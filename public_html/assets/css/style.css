@@ -7514,3 +7514,72 @@ body.accounting-reference-layout .badge {
 
 .rc-mail-hint { font-size: 0.68rem; line-height: 1.4; }
 .rc-mail-hint code { background: #f4f7fc; padding: 1px 4px; border-radius: 4px; }
+
+/* ------------------------------------------------------------------ */
+/* Blueprint shell: grouped nav, hierarchy strip, breadcrumb, KPI links */
+/* ------------------------------------------------------------------ */
+.admin-nav-group {
+  display: block;
+  margin: 14px 12px 4px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.admin-nav .admin-nav-group:first-child { margin-top: 4px; }
+
+.admin-hierarchy-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 22px;
+  border-bottom: 1px solid var(--ref-line);
+  background: #fff;
+  color: var(--ref-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.admin-hierarchy-strip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-hierarchy-strip strong { color: var(--ref-text); }
+.admin-hierarchy-strip .strip-sep { color: #b9c9e6; font-weight: 900; }
+.admin-hierarchy-strip .ui-icon { width: 14px; height: 14px; }
+
+.admin-breadcrumb {
+  margin-bottom: 4px;
+  color: var(--ref-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.admin-breadcrumb a { color: var(--ref-muted); }
+.admin-breadcrumb a:hover { color: var(--ref-text); }
+.admin-breadcrumb strong { color: var(--ref-text); }
+
+.admin-stats .stat-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+
+.admin-stats .stat-link:hover {
+  border-color: var(--ref-gold);
+  transform: translateY(-1px);
+}
+
+.admin-stats .stat-link small {
+  display: block;
+  margin-top: 4px;
+  color: #1f67dc;
+  font-size: 0.64rem;
+  font-weight: 800;
+}

@@ -147,7 +147,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 
     <div class="form-card">
-        <h2>Create fiscal year</h2>
+        <h2>Create Fiscal Year</h2>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="create_fiscal_year">
@@ -164,7 +164,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>End date<input type="date" name="end_date" required></label>
             <label><input type="checkbox" name="is_active" checked> Active</label>
             <label><input type="checkbox" name="is_default"> Default for company</label>
-            <button type="submit">Create fiscal year</button>
+            <button type="submit">Create Fiscal Year</button>
         </form>
     </div>
 </div>

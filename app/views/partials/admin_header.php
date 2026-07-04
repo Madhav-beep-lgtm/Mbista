@@ -51,19 +51,25 @@ $headerPortalLabel = match ($headerCompanyCode) {
             </div>
         <?php endif; ?>
         <nav class="admin-nav">
+            <span class="admin-nav-group">Core Admin</span>
             <a class="<?= $headerScript === 'accounting-dashboard.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
             <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/index.php')) ?>"><?= icon('home') ?>Admin Overview</a>
+            <span class="admin-nav-group">Accounting Workspace</span>
             <a class="<?= $headerScript === 'accounting-parties.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-parties.php')) ?>"><?= icon('accounting') ?>Accounting</a>
             <a class="<?= $headerScript === 'chart-of-accounts.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?>Chart of Accounts</a>
             <a class="<?= $headerScript === 'accounting.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('documents') ?>Vouchers</a>
-            <a class="<?= $headerScript === 'accounting-inventory.php' && !str_contains((string) ($_SERVER['REQUEST_URI'] ?? ''), '#manufacturing') ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?>Inventory</a>
-            <a href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>"><?= icon('settings') ?>Manufacturing</a>
+            <span class="admin-nav-group">Commercial Operations</span>
             <a class="<?= $headerScript === 'invoice.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Sales &amp; Invoices</a>
-            <a class="<?= $headerScript === 'reports-center.php' && $headerReportId === 'purchase-register' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php?report=purchase-register')) ?>"><?= icon('services') ?>Purchases</a>
-            <a class="<?= $headerScript === 'reports-center.php' && $headerReportId !== 'purchase-register' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports</a>
+            <a href="<?= e(url('admin/accounting-parties.php?tab=purchases')) ?>"><?= icon('services') ?>Purchases</a>
             <a class="<?= $headerScript === 'receipts.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/receipts.php')) ?>"><?= icon('documents') ?>Receipts</a>
+            <span class="admin-nav-group">Inventory &amp; Manufacturing</span>
+            <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?>Inventory</a>
+            <a href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>"><?= icon('settings') ?>Manufacturing</a>
+            <span class="admin-nav-group">Reports &amp; Controls</span>
+            <a class="<?= $headerScript === 'reports-center.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
             <a class="<?= $headerScript === 'compliance.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>
+            <span class="admin-nav-group">Shared / Supporting</span>
             <a class="<?= $headerScript === 'workspace.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('portal') ?>Work Portal</a>
             <a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
             <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
@@ -133,7 +139,26 @@ $headerPortalLabel = match ($headerCompanyCode) {
                 </button>
             </div>
         </header>
+        <?php
+        $stripParentCompany = company_by_code('AGHPL');
+        $stripSubsidiaries = $stripParentCompany ? child_companies_for_company((int) $stripParentCompany['id']) : [];
+        $stripRoleLabel = ($currentUser['role'] ?? '') === 'admin' ? 'Super Admin' : ucfirst((string) ($currentUser['role'] ?? 'Staff'));
+        ?>
+        <div class="admin-hierarchy-strip" aria-label="Corporate hierarchy">
+            <span><?= icon('admin') ?><strong><?= e($currentUser['name'] ?? 'Admin') ?></strong> — <?= e($stripRoleLabel) ?></span>
+            <?php if ($stripParentCompany): ?>
+                <span class="strip-sep">→</span>
+                <span><?= icon('companies') ?><strong><?= e($stripParentCompany['name']) ?></strong> — Parent Company</span>
+            <?php endif; ?>
+            <?php foreach (array_slice($stripSubsidiaries, 0, 2) as $stripSubsidiary): ?>
+                <span class="strip-sep">→</span>
+                <span><?= icon('companies') ?><strong><?= e($stripSubsidiary['name']) ?></strong> — Subsidiary Company</span>
+            <?php endforeach; ?>
+        </div>
         <div class="admin-content">
+            <nav class="admin-breadcrumb" aria-label="Breadcrumb">
+                <a href="<?= e(url('admin/index.php')) ?>">Home</a> / <strong><?= e($pageTitle) ?></strong>
+            </nav>
             <?php if ($message = flash('success')): ?>
                 <div class="notice success"><?= e($message) ?></div>
             <?php endif; ?>

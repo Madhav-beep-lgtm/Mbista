@@ -309,7 +309,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <a class="button secondary" href="<?= e(url('admin/accounting-parties.php')) ?>"><?= icon('users') ?>Parties</a>
         <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?>Inventory</a>
         <a class="button secondary" href="<?= e(url('admin/accounting-dashboard.php')) ?>">📊 Dashboard</a>
-        <a class="button secondary" href="<?= e(url('admin/reports.php')) ?>">Open reports</a>
+        <a class="button secondary" href="<?= e(url('admin/reports-center.php')) ?>">Reports Center</a>
         <?php if ($company && $fiscalYear): ?>
             <a class="button secondary" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank">📄 Export PDF</a>
             <a class="button secondary" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>">📊 Export Excel</a>
@@ -362,7 +362,7 @@ if ($fiscalYears):
     <details class="feature-disclosure">
         <summary>
             <span>
-                <strong><?= icon('settings') ?>Create fiscal year</strong>
+                <strong><?= icon('settings') ?>Create Fiscal Year</strong>
                 <small>Fiscal-year setup is used inside accounting reports and voucher posting.</small>
             </span>
             <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
@@ -374,7 +374,7 @@ if ($fiscalYears):
             <label>Start date<input type="date" name="start_date" required></label>
             <label>End date<input type="date" name="end_date" required></label>
             <label class="checkbox-line"><input type="checkbox" name="is_default" value="1" checked> Use as default accounting year</label>
-            <button type="submit"><?= icon('settings') ?>Create fiscal year</button>
+            <button type="submit"><?= icon('settings') ?>Create Fiscal Year</button>
         </form>
     </details>
 

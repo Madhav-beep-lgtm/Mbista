@@ -7,7 +7,7 @@ require_staff_or_admin();
 require_company_context();
 
 $repairErrors = accounting_module_repair_database();
-$pageTitle = 'Accounting Parties';
+$pageTitle = 'Sales, Purchases & Party Management';
 $company = current_company();
 $fiscalYear = current_fiscal_year();
 $companyId = (int) ($company['id'] ?? 0);

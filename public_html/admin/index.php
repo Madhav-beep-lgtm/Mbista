@@ -4,7 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 
 require_admin();
 require_company_context();
-$pageTitle = 'Dashboard';
+$pageTitle = 'Admin Overview';
 $bodyClass = 'admin-layout admin-dashboard';
 $company = current_company();
 $fiscalYear = current_fiscal_year();
@@ -179,14 +179,14 @@ if (table_exists('client_tasks') && table_exists('client_profiles')) {
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <div class="admin-stats">
-    <div class="card"><span class="stat-icon"><?= icon('companies') ?></span><strong><?= e($companyCount) ?></strong><p>Companies</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('staff') ?></span><strong><?= e($activeStaffCount) ?></strong><p>Active staff</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('clients') ?></span><strong><?= e($activeClientCount) ?></strong><p>Active clients</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('tasks') ?></span><strong><?= e($openTaskCount) ?></strong><p>Open tasks</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('insights') ?></span><strong><?= e(number_format($overallTaskProgress, 1)) ?>%</strong><p>Overall task progress</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('invoices') ?></span><strong><?= e($pendingInvoiceCount) ?></strong><p>Pending invoices</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('accounting') ?></span><strong>Rs.<?= e(number_format($pendingInvoiceAmount, 2)) ?></strong><p>Pending invoice amount</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('reports') ?></span><strong><?= e(number_format($invoiceCollectionRate, 1)) ?>%</strong><p>Invoice collection rate</p></div>
+    <a class="card stat-link" href="<?= e(url('admin/companies.php')) ?>"><span class="stat-icon"><?= icon('companies') ?></span><strong><?= e($companyCount) ?></strong><p>Companies</p><small>Click → View all companies</small></a>
+    <a class="card stat-link" href="<?= e(url('admin/users.php')) ?>"><span class="stat-icon"><?= icon('staff') ?></span><strong><?= e($activeStaffCount) ?></strong><p>Active staff</p><small>Click → View all staff</small></a>
+    <a class="card stat-link" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><span class="stat-icon"><?= icon('clients') ?></span><strong><?= e($activeClientCount) ?></strong><p>Active clients</p><small>Click → View all clients</small></a>
+    <a class="card stat-link" href="<?= e(url('admin/workspace.php?view=home')) ?>"><span class="stat-icon"><?= icon('tasks') ?></span><strong><?= e($openTaskCount) ?></strong><p>Open tasks</p><small>Click → View all tasks</small></a>
+    <a class="card stat-link" href="<?= e(url('admin/workspace.php?view=home')) ?>"><span class="stat-icon"><?= icon('insights') ?></span><strong><?= e(number_format($overallTaskProgress, 1)) ?>%</strong><p>Overall task progress</p><small>Click → Open task analytics</small></a>
+    <a class="card stat-link" href="<?= e(url('admin/invoice.php')) ?>"><span class="stat-icon"><?= icon('invoices') ?></span><strong><?= e($pendingInvoiceCount) ?></strong><p>Pending invoices</p><small>Click → View pending invoices</small></a>
+    <a class="card stat-link" href="<?= e(url('admin/invoice.php')) ?>"><span class="stat-icon"><?= icon('accounting') ?></span><strong>Rs.<?= e(number_format($pendingInvoiceAmount, 2)) ?></strong><p>Pending invoice amount</p><small>Click → View amount details</small></a>
+    <a class="card stat-link" href="<?= e(url('admin/accounting-parties.php?tab=collections')) ?>"><span class="stat-icon"><?= icon('reports') ?></span><strong><?= e(number_format($invoiceCollectionRate, 1)) ?>%</strong><p>Invoice collection rate</p><small>Click → View collection analytics</small></a>
 </div>
 
 <div class="admin-dashboard-grid">
