@@ -53,6 +53,9 @@ A cPanel-friendly PHP and MySQL starter for a hosting-package business site. It 
 	- `database/migrations/018_invoice_request_discount_receipts.sql`
 	- `database/migrations/019_client_payment_response_and_task_assignment.sql`
 	- `database/migrations/020_staff_profiles_and_kyc.sql`
+	- `database/migrations/021_accounting_parties_inventory.sql`
+	- `database/migrations/022_hierarchical_groups_and_ledger_mappings.sql`
+	- `database/migrations/023_accounting_dashboard_preferences.sql`
 4. Upload the contents of `public_html/` to your hosting web root.
 5. Keep the `app/` and `database/` folders outside the public web root if possible.
 6. Copy `.env.example` to `.env` and update production values.
@@ -101,6 +104,9 @@ Use migration files when the database already exists and you want to upgrade wit
 	- `database/migrations/018_invoice_request_discount_receipts.sql`
 	- `database/migrations/019_client_payment_response_and_task_assignment.sql`
 	- `database/migrations/020_staff_profiles_and_kyc.sql`
+	- `database/migrations/021_accounting_parties_inventory.sql`
+	- `database/migrations/022_hierarchical_groups_and_ledger_mappings.sql`
+	- `database/migrations/023_accounting_dashboard_preferences.sql`
 4. Refresh the admin Orders page and confirm payment fields appear.
 5. Open admin Contacts and confirm assignment, priority, and activity logs load.
 6. Open admin Users and confirm workflow actions + activity logs load.

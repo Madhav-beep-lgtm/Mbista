@@ -10,6 +10,7 @@ $currentUser = current_user();
 $headerCompany = current_company();
 $headerFiscalYear = current_fiscal_year();
 $headerScript = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+$headerReportId = (string) ($_GET['report'] ?? '');
 $headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php'], true);
 $headerCompanyId = (int) ($headerCompany['id'] ?? 0);
 $headerCompanyCode = (string) ($headerCompany['code'] ?? '');
@@ -36,8 +37,8 @@ $headerPortalLabel = match ($headerCompanyCode) {
         <a class="brand brand-admin" href="<?= e(url('admin/index.php')) ?>">
             <span class="brand-mark">MB</span>
             <span>
-                <strong>Admin Panel</strong>
-                <small><?= e(app_name()) ?></small>
+                <strong>MB World</strong>
+                <small>Admin Portal</small>
             </span>
         </a>
         <?php if ($headerCompany): ?>
@@ -50,23 +51,24 @@ $headerPortalLabel = match ($headerCompanyCode) {
             </div>
         <?php endif; ?>
         <nav class="admin-nav">
-            <a href="<?= e(url('admin/index.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
-            <a href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('portal') ?>Work Portal</a>
-            <a href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Invoices</a>
-            <a href="<?= e(url('admin/receipts.php')) ?>"><?= icon('documents') ?>Receipts</a>
-            <a href="<?= e(url('admin/accounting-parties.php')) ?>"><?= icon('accounting') ?>Accounting</a>
-            <a href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?>Chart of Accounts</a>
-            <a href="<?= e(url('admin/accounting.php')) ?>"><?= icon('documents') ?>Vouchers</a>
-            <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?>Inventory</a>
-            <a href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
-            <a href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>
-            <a href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
-            <a href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
-            <a href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>Attendance</a>
-            <a href="<?= e(url('admin/hr.php?view=leave')) ?>"><?= icon('leave') ?>Leave</a>
-            <a href="<?= e(url('admin/hr.php?view=timesheets')) ?>"><?= icon('timesheets') ?>Timesheets</a>
-            <a href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?>Users</a>
-            <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
+            <a class="<?= $headerScript === 'accounting-dashboard.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
+            <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/index.php')) ?>"><?= icon('home') ?>Admin Overview</a>
+            <a class="<?= $headerScript === 'accounting-parties.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-parties.php')) ?>"><?= icon('accounting') ?>Accounting</a>
+            <a class="<?= $headerScript === 'chart-of-accounts.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?>Chart of Accounts</a>
+            <a class="<?= $headerScript === 'accounting.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('documents') ?>Vouchers</a>
+            <a class="<?= $headerScript === 'accounting-inventory.php' && !str_contains((string) ($_SERVER['REQUEST_URI'] ?? ''), '#manufacturing') ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?>Inventory</a>
+            <a href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>"><?= icon('settings') ?>Manufacturing</a>
+            <a class="<?= $headerScript === 'invoice.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Sales &amp; Invoices</a>
+            <a class="<?= $headerScript === 'reports-center.php' && $headerReportId === 'purchase-register' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php?report=purchase-register')) ?>"><?= icon('services') ?>Purchases</a>
+            <a class="<?= $headerScript === 'reports-center.php' && $headerReportId !== 'purchase-register' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports</a>
+            <a class="<?= $headerScript === 'receipts.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/receipts.php')) ?>"><?= icon('documents') ?>Receipts</a>
+            <a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
+            <a class="<?= $headerScript === 'compliance.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>
+            <a class="<?= $headerScript === 'workspace.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('portal') ?>Work Portal</a>
+            <a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
+            <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
+            <a class="<?= $headerScript === 'users.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?>Users</a>
+            <a class="<?= $headerScript === 'settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
             <a href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?>Logout</a>
         </nav>
     </aside>

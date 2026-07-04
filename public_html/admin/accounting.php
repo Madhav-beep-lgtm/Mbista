@@ -383,7 +383,7 @@ if ($fiscalYears):
         <p>Ledger accounts are now created inside a group under a fixed master. Use the <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a> page to create groups and ledgers.</p>
     </div>
 
-    <details class="feature-disclosure">
+    <details class="feature-disclosure" id="post-voucher">
         <summary>
             <span>
                 <strong><?= icon('invoices') ?>Post manual voucher</strong>

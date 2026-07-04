@@ -296,7 +296,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
 <div class="workspace-feature-stack">
-    <details class="feature-disclosure" open>
+    <details class="feature-disclosure" id="create-item" open>
         <summary><span><strong><?= icon('services') ?><?= $editItem ? 'Edit item' : 'Create item' ?></strong><small>Maintain inventory, service, raw material, and finished-goods master data.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open form</span></summary>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -319,7 +319,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </form>
     </details>
 
-    <details class="feature-disclosure">
+    <details class="feature-disclosure" id="stock-movement">
         <summary><span><strong><?= icon('tasks') ?>Record stock movement</strong><small>Post opening, purchase, sale, return, or adjustment quantities.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open form</span></summary>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -335,7 +335,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </form>
     </details>
 
-    <details class="feature-disclosure">
+    <details class="feature-disclosure" id="manufacturing">
         <summary><span><strong><?= icon('settings') ?>Complete manufacturing order</strong><small>Consume input items and produce finished goods in one step.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open form</span></summary>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

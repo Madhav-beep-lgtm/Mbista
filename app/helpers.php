@@ -1331,6 +1331,58 @@ function ledger_by_code(int $companyId, string $code): ?array
     return $row ?: null;
 }
 
+/**
+ * Resolve a company-specific accounting role to a ledger.
+ *
+ * Legacy ledger codes remain as a fallback so automated posting continues to
+ * work before the mapping migration is applied or while a mapping is unset.
+ */
+function get_mapped_ledger(int $companyId, string $mapKey): ?array
+{
+    if ($companyId <= 0 || !table_exists('ledgers')) {
+        return null;
+    }
+
+    if (table_exists('company_ledger_mappings')) {
+        $stmt = db()->prepare('
+            SELECT l.*
+            FROM company_ledger_mappings clm
+            INNER JOIN ledgers l
+                ON l.id = clm.ledger_id
+               AND l.company_id = clm.company_id
+            WHERE clm.company_id = :company_id
+              AND clm.map_key = :map_key
+            LIMIT 1
+        ');
+        $stmt->execute([
+            'company_id' => $companyId,
+            'map_key' => $mapKey,
+        ]);
+        $mappedLedger = $stmt->fetch();
+        if ($mappedLedger) {
+            return $mappedLedger;
+        }
+    }
+
+    $fallbackCodes = [
+        'default_cash_bank' => ['CASH'],
+        'default_accounts_receivable' => ['AR'],
+        'default_accounts_payable' => ['AP'],
+        'default_tax_payable' => ['TAX_PAYABLE'],
+        'default_service_revenue' => ['SERVICE_REVENUE'],
+        'default_hosting_revenue' => ['HOSTING_REVENUE', 'SERVICE_REVENUE'],
+    ];
+
+    foreach ($fallbackCodes[$mapKey] ?? [] as $code) {
+        $ledger = ledger_by_code($companyId, $code);
+        if ($ledger) {
+            return $ledger;
+        }
+    }
+
+    return null;
+}
+
 function create_voucher_with_entries(array $voucher, array $entries): int
 {
     if (!table_exists('vouchers') || !table_exists('voucher_entries')) {
@@ -1417,8 +1469,8 @@ function auto_post_order_payment_voucher(int $orderId, ?int $actorId = null): vo
         $fiscalYearId = (int) $default['fiscal_year']['id'];
     }
 
-    $cashLedger = ledger_by_code($companyId, 'CASH');
-    $revenueLedger = ledger_by_code($companyId, 'HOSTING_REVENUE');
+    $cashLedger = get_mapped_ledger($companyId, 'default_cash_bank');
+    $revenueLedger = get_mapped_ledger($companyId, 'default_hosting_revenue');
     if (!$cashLedger || !$revenueLedger) {
         return;
     }
@@ -1490,8 +1542,8 @@ function auto_post_order_refund_voucher(int $orderId, ?int $actorId = null): voi
         $fiscalYearId = (int) $default['fiscal_year']['id'];
     }
 
-    $cashLedger = ledger_by_code($companyId, 'CASH');
-    $revenueLedger = ledger_by_code($companyId, 'HOSTING_REVENUE');
+    $cashLedger = get_mapped_ledger($companyId, 'default_cash_bank');
+    $revenueLedger = get_mapped_ledger($companyId, 'default_hosting_revenue');
     if (!$cashLedger || !$revenueLedger) {
         return;
     }
@@ -1565,9 +1617,9 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
         $fiscalYearId = (int) $default['fiscal_year']['id'];
     }
 
-    $receivableLedger = ledger_by_code($companyId, 'AR');
-    $revenueLedger = ledger_by_code($companyId, 'SERVICE_REVENUE');
-    $taxPayableLedger = ledger_by_code($companyId, 'TAX_PAYABLE');
+    $receivableLedger = get_mapped_ledger($companyId, 'default_accounts_receivable');
+    $revenueLedger = get_mapped_ledger($companyId, 'default_service_revenue');
+    $taxPayableLedger = get_mapped_ledger($companyId, 'default_tax_payable');
     if (!$receivableLedger || !$revenueLedger) {
         return;
     }
@@ -1664,8 +1716,8 @@ function auto_post_invoice_payment_voucher(int $paymentRequestId, ?int $actorId 
         $fiscalYearId = (int) $default['fiscal_year']['id'];
     }
 
-    $cashLedger = ledger_by_code($companyId, 'CASH');
-    $receivableLedger = ledger_by_code($companyId, 'AR');
+    $cashLedger = get_mapped_ledger($companyId, 'default_cash_bank');
+    $receivableLedger = get_mapped_ledger($companyId, 'default_accounts_receivable');
     if (!$cashLedger || !$receivableLedger) {
         return;
     }
@@ -3194,28 +3246,6 @@ function compliance_effective_status(array $deadline): string
     }
 
     return $status;
-}
-
-/**
- * Gets a system-critical ledger using the new mapping table.
- *
- * @param int $companyId The company context.
- * @param string $mapKey The role of the ledger (e.g., 'default_accounts_receivable').
- * @return array|null The ledger row or null if not found.
- */
-function get_mapped_ledger(int $companyId, string $mapKey): ?array
-{
-    if (!table_exists('company_ledger_mappings')) {
-        // Fallback to old method if the new table doesn't exist
-        $code = strtoupper(str_replace(['default_', '_'], ['', ''], $mapKey));
-        return ledger_by_code($companyId, $code);
-    }
-
-    $stmt = db()->prepare('SELECT l.* FROM ledgers l INNER JOIN company_ledger_mappings clm ON clm.ledger_id = l.id WHERE clm.company_id = :company_id AND clm.map_key = :map_key LIMIT 1');
-    $stmt->execute(['company_id' => $companyId, 'map_key' => $mapKey]);
-    $row = $stmt->fetch();
-
-    return $row ?: null;
 }
 
 function attendance_is_late(?string $checkInTime): bool
