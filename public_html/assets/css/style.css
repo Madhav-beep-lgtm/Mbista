@@ -7472,3 +7472,45 @@ body.accounting-reference-layout .badge {
   .rc-workspace { grid-template-columns: 1fr; }
   .rc-actions-col { grid-template-columns: 1fr; }
 }
+
+.rc-schedule-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ref-line);
+}
+
+.rc-schedule-row strong { display: block; font-size: 0.74rem; color: var(--ref-text); }
+.rc-schedule-row small { display: block; color: var(--ref-muted); font-size: 0.66rem; }
+
+.rc-schedule-row button {
+  border: 0;
+  background: transparent;
+  color: #f04438;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.rc-schedule-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: var(--ref-muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.rc-schedule-form input[type="email"],
+.rc-schedule-form select {
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--ref-line);
+  border-radius: 6px;
+  font-size: 0.74rem;
+}
+
+.rc-mail-hint { font-size: 0.68rem; line-height: 1.4; }
+.rc-mail-hint code { background: #f4f7fc; padding: 1px 4px; border-radius: 4px; }

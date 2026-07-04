@@ -59,3 +59,6 @@ output.pdf
 
 # Archives at repo root or in public_html
 /public_html/assets.zip
+
+# Runtime output (logged emails, caches)
+/storage/

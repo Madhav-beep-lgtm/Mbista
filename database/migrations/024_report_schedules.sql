@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS report_schedules (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  company_id INT UNSIGNED NOT NULL,
+  report_key VARCHAR(60) NOT NULL,
+  recipient_email VARCHAR(190) NOT NULL,
+  frequency ENUM('daily', 'weekly', 'monthly') NOT NULL DEFAULT 'monthly',
+  export_format ENUM('csv', 'html', 'both') NOT NULL DEFAULT 'both',
+  filters TEXT DEFAULT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  last_run_at DATETIME DEFAULT NULL,
+  last_run_status VARCHAR(255) DEFAULT NULL,
+  next_run_on DATE NOT NULL,
+  created_by INT UNSIGNED DEFAULT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_report_schedules_company (company_id),
+  KEY idx_report_schedules_due (is_active, next_run_on),
+  CONSTRAINT fk_report_schedules_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+  CONSTRAINT fk_report_schedules_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

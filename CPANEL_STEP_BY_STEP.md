@@ -125,3 +125,17 @@ Login with the admin account first, then immediately change or remove all defaul
 - Keep full DB backup before migration.
 - Keep previous file backup zip.
 - If issue occurs, restore files and DB backup, then re-run only verified migrations.
+
+## 10) Scheduled report emails (optional)
+
+1. Create an email account in cPanel -> Email Accounts (for example reports@yourdomain.com).
+2. Add its SMTP settings to `.env` (see the MAIL_* block in `.env.example`).
+   Most cPanel hosts use `MAIL_HOST=mail.yourdomain.com`, `MAIL_PORT=587`, `MAIL_ENCRYPTION=tls`.
+3. Add a cron job in cPanel -> Cron Jobs, running once daily:
+
+```
+0 7 * * * /usr/local/bin/php /home/USERNAME/database/run_report_schedules.php
+```
+
+4. Create schedules from Admin -> Reports -> Schedule Report.
+   Until SMTP is configured, deliveries are written to `storage/mail/` so you can verify the output.
