@@ -833,6 +833,41 @@ function company_pin_is_set(int $companyId): bool
     return company_pin_hash_by_id($companyId) !== null;
 }
 
+function handle_company_switch(int $companyId, string $failureUrl): never
+{
+    $failureUrl = $failureUrl !== '' ? $failureUrl : 'portal.php';
+
+    if ($companyId <= 0) {
+        flash('error', 'Select a company to continue.');
+        redirect($failureUrl);
+    }
+
+    $company = company_by_id($companyId);
+    if (!$company || (int) ($company['is_active'] ?? 0) !== 1) {
+        flash('error', 'Selected company is not available.');
+        redirect($failureUrl);
+    }
+
+    if ((string) ($company['code'] ?? '') === 'MBAACA') {
+        if (!activate_company_context($companyId, true)) {
+            flash('error', 'No active fiscal year is available for M.Bista and Associates.');
+            redirect($failureUrl);
+        }
+
+        flash('success', 'M.Bista superadmin portal opened.');
+        redirect('admin/index.php');
+    }
+
+    if (!company_pin_is_set($companyId)) {
+        flash('error', 'Set a 4-digit PIN for this company before opening its portal.');
+        redirect('admin/company-pin-reset.php?company_id=' . $companyId);
+    }
+
+    set_selected_company($companyId);
+    clear_company_pin_verification();
+    redirect('admin/company-pin.php?company_id=' . $companyId);
+}
+
 function verify_company_pin(int $companyId, string $pin): bool
 {
     $hash = company_pin_hash_by_id($companyId);
