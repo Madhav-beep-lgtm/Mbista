@@ -6214,3 +6214,248 @@ body.accounting-reference-layout .admin-content {
     grid-template-columns: 1fr;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Reference design: functional controls (search, dates, panels)      */
+/* ------------------------------------------------------------------ */
+.reference-filter-group .reference-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--ref-line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ref-muted);
+}
+
+.reference-filter-group .reference-search input {
+  min-width: 220px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ref-text);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.reference-date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--ref-line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ref-muted);
+}
+
+.reference-date-field input[type="date"],
+.reference-filter-group select {
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ref-text);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.reference-filter-group select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--ref-line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.reference-panel-card {
+  padding: 18px 20px;
+  border: 1px solid var(--ref-line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(6, 25, 70, 0.06);
+}
+
+.reference-panel-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  color: var(--ref-text);
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.reference-panel-card .reference-party-form {
+  position: static;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+  width: 100%;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+.reference-panel-card .reference-party-form .span-2 { grid-column: span 2; }
+
+.reference-pagination a {
+  display: inline-block;
+  min-width: 34px;
+  margin-left: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--ref-line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ref-text);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.reference-pagination a.is-active {
+  background: var(--ref-navy);
+  border-color: var(--ref-navy);
+  color: #fff;
+}
+
+.party-ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.74rem;
+}
+
+.party-ledger-table th,
+.party-ledger-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ref-line);
+  text-align: right;
+}
+
+.party-ledger-table th:first-child,
+.party-ledger-table td:first-child,
+.party-ledger-table th:nth-child(2),
+.party-ledger-table td:nth-child(2) {
+  text-align: left;
+}
+
+.party-document-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.party-document-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ref-line);
+  font-size: 0.78rem;
+}
+
+.party-notes-form textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--ref-line);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.party-notes-form button {
+  margin-top: 10px;
+}
+
+.reference-row-actions .inline-form {
+  display: inline;
+}
+
+.reference-row-actions .inline-form button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+
+.party-panel-tabs a.is-active {
+  color: #c87a00;
+  border-bottom: 2px solid var(--ref-gold);
+}
+
+/* ------------------------------------------------------------------ */
+/* Reference design applied app-wide to admin components               */
+/* ------------------------------------------------------------------ */
+body.accounting-reference-layout .admin-content h2,
+body.accounting-reference-layout .admin-content h3 {
+  color: var(--ref-text);
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+body.accounting-reference-layout .admin-content .card {
+  border: 1px solid var(--ref-line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(6, 25, 70, 0.05);
+}
+
+body.accounting-reference-layout .admin-content table:not(.reference-table):not(.party-ledger-table) {
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+body.accounting-reference-layout .admin-content table:not(.reference-table):not(.party-ledger-table) thead th {
+  background: #f7f9fd;
+  color: var(--ref-muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--ref-line);
+}
+
+body.accounting-reference-layout .admin-content table:not(.reference-table):not(.party-ledger-table) tbody td {
+  border-bottom: 1px solid var(--ref-line);
+}
+
+body.accounting-reference-layout .admin-content .button:not(.secondary):not(.outline) {
+  background: var(--ref-navy);
+  border-color: var(--ref-navy);
+  border-radius: 6px;
+  font-weight: 900;
+}
+
+body.accounting-reference-layout .admin-content .button.secondary,
+body.accounting-reference-layout .admin-content .button.outline {
+  border-radius: 6px;
+  border: 1px solid var(--ref-line);
+  background: #fff;
+  color: var(--ref-text);
+  font-weight: 900;
+}
+
+body.accounting-reference-layout .notice {
+  border-radius: 8px;
+  border: 1px solid var(--ref-line);
+  font-weight: 700;
+}
+
+body.accounting-reference-layout .badge {
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 1100px) {
+  .reference-panel-card .reference-party-form {
+    grid-template-columns: 1fr;
+  }
+  .reference-panel-card .reference-party-form .span-2 { grid-column: auto; }
+}

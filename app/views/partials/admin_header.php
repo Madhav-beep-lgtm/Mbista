@@ -1,6 +1,11 @@
 <?php
 $pageTitle = $pageTitle ?? 'Admin';
 $bodyClass = $bodyClass ?? 'admin-layout';
+// Every admin shell page uses the reference design language (sidebar theme,
+// bold components, stat cards) introduced on the accounting module.
+if (str_contains($bodyClass, 'admin-layout') && !str_contains($bodyClass, 'accounting-reference-layout')) {
+    $bodyClass .= ' accounting-reference-layout';
+}
 $currentUser = current_user();
 $headerCompany = current_company();
 $headerFiscalYear = current_fiscal_year();
@@ -23,7 +28,7 @@ $headerPortalLabel = match ($headerCompanyCode) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260704-reference-sales-party">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260704-reference-appwide">
 </head>
 <body class="<?= e($bodyClass) ?>">
 <div class="admin-shell">
