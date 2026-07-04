@@ -1,0 +1,1365 @@
+
+-- Complete application schema for fresh installs.
+-- Works for cPanel/phpMyAdmin and local blank databases after selecting or creating the database first.
+-- This file intentionally does not run CREATE DATABASE or USE, because many cPanel database users cannot run those commands.
+
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(120) NOT NULL,
+  `email` VARCHAR(190) NOT NULL,
+  `password_hash` VARCHAR(255) NOT NULL,
+  `role` ENUM('admin', 'staff', 'customer') NOT NULL DEFAULT 'customer',
+  `status` ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+  `must_change_password` TINYINT(1) NOT NULL DEFAULT 0,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `phone` VARCHAR(30) DEFAULT NULL,
+  `company` VARCHAR(120) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_users_email` (`email`),
+  KEY `idx_users_company` (`company_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `plans` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(120) NOT NULL,
+  `slug` VARCHAR(140) NOT NULL,
+  `billing_cycle` ENUM('monthly', 'yearly') NOT NULL DEFAULT 'monthly',
+  `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'USD',
+  `disk_space_gb` INT UNSIGNED NOT NULL DEFAULT 0,
+  `bandwidth_gb` INT UNSIGNED NOT NULL DEFAULT 0,
+  `email_accounts` INT UNSIGNED NOT NULL DEFAULT 0,
+  `databases_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `domains_allowed` INT UNSIGNED NOT NULL DEFAULT 1,
+  `features` TEXT DEFAULT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_plans_slug` (`slug`),
+  KEY `idx_plans_active_sort` (`is_active`, `sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `orders` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `user_id` INT UNSIGNED DEFAULT NULL,
+  `plan_id` INT UNSIGNED NOT NULL,
+  `full_name` VARCHAR(120) NOT NULL,
+  `email` VARCHAR(190) NOT NULL,
+  `phone` VARCHAR(30) DEFAULT NULL,
+  `domain_name` VARCHAR(190) NOT NULL,
+  `billing_cycle` ENUM('monthly', 'yearly') NOT NULL DEFAULT 'monthly',
+  `amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `payment_method` VARCHAR(40) NOT NULL DEFAULT 'manual',
+  `payment_status` ENUM('pending', 'paid', 'failed', 'refunded') NOT NULL DEFAULT 'pending',
+  `transaction_id` VARCHAR(190) DEFAULT NULL,
+  `status` ENUM('pending', 'confirmed', 'processing', 'completed', 'cancelled') NOT NULL DEFAULT 'pending',
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_orders_company_id` (`company_id`),
+  KEY `idx_orders_user_id` (`user_id`),
+  KEY `idx_orders_plan_id` (`plan_id`),
+  KEY `idx_orders_status_created` (`status`, `created_at`),
+  CONSTRAINT `fk_orders_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_orders_plan` FOREIGN KEY (`plan_id`) REFERENCES `plans` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `contacts` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `name` VARCHAR(120) NOT NULL,
+  `email` VARCHAR(190) NOT NULL,
+  `subject` VARCHAR(190) NOT NULL,
+  `message` TEXT NOT NULL,
+  `status` ENUM('new', 'read', 'replied') NOT NULL DEFAULT 'new',
+  `attachment_path` VARCHAR(255) DEFAULT NULL,
+  `attachment_name` VARCHAR(190) DEFAULT NULL,
+  `priority` ENUM('low', 'normal', 'high', 'urgent') NOT NULL DEFAULT 'normal',
+  `assigned_admin_id` INT UNSIGNED DEFAULT NULL,
+  `replied_at` TIMESTAMP NULL DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_contacts_company_id` (`company_id`),
+  KEY `idx_contacts_status_created` (`status`, `created_at`),
+  KEY `idx_contacts_assigned_admin` (`assigned_admin_id`),
+  CONSTRAINT `fk_contacts_assigned_admin` FOREIGN KEY (`assigned_admin_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `activity_logs` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `entity_type` VARCHAR(50) NOT NULL,
+  `entity_id` INT UNSIGNED NOT NULL,
+  `action` VARCHAR(80) NOT NULL,
+  `details` TEXT DEFAULT NULL,
+  `actor_id` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_activity_entity` (`entity_type`, `entity_id`, `created_at`),
+  KEY `idx_activity_actor` (`actor_id`),
+  CONSTRAINT `fk_activity_actor` FOREIGN KEY (`actor_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `password_resets` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` INT UNSIGNED NOT NULL,
+  `token_hash` CHAR(64) NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  `used_at` DATETIME DEFAULT NULL,
+  `requested_ip` VARCHAR(45) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_password_resets_token_hash` (`token_hash`),
+  KEY `idx_password_resets_user` (`user_id`),
+  KEY `idx_password_resets_expiry` (`expires_at`),
+  CONSTRAINT `fk_password_resets_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `companies` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(150) NOT NULL,
+  `code` VARCHAR(30) NOT NULL,
+  `parent_company_id` INT UNSIGNED DEFAULT NULL,
+  `admin_pin_hash` VARCHAR(255) DEFAULT NULL,
+  `admin_pin_reset_token_hash` CHAR(64) DEFAULT NULL,
+  `admin_pin_reset_expires_at` DATETIME DEFAULT NULL,
+  `admin_pin_reset_used_at` DATETIME DEFAULT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_companies_code` (`code`),
+  KEY `idx_companies_active` (`is_active`),
+  KEY `idx_companies_parent` (`parent_company_id`),
+  CONSTRAINT `fk_companies_parent` FOREIGN KEY (`parent_company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `fiscal_years` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `label` VARCHAR(80) NOT NULL,
+  `start_date` DATE NOT NULL,
+  `end_date` DATE NOT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_fiscal_years_company` (`company_id`),
+  KEY `idx_fiscal_years_active` (`is_active`),
+  CONSTRAINT `fk_fiscal_years_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `company_shareholdings` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `investor_company_id` INT UNSIGNED NOT NULL,
+  `investee_company_id` INT UNSIGNED NOT NULL,
+  `ownership_percent` DECIMAL(5,2) NOT NULL DEFAULT 100.00,
+  `relationship_type` ENUM('subsidiary', 'associate', 'joint_venture', 'investment') NOT NULL DEFAULT 'subsidiary',
+  `consolidation_method` ENUM('full', 'equity', 'proportionate', 'cost') NOT NULL DEFAULT 'full',
+  `effective_from` DATE DEFAULT NULL,
+  `effective_to` DATE DEFAULT NULL,
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_company_shareholding_pair` (`investor_company_id`, `investee_company_id`),
+  KEY `idx_company_shareholdings_investor` (`investor_company_id`),
+  KEY `idx_company_shareholdings_investee` (`investee_company_id`),
+  CONSTRAINT `fk_company_shareholdings_investor` FOREIGN KEY (`investor_company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_company_shareholdings_investee` FOREIGN KEY (`investee_company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `ledger_groups` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `master_key` ENUM(
+      'equity', 'non_current_liability', 'current_liability',
+      'non_current_asset', 'current_asset',
+      'direct_income', 'indirect_income', 'direct_expense', 'indirect_expense'
+  ) NOT NULL,
+  `parent_group_id` INT UNSIGNED DEFAULT NULL,
+  `code` VARCHAR(40) NOT NULL,
+  `name` VARCHAR(150) NOT NULL,
+  `is_cash_or_bank` TINYINT(1) NOT NULL DEFAULT 0,
+  `is_system` TINYINT(1) NOT NULL DEFAULT 0,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_ledger_groups_company_code` (`company_id`, `code`),
+  KEY `idx_ledger_groups_company_master` (`company_id`, `master_key`),
+  KEY `idx_ledger_groups_cash_bank` (`company_id`, `is_cash_or_bank`),
+  KEY `idx_ledger_groups_parent` (`parent_group_id`),
+  CONSTRAINT `fk_ledger_groups_parent` FOREIGN KEY (`parent_group_id`) REFERENCES `ledger_groups`(`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_ledger_groups_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `ledgers` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `group_id` INT UNSIGNED DEFAULT NULL,
+  `code` VARCHAR(40) NOT NULL,
+  `name` VARCHAR(150) NOT NULL,
+  `type` ENUM('asset', 'liability', 'equity', 'revenue', 'expense') NOT NULL,
+  `is_system` TINYINT(1) NOT NULL DEFAULT 0,
+  `status` ENUM('active', 'suspended') NOT NULL DEFAULT 'active',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_ledgers_company_code` (`company_id`, `code`),
+  KEY `idx_ledgers_company` (`company_id`),
+  KEY `idx_ledgers_group` (`group_id`),
+  CONSTRAINT `fk_ledgers_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ledgers_group` FOREIGN KEY (`group_id`) REFERENCES `ledger_groups` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `company_ledger_mappings` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `map_key` VARCHAR(80) NOT NULL COMMENT 'e.g., default_accounts_receivable, default_vat_payable',
+  `ledger_id` INT UNSIGNED NOT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_company_ledger_mapping` (`company_id`, `map_key`),
+  KEY `idx_company_ledger_mappings_ledger` (`ledger_id`),
+  CONSTRAINT `fk_company_ledger_mappings_company` FOREIGN KEY (`company_id`) REFERENCES `companies`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_company_ledger_mappings_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `vouchers` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `fiscal_year_id` INT UNSIGNED NOT NULL,
+  `voucher_no` VARCHAR(80) NOT NULL,
+  `voucher_date` DATE DEFAULT NULL,
+  `voucher_type` ENUM('payment', 'receipt', 'journal', 'sales', 'purchase', 'contra', 'debit_note', 'credit_note') NOT NULL DEFAULT 'journal',
+  `source_type` VARCHAR(80) DEFAULT NULL,
+  `source_id` INT UNSIGNED DEFAULT NULL,
+  `party_id` INT UNSIGNED DEFAULT NULL,
+  `reference_no` VARCHAR(120) DEFAULT NULL,
+  `narration` TEXT DEFAULT NULL,
+  `total_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `status` ENUM('draft', 'posted', 'cancelled') NOT NULL DEFAULT 'posted',
+  `posted_by` INT UNSIGNED DEFAULT NULL,
+  `posted_at` DATETIME DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_vouchers_no_company` (`company_id`, `voucher_no`),
+  UNIQUE KEY `uniq_vouchers_source` (`source_type`, `source_id`),
+  KEY `idx_vouchers_company_fiscal` (`company_id`, `fiscal_year_id`),
+  KEY `idx_vouchers_date` (`company_id`, `fiscal_year_id`, `voucher_date`),
+  KEY `idx_vouchers_party` (`party_id`),
+  CONSTRAINT `fk_vouchers_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_vouchers_fiscal_year` FOREIGN KEY (`fiscal_year_id`) REFERENCES `fiscal_years` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_vouchers_posted_by` FOREIGN KEY (`posted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `voucher_entries` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `voucher_id` INT UNSIGNED NOT NULL,
+  `ledger_id` INT UNSIGNED NOT NULL,
+  `entry_type` ENUM('debit', 'credit') NOT NULL,
+  `amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `memo` VARCHAR(255) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_voucher_entries_voucher` (`voucher_id`),
+  KEY `idx_voucher_entries_ledger` (`ledger_id`),
+  CONSTRAINT `fk_voucher_entries_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_voucher_entries_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `settings` (
+  `setting_key` VARCHAR(100) NOT NULL,
+  `setting_value` LONGTEXT DEFAULT NULL,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`setting_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `teams` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `name` VARCHAR(140) NOT NULL,
+  `description` TEXT DEFAULT NULL,
+  `leader_user_id` INT UNSIGNED NOT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_teams_name` (`name`),
+  KEY `idx_teams_company` (`company_id`),
+  KEY `idx_teams_leader` (`leader_user_id`),
+  CONSTRAINT `fk_teams_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_teams_leader` FOREIGN KEY (`leader_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `team_members` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `team_id` INT UNSIGNED NOT NULL,
+  `user_id` INT UNSIGNED NOT NULL,
+  `member_role` VARCHAR(80) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_team_member` (`team_id`, `user_id`),
+  KEY `idx_team_members_team` (`team_id`),
+  KEY `idx_team_members_user` (`user_id`),
+  CONSTRAINT `fk_team_members_team` FOREIGN KEY (`team_id`) REFERENCES `teams` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_team_members_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `industries` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(160) NOT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_industries_name` (`name`),
+  KEY `idx_industries_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `service_provider_entities` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `name` VARCHAR(190) NOT NULL,
+  `code` VARCHAR(60) DEFAULT NULL,
+  `logo_path` VARCHAR(255) DEFAULT NULL,
+  `contact_email` VARCHAR(190) DEFAULT NULL,
+  `contact_number` VARCHAR(60) DEFAULT NULL,
+  `address` TEXT DEFAULT NULL,
+  `website` VARCHAR(255) DEFAULT NULL,
+  `authorized_signatory_name` VARCHAR(190) DEFAULT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_service_provider_entities_code` (`code`),
+  KEY `idx_service_provider_entities_company` (`company_id`),
+  KEY `idx_service_provider_entities_active` (`is_active`),
+  CONSTRAINT `fk_service_provider_entities_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `client_profiles` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` INT UNSIGNED NOT NULL,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `organization_name` VARCHAR(190) NOT NULL,
+  `client_code` VARCHAR(60) DEFAULT NULL,
+  `registration_no` VARCHAR(80) DEFAULT NULL,
+  `industry_id` INT UNSIGNED DEFAULT NULL,
+  `assigned_staff_user_id` INT UNSIGNED DEFAULT NULL,
+  `assigned_team_id` INT UNSIGNED DEFAULT NULL,
+  `address` VARCHAR(255) DEFAULT NULL,
+  `pan_no` VARCHAR(60) DEFAULT NULL,
+  `authorized_person_position` VARCHAR(140) DEFAULT NULL,
+  `authorized_signatory_name` VARCHAR(190) DEFAULT NULL,
+  `contact_number` VARCHAR(60) DEFAULT NULL,
+  `website` VARCHAR(255) DEFAULT NULL,
+  `company_logo_path` VARCHAR(255) DEFAULT NULL,
+  `client_status` ENUM('active', 'suspended', 'inactive') NOT NULL DEFAULT 'active',
+  `notes` TEXT DEFAULT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_client_profiles_user` (`user_id`),
+  UNIQUE KEY `uniq_client_profiles_code` (`client_code`),
+  KEY `idx_client_profiles_company` (`company_id`),
+  KEY `idx_client_profiles_staff` (`assigned_staff_user_id`),
+  KEY `idx_client_profiles_team` (`assigned_team_id`),
+  KEY `idx_client_profiles_industry` (`industry_id`),
+  KEY `idx_client_profiles_status` (`client_status`),
+  KEY `idx_client_profiles_registration` (`registration_no`),
+  KEY `idx_client_profiles_pan` (`pan_no`),
+  CONSTRAINT `fk_client_profiles_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_client_profiles_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_profiles_staff` FOREIGN KEY (`assigned_staff_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_client_profiles_team` FOREIGN KEY (`assigned_team_id`) REFERENCES `teams` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `client_service_provider_entities` (
+  `client_id` INT UNSIGNED NOT NULL,
+  `service_provider_entity_id` INT UNSIGNED NOT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`client_id`, `service_provider_entity_id`),
+  KEY `idx_client_service_provider_entity` (`service_provider_entity_id`),
+  CONSTRAINT `fk_client_service_provider_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_service_provider_entity` FOREIGN KEY (`service_provider_entity_id`) REFERENCES `service_provider_entities` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `service_contracts` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `client_id` INT UNSIGNED NOT NULL,
+  `title` VARCHAR(190) NOT NULL,
+  `contract_no` VARCHAR(100) NOT NULL,
+  `start_date` DATE DEFAULT NULL,
+  `end_date` DATE DEFAULT NULL,
+  `total_value` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `billing_cycle` VARCHAR(40) DEFAULT NULL,
+  `status` ENUM('draft', 'active', 'completed', 'terminated') NOT NULL DEFAULT 'draft',
+  `terms` TEXT DEFAULT NULL,
+  `created_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_service_contract_no` (`contract_no`),
+  KEY `idx_service_contract_company` (`company_id`),
+  KEY `idx_service_contract_client` (`client_id`),
+  KEY `idx_service_contract_created_by` (`created_by`),
+  CONSTRAINT `fk_service_contract_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_service_contract_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_service_contract_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `client_tasks` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `client_id` INT UNSIGNED NOT NULL,
+  `service_provider_entity_id` INT UNSIGNED DEFAULT NULL,
+  `contract_id` INT UNSIGNED DEFAULT NULL,
+  `team_id` INT UNSIGNED DEFAULT NULL,
+  `assigned_staff_user_id` INT UNSIGNED DEFAULT NULL,
+  `title` VARCHAR(190) NOT NULL,
+  `description` TEXT DEFAULT NULL,
+  `quoted_fee` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `status` ENUM('new', 'in_progress', 'on_hold', 'completed', 'cancelled') NOT NULL DEFAULT 'new',
+  `priority` ENUM('low', 'normal', 'high', 'urgent') NOT NULL DEFAULT 'normal',
+  `start_date` DATE DEFAULT NULL,
+  `due_date` DATE DEFAULT NULL,
+  `completed_at` DATETIME DEFAULT NULL,
+  `created_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_client_tasks_company` (`company_id`),
+  KEY `idx_client_tasks_client` (`client_id`),
+  KEY `idx_client_tasks_team` (`team_id`),
+  KEY `idx_client_tasks_contract` (`contract_id`),
+  KEY `idx_client_tasks_status` (`status`),
+  KEY `idx_client_tasks_assigned_staff` (`assigned_staff_user_id`),
+  KEY `idx_client_tasks_service_provider_entity` (`service_provider_entity_id`),
+  CONSTRAINT `fk_client_tasks_service_provider_entity` FOREIGN KEY (`service_provider_entity_id`) REFERENCES `service_provider_entities` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_client_tasks_assigned_staff` FOREIGN KEY (`assigned_staff_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_client_tasks_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_client_tasks_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_tasks_team` FOREIGN KEY (`team_id`) REFERENCES `teams` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_client_tasks_contract` FOREIGN KEY (`contract_id`) REFERENCES `service_contracts` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_client_tasks_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `task_stages` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `task_id` INT UNSIGNED NOT NULL,
+  `stage_name` VARCHAR(190) NOT NULL,
+  `sequence_no` INT NOT NULL DEFAULT 1,
+  `stage_fee` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `assigned_staff_user_id` INT UNSIGNED DEFAULT NULL,
+  `status` ENUM('pending', 'in_progress', 'completed') NOT NULL DEFAULT 'pending',
+  `completed_at` DATETIME DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_task_stages_company` (`company_id`),
+  KEY `idx_task_stages_task` (`task_id`),
+  KEY `idx_task_stages_status` (`status`),
+  KEY `idx_task_stages_assigned_staff` (`assigned_staff_user_id`),
+  CONSTRAINT `fk_task_stages_assigned_staff` FOREIGN KEY (`assigned_staff_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_stages_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_stages_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `task_invoices` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `task_id` INT UNSIGNED DEFAULT NULL,
+  `stage_id` INT UNSIGNED DEFAULT NULL,
+  `invoice_no` VARCHAR(100) NOT NULL,
+  `invoice_type` ENUM('stage', 'task', 'inventory', 'manufacturing', 'other') NOT NULL DEFAULT 'task',
+  `invoice_source_type` ENUM('task', 'inventory', 'manufacturing', 'other') NOT NULL DEFAULT 'task',
+  `source_id` INT UNSIGNED DEFAULT NULL,
+  `party_id` INT UNSIGNED DEFAULT NULL,
+  `description` VARCHAR(255) DEFAULT NULL,
+  `invoice_category` ENUM('proforma', 'tax') DEFAULT 'proforma',
+  `tax_invoice_id` INT UNSIGNED DEFAULT NULL,
+  `amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `vat_rate` DECIMAL(5,2) DEFAULT 13.00,
+  `vat_amount` DECIMAL(12,2) DEFAULT 0.00,
+  `taxable_amount` DECIMAL(12,2) DEFAULT 0.00,
+  `total_amount` DECIMAL(12,2) DEFAULT 0.00,
+  `discount_type` ENUM('none', 'percent', 'fixed') NOT NULL DEFAULT 'none',
+  `discount_value` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `discount_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `adjusted_on` TIMESTAMP NULL DEFAULT NULL,
+  `adjusted_by` INT UNSIGNED DEFAULT NULL,
+  `tax_invoice_date` DATE DEFAULT NULL,
+  `pan_number` VARCHAR(20) DEFAULT NULL,
+  `vat_reg_number` VARCHAR(20) DEFAULT NULL,
+  `converted_to_tax_on` TIMESTAMP NULL DEFAULT NULL,
+  `converted_by` INT UNSIGNED DEFAULT NULL,
+  `status` ENUM('draft', 'issued', 'paid', 'cancelled') NOT NULL DEFAULT 'issued',
+  `issued_on` DATE NOT NULL,
+  `due_on` DATE DEFAULT NULL,
+  `notes` TEXT DEFAULT NULL,
+  `issued_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_task_invoice_no` (`invoice_no`),
+  KEY `idx_task_invoices_company` (`company_id`),
+  KEY `idx_task_invoices_task` (`task_id`),
+  KEY `idx_task_invoices_stage` (`stage_id`),
+  KEY `idx_task_invoices_category` (`invoice_category`),
+  KEY `idx_task_invoices_tax_invoice` (`tax_invoice_id`),
+  KEY `idx_task_invoices_discount_type` (`discount_type`),
+  KEY `idx_task_invoices_source` (`company_id`, `invoice_source_type`, `source_id`),
+  KEY `idx_task_invoices_party` (`party_id`),
+  CONSTRAINT `fk_task_invoices_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_invoices_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_task_invoices_stage` FOREIGN KEY (`stage_id`) REFERENCES `task_stages` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_invoices_issued_by` FOREIGN KEY (`issued_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_invoices_tax_invoice` FOREIGN KEY (`tax_invoice_id`) REFERENCES `task_invoices` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_invoices_converted_by` FOREIGN KEY (`converted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_invoices_adjusted_by` FOREIGN KEY (`adjusted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `invoice_payment_requests` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `invoice_id` INT UNSIGNED NOT NULL,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `requested_by` INT UNSIGNED NOT NULL,
+  `amount_requested` DECIMAL(12,2) NOT NULL,
+  `payment_method` VARCHAR(100) DEFAULT NULL,
+  `status` ENUM('pending', 'paid', 'partial', 'cancelled') DEFAULT 'pending',
+  `payment_received_on` DATE DEFAULT NULL,
+  `payment_amount` DECIMAL(12,2) DEFAULT 0.00,
+  `notes` TEXT DEFAULT NULL,
+  `client_declared_status` ENUM('none', 'partial', 'complete') NOT NULL DEFAULT 'none',
+  `client_declared_amount` DECIMAL(12,2) DEFAULT NULL,
+  `client_declared_method` VARCHAR(100) DEFAULT NULL,
+  `client_declared_reference` VARCHAR(190) DEFAULT NULL,
+  `client_declared_on` DATE DEFAULT NULL,
+  `client_declared_note` TEXT DEFAULT NULL,
+  `client_declared_at` TIMESTAMP NULL DEFAULT NULL,
+  `requested_on` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_invoice_payment_requests_invoice` (`invoice_id`),
+  KEY `idx_invoice_payment_requests_company` (`company_id`),
+  KEY `idx_invoice_payment_requests_status` (`status`),
+  KEY `idx_invoice_payment_requests_declared` (`client_declared_status`),
+  CONSTRAINT `fk_invoice_payment_requests_invoice` FOREIGN KEY (`invoice_id`) REFERENCES `task_invoices` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_invoice_payment_requests_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `invoice_payment_receipts` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `payment_request_id` INT UNSIGNED NOT NULL,
+  `invoice_id` INT UNSIGNED NOT NULL,
+  `company_id` INT UNSIGNED NOT NULL,
+  `client_id` INT UNSIGNED DEFAULT NULL,
+  `receipt_no` VARCHAR(60) NOT NULL,
+  `amount_received` DECIMAL(12,2) NOT NULL,
+  `payment_method` VARCHAR(100) DEFAULT NULL,
+  `payment_reference` VARCHAR(190) DEFAULT NULL,
+  `received_on` DATE NOT NULL,
+  `notes` TEXT DEFAULT NULL,
+  `created_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_invoice_payment_receipts_no` (`receipt_no`),
+  KEY `idx_invoice_payment_receipts_request` (`payment_request_id`),
+  KEY `idx_invoice_payment_receipts_invoice` (`invoice_id`),
+  KEY `idx_invoice_payment_receipts_company` (`company_id`),
+  CONSTRAINT `fk_invoice_payment_receipts_request` FOREIGN KEY (`payment_request_id`) REFERENCES `invoice_payment_requests` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_invoice_payment_receipts_invoice` FOREIGN KEY (`invoice_id`) REFERENCES `task_invoices` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_invoice_payment_receipts_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_invoice_payment_receipts_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_invoice_payment_receipts_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `documents` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `client_id` INT UNSIGNED NOT NULL,
+  `task_id` INT UNSIGNED DEFAULT NULL,
+  `parent_document_id` INT UNSIGNED DEFAULT NULL,
+  `version_number` INT UNSIGNED NOT NULL DEFAULT 1,
+  `category` ENUM(
+      'registration_kyc', 'accounting_records', 'tax_documents', 'audit_documents',
+      'reports', 'certificates', 'invoices_receipts', 'correspondence', 'other'
+  ) NOT NULL DEFAULT 'other',
+  `title` VARCHAR(190) NOT NULL,
+  `original_file_name` VARCHAR(255) NOT NULL,
+  `stored_file_name` VARCHAR(255) NOT NULL,
+  `file_path` VARCHAR(255) NOT NULL,
+  `file_type` VARCHAR(100) DEFAULT NULL,
+  `file_size` INT UNSIGNED NOT NULL DEFAULT 0,
+  `visibility` ENUM('internal', 'client') NOT NULL DEFAULT 'internal',
+  `description` TEXT DEFAULT NULL,
+  `uploaded_by` INT UNSIGNED DEFAULT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_documents_company` (`company_id`),
+  KEY `idx_documents_client` (`client_id`),
+  KEY `idx_documents_task` (`task_id`),
+  KEY `idx_documents_parent` (`parent_document_id`),
+  CONSTRAINT `fk_documents_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_documents_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_documents_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_documents_parent` FOREIGN KEY (`parent_document_id`) REFERENCES `documents` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_documents_uploaded_by` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `document_requests` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `client_id` INT UNSIGNED NOT NULL,
+  `task_id` INT UNSIGNED DEFAULT NULL,
+  `document_id` INT UNSIGNED DEFAULT NULL,
+  `title` VARCHAR(190) NOT NULL,
+  `description` TEXT DEFAULT NULL,
+  `priority` ENUM('low', 'normal', 'high', 'urgent') NOT NULL DEFAULT 'normal',
+  `due_date` DATE DEFAULT NULL,
+  `status` ENUM('requested', 'uploaded', 'under_review', 'accepted', 'rejected', 'waived') NOT NULL DEFAULT 'requested',
+  `requested_by` INT UNSIGNED DEFAULT NULL,
+  `staff_comment` TEXT DEFAULT NULL,
+  `client_comment` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_doc_requests_company` (`company_id`),
+  KEY `idx_doc_requests_client` (`client_id`),
+  KEY `idx_doc_requests_status` (`status`),
+  CONSTRAINT `fk_doc_requests_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_doc_requests_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_doc_requests_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_doc_requests_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_doc_requests_requested_by` FOREIGN KEY (`requested_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `compliance_types` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `name` VARCHAR(150) NOT NULL,
+  `is_system` TINYINT(1) NOT NULL DEFAULT 0,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_compliance_types_company_name` (`company_id`, `name`),
+  CONSTRAINT `fk_compliance_types_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `compliance_deadlines` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `client_id` INT UNSIGNED NOT NULL,
+  `compliance_type_id` INT UNSIGNED NOT NULL,
+  `task_id` INT UNSIGNED DEFAULT NULL,
+  `document_id` INT UNSIGNED DEFAULT NULL,
+  `applicable_period` VARCHAR(100) NOT NULL,
+  `statutory_due_date` DATE NOT NULL,
+  `internal_due_date` DATE DEFAULT NULL,
+  `assigned_staff_user_id` INT UNSIGNED DEFAULT NULL,
+  `reviewer_user_id` INT UNSIGNED DEFAULT NULL,
+  `status` ENUM(
+      'not_started', 'upcoming', 'in_progress', 'waiting_for_client',
+      'filed', 'completed', 'overdue', 'not_applicable'
+  ) NOT NULL DEFAULT 'not_started',
+  `filing_date` DATE DEFAULT NULL,
+  `filing_reference` VARCHAR(150) DEFAULT NULL,
+  `remarks` TEXT DEFAULT NULL,
+  `created_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_compliance_deadlines_company` (`company_id`),
+  KEY `idx_compliance_deadlines_client` (`client_id`),
+  KEY `idx_compliance_deadlines_due` (`statutory_due_date`),
+  KEY `idx_compliance_deadlines_status` (`status`),
+  CONSTRAINT `fk_compliance_deadlines_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_compliance_deadlines_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_compliance_deadlines_type` FOREIGN KEY (`compliance_type_id`) REFERENCES `compliance_types` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_compliance_deadlines_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_compliance_deadlines_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_compliance_deadlines_staff` FOREIGN KEY (`assigned_staff_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_compliance_deadlines_reviewer` FOREIGN KEY (`reviewer_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `compliance_types` (`company_id`, `name`, `is_system`)
+SELECT c.id, seed.name, 1
+FROM `companies` c
+JOIN (
+    SELECT 'VAT Return' AS name
+    UNION ALL SELECT 'TDS Return'
+    UNION ALL SELECT 'Income Tax Instalment'
+    UNION ALL SELECT 'Annual Income Tax Return'
+    UNION ALL SELECT 'Company Annual Return'
+    UNION ALL SELECT 'AGM'
+    UNION ALL SELECT 'Audit Completion'
+    UNION ALL SELECT 'Social Security Fund Payment'
+    UNION ALL SELECT 'Payroll Processing'
+    UNION ALL SELECT 'Internal Audit Report'
+    UNION ALL SELECT 'Engagement Renewal'
+) seed
+WHERE c.is_active = 1
+  AND NOT EXISTS (
+      SELECT 1 FROM `compliance_types` existing
+      WHERE existing.company_id = c.id AND existing.name = seed.name
+  );
+
+CREATE TABLE IF NOT EXISTS `message_threads` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `client_id` INT UNSIGNED DEFAULT NULL,
+  `subject` VARCHAR(190) NOT NULL,
+  `created_by` INT UNSIGNED DEFAULT NULL,
+  `is_archived` TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_message_threads_company` (`company_id`),
+  KEY `idx_message_threads_client` (`client_id`),
+  CONSTRAINT `fk_message_threads_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_message_threads_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_message_threads_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `message_thread_participants` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `thread_id` INT UNSIGNED NOT NULL,
+  `user_id` INT UNSIGNED NOT NULL,
+  `last_read_at` DATETIME DEFAULT NULL,
+  `joined_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_thread_participant` (`thread_id`, `user_id`),
+  KEY `idx_thread_participants_user` (`user_id`),
+  CONSTRAINT `fk_thread_participants_thread` FOREIGN KEY (`thread_id`) REFERENCES `message_threads` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_thread_participants_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `messages` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `thread_id` INT UNSIGNED NOT NULL,
+  `sender_id` INT UNSIGNED NOT NULL,
+  `body` TEXT NOT NULL,
+  `attachment_path` VARCHAR(255) DEFAULT NULL,
+  `attachment_name` VARCHAR(255) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_messages_thread` (`thread_id`),
+  CONSTRAINT `fk_messages_thread` FOREIGN KEY (`thread_id`) REFERENCES `message_threads` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_messages_sender` FOREIGN KEY (`sender_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `support_tickets` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `client_id` INT UNSIGNED NOT NULL,
+  `ticket_no` VARCHAR(40) NOT NULL,
+  `subject` VARCHAR(190) NOT NULL,
+  `category` ENUM('general', 'technical', 'billing', 'document', 'other') NOT NULL DEFAULT 'general',
+  `priority` ENUM('low', 'normal', 'high', 'urgent') NOT NULL DEFAULT 'normal',
+  `description` TEXT NOT NULL,
+  `status` ENUM('open', 'assigned', 'in_progress', 'waiting_for_client', 'resolved', 'closed') NOT NULL DEFAULT 'open',
+  `assigned_staff_user_id` INT UNSIGNED DEFAULT NULL,
+  `resolution` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_support_tickets_no` (`ticket_no`),
+  KEY `idx_support_tickets_company` (`company_id`),
+  KEY `idx_support_tickets_client` (`client_id`),
+  KEY `idx_support_tickets_status` (`status`),
+  CONSTRAINT `fk_support_tickets_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_support_tickets_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_support_tickets_staff` FOREIGN KEY (`assigned_staff_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `support_ticket_messages` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `ticket_id` INT UNSIGNED NOT NULL,
+  `sender_id` INT UNSIGNED NOT NULL,
+  `body` TEXT NOT NULL,
+  `attachment_path` VARCHAR(255) DEFAULT NULL,
+  `attachment_name` VARCHAR(255) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_ticket_messages_ticket` (`ticket_id`),
+  CONSTRAINT `fk_ticket_messages_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `support_tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ticket_messages_sender` FOREIGN KEY (`sender_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `support_ticket_requests` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `ticket_id` INT UNSIGNED NOT NULL,
+  `company_id` INT UNSIGNED NOT NULL,
+  `client_id` INT UNSIGNED NOT NULL,
+  `request_type` ENUM('invoice_request', 'discount_request', 'credit_period_request', 'advance_payment_request', 'partial_payment_request') NOT NULL,
+  `target_task_id` INT UNSIGNED DEFAULT NULL,
+  `target_stage_id` INT UNSIGNED DEFAULT NULL,
+  `target_invoice_id` INT UNSIGNED DEFAULT NULL,
+  `requested_amount` DECIMAL(12,2) DEFAULT NULL,
+  `requested_percent` DECIMAL(6,2) DEFAULT NULL,
+  `requested_due_on` DATE DEFAULT NULL,
+  `decision_status` ENUM('pending', 'approved', 'rejected', 'negotiation', 'deferred') NOT NULL DEFAULT 'pending',
+  `approved_amount` DECIMAL(12,2) DEFAULT NULL,
+  `approved_percent` DECIMAL(6,2) DEFAULT NULL,
+  `approved_due_on` DATE DEFAULT NULL,
+  `applied_invoice_id` INT UNSIGNED DEFAULT NULL,
+  `admin_note` TEXT DEFAULT NULL,
+  `processed_by` INT UNSIGNED DEFAULT NULL,
+  `processed_on` TIMESTAMP NULL DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_support_ticket_request_ticket` (`ticket_id`),
+  KEY `idx_support_ticket_requests_company` (`company_id`),
+  KEY `idx_support_ticket_requests_client` (`client_id`),
+  KEY `idx_support_ticket_requests_type` (`request_type`),
+  KEY `idx_support_ticket_requests_target_invoice` (`target_invoice_id`),
+  CONSTRAINT `fk_support_ticket_requests_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `support_tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_support_ticket_requests_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_support_ticket_requests_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_support_ticket_requests_task` FOREIGN KEY (`target_task_id`) REFERENCES `client_tasks` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_support_ticket_requests_stage` FOREIGN KEY (`target_stage_id`) REFERENCES `task_stages` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_support_ticket_requests_invoice` FOREIGN KEY (`target_invoice_id`) REFERENCES `task_invoices` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_support_ticket_requests_applied_invoice` FOREIGN KEY (`applied_invoice_id`) REFERENCES `task_invoices` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_support_ticket_requests_processed_by` FOREIGN KEY (`processed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `attendance` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `staff_user_id` INT UNSIGNED NOT NULL,
+  `attendance_date` DATE NOT NULL,
+  `check_in_time` DATETIME DEFAULT NULL,
+  `check_out_time` DATETIME DEFAULT NULL,
+  `work_location` VARCHAR(100) DEFAULT NULL,
+  `remarks` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_attendance_staff_date` (`staff_user_id`, `attendance_date`),
+  KEY `idx_attendance_company` (`company_id`),
+  CONSTRAINT `fk_attendance_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_attendance_staff` FOREIGN KEY (`staff_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `attendance_correction_requests` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `staff_user_id` INT UNSIGNED NOT NULL,
+  `attendance_date` DATE NOT NULL,
+  `requested_check_in` DATETIME DEFAULT NULL,
+  `requested_check_out` DATETIME DEFAULT NULL,
+  `reason` TEXT NOT NULL,
+  `status` ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+  `reviewer_remarks` TEXT DEFAULT NULL,
+  `reviewed_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_attendance_corrections_company` (`company_id`),
+  KEY `idx_attendance_corrections_staff` (`staff_user_id`),
+  CONSTRAINT `fk_attendance_corrections_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_attendance_corrections_staff` FOREIGN KEY (`staff_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_attendance_corrections_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `leave_types` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `name` VARCHAR(100) NOT NULL,
+  `default_days_per_year` INT UNSIGNED NOT NULL DEFAULT 0,
+  `is_system` TINYINT(1) NOT NULL DEFAULT 0,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_leave_types_company_name` (`company_id`, `name`),
+  CONSTRAINT `fk_leave_types_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `leave_requests` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `staff_user_id` INT UNSIGNED NOT NULL,
+  `leave_type_id` INT UNSIGNED NOT NULL,
+  `start_date` DATE NOT NULL,
+  `end_date` DATE NOT NULL,
+  `total_days` INT UNSIGNED NOT NULL DEFAULT 1,
+  `reason` TEXT NOT NULL,
+  `attachment_path` VARCHAR(255) DEFAULT NULL,
+  `attachment_name` VARCHAR(255) DEFAULT NULL,
+  `status` ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+  `reviewer_remarks` TEXT DEFAULT NULL,
+  `reviewed_by` INT UNSIGNED DEFAULT NULL,
+  `reviewed_at` DATETIME DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_leave_requests_company` (`company_id`),
+  KEY `idx_leave_requests_staff` (`staff_user_id`),
+  CONSTRAINT `fk_leave_requests_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_leave_requests_staff` FOREIGN KEY (`staff_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_leave_requests_type` FOREIGN KEY (`leave_type_id`) REFERENCES `leave_types` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_leave_requests_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `timesheet_entries` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `staff_user_id` INT UNSIGNED NOT NULL,
+  `client_id` INT UNSIGNED DEFAULT NULL,
+  `task_id` INT UNSIGNED DEFAULT NULL,
+  `entry_date` DATE NOT NULL,
+  `description` VARCHAR(255) NOT NULL,
+  `start_time` TIME NOT NULL,
+  `end_time` TIME NOT NULL,
+  `total_hours` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  `is_billable` TINYINT(1) NOT NULL DEFAULT 1,
+  `work_location` VARCHAR(100) DEFAULT NULL,
+  `status` ENUM('draft', 'submitted', 'approved', 'rejected') NOT NULL DEFAULT 'draft',
+  `reviewer_remarks` TEXT DEFAULT NULL,
+  `reviewed_by` INT UNSIGNED DEFAULT NULL,
+  `reviewed_at` DATETIME DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_timesheet_entries_company` (`company_id`),
+  KEY `idx_timesheet_entries_staff` (`staff_user_id`),
+  KEY `idx_timesheet_entries_client` (`client_id`),
+  KEY `idx_timesheet_entries_status` (`status`),
+  CONSTRAINT `fk_timesheet_entries_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_timesheet_entries_staff` FOREIGN KEY (`staff_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_timesheet_entries_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_timesheet_entries_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_timesheet_entries_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `staff_profiles` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` INT UNSIGNED NOT NULL,
+  `job_title` VARCHAR(150) DEFAULT NULL,
+  `department` VARCHAR(150) DEFAULT NULL,
+  `education` VARCHAR(255) DEFAULT NULL,
+  `qualifications` VARCHAR(255) DEFAULT NULL,
+  `expertise` VARCHAR(255) DEFAULT NULL,
+  `bio` TEXT DEFAULT NULL,
+  `photo_path` VARCHAR(255) DEFAULT NULL,
+  `team_category` ENUM('leadership', 'management', 'professional') NOT NULL DEFAULT 'professional',
+  `show_on_public_team` TINYINT(1) NOT NULL DEFAULT 0,
+  `display_order` INT NOT NULL DEFAULT 0,
+  `employment_status` ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_staff_profiles_user` (`user_id`),
+  KEY `idx_staff_profiles_public` (`show_on_public_team`, `display_order`),
+  CONSTRAINT `fk_staff_profiles_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `staff_kyc_documents` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `staff_user_id` INT UNSIGNED NOT NULL,
+  `document_type` ENUM('citizenship', 'national_id', 'passport', 'pan') NOT NULL,
+  `stored_filename` VARCHAR(190) NOT NULL,
+  `original_filename` VARCHAR(255) DEFAULT NULL,
+  `mime_type` VARCHAR(100) DEFAULT NULL,
+  `file_size` INT UNSIGNED DEFAULT NULL,
+  `verification_status` ENUM('submitted', 'verified', 'rejected', 'requires_update') NOT NULL DEFAULT 'submitted',
+  `verified_by` INT UNSIGNED DEFAULT NULL,
+  `verified_at` DATETIME DEFAULT NULL,
+  `remarks` TEXT DEFAULT NULL,
+  `uploaded_by` INT UNSIGNED DEFAULT NULL,
+  `uploaded_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_staff_kyc_stored_filename` (`stored_filename`),
+  KEY `idx_staff_kyc_staff` (`staff_user_id`),
+  KEY `idx_staff_kyc_type` (`document_type`),
+  KEY `idx_staff_kyc_status` (`verification_status`),
+  CONSTRAINT `fk_staff_kyc_staff` FOREIGN KEY (`staff_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_staff_kyc_verified_by` FOREIGN KEY (`verified_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_staff_kyc_uploaded_by` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `accounting_parties` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `ledger_id` INT UNSIGNED DEFAULT NULL,
+  `code` VARCHAR(60) NOT NULL,
+  `name` VARCHAR(190) NOT NULL,
+  `party_type` ENUM('customer', 'supplier', 'both', 'other') NOT NULL DEFAULT 'both',
+  `pan_no` VARCHAR(60) DEFAULT NULL,
+  `email` VARCHAR(190) DEFAULT NULL,
+  `phone` VARCHAR(80) DEFAULT NULL,
+  `billing_address` TEXT DEFAULT NULL,
+  `opening_balance` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `opening_balance_type` ENUM('debit', 'credit') NOT NULL DEFAULT 'debit',
+  `credit_limit` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `status` ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_accounting_parties_company_code` (`company_id`, `code`),
+  KEY `idx_accounting_parties_company_type` (`company_id`, `party_type`),
+  KEY `idx_accounting_parties_ledger` (`ledger_id`),
+  CONSTRAINT `fk_accounting_parties_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_accounting_parties_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `inventory_items` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `ledger_id` INT UNSIGNED DEFAULT NULL,
+  `sku` VARCHAR(80) NOT NULL,
+  `name` VARCHAR(190) NOT NULL,
+  `item_type` ENUM('stock', 'service', 'raw_material', 'finished_good', 'consumable') NOT NULL DEFAULT 'stock',
+  `unit` VARCHAR(40) NOT NULL DEFAULT 'pcs',
+  `hs_code` VARCHAR(80) DEFAULT NULL,
+  `tax_rate` DECIMAL(5,2) NOT NULL DEFAULT 13.00,
+  `sales_rate` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `purchase_rate` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `opening_qty` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+  `reorder_level` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+  `status` ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_inventory_items_company_sku` (`company_id`, `sku`),
+  KEY `idx_inventory_items_company_type` (`company_id`, `item_type`),
+  KEY `idx_inventory_items_ledger` (`ledger_id`),
+  CONSTRAINT `fk_inventory_items_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_inventory_items_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `inventory_transactions` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `fiscal_year_id` INT UNSIGNED DEFAULT NULL,
+  `item_id` INT UNSIGNED NOT NULL,
+  `voucher_id` INT UNSIGNED DEFAULT NULL,
+  `transaction_type` ENUM('opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment', 'consume', 'produce') NOT NULL DEFAULT 'adjustment',
+  `ref_no` VARCHAR(120) DEFAULT NULL,
+  `transaction_date` DATE NOT NULL,
+  `qty_in` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+  `qty_out` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+  `rate` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `amount` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_inventory_transactions_company_date` (`company_id`, `transaction_date`),
+  KEY `idx_inventory_transactions_item` (`item_id`),
+  KEY `idx_inventory_transactions_voucher` (`voucher_id`),
+  CONSTRAINT `fk_inventory_transactions_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_inventory_transactions_fiscal_year` FOREIGN KEY (`fiscal_year_id`) REFERENCES `fiscal_years` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_inventory_transactions_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_inventory_transactions_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `manufacturing_orders` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `fiscal_year_id` INT UNSIGNED DEFAULT NULL,
+  `order_no` VARCHAR(80) NOT NULL,
+  `finished_item_id` INT UNSIGNED NOT NULL,
+  `quantity` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+  `status` ENUM('draft', 'in_progress', 'completed', 'cancelled') NOT NULL DEFAULT 'draft',
+  `started_on` DATE DEFAULT NULL,
+  `completed_on` DATE DEFAULT NULL,
+  `notes` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_manufacturing_orders_company_no` (`company_id`, `order_no`),
+  KEY `idx_manufacturing_orders_company_status` (`company_id`, `status`),
+  KEY `idx_manufacturing_orders_finished_item` (`finished_item_id`),
+  CONSTRAINT `fk_manufacturing_orders_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_manufacturing_orders_fiscal_year` FOREIGN KEY (`fiscal_year_id`) REFERENCES `fiscal_years` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_manufacturing_orders_finished_item` FOREIGN KEY (`finished_item_id`) REFERENCES `inventory_items` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `manufacturing_order_inputs` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `manufacturing_order_id` INT UNSIGNED NOT NULL,
+  `item_id` INT UNSIGNED NOT NULL,
+  `quantity` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+  `rate` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_manufacturing_order_inputs_order` (`manufacturing_order_id`),
+  KEY `idx_manufacturing_order_inputs_item` (`item_id`),
+  CONSTRAINT `fk_manufacturing_order_inputs_order` FOREIGN KEY (`manufacturing_order_id`) REFERENCES `manufacturing_orders` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_manufacturing_order_inputs_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `invoice_line_items` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `invoice_id` INT UNSIGNED NOT NULL,
+  `item_id` INT UNSIGNED DEFAULT NULL,
+  `source_type` ENUM('task', 'inventory', 'manufacturing', 'other') NOT NULL DEFAULT 'other',
+  `source_id` INT UNSIGNED DEFAULT NULL,
+  `description` VARCHAR(255) NOT NULL,
+  `hs_code` VARCHAR(80) DEFAULT NULL,
+  `unit` VARCHAR(40) NOT NULL DEFAULT 'pcs',
+  `quantity` DECIMAL(14,3) NOT NULL DEFAULT 1.000,
+  `rate` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `taxable_amount` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `vat_rate` DECIMAL(5,2) NOT NULL DEFAULT 13.00,
+  `vat_amount` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `total_amount` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_invoice_line_items_invoice` (`invoice_id`),
+  KEY `idx_invoice_line_items_item` (`item_id`),
+  CONSTRAINT `fk_invoice_line_items_invoice` FOREIGN KEY (`invoice_id`) REFERENCES `task_invoices` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_invoice_line_items_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `leave_types` (`company_id`, `name`, `default_days_per_year`, `is_system`)
+SELECT c.id, seed.name, seed.default_days_per_year, 1
+FROM `companies` c
+JOIN (
+    SELECT 'Casual Leave' AS name, 12 AS default_days_per_year
+    UNION ALL SELECT 'Sick Leave', 12
+    UNION ALL SELECT 'Annual Leave', 18
+    UNION ALL SELECT 'Maternity/Paternity Leave', 98
+    UNION ALL SELECT 'Unpaid Leave', 0
+) seed
+WHERE c.is_active = 1
+  AND NOT EXISTS (
+      SELECT 1 FROM `leave_types` existing
+      WHERE existing.company_id = c.id AND existing.name = seed.name
+  );
+
+INSERT INTO `plans` (`name`, `slug`, `billing_cycle`, `price`, `currency`, `disk_space_gb`, `bandwidth_gb`, `email_accounts`, `databases_count`, `domains_allowed`, `features`, `is_active`, `sort_order`) VALUES
+('Starter Hosting', 'starter-hosting', 'monthly', 9.99, 'USD', 10, 100, 5, 1, 1, 'Free SSL, One-click backups, cPanel access, Email support', 1, 1),
+('Business Hosting', 'business-hosting', 'monthly', 19.99, 'USD', 25, 250, 25, 5, 3, 'Free SSL, Daily backups, Priority support, Multiple websites', 1, 2),
+('Enterprise Hosting', 'enterprise-hosting', 'monthly', 49.99, 'USD', 100, 1000, 100, 20, 10, 'Dedicated resources, Priority support, Staging tools, Advanced security', 1, 3)
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `billing_cycle` = VALUES(`billing_cycle`), `price` = VALUES(`price`), `currency` = VALUES(`currency`), `disk_space_gb` = VALUES(`disk_space_gb`), `bandwidth_gb` = VALUES(`bandwidth_gb`), `email_accounts` = VALUES(`email_accounts`), `databases_count` = VALUES(`databases_count`), `domains_allowed` = VALUES(`domains_allowed`), `features` = VALUES(`features`), `is_active` = VALUES(`is_active`), `sort_order` = VALUES(`sort_order`);
+
+INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
+('site_name', 'Altiora Advisory Operations'),
+('site_tagline', 'Integrated audit, advisory, and compliance operations.'),
+('support_email', 'support@example.com'),
+('support_phone', '+977-9800000000'),
+('office_address', 'Kathmandu, Nepal'),
+('currency_symbol', '$'),
+('payment_mode', 'manual'),
+('payment_label', 'Manual payment / bank transfer'),
+('bank_name', 'Your Bank Name'),
+('bank_account_name', 'Altiora Advisory Operations'),
+('bank_account_number', '0000000000000000'),
+('payment_note', 'Share payment confirmation with finance for reconciliation.'),
+('stripe_checkout_url', ''),
+('paypal_checkout_url', ''),
+('hero_title', 'Run multi-company audit and advisory workflows with clarity.'),
+('hero_description', 'Manage entities, teams, contracts, tasks, and stage-based invoicing in one place.'),
+('about_text', 'Altiora Advisory Operations supports structured professional-services delivery across group companies.')
+ON DUPLICATE KEY UPDATE `setting_value` = VALUES(`setting_value`);
+
+INSERT INTO `companies` (`name`, `code`, `parent_company_id`, `is_active`) VALUES
+('Altiora Global Holdings Private Limited', 'AGHPL', NULL, 1),
+('M.B. Training and Advisory Services Private Limited', 'MBTAS', NULL, 1),
+('Excel Business Consulting Private Limited', 'EBCPL', NULL, 1),
+('Vyra Edupath Private limited', 'VEPL', NULL, 1),
+('Passion Eduhub Private Limited', 'PEPL', NULL, 1),
+('M.Bista and Associates, Chartered Accountants', 'MBAACA', NULL, 1)
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `is_active` = VALUES(`is_active`);
+
+UPDATE `companies` child
+INNER JOIN `companies` parent ON parent.code = 'AGHPL'
+SET child.parent_company_id = parent.id
+WHERE child.code IN ('MBTAS', 'EBCPL', 'VEPL', 'PEPL');
+
+UPDATE `companies`
+SET parent_company_id = NULL
+WHERE code IN ('AGHPL', 'MBAACA');
+
+INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `status`, `company_id`, `company`) VALUES
+('Super Admin', 'admin@mbista.local', '$2y$10$yeqdVHMElucdlMZWdRO8Ru9Auoymey4RY3rUVnuYcd2WjiYxgVLo.', 'admin', 'active', (SELECT `id` FROM `companies` WHERE `code` = 'AGHPL' LIMIT 1), 'Altiora Global Holdings Private Limited'),
+('Excel Business Client', 'excelbusinessandtax@gmail.com', '$2y$10$ZhJ74eAtR.gMbwufkPzAiO1y2G2c9H8gWQWJ/PXC2v9KYfYtR2.WC', 'customer', 'active', (SELECT `id` FROM `companies` WHERE `code` = 'EBCPL' LIMIT 1), 'Excel Business Consulting Private Limited'),
+('Test Customer', 'testcustomer@example.com', '$2y$10$HULv47NgbaGJuPGGvfZnyurg/1FUy0IExZDgG95bbo2mzhXIVRzmu', 'customer', 'active', NULL, 'Test Customer')
+ON DUPLICATE KEY UPDATE
+`name` = VALUES(`name`),
+`password_hash` = VALUES(`password_hash`),
+`role` = VALUES(`role`),
+`status` = VALUES(`status`),
+`company_id` = VALUES(`company_id`),
+`company` = VALUES(`company`);
+
+INSERT INTO `fiscal_years` (`company_id`, `label`, `start_date`, `end_date`, `is_active`, `is_default`)
+SELECT c.id, 'FY 2026-2027', '2026-01-01', '2026-12-31', 1, 1
+FROM `companies` c
+WHERE c.code IN ('AGHPL', 'MBTAS', 'EBCPL', 'VEPL', 'PEPL', 'MBAACA')
+  AND NOT EXISTS (
+      SELECT 1
+      FROM `fiscal_years` fy
+      WHERE fy.company_id = c.id
+        AND fy.label = 'FY 2026-2027'
+  );
+
+INSERT INTO `company_shareholdings` (`investor_company_id`, `investee_company_id`, `ownership_percent`, `relationship_type`, `consolidation_method`, `effective_from`, `notes`)
+SELECT parent.id,
+       child.id,
+       100.00,
+       'subsidiary',
+       'full',
+       CURRENT_DATE,
+       'Default group accounting relationship.'
+FROM `companies` parent
+INNER JOIN `companies` child ON child.parent_company_id = parent.id
+WHERE parent.code = 'AGHPL'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM `company_shareholdings` existing
+      WHERE existing.investor_company_id = parent.id
+        AND existing.investee_company_id = child.id
+  );
+
+INSERT INTO `ledgers` (`company_id`, `code`, `name`, `type`, `is_system`)
+SELECT c.id, ledger_seed.code, ledger_seed.name, ledger_seed.type, 1
+FROM `companies` c
+JOIN (
+    SELECT 'CASH' AS code, 'Cash and bank' AS name, 'asset' AS type
+    UNION ALL SELECT 'AR', 'Accounts receivable', 'asset'
+    UNION ALL SELECT 'PREPAID', 'Prepaid expenses', 'asset'
+    UNION ALL SELECT 'INVESTMENTS', 'Investments', 'asset'
+    UNION ALL SELECT 'AP', 'Accounts payable', 'liability'
+    UNION ALL SELECT 'TAX_PAYABLE', 'Tax payable', 'liability'
+    UNION ALL SELECT 'SHARE_CAPITAL', 'Share capital', 'equity'
+    UNION ALL SELECT 'RETAINED_EARNINGS', 'Retained earnings', 'equity'
+    UNION ALL SELECT 'SERVICE_REVENUE', 'Service revenue', 'revenue'
+    UNION ALL SELECT 'OTHER_INCOME', 'Other income', 'revenue'
+    UNION ALL SELECT 'SALARY_EXPENSE', 'Salary expense', 'expense'
+    UNION ALL SELECT 'RENT_EXPENSE', 'Rent expense', 'expense'
+    UNION ALL SELECT 'PROFESSIONAL_FEES', 'Professional fees', 'expense'
+    UNION ALL SELECT 'TAX_EXPENSE', 'Tax expense', 'expense'
+) ledger_seed
+WHERE c.is_active = 1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM `ledgers` l
+      WHERE l.company_id = c.id
+        AND l.code = ledger_seed.code
+  );
+
+INSERT INTO `ledger_groups` (`company_id`, `code`, `name`, `master_key`, `is_cash_or_bank`, `is_system`)
+SELECT c.id, seed.code, seed.name, seed.master_key, seed.is_cash_or_bank, 1
+FROM `companies` c
+JOIN (
+    SELECT 'BANK' AS code, 'Bank' AS name, 'current_asset' AS master_key, 1 AS is_cash_or_bank
+    UNION ALL SELECT 'CASH_GRP', 'Cash in Hand', 'current_asset', 1
+    UNION ALL SELECT 'RECEIVABLE', 'Trade Receivables', 'current_asset', 0
+    UNION ALL SELECT 'PREPAID_GRP', 'Prepaid Expenses', 'current_asset', 0
+    UNION ALL SELECT 'INVEST_GRP', 'Investments', 'non_current_asset', 0
+    UNION ALL SELECT 'PAYABLE', 'Trade Payables', 'current_liability', 0
+    UNION ALL SELECT 'DUTIES_TAXES', 'Duties and Taxes', 'current_liability', 0
+    UNION ALL SELECT 'SHARE_CAPITAL_GRP', 'Share Capital', 'equity', 0
+    UNION ALL SELECT 'RESERVE_SURPLUS', 'Reserve & Surplus', 'equity', 0
+    UNION ALL SELECT 'DIRECT_INCOME_GRP', 'Professional Fee Income', 'direct_income', 0
+    UNION ALL SELECT 'INDIRECT_INCOME_GRP', 'Other Income', 'indirect_income', 0
+    UNION ALL SELECT 'ADMIN_EXP', 'Administrative Expenses', 'indirect_expense', 0
+    UNION ALL SELECT 'EMP_BENEFIT_EXP', 'Operating/Employee Benefit Expenses', 'indirect_expense', 0
+    UNION ALL SELECT 'SALES_MKT_EXP', 'Sales and Marketing Expenses', 'indirect_expense', 0
+    UNION ALL SELECT 'OTHER_NONOP_EXP', 'Other Non-operating Expenses', 'indirect_expense', 0
+    UNION ALL SELECT 'DIRECT_EXP_GRP', 'Direct Expenses', 'direct_expense', 0
+    UNION ALL SELECT 'TAX_EXP_GRP', 'Tax Expenses', 'indirect_expense', 0
+) seed
+WHERE c.is_active = 1
+  AND NOT EXISTS (
+      SELECT 1 FROM `ledger_groups` existing
+      WHERE existing.company_id = c.id AND existing.code = seed.code
+  );
+
+UPDATE `ledgers` l
+INNER JOIN `ledger_groups` g
+    ON g.company_id = l.company_id
+   AND g.code = CASE l.code
+        WHEN 'CASH' THEN 'BANK'
+        WHEN 'AR' THEN 'RECEIVABLE'
+        WHEN 'PREPAID' THEN 'PREPAID_GRP'
+        WHEN 'INVESTMENTS' THEN 'INVEST_GRP'
+        WHEN 'AP' THEN 'PAYABLE'
+        WHEN 'TAX_PAYABLE' THEN 'DUTIES_TAXES'
+        WHEN 'SHARE_CAPITAL' THEN 'SHARE_CAPITAL_GRP'
+        WHEN 'RETAINED_EARNINGS' THEN 'RESERVE_SURPLUS'
+        WHEN 'SERVICE_REVENUE' THEN 'DIRECT_INCOME_GRP'
+        WHEN 'OTHER_INCOME' THEN 'INDIRECT_INCOME_GRP'
+        WHEN 'SALARY_EXPENSE' THEN 'EMP_BENEFIT_EXP'
+        WHEN 'RENT_EXPENSE' THEN 'ADMIN_EXP'
+        WHEN 'PROFESSIONAL_FEES' THEN 'DIRECT_EXP_GRP'
+        WHEN 'TAX_EXPENSE' THEN 'TAX_EXP_GRP'
+        ELSE NULL
+    END
+SET l.group_id = g.id
+WHERE l.group_id IS NULL
+  AND l.code IN ('CASH','AR','PREPAID','INVESTMENTS','AP','TAX_PAYABLE','SHARE_CAPITAL',
+                 'RETAINED_EARNINGS','SERVICE_REVENUE','OTHER_INCOME','SALARY_EXPENSE',
+                 'RENT_EXPENSE','PROFESSIONAL_FEES','TAX_EXPENSE');
+
+INSERT INTO `company_ledger_mappings` (`company_id`, `map_key`, `ledger_id`)
+SELECT c.id, mapping_seed.map_key, l.id
+FROM `companies` c
+INNER JOIN (
+    SELECT 'default_cash_bank' AS map_key, 'CASH' AS ledger_code
+    UNION ALL SELECT 'default_accounts_receivable', 'AR'
+    UNION ALL SELECT 'default_accounts_payable', 'AP'
+    UNION ALL SELECT 'default_tax_payable', 'TAX_PAYABLE'
+    UNION ALL SELECT 'default_service_revenue', 'SERVICE_REVENUE'
+    UNION ALL SELECT 'default_hosting_revenue', 'SERVICE_REVENUE'
+) mapping_seed
+INNER JOIN `ledgers` l
+    ON l.company_id = c.id
+   AND l.code = mapping_seed.ledger_code
+WHERE c.is_active = 1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM `company_ledger_mappings` existing
+      WHERE existing.company_id = c.id
+        AND existing.map_key = mapping_seed.map_key
+  );
+
+INSERT INTO `industries` (`name`, `is_active`)
+SELECT seed.name, 1
+FROM (
+  SELECT 'Accounting and Audit' AS name
+  UNION ALL SELECT 'Banking and Finance'
+  UNION ALL SELECT 'Cooperative'
+  UNION ALL SELECT 'Education'
+  UNION ALL SELECT 'Healthcare'
+  UNION ALL SELECT 'Hydropower'
+  UNION ALL SELECT 'Information Technology'
+  UNION ALL SELECT 'Jewellery'
+  UNION ALL SELECT 'Manufacturing'
+  UNION ALL SELECT 'NGO/INGO'
+  UNION ALL SELECT 'Real Estate'
+  UNION ALL SELECT 'Retail and Trading'
+  UNION ALL SELECT 'Other'
+) seed
+WHERE NOT EXISTS (SELECT 1 FROM `industries` i WHERE i.name = seed.name);
+
+INSERT INTO `service_provider_entities` (`company_id`, `name`, `code`, `is_active`)
+SELECT c.id, c.name, c.code, c.is_active
+FROM `companies` c
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM `service_provider_entities` spe
+  WHERE spe.company_id = c.id
+     OR spe.code = c.code
+);
+
+ALTER TABLE `users`
+  ADD CONSTRAINT `fk_users_company`
+  FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL;
+
+ALTER TABLE `task_invoices`
+  ADD CONSTRAINT `fk_task_invoices_accounting_party`
+  FOREIGN KEY (`party_id`) REFERENCES `accounting_parties` (`id`) ON DELETE SET NULL;

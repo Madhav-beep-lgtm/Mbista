@@ -1,0 +1,20 @@
+---
+deployment:
+  tasks:
+    # Deploys this repository from cPanel "Git Version Control" into the account.
+    # Layout: ~/public_html is the web root; app/ and database/ live beside it,
+    # outside the web root, exactly as app/bootstrap.php expects (__DIR__/../app).
+    #
+    # If this site runs on an addon domain, change $HOME/public_html below to
+    # the addon domain's document root.
+    - /bin/mkdir -p $HOME/public_html $HOME/app $HOME/database $HOME/secure_uploads/kyc
+    # Never overwrite server-side user uploads; never ship local dev uploads.
+    - /usr/bin/rsync -a --exclude=uploads/ --exclude=assets/uploads/ public_html/ $HOME/public_html/
+    - /bin/mkdir -p $HOME/public_html/uploads $HOME/public_html/assets/uploads
+    - /bin/cp -f public_html/uploads/.htaccess $HOME/public_html/uploads/.htaccess
+    - /bin/cp -f public_html/uploads/.htaccess $HOME/public_html/assets/uploads/.htaccess
+    - /usr/bin/rsync -a app/ $HOME/app/
+    - /usr/bin/rsync -a database/ $HOME/database/
+    - /bin/cp -f secure_uploads/kyc/.htaccess $HOME/secure_uploads/kyc/.htaccess
+    # Provide the .env template; the real .env is created once by hand and never touched.
+    - /bin/cp -f .env.example $HOME/.env.example
