@@ -814,6 +814,65 @@ function current_fiscal_year(): ?array
     return fiscal_year_by_id($fiscalYearId);
 }
 
+function company_accounting_preferences_row(?int $companyId = null): ?array
+{
+    $companyId = $companyId ?? current_company_id();
+    if ($companyId <= 0 || !table_exists('company_accounting_preferences')) {
+        return null;
+    }
+
+    $stmt = db()->prepare('SELECT * FROM company_accounting_preferences WHERE company_id = :company_id LIMIT 1');
+    $stmt->execute(['company_id' => $companyId]);
+    $row = $stmt->fetch();
+
+    return $row ?: null;
+}
+
+function company_accounting_business_type(?int $companyId = null): string
+{
+    $preferences = company_accounting_preferences_row($companyId);
+    $businessType = (string) ($preferences['business_type'] ?? 'service');
+
+    return in_array($businessType, ['service', 'trading', 'manufacturing'], true) ? $businessType : 'service';
+}
+
+function company_accounting_default_excise_rate(?int $companyId = null): float
+{
+    $preferences = company_accounting_preferences_row($companyId);
+    $rate = (float) ($preferences['default_excise_rate'] ?? 0);
+
+    return max(0.0, min(100.0, $rate));
+}
+
+function accounting_business_profile(?string $businessType = null): array
+{
+    $businessType = in_array((string) $businessType, ['service', 'trading', 'manufacturing'], true)
+        ? (string) $businessType
+        : company_accounting_business_type();
+
+    $isService = $businessType === 'service';
+    $isTrading = $businessType === 'trading';
+    $isManufacturing = $businessType === 'manufacturing';
+
+    return [
+        'business_type' => $businessType,
+        'label' => $isManufacturing ? 'Manufacturing' : ($isTrading ? 'Trading' : 'Service'),
+        'show_inventory' => !$isService,
+        'show_manufacturing' => $isManufacturing,
+        'show_excise' => $isManufacturing,
+        'show_quantity_rate' => !$isService,
+        'allowed_invoice_sources' => $isService
+            ? ['task', 'other']
+            : ($isTrading
+                ? ['task', 'inventory', 'other']
+                : ['task', 'inventory', 'manufacturing', 'other']),
+        'default_invoice_source' => $isService ? 'task' : ($isTrading ? 'inventory' : 'manufacturing'),
+        'report_business_slices' => $isManufacturing
+            ? ['all', 'service', 'trading', 'manufacturing']
+            : ($isTrading ? ['all', 'service', 'trading'] : ['all', 'service']),
+    ];
+}
+
 function company_pin_hash_by_id(int $companyId): ?string
 {
     if ($companyId <= 0 || !table_exists('companies')) {
@@ -1056,7 +1115,8 @@ function current_user(): ?array
     }
 
     $passwordChangeSelect = column_exists('users', 'must_change_password') ? ', must_change_password' : '';
-    $stmt = db()->prepare('SELECT id, name, email, role, status, company_id, phone, company, created_at' . $passwordChangeSelect . ' FROM users WHERE id = :id LIMIT 1');
+    $accessLevelSelect = column_exists('users', 'access_level') ? ', access_level' : '';
+    $stmt = db()->prepare('SELECT id, name, email, role, status, company_id, phone, company, created_at' . $passwordChangeSelect . $accessLevelSelect . ' FROM users WHERE id = :id LIMIT 1');
     $stmt->execute(['id' => (int) $_SESSION['user_id']]);
 
     $user = $stmt->fetch();
@@ -1118,7 +1178,9 @@ function create_user(array $data): int
 {
     $mustChangeColumn = column_exists('users', 'must_change_password') ? ', must_change_password' : '';
     $mustChangeValue = column_exists('users', 'must_change_password') ? ', :must_change_password' : '';
-    $stmt = db()->prepare('INSERT INTO users (name, email, password_hash, role, status, company_id, phone, company' . $mustChangeColumn . ') VALUES (:name, :email, :password_hash, :role, :status, :company_id, :phone, :company' . $mustChangeValue . ')');
+    $accessLevelColumn = column_exists('users', 'access_level') ? ', access_level' : '';
+    $accessLevelValue = column_exists('users', 'access_level') ? ', :access_level' : '';
+    $stmt = db()->prepare('INSERT INTO users (name, email, password_hash, role, status, company_id, phone, company' . $mustChangeColumn . $accessLevelColumn . ') VALUES (:name, :email, :password_hash, :role, :status, :company_id, :phone, :company' . $mustChangeValue . $accessLevelValue . ')');
     $params = [
         'name' => $data['name'],
         'email' => $data['email'],
@@ -1131,6 +1193,10 @@ function create_user(array $data): int
     ];
     if (column_exists('users', 'must_change_password')) {
         $params['must_change_password'] = !empty($data['must_change_password']) ? 1 : 0;
+    }
+    if (column_exists('users', 'access_level')) {
+        $accessLevel = (string) ($data['access_level'] ?? '');
+        $params['access_level'] = array_key_exists($accessLevel, ACCESS_LEVELS) ? $accessLevel : default_access_level_for_role((string) ($data['role'] ?? 'customer'));
     }
     $stmt->execute($params);
 
@@ -1369,6 +1435,7 @@ function get_mapped_ledger(int $companyId, string $mapKey): ?array
         'default_accounts_receivable' => ['AR'],
         'default_accounts_payable' => ['AP'],
         'default_tax_payable' => ['TAX_PAYABLE'],
+        'default_excise_payable' => ['EXCISE_PAYABLE', 'TAX_PAYABLE'],
         'default_service_revenue' => ['SERVICE_REVENUE'],
         'default_hosting_revenue' => ['HOSTING_REVENUE', 'SERVICE_REVENUE'],
     ];
@@ -1418,6 +1485,13 @@ function create_voucher_with_entries(array $voucher, array $entries): int
         $extraColumns .= ', reference_no';
         $extraValues .= ', :reference_no';
         $params['reference_no'] = $voucher['reference_no'] ?? null;
+    }
+    foreach (['approval_state', 'submitted_by', 'approved_by', 'approved_at', 'rejection_reason'] as $approvalColumn) {
+        if (column_exists('vouchers', $approvalColumn)) {
+            $extraColumns .= ', ' . $approvalColumn;
+            $extraValues .= ', :' . $approvalColumn;
+            $params[$approvalColumn] = $voucher[$approvalColumn] ?? null;
+        }
     }
 
     $stmt = db()->prepare('INSERT INTO vouchers (company_id, fiscal_year_id, voucher_no, voucher_type, source_type, source_id, narration, total_amount, status, posted_by, posted_at' . $extraColumns . ') VALUES (:company_id, :fiscal_year_id, :voucher_no, :voucher_type, :source_type, :source_id, :narration, :total_amount, :status, :posted_by, :posted_at' . $extraValues . ')');
@@ -1620,14 +1694,19 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
     $receivableLedger = get_mapped_ledger($companyId, 'default_accounts_receivable');
     $revenueLedger = get_mapped_ledger($companyId, 'default_service_revenue');
     $taxPayableLedger = get_mapped_ledger($companyId, 'default_tax_payable');
+    $excisePayableLedger = get_mapped_ledger($companyId, 'default_excise_payable');
     if (!$receivableLedger || !$revenueLedger) {
         return;
     }
 
     $taxableAmount = round((float) ($invoice['taxable_amount'] ?? $invoice['amount'] ?? 0), 2);
+    $exciseAmount = round((float) ($invoice['excise_amount'] ?? 0), 2);
     $vatAmount = round((float) ($invoice['vat_amount'] ?? 0), 2);
-    $totalAmount = round((float) ($invoice['total_amount'] ?? ($taxableAmount + $vatAmount)), 2);
+    $totalAmount = round((float) ($invoice['total_amount'] ?? ($taxableAmount + $exciseAmount + $vatAmount)), 2);
     if ($totalAmount <= 0 || $taxableAmount <= 0) {
+        return;
+    }
+    if ($exciseAmount > 0 && !$excisePayableLedger) {
         return;
     }
     if ($vatAmount > 0 && !$taxPayableLedger) {
@@ -1649,6 +1728,14 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
             'memo' => 'Service revenue recognized',
         ],
     ];
+    if ($exciseAmount > 0 && $excisePayableLedger) {
+        $entries[] = [
+            'ledger_id' => (int) $excisePayableLedger['id'],
+            'entry_type' => 'credit',
+            'amount' => $exciseAmount,
+            'memo' => 'Excise duty payable on invoice',
+        ];
+    }
     if ($vatAmount > 0 && $taxPayableLedger) {
         $entries[] = [
             'ledger_id' => (int) $taxPayableLedger['id'],
@@ -1791,14 +1878,146 @@ function store_first_admin(array $data): int
 
 function log_activity(string $entityType, int $entityId, string $action, ?string $details = null, ?int $actorId = null): void
 {
-    $stmt = db()->prepare('INSERT INTO activity_logs (entity_type, entity_id, action, details, actor_id) VALUES (:entity_type, :entity_id, :action, :details, :actor_id)');
-    $stmt->execute([
+    $hasIp = column_exists('activity_logs', 'ip_address');
+    $columns = 'entity_type, entity_id, action, details, actor_id' . ($hasIp ? ', ip_address' : '');
+    $values = ':entity_type, :entity_id, :action, :details, :actor_id' . ($hasIp ? ', :ip_address' : '');
+    $params = [
         'entity_type' => $entityType,
         'entity_id' => $entityId,
         'action' => $action,
         'details' => $details,
-        'actor_id' => $actorId,
-    ]);
+        'actor_id' => $actorId ?? (current_user()['id'] ?? null),
+    ];
+    if ($hasIp) {
+        $params['ip_address'] = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    }
+    $stmt = db()->prepare('INSERT INTO activity_logs (' . $columns . ') VALUES (' . $values . ')');
+    $stmt->execute($params);
+}
+
+/**
+ * Records a field-level before/after change for the Audit Trail page.
+ */
+function log_field_changes(string $entityType, int $entityId, array $before, array $after, ?int $companyId = null, ?int $actorId = null): void
+{
+    if (!table_exists('audit_change_history')) {
+        return;
+    }
+    $actorId = $actorId ?? (current_user()['id'] ?? null);
+    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    $stmt = db()->prepare('INSERT INTO audit_change_history (company_id, entity_type, entity_id, field_name, old_value, new_value, actor_id, ip_address) VALUES (:company_id, :entity_type, :entity_id, :field_name, :old_value, :new_value, :actor_id, :ip_address)');
+    foreach ($after as $field => $newValue) {
+        $oldValue = $before[$field] ?? null;
+        if ((string) $oldValue === (string) $newValue) {
+            continue;
+        }
+        $stmt->execute([
+            'company_id' => $companyId,
+            'entity_type' => $entityType,
+            'entity_id' => $entityId,
+            'field_name' => $field,
+            'old_value' => $oldValue === null ? null : (string) $oldValue,
+            'new_value' => $newValue === null ? null : (string) $newValue,
+            'actor_id' => $actorId,
+            'ip_address' => $ip,
+        ]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Role matrix / capabilities (blueprint page 17).
+// ---------------------------------------------------------------------------
+const ACCESS_LEVELS = [
+    'super_admin' => 'Super Admin',
+    'parent_admin' => 'Parent Company Admin',
+    'subsidiary_admin' => 'Subsidiary Company Admin',
+    'accountant' => 'Accountant',
+    'approver' => 'Approver',
+    'viewer' => 'Viewer',
+    'support' => 'Support User',
+];
+
+/**
+ * Capability matrix: level => [capability => true]. Capabilities:
+ * view, create, edit, approve, post, delete, report, admin.
+ */
+function access_level_capabilities(): array
+{
+    return [
+        'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'approve' => true, 'post' => true, 'delete' => true, 'report' => true, 'admin' => true],
+        'parent_admin' => ['view' => true, 'create' => true, 'edit' => true, 'approve' => true, 'post' => true, 'delete' => false, 'report' => true, 'admin' => true],
+        'subsidiary_admin' => ['view' => true, 'create' => true, 'edit' => true, 'approve' => true, 'post' => true, 'delete' => false, 'report' => true, 'admin' => false],
+        'accountant' => ['view' => true, 'create' => true, 'edit' => true, 'approve' => false, 'post' => false, 'delete' => false, 'report' => true, 'admin' => false],
+        'approver' => ['view' => true, 'create' => false, 'edit' => false, 'approve' => true, 'post' => true, 'delete' => false, 'report' => true, 'admin' => false],
+        'viewer' => ['view' => true, 'create' => false, 'edit' => false, 'approve' => false, 'post' => false, 'delete' => false, 'report' => true, 'admin' => false],
+        'support' => ['view' => true, 'create' => false, 'edit' => false, 'approve' => false, 'post' => false, 'delete' => false, 'report' => false, 'admin' => false],
+    ];
+}
+
+function current_access_level(): string
+{
+    $user = current_user();
+    if (!$user) {
+        return 'viewer';
+    }
+    $level = (string) ($user['access_level'] ?? '');
+    if (($user['role'] ?? '') === 'admin' && ($level === '' || $level === 'accountant')) {
+        $companyId = (int) ($user['company_id'] ?? 0);
+        return in_array($companyId, [0, 1], true) ? 'super_admin' : 'parent_admin';
+    }
+    return $level !== '' ? $level : 'accountant';
+}
+
+function user_can(string $capability, ?string $level = null): bool
+{
+    $level = $level ?? current_access_level();
+    $matrix = access_level_capabilities();
+    return (bool) ($matrix[$level][$capability] ?? false);
+}
+
+function default_access_level_for_role(string $role): string
+{
+    return match ($role) {
+        'admin' => 'parent_admin',
+        'staff' => 'accountant',
+        default => 'viewer',
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Fiscal period locks (blueprint page 18).
+// ---------------------------------------------------------------------------
+function period_locked_through(int $companyId, int $fiscalYearId): ?string
+{
+    if ($companyId <= 0 || $fiscalYearId <= 0 || !table_exists('fiscal_period_locks')) {
+        return null;
+    }
+    $stmt = db()->prepare('SELECT locked_through FROM fiscal_period_locks WHERE company_id = :company_id AND fiscal_year_id = :fiscal_year_id LIMIT 1');
+    $stmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
+    $value = $stmt->fetchColumn();
+    return $value !== false && $value !== null ? (string) $value : null;
+}
+
+function is_period_locked(int $companyId, int $fiscalYearId, string $date): bool
+{
+    $lockedThrough = period_locked_through($companyId, $fiscalYearId);
+    if ($lockedThrough === null) {
+        return false;
+    }
+    return strtotime($date) <= strtotime($lockedThrough . ' 23:59:59');
+}
+
+// ---------------------------------------------------------------------------
+// Voucher approval workflow (blueprint pages 5, 19).
+// ---------------------------------------------------------------------------
+function approvals_enabled(): bool
+{
+    return (string) setting('approvals_enabled', '0') === '1';
+}
+
+function default_vat_rate(): float
+{
+    return (float) setting('default_vat_rate', setting('tax_invoice_tax_rate', '13'));
 }
 
 function activity_logs_for(string $entityType, int $entityId, int $limit = 20): array
@@ -2084,20 +2303,36 @@ function export_invoice_html(array $invoice): string
     $companyName = $company['name'] ?? 'Company';
     $companyPan = $company['pan_number'] ?? 'N/A';
     $companyVat = $company['vat_registration_number'] ?? 'N/A';
+    $businessType = company_accounting_business_type((int) ($invoice['company_id'] ?? 0));
     
     $issuedByName = $invoice['issued_by_name'] ?? 'N/A';
     $invoiceNo = $invoice['invoice_no'] ?? 'N/A';
     $category = $invoice['invoice_category'] ?? 'proforma';
     $status = $invoice['status'] ?? 'draft';
+    $sourceType = (string) ($invoice['invoice_source_type'] ?? 'task');
     
     $categoryLabel = $category === 'tax' ? 'Tax Invoice' : 'Proforma Invoice';
+    $templateLabel = match ($sourceType) {
+        'inventory' => 'Trading Template',
+        'manufacturing' => 'Manufacturing Template',
+        default => 'Service Template',
+    };
     $statusBadgeClass = get_status_badge_class($status);
     $vatRate = (float) ($invoice['vat_rate'] ?? 13.00);
     $taxableAmount = (float) ($invoice['taxable_amount'] ?? ($invoice['amount'] ?? 0));
+    $exciseRate = $sourceType === 'manufacturing'
+        ? (float) ($invoice['excise_rate'] ?? company_accounting_default_excise_rate((int) ($invoice['company_id'] ?? 0)))
+        : 0.0;
+    $exciseAmount = (float) ($invoice['excise_amount'] ?? 0);
     $vatAmount = (float) ($invoice['vat_amount'] ?? 0);
-    $totalAmount = (float) ($invoice['total_amount'] ?? ($taxableAmount + $vatAmount));
+    $vatBase = $taxableAmount + $exciseAmount;
+    if ($vatAmount <= 0 && $vatBase > 0) {
+        $vatAmount = round($vatBase * ($vatRate / 100), 2);
+    }
+    $totalAmount = (float) ($invoice['total_amount'] ?? ($taxableAmount + $exciseAmount + $vatAmount));
     
     $taxableCurrency = format_currency($taxableAmount);
+    $exciseCurrency = format_currency($exciseAmount);
     $vatCurrency = format_currency($vatAmount);
     $totalCurrency = format_currency($totalAmount);
     
@@ -2114,17 +2349,48 @@ function export_invoice_html(array $invoice): string
             'total_amount' => $totalAmount,
         ]];
     }
+
+    $showQuantityRate = !in_array($sourceType, ['task', 'other'], true);
+    $showExcise = $sourceType === 'manufacturing';
+    $lineTableHeader = '<tr><th>#</th><th>Description</th>';
+    if ($showQuantityRate) {
+        $lineTableHeader .= '<th>Unit</th><th>Qty</th><th>Rate</th><th>Taxable</th>';
+    } else {
+        $lineTableHeader .= '<th>Amount</th>';
+    }
+    if ($showExcise) {
+        $lineTableHeader .= '<th>Excise Duty</th>';
+    }
+    $lineTableHeader .= '<th>VAT</th><th>Total</th></tr>';
+
     $lineRows = '';
     foreach ($lineItems as $index => $line) {
+        $lineDescription = (string) ($line['description'] ?? 'Invoice line');
+        $lineTaxable = (float) ($line['taxable_amount'] ?? 0);
+        if ($lineTaxable <= 0) {
+            $lineTaxable = round((float) ($line['quantity'] ?? 1) * (float) ($line['rate'] ?? 0), 2);
+        }
+        $lineExcise = $showExcise ? round($lineTaxable * ($exciseRate / 100), 2) : 0.0;
+        $lineVatRate = (float) ($line['vat_rate'] ?? $vatRate);
+        $lineVatBase = $lineTaxable + $lineExcise;
+        $lineVat = (float) ($line['vat_amount'] ?? round($lineVatBase * ($lineVatRate / 100), 2));
+        $lineTotal = (float) ($line['total_amount'] ?? round($lineVatBase + $lineVat, 2));
         $lineRows .= '<tr>'
             . '<td>' . e((string) ($index + 1)) . '</td>'
-            . '<td>' . e((string) ($line['description'] ?? 'Invoice line')) . '</td>'
-            . '<td>' . e((string) ($line['unit'] ?? 'pcs')) . '</td>'
-            . '<td>' . e(number_format((float) ($line['quantity'] ?? 1), 3)) . '</td>'
-            . '<td>' . e(format_currency((float) ($line['rate'] ?? 0))) . '</td>'
-            . '<td>' . e(format_currency((float) ($line['taxable_amount'] ?? 0))) . '</td>'
-            . '<td>' . e(number_format((float) ($line['vat_rate'] ?? $vatRate), 2)) . '%</td>'
-            . '<td>' . e(format_currency((float) ($line['total_amount'] ?? 0))) . '</td>'
+            . '<td>' . e($lineDescription) . '</td>';
+        if ($showQuantityRate) {
+            $lineRows .= '<td>' . e((string) ($line['unit'] ?? 'pcs')) . '</td>'
+                . '<td>' . e(number_format((float) ($line['quantity'] ?? 1), 3)) . '</td>'
+                . '<td>' . e(format_currency((float) ($line['rate'] ?? 0))) . '</td>';
+            $lineRows .= '<td>' . e(format_currency($lineTaxable)) . '</td>';
+        } else {
+            $lineRows .= '<td>' . e(format_currency($lineTaxable)) . '</td>';
+        }
+        if ($showExcise) {
+            $lineRows .= '<td>' . e(format_currency($lineExcise)) . '</td>';
+        }
+        $lineRows .= '<td>' . e(format_currency($lineVat)) . '</td>'
+            . '<td>' . e(format_currency($lineTotal)) . '</td>'
             . '</tr>';
     }
 
@@ -2186,6 +2452,7 @@ function export_invoice_html(array $invoice): string
                 <p><strong>' . e($invoiceNo) . '</strong></p>
                 <div>
                     <span class="badge badge-info">' . e($categoryLabel) . '</span>
+                    <span class="badge badge-primary">' . e($templateLabel) . '</span>
                     <span class="badge badge-' . e($statusBadgeClass) . '">' . e($status) . '</span>
                 </div>
             </div>
@@ -2208,16 +2475,7 @@ function export_invoice_html(array $invoice): string
 
         <table>
             <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Description</th>
-                    <th>Unit</th>
-                    <th>Qty</th>
-                    <th>Rate</th>
-                    <th>Taxable</th>
-                    <th>VAT</th>
-                    <th>Total</th>
-                </tr>
+                ' . $lineTableHeader . '
             </thead>
             <tbody>' . $lineRows . '</tbody>
         </table>
@@ -2226,6 +2484,7 @@ function export_invoice_html(array $invoice): string
             <div></div>
             <div class="total-section">
                 <p><span class="total-label">Taxable Amount:</span> <span>' . e($taxableCurrency) . '</span></p>
+                ' . ($showExcise ? '<p><span class="total-label">Excise Duty (' . e(number_format($exciseRate, 2)) . '%):</span> <span>' . e($exciseCurrency) . '</span></p>' : '') . '
                 <div class="vat-section">
                     <p><span class="total-label">VAT Rate:</span> <span>' . e($vatRate) . '%</span></p>
                     <p><span class="total-label">VAT Amount:</span> <span>' . e($vatCurrency) . '</span></p>
@@ -2313,9 +2572,21 @@ function export_invoice_to_excel(int $invoiceId): array
     
     // Company and Invoice Info
     $company = company_by_id((int) $invoice['company_id']);
+    $sourceType = (string) ($invoice['invoice_source_type'] ?? 'task');
+    $templateLabel = match ($sourceType) {
+        'inventory' => 'Trading Template',
+        'manufacturing' => 'Manufacturing Template',
+        default => 'Service Template',
+    };
+    $exciseRate = $sourceType === 'manufacturing'
+        ? (float) ($invoice['excise_rate'] ?? company_accounting_default_excise_rate((int) $invoice['company_id']))
+        : 0.0;
+    $exciseAmount = (float) ($invoice['excise_amount'] ?? 0);
     $rows[] = ['Company', $company['name'] ?? 'N/A'];
     $rows[] = ['Invoice ID', $invoice['id']];
     $rows[] = ['Invoice Type', ucfirst($invoice['invoice_category'] ?? 'invoice')];
+    $rows[] = ['Template', $templateLabel];
+    $rows[] = ['Source Type', ucfirst($sourceType)];
     $rows[] = ['Status', ucfirst($invoice['status'] ?? 'draft')];
     $rows[] = [];
     
@@ -2329,6 +2600,10 @@ function export_invoice_to_excel(int $invoiceId): array
     $totalCurrency = format_currency((float) $invoice['total_amount'] ?? 0);
     $rows[] = ['Subtotal', $invoice['subtotal'] ?? 0];
     $rows[] = ['Taxable Amount', $invoice['taxable_amount'] ?? 0];
+    if ($sourceType === 'manufacturing') {
+        $rows[] = ['Excise Rate (%)', $exciseRate];
+        $rows[] = ['Excise Amount', $exciseAmount];
+    }
     $rows[] = ['VAT Rate (%)', $invoice['vat_rate'] ?? 13];
     $rows[] = ['VAT Amount', $invoice['vat_amount'] ?? 0];
     $rows[] = ['Total Amount', $totalCurrency];
@@ -3039,14 +3314,15 @@ function export_ledger_to_excel(int $companyId, int $fiscalYearId): array
         SELECT l.id, l.code, l.name, l.type, 
                COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE 0 END),0) AS debit_total,
                COALESCE(SUM(CASE WHEN ve.entry_type='credit' THEN ve.amount ELSE 0 END),0) AS credit_total
-        FROM ledgers l 
-        LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id 
+        FROM ledgers l
+        LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
         LEFT JOIN vouchers v ON v.id = ve.voucher_id AND v.company_id = l.company_id
+            AND v.fiscal_year_id = :fiscal_year_id AND v.status = 'posted'
         WHERE l.company_id = :company_id
         GROUP BY l.id, l.code, l.name, l.type
         ORDER BY l.code ASC
     ");
-    $balanceStmt->execute(['company_id' => $companyId]);
+    $balanceStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
     $ledgers = $balanceStmt->fetchAll();
     
     $rows = [
@@ -3106,6 +3382,7 @@ function export_ledger_html(int $companyId, int $fiscalYearId): string
             ON v.id = ve.voucher_id
            AND v.company_id = l.company_id
            AND v.fiscal_year_id = :fiscal_year_id
+           AND v.status = 'posted'
         WHERE l.company_id = :company_id
         GROUP BY l.id, l.code, l.name, l.type
         ORDER BY l.code ASC

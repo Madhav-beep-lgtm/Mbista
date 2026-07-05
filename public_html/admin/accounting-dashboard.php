@@ -142,6 +142,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash('success', 'Business type updated.');
         redirect('admin/accounting-dashboard.php?fiscal_year_id=' . $fiscalYearId);
     }
+    if ($action === 'set_excise_rate') {
+        if (!table_exists('company_accounting_preferences')) {
+            flash('error', 'Could not save the excise rate.');
+            redirect('admin/accounting-dashboard.php?fiscal_year_id=' . $fiscalYearId);
+        }
+        $exciseRate = round(max(0.0, min(100.0, (float) ($_POST['default_excise_rate'] ?? 0))), 2);
+        $existingBusinessType = company_accounting_business_type($companyId);
+        db()->prepare('
+            INSERT INTO company_accounting_preferences (company_id, business_type, default_excise_rate, updated_by)
+            VALUES (:company_id, :business_type, :default_excise_rate, :updated_by)
+            ON DUPLICATE KEY UPDATE business_type = VALUES(business_type), default_excise_rate = VALUES(default_excise_rate), updated_by = VALUES(updated_by)
+        ')->execute([
+            'company_id' => $companyId,
+            'business_type' => $existingBusinessType,
+            'default_excise_rate' => $exciseRate,
+            'updated_by' => $userId ?: null,
+        ]);
+        log_activity('company', $companyId, 'accounting_excise_rate_updated', 'Default excise rate changed to ' . number_format($exciseRate, 2) . '%.', $userId ?: null);
+        flash('success', 'Excise rate updated.');
+        redirect('admin/accounting-dashboard.php?fiscal_year_id=' . $fiscalYearId);
+    }
 }
 
 $businessType = 'service';
@@ -153,6 +174,9 @@ if (table_exists('company_accounting_preferences')) {
         $businessType = $savedBusinessType;
     }
 }
+$businessProfile = accounting_business_profile($businessType);
+$showInventoryFeatures = (bool) ($businessProfile['show_inventory'] ?? false);
+$showManufacturingFeatures = (bool) ($businessProfile['show_manufacturing'] ?? false);
 
 $ledgerStmt = db()->prepare('
     SELECT l.id, l.code, l.name, l.type, g.name AS group_name, g.master_key,
@@ -340,6 +364,7 @@ $kpis = [
     ['label' => 'Gross Profit', 'amount' => $grossProfit, 'tone' => 'green', 'icon' => 'insights', 'note' => number_format($grossMargin, 1) . '% of sales'],
     ['label' => 'Net Profit', 'amount' => $netProfit, 'tone' => 'green', 'icon' => 'reports', 'note' => number_format($netMargin, 1) . '% of sales'],
 ];
+$kpis = array_values(array_filter($kpis, static fn (array $kpi): bool => $showInventoryFeatures || $kpi['label'] !== 'Inventory Value'));
 
 $pageTitle = 'Accounting Dashboard';
 $bodyClass = 'admin-layout accounting-module-page accounting-dashboard-page';
@@ -374,6 +399,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </div>
         </form>
+        <?php if ($showManufacturingFeatures): ?>
+            <form method="post" class="ad-excise-form">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="set_excise_rate">
+                <span>Excise Duty</span>
+                <div>
+                    <label for="default_excise_rate">Default excise rate (%)</label>
+                    <input id="default_excise_rate" type="number" name="default_excise_rate" min="0" max="100" step="0.01" value="<?= e(number_format(company_accounting_default_excise_rate($companyId), 2, '.', '')) ?>">
+                    <button type="submit">Save</button>
+                </div>
+            </form>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -395,8 +432,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a href="<?= e(url('admin/accounting.php#post-voucher')) ?>"><?= icon('accounting') ?><span>Create Voucher</span></a>
     <a href="<?= e(url('admin/chart-of-accounts.php#create-ledger')) ?>"><?= icon('documents') ?><span>Add Ledger</span></a>
     <a href="<?= e(url('admin/chart-of-accounts.php#create-group')) ?>"><?= icon('teams') ?><span>Create Group</span></a>
-    <a href="<?= e(url('admin/accounting-inventory.php#create-item')) ?>"><?= icon('services') ?><span>Create Item</span></a>
-    <a href="<?= e(url('admin/accounting-inventory.php#stock-movement')) ?>"><?= icon('insights') ?><span>Add Stock Movement</span></a>
+    <?php if ($showInventoryFeatures): ?>
+        <a href="<?= e(url('admin/accounting-inventory.php#create-item')) ?>"><?= icon('services') ?><span>Create Item</span></a>
+        <a href="<?= e(url('admin/accounting-inventory.php#stock-movement')) ?>"><?= icon('insights') ?><span>Add Stock Movement</span></a>
+    <?php endif; ?>
+    <?php if ($showManufacturingFeatures): ?>
+        <a href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>"><?= icon('settings') ?><span>Create Manufacturing Order</span></a>
+    <?php endif; ?>
     <a href="<?= e(accounting_dashboard_report_url('trial-balance', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('accounting') ?><span>Trial Balance</span></a>
     <a href="<?= e(accounting_dashboard_report_url('profit-loss', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('reports') ?><span>Profit & Loss</span></a>
     <a href="<?= e(accounting_dashboard_report_url('balance-sheet', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('documents') ?><span>Balance Sheet</span></a>
@@ -497,15 +539,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </section>
 
-    <section class="ad-panel ad-alert-panel">
-        <header><h3>Inventory Alerts</h3><a href="<?= e(url('admin/accounting-inventory.php')) ?>">View All</a></header>
-        <div class="ad-alert-list">
-            <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><i class="warning"><?= icon('about') ?></i><span>Low Stock Items</span><strong><?= (int) $inventoryAlerts['low'] ?> items</strong></a>
-            <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><i class="danger"><?= icon('about') ?></i><span>Out of Stock Items</span><strong><?= (int) $inventoryAlerts['out'] ?> items</strong></a>
-            <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><i class="danger"><?= icon('about') ?></i><span>Negative Stock Items</span><strong><?= (int) $inventoryAlerts['negative'] ?> items</strong></a>
-            <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><i class="muted"><?= icon('services') ?></i><span>Inactive Items</span><strong><?= (int) $inventoryAlerts['inactive'] ?> items</strong></a>
-        </div>
-    </section>
+    <?php if ($showInventoryFeatures): ?>
+        <section class="ad-panel ad-alert-panel">
+            <header><h3>Inventory Alerts</h3><a href="<?= e(url('admin/accounting-inventory.php')) ?>">View All</a></header>
+            <div class="ad-alert-list">
+                <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><i class="warning"><?= icon('about') ?></i><span>Low Stock Items</span><strong><?= (int) $inventoryAlerts['low'] ?> items</strong></a>
+                <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><i class="danger"><?= icon('about') ?></i><span>Out of Stock Items</span><strong><?= (int) $inventoryAlerts['out'] ?> items</strong></a>
+                <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><i class="danger"><?= icon('about') ?></i><span>Negative Stock Items</span><strong><?= (int) $inventoryAlerts['negative'] ?> items</strong></a>
+                <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><i class="muted"><?= icon('services') ?></i><span>Inactive Items</span><strong><?= (int) $inventoryAlerts['inactive'] ?> items</strong></a>
+            </div>
+        </section>
+    <?php endif; ?>
 </div>
 
 <div class="ad-bottom-grid">
@@ -514,7 +558,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div>
             <a href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?><span><strong>Chart of Accounts</strong><small>Browse all accounts</small></span></a>
             <a href="<?= e(accounting_dashboard_report_url('ledger-report', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('documents') ?><span><strong>Ledger Directory</strong><small>Search ledger reports</small></span></a>
-            <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?><span><strong>Item Directory</strong><small>View inventory items</small></span></a>
+            <?php if ($showInventoryFeatures): ?>
+                <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?><span><strong>Item Directory</strong><small>View inventory items</small></span></a>
+            <?php endif; ?>
             <a href="<?= e(url('admin/accounting.php')) ?>"><?= icon('documents') ?><span><strong>Voucher List</strong><small>All accounting vouchers</small></span></a>
             <a href="<?= e(accounting_dashboard_report_url('bank-book', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('companies') ?><span><strong>Bank Book</strong><small>Review bank activity</small></span></a>
             <a href="<?= e(url('admin/reports-center.php?report=journal-register')) ?>"><?= icon('compliance') ?><span><strong>Audit Trail</strong><small>Review journal activity</small></span></a>
@@ -523,9 +569,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <section class="ad-panel ad-report-links">
         <header><h3>Reports</h3><a href="<?= e(url('admin/reports-center.php')) ?>">View All</a></header>
         <div>
-            <?php foreach ([['trial-balance', 'Trial Balance', 'accounting'], ['profit-loss', 'Profit & Loss', 'reports'], ['balance-sheet', 'Balance Sheet', 'documents'], ['cash-book', 'Cash Flow', 'companies'], ['ledger-report', 'Ledger Report', 'documents'], ['financial-ratios', 'More Reports', 'insights']] as [$reportId, $label, $iconName]): ?>
-                <a href="<?= e(accounting_dashboard_report_url($reportId, $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon($iconName) ?><span><?= e($label) ?></span></a>
-            <?php endforeach; ?>
+            <a href="<?= e(accounting_dashboard_report_url('trial-balance', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('accounting') ?><span>Trial Balance</span></a>
+            <a href="<?= e(accounting_dashboard_report_url('profit-loss', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('reports') ?><span>Profit & Loss</span></a>
+            <a href="<?= e(accounting_dashboard_report_url('balance-sheet', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('documents') ?><span>Balance Sheet</span></a>
+            <?php if ($showInventoryFeatures): ?>
+                <a href="<?= e(accounting_dashboard_report_url('inventory-summary', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('services') ?><span>Inventory Summary</span></a>
+                <a href="<?= e(accounting_dashboard_report_url('stock-ledger', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('tasks') ?><span>Stock Ledger</span></a>
+            <?php endif; ?>
+            <?php if ($showManufacturingFeatures): ?>
+                <a href="<?= e(accounting_dashboard_report_url('manufacturing-statement', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('settings') ?><span>Manufacturing Statement</span></a>
+            <?php endif; ?>
+            <a href="<?= e(accounting_dashboard_report_url('cash-book', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('companies') ?><span>Cash Flow</span></a>
+            <a href="<?= e(accounting_dashboard_report_url('ledger-report', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('documents') ?><span>Ledger Report</span></a>
+            <a href="<?= e(accounting_dashboard_report_url('financial-ratios', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('insights') ?><span>More Reports</span></a>
         </div>
     </section>
 </div>

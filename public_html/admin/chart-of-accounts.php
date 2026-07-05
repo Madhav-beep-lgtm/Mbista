@@ -6,6 +6,7 @@ require_staff_or_admin();
 require_company_context();
 
 $pageTitle = 'Chart of Accounts';
+$bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 $currentCompany = current_company();
 $currentAdmin = current_user();
 $companyId = (int) ($currentCompany['id'] ?? 0);
@@ -175,6 +176,9 @@ if (table_exists('company_ledger_mappings')) {
 }
 
 $chartOfAccounts = get_chart_of_accounts_tree($companyId);
+$ledgerCount = count($flatLedgers);
+$groupCount = count($flatGroups);
+$mappedCount = count(array_filter($currentMappings));
 
 /**
  * Recursive function to render the account tree.
@@ -226,20 +230,39 @@ function render_account_tree(array $nodes, int $level = 0): void
 
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<style>
-    .tree-node { border-left: 2px solid #e5e7eb; margin-bottom: 4px; }
-    .tree-node details { margin-bottom: 0; }
-    .tree-group { cursor: pointer; padding: 8px 12px; font-weight: 600; background-color: #f9fafb; }
-    .tree-group:hover { background-color: #f3f4f6; }
-    .tree-group .muted { font-weight: 400; color: #6b7280; font-size: 0.9em; }
-    .tree-content { padding-left: 20px; }
-    .tree-ledger { padding: 8px 12px; border-top: 1px solid #f3f4f6; }
-    .tree-ledger .muted { color: #6b7280; font-size: 0.9em; }
-    summary { display: list-item; } /* Fix for some browsers */
-</style>
+<div class="accounting-page-head">
+    <div>
+        <h2>Masters, groups, ledgers, and posting structure</h2>
+        <p><?= e($currentCompany['name'] ?? 'Company') ?> / Foundation for vouchers, invoices, purchases, inventory, manufacturing, and reports.</p>
+    </div>
+    <div class="accounting-actions">
+        <a class="button secondary" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
+        <a class="button secondary" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('documents') ?>Vouchers</a>
+    </div>
+</div>
 
-<div class="page-header">
-    <h1><?= e($pageTitle) ?></h1>
+<nav class="accounting-tabs" aria-label="Chart of accounts sections">
+    <a class="is-active" href="#hierarchy">Hierarchy View</a>
+    <a href="#create-group">Groups</a>
+    <a href="#create-ledger">Ledgers</a>
+    <a href="#posting-accounts">Posting Accounts</a>
+    <a href="#audit-log">Audit Log</a>
+</nav>
+
+<section class="coa-module-grid" aria-label="Chart of accounts module structure">
+    <article><span><?= icon('accounting') ?></span><strong>Masters</strong><small>Chart framework</small></article>
+    <article><span><?= icon('teams') ?></span><strong>Groups</strong><small>Classification</small></article>
+    <article><span><?= icon('documents') ?></span><strong>Ledgers</strong><small>Accounts</small></article>
+    <article><span><?= icon('services') ?></span><strong>Opening Balances</strong><small>OB controls</small></article>
+    <article><span><?= icon('settings') ?></span><strong>Automated Posting</strong><small>Mapped accounts</small></article>
+    <article><span><?= icon('reports') ?></span><strong>Dimensions</strong><small>Cost centers and projects</small></article>
+</section>
+
+<div class="accounting-stat-grid">
+    <div class="accounting-stat-card accent-blue"><span class="stat-icon"><?= icon('accounting') ?></span><small>Masters</small><strong><?= e((string) count($masters)) ?></strong><em>Fixed framework</em></div>
+    <div class="accounting-stat-card accent-green"><span class="stat-icon"><?= icon('teams') ?></span><small>Groups</small><strong><?= e((string) $groupCount) ?></strong><em>Active classifications</em></div>
+    <div class="accounting-stat-card accent-purple"><span class="stat-icon"><?= icon('documents') ?></span><small>Ledgers</small><strong><?= e((string) $ledgerCount) ?></strong><em>Posting accounts</em></div>
+    <div class="accounting-stat-card accent-orange"><span class="stat-icon"><?= icon('settings') ?></span><small>Mapped accounts</small><strong><?= e((string) $mappedCount) ?></strong><em>Automation ready</em></div>
 </div>
 
 <div class="workspace-feature-stack">
@@ -311,7 +334,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
     </details>
 
-    <details class="feature-disclosure">
+    <details class="feature-disclosure" id="posting-accounts">
         <summary>
             <span>
                 <strong><?= icon('settings') ?>Automated Posting Accounts</strong>
@@ -352,9 +375,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </details>
 </div>
 
-<div class="card">
+<div class="coa-workspace-grid" id="hierarchy">
+<div class="card coa-tree-card">
     <div class="card-header">
-        <h3><?= e($currentCompany['name']) ?></h3>
+        <h3><?= e($currentCompany['name']) ?> chart hierarchy</h3>
     </div>
     <div class="card-body">
         <?php if (empty($chartOfAccounts)): ?>
@@ -366,6 +390,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<aside class="coa-impact-card">
+    <h3>Click flows and impact</h3>
+    <div><strong>Create Group</strong><span>Vouchers, sales, purchases, inventory, manufacturing, and reports inherit classification.</span></div>
+    <div><strong>Create Ledger Account</strong><span>New account becomes available for postings and mapped automation.</span></div>
+    <div><strong>Automated Posting</strong><span>Invoices, receipts, payments, VAT, and cash/bank entries use approved ledgers.</span></div>
+    <div><strong>Audit Enabled</strong><span>All account changes are tracked through activity logs and field history.</span></div>
+</aside>
+</div>
+
+<section class="mbw-governance-note" id="audit-log">
+    <span><?= icon('admin') ?></span>
+    <p>All company-specific ledgers, groups, posting accounts, cost centers, and projects must be created under the assigned company node. Super Admin can review the full group, while subsidiary users remain inside their company scope.</p>
+</section>
 
 <?php
 include __DIR__ . '/../../app/views/partials/admin_footer.php';

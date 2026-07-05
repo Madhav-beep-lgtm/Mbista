@@ -70,6 +70,7 @@ $staffStmt = db()->prepare("SELECT id, name FROM users WHERE role IN ('staff', '
 $staffStmt->execute(['company_id' => $companyId]);
 $staffUsers = $staffStmt->fetchAll();
 $hasTicketRequests = table_exists('support_ticket_requests');
+$hasTicketSla = column_exists('support_tickets', 'sla_due_at');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
@@ -80,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $status = (string) ($_POST['status'] ?? '');
         $assignedStaffUserId = (int) ($_POST['assigned_staff_user_id'] ?? 0);
         $resolution = trim((string) ($_POST['resolution'] ?? ''));
+        $slaDueAt = trim((string) ($_POST['sla_due_at'] ?? ''));
 
         if ($ticketId <= 0 || !in_array($status, $allowedStatus, true)) {
             flash('error', 'Invalid ticket update.');
@@ -94,13 +96,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/tickets.php');
         }
 
-        $stmt = db()->prepare('UPDATE support_tickets SET status = :status, assigned_staff_user_id = :assigned_staff_user_id, resolution = :resolution WHERE id = :id');
-        $stmt->execute([
+        $sql = 'UPDATE support_tickets SET status = :status, assigned_staff_user_id = :assigned_staff_user_id, resolution = :resolution';
+        $params = [
             'status' => $status,
             'assigned_staff_user_id' => $assignedStaffUserId > 0 ? $assignedStaffUserId : null,
             'resolution' => $resolution !== '' ? $resolution : null,
             'id' => $ticketId,
-        ]);
+            'company_id' => $companyId,
+        ];
+        if ($hasTicketSla) {
+            $sql .= ', sla_due_at = :sla_due_at, resolved_at = :resolved_at';
+            $params['sla_due_at'] = $slaDueAt !== '' ? str_replace('T', ' ', $slaDueAt) . ':00' : null;
+            $params['resolved_at'] = in_array($status, ['resolved', 'closed'], true) ? (($ticket['resolved_at'] ?? null) ?: date('Y-m-d H:i:s')) : null;
+        }
+        $sql .= ' WHERE id = :id AND company_id = :company_id';
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
+        log_field_changes('support_ticket', $ticketId, $ticket, ['status' => $status, 'assigned_staff_user_id' => $assignedStaffUserId > 0 ? $assignedStaffUserId : null, 'resolution' => $resolution !== '' ? $resolution : null, 'sla_due_at' => $params['sla_due_at'] ?? null, 'resolved_at' => $params['resolved_at'] ?? null], $companyId, $userId);
         log_activity('support_ticket', $ticketId, 'updated', 'Ticket status updated to ' . $status . '.', $userId);
         flash('success', 'Ticket updated.');
         redirect('admin/tickets.php?ticket_id=' . $ticketId);
@@ -518,12 +530,13 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                         <th>Category</th>
                         <th>Priority</th>
                         <th>Status</th>
+                        <?php if ($hasTicketSla): ?><th>SLA</th><?php endif; ?>
                         <th>Assigned</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if ($tickets === []): ?>
-                        <tr><td colspan="7">No support tickets found.</td></tr>
+                        <tr><td colspan="<?= $hasTicketSla ? '8' : '7' ?>">No support tickets found.</td></tr>
                     <?php endif; ?>
                     <?php foreach ($tickets as $t): ?>
                         <tr>
@@ -538,6 +551,27 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td><?= e($categoryLabels[$t['category']] ?? $t['category']) ?></td>
                             <td><span class="tag"><?= e($t['priority']) ?></span></td>
                             <td><span class="tag"><?= e($statusLabels[$t['status']] ?? $t['status']) ?></span></td>
+                            <?php if ($hasTicketSla): ?>
+                                <td>
+                                    <?php
+                                    $slaBadge = ['label' => 'No SLA', 'class' => 'sla-none'];
+                                    if (!empty($t['resolved_at'])) {
+                                        $slaBadge = ['label' => 'Resolved', 'class' => 'sla-ok'];
+                                    } elseif (!empty($t['sla_due_at'])) {
+                                        $hoursLeft = (strtotime((string) $t['sla_due_at']) - time()) / 3600;
+                                        if ($hoursLeft < 0) {
+                                            $slaBadge = ['label' => 'Breached', 'class' => 'sla-breach'];
+                                        } elseif ($hoursLeft <= 8) {
+                                            $slaBadge = ['label' => 'At Risk', 'class' => 'sla-risk'];
+                                        } else {
+                                            $slaBadge = ['label' => 'On Track', 'class' => 'sla-ok'];
+                                        }
+                                    }
+                                    ?>
+                                    <span class="sla-badge <?= e($slaBadge['class']) ?>"><?= e($slaBadge['label']) ?></span>
+                                    <?php if (!empty($t['sla_due_at']) && empty($t['resolved_at'])): ?><br><small>Due <?= e(date('d M H:i', strtotime((string) $t['sla_due_at']))) ?></small><?php endif; ?>
+                                </td>
+                            <?php endif; ?>
                             <td><?= e($t['assigned_staff_name'] ?? 'Unassigned') ?></td>
                         </tr>
                     <?php endforeach; ?>
@@ -552,6 +586,9 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 
         <div class="table-card">
             <p><strong>Category:</strong> <?= e($categoryLabels[$ticket['category']] ?? $ticket['category']) ?> | <strong>Priority:</strong> <?= e($ticket['priority']) ?></p>
+            <?php if ($hasTicketSla): ?>
+                <p><strong>SLA due:</strong> <?= e($ticket['sla_due_at'] ?? '-') ?> | <strong>Resolved:</strong> <?= e($ticket['resolved_at'] ?? '-') ?></p>
+            <?php endif; ?>
             <p><strong>Request Type:</strong> <?= e($requestTypeLabels[$ticket['request_type'] ?? 'none'] ?? 'General support') ?></p>
             <?php if (($ticket['request_type'] ?? 'none') !== 'none'): ?>
                 <p>
@@ -622,6 +659,11 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                         <?php endforeach; ?>
                     </select>
                 </label>
+                <?php if ($hasTicketSla): ?>
+                    <label>SLA due
+                        <input type="datetime-local" name="sla_due_at" value="<?= e(!empty($ticket['sla_due_at']) ? date('Y-m-d\TH:i', strtotime((string) $ticket['sla_due_at'])) : '') ?>">
+                    </label>
+                <?php endif; ?>
                 <label class="workspace-span-2">Resolution notes<textarea name="resolution"><?= e((string) ($ticket['resolution'] ?? '')) ?></textarea></label>
                 <div class="workspace-span-2">
                     <button type="submit"><?= icon('tickets') ?>Save</button>

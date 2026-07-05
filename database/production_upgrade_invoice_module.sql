@@ -5,9 +5,12 @@
 -- older schema.sql that lacked these tables/columns.
 
 -- ---- From migration 010: VAT / proforma-tax support on task_invoices ----
+ALTER TABLE company_accounting_preferences ADD COLUMN IF NOT EXISTS default_excise_rate DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER business_type;
 ALTER TABLE task_invoices ADD COLUMN IF NOT EXISTS invoice_category ENUM('proforma', 'tax') DEFAULT 'proforma' AFTER invoice_type;
 ALTER TABLE task_invoices ADD COLUMN IF NOT EXISTS tax_invoice_id INT UNSIGNED DEFAULT NULL AFTER invoice_category;
 ALTER TABLE task_invoices ADD COLUMN IF NOT EXISTS vat_rate DECIMAL(5,2) DEFAULT 13.00 AFTER amount;
+ALTER TABLE task_invoices ADD COLUMN IF NOT EXISTS excise_rate DECIMAL(5,2) DEFAULT 0.00 AFTER vat_rate;
+ALTER TABLE task_invoices ADD COLUMN IF NOT EXISTS excise_amount DECIMAL(12,2) DEFAULT 0.00 AFTER excise_rate;
 ALTER TABLE task_invoices ADD COLUMN IF NOT EXISTS vat_amount DECIMAL(12,2) DEFAULT 0.00 AFTER vat_rate;
 ALTER TABLE task_invoices ADD COLUMN IF NOT EXISTS taxable_amount DECIMAL(12,2) DEFAULT 0.00 AFTER vat_amount;
 ALTER TABLE task_invoices ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2) DEFAULT 0.00 AFTER taxable_amount;

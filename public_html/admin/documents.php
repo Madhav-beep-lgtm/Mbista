@@ -36,6 +36,7 @@ $allowedCategories = [
 ];
 $allowedPriorities = ['low', 'normal', 'high', 'urgent'];
 $allowedRequestStatus = ['requested', 'uploaded', 'under_review', 'accepted', 'rejected', 'waived'];
+$hasDocumentApprovals = column_exists('documents', 'approval_status');
 
 $scopedClientIds = $role === 'staff' ? staff_scoped_client_ids($userId, $companyId) : null;
 
@@ -181,8 +182,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/documents.php?view=library');
         }
 
-        $stmt = db()->prepare('INSERT INTO documents (company_id, client_id, parent_document_id, version_number, category, title, original_file_name, stored_file_name, file_path, file_type, file_size, visibility, uploaded_by) VALUES (:company_id, :client_id, :parent_document_id, :version_number, :category, :title, :original_file_name, :stored_file_name, :file_path, :file_type, :file_size, :visibility, :uploaded_by)');
-        $stmt->execute([
+        $approvalColumns = $hasDocumentApprovals ? ', approval_status, approved_by, approved_at' : '';
+        $approvalValues = $hasDocumentApprovals ? ', :approval_status, :approved_by, :approved_at' : '';
+        $params = [
             'company_id' => $companyId,
             'client_id' => $clientId,
             'parent_document_id' => $rootParentId,
@@ -196,10 +198,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'file_size' => $uploadResult['file_size'],
             'visibility' => $visibility,
             'uploaded_by' => $userId,
-        ]);
+        ];
+        if ($hasDocumentApprovals) {
+            $autoApproved = user_can('approve');
+            $params['approval_status'] = $autoApproved ? 'approved' : 'under_review';
+            $params['approved_by'] = $autoApproved ? $userId : null;
+            $params['approved_at'] = $autoApproved ? date('Y-m-d H:i:s') : null;
+        }
+        $stmt = db()->prepare('INSERT INTO documents (company_id, client_id, parent_document_id, version_number, category, title, original_file_name, stored_file_name, file_path, file_type, file_size, visibility, uploaded_by' . $approvalColumns . ') VALUES (:company_id, :client_id, :parent_document_id, :version_number, :category, :title, :original_file_name, :stored_file_name, :file_path, :file_type, :file_size, :visibility, :uploaded_by' . $approvalValues . ')');
+        $stmt->execute($params);
         $documentId = (int) db()->lastInsertId();
         log_activity('document', $documentId, 'uploaded', 'Document uploaded to library.', $userId);
         flash('success', 'Document uploaded.');
+        redirect('admin/documents.php?view=library');
+    }
+
+    if ($action === 'review_document' && $hasDocumentApprovals) {
+        if (!user_can('approve')) {
+            flash('error', 'You do not have document approval permission.');
+            redirect('admin/documents.php?view=library');
+        }
+        $documentId = (int) ($_POST['document_id'] ?? 0);
+        $decision = (string) ($_POST['decision'] ?? '');
+        if ($documentId <= 0 || !in_array($decision, ['approved', 'rejected'], true)) {
+            flash('error', 'Choose a valid document approval decision.');
+            redirect('admin/documents.php?view=library');
+        }
+        $docStmt = db()->prepare('SELECT id, client_id, approval_status FROM documents WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $docStmt->execute(['id' => $documentId, 'company_id' => $companyId]);
+        $document = $docStmt->fetch();
+        if (!$document || !in_array((int) $document['client_id'], $clientIdsInScope, true)) {
+            flash('error', 'Document not found in your scope.');
+            redirect('admin/documents.php?view=library');
+        }
+        db()->prepare('UPDATE documents SET approval_status = :approval_status, approved_by = :approved_by, approved_at = NOW() WHERE id = :id AND company_id = :company_id')
+            ->execute([
+                'approval_status' => $decision,
+                'approved_by' => $userId,
+                'id' => $documentId,
+                'company_id' => $companyId,
+            ]);
+        log_field_changes('document', $documentId, $document, ['approval_status' => $decision], $companyId, $userId);
+        log_activity('document', $documentId, $decision, 'Document ' . $decision . '.', $userId);
+        flash('success', 'Document approval updated.');
         redirect('admin/documents.php?view=library');
     }
 
@@ -422,6 +463,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                         <th>Client</th>
                         <th>Version</th>
                         <th>Visibility</th>
+                        <?php if ($hasDocumentApprovals): ?><th>Approval</th><?php endif; ?>
                         <th>Uploaded</th>
                         <th>Size</th>
                         <th>Actions</th>
@@ -429,7 +471,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </thead>
                 <tbody>
                     <?php if ($documents === []): ?>
-                        <tr><td colspan="8">No documents yet.</td></tr>
+                        <tr><td colspan="<?= $hasDocumentApprovals ? '9' : '8' ?>">No documents yet.</td></tr>
                     <?php endif; ?>
                     <?php foreach ($documents as $document): ?>
                         <?php $lineageId = (int) ($document['parent_document_id'] ?: $document['id']); ?>
@@ -439,6 +481,20 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td><?= e($document['organization_name']) ?></td>
                             <td>v<?= e((string) $document['version_number']) ?><?= count($historyByLineage[$lineageId] ?? []) > 1 ? ' (' . e((string) count($historyByLineage[$lineageId])) . ' versions)' : '' ?></td>
                             <td><span class="tag"><?= e($document['visibility']) ?></span></td>
+                            <?php if ($hasDocumentApprovals): ?>
+                                <td>
+                                    <span class="tag"><?= e(str_replace('_', ' ', (string) ($document['approval_status'] ?? 'approved'))) ?></span>
+                                    <?php if (user_can('approve') && in_array((string) ($document['approval_status'] ?? ''), ['draft', 'under_review'], true)): ?>
+                                        <form method="post" class="inline-action-form">
+                                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                            <input type="hidden" name="action" value="review_document">
+                                            <input type="hidden" name="document_id" value="<?= e((int) $document['id']) ?>">
+                                            <button type="submit" name="decision" value="approved" class="button secondary">Approve</button>
+                                            <button type="submit" name="decision" value="rejected" class="button secondary">Reject</button>
+                                        </form>
+                                    <?php endif; ?>
+                                </td>
+                            <?php endif; ?>
                             <td><?= e($document['uploaded_by_name'] ?? 'N/A') ?><br><small><?= e($document['created_at']) ?></small></td>
                             <td><?= e(number_format((int) $document['file_size'] / 1024, 1)) ?> KB</td>
                             <td>

@@ -20,6 +20,7 @@ $allowedSort = [
 ];
 $perPageOptions = [10, 20, 50, 100];
 $staffWorkflowActions = ['save_staff_profile', 'upload_kyc_document', 'review_kyc_document'];
+$hasAccessLevels = column_exists('users', 'access_level');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'] ?? ''), $staffWorkflowActions, true)) {
     verify_csrf();
@@ -32,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
         $password = (string) ($_POST['password'] ?? '');
         $role = $action === 'create' ? 'staff' : (string) ($_POST['role'] ?? 'staff');
         $status = (string) ($_POST['status'] ?? 'active');
+        $accessLevel = $hasAccessLevels ? (string) ($_POST['access_level'] ?? '') : '';
         $phone = trim((string) ($_POST['phone'] ?? ''));
         $selectedCompanyId = $action === 'create' ? $companyId : (int) ($_POST['company_id'] ?? $companyId);
 
@@ -62,6 +64,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
         if (!in_array($status, ['active', 'inactive'], true)) {
             $status = 'active';
         }
+        if ($hasAccessLevels && !array_key_exists($accessLevel, ACCESS_LEVELS)) {
+            $accessLevel = default_access_level_for_role($role);
+        }
 
         if ($action === 'create') {
             try {
@@ -74,6 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
                     'company_id' => $selectedCompanyId,
                     'phone' => $phone,
                     'company' => null,
+                    'access_level' => $accessLevel,
                 ]);
 
                 log_activity('user', $newUserId, 'created', 'User profile created from admin workflow.', (int) ($currentAdmin['id'] ?? 0));
@@ -91,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
             redirect('admin/users.php');
         }
 
-        $existingStmt = db()->prepare('SELECT id, role, status FROM users WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $existingStmt = db()->prepare('SELECT id, name, email, role, status, phone, company' . ($hasAccessLevels ? ', access_level' : '') . ' FROM users WHERE id = :id AND company_id = :company_id LIMIT 1');
         $existingStmt->execute(['id' => $userId, 'company_id' => $companyId]);
         $existingUser = $existingStmt->fetch();
         if (!$existingUser) {
@@ -117,6 +123,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
             ];
 
             $sql = 'UPDATE users SET name = :name, email = :email, role = :role, status = :status, phone = :phone, company = :company, company_id = :company_id';
+            if ($hasAccessLevels) {
+                $sql .= ', access_level = :access_level';
+                $params['access_level'] = $accessLevel;
+            }
             if ($password !== '') {
                 $sql .= ', password_hash = :password_hash';
                 $params['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
@@ -126,7 +136,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
             $stmt = db()->prepare($sql);
             $stmt->execute($params);
 
+            $auditAfter = [
+                'name' => $name,
+                'email' => $email,
+                'role' => $role,
+                'status' => $status,
+                'phone' => $phone !== '' ? $phone : null,
+                'company' => null,
+            ];
+            if ($hasAccessLevels) {
+                $auditAfter['access_level'] = $accessLevel;
+            }
             log_activity('user', $userId, 'updated', 'User profile details updated.', (int) ($currentAdmin['id'] ?? 0));
+            log_field_changes('user', $userId, $existingUser, $auditAfter, $companyId, (int) ($currentAdmin['id'] ?? 0));
             if (($existingUser['status'] ?? '') !== $status) {
                 log_activity('user', $userId, 'status_changed', 'User status changed to ' . $status . '.', (int) ($currentAdmin['id'] ?? 0));
             }
@@ -426,7 +448,7 @@ $buildUsersUrl = static function (array $extra = []) use ($baseQuery): string {
 };
 
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
-    $exportSql = 'SELECT u.id, u.name, u.email, u.role, u.status, u.phone, u.company, u.created_at FROM users u' . $whereSql . ' ORDER BY ' . $allowedSort[$sort];
+    $exportSql = 'SELECT u.id, u.name, u.email, u.role, u.status, u.phone, u.company' . ($hasAccessLevels ? ', u.access_level' : '') . ', u.created_at FROM users u' . $whereSql . ' ORDER BY ' . $allowedSort[$sort];
     $exportStmt = db()->prepare($exportSql);
     foreach ($params as $key => $value) {
         $exportStmt->bindValue(':' . $key, $value);
@@ -443,10 +465,15 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         exit('Unable to generate CSV export.');
     }
 
-    fputcsv($output, ['ID', 'Name', 'Email', 'Role', 'Status', 'Phone', 'Company', 'Created At']);
+    $headers = ['ID', 'Name', 'Email', 'Role', 'Status', 'Phone', 'Company'];
+    if ($hasAccessLevels) {
+        $headers[] = 'Access Level';
+    }
+    $headers[] = 'Created At';
+    fputcsv($output, $headers);
 
     foreach ($rows as $row) {
-        fputcsv($output, [
+        $csvRow = [
             $row['id'],
             $row['name'],
             $row['email'],
@@ -454,8 +481,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $row['status'],
             $row['phone'] ?? '',
             $row['company'] ?? '',
-            $row['created_at'],
-        ]);
+        ];
+        if ($hasAccessLevels) {
+            $csvRow[] = ACCESS_LEVELS[$row['access_level']] ?? $row['access_level'];
+        }
+        $csvRow[] = $row['created_at'];
+        fputcsv($output, $csvRow);
     }
 
     fclose($output);
@@ -476,7 +507,7 @@ if ($page > $totalPages) {
     $offset = ($page - 1) * $perPage;
 }
 
-$sql = 'SELECT u.id, u.name, u.email, u.role, u.status, u.phone, u.company, u.created_at FROM users u' . $whereSql . ' ORDER BY ' . $allowedSort[$sort] . ' LIMIT :limit OFFSET :offset';
+$sql = 'SELECT u.id, u.name, u.email, u.role, u.status, u.phone, u.company' . ($hasAccessLevels ? ', u.access_level' : '') . ', u.created_at FROM users u' . $whereSql . ' ORDER BY ' . $allowedSort[$sort] . ' LIMIT :limit OFFSET :offset';
 $stmt = db()->prepare($sql);
 foreach ($params as $key => $value) {
     $stmt->bindValue(':' . $key, $value);
@@ -505,7 +536,7 @@ $viewUser = null;
 $viewUserActivity = [];
 $viewUserOrders = [];
 if ($viewUserId > 0) {
-    $viewStmt = db()->prepare('SELECT id, name, email, role, status, phone, company, created_at FROM users WHERE id = :id AND company_id = :company_id LIMIT 1');
+    $viewStmt = db()->prepare('SELECT id, name, email, role, status, phone, company' . ($hasAccessLevels ? ', access_level' : '') . ', created_at FROM users WHERE id = :id AND company_id = :company_id LIMIT 1');
     $viewStmt->execute(['id' => $viewUserId, 'company_id' => $companyId]);
     $viewUser = $viewStmt->fetch() ?: null;
 
@@ -543,13 +574,39 @@ if ($viewUser && in_array(($viewUser['role'] ?? ''), ['staff', 'admin'], true)) 
 $editUserId = (int) ($_GET['edit'] ?? 0);
 $editUser = null;
 if ($editUserId > 0) {
-    $editStmt = db()->prepare('SELECT id, name, email, role, status, phone, company FROM users WHERE id = :id AND company_id = :company_id LIMIT 1');
+    $editStmt = db()->prepare('SELECT id, name, email, role, status, phone, company' . ($hasAccessLevels ? ', access_level' : '') . ' FROM users WHERE id = :id AND company_id = :company_id LIMIT 1');
     $editStmt->execute(['id' => $editUserId, 'company_id' => $companyId]);
     $editUser = $editStmt->fetch() ?: null;
 }
 
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
+<details class="role-matrix-panel">
+    <summary><?= icon('users') ?>Role Matrix — who can do what</summary>
+    <div class="rc-table-scroll">
+        <table class="rc-table role-matrix-table">
+            <thead>
+                <tr>
+                    <th>Role</th>
+                    <?php foreach (['view' => 'View', 'create' => 'Create', 'edit' => 'Edit', 'approve' => 'Approve', 'post' => 'Post', 'delete' => 'Delete', 'report' => 'Report', 'admin' => 'Admin'] as $capLabel): ?>
+                        <th class="align-center"><?= e($capLabel) ?></th>
+                    <?php endforeach; ?>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach (access_level_capabilities() as $levelKey => $caps): ?>
+                    <tr>
+                        <td><strong><?= e(ACCESS_LEVELS[$levelKey] ?? $levelKey) ?></strong></td>
+                        <?php foreach (['view', 'create', 'edit', 'approve', 'post', 'delete', 'report', 'admin'] as $cap): ?>
+                            <td class="align-center"><?= !empty($caps[$cap]) ? '<span class="matrix-yes">✔</span>' : '<span class="matrix-no">✕</span>' ?></td>
+                        <?php endforeach; ?>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <p class="muted">Assign a role to each user via New user / Edit. Capabilities are enforced on voucher approval and posting; broader per-module enforcement rolls out as modules adopt <code>user_can()</code>.</p>
+</details>
 <div class="admin-hero">
     <div>
         <div class="badge">Users workflow</div>
@@ -626,6 +683,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
+                <?php if ($hasAccessLevels): ?><th>Access</th><?php endif; ?>
                 <th>Status</th>
                 <th>Phone</th>
                 <th>Company</th>
@@ -636,7 +694,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <tbody>
             <?php if ($users === []): ?>
                 <tr>
-                    <td colspan="9">No users found for selected filters.</td>
+                    <td colspan="<?= $hasAccessLevels ? '10' : '9' ?>">No users found for selected filters.</td>
                 </tr>
             <?php endif; ?>
             <?php foreach ($users as $user): ?>
@@ -651,6 +709,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <br><small class="muted">KYC: <?= e($rowKycStatus) ?></small>
                         <?php endif; ?>
                     </td>
+                    <?php if ($hasAccessLevels): ?>
+                        <td><span class="tag"><?= e(ACCESS_LEVELS[$user['access_level']] ?? $user['access_level']) ?></span></td>
+                    <?php endif; ?>
                     <td><span class="tag"><?= e($user['status']) ?></span></td>
                     <td><?= e($user['phone'] ?? '-') ?></td>
                     <td><?= e($user['company'] ?? '-') ?></td>
@@ -718,6 +779,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <p><strong>Name:</strong> <?= e($viewUser['name']) ?></p>
                     <p><strong>Email:</strong> <?= e($viewUser['email']) ?></p>
                     <p><strong>Role:</strong> <?= e($viewUser['role']) ?></p>
+                    <?php if ($hasAccessLevels): ?><p><strong>Access:</strong> <?= e(ACCESS_LEVELS[$viewUser['access_level']] ?? $viewUser['access_level']) ?></p><?php endif; ?>
                     <p><strong>Status:</strong> <?= e($viewUser['status']) ?></p>
                     <p><strong>Phone:</strong> <?= e($viewUser['phone'] ?? '-') ?></p>
                     <p><strong>Company:</strong> <?= e($viewUser['company'] ?? '-') ?></p>
@@ -945,6 +1007,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <option value="inactive" <?= ($editUser['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>Inactive</option>
                             </select>
                         </label>
+                        <?php if ($hasAccessLevels): ?>
+                            <label>Access level
+                                <select name="access_level" required>
+                                    <?php foreach (ACCESS_LEVELS as $levelKey => $levelLabel): ?>
+                                        <option value="<?= e($levelKey) ?>" <?= ($editUser['access_level'] ?? '') === $levelKey ? 'selected' : '' ?>><?= e($levelLabel) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </label>
+                        <?php endif; ?>
                         <label>Phone<input type="text" name="phone" value="<?= e($editUser['phone'] ?? '') ?>"></label>
                         <label class="users-full">Company<input type="text" name="company" value="<?= e($editUser['company'] ?? '') ?>"></label>
                     </div>
@@ -983,6 +1054,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <option value="inactive">Inactive</option>
                         </select>
                     </label>
+                    <?php if ($hasAccessLevels): ?>
+                        <label>Access level
+                            <select name="access_level" required>
+                                <?php foreach (ACCESS_LEVELS as $levelKey => $levelLabel): ?>
+                                    <option value="<?= e($levelKey) ?>" <?= $levelKey === 'accountant' ? 'selected' : '' ?>><?= e($levelLabel) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+                    <?php endif; ?>
                     <label>Phone<input type="text" name="phone"></label>
                     <input type="hidden" name="company_id" value="<?= e($companyId) ?>">
                     <label class="users-full">Company portal<input type="text" value="<?= e($company['name'] ?? 'Current company') ?><?= !empty($company['code']) ? ' (' . e($company['code']) . ')' : '' ?>" readonly></label>

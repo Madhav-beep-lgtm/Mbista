@@ -58,6 +58,41 @@ function settings_upload_image(string $field, array $settings): string
     return 'assets/uploads/company-assets/' . $fileName;
 }
 
+$settingsCompany = current_company();
+$settingsCompanyId = (int) ($settingsCompany['id'] ?? 0);
+$settingsFiscalYear = current_fiscal_year();
+$settingsFiscalYearId = (int) ($settingsFiscalYear['id'] ?? 0);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'save_fiscal_controls') {
+    verify_csrf();
+
+    $vatRate = (string) ($_POST['default_vat_rate'] ?? '13');
+    if (!is_numeric($vatRate) || (float) $vatRate < 0) {
+        $vatRate = '13';
+    }
+    update_settings([
+        'approvals_enabled' => isset($_POST['approvals_enabled']) ? '1' : '0',
+        'default_vat_rate' => $vatRate,
+    ]);
+
+    $lockThrough = trim((string) ($_POST['locked_through'] ?? ''));
+    if ($settingsCompanyId > 0 && $settingsFiscalYearId > 0 && table_exists('fiscal_period_locks')) {
+        if ($lockThrough !== '' && DateTimeImmutable::createFromFormat('Y-m-d', $lockThrough) !== false) {
+            db()->prepare('INSERT INTO fiscal_period_locks (company_id, fiscal_year_id, locked_through, locked_by)
+                VALUES (:company_id, :fy, :locked_through, :locked_by)
+                ON DUPLICATE KEY UPDATE locked_through = VALUES(locked_through), locked_by = VALUES(locked_by)')
+                ->execute(['company_id' => $settingsCompanyId, 'fy' => $settingsFiscalYearId, 'locked_through' => $lockThrough, 'locked_by' => (int) (current_user()['id'] ?? 0)]);
+            log_activity('settings', $settingsCompanyId, 'period_locked', 'Accounting period locked through ' . $lockThrough . '.', (int) (current_user()['id'] ?? 0));
+        } else {
+            db()->prepare('DELETE FROM fiscal_period_locks WHERE company_id = :company_id AND fiscal_year_id = :fy')
+                ->execute(['company_id' => $settingsCompanyId, 'fy' => $settingsFiscalYearId]);
+        }
+    }
+
+    flash('success', 'Fiscal & accounting controls saved.');
+    redirect('admin/settings.php');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
 
@@ -159,7 +194,37 @@ $settings = all_settings();
 $checked = static fn (string $key, string $default = '0'): string => (($settings[$key] ?? $default) === '1') ? ' checked' : '';
 
 include __DIR__ . '/../../app/views/partials/admin_header.php';
+$currentLockThrough = period_locked_through($settingsCompanyId, $settingsFiscalYearId);
 ?>
+<form method="post" class="settings-form" id="fiscal-controls">
+    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+    <input type="hidden" name="action" value="save_fiscal_controls">
+    <div class="settings-component">
+        <div class="settings-component-head">
+            <span class="stat-icon"><?= icon('compliance') ?></span>
+            <div>
+                <p class="badge">Fiscal &amp; Accounting Controls</p>
+                <h2>Approvals, Period Lock &amp; Tax</h2>
+                <p>Governance controls for the accounting workspace (blueprint pages 5, 18, 19).</p>
+            </div>
+        </div>
+        <div class="settings-grid">
+            <label class="settings-check">
+                <input type="checkbox" name="approvals_enabled" value="1" <?= approvals_enabled() ? 'checked' : '' ?>>
+                <span>Require approval for manual vouchers<small>When on, accountants submit vouchers for an approver to post from Audit Trail &amp; Approvals.</small></span>
+            </label>
+            <label>Default VAT / tax rate (%)
+                <input type="number" step="0.01" min="0" name="default_vat_rate" value="<?= e((string) default_vat_rate()) ?>">
+            </label>
+            <label>Lock accounting periods through
+                <input type="date" name="locked_through" value="<?= e($currentLockThrough ?? '') ?>">
+                <small>Vouchers dated on/before this date cannot be posted for <?= e($settingsFiscalYear['label'] ?? 'the current fiscal year') ?>. Clear to unlock.</small>
+            </label>
+        </div>
+        <div class="settings-actions"><button type="submit" class="button"><?= icon('settings') ?>Save fiscal controls</button></div>
+    </div>
+</form>
+
 <form method="post" class="settings-form" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 

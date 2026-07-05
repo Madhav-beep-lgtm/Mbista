@@ -14,6 +14,8 @@ $headerReportId = (string) ($_GET['report'] ?? '');
 $headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php'], true);
 $headerCompanyId = (int) ($headerCompany['id'] ?? 0);
 $headerCompanyCode = (string) ($headerCompany['code'] ?? '');
+$headerBusinessType = company_accounting_business_type($headerCompanyId);
+$headerBusinessProfile = accounting_business_profile($headerBusinessType);
 $headerAltioraCompany = $headerCompanyCode === 'MBAACA' ? company_by_code('AGHPL') : null;
 $headerMbistaCompany = $headerCompanyCode !== 'MBAACA' ? company_by_code('MBAACA') : null;
 $headerSubsidiaryCompanies = $headerCompanyCode === 'AGHPL' && $headerCompanyId > 0 ? child_companies_for_company($headerCompanyId) : [];
@@ -62,13 +64,20 @@ $headerPortalLabel = match ($headerCompanyCode) {
             <a class="<?= $headerScript === 'invoice.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Sales &amp; Invoices</a>
             <a href="<?= e(url('admin/accounting-parties.php?tab=purchases')) ?>"><?= icon('services') ?>Purchases</a>
             <a class="<?= $headerScript === 'receipts.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/receipts.php')) ?>"><?= icon('documents') ?>Receipts</a>
-            <span class="admin-nav-group">Inventory &amp; Manufacturing</span>
-            <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?>Inventory</a>
-            <a href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>"><?= icon('settings') ?>Manufacturing</a>
+            <?php if (($headerBusinessProfile['show_inventory'] ?? false) || ($headerBusinessProfile['show_manufacturing'] ?? false)): ?>
+                <span class="admin-nav-group">Inventory &amp; Manufacturing</span>
+                <?php if ($headerBusinessProfile['show_inventory'] ?? false): ?>
+                    <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?>Inventory</a>
+                <?php endif; ?>
+                <?php if ($headerBusinessProfile['show_manufacturing'] ?? false): ?>
+                    <a href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>"><?= icon('settings') ?>Manufacturing</a>
+                <?php endif; ?>
+            <?php endif; ?>
             <span class="admin-nav-group">Reports &amp; Controls</span>
             <a class="<?= $headerScript === 'reports-center.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
             <a class="<?= $headerScript === 'compliance.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>
+            <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('reports') ?>Audit Trail &amp; Approvals</a>
             <span class="admin-nav-group">Shared / Supporting</span>
             <a class="<?= $headerScript === 'workspace.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('portal') ?>Work Portal</a>
             <a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>

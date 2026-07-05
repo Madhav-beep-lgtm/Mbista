@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `email` VARCHAR(190) NOT NULL,
   `password_hash` VARCHAR(255) NOT NULL,
   `role` ENUM('admin', 'staff', 'customer') NOT NULL DEFAULT 'customer',
+  `access_level` ENUM('super_admin', 'parent_admin', 'subsidiary_admin', 'accountant', 'approver', 'viewer', 'support') NOT NULL DEFAULT 'accountant',
   `status` ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
   `company_id` INT UNSIGNED DEFAULT NULL,
   `phone` VARCHAR(30) DEFAULT NULL,
@@ -98,6 +99,7 @@ CREATE TABLE IF NOT EXISTS `activity_logs` (
   `action` VARCHAR(80) NOT NULL,
   `details` TEXT DEFAULT NULL,
   `actor_id` INT UNSIGNED DEFAULT NULL,
+  `ip_address` VARCHAR(60) DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_activity_entity` (`entity_type`, `entity_id`, `created_at`),
@@ -175,6 +177,19 @@ CREATE TABLE IF NOT EXISTS `company_shareholdings` (
   CONSTRAINT `fk_company_shareholdings_investee` FOREIGN KEY (`investee_company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `company_accounting_preferences` (
+  `company_id` INT UNSIGNED NOT NULL,
+  `business_type` ENUM('service', 'trading', 'manufacturing') NOT NULL DEFAULT 'service',
+  `default_excise_rate` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  `updated_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`company_id`),
+  KEY `idx_company_accounting_preferences_updated_by` (`updated_by`),
+  CONSTRAINT `fk_company_accounting_preferences_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_company_accounting_preferences_user` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `ledger_groups` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `company_id` INT UNSIGNED NOT NULL,
@@ -227,6 +242,11 @@ CREATE TABLE IF NOT EXISTS `vouchers` (
   `narration` TEXT DEFAULT NULL,
   `total_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `status` ENUM('draft', 'posted', 'cancelled') NOT NULL DEFAULT 'posted',
+  `approval_state` ENUM('draft', 'pending_approval', 'approved', 'rejected') NOT NULL DEFAULT 'approved',
+  `submitted_by` INT UNSIGNED DEFAULT NULL,
+  `approved_by` INT UNSIGNED DEFAULT NULL,
+  `approved_at` DATETIME DEFAULT NULL,
+  `rejection_reason` VARCHAR(255) DEFAULT NULL,
   `posted_by` INT UNSIGNED DEFAULT NULL,
   `posted_at` DATETIME DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -408,6 +428,8 @@ CREATE TABLE IF NOT EXISTS `task_invoices` (
   `tax_invoice_id` INT UNSIGNED DEFAULT NULL,
   `amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `vat_rate` DECIMAL(5,2) DEFAULT 13.00,
+  `excise_rate` DECIMAL(5,2) DEFAULT 0.00,
+  `excise_amount` DECIMAL(12,2) DEFAULT 0.00,
   `vat_amount` DECIMAL(12,2) DEFAULT 0.00,
   `taxable_amount` DECIMAL(12,2) DEFAULT 0.00,
   `total_amount` DECIMAL(12,2) DEFAULT 0.00,
@@ -516,6 +538,9 @@ CREATE TABLE IF NOT EXISTS `documents` (
   `file_type` VARCHAR(100) DEFAULT NULL,
   `file_size` INT UNSIGNED NOT NULL DEFAULT 0,
   `visibility` ENUM('internal', 'client') NOT NULL DEFAULT 'internal',
+  `approval_status` ENUM('draft', 'under_review', 'approved', 'rejected') NOT NULL DEFAULT 'approved',
+  `approved_by` INT UNSIGNED DEFAULT NULL,
+  `approved_at` DATETIME DEFAULT NULL,
   `description` TEXT DEFAULT NULL,
   `uploaded_by` INT UNSIGNED DEFAULT NULL,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
@@ -683,6 +708,8 @@ CREATE TABLE IF NOT EXISTS `support_tickets` (
   `priority` ENUM('low', 'normal', 'high', 'urgent') NOT NULL DEFAULT 'normal',
   `description` TEXT NOT NULL,
   `status` ENUM('open', 'assigned', 'in_progress', 'waiting_for_client', 'resolved', 'closed') NOT NULL DEFAULT 'open',
+  `sla_due_at` DATETIME DEFAULT NULL,
+  `resolved_at` DATETIME DEFAULT NULL,
   `assigned_staff_user_id` INT UNSIGNED DEFAULT NULL,
   `resolution` TEXT DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -936,6 +963,8 @@ INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
 ('bank_account_name', 'Altiora Advisory Operations'),
 ('bank_account_number', '0000000000000000'),
 ('payment_note', 'Share payment confirmation with finance for reconciliation.'),
+('approvals_enabled', '0'),
+('default_vat_rate', '13'),
 ('stripe_checkout_url', ''),
 ('paypal_checkout_url', ''),
 ('hero_title', 'Run multi-company audit and advisory workflows with clarity.'),
@@ -1082,6 +1111,38 @@ WHERE l.group_id IS NULL
   AND l.code IN ('CASH','AR','PREPAID','INVESTMENTS','AP','TAX_PAYABLE','SHARE_CAPITAL',
                  'RETAINED_EARNINGS','SERVICE_REVENUE','OTHER_INCOME','SALARY_EXPENSE',
                  'RENT_EXPENSE','PROFESSIONAL_FEES','TAX_EXPENSE');
+
+CREATE TABLE IF NOT EXISTS `audit_change_history` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `entity_type` VARCHAR(60) NOT NULL,
+  `entity_id` INT UNSIGNED NOT NULL,
+  `field_name` VARCHAR(80) NOT NULL,
+  `old_value` TEXT DEFAULT NULL,
+  `new_value` TEXT DEFAULT NULL,
+  `actor_id` INT UNSIGNED DEFAULT NULL,
+  `ip_address` VARCHAR(60) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_audit_change_entity` (`entity_type`, `entity_id`, `created_at`),
+  KEY `idx_audit_change_company` (`company_id`, `created_at`),
+  CONSTRAINT `fk_audit_change_actor` FOREIGN KEY (`actor_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `fiscal_period_locks` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `fiscal_year_id` INT UNSIGNED NOT NULL,
+  `locked_through` DATE NOT NULL,
+  `locked_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_fiscal_period_lock` (`company_id`, `fiscal_year_id`),
+  CONSTRAINT `fk_fiscal_period_lock_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_fiscal_period_lock_fy` FOREIGN KEY (`fiscal_year_id`) REFERENCES `fiscal_years` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_fiscal_period_lock_user` FOREIGN KEY (`locked_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 ALTER TABLE `users`
   ADD CONSTRAINT `fk_users_company`

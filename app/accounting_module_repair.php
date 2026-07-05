@@ -225,6 +225,19 @@ function accounting_module_repair_database(): array
         ");
     });
 
+    $run('Upgrade accounting preferences and excise support', static function (): void {
+        if (accounting_repair_table_exists('company_accounting_preferences')) {
+            accounting_repair_add_column('company_accounting_preferences', 'default_excise_rate', '`default_excise_rate` DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER `business_type`');
+        }
+
+        if (!accounting_repair_table_exists('task_invoices')) {
+            return;
+        }
+
+        accounting_repair_add_column('task_invoices', 'excise_rate', '`excise_rate` DECIMAL(5,2) DEFAULT 0.00 AFTER `vat_rate`');
+        accounting_repair_add_column('task_invoices', 'excise_amount', '`excise_amount` DECIMAL(12,2) DEFAULT 0.00 AFTER `excise_rate`');
+    });
+
     $run('Upgrade invoice source and lines', static function (): void {
         if (!accounting_repair_table_exists('task_invoices')) {
             return;

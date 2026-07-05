@@ -12,16 +12,76 @@ if (!empty($_GET['fiscal_year_id'])) {
     $_SESSION['fiscal_year_id'] = (int) $_GET['fiscal_year_id'];
 }
 
-$pageTitle = 'Accounting';
+$pageTitle = 'Vouchers';
 $company = current_company();
 $fiscalYear = current_fiscal_year();
 $currentAdmin = current_user();
 $companyId = (int) ($company['id'] ?? 0);
 $fiscalYearId = (int) ($fiscalYear['id'] ?? 0);
+$userId = (int) ($currentAdmin['id'] ?? 0);
+$hasVoucherApprovals = column_exists('vouchers', 'approval_state');
+$lockedThrough = period_locked_through($companyId, $fiscalYearId);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $postAction = (string) ($_POST['action'] ?? '');
+
+    if ($postAction === 'save_period_lock' && user_can('admin')) {
+        $lockedThroughInput = trim((string) ($_POST['locked_through'] ?? ''));
+        if ($companyId <= 0 || $fiscalYearId <= 0 || $lockedThroughInput === '' || !table_exists('fiscal_period_locks')) {
+            flash('error', 'Select a valid fiscal period lock date.');
+            redirect('admin/accounting.php');
+        }
+
+        db()->prepare('
+            INSERT INTO fiscal_period_locks (company_id, fiscal_year_id, locked_through, locked_by)
+            VALUES (:company_id, :fiscal_year_id, :locked_through, :locked_by)
+            ON DUPLICATE KEY UPDATE locked_through = VALUES(locked_through), locked_by = VALUES(locked_by)
+        ')->execute([
+            'company_id' => $companyId,
+            'fiscal_year_id' => $fiscalYearId,
+            'locked_through' => $lockedThroughInput,
+            'locked_by' => $userId,
+        ]);
+
+        log_activity('fiscal_period_lock', $fiscalYearId, 'updated', 'Accounting period locked through ' . $lockedThroughInput . '.', $userId);
+        flash('success', 'Fiscal period lock saved.');
+        redirect('admin/accounting.php');
+    }
+
+    if (in_array($postAction, ['approve_voucher', 'reject_voucher'], true) && $hasVoucherApprovals) {
+        if (!user_can('approve')) {
+            flash('error', 'You do not have approval permission.');
+            redirect('admin/accounting.php');
+        }
+
+        $voucherId = (int) ($_POST['voucher_id'] ?? 0);
+        $rejectionReason = trim((string) ($_POST['rejection_reason'] ?? ''));
+        $voucherStmt = db()->prepare("SELECT id, approval_state FROM vouchers WHERE id = :id AND company_id = :company_id AND fiscal_year_id = :fiscal_year_id LIMIT 1");
+        $voucherStmt->execute(['id' => $voucherId, 'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
+        $voucher = $voucherStmt->fetch();
+        if (!$voucher || (string) ($voucher['approval_state'] ?? '') !== 'pending_approval') {
+            flash('error', 'Voucher is not pending approval.');
+            redirect('admin/accounting.php');
+        }
+        if ($postAction === 'reject_voucher' && $rejectionReason === '') {
+            flash('error', 'Rejection reason is required.');
+            redirect('admin/accounting.php');
+        }
+
+        if ($postAction === 'approve_voucher') {
+            db()->prepare("UPDATE vouchers SET approval_state = 'approved', status = 'posted', approved_by = :approved_by, approved_at = NOW(), posted_by = :posted_by, posted_at = NOW(), rejection_reason = NULL WHERE id = :id AND company_id = :company_id")
+                ->execute(['approved_by' => $userId, 'posted_by' => $userId, 'id' => $voucherId, 'company_id' => $companyId]);
+            log_activity('voucher', $voucherId, 'approved', 'Voucher approved and posted.', $userId);
+            flash('success', 'Voucher approved and posted.');
+        } else {
+            db()->prepare("UPDATE vouchers SET approval_state = 'rejected', status = 'cancelled', approved_by = :approved_by, approved_at = NOW(), rejection_reason = :rejection_reason WHERE id = :id AND company_id = :company_id")
+                ->execute(['approved_by' => $userId, 'rejection_reason' => $rejectionReason, 'id' => $voucherId, 'company_id' => $companyId]);
+            log_activity('voucher', $voucherId, 'rejected', 'Voucher rejected: ' . $rejectionReason, $userId);
+            flash('success', 'Voucher rejected.');
+        }
+        redirect('admin/accounting.php');
+    }
 
     if ($postAction === 'create_fiscal_year') {
         $label = trim((string) ($_POST['label'] ?? ''));
@@ -60,6 +120,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($postAction === 'create_voucher') {
+        if (!user_can('create')) {
+            flash('error', 'You do not have permission to create vouchers.');
+            redirect('admin/accounting.php');
+        }
         $voucherType = (string) ($_POST['voucher_type'] ?? 'journal');
         $voucherNo = trim((string) ($_POST['voucher_no'] ?? ''));
         $voucherDate = (string) ($_POST['voucher_date'] ?? date('Y-m-d'));
@@ -79,6 +143,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($voucherNo === '') {
             $voucherNo = strtoupper(substr($voucherType, 0, 2)) . '-' . date('Ymd-His');
+        }
+
+        if (is_period_locked($companyId, $fiscalYearId, $voucherDate !== '' ? $voucherDate : date('Y-m-d'))) {
+            flash('error', 'This voucher date is inside a locked accounting period.');
+            redirect('admin/accounting.php');
         }
 
         $entries = [];
@@ -141,6 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         try {
+            $needsApproval = $hasVoucherApprovals && approvals_enabled() && !user_can('approve');
             create_voucher_with_entries([
                 'company_id' => $companyId,
                 'fiscal_year_id' => $fiscalYearId,
@@ -153,11 +223,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'voucher_date' => $voucherDate !== '' ? $voucherDate : date('Y-m-d'),
                 'narration' => $narration,
                 'total_amount' => $debitTotal,
-                'status' => 'posted',
-                'posted_by' => (int) ($currentAdmin['id'] ?? 0),
-                'posted_at' => date('Y-m-d H:i:s'),
+                'status' => $needsApproval ? 'draft' : 'posted',
+                'approval_state' => $needsApproval ? 'pending_approval' : 'approved',
+                'submitted_by' => $userId,
+                'approved_by' => $needsApproval ? null : $userId,
+                'approved_at' => $needsApproval ? null : date('Y-m-d H:i:s'),
+                'posted_by' => $needsApproval ? null : $userId,
+                'posted_at' => $needsApproval ? null : date('Y-m-d H:i:s'),
             ], $entries);
-            flash('success', 'Voucher posted.');
+            flash('success', $needsApproval ? 'Voucher submitted for approval.' : 'Voucher posted.');
         } catch (Throwable $exception) {
             flash('error', 'Could not post voucher. Check voucher number uniqueness.');
         }
@@ -318,12 +392,53 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </div>
 
 <nav class="accounting-tabs" aria-label="Accounting sections">
-    <a href="<?= e(url('admin/accounting-parties.php')) ?>">Parties</a>
+    <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Dashboard</a>
     <a class="is-active" href="<?= e(url('admin/accounting.php')) ?>">Vouchers</a>
+    <a href="<?= e(url('admin/accounting-parties.php')) ?>">Parties</a>
+    <a href="#daybook">Daybook</a>
     <a href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory</a>
     <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a>
     <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Reports</a>
 </nav>
+
+<section class="mbw-command-strip voucher-command-strip" aria-label="Voucher workspace blueprint">
+    <article>
+        <span><?= icon('documents') ?></span>
+        <strong>Payment Voucher</strong>
+        <small>Outgoing payments to suppliers, vendors, taxes, and expenses.</small>
+    </article>
+    <article>
+        <span><?= icon('documents') ?></span>
+        <strong>Receipt Voucher</strong>
+        <small>Incoming receipts from clients, customers, income, and loans.</small>
+    </article>
+    <article>
+        <span><?= icon('accounting') ?></span>
+        <strong>Journal Voucher</strong>
+        <small>Non-cash accounting entries, accruals, and adjustments.</small>
+    </article>
+    <article>
+        <span><?= icon('services') ?></span>
+        <strong>Contra Voucher</strong>
+        <small>Cash-to-bank, bank-to-cash, and bank-to-bank transfers.</small>
+    </article>
+    <article>
+        <span><?= icon('invoices') ?></span>
+        <strong>Sales Voucher</strong>
+        <small>Sales of goods or services linked to invoices.</small>
+    </article>
+    <article>
+        <span><?= icon('services') ?></span>
+        <strong>Purchase Voucher</strong>
+        <small>Purchases of goods and services linked to supplier bills.</small>
+    </article>
+</section>
+
+<section class="mbw-flow-panel" aria-label="Voucher transaction workflow">
+    <?php foreach (['Choose Fiscal Year', 'Choose Voucher Type', 'Select Ledger / Party', 'Enter Lines / Taxes', 'Save Draft', 'Approve / Post', 'Update Ledgers', 'Update Dashboard', 'Update Reports'] as $stepIndex => $stepLabel): ?>
+        <div><b><?= e((string) ($stepIndex + 1)) ?></b><span><?= e($stepLabel) ?></span></div>
+    <?php endforeach; ?>
+</section>
 
 <div class="accounting-stat-grid">
     <div class="accounting-stat-card accent-blue"><span class="stat-icon"><?= icon('documents') ?></span><small>Posted vouchers</small><strong><?= e((string) count($vouchers)) ?></strong><em><?= e(site_currency_symbol()) ?><?= e(number_format($voucherTotal, 2)) ?> total</em></div>
@@ -331,6 +446,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="accounting-stat-card accent-red"><span class="stat-icon"><?= icon('tasks') ?></span><small>Total credits</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format($ledgerCreditTotal, 2)) ?></strong><em>Selected fiscal year</em></div>
     <div class="accounting-stat-card accent-purple"><span class="stat-icon"><?= icon('users') ?></span><small>Active parties</small><strong><?= e((string) count($parties)) ?></strong><em>Available for voucher posting</em></div>
 </div>
+
+<?php if ($lockedThrough !== null): ?>
+    <div class="alert alert-info">Accounting entries dated on or before <?= e($lockedThrough) ?> are locked for this fiscal year.</div>
+<?php endif; ?>
 
 <!-- Fiscal Year Selector - Only in Accounting Module -->
 <?php 
@@ -386,7 +505,7 @@ if ($fiscalYears):
     <details class="feature-disclosure" id="post-voucher">
         <summary>
             <span>
-                <strong><?= icon('invoices') ?>Post manual voucher</strong>
+                <strong><?= icon('invoices') ?><?= approvals_enabled() && !user_can('approve') ? 'Submit manual voucher' : 'Post manual voucher' ?></strong>
                 <small>Record balanced debit and credit accounting entries for the selected fiscal year.</small>
             </span>
             <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
@@ -456,10 +575,28 @@ if ($fiscalYears):
                     </div>
                 <?php endfor; ?>
 
-                <button type="submit"><?= icon('accounting') ?>Post voucher</button>
+                <button type="submit"><?= icon('accounting') ?><?= approvals_enabled() && !user_can('approve') ? 'Submit for approval' : 'Post voucher' ?></button>
             </form>
         <?php endif; ?>
     </details>
+
+    <?php if (user_can('admin') && table_exists('fiscal_period_locks')): ?>
+        <details class="feature-disclosure">
+            <summary>
+                <span>
+                    <strong><?= icon('settings') ?>Fiscal period lock</strong>
+                    <small>Prevent new postings inside a closed accounting period.</small>
+                </span>
+                <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
+            </summary>
+            <form method="post" class="workspace-form-grid">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="save_period_lock">
+                <label>Locked through<input type="date" name="locked_through" value="<?= e($lockedThrough ?? '') ?>" required></label>
+                <button type="submit"><?= icon('settings') ?>Save lock</button>
+            </form>
+        </details>
+    <?php endif; ?>
 
     <?php if ($availableInvesteeCompanies !== []): ?>
         <details class="feature-disclosure">
@@ -557,11 +694,11 @@ if ($fiscalYears):
     <h2>Posted vouchers</h2>
     <table>
         <thead>
-            <tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Reference</th><th>Total</th><th>Status</th><th>Posted At</th></tr>
+            <tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Reference</th><th>Total</th><th>Status</th><th>Posted At</th><?php if ($hasVoucherApprovals): ?><th>Approval</th><?php endif; ?></tr>
         </thead>
         <tbody>
             <?php if ($vouchers === []): ?>
-                <tr><td colspan="8">No vouchers posted for selected context.</td></tr>
+                <tr><td colspan="<?= $hasVoucherApprovals ? '9' : '8' ?>">No vouchers posted for selected context.</td></tr>
             <?php endif; ?>
             <?php foreach ($vouchers as $voucher): ?>
                 <tr>
@@ -573,13 +710,35 @@ if ($fiscalYears):
                     <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $voucher['total_amount'], 2)) ?></td>
                     <td><?= e($voucher['status']) ?></td>
                     <td><?= e($voucher['posted_at']) ?></td>
+                    <?php if ($hasVoucherApprovals): ?>
+                        <td>
+                            <span class="tag"><?= e(str_replace('_', ' ', (string) ($voucher['approval_state'] ?? 'approved'))) ?></span>
+                            <?php if (($voucher['approval_state'] ?? '') === 'pending_approval' && user_can('approve')): ?>
+                                <form method="post" class="inline-action-form">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="approve_voucher">
+                                    <input type="hidden" name="voucher_id" value="<?= e((int) $voucher['id']) ?>">
+                                    <button type="submit" class="button secondary">Approve</button>
+                                </form>
+                                <form method="post" class="inline-action-form">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="reject_voucher">
+                                    <input type="hidden" name="voucher_id" value="<?= e((int) $voucher['id']) ?>">
+                                    <input type="text" name="rejection_reason" placeholder="Reason" required>
+                                    <button type="submit" class="button secondary">Reject</button>
+                                </form>
+                            <?php elseif (!empty($voucher['rejection_reason'])): ?>
+                                <br><small class="muted"><?= e($voucher['rejection_reason']) ?></small>
+                            <?php endif; ?>
+                        </td>
+                    <?php endif; ?>
                 </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
 </div>
 
-<div class="table-card">
+<div class="table-card" id="daybook">
     <h2>Daybook</h2>
     <table>
         <thead>

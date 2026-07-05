@@ -7,15 +7,24 @@ require_staff_or_admin();
 require_company_context();
 
 $repairErrors = accounting_module_repair_database();
-$pageTitle = 'Accounting Inventory';
+$pageTitle = 'Inventory & Manufacturing';
 $company = current_company();
 $fiscalYear = current_fiscal_year();
 $currentUser = current_user();
 $companyId = (int) ($company['id'] ?? 0);
 $fiscalYearId = (int) ($fiscalYear['id'] ?? 0);
 $userId = (int) ($currentUser['id'] ?? 0);
+$inventoryBusinessType = company_accounting_business_type($companyId);
+$inventoryProfile = accounting_business_profile($inventoryBusinessType);
 
-$itemTypes = ['stock', 'service', 'raw_material', 'finished_good', 'consumable'];
+if (!($inventoryProfile['show_inventory'] ?? false)) {
+    flash('error', 'Inventory and manufacturing tools are available only for trading and manufacturing companies.');
+    redirect('admin/accounting-dashboard.php');
+}
+
+$itemTypes = $inventoryProfile['show_manufacturing']
+    ? ['stock', 'service', 'raw_material', 'finished_good', 'consumable']
+    : ['stock', 'service', 'consumable'];
 $movementTypes = ['opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment'];
 
 function inventory_direction(string $type): string
@@ -123,6 +132,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'create_manufacturing_order') {
+        if (!($inventoryProfile['show_manufacturing'] ?? false)) {
+            flash('error', 'Manufacturing orders are available only for manufacturing companies.');
+            redirect('admin/accounting-inventory.php');
+        }
         $orderNo = strtoupper(trim((string) ($_POST['order_no'] ?? '')));
         $finishedItemId = (int) ($_POST['finished_item_id'] ?? 0);
         $quantity = round((float) ($_POST['quantity'] ?? 0), 3);
@@ -264,6 +277,37 @@ $manufacturingOrders = $orderStmt->fetchAll();
 
 $stockValue = array_sum(array_map(static fn (array $item): float => (float) $item['on_hand'] * (float) $item['purchase_rate'], $items));
 $lowStockCount = count(array_filter($items, static fn (array $item): bool => (float) $item['reorder_level'] > 0 && (float) $item['on_hand'] <= (float) $item['reorder_level']));
+$inventoryProcessSteps = $inventoryProfile['show_manufacturing']
+    ? [
+        ['Create Item', 'Master data'],
+        ['Set Type, Unit & Category', 'Classification'],
+        ['Save Item Master', 'Available for transactions'],
+        ['Record Stock Movement', 'Receipt / issue / transfer'],
+        ['Update Stock Summary', 'Qty on hand'],
+        ['Update Valuation', 'Cost and value'],
+        ['Update Reports', 'Analytics'],
+    ]
+    : [
+        ['Create Item', 'Master data'],
+        ['Set Type, Unit & Category', 'Classification'],
+        ['Save Item Master', 'Available for transactions'],
+        ['Record Stock Movement', 'Receipt / issue / transfer'],
+        ['Update Stock Summary', 'Qty on hand'],
+        ['Update Valuation', 'Cost and value'],
+    ];
+$inventoryTypeCards = $inventoryProfile['show_manufacturing']
+    ? [
+        ['Stock Item', 'Physical items bought, sold, and inventoried.'],
+        ['Service Item', 'Non-physical service lines used in billing.'],
+        ['Raw Material', 'Inputs consumed in manufacturing or production.'],
+        ['Finished Goods', 'Completed products ready for sale to customers.'],
+    ]
+    : [
+        ['Stock Item', 'Physical items bought, sold, and inventoried.'],
+        ['Service Item', 'Non-physical service lines used in billing.'],
+        ['Consumable', 'Low-value operational items tracked for stock control.'],
+    ];
+$pageTitle = $inventoryProfile['show_manufacturing'] ? 'Inventory & Manufacturing' : 'Inventory';
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
@@ -279,12 +323,27 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </div>
 
 <nav class="accounting-tabs" aria-label="Accounting sections">
+    <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Dashboard</a>
     <a href="<?= e(url('admin/accounting-parties.php')) ?>">Parties</a>
     <a href="<?= e(url('admin/accounting.php')) ?>">Vouchers</a>
     <a class="is-active" href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory</a>
+    <a href="#manufacturing">Manufacturing</a>
     <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a>
     <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Reports</a>
 </nav>
+
+<section class="inventory-process-grid" aria-label="Inventory process click flow">
+    <?php foreach ([['Create Item', 'Master data'], ['Set Type, Unit & Category', 'Classification'], ['Save Item Master', 'Available for transactions'], ['Record Stock Movement', 'Receipt / issue / transfer'], ['Update Stock Summary', 'Qty on hand'], ['Update Valuation', 'Cost and value'], ['Update Reports', 'Analytics']] as $index => $process): ?>
+        <article><b><?= e((string) ($index + 1)) ?></b><span><?= icon($index === 0 ? 'services' : ($index === 4 ? 'reports' : 'documents')) ?></span><strong><?= e($process[0]) ?></strong><small><?= e($process[1]) ?></small></article>
+    <?php endforeach; ?>
+</section>
+
+<section class="inventory-type-grid" aria-label="Inventory item types">
+    <article><strong>Stock Item</strong><span>Physical items bought, sold, and inventoried.</span></article>
+    <article><strong>Service Item</strong><span>Non-physical service lines used in billing.</span></article>
+    <article><strong>Raw Material</strong><span>Inputs consumed in manufacturing or production.</span></article>
+    <article><strong>Finished Goods</strong><span>Completed products ready for sale to customers.</span></article>
+</section>
 
 <div class="accounting-stat-grid">
     <div class="accounting-stat-card accent-blue"><span class="stat-icon"><?= icon('services') ?></span><small>Items</small><strong><?= e((string) count($items)) ?></strong><em>Stock, service, raw material</em></div>
@@ -356,6 +415,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </form>
     </details>
 </div>
+
+<section class="mbw-flow-panel manufacturing-flow" aria-label="Manufacturing production workflow">
+    <?php foreach (['Create Production Order', 'Select Finished Item & BOM', 'Issue Materials', 'Record Work in Progress', 'Complete Production', 'Finished Goods Receipt', 'Update Stock & Accounting'] as $stepIndex => $stepLabel): ?>
+        <div><b><?= e((string) ($stepIndex + 1)) ?></b><span><?= e($stepLabel) ?></span></div>
+    <?php endforeach; ?>
+</section>
 
 <div class="table-card">
     <h2>Item stock summary</h2>

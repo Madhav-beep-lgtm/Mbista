@@ -11,6 +11,9 @@ accounting_module_repair_database();
 $currentCompany = current_company();
 $currentAdmin = current_user();
 $adminId = (int) ($currentAdmin['id'] ?? 0);
+$invoiceBusinessType = company_accounting_business_type((int) ($currentCompany['id'] ?? 0));
+$invoiceBusinessProfile = accounting_business_profile($invoiceBusinessType);
+$defaultExciseRate = company_accounting_default_excise_rate((int) ($currentCompany['id'] ?? 0));
 
 $invoiceSchemaReady = table_exists('task_invoices')
     && table_exists('client_tasks')
@@ -38,7 +41,8 @@ $invoiceId = (int) ($_GET['id'] ?? 0);
 $message = null;
 $error = null;
 $allowedInvoiceType = ['stage', 'task', 'inventory', 'manufacturing', 'other'];
-$allowedInvoiceSourceTypes = ['task', 'inventory', 'manufacturing', 'other'];
+$allowedInvoiceSourceTypes = $invoiceBusinessProfile['allowed_invoice_sources'];
+$defaultInvoiceSourceType = $invoiceBusinessProfile['default_invoice_source'];
 $allowedInvoiceStatus = ['draft', 'issued', 'paid', 'cancelled'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -54,9 +58,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($postAction === 'create_invoice') {
         $taskId = (int) ($_POST['task_id'] ?? 0);
         $stageId = (int) ($_POST['stage_id'] ?? 0);
-        $invoiceSourceType = (string) ($_POST['invoice_source_type'] ?? 'task');
+        $invoiceSourceType = (string) ($_POST['invoice_source_type'] ?? $defaultInvoiceSourceType);
         if (!in_array($invoiceSourceType, $allowedInvoiceSourceTypes, true)) {
-            $invoiceSourceType = 'task';
+            $invoiceSourceType = $defaultInvoiceSourceType;
         }
         $invoiceType = $invoiceSourceType === 'task' ? (string) ($_POST['invoice_type'] ?? 'stage') : $invoiceSourceType;
         $partyId = (int) ($_POST['party_id'] ?? 0);
@@ -70,7 +74,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $issuedOn = trim((string) ($_POST['issued_on'] ?? date('Y-m-d')));
         $dueOn = trim((string) ($_POST['due_on'] ?? ''));
         $notes = trim((string) ($_POST['notes'] ?? ''));
-        $vatRate = (float) ($_POST['vat_rate'] ?? 13.00);
+        $vatRate = (float) ($_POST['vat_rate'] ?? default_vat_rate());
+        $exciseRate = $invoiceSourceType === 'manufacturing'
+            ? round((float) ($_POST['excise_rate'] ?? $defaultExciseRate), 2)
+            : 0.00;
         $invoiceCategory = (string) ($_POST['invoice_category'] ?? 'proforma');
         $description = trim((string) ($_POST['description'] ?? ''));
 
@@ -82,17 +89,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $task = null;
             $lineItems = [];
             $amount = round((float) $amountRaw, 2);
+            $serviceMode = in_array($invoiceSourceType, ['task', 'other'], true);
 
-            if ($invoiceSourceType === 'task') {
-                if ($taskId <= 0) {
-                    $error = 'Task is required for task or stage invoice.';
+            if ($serviceMode) {
+                if ($invoiceSourceType === 'task') {
+                    if ($taskId <= 0) {
+                        $error = 'Task is required for task or stage invoice.';
+                    } else {
+                        $taskStmt = db()->prepare('SELECT id, title, quoted_fee, status FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1');
+                        $taskStmt->execute([
+                            'id' => $taskId,
+                            'company_id' => (int) $currentCompany['id'],
+                        ]);
+                        $task = $taskStmt->fetch();
+                    }
                 } else {
-                    $taskStmt = db()->prepare('SELECT id, title, quoted_fee, status FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1');
-                    $taskStmt->execute([
-                        'id' => $taskId,
-                        'company_id' => (int) $currentCompany['id'],
-                    ]);
-                    $task = $taskStmt->fetch();
+                    $taskId = 0;
+                    $stageId = 0;
                 }
             } else {
                 $taskId = 0;
@@ -114,20 +127,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     $lineVatRate = round((float) ($lineVatRates[$index] ?? $vatRate), 2);
                     $taxableLine = round($quantity * $rate, 2);
-                    $vatLine = round($taxableLine * ($lineVatRate / 100), 2);
+                    $lineExcise = $invoiceSourceType === 'manufacturing' ? round($taxableLine * ($exciseRate / 100), 2) : 0.0;
+                    $vatLine = round(($taxableLine + $lineExcise) * ($lineVatRate / 100), 2);
                     $lineItems[] = [
                         'item_id' => (int) ($itemIds[$index] ?? 0) ?: null,
                         'description' => $lineDescription,
                         'quantity' => $quantity,
+                        'unit' => 'pcs',
                         'rate' => $rate,
                         'taxable_amount' => $taxableLine,
+                        'excise_rate' => $invoiceSourceType === 'manufacturing' ? $exciseRate : 0.0,
+                        'excise_amount' => $lineExcise,
                         'vat_rate' => $lineVatRate,
                         'vat_amount' => $vatLine,
-                        'total_amount' => round($taxableLine + $vatLine, 2),
+                        'total_amount' => round($taxableLine + $lineExcise + $vatLine, 2),
                     ];
                 }
                 if ($lineItems !== []) {
-                    $amount = array_sum(array_map(static fn (array $line): float => (float) $line['taxable_amount'], $lineItems));
+                    $amount = round(array_sum(array_map(static fn (array $line): float => (float) $line['taxable_amount'], $lineItems)), 2);
                 }
             }
 
@@ -187,21 +204,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if (!$error) {
                     if ($lineItems === []) {
-                        $vatAmount = round($amount * ($vatRate / 100), 2);
+                        $lineExcise = $invoiceSourceType === 'manufacturing' ? round($amount * ($exciseRate / 100), 2) : 0.0;
+                        $vatAmount = round(($amount + $lineExcise) * ($vatRate / 100), 2);
                         $lineItems[] = [
                             'item_id' => null,
                             'description' => $description !== '' ? $description : (($task['title'] ?? '') !== '' ? (string) $task['title'] : 'Manual invoice line'),
                             'quantity' => 1,
+                            'unit' => 'job',
                             'rate' => $amount,
                             'taxable_amount' => $amount,
+                            'excise_rate' => $invoiceSourceType === 'manufacturing' ? $exciseRate : 0.0,
+                            'excise_amount' => $lineExcise,
                             'vat_rate' => $vatRate,
                             'vat_amount' => $vatAmount,
-                            'total_amount' => round($amount + $vatAmount, 2),
+                            'total_amount' => round($amount + $lineExcise + $vatAmount, 2),
                         ];
                     }
                     $amount = round(array_sum(array_map(static fn (array $line): float => (float) $line['taxable_amount'], $lineItems)), 2);
+                    $exciseAmount = round(array_sum(array_map(static fn (array $line): float => (float) ($line['excise_amount'] ?? 0), $lineItems)), 2);
                     $vatAmount = round(array_sum(array_map(static fn (array $line): float => (float) $line['vat_amount'], $lineItems)), 2);
-                    $totalAmount = round($amount + $vatAmount, 2);
+                    $totalAmount = round($amount + $exciseAmount + $vatAmount, 2);
 
                     $prefix = match ($invoiceSourceType) {
                         'inventory' => 'INV-STK',
@@ -296,12 +318,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     try {
-                        $updateVatStmt = db()->prepare('UPDATE task_invoices SET invoice_category = :invoice_category, vat_rate = :vat_rate, vat_amount = :vat_amount, taxable_amount = :taxable_amount, total_amount = :total_amount WHERE id = :id AND company_id = :company_id');
+                        $updateVatStmt = db()->prepare('UPDATE task_invoices SET invoice_category = :invoice_category, vat_rate = :vat_rate, vat_amount = :vat_amount, taxable_amount = :taxable_amount, excise_rate = :excise_rate, excise_amount = :excise_amount, total_amount = :total_amount WHERE id = :id AND company_id = :company_id');
                         $updateVatStmt->execute([
                             'invoice_category' => in_array($invoiceCategory, ['proforma', 'tax'], true) ? $invoiceCategory : 'proforma',
                             'vat_rate' => $vatRate,
                             'vat_amount' => $vatAmount,
                             'taxable_amount' => $amount,
+                            'excise_rate' => $exciseAmount > 0 ? $exciseRate : 0.0,
+                            'excise_amount' => $exciseAmount,
                             'total_amount' => $totalAmount,
                             'id' => $newInvoiceId,
                             'company_id' => (int) $currentCompany['id'],
@@ -438,15 +462,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $issueDate = $_POST['issued_on'] ?? null;
         $dueDate = $_POST['due_on'] ?? null;
         $notes = $_POST['notes'] ?? null;
-        $vatRate = (float) ($_POST['vat_rate'] ?? 13.00);
+        $vatRate = (float) ($_POST['vat_rate'] ?? default_vat_rate());
+        $invoiceSourceType = (string) ($targetInvoice['invoice_source_type'] ?? 'task');
+        $exciseRate = $invoiceSourceType === 'manufacturing'
+            ? (float) ($_POST['excise_rate'] ?? ($targetInvoice['excise_rate'] ?? $defaultExciseRate))
+            : 0.0;
 
         if (!invoice_is_editable($targetInvoice)) {
             $error = 'This invoice can no longer be edited. Only draft and proforma invoices that are not paid or cancelled are editable.';
         } elseif ($invoiceNo && $amount > 0 && $issueDate) {
             $existingDiscount = (float) ($targetInvoice['discount_amount'] ?? 0);
             $taxableAmount = max($amount - $existingDiscount, 0.0);
-            $vatAmount = round($taxableAmount * ($vatRate / 100), 2);
-            $totalAmount = round($taxableAmount + $vatAmount, 2);
+            $exciseAmount = round($taxableAmount * ($exciseRate / 100), 2);
+            $vatAmount = round(($taxableAmount + $exciseAmount) * ($vatRate / 100), 2);
+            $totalAmount = round($taxableAmount + $exciseAmount + $vatAmount, 2);
 
             try {
                 $stmt = db()->prepare('
@@ -457,6 +486,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         due_on = :due_on,
                         notes = :notes,
                         vat_rate = :vat_rate,
+                        excise_rate = :excise_rate,
+                        excise_amount = :excise_amount,
                         vat_amount = :vat_amount,
                         taxable_amount = :taxable_amount,
                         total_amount = :total_amount
@@ -470,6 +501,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'due_on' => $dueDate,
                     'notes' => $notes,
                     'vat_rate' => $vatRate,
+                    'excise_rate' => $exciseRate,
+                    'excise_amount' => $exciseAmount,
                     'vat_amount' => $vatAmount,
                     'taxable_amount' => $taxableAmount,
                     'total_amount' => $totalAmount,
@@ -582,6 +615,16 @@ if ($hasClientDeclarations) {
     $declarationsAwaitingReview = count($invoiceIdsWithDeclarations);
 }
 
+$selectedInvoiceSourceType = (string) ($_POST['invoice_source_type'] ?? $defaultInvoiceSourceType);
+if (!in_array($selectedInvoiceSourceType, $allowedInvoiceSourceTypes, true)) {
+    $selectedInvoiceSourceType = $defaultInvoiceSourceType;
+}
+$selectedInvoiceType = $selectedInvoiceSourceType === 'task' ? (string) ($_POST['invoice_type'] ?? 'stage') : $selectedInvoiceSourceType;
+$showTaskFields = $selectedInvoiceSourceType === 'task';
+$showGoodsFields = in_array($selectedInvoiceSourceType, ['inventory', 'manufacturing'], true);
+$showManufacturingFields = $selectedInvoiceSourceType === 'manufacturing';
+$showServiceFields = in_array($selectedInvoiceSourceType, ['task', 'other'], true);
+
 $pageTitle = 'Invoice Management';
 $bodyClass = 'admin-layout';
 require __DIR__ . '/../../app/views/partials/admin_header.php';
@@ -630,6 +673,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
         .invoice-line-entry { display: grid; grid-template-columns: 1.2fr 1.5fr 0.55fr 0.7fr 0.55fr; gap: 0.5rem; }
         .invoice-line-entry input,
         .invoice-line-entry select { min-width: 0; }
+        .is-hidden { display: none !important; }
         @media (max-width: 960px) {
             .create-invoice-grid { grid-template-columns: 1fr; }
             .invoice-line-entry { grid-template-columns: 1fr; }
@@ -660,14 +704,14 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                     <form method="post" class="create-invoice-grid">
                         <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
                         <input type="hidden" name="action" value="create_invoice">
+                        <?php $invoiceSourceLabels = ['task' => 'Client Task / Service', 'inventory' => 'Inventory Sale', 'manufacturing' => 'Manufacturing Output', 'other' => 'Other / Manual']; ?>
 
                         <div>
                             <label>Invoice Source</label>
                             <select name="invoice_source_type" id="invoice_source_type">
-                                <option value="task">Client Task / Service</option>
-                                <option value="inventory">Inventory Sale</option>
-                                <option value="manufacturing">Manufacturing Output</option>
-                                <option value="other">Other / Manual</option>
+                                <?php foreach ($allowedInvoiceSourceTypes as $sourceTypeOption): ?>
+                                    <option value="<?php echo e($sourceTypeOption); ?>" <?php echo $selectedInvoiceSourceType === $sourceTypeOption ? 'selected' : ''; ?>><?php echo e($invoiceSourceLabels[$sourceTypeOption] ?? ucfirst($sourceTypeOption)); ?></option>
+                                <?php endforeach; ?>
                             </select>
                         </div>
 
@@ -682,16 +726,11 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         </div>
 
                         <div>
-                            <label>Manufacturing Order</label>
-                            <select name="manufacturing_order_id">
-                                <option value="0">No manufacturing order</option>
-                                <?php foreach ($manufacturingOptions as $order): ?>
-                                    <option value="<?php echo e((int) $order['id']); ?>"><?php echo e($order['order_no'] . ' - ' . $order['sku'] . ' ' . $order['item_name']); ?></option>
-                                <?php endforeach; ?>
-                            </select>
+                            <label>Amount before VAT</label>
+                            <input type="number" min="0" step="0.01" name="amount" placeholder="Leave 0 when using line items">
                         </div>
 
-                        <div>
+                        <div id="task-field" class="<?php echo $showTaskFields ? '' : 'is-hidden'; ?>">
                             <label>Task</label>
                             <select name="task_id">
                                 <option value="">Select task</option>
@@ -703,15 +742,15 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                             </select>
                         </div>
 
-                        <div>
+                        <div id="invoice-type-field" class="<?php echo $showTaskFields ? '' : 'is-hidden'; ?>">
                             <label>Invoice Type</label>
-                            <select name="invoice_type" required>
-                                <option value="stage">Stage Invoice</option>
-                                <option value="task">Task Invoice</option>
+                            <select name="invoice_type" id="invoice_type">
+                                <option value="stage" <?php echo $selectedInvoiceType === 'stage' ? 'selected' : ''; ?>>Stage Invoice</option>
+                                <option value="task" <?php echo $selectedInvoiceType === 'task' ? 'selected' : ''; ?>>Task Invoice</option>
                             </select>
                         </div>
 
-                        <div>
+                        <div id="stage-field" class="<?php echo $showTaskFields ? '' : 'is-hidden'; ?>">
                             <label>Stage (required for stage invoice)</label>
                             <select name="stage_id">
                                 <option value="0">No stage selected</option>
@@ -723,9 +762,14 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                             </select>
                         </div>
 
-                        <div>
-                            <label>Amount before VAT</label>
-                            <input type="number" min="0" step="0.01" name="amount" placeholder="Leave 0 when using line items">
+                        <div id="manufacturing-order-field" class="<?php echo $showManufacturingFields ? '' : 'is-hidden'; ?>">
+                            <label>Manufacturing Order</label>
+                            <select name="manufacturing_order_id">
+                                <option value="0">No manufacturing order</option>
+                                <?php foreach ($manufacturingOptions as $order): ?>
+                                    <option value="<?php echo e((int) $order['id']); ?>"><?php echo e($order['order_no'] . ' - ' . $order['sku'] . ' ' . $order['item_name']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
                         </div>
 
                         <div>
@@ -761,12 +805,17 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                             <input type="number" name="vat_rate" step="0.01" value="13.00" required>
                         </div>
 
-                        <div class="full">
-                            <label>Invoice Description</label>
-                            <input type="text" name="description" placeholder="Service, inventory sale, manufacturing invoice, or manual billing description">
+                        <div id="excise-rate-field" class="<?php echo $showManufacturingFields ? '' : 'is-hidden'; ?>">
+                            <label>Excise Duty Rate (%)</label>
+                            <input type="number" name="excise_rate" step="0.01" min="0" value="<?php echo e(number_format($defaultExciseRate, 2, '.', '')); ?>">
                         </div>
 
-                        <div class="full invoice-lines-box">
+                        <div class="full">
+                            <label>Invoice Description</label>
+                            <input type="text" name="description" placeholder="<?php echo $showGoodsFields ? 'Inventory sale, manufacturing invoice, or manual billing description' : 'Service or manual billing description'; ?>">
+                        </div>
+
+                        <div class="full invoice-lines-box <?php echo $showGoodsFields ? '' : 'is-hidden'; ?>" id="line-items-field">
                             <label>Invoice Line Items</label>
                             <div class="invoice-line-entry">
                                 <select name="item_id[]">
@@ -796,7 +845,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <input type="number" name="line_rate[]" step="0.01" min="0" placeholder="Rate">
                                 <input type="number" name="line_vat_rate[]" step="0.01" min="0" placeholder="VAT %" value="13.00">
                             </div>
-                            <small class="text-muted">For inventory invoices, selected item quantities are issued from stock automatically when the invoice is issued or paid.</small>
+                            <small class="text-muted">For inventory invoices, selected item quantities are issued from stock automatically when the invoice is issued or paid. Manufacturing invoices also apply the configured excise rate on the taxable amount.</small>
                         </div>
 
                         <div class="full">
@@ -967,6 +1016,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         <h4>Invoice Details</h4>
                         <p><strong>Issued:</strong> <?php echo e($invoice['issued_on']); ?></p>
                         <p><strong>Due:</strong> <?php echo e($invoice['due_on'] ?? 'On demand'); ?></p>
+                        <p><strong>Template:</strong> <?php echo e(ucfirst((string) ($invoice['invoice_source_type'] ?? 'task'))); ?></p>
                         <?php if ($invoice['invoice_category'] === 'tax' && $invoice['tax_invoice_date']): ?>
                             <p><strong>Tax Invoice Date:</strong> <?php echo e($invoice['tax_invoice_date']); ?></p>
                         <?php endif; ?>
@@ -980,18 +1030,74 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
 
                 <div style="margin-top: 2rem;">
                     <h4>Invoice Items</h4>
+                    <?php
+                        $invoiceSourceType = (string) ($invoice['invoice_source_type'] ?? 'task');
+                        $showQuantityRate = !in_array($invoiceSourceType, ['task', 'other'], true);
+                        $showExcise = $invoiceSourceType === 'manufacturing';
+                        $exciseRateDisplay = $showExcise ? (float) ($invoice['excise_rate'] ?? $defaultExciseRate) : 0.0;
+                        $invoiceLines = $invoice['line_items'] ?? [];
+                        if ($invoiceLines === []) {
+                            $fallbackTaxable = (float) ($invoice['taxable_amount'] ?? $invoice['amount'] ?? 0);
+                            $fallbackExcise = $showExcise ? (float) ($invoice['excise_amount'] ?? round($fallbackTaxable * ($exciseRateDisplay / 100), 2)) : 0.0;
+                            $fallbackVatRate = (float) ($invoice['vat_rate'] ?? 13.00);
+                            $fallbackVat = (float) ($invoice['vat_amount'] ?? round(($fallbackTaxable + $fallbackExcise) * ($fallbackVatRate / 100), 2));
+                            $invoiceLines = [[
+                                'description' => $invoice['description'] ?? ($invoice['task_title'] ?? 'Invoice line'),
+                                'unit' => 'job',
+                                'quantity' => 1,
+                                'rate' => $fallbackTaxable,
+                                'taxable_amount' => $fallbackTaxable,
+                                'excise_amount' => $fallbackExcise,
+                                'vat_rate' => $fallbackVatRate,
+                                'vat_amount' => $fallbackVat,
+                                'total_amount' => round($fallbackTaxable + $fallbackExcise + $fallbackVat, 2),
+                            ]];
+                        }
+                    ?>
                     <div class="invoice-line header">
                         <div>Description</div>
-                        <div>Rate</div>
-                        <div>Qty</div>
-                        <div>Amount</div>
+                        <?php if ($showQuantityRate): ?>
+                            <div>Unit</div>
+                            <div>Qty</div>
+                            <div>Rate</div>
+                            <div>Taxable</div>
+                        <?php else: ?>
+                            <div>Amount</div>
+                        <?php endif; ?>
+                        <?php if ($showExcise): ?>
+                            <div>Excise Duty</div>
+                        <?php endif; ?>
+                        <div>VAT</div>
+                        <div>Total</div>
                     </div>
-                    <div class="invoice-line">
-                        <div><?php echo e($invoice['task_title'] ?? 'Service'); ?></div>
-                        <div>NPR <?php echo number_format((float) $invoice['amount'], 2); ?></div>
-                        <div>1</div>
-                        <div>NPR <?php echo number_format((float) $invoice['amount'], 2); ?></div>
-                    </div>
+                    <?php foreach ($invoiceLines as $line): ?>
+                        <?php
+                            $lineTaxable = (float) ($line['taxable_amount'] ?? 0);
+                            if ($lineTaxable <= 0) {
+                                $lineTaxable = round((float) ($line['quantity'] ?? 1) * (float) ($line['rate'] ?? 0), 2);
+                            }
+                            $lineExcise = $showExcise ? (float) ($line['excise_amount'] ?? round($lineTaxable * ($exciseRateDisplay / 100), 2)) : 0.0;
+                            $lineVatRate = (float) ($line['vat_rate'] ?? $invoice['vat_rate'] ?? 13.00);
+                            $lineVat = (float) ($line['vat_amount'] ?? round(($lineTaxable + $lineExcise) * ($lineVatRate / 100), 2));
+                            $lineTotal = (float) ($line['total_amount'] ?? round($lineTaxable + $lineExcise + $lineVat, 2));
+                        ?>
+                        <div class="invoice-line">
+                            <div><?php echo e($line['description'] ?? ($invoice['task_title'] ?? 'Invoice line')); ?></div>
+                            <?php if ($showQuantityRate): ?>
+                                <div><?php echo e($line['unit'] ?? 'pcs'); ?></div>
+                                <div><?php echo e(number_format((float) ($line['quantity'] ?? 1), 3)); ?></div>
+                                <div>NPR <?php echo number_format((float) ($line['rate'] ?? 0), 2); ?></div>
+                                <div>NPR <?php echo number_format($lineTaxable, 2); ?></div>
+                            <?php else: ?>
+                                <div>NPR <?php echo number_format($lineTaxable, 2); ?></div>
+                            <?php endif; ?>
+                            <?php if ($showExcise): ?>
+                                <div>NPR <?php echo number_format($lineExcise, 2); ?></div>
+                            <?php endif; ?>
+                            <div>NPR <?php echo number_format($lineVat, 2); ?></div>
+                            <div>NPR <?php echo number_format($lineTotal, 2); ?></div>
+                        </div>
+                    <?php endforeach; ?>
                 </div>
 
                 <div class="vat-section">
@@ -999,6 +1105,12 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         <strong>Taxable Amount:</strong>
                         <span>NPR <?php echo number_format((float) ($invoice['taxable_amount'] ?? $invoice['amount']), 2); ?></span>
                     </div>
+                    <?php if ($showExcise): ?>
+                        <div style="display: grid; grid-template-columns: auto 1fr; gap: 1rem; margin-bottom: 0.5rem;">
+                            <strong>Excise Duty:</strong>
+                            <span>NPR <?php echo number_format((float) ($invoice['excise_amount'] ?? 0), 2); ?> @ <?php echo number_format($exciseRateDisplay, 2); ?>%</span>
+                        </div>
+                    <?php endif; ?>
                     <div style="display: grid; grid-template-columns: auto 1fr; gap: 1rem; margin-bottom: 0.5rem;">
                         <strong>VAT Rate:</strong>
                         <span><?php echo number_format((float) ($invoice['vat_rate'] ?? 13.00), 2); ?>%</span>
@@ -1115,6 +1227,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
             <!-- Edit Invoice -->
             <div class="invoice-details">
                 <h2>Edit Invoice: <?php echo e($invoice['invoice_no']); ?></h2>
+                <?php $editShowsExcise = (string) ($invoice['invoice_source_type'] ?? 'task') === 'manufacturing'; ?>
                 <form method="post" action="">
                     <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
                     <input type="hidden" name="action" value="update_invoice">
@@ -1141,6 +1254,12 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                             <label>VAT Rate (%)</label>
                             <input type="number" name="vat_rate" step="0.01" value="<?php echo e(number_format((float) ($invoice['vat_rate'] ?? 13.00), 2, '.', '')); ?>" required>
                         </div>
+                        <?php if ($editShowsExcise): ?>
+                            <div class="form-group">
+                                <label>Excise Duty Rate (%)</label>
+                                <input type="number" name="excise_rate" step="0.01" value="<?php echo e(number_format((float) ($invoice['excise_rate'] ?? $defaultExciseRate), 2, '.', '')); ?>">
+                            </div>
+                        <?php endif; ?>
                     </div>
                     
                     <div class="form-group">
@@ -1210,6 +1329,29 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 
     <script>
+        function toggleInvoiceField(id, hidden) {
+            const field = document.getElementById(id);
+            if (field) {
+                field.classList.toggle('is-hidden', hidden);
+            }
+        }
+
+        function syncInvoiceFields() {
+            const sourceSelect = document.getElementById('invoice_source_type');
+            if (!sourceSelect) return;
+            const sourceType = sourceSelect.value;
+            const isTask = sourceType === 'task';
+            const isGoods = sourceType === 'inventory' || sourceType === 'manufacturing';
+            const isManufacturing = sourceType === 'manufacturing';
+
+            toggleInvoiceField('task-field', !isTask);
+            toggleInvoiceField('invoice-type-field', !isTask);
+            toggleInvoiceField('stage-field', !isTask);
+            toggleInvoiceField('manufacturing-order-field', !isManufacturing);
+            toggleInvoiceField('excise-rate-field', !isManufacturing);
+            toggleInvoiceField('line-items-field', !isGoods);
+        }
+
         function showPaymentModal(invoiceId) {
             document.getElementById('modalInvoiceId').value = invoiceId;
             document.getElementById('paymentModal').classList.add('active');
@@ -1236,6 +1378,12 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
         document.getElementById('convertModal').addEventListener('click', function(e) {
             if (e.target === this) closeConvertModal();
         });
+
+        const invoiceSourceSelect = document.getElementById('invoice_source_type');
+        if (invoiceSourceSelect) {
+            invoiceSourceSelect.addEventListener('change', syncInvoiceFields);
+            syncInvoiceFields();
+        }
 
         document.querySelectorAll('.invoice-line-entry select[name="item_id[]"]').forEach(function(select) {
             select.addEventListener('change', function() {
