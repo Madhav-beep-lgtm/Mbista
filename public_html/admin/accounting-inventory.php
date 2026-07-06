@@ -223,7 +223,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             flash('error', 'Could not create manufacturing order. Check order number and item selections.');
         }
-        redirect('admin/accounting-inventory.php');
+        redirect('admin/accounting-inventory.php?view=manufacturing');
     }
 }
 
@@ -307,7 +307,11 @@ $inventoryTypeCards = $inventoryProfile['show_manufacturing']
         ['Service Item', 'Non-physical service lines used in billing.'],
         ['Consumable', 'Low-value operational items tracked for stock control.'],
 ];
-$pageTitle = $inventoryProfile['show_manufacturing'] ? 'Inventory & Manufacturing' : 'Inventory';
+$invView = (string) ($_GET['view'] ?? 'inventory');
+if ($invView !== 'manufacturing' || !($inventoryProfile['show_manufacturing'] ?? false)) {
+    $invView = 'inventory';
+}
+$pageTitle = $invView === 'manufacturing' ? 'Manufacturing' : 'Inventory';
 $pageSubtitle = $inventoryProfile['show_manufacturing']
     ? 'Item master, stock movements, valuation, and production orders'
     : 'Item master, stock movements, and valuation';
@@ -329,8 +333,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Dashboard</a>
     <a href="<?= e(url('admin/accounting-parties.php')) ?>">Parties</a>
     <a href="<?= e(url('admin/accounting.php')) ?>">Vouchers</a>
-    <a class="is-active" href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory</a>
-    <?php if ($inventoryProfile['show_manufacturing']): ?><a href="#manufacturing">Manufacturing</a><?php endif; ?>
+    <a class="<?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory</a>
+    <?php if ($inventoryProfile['show_manufacturing']): ?><a class="<?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>">Manufacturing</a><?php endif; ?>
     <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a>
     <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Reports</a>
 </nav>
@@ -372,6 +376,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 </section>
 
+<?php if ($invView === 'inventory'): ?>
 <section class="mbw-card" aria-label="Inventory process click flow">
     <div class="mbw-card-head"><h2>Inventory Process Flow</h2></div>
     <div class="inventory-process-grid">
@@ -392,9 +397,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
+<?php endif; ?>
+
 <section class="mbw-card" aria-label="Inventory workbench">
     <div class="mbw-card-head"><h2>Create &amp; Record</h2></div>
 <div class="workspace-feature-stack">
+    <?php if ($invView === 'inventory'): ?>
     <details class="feature-disclosure" id="create-item" open>
         <summary><span><strong><?= icon('services') ?><?= $editItem ? 'Edit item' : 'Create item' ?></strong><small>Maintain inventory, service, raw material, and finished-goods master data.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid">
@@ -434,7 +442,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </form>
     </details>
 
-    <?php if ($inventoryProfile['show_manufacturing']): ?>
+    <?php endif; ?>
+    <?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing'): ?>
         <details class="feature-disclosure" id="manufacturing">
             <summary><span><strong><?= icon('settings') ?>Production Completion</strong><small>Consume input items and produce finished goods in one step.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
             <form method="post" class="workspace-form-grid">
@@ -467,6 +476,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 <?php endif; ?>
 
+<?php if ($invView === 'inventory'): ?>
 <section class="mbw-card">
     <div class="mbw-card-head"><h2>Item Stock Summary</h2></div>
     <div style="overflow-x:auto">
@@ -501,7 +511,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
-<?php if ($inventoryProfile['show_manufacturing']): ?>
+<?php endif; ?>
+<?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing'): ?>
     <section class="mbw-card">
         <div class="mbw-card-head"><h2>Manufacturing Orders</h2></div>
         <div style="overflow-x:auto">
