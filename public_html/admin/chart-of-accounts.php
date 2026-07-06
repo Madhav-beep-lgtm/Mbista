@@ -76,9 +76,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
         $code = strtoupper(trim((string) ($row[1] ?? '')));
         $name = trim((string) ($row[2] ?? ''));
         $type = strtolower(trim((string) ($row[3] ?? '')));
-        if ($groupCode === 'GROUP_CODE' || $code === '' || $name === '' || !isset($groupsByCode[$groupCode]) || !in_array($type, ['asset', 'liability', 'equity', 'revenue', 'expense'], true)) {
+        if ($groupCode === 'GROUP_CODE' || $name === '' || !isset($groupsByCode[$groupCode]) || !in_array($type, ['asset', 'liability', 'equity', 'revenue', 'expense'], true)) {
             $skipped++;
             continue;
+        }
+        if ($code === '') {
+            $code = coa_next_ledger_code($companyId, (int) $groupsByCode[$groupCode]['id']);
         }
         $exists->execute(['cid' => $companyId, 'code' => $code]);
         if ((int) $exists->fetchColumn() > 0) {
@@ -240,9 +243,10 @@ $statusPill = static fn (string $status): string => $status === 'active'
     <section class="mbw-card frm-rail-card">
         <div class="frm-section-head"><span class="mbw-chip is-square tone-blue"><?= icon('about') ?></span><h2>Code Structure Rules</h2></div>
         <div style="display:grid;gap:10px;font-size:12px">
-            <div style="border:1px solid var(--mbw-primary-soft);background:var(--mbw-primary-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-primary)"># Master = Nature (1–5)</strong><br><span style="color:var(--mbw-muted)">1 Assets · 2 Liabilities · 3 Equity · 4 Revenue · 5 Expenses</span></div>
-            <div style="border:1px solid var(--mbw-green-soft);background:var(--mbw-green-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-green)">## Group = short code</strong><br><span style="color:var(--mbw-muted)">e.g. BANK, RECEIVABLE, PAYABLE, ADMIN_EXP</span></div>
-            <div style="border:1px solid var(--mbw-purple-soft);background:var(--mbw-purple-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-purple)">### Ledger = unique code</strong><br><span style="color:var(--mbw-muted)">e.g. CASH, AR, AP, SALES — unique per company</span></div>
+            <div style="border:1px solid var(--mbw-primary-soft);background:var(--mbw-primary-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-primary)"># Master Code = 1 Digit</strong><br><span style="color:var(--mbw-muted)">Examples: 1 Assets · 2 Liabilities · 3 Equity · 4 Revenue · 5 Expenses</span></div>
+            <div style="border:1px solid var(--mbw-green-soft);background:var(--mbw-green-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-green)">## Group Code = 2 Digits</strong><br><span style="color:var(--mbw-muted)">Examples: 11 Current Assets · 12 Non-Current Assets · 21 Current Liabilities · 41 Operating Revenue · 51 Administrative Expenses</span></div>
+            <div style="border:1px solid var(--mbw-purple-soft);background:var(--mbw-purple-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-purple)">### Ledger Code = 3 Digits</strong><br><span style="color:var(--mbw-muted)">Examples: 111 Cash in Hand · 112 Bank Account · 113 Trade Receivables · 211 Trade Payables · 411 Service Revenue · 511 Office Rent</span></div>
+            <p style="margin:0;color:var(--mbw-muted)">Codes are generated automatically — never typed by hand. Existing legacy codes remain valid.</p>
         </div>
     </section>
 

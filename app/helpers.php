@@ -37,6 +37,47 @@ function ledger_master_nature(string $masterKey): ?string
     return LEDGER_MASTERS[$masterKey]['nature'] ?? null;
 }
 
+/**
+ * Structured chart-of-accounts codes: master = 1 digit by nature,
+ * group = master digit + sequence (2 digits), ledger = group code +
+ * sequence (3 digits). Codes are always system-generated.
+ */
+function coa_master_digit(string $masterKey): string
+{
+    $digits = ['asset' => '1', 'liability' => '2', 'equity' => '3', 'revenue' => '4', 'expense' => '5'];
+    return $digits[ledger_master_nature($masterKey) ?? 'asset'] ?? '1';
+}
+
+function coa_next_group_code(int $companyId, string $masterKey): string
+{
+    $digit = coa_master_digit($masterKey);
+    $stmt = db()->prepare('SELECT code FROM ledger_groups WHERE company_id = :cid AND code REGEXP :pattern');
+    $stmt->execute(['cid' => $companyId, 'pattern' => '^' . $digit . '[0-9]+$']);
+    $max = 0;
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $existing) {
+        $max = max($max, (int) substr((string) $existing, 1));
+    }
+    return $digit . (string) ($max + 1);
+}
+
+function coa_next_ledger_code(int $companyId, int $groupId): string
+{
+    $groupStmt = db()->prepare('SELECT code, master_key FROM ledger_groups WHERE id = :id AND company_id = :cid LIMIT 1');
+    $groupStmt->execute(['id' => $groupId, 'cid' => $companyId]);
+    $group = $groupStmt->fetch();
+    $base = $group && preg_match('/^\d+$/', (string) $group['code'])
+        ? (string) $group['code']
+        : coa_master_digit((string) ($group['master_key'] ?? '')) . '0';
+    $stmt = db()->prepare('SELECT code FROM ledgers WHERE company_id = :cid AND code REGEXP :pattern');
+    $stmt->execute(['cid' => $companyId, 'pattern' => '^' . $base . '[0-9]+$']);
+    $max = 0;
+    $baseLength = strlen($base);
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $existing) {
+        $max = max($max, (int) substr((string) $existing, $baseLength));
+    }
+    return $base . (string) ($max + 1);
+}
+
 function e(mixed $value): string
 {
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
@@ -3358,7 +3399,7 @@ function provision_client_books(int $clientProfileId): int
     $groupInsert = db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, :name, :mk, :cb, 1)');
     $groupIds = [];
     foreach ($groupSeeds as [$gCode, $gName, $gMaster, $gCashBank]) {
-        $groupInsert->execute(['cid' => $booksCompanyId, 'code' => $gCode, 'name' => $gName, 'mk' => $gMaster, 'cb' => $gCashBank]);
+        $groupInsert->execute(['cid' => $booksCompanyId, 'code' => coa_next_group_code($booksCompanyId, $gMaster), 'name' => $gName, 'mk' => $gMaster, 'cb' => $gCashBank]);
         $groupIds[$gCode] = (int) db()->lastInsertId();
     }
 
@@ -3371,7 +3412,8 @@ function provision_client_books(int $clientProfileId): int
     $ledgerInsert = db()->prepare('INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:cid, :gid, :code, :name, :type, 1, \'active\')');
     $ledgerIds = [];
     foreach ($ledgerSeeds as [$lCode, $lName, $lType, $lGroup]) {
-        $ledgerInsert->execute(['cid' => $booksCompanyId, 'gid' => $groupIds[$lGroup] ?? null, 'code' => $lCode, 'name' => $lName, 'type' => $lType]);
+        $seedGroupId = $groupIds[$lGroup] ?? 0;
+        $ledgerInsert->execute(['cid' => $booksCompanyId, 'gid' => $seedGroupId ?: null, 'code' => coa_next_ledger_code($booksCompanyId, (int) $seedGroupId), 'name' => $lName, 'type' => $lType]);
         $ledgerIds[$lCode] = (int) db()->lastInsertId();
     }
     if (table_exists('company_ledger_mappings')) {

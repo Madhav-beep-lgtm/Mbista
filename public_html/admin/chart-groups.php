@@ -18,7 +18,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
     if ($action === 'save_group') {
         $groupId = (int) ($_POST['group_id'] ?? 0);
-        $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
         $masterKey = (string) ($_POST['master_key'] ?? '');
         $parentGroupId = $supportsGroupHierarchy ? (int) ($_POST['parent_group_id'] ?? 0) : 0;
@@ -31,9 +30,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $masterKey = (string) $parentGroup['master_key'];
             }
         }
-        if ($code === '' || $name === '' || !array_key_exists($masterKey, $masters)) {
-            flash('error', 'Code, name, and master are required.');
+        if ($name === '' || !array_key_exists($masterKey, $masters)) {
+            flash('error', 'Name and master are required.');
             redirect('admin/chart-groups.php');
+        }
+        // Codes follow the structure rules and are never entered manually.
+        if ($groupId > 0) {
+            $codeStmt = db()->prepare('SELECT code FROM ledger_groups WHERE id = :id AND company_id = :cid LIMIT 1');
+            $codeStmt->execute(['id' => $groupId, 'cid' => $companyId]);
+            $code = (string) ($codeStmt->fetchColumn() ?: coa_next_group_code($companyId, $masterKey));
+        } else {
+            $code = coa_next_group_code($companyId, $masterKey);
         }
         if ($groupId > 0) {
             $sql = 'UPDATE ledger_groups SET code = :code, name = :name, master_key = :master_key, is_cash_or_bank = :is_cash_or_bank' . ($supportsGroupHierarchy ? ', parent_group_id = :parent_group_id' : '') . ' WHERE id = :id AND company_id = :company_id';
@@ -94,7 +101,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_group">
             <input type="hidden" name="group_id" value="<?= e((int) ($editGroup['id'] ?? 0)) ?>">
-            <label>Code<input type="text" name="code" value="<?= e($editGroup['code'] ?? '') ?>" required></label>
+            <label>Code<input type="text" value="<?= e($editGroup['code'] ?? 'Auto — master digit + sequence') ?>" disabled title="System-generated per the code structure rules"></label>
             <label>Name<input type="text" name="name" value="<?= e($editGroup['name'] ?? '') ?>" required></label>
             <label>Master
                 <select name="master_key" required>

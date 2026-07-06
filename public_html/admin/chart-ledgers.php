@@ -20,16 +20,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
     if ($action === 'save_ledger') {
         $ledgerId = (int) ($_POST['ledger_id'] ?? 0);
-        $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
         $groupId = (int) ($_POST['group_id'] ?? 0);
         $groupStmt = db()->prepare('SELECT id, master_key FROM ledger_groups WHERE id = :id AND company_id = :company_id AND is_active = 1 LIMIT 1');
         $groupStmt->execute(['id' => $groupId, 'company_id' => $companyId]);
         $group = $groupStmt->fetch();
         $ledgerType = $group ? ledger_master_nature((string) $group['master_key']) : null;
-        if ($code === '' || $name === '' || !$group || $ledgerType === null) {
-            flash('error', 'Code, name, and group are required.');
+        if ($name === '' || !$group || $ledgerType === null) {
+            flash('error', 'Name and group are required.');
             redirect('admin/chart-ledgers.php');
+        }
+        // Codes follow the structure rules and are never entered manually.
+        if ($ledgerId > 0) {
+            $codeStmt = db()->prepare('SELECT code FROM ledgers WHERE id = :id AND company_id = :cid LIMIT 1');
+            $codeStmt->execute(['id' => $ledgerId, 'cid' => $companyId]);
+            $code = (string) ($codeStmt->fetchColumn() ?: coa_next_ledger_code($companyId, $groupId));
+        } else {
+            $code = coa_next_ledger_code($companyId, $groupId);
         }
         if ($ledgerId > 0) {
             db()->prepare("UPDATE ledgers SET code = :code, name = :name, group_id = :group_id, type = :type WHERE id = :id AND company_id = :company_id")
@@ -82,7 +89,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_ledger">
             <input type="hidden" name="ledger_id" value="<?= e((int) ($editLedger['id'] ?? 0)) ?>">
-            <label>Code<input type="text" name="code" value="<?= e($editLedger['code'] ?? '') ?>" required></label>
+            <label>Code<input type="text" value="<?= e($editLedger['code'] ?? 'Auto — group code + sequence') ?>" disabled title="System-generated per the code structure rules"></label>
             <label>Name<input type="text" name="name" value="<?= e($editLedger['name'] ?? '') ?>" required></label>
             <label>Group
                 <select name="group_id" required>
