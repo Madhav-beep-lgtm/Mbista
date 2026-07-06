@@ -9,11 +9,12 @@ function rc_report_registry(): array
         'trial-balance' => ['Trial Balance', 'Summary of all ledger balances', 'accounting'],
         'profit-loss' => ['Profit or Loss Statement', 'Income and expense summary', 'invoices'],
         'balance-sheet' => ['Balance Sheet', 'Statement of financial position', 'documents'],
-        'ledger-report' => ['Ledger Report', 'Detailed ledger balances', 'accounting'],
+        'cash-flow' => ['Cash Flow Statement', 'Operating, investing and financing activities', 'bank'],
+        'ledger-report' => ['Ledger Report', 'Account statement with running balance', 'accounting'],
         'group-report' => ['Group Report', 'Summary by ledger groups', 'teams'],
         'consolidated' => ['Consolidated Report', 'Consolidated financials', 'companies'],
         'ledger-wise' => ['Ledger-wise Report', 'Report by specific ledger', 'documents'],
-        'party-wise' => ['Party-wise Report', 'Report by parties', 'users'],
+        'party-wise' => ['Receivables Aging Report', 'Customer dues by age bucket', 'users'],
         'cash-book' => ['Cash Book', 'Cash account transactions', 'documents'],
         'bank-book' => ['Bank Book', 'Bank account transactions', 'accounting'],
         'daybook' => ['Daybook', 'All day transactions', 'compliance'],
@@ -34,6 +35,147 @@ function rc_report_registry(): array
 function rc_fmt(float $amount): string
 {
     return abs($amount) < 0.005 ? '–' : number_format($amount, 2);
+}
+
+/**
+ * Statement row with an optional emphasis style for the template renderer:
+ * '' (plain), 'bold' (computed line), 'section' (section heading), 'total'.
+ */
+function rc_row(array $cells, string $style = ''): array
+{
+    return ['cells' => $cells, 'style' => $style];
+}
+
+function rc_row_cells(array $row): array
+{
+    return $row['cells'] ?? $row;
+}
+
+function rc_row_style(array $row): string
+{
+    return (string) ($row['style'] ?? '');
+}
+
+/** Immediately preceding period of the same length. */
+function rc_previous_period(string $from, string $to): array
+{
+    $days = max(1, (int) (new DateTimeImmutable($from))->diff(new DateTimeImmutable($to))->days + 1);
+    $prevTo = (new DateTimeImmutable($from))->modify('-1 day')->format('Y-m-d');
+    $prevFrom = (new DateTimeImmutable($prevTo))->modify('-' . ($days - 1) . ' days')->format('Y-m-d');
+    return [$prevFrom, $prevTo];
+}
+
+/** Variance helpers for the two-period statement templates. */
+function rc_variance_cells(float $current, float $previous): array
+{
+    $variance = $current - $previous;
+    $pct = abs($previous) > 0.004 ? ($variance / abs($previous)) * 100 : null;
+    return [rc_fmt($variance), $pct === null ? '–' : number_format($pct, 2) . '%'];
+}
+
+/**
+ * Period movements aggregated for the P&L / cash-flow templates. Returns
+ * per-ledger movement rows plus bucket totals keyed by statement line.
+ */
+function rc_pl_figures(int $scopeCompanyId, string $from, string $to): array
+{
+    $balances = rc_ledger_balances($scopeCompanyId, $from, $to);
+    $f = [
+        'gross_sales' => 0.0, 'sales_returns' => 0.0, 'other_income' => 0.0,
+        'cogs' => 0.0, 'operating_expenses' => 0.0, 'finance_cost' => 0.0,
+        'income_tax' => 0.0, 'employee_cost' => 0.0, 'depreciation' => 0.0,
+        'revenue_lines' => [],
+    ];
+    foreach ($balances as $b) {
+        $nature = rc_ledger_nature($b);
+        $master = (string) ($b['master_key'] ?? '');
+        $txDr = (float) $b['tx_dr'];
+        $txCr = (float) $b['tx_cr'];
+        $name = (string) $b['name'];
+        if ($nature === 'revenue') {
+            if ($master === 'indirect_income') {
+                $f['other_income'] += $txCr - $txDr;
+            } else {
+                $f['gross_sales'] += $txCr;
+                $f['sales_returns'] += $txDr;
+            }
+            if (abs($txCr - $txDr) > 0.004) {
+                $f['revenue_lines'][] = ['name' => $name, 'amount' => $txCr - $txDr];
+            }
+        } elseif ($nature === 'expense') {
+            $movement = $txDr - $txCr;
+            if (abs($movement) < 0.005) {
+                continue;
+            }
+            $haystack = strtolower($name . ' ' . (string) ($b['group_name'] ?? ''));
+            if (preg_match('/income tax|tax expense/', $haystack)) {
+                $f['income_tax'] += $movement;
+            } elseif (preg_match('/interest|finance (cost|charge)|bank charge/', $haystack)) {
+                $f['finance_cost'] += $movement;
+            } elseif ($master === 'direct_expense') {
+                $f['cogs'] += $movement;
+            } else {
+                if (preg_match('/salar|wage|staff|employee|payroll/', $haystack)) {
+                    $f['employee_cost'] += $movement;
+                } elseif (preg_match('/depreciat|amortis|amortiz/', $haystack)) {
+                    $f['depreciation'] += $movement;
+                }
+                $f['operating_expenses'] += $movement;
+            }
+        }
+    }
+    $f['net_sales'] = $f['gross_sales'] - $f['sales_returns'];
+    $f['gross_profit'] = $f['net_sales'] - $f['cogs'];
+    $f['operating_profit'] = $f['gross_profit'] + $f['other_income'] - $f['operating_expenses'];
+    $f['pbt'] = $f['operating_profit'] - $f['finance_cost'];
+    $f['pat'] = $f['pbt'] - $f['income_tax'];
+    $f['total_revenue'] = $f['net_sales'] + $f['other_income'];
+    return $f;
+}
+
+/**
+ * Cash movements classified by activity (indirect approximation): each
+ * posted voucher touching cash/bank is assigned to the activity of its
+ * dominant counterpart ledger group.
+ */
+function rc_cash_flow_figures(int $scopeCompanyId, string $from, string $to): array
+{
+    $stmt = db()->prepare("
+        SELECT v.id,
+               SUM(CASE WHEN COALESCE(g.is_cash_or_bank, 0) = 1 THEN (CASE WHEN e.entry_type = 'debit' THEN e.amount ELSE -e.amount END) ELSE 0 END) AS cash_net,
+               SUM(CASE WHEN COALESCE(g.is_cash_or_bank, 0) = 0 AND g.master_key IN ('non_current_asset') THEN e.amount ELSE 0 END) AS w_investing,
+               SUM(CASE WHEN COALESCE(g.is_cash_or_bank, 0) = 0 AND g.master_key IN ('equity', 'non_current_liability') THEN e.amount ELSE 0 END) AS w_financing,
+               SUM(CASE WHEN COALESCE(g.is_cash_or_bank, 0) = 0 AND (g.master_key NOT IN ('non_current_asset', 'equity', 'non_current_liability') OR g.master_key IS NULL) THEN e.amount ELSE 0 END) AS w_operating
+        FROM vouchers v
+        INNER JOIN voucher_entries e ON e.voucher_id = v.id
+        INNER JOIN ledgers l ON l.id = e.ledger_id
+        LEFT JOIN ledger_groups g ON g.id = l.group_id
+        WHERE v.company_id = :company_id AND v.status = 'posted'
+          AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :from AND :to
+        GROUP BY v.id
+        HAVING cash_net <> 0
+    ");
+    $stmt->execute(['company_id' => $scopeCompanyId, 'from' => $from, 'to' => $to]);
+    $flows = ['operating' => 0.0, 'investing' => 0.0, 'financing' => 0.0];
+    foreach ($stmt->fetchAll() as $row) {
+        $weights = ['operating' => (float) $row['w_operating'], 'investing' => (float) $row['w_investing'], 'financing' => (float) $row['w_financing']];
+        arsort($weights);
+        $flows[(string) array_key_first($weights)] += (float) $row['cash_net'];
+    }
+    $flows['net'] = $flows['operating'] + $flows['investing'] + $flows['financing'];
+
+    $openStmt = db()->prepare("
+        SELECT COALESCE(SUM(CASE WHEN e.entry_type = 'debit' THEN e.amount ELSE -e.amount END), 0)
+        FROM voucher_entries e
+        INNER JOIN vouchers v ON v.id = e.voucher_id AND v.company_id = :company_id AND v.status = 'posted'
+        INNER JOIN ledgers l ON l.id = e.ledger_id
+        INNER JOIN ledger_groups g ON g.id = l.group_id AND COALESCE(g.is_cash_or_bank, 0) = 1
+        WHERE COALESCE(v.voucher_date, DATE(v.created_at)) < :from
+    ");
+    $openStmt->execute(['company_id' => $scopeCompanyId, 'from' => $from]);
+    $flows['opening'] = (float) $openStmt->fetchColumn();
+    $flows['closing'] = $flows['opening'] + $flows['net'];
+    return $flows;
 }
 
 /**
@@ -124,7 +266,7 @@ function rc_entry_lines(int $scopeCompanyId, array $ledgerIds, string $from, str
     $placeholders = implode(',', array_fill(0, count($ledgerIds), '?'));
     $sql = "
         SELECT e.ledger_id, e.entry_type, e.amount, e.memo,
-               v.voucher_no, v.voucher_type, v.narration,
+               v.voucher_no, v.voucher_type, v.narration, v.reference_no,
                COALESCE(v.voucher_date, DATE(v.created_at)) AS vdate,
                l.code AS ledger_code, l.name AS ledger_name
         FROM voucher_entries e
@@ -158,7 +300,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 }
                 $sn++;
                 $rows[] = [
-                    (string) $sn, $b['name'], $b['code'],
+                    (string) $sn, $b['code'], $b['name'], $b['group_name'] ?? '–',
                     rc_fmt($b['op_side_dr']), rc_fmt($b['op_side_cr']),
                     rc_fmt((float) $b['tx_dr']), rc_fmt((float) $b['tx_cr']),
                     rc_fmt($b['cl_side_dr']), rc_fmt($b['cl_side_cr']),
@@ -171,92 +313,256 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 $totals['cl_cr'] += $b['cl_side_cr'];
             }
             return [
+                'number' => '1',
+                'title' => 'Trial Balance',
                 'subtitle' => 'Summary of all ledger balances as on selected date range.',
                 'columns' => [
-                    ['SN', 'left', ''], ['Account Name', 'left', ''], ['Ledger Code', 'left', ''],
-                    ['Dr. (' . $sym . ')', 'right', 'Opening Balance'], ['Cr. (' . $sym . ')', 'right', 'Opening Balance'],
-                    ['Dr. (' . $sym . ')', 'right', 'Transactions'], ['Cr. (' . $sym . ')', 'right', 'Transactions'],
-                    ['Dr. (' . $sym . ')', 'right', 'Closing Balance'], ['Cr. (' . $sym . ')', 'right', 'Closing Balance'],
+                    ['SN', 'left', ''], ['Ledger Code', 'left', ''], ['Account Name', 'left', ''], ['Group', 'left', ''],
+                    ['Dr.', 'right', 'Opening Balance'], ['Cr.', 'right', 'Opening Balance'],
+                    ['Dr.', 'right', 'Period Activity'], ['Cr.', 'right', 'Period Activity'],
+                    ['Dr.', 'right', 'Closing Balance'], ['Cr.', 'right', 'Closing Balance'],
                 ],
                 'rows' => $rows,
-                'totals' => ['', 'Total', '', rc_fmt($totals['op_dr']), rc_fmt($totals['op_cr']), rc_fmt($totals['tx_dr']), rc_fmt($totals['tx_cr']), rc_fmt($totals['cl_dr']), rc_fmt($totals['cl_cr'])],
+                'totals' => ['', '', 'Total', '', rc_fmt($totals['op_dr']), rc_fmt($totals['op_cr']), rc_fmt($totals['tx_dr']), rc_fmt($totals['tx_cr']), rc_fmt($totals['cl_dr']), rc_fmt($totals['cl_cr'])],
             ];
         }
 
         case 'profit-loss': {
-            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, '', $ctx['group_id'], 0);
-            $income = 0.0;
-            $expense = 0.0;
-            $rows = [];
-            foreach ($balances as $b) {
-                $nature = rc_ledger_nature($b);
-                $movement = (float) $b['tx_cr'] - (float) $b['tx_dr'];
-                if ($nature === 'revenue' && abs($movement) > 0.004) {
-                    $rows[] = ['Income', $b['name'], $b['code'], rc_fmt($movement)];
-                    $income += $movement;
-                } elseif ($nature === 'expense' && abs($movement) > 0.004) {
-                    $rows[] = ['Expense', $b['name'], $b['code'], rc_fmt(-$movement)];
-                    $expense += -$movement;
+            $orgType = in_array((string) $ctx['biz'], ['manufacturing', 'trading', 'service'], true)
+                ? (string) $ctx['biz']
+                : (string) ($ctx['org_default'] ?? 'service');
+            [$prevFrom, $prevTo] = rc_previous_period($from, $to);
+            $cur = rc_pl_figures($scopeCompanyId, $from, $to);
+            $prev = rc_pl_figures($scopeCompanyId, $prevFrom, $prevTo);
+
+            $columns = [
+                ['Particulars', 'left', ''], ['Note', 'left', ''],
+                ['Current Period (' . $sym . ')', 'right', ''], ['Previous Period (' . $sym . ')', 'right', ''],
+                ['Variance (' . $sym . ')', 'right', ''], ['Variance (%)', 'right', ''],
+            ];
+            $note = 0;
+            $line = static function (string $label, float $c, float $p, string $style = '', bool $numbered = true, bool $negative = false) use (&$note): array {
+                if ($numbered) {
+                    $note++;
                 }
+                $cs = $negative ? -$c : $c;
+                $ps = $negative ? -$p : $p;
+                [$var, $pct] = rc_variance_cells($c, $p);
+                return rc_row([$label, $numbered ? (string) $note : '', rc_fmt($cs), rc_fmt($ps), $var, $pct], $style);
+            };
+
+            $rows = [];
+            if ($orgType === 'service') {
+                $number = '2C';
+                $titleSuffix = 'Service';
+                $revCur = $cur['revenue_lines'];
+                $revPrevByName = [];
+                foreach ($prev['revenue_lines'] as $rl) {
+                    $revPrevByName[$rl['name']] = (float) $rl['amount'];
+                }
+                foreach ($revCur as $rl) {
+                    $rows[] = $line((string) $rl['name'], (float) $rl['amount'], $revPrevByName[$rl['name']] ?? 0.0);
+                }
+                $rows[] = $line('Total Operating Revenue', $cur['total_revenue'], $prev['total_revenue'], 'bold', false);
+                $adminCur = $cur['operating_expenses'] - $cur['employee_cost'] - $cur['depreciation'];
+                $adminPrev = $prev['operating_expenses'] - $prev['employee_cost'] - $prev['depreciation'];
+                $rows[] = $line('Direct Cost', $cur['cogs'], $prev['cogs']);
+                $rows[] = $line('Employee Cost', $cur['employee_cost'], $prev['employee_cost']);
+                $rows[] = $line('Administrative Expenses', $adminCur, $adminPrev);
+                $rows[] = $line('Depreciation', $cur['depreciation'], $prev['depreciation']);
+                $opCur = $cur['total_revenue'] - $cur['cogs'] - $cur['operating_expenses'];
+                $opPrev = $prev['total_revenue'] - $prev['cogs'] - $prev['operating_expenses'];
+                $rows[] = $line('Operating Profit', $opCur, $opPrev, 'bold', false);
+                $rows[] = $line('Finance Cost', $cur['finance_cost'], $prev['finance_cost']);
+                $rows[] = $line('Profit Before Tax', $opCur - $cur['finance_cost'], $opPrev - $prev['finance_cost'], 'bold', false);
+                $rows[] = $line('Income Tax Expense', $cur['income_tax'], $prev['income_tax']);
+                $rows[] = $line('Profit After Tax', $opCur - $cur['finance_cost'] - $cur['income_tax'], $opPrev - $prev['finance_cost'] - $prev['income_tax'], 'total', false);
+            } else {
+                $number = $orgType === 'manufacturing' ? '2A' : '2B';
+                $titleSuffix = ucfirst($orgType);
+                $rows[] = $line('Gross Sales', $cur['gross_sales'], $prev['gross_sales']);
+                $rows[] = $line('Less: Sales Returns', $cur['sales_returns'], $prev['sales_returns'], '', true, true);
+                $rows[] = $line('Net Sales', $cur['net_sales'], $prev['net_sales'], 'bold', false);
+                $rows[] = $line('Cost of Goods Sold', $cur['cogs'], $prev['cogs']);
+                $rows[] = $line('Gross Profit', $cur['gross_profit'], $prev['gross_profit'], 'bold', false);
+                if (abs($cur['other_income']) > 0.004 || abs($prev['other_income']) > 0.004) {
+                    $rows[] = $line('Other Operating Income', $cur['other_income'], $prev['other_income']);
+                }
+                $rows[] = $line('Operating Expenses', $cur['operating_expenses'], $prev['operating_expenses']);
+                $rows[] = $line('Operating Profit', $cur['operating_profit'], $prev['operating_profit'], 'bold', false);
+                $rows[] = $line('Finance Cost', $cur['finance_cost'], $prev['finance_cost']);
+                $rows[] = $line('Profit Before Tax', $cur['pbt'], $prev['pbt'], 'bold', false);
+                $rows[] = $line('Income Tax Expense', $cur['income_tax'], $prev['income_tax']);
+                $rows[] = $line('Profit After Tax', $cur['pat'], $prev['pat'], 'total', false);
             }
-            $net = $income - $expense;
-            $rows[] = ['', 'Total Income', '', rc_fmt($income)];
-            $rows[] = ['', 'Total Expenses', '', rc_fmt($expense)];
+
             return [
-                'subtitle' => 'Income and expense summary for the selected period.',
-                'columns' => [['Section', 'left', ''], ['Account', 'left', ''], ['Code', 'left', ''], ['Amount (' . $sym . ')', 'right', '']],
+                'number' => $number,
+                'title' => 'Profit or Loss Statement (' . $titleSuffix . ')',
+                'org_label' => $titleSuffix . ' Organization',
+                'subtitle' => 'Profit or Loss Statement — ' . $titleSuffix . ' Organization, with previous-period comparison.',
+                'columns' => $columns,
                 'rows' => $rows,
-                'totals' => ['', $net >= 0 ? 'Net Profit' : 'Net Loss', '', rc_fmt(abs($net))],
+                'totals' => null,
             ];
         }
 
         case 'balance-sheet': {
             $balances = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0);
-            $sections = ['asset' => 0.0, 'liability' => 0.0, 'equity' => 0.0];
-            $profit = 0.0;
-            $rows = [];
+            $buckets = [
+                'nca' => ['cur' => 0.0, 'prev' => 0.0], 'ca' => ['cur' => 0.0, 'prev' => 0.0],
+                'equity' => ['cur' => 0.0, 'prev' => 0.0], 'ncl' => ['cur' => 0.0, 'prev' => 0.0],
+                'cl' => ['cur' => 0.0, 'prev' => 0.0], 'profit' => ['cur' => 0.0, 'prev' => 0.0],
+            ];
             foreach ($balances as $b) {
                 $nature = rc_ledger_nature($b);
-                $closing = (float) $b['closing_net'];
-                if (abs($closing) < 0.005) {
-                    continue;
-                }
+                $master = (string) ($b['master_key'] ?? '');
+                $cur = (float) $b['closing_net'];
+                $prev = (float) $b['opening_net'];
                 if ($nature === 'asset') {
-                    $rows[] = ['Assets', $b['name'], $b['code'], rc_fmt($closing)];
-                    $sections['asset'] += $closing;
+                    $key = $master === 'non_current_asset' ? 'nca' : 'ca';
+                    $buckets[$key]['cur'] += $cur;
+                    $buckets[$key]['prev'] += $prev;
                 } elseif ($nature === 'liability') {
-                    $rows[] = ['Liabilities', $b['name'], $b['code'], rc_fmt(-$closing)];
-                    $sections['liability'] += -$closing;
+                    $key = $master === 'non_current_liability' ? 'ncl' : 'cl';
+                    $buckets[$key]['cur'] += -$cur;
+                    $buckets[$key]['prev'] += -$prev;
                 } elseif ($nature === 'equity') {
-                    $rows[] = ['Equity', $b['name'], $b['code'], rc_fmt(-$closing)];
-                    $sections['equity'] += -$closing;
+                    $buckets['equity']['cur'] += -$cur;
+                    $buckets['equity']['prev'] += -$prev;
                 } elseif ($nature === 'revenue') {
-                    $profit += -$closing;
+                    $buckets['profit']['cur'] += -$cur;
+                    $buckets['profit']['prev'] += -$prev;
                 } elseif ($nature === 'expense') {
-                    $profit -= $closing;
+                    $buckets['profit']['cur'] -= $cur;
+                    $buckets['profit']['prev'] -= $prev;
                 }
             }
-            $rows[] = ['Equity', 'Profit for the period', '', rc_fmt($profit)];
-            $rows[] = ['', 'Total Assets', '', rc_fmt($sections['asset'])];
+            $equityCur = $buckets['equity']['cur'] + $buckets['profit']['cur'];
+            $equityPrev = $buckets['equity']['prev'] + $buckets['profit']['prev'];
+            $totalAssetsCur = $buckets['nca']['cur'] + $buckets['ca']['cur'];
+            $totalAssetsPrev = $buckets['nca']['prev'] + $buckets['ca']['prev'];
+            $totalEqLiabCur = $equityCur + $buckets['ncl']['cur'] + $buckets['cl']['cur'];
+            $totalEqLiabPrev = $equityPrev + $buckets['ncl']['prev'] + $buckets['cl']['prev'];
+
+            $asAtCur = date('d M Y', strtotime($to));
+            $asAtPrev = date('d M Y', strtotime($from . ' -1 day'));
+            $note = 0;
+            $bsLine = static function (string $label, float $c, float $p, string $style = '', bool $numbered = true) use (&$note): array {
+                if ($numbered) {
+                    $note++;
+                }
+                return rc_row([$label, $numbered ? (string) $note : '', rc_fmt($c), rc_fmt($p), rc_fmt($c - $p)], $style);
+            };
+            $rows = [
+                rc_row(['ASSETS', '', '', '', ''], 'section'),
+                $bsLine('Non-Current Assets', $buckets['nca']['cur'], $buckets['nca']['prev']),
+                $bsLine('Current Assets', $buckets['ca']['cur'], $buckets['ca']['prev']),
+                $bsLine('Total Assets', $totalAssetsCur, $totalAssetsPrev, 'bold', false),
+                rc_row(['EQUITY AND LIABILITIES', '', '', '', ''], 'section'),
+                $bsLine('Equity (incl. profit for the period)', $equityCur, $equityPrev),
+                $bsLine('Non-Current Liabilities', $buckets['ncl']['cur'], $buckets['ncl']['prev']),
+                $bsLine('Current Liabilities', $buckets['cl']['cur'], $buckets['cl']['prev']),
+                $bsLine('Total Equity and Liabilities', $totalEqLiabCur, $totalEqLiabPrev, 'total', false),
+            ];
             return [
-                'subtitle' => 'Statement of financial position as on ' . date('d M Y', strtotime($to)) . '.',
-                'columns' => [['Section', 'left', ''], ['Account', 'left', ''], ['Code', 'left', ''], ['Amount (' . $sym . ')', 'right', '']],
+                'number' => '3',
+                'title' => 'Statement of Financial Position',
+                'as_at' => true,
+                'subtitle' => 'Statement of financial position as at ' . $asAtCur . '.',
+                'columns' => [
+                    ['Particulars', 'left', ''], ['Note', 'left', ''],
+                    ['As at ' . $asAtCur . ' (' . $sym . ')', 'right', ''],
+                    ['As at ' . $asAtPrev . ' (' . $sym . ')', 'right', ''],
+                    ['Change (' . $sym . ')', 'right', ''],
+                ],
                 'rows' => $rows,
-                'totals' => ['', 'Total Liabilities + Equity', '', rc_fmt($sections['liability'] + $sections['equity'] + $profit)],
+                'totals' => null,
+            ];
+        }
+
+        case 'cash-flow': {
+            [$prevFrom, $prevTo] = rc_previous_period($from, $to);
+            $cur = rc_cash_flow_figures($scopeCompanyId, $from, $to);
+            $prev = rc_cash_flow_figures($scopeCompanyId, $prevFrom, $prevTo);
+            $rows = [
+                rc_row(['Cash Flow from Operating Activities', '1', rc_fmt($cur['operating']), rc_fmt($prev['operating'])]),
+                rc_row(['Cash Flow from Investing Activities', '2', rc_fmt($cur['investing']), rc_fmt($prev['investing'])]),
+                rc_row(['Cash Flow from Financing Activities', '3', rc_fmt($cur['financing']), rc_fmt($prev['financing'])]),
+                rc_row(['Net Increase / (Decrease) in Cash', '', rc_fmt($cur['net']), rc_fmt($prev['net'])], 'bold'),
+                rc_row(['Opening Cash and Bank Balance', '', rc_fmt($cur['opening']), rc_fmt($prev['opening'])], 'bold'),
+                rc_row(['Closing Cash and Bank Balance', '', rc_fmt($cur['closing']), rc_fmt($prev['closing'])], 'total'),
+            ];
+            return [
+                'number' => '4',
+                'title' => 'Cash Flow Statement',
+                'subtitle' => 'Cash flows by activity with previous-period comparison (indirect classification).',
+                'columns' => [
+                    ['Particulars', 'left', ''], ['Note', 'left', ''],
+                    ['Current Period (' . $sym . ')', 'right', ''], ['Previous Period (' . $sym . ')', 'right', ''],
+                ],
+                'rows' => $rows,
+                'totals' => null,
             ];
         }
 
         case 'ledger-report': {
-            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, $ctx['vtype'], $ctx['group_id'], $ctx['ledger_id']);
-            $rows = [];
-            foreach ($balances as $b) {
-                $rows[] = [$b['code'], $b['name'], $b['group_name'] ?? '-', ucfirst(rc_ledger_nature($b)), rc_fmt((float) $b['tx_dr']), rc_fmt((float) $b['tx_cr']), rc_fmt($b['cl_side_dr']), rc_fmt($b['cl_side_cr'])];
+            // Account statement for one ledger (defaults to the cash ledger).
+            $ledgerId = (int) $ctx['ledger_id'];
+            $allBalances = rc_ledger_balances($scopeCompanyId, $from, $to);
+            $target = null;
+            foreach ($allBalances as $b) {
+                if ($ledgerId > 0 && (int) $b['id'] === $ledgerId) {
+                    $target = $b;
+                    break;
+                }
+                if ($ledgerId <= 0 && $target === null && (int) $b['is_cash_or_bank'] === 1) {
+                    $target = $b;
+                }
+            }
+            $target = $target ?? ($allBalances[0] ?? null);
+            if ($target === null) {
+                return ['number' => '5', 'title' => 'Ledger Report', 'subtitle' => 'No ledgers exist for this company.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+
+            $running = (float) $target['opening_net'];
+            $drCr = static fn (float $bal): string => $bal >= 0 ? 'Dr' : 'Cr';
+            $rows = [
+                rc_row([date('d M Y', strtotime($from)), 'Opening', '–', 'Opening Balance', '–', rc_fmt(max(0, $running)), rc_fmt(max(0, -$running)), number_format(abs($running), 2), $drCr($running)], 'bold'),
+            ];
+            $totalDr = 0.0;
+            $totalCr = 0.0;
+            foreach (rc_entry_lines($scopeCompanyId, [(int) $target['id']], $from, $to) as $lineRow) {
+                $amount = (float) $lineRow['amount'];
+                $isDebit = (string) $lineRow['entry_type'] === 'debit';
+                $running += $isDebit ? $amount : -$amount;
+                $totalDr += $isDebit ? $amount : 0;
+                $totalCr += $isDebit ? 0 : $amount;
+                $rows[] = [
+                    date('d M Y', strtotime((string) $lineRow['vdate'])),
+                    ucwords(str_replace('_', ' ', (string) $lineRow['voucher_type'])),
+                    (string) $lineRow['voucher_no'],
+                    (string) ($lineRow['memo'] ?: ($lineRow['narration'] ?: '–')),
+                    (string) ($lineRow['reference_no'] ?: '–'),
+                    $isDebit ? rc_fmt($amount) : '–',
+                    $isDebit ? '–' : rc_fmt($amount),
+                    number_format(abs($running), 2),
+                    $drCr($running),
+                ];
             }
             return [
-                'subtitle' => 'Detailed balances for every ledger.',
-                'columns' => [['Code', 'left', ''], ['Ledger', 'left', ''], ['Group', 'left', ''], ['Nature', 'left', ''], ['Period Dr.', 'right', ''], ['Period Cr.', 'right', ''], ['Closing Dr.', 'right', ''], ['Closing Cr.', 'right', '']],
+                'number' => '5',
+                'title' => 'Ledger Report',
+                'entity_line' => 'Account: ' . $target['name'] . ' (' . $target['code'] . ')',
+                'subtitle' => 'Account statement with running balance for ' . $target['name'] . '.',
+                'columns' => [
+                    ['Date', 'left', ''], ['Voucher Type', 'left', ''], ['Voucher No.', 'left', ''],
+                    ['Particulars', 'left', ''], ['Reference', 'left', ''],
+                    ['Debit (' . $sym . ')', 'right', ''], ['Credit (' . $sym . ')', 'right', ''],
+                    ['Balance (' . $sym . ')', 'right', ''], ['Dr/Cr', 'left', ''],
+                ],
                 'rows' => $rows,
-                'totals' => null,
+                'totals' => ['', '', '', 'Total', '', rc_fmt($totalDr), rc_fmt($totalCr), number_format(abs($running), 2), $drCr($running)],
             ];
         }
 
@@ -365,17 +671,96 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 ORDER BY ap.name ASC
             ');
             $stmt->execute(['f1' => $from, 't1' => $to, 'f2' => $from, 't2' => $to, 'f3' => $from, 't3' => $to, 'f4' => $from, 't4' => $to, 'company_id' => $scopeCompanyId]);
-            $rows = [];
-            foreach ($stmt->fetchAll() as $p) {
-                $receivable = (float) $p['sales_total'] - (float) $p['received_total'];
-                $payable = (float) $p['purchase_total'] - (float) $p['paid_total'];
-                $rows[] = [$p['code'], $p['name'], ucfirst((string) $p['party_type']), rc_fmt((float) $p['sales_total']), rc_fmt((float) $p['received_total']), rc_fmt((float) $p['purchase_total']), rc_fmt((float) $p['paid_total']), rc_fmt($receivable), rc_fmt($payable)];
+            $parties = $stmt->fetchAll();
+
+            // Open sales invoices per party, bucketed by days overdue as at the report date.
+            $agingByParty = [];
+            if (table_exists('task_invoices') && column_exists('task_invoices', 'due_on')) {
+                $invStmt = db()->prepare("
+                    SELECT ti.party_id, ti.total_amount, ti.due_on,
+                           COALESCE(ti.issued_on, DATE(ti.created_at)) AS issued_on
+                    FROM task_invoices ti
+                    WHERE ti.company_id = :company_id
+                      AND COALESCE(ti.invoice_category, 'sales') <> 'purchase'
+                      AND LOWER(COALESCE(ti.status, '')) NOT IN ('paid', 'cancelled', 'draft')
+                      AND COALESCE(ti.issued_on, DATE(ti.created_at)) <= :to
+                ");
+                $invStmt->execute(['company_id' => $scopeCompanyId, 'to' => $to]);
+                foreach ($invStmt->fetchAll() as $inv) {
+                    $partyId = (int) ($inv['party_id'] ?? 0);
+                    $amount = (float) $inv['total_amount'];
+                    $due = (string) ($inv['due_on'] ?? '');
+                    $days = $due !== '' ? (int) floor((strtotime($to) - strtotime($due)) / 86400) : 0;
+                    $bucket = $days <= 0 ? 'current' : ($days <= 30 ? 'b30' : ($days <= 60 ? 'b60' : ($days <= 90 ? 'b90' : 'b90plus')));
+                    if (!isset($agingByParty[$partyId])) {
+                        $agingByParty[$partyId] = ['current' => 0.0, 'b30' => 0.0, 'b60' => 0.0, 'b90' => 0.0, 'b90plus' => 0.0];
+                    }
+                    $agingByParty[$partyId][$bucket] += $amount;
+                }
             }
+
+            $idsByCode = [];
+            $idStmt = db()->prepare('SELECT id, code FROM accounting_parties WHERE company_id = :company_id');
+            $idStmt->execute(['company_id' => $scopeCompanyId]);
+            foreach ($idStmt->fetchAll() as $idRow) {
+                $idsByCode[(string) $idRow['code']] = (int) $idRow['id'];
+            }
+
+            $rows = [];
+            $totals = ['out' => 0.0, 'current' => 0.0, 'b30' => 0.0, 'b60' => 0.0, 'b90' => 0.0, 'b90plus' => 0.0];
+            $creditLimits = [];
+            $limitStmt = db()->prepare('SELECT id, credit_limit FROM accounting_parties WHERE company_id = :company_id');
+            $limitStmt->execute(['company_id' => $scopeCompanyId]);
+            foreach ($limitStmt->fetchAll() as $limitRow) {
+                $creditLimits[(int) $limitRow['id']] = (float) ($limitRow['credit_limit'] ?? 0);
+            }
+            foreach ($parties as $p) {
+                if (!in_array((string) $p['party_type'], ['customer', 'both'], true)) {
+                    continue;
+                }
+                $partyId = $idsByCode[(string) $p['code']] ?? 0;
+                $aging = $agingByParty[$partyId] ?? ['current' => 0.0, 'b30' => 0.0, 'b60' => 0.0, 'b90' => 0.0, 'b90plus' => 0.0];
+                $outstanding = array_sum($aging);
+                $ledgerDue = max(0.0, (float) $p['sales_total'] - (float) $p['received_total']);
+                if ($outstanding < 0.005 && $ledgerDue >= 0.005) {
+                    // No due-dated invoices: treat the open balance as current.
+                    $aging['current'] = $ledgerDue;
+                    $outstanding = $ledgerDue;
+                }
+                if ($outstanding < 0.005) {
+                    continue;
+                }
+                $overdue = $outstanding - $aging['current'];
+                $limit = $creditLimits[$partyId] ?? 0.0;
+                $rows[] = [
+                    (string) $p['code'], (string) $p['name'],
+                    rc_fmt($outstanding), rc_fmt($aging['current']),
+                    rc_fmt($aging['b30']), rc_fmt($aging['b60']), rc_fmt($aging['b90']), rc_fmt($aging['b90plus']),
+                    $limit > 0 ? rc_fmt($limit) : '–',
+                    $outstanding > 0.004 ? number_format(($overdue / $outstanding) * 100, 2) . '%' : '–',
+                ];
+                $totals['out'] += $outstanding;
+                $totals['current'] += $aging['current'];
+                $totals['b30'] += $aging['b30'];
+                $totals['b60'] += $aging['b60'];
+                $totals['b90'] += $aging['b90'];
+                $totals['b90plus'] += $aging['b90plus'];
+            }
+            $totalOverdue = $totals['out'] - $totals['current'];
             return [
-                'subtitle' => 'Sales, collections, purchases, and payments by party.',
-                'columns' => [['Code', 'left', ''], ['Party', 'left', ''], ['Type', 'left', ''], ['Sales', 'right', ''], ['Received', 'right', ''], ['Purchases', 'right', ''], ['Paid', 'right', ''], ['Receivable', 'right', ''], ['Payable', 'right', '']],
+                'number' => '6',
+                'title' => 'Receivables Aging Report',
+                'as_at' => true,
+                'subtitle' => 'Customer dues bucketed by days overdue as at ' . date('d M Y', strtotime($to)) . '.',
+                'columns' => [
+                    ['Code', 'left', ''], ['Customer', 'left', ''],
+                    ['Total Outstanding', 'right', ''], ['Current', 'right', ''],
+                    ['1 - 30 Days', 'right', ''], ['31 - 60 Days', 'right', ''],
+                    ['61 - 90 Days', 'right', ''], ['Above 90 Days', 'right', ''],
+                    ['Credit Limit', 'right', ''], ['Overdue %', 'right', ''],
+                ],
                 'rows' => $rows,
-                'totals' => null,
+                'totals' => ['', 'Total', rc_fmt($totals['out']), rc_fmt($totals['current']), rc_fmt($totals['b30']), rc_fmt($totals['b60']), rc_fmt($totals['b90']), rc_fmt($totals['b90plus']), '', $totals['out'] > 0.004 ? number_format(($totalOverdue / $totals['out']) * 100, 2) . '%' : '–'],
             ];
         }
 
@@ -554,28 +939,52 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             if (!table_exists('inventory_items')) {
                 return ['subtitle' => 'Inventory module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
             }
-            $stmt = db()->prepare('
-                SELECT i.sku, i.name, i.unit, i.item_type, i.opening_qty, i.reorder_level,
-                       COALESCE(SUM(CASE WHEN t.transaction_date BETWEEN :f1 AND :t1 THEN t.qty_in ELSE 0 END), 0) AS qty_in,
-                       COALESCE(SUM(CASE WHEN t.transaction_date BETWEEN :f2 AND :t2 THEN t.qty_out ELSE 0 END), 0) AS qty_out,
-                       COALESCE(SUM(t.qty_in - t.qty_out), 0) AS lifetime_net
+            $stmt = db()->prepare("
+                SELECT i.sku, i.name, i.unit, i.item_type, i.opening_qty, i.purchase_rate,
+                       COALESCE(SUM(CASE WHEN t.transaction_date BETWEEN :f1 AND :t1 AND COALESCE(t.transaction_type, '') NOT LIKE '%adjust%' THEN t.qty_in ELSE 0 END), 0) AS qty_in,
+                       COALESCE(SUM(CASE WHEN t.transaction_date BETWEEN :f2 AND :t2 AND COALESCE(t.transaction_type, '') NOT LIKE '%adjust%' THEN t.qty_out ELSE 0 END), 0) AS qty_out,
+                       COALESCE(SUM(CASE WHEN t.transaction_date BETWEEN :f3 AND :t3 AND COALESCE(t.transaction_type, '') LIKE '%adjust%' THEN t.qty_in - t.qty_out ELSE 0 END), 0) AS qty_adjust,
+                       COALESCE(SUM(CASE WHEN t.transaction_date <= :t4 THEN t.qty_in - t.qty_out ELSE 0 END), 0) AS net_to_date
                 FROM inventory_items i
                 LEFT JOIN inventory_transactions t ON t.item_id = i.id
                 WHERE i.company_id = :company_id
                 GROUP BY i.id
                 ORDER BY i.sku ASC
-            ');
-            $stmt->execute(['f1' => $from, 't1' => $to, 'f2' => $from, 't2' => $to, 'company_id' => $scopeCompanyId]);
+            ");
+            $stmt->execute(['f1' => $from, 't1' => $to, 'f2' => $from, 't2' => $to, 'f3' => $from, 't3' => $to, 't4' => $to, 'company_id' => $scopeCompanyId]);
             $rows = [];
+            $totals = ['opening' => 0.0, 'in' => 0.0, 'out' => 0.0, 'adjust' => 0.0, 'closing' => 0.0, 'value' => 0.0];
             foreach ($stmt->fetchAll() as $item) {
-                $closing = (float) $item['opening_qty'] + (float) $item['lifetime_net'];
-                $rows[] = [$item['sku'], $item['name'], ucfirst(str_replace('_', ' ', (string) $item['item_type'])), $item['unit'], number_format((float) $item['opening_qty'], 2), number_format((float) $item['qty_in'], 2), number_format((float) $item['qty_out'], 2), number_format($closing, 2), $closing <= (float) $item['reorder_level'] ? 'Reorder' : 'OK'];
+                $closing = (float) $item['opening_qty'] + (float) $item['net_to_date'];
+                $rate = (float) $item['purchase_rate'];
+                $value = $closing * $rate;
+                $rows[] = [
+                    (string) $item['sku'], (string) $item['name'],
+                    ucfirst(str_replace('_', ' ', (string) $item['item_type'])), (string) $item['unit'],
+                    number_format((float) $item['opening_qty'], 0), number_format((float) $item['qty_in'], 0),
+                    number_format((float) $item['qty_out'], 0),
+                    (float) $item['qty_adjust'] == 0.0 ? '–' : '(' . number_format(abs((float) $item['qty_adjust']), 0) . ')',
+                    number_format($closing, 0), rc_fmt($rate), rc_fmt($value),
+                ];
+                $totals['opening'] += (float) $item['opening_qty'];
+                $totals['in'] += (float) $item['qty_in'];
+                $totals['out'] += (float) $item['qty_out'];
+                $totals['adjust'] += (float) $item['qty_adjust'];
+                $totals['closing'] += $closing;
+                $totals['value'] += $value;
             }
             return [
-                'subtitle' => 'Stock summary by item (period in/out, lifetime closing).',
-                'columns' => [['SKU', 'left', ''], ['Item', 'left', ''], ['Type', 'left', ''], ['Unit', 'left', ''], ['Opening', 'right', ''], ['In', 'right', ''], ['Out', 'right', ''], ['Closing', 'right', ''], ['Level', 'left', '']],
+                'number' => '7',
+                'title' => 'Inventory Summary Report',
+                'as_at' => true,
+                'subtitle' => 'Stock summary by item as at ' . date('d M Y', strtotime($to)) . '.',
+                'columns' => [
+                    ['Item Code', 'left', ''], ['Item Name', 'left', ''], ['Category', 'left', ''], ['Unit', 'left', ''],
+                    ['Opening Qty', 'right', ''], ['In Qty', 'right', ''], ['Out Qty', 'right', ''], ['Adjust Qty', 'right', ''],
+                    ['Closing Qty', 'right', ''], ['Rate (' . $sym . ')', 'right', ''], ['Value (' . $sym . ')', 'right', ''],
+                ],
                 'rows' => $rows,
-                'totals' => null,
+                'totals' => ['', 'Total', '', '', number_format($totals['opening'], 0), number_format($totals['in'], 0), number_format($totals['out'], 0), $totals['adjust'] == 0.0 ? '–' : '(' . number_format(abs($totals['adjust']), 0) . ')', number_format($totals['closing'], 0), '', rc_fmt($totals['value'])],
             ];
         }
 
@@ -743,8 +1152,9 @@ function rc_render_table(array $report, bool $hasGroups): void
                 <tr><td colspan="<?= count($report['columns']) ?>">No data for the selected filters.</td></tr>
             <?php endif; ?>
             <?php foreach ($report['rows'] as $row): ?>
-                <tr>
-                    <?php foreach ($row as $cellIndex => $cell): ?>
+                <?php $cells = rc_row_cells($row); $style = rc_row_style($row); ?>
+                <tr class="<?= $style !== '' ? 'rpt-row-' . e($style) : '' ?>">
+                    <?php foreach ($cells as $cellIndex => $cell): ?>
                         <td class="align-<?= e($report['columns'][$cellIndex][1] ?? 'left') ?>"><?= e((string) $cell) ?></td>
                     <?php endforeach; ?>
                 </tr>
@@ -758,5 +1168,58 @@ function rc_render_table(array $report, bool $hasGroups): void
             <?php endif; ?>
         </tbody>
     </table>
+    <?php
+}
+
+/**
+ * Statement letterhead per the approved report templates: company name,
+ * statement title, fiscal-year / period line, branch and currency.
+ */
+function rc_render_letterhead(array $report, array $meta): void
+{
+    $title = (string) ($report['title'] ?? $meta['report_label'] ?? 'Report');
+    $asAt = (bool) ($report['as_at'] ?? false);
+    $periodLine = $asAt
+        ? 'As at ' . date('d M Y', strtotime((string) $meta['to']))
+        : date('d M Y', strtotime((string) $meta['from'])) . ' – ' . date('d M Y', strtotime((string) $meta['to']));
+    if (!empty($meta['fiscal_label'])) {
+        $periodLine = $meta['fiscal_label'] . '  |  ' . $periodLine;
+    }
+    ?>
+    <div class="rpt-letterhead">
+        <div>
+            <div class="rpt-company"><?= e(mb_strtoupper((string) $meta['company_name'])) ?></div>
+            <div class="rpt-title"><?= e($title) ?></div>
+            <?php if (!empty($report['entity_line'])): ?>
+                <div class="rpt-entity"><?= e((string) $report['entity_line']) ?></div>
+            <?php endif; ?>
+            <div class="rpt-period"><?= e($periodLine) ?></div>
+        </div>
+        <div class="rpt-meta">
+            <?php if (!empty($report['org_label'])): ?>
+                <span><em>Organization Type</em> : <?= e((string) $report['org_label']) ?></span>
+            <?php endif; ?>
+            <span><em>Branch</em> : <?= e((string) ($meta['branch'] ?? 'Head Office')) ?></span>
+            <span><em>Currency</em> : <?= e((string) ($meta['currency_code'] ?? 'NPR')) ?></span>
+        </div>
+    </div>
+    <?php
+}
+
+/** Generated-on/by strip with export actions, shown under every statement. */
+function rc_render_report_foot(array $meta): void
+{
+    ?>
+    <div class="rpt-foot">
+        <span>Generated On: <?= e(date('d M Y, h:i A')) ?></span>
+        <span>Generated By: <?= e((string) ($meta['generated_by'] ?? 'System')) ?></span>
+        <?php if (!empty($meta['pdf_url'])): ?>
+            <span class="rpt-foot-actions">
+                <a href="<?= e((string) $meta['pdf_url']) ?>" target="_blank"><?= icon('documents') ?> Export PDF</a>
+                <a href="<?= e((string) $meta['excel_url']) ?>"><?= icon('reports') ?> Export Excel</a>
+                <a href="<?= e((string) $meta['pdf_url']) ?>" target="_blank"><?= icon('documents') ?> Print</a>
+            </span>
+        <?php endif; ?>
+    </div>
     <?php
 }

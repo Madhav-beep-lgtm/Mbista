@@ -79,7 +79,7 @@ foreach ($due as $schedule) {
         fputcsv($handle, [$reportLabel . ' — ' . $companyName . ' — ' . $from . ' to ' . $to]);
         fputcsv($handle, array_map(static fn (array $col): string => ($col[2] !== '' ? $col[2] . ' ' : '') . $col[0], $report['columns']));
         foreach ($report['rows'] as $row) {
-            fputcsv($handle, $row);
+            fputcsv($handle, rc_row_cells($row));
         }
         if ($report['totals'] !== null) {
             fputcsv($handle, $report['totals']);

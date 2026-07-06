@@ -115,6 +115,7 @@ function rc_url(array $overrides = []): string
 
 $generatorContext = [
     'currency' => $currencySymbol,
+    'org_default' => $companyBusinessType,
     'vtype' => $voucherType,
     'group_id' => $groupFilterId,
     'ledger_id' => $ledgerFilterId,
@@ -146,7 +147,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     fputcsv($out, [$reportLabel . ' — ' . ($company['name'] ?? '') . ' — ' . $fromDate . ' to ' . $toDate]);
     fputcsv($out, array_map(static fn (array $col): string => ($col[2] !== '' ? $col[2] . ' ' : '') . $col[0], $report['columns']));
     foreach ($report['rows'] as $row) {
-        fputcsv($out, $row);
+        fputcsv($out, rc_row_cells($row));
     }
     if ($report['totals'] !== null) {
         fputcsv($out, $report['totals']);
@@ -160,30 +161,53 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 // ---------------------------------------------------------------------------
 $hasGroups = rc_has_group_columns($report);
 
+$reportMeta = [
+    'report_label' => $reportLabel,
+    'company_name' => (string) ($generatorContext['company_name'] ?: ($company['name'] ?? app_name())),
+    'from' => $fromDate,
+    'to' => $toDate,
+    'fiscal_label' => (string) ($selectedFiscalYear['label'] ?? ''),
+    'branch' => 'Head Office',
+    'currency_code' => trim($currencySymbol, ' .') !== '' ? rtrim(trim($currencySymbol), '. ') : 'NPR',
+    'generated_by' => (string) ($currentUser['name'] ?? 'System'),
+    'pdf_url' => rc_url(['view' => 'print']),
+    'excel_url' => rc_url(['export' => 'csv']),
+];
+$reportNumberedTitle = (isset($report['number']) ? $report['number'] . '. ' : '') . ($report['title'] ?? $reportLabel);
+
 if (isset($_GET['view']) && $_GET['view'] === 'print') {
     ?><!doctype html>
     <html lang="en">
     <head>
         <meta charset="utf-8">
-        <title><?= e($reportLabel) ?> | <?= e($company['name'] ?? app_name()) ?></title>
+        <title><?= e($reportNumberedTitle) ?> | <?= e($reportMeta['company_name']) ?></title>
         <style>
-            body { font-family: Georgia, 'Times New Roman', serif; margin: 36px; color: #1c2434; }
-            h1 { margin: 0; font-size: 22px; }
-            .muted { color: #64748b; font-size: 12px; }
-            .rc-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12.5px; }
-            .rc-table th, .rc-table td { border: 1px solid #d7dfeb; padding: 6px 9px; }
-            .rc-table thead th { background: #f4f7fc; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+            body { font-family: "Inter", "Segoe UI", system-ui, sans-serif; margin: 30px; color: #16263e; }
+            .rpt-bar { background: #16325d; color: #fff; padding: 9px 14px; font-weight: 700; font-size: 14px; border-radius: 4px 4px 0 0; }
+            .rpt-letterhead { display: flex; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid #d7dfeb; border-top: 0; }
+            .rpt-company { color: #16325d; font-weight: 800; font-size: 13px; letter-spacing: 0.02em; }
+            .rpt-title { font-weight: 700; font-size: 15px; margin-top: 2px; }
+            .rpt-entity { font-weight: 600; font-size: 12.5px; margin-top: 2px; }
+            .rpt-period { color: #55657e; font-size: 12px; margin-top: 3px; }
+            .rpt-meta { text-align: right; font-size: 11.5px; color: #55657e; display: grid; gap: 3px; align-content: start; }
+            .rpt-meta em { font-style: normal; color: #8494ab; }
+            .rc-table { width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid #d7dfeb; border-top: 0; }
+            .rc-table th, .rc-table td { border: 1px solid #e3e9f2; padding: 6px 9px; }
+            .rc-table thead th { background: #f1f5fb; color: #3f4c61; font-size: 10.5px; letter-spacing: 0.03em; }
             .align-right { text-align: right; }
-            .rc-total-row td { font-weight: bold; background: #f8fafc; }
-            .print-button { margin-top: 20px; padding: 10px 18px; background: #05295f; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
-            @media print { .print-button { display: none; } body { margin: 10mm; } }
+            .rc-total-row td, .rpt-row-total td { font-weight: 700; background: #eef3fa; }
+            .rpt-row-bold td { font-weight: 700; }
+            .rpt-row-section td { font-weight: 700; background: #f6f8fc; letter-spacing: 0.04em; }
+            .rpt-foot { display: flex; gap: 18px; padding: 9px 12px; border: 1px solid #d7dfeb; border-top: 0; color: #55657e; font-size: 11px; }
+            .print-button { margin-top: 20px; padding: 10px 18px; background: #16325d; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+            @media print { .print-button { display: none; } body { margin: 8mm; } }
         </style>
     </head>
     <body>
-        <h1><?= e($reportLabel) ?></h1>
-        <div class="muted"><?= e($company['name'] ?? '') ?> · <?= e(date('d M Y', strtotime($fromDate))) ?> to <?= e(date('d M Y', strtotime($toDate))) ?> · Generated <?= e(date('d M Y H:i')) ?></div>
+        <div class="rpt-bar"><?= e($reportNumberedTitle) ?></div>
+        <?php rc_render_letterhead($report, $reportMeta); ?>
         <?php rc_render_table($report, $hasGroups); ?>
-        <div class="muted" style="margin-top:10px;">All amounts are in <?= e(trim($currencySymbol, ' ')) ?: 'NPR' ?>. Figures are rounded off to 2 decimal places.</div>
+        <?php rc_render_report_foot(['generated_by' => $reportMeta['generated_by']]); ?>
         <button class="print-button" onclick="window.print()">Print / Save as PDF</button>
     </body>
     </html><?php
@@ -269,14 +293,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </label>
         <?php endif; ?>
         <div class="rc-biz-toggle">
-            <span>Business Type</span>
+            <span>Organization Type</span>
             <div>
                 <?php foreach ($businessTypeOptions as $bizValue => $bizLabel): ?>
                     <button type="submit" name="biz" value="<?= e($bizValue) ?>" class="<?= $businessType === $bizValue ? 'is-active' : '' ?>"><?= e($bizLabel) ?></button>
                 <?php endforeach; ?>
             </div>
         </div>
-        <div class="rc-filter-apply"><button type="submit" class="button"><?= icon('settings') ?>Apply Filters</button></div>
+        <div class="rc-filter-apply">
+            <button type="submit" class="button"><?= icon('settings') ?>Apply Filters</button>
+            <a class="button secondary" href="<?= e(url('admin/reports-center.php?report=' . $reportId)) ?>">Reset</a>
+        </div>
     </div>
 </form>
 
@@ -313,31 +340,22 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </aside>
 
-    <main class="rc-report-view">
-        <div class="rc-report-head">
-            <div>
-                <h3><?= icon($reportIcon) ?><?= e($reportLabel) ?></h3>
-                <p><?= e($report['subtitle']) ?></p>
-            </div>
-            <span class="rc-asof">As on <?= e(date('d M Y', strtotime($toDate))) ?></span>
-        </div>
+    <main class="rc-report-view rpt-statement">
+        <div class="rpt-bar"><?= e($reportNumberedTitle) ?></div>
+        <?php rc_render_letterhead($report, $reportMeta); ?>
         <div class="rc-table-scroll">
             <?php rc_render_table($report, $hasGroups); ?>
         </div>
+        <?php rc_render_report_foot($reportMeta); ?>
         <?php if ($compareEnabled && $compareReport !== null): ?>
-            <div class="rc-report-head rc-compare-head">
-                <div>
-                    <h3><?= icon('compliance') ?>Comparison Period</h3>
-                    <p><?= e(date('d M Y', strtotime($compareFrom))) ?> to <?= e(date('d M Y', strtotime($compareTo))) ?></p>
-                </div>
-            </div>
+            <div class="rpt-bar rpt-bar-compare">Comparison Period — <?= e(date('d M Y', strtotime($compareFrom))) ?> to <?= e(date('d M Y', strtotime($compareTo))) ?></div>
             <div class="rc-table-scroll">
                 <?php rc_render_table($compareReport, $hasGroups); ?>
             </div>
         <?php endif; ?>
         <div class="rc-report-foot">
-            <span>All amounts are in <?= e(trim($currencySymbol, ' ')) ?: 'NPR' ?></span>
-            <span>Figures are rounded off to 2 decimal places</span>
+            <span><?= e($report['subtitle']) ?></span>
+            <span>All amounts are in <?= e($reportMeta['currency_code']) ?>, rounded to 2 decimal places</span>
         </div>
     </main>
 

@@ -1394,6 +1394,160 @@ body.admin-layout .mbw-row-tables {
 }
 
 /* ==========================================================================
+   Report statement templates (Reports Center)
+   ========================================================================== */
+
+body.admin-layout .rpt-statement {
+  padding: 0;
+  overflow: hidden;
+}
+
+body.admin-layout .rpt-bar {
+  padding: 10px 16px;
+  background: #16325d;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+body.admin-layout.theme-dark .rpt-bar,
+body.admin-layout.admin-dark .rpt-bar {
+  background: #1d3a63;
+}
+
+body.admin-layout .rpt-bar-compare {
+  margin-top: 14px;
+  font-size: 12.5px;
+}
+
+body.admin-layout .rpt-letterhead {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--mbw-border);
+}
+
+body.admin-layout .rpt-company {
+  color: #16325d;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+body.admin-layout.theme-dark .rpt-company,
+body.admin-layout.admin-dark .rpt-company {
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .rpt-title {
+  margin-top: 2px;
+  color: var(--mbw-heading);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+body.admin-layout .rpt-entity {
+  margin-top: 2px;
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+body.admin-layout .rpt-period {
+  margin-top: 3px;
+  color: var(--mbw-muted);
+  font-size: 12px;
+}
+
+body.admin-layout .rpt-meta {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  color: var(--mbw-muted);
+  font-size: 11.5px;
+  text-align: right;
+}
+
+body.admin-layout .rpt-meta em {
+  font-style: normal;
+  color: var(--mbw-muted);
+  opacity: 0.75;
+}
+
+body.admin-layout .rpt-statement .rc-table-scroll {
+  padding: 0 16px;
+}
+
+body.admin-layout .rpt-statement .rc-table th,
+body.admin-layout .rpt-statement .rc-table td {
+  border: 1px solid var(--mbw-border-soft);
+  font-size: 12.5px;
+  padding: 8px 10px;
+}
+
+body.admin-layout .rpt-statement .rc-table thead th {
+  background: var(--mbw-card-soft);
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .rpt-row-bold td {
+  font-weight: 700;
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .rpt-row-section td {
+  font-weight: 700;
+  color: var(--mbw-heading);
+  letter-spacing: 0.05em;
+  background: var(--mbw-gray-soft);
+}
+
+body.admin-layout .rpt-row-total td,
+body.admin-layout .rpt-statement .rc-total-row td {
+  font-weight: 700;
+  color: var(--mbw-heading);
+  background: var(--mbw-primary-soft);
+}
+
+body.admin-layout .rpt-foot {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-top: 1px solid var(--mbw-border);
+  color: var(--mbw-muted);
+  font-size: 11.5px;
+}
+
+body.admin-layout .rpt-foot-actions {
+  display: inline-flex;
+  gap: 14px;
+  margin-left: auto;
+}
+
+body.admin-layout .rpt-foot-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--mbw-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+body.admin-layout .rpt-foot-actions a .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+body.admin-layout .rpt-statement .rc-report-foot {
+  padding: 8px 16px 14px;
+}
+
+/* ==========================================================================
    Modals, misc
    ========================================================================== */
 
