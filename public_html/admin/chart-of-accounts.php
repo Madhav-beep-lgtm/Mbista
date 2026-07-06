@@ -91,7 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
     fclose($handle);
     log_activity('company', $companyId, 'coa_bulk_import', $created . ' ledgers imported, ' . $skipped . ' rows skipped.', $userId ?: null);
     flash($created > 0 ? 'success' : 'error', $created . ' ledgers imported' . ($skipped > 0 ? ', ' . $skipped . ' rows skipped (bad group/type, duplicate, or header)' : '') . '.');
-    redirect('admin/chart-of-accounts.php');
+    redirect('admin/chart-masters.php');
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ $statusPill = static fn (string $status): string => $status === 'active'
 
 <nav class="mbw-tabbar" aria-label="Chart of accounts sections">
     <a class="mbw-tab is-active" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('tree') ?>Hierarchy View</a>
-    <a class="mbw-tab" href="#coa-masters" onclick="document.getElementById('coa-masters').scrollIntoView({behavior:'smooth'});return false;"><?= icon('layers') ?>Masters</a>
+    <a class="mbw-tab" href="<?= e(url('admin/chart-masters.php')) ?>"><?= icon('layers') ?>Masters</a>
     <a class="mbw-tab" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('teams') ?>Groups</a>
     <a class="mbw-tab" href="<?= e(url('admin/chart-ledgers.php')) ?>"><?= icon('journal') ?>Ledgers</a>
     <a class="mbw-tab" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><?= icon('settings') ?>Posting Accounts</a>
@@ -221,40 +221,7 @@ $statusPill = static fn (string $status): string => $status === 'active'
         </div>
     </section>
 
-    <section class="mbw-card" id="coa-masters" aria-label="Masters">
-        <div class="mbw-card-head"><h2>Masters</h2><span class="frm-optional">Fixed accounting taxonomy — groups attach to a master, ledgers to a group</span></div>
-        <div style="overflow-x:auto"><table>
-            <thead><tr><th>Master</th><th>Nature</th><th class="is-numeric">Groups</th><th class="is-numeric">Ledgers</th></tr></thead>
-            <tbody>
-            <?php foreach ($masters as $masterKey => $master): ?>
-                <?php
-                $mGroups = array_filter($groups, static fn (array $g): bool => (string) $g['master_key'] === $masterKey);
-                $mLedgers = 0;
-                foreach ($mGroups as $mg) {
-                    $mLedgers += count($ledgersByGroup[(int) $mg['id']] ?? []);
-                }
-                ?>
-                <tr>
-                    <td><strong style="color:var(--mbw-heading)"><?= e($master['label']) ?></strong> <span class="mbw-pill tone-gray"><?= e($masterKey) ?></span></td>
-                    <td><span class="mbw-pill tone-blue"><?= e(ucfirst((string) $master['nature'])) ?></span></td>
-                    <td class="is-numeric"><?= count($mGroups) ?></td>
-                    <td class="is-numeric"><?= $mLedgers ?></td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table></div>
-    </section>
 
-    <section class="mbw-card" id="coa-import" aria-label="Bulk import">
-        <div class="mbw-card-head"><h2>Bulk Import Ledgers</h2><span class="frm-optional">CSV columns: group_code, ledger_code, ledger_name, type (asset/liability/equity/revenue/expense)</span></div>
-        <form method="post" enctype="multipart/form-data" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="bulk_import">
-            <input type="file" name="import_file" accept=".csv" required style="min-height:38px">
-            <button type="submit" class="button"><?= icon('layers') ?>Import CSV</button>
-            <a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>">Download current COA as a template</a>
-        </form>
-    </section>
 </div>
 
 <aside class="frm-rail">
@@ -263,7 +230,7 @@ $statusPill = static fn (string $status): string => $status === 'active'
         <div class="mbw-qa-grid" style="grid-template-columns:1fr 1fr">
             <a class="mbw-qa" href="<?= e(url('admin/chart-groups.php')) ?>"><span class="mbw-chip is-square tone-green"><?= icon('tree') ?></span><div><strong>Create Group</strong></div></a>
             <a class="mbw-qa" href="<?= e(url('admin/chart-ledgers.php')) ?>"><span class="mbw-chip is-square tone-purple"><?= icon('journal') ?></span><div><strong>Create Ledger</strong></div></a>
-            <a class="mbw-qa" href="#coa-import" onclick="document.getElementById('coa-import').scrollIntoView({behavior:'smooth'});return false;"><span class="mbw-chip is-square tone-amber"><?= icon('layers') ?></span><div><strong>Bulk Import</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/chart-masters.php')) ?>"><span class="mbw-chip is-square tone-amber"><?= icon('layers') ?></span><div><strong>Bulk Import</strong></div></a>
             <a class="mbw-qa" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>"><span class="mbw-chip is-square tone-teal"><?= icon('analytics') ?></span><div><strong>Export COA</strong></div></a>
             <a class="mbw-qa" href="<?= e(url('admin/accounting.php')) ?>"><span class="mbw-chip is-square tone-blue"><?= icon('wallet') ?></span><div><strong>Opening Balances</strong></div></a>
             <a class="mbw-qa" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><span class="mbw-chip is-square tone-red"><?= icon('settings') ?></span><div><strong>Posting Mappings</strong></div></a>

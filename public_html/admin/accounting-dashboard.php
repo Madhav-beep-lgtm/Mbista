@@ -508,8 +508,8 @@ $fmtMoney = static fn (float $amount): string => $currency . number_format($amou
 
 // Primary KPI row — mirrors the approved reference dashboard.
 $primaryKpis = [
-    ['label' => 'Total Receivables', 'amount' => $receivablesTotal, 'delta' => $kpiDelta($receivablesTotal, $prevTotals['receivables']), 'vs' => 'vs Last Month', 'tone' => 'green', 'icon' => 'clients', 'href' => url('admin/accounting-parties.php?tab=sales#documents')],
-    ['label' => 'Total Payables', 'amount' => $payablesTotal, 'delta' => $kpiDelta($payablesTotal, $prevTotals['payables']), 'vs' => 'vs Last Month', 'tone' => 'red', 'icon' => 'card', 'href' => url('admin/accounting-parties.php?tab=purchases#documents')],
+    ['label' => 'Total Receivables', 'amount' => $receivablesTotal, 'delta' => $kpiDelta($receivablesTotal, $prevTotals['receivables']), 'vs' => 'vs Last Month', 'tone' => 'green', 'icon' => 'clients', 'href' => url('admin/accounting-parties.php?tab=sales')],
+    ['label' => 'Total Payables', 'amount' => $payablesTotal, 'delta' => $kpiDelta($payablesTotal, $prevTotals['payables']), 'vs' => 'vs Last Month', 'tone' => 'red', 'icon' => 'card', 'href' => url('admin/accounting-parties.php?tab=purchases')],
     ['label' => 'Cash & Bank Balance', 'amount' => $cashBankTotal, 'delta' => $kpiDelta($cashBankTotal, $prevTotals['cash']), 'vs' => 'vs Last Month', 'tone' => 'blue', 'icon' => 'bank', 'href' => url('admin/banking.php')],
     ['label' => 'Net Profit (YTD)', 'amount' => $netProfit, 'delta' => $kpiDelta($netProfit, $prevTotals['income'] - $prevTotals['expenses']), 'vs' => 'vs Last Month', 'tone' => 'green', 'icon' => 'trend-up', 'href' => accounting_dashboard_report_url('profit-loss', $fiscalYearId, $fromDate, $toDate, $businessType)],
     ['label' => 'Total Income (YTD)', 'amount' => $totalIncome, 'delta' => $kpiDelta($totalIncome, $prevTotals['income']), 'vs' => 'vs Last Month', 'tone' => 'purple', 'icon' => 'analytics', 'href' => accounting_dashboard_report_url('profit-loss', $fiscalYearId, $fromDate, $toDate, $businessType)],
@@ -937,7 +937,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <span class="mbw-info"><?= icon('about') ?></span>
         </div>
         <div class="mbw-due-list">
-            <a class="mbw-due" href="<?= e(url('admin/accounting-parties.php?tab=sales#documents')) ?>">
+            <a class="mbw-due" href="<?= e(url('admin/accounting-parties.php?tab=sales')) ?>">
                 <span class="mbw-chip tone-red"><?= icon('card') ?></span>
                 <div>
                     <div class="mbw-due-label">Overdue Receivables</div>
@@ -945,7 +945,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <div class="mbw-due-sub tone-red"><?= (int) $dueSummary['overdue_receivable']['count'] ?> Invoices</div>
                 </div>
             </a>
-            <a class="mbw-due" href="<?= e(url('admin/accounting-parties.php?tab=purchases#documents')) ?>">
+            <a class="mbw-due" href="<?= e(url('admin/accounting-parties.php?tab=purchases')) ?>">
                 <span class="mbw-chip tone-amber"><?= icon('receipt-voucher') ?></span>
                 <div>
                     <div class="mbw-due-label">Overdue Payables</div>
@@ -1001,13 +1001,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <div><strong>Trial Balance</strong><span>As of <?= e(date('d M', strtotime($asOfDate))) ?></span></div>
         </a>
         <?php if ($showInventoryFeatures): ?>
-            <a class="mbw-qa" href="<?= e(url('admin/accounting-inventory.php#stock-movement')) ?>">
+            <a class="mbw-qa" href="<?= e(url('admin/accounting-inventory.php')) ?>">
                 <span class="mbw-chip is-square tone-purple"><?= icon('layers') ?></span>
                 <div><strong>Stock Movement</strong><span>Record inventory transaction</span></div>
             </a>
         <?php endif; ?>
         <?php if ($showManufacturingFeatures): ?>
-            <a class="mbw-qa" href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>">
+            <a class="mbw-qa" href="<?= e(url('admin/accounting-inventory.php')) ?>">
                 <span class="mbw-chip is-square tone-amber"><?= icon('settings') ?></span>
                 <div><strong>Production Order</strong><span>Create manufacturing order</span></div>
             </a>

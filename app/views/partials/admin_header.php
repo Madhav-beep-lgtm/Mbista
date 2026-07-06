@@ -126,7 +126,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <?php if ($headerBusinessProfile['show_inventory'] ?? false): ?>
                     <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('layers') ?>Inventory &amp; Manufacturing</a>
                 <?php elseif ($headerBusinessProfile['show_manufacturing'] ?? false): ?>
-                    <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>"><?= icon('layers') ?>Manufacturing</a>
+                    <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('layers') ?>Manufacturing</a>
                 <?php endif; ?>
             <?php endif; ?>
             <?php endif; ?>
