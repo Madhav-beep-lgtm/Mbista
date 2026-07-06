@@ -11,7 +11,7 @@ $headerSupportEmail = (string) setting('support_email', '');
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260704">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260706">
 </head>
 <body class="<?= e($bodyClass) ?>">
 <?php if ($headerSupportPhone !== '' || $headerSupportEmail !== ''): ?>
@@ -20,10 +20,10 @@ $headerSupportEmail = (string) setting('support_email', '');
             <span><?= e(setting('site_tagline', '')) ?></span>
             <span class="utility-bar-contacts">
                 <?php if ($headerSupportPhone !== ''): ?>
-                    <a href="tel:<?= e(preg_replace('/[^+0-9]/', '', $headerSupportPhone)) ?>"><?= icon('contact') ?><?= e($headerSupportPhone) ?></a>
+                    <a href="tel:<?= e(preg_replace('/[^+0-9]/', '', $headerSupportPhone)) ?>"><?= icon('phone') ?><?= e($headerSupportPhone) ?></a>
                 <?php endif; ?>
                 <?php if ($headerSupportEmail !== ''): ?>
-                    <a href="mailto:<?= e($headerSupportEmail) ?>"><?= icon('messages') ?><?= e($headerSupportEmail) ?></a>
+                    <a href="mailto:<?= e($headerSupportEmail) ?>"><?= icon('contact') ?><?= e($headerSupportEmail) ?></a>
                 <?php endif; ?>
             </span>
         </div>
@@ -33,14 +33,20 @@ $headerSupportEmail = (string) setting('support_email', '');
     <div class="container nav-wrap">
         <a class="brand" href="<?= e(url('index.php')) ?>">
             <span class="brand-mark">MB</span>
-            <span>
-                <strong><?= e(app_name()) ?></strong>
-                <small><?= e(setting('site_tagline', '')) ?></small>
+            <span class="brand-text">
+                <strong><?= e(setting('brand_name', 'M.Bista & Associates')) ?></strong>
+                <span class="brand-designation"><?= e(setting('brand_designation', 'Chartered Accountants')) ?></span>
+                <small class="brand-tagline"><?= e(setting('brand_tagline', 'Delivering Clarity. Enabling Confidence.')) ?></small>
             </span>
         </a>
         <button type="button" class="mobile-menu-button" data-mobile-menu-open aria-label="Open menu" aria-expanded="false">
             <?= icon('menu') ?>Menu
         </button>
+        <form method="get" action="<?= e(url('search.php')) ?>" class="site-header-search" role="search">
+            <label class="sr-only" for="site-global-search">Search</label>
+            <input id="site-global-search" type="search" name="q" placeholder="Search the site" value="<?= e((string) ($_GET['q'] ?? '')) ?>">
+            <button type="submit" aria-label="Search" title="Search"><?= icon('reports') ?></button>
+        </form>
         <nav class="nav main-navigation" data-main-nav aria-label="Main navigation">
             <div class="mobile-nav-head">
                 <strong><?= e(app_name()) ?></strong>
@@ -51,7 +57,7 @@ $headerSupportEmail = (string) setting('support_email', '');
             <?php if (!$currentUser): ?>
                 <a href="<?= e(url('index.php')) ?>"><?= icon('home') ?>Home</a>
                 <div class="nav-item has-dropdown">
-                    <a class="nav-main-link" href="<?= e(url('about/index.php')) ?>"><?= icon('about') ?>About</a>
+                    <a class="nav-main-link" href="<?= e(url('about/index.php')) ?>"><?= icon('about') ?>About Us</a>
                     <button type="button" class="dropdown-toggle" aria-label="Open About menu" aria-expanded="false">
                         <span class="dropdown-arrow"><?= icon('chevron') ?></span>
                     </button>

@@ -66,6 +66,23 @@ $homepageServiceCategories = [
 ];
 $companyDisplayCount = count(array_merge($groupParent ? [$groupParent] : [], $groupSubsidiaries, $associatedFirm ? [$associatedFirm] : []));
 
+// Hero headline: each sentence renders on its own line, the last one in gold.
+$heroTitleSetting = trim((string) setting('hero_title', 'Integrated solutions. Trusted guidance. Stronger tomorrow.'));
+$heroTitleLines = preg_split('/(?<=[.!?])\s+/', $heroTitleSetting) ?: [];
+if ($heroTitleLines === []) {
+    $heroTitleLines = [$heroTitleSetting];
+}
+$heroTitleAccent = count($heroTitleLines) > 1 ? array_pop($heroTitleLines) : null;
+
+// Professional affiliations shown in the partner strip.
+$affiliations = [
+    ['mark' => 'ICAN', 'name' => 'The Institute of Chartered Accountants of Nepal'],
+    ['mark' => 'NFRS', 'name' => 'Nepal Financial Reporting Standards'],
+    ['mark' => 'IFRS', 'name' => 'International Financial Reporting Standards'],
+    ['mark' => 'ACCA', 'name' => 'Association of Chartered Certified Accountants'],
+    ['mark' => 'CPA', 'name' => 'Chartered Professional Accountants'],
+];
+
 include __DIR__ . '/../app/views/partials/header.php';
 ?>
 <section class="hero" id="top">
@@ -74,24 +91,110 @@ include __DIR__ . '/../app/views/partials/header.php';
         <div class="hero-grid">
             <div class="hero-copy">
                 <div class="kicker">Audit &middot; Advisory &middot; Investment &middot; Training &middot; Education</div>
-                <h1><?= e(setting('hero_title', 'Integrated expertise for business, finance, investment, and education.')) ?></h1>
-                <p><?= e(setting('hero_description', 'A professional group spanning audit and assurance, business consulting, corporate training, investment holding, and education services.')) ?></p>
+                <h1 class="hero-title">
+                    <?php foreach ($heroTitleLines as $heroTitleLine): ?>
+                        <span class="hero-title-line"><?= e($heroTitleLine) ?></span>
+                    <?php endforeach; ?>
+                    <?php if ($heroTitleAccent !== null): ?>
+                        <span class="hero-title-line hero-title-accent"><?= e($heroTitleAccent) ?></span>
+                    <?php endif; ?>
+                </h1>
+                <p><?= e(setting('hero_description', 'A coordinated group of professional-service companies delivering auditing, advisory, consulting, training, investment, and education services with integrity and excellence.')) ?></p>
                 <div class="actions">
-                    <a class="button" href="<?= e(url('contact/request-consultation.php')) ?>"><?= icon('contact') ?>Request consultation</a>
-                    <a class="button secondary" href="<?= e(url('about/index.php')) ?>"><?= icon('about') ?>Explore the group</a>
+                    <a class="button" href="<?= e(url('contact/request-consultation.php')) ?>"><?= icon('contact') ?>Request Consultation</a>
+                    <a class="button secondary hero-secondary-button" href="<?= e(url('about/index.php')) ?>"><?= icon('about') ?>Explore Our Group<span class="arrow-right" aria-hidden="true"><?= icon('chevron') ?></span></a>
                 </div>
             </div>
             <div class="hero-aside">
                 <div class="hero-card">
-                    <h3><?= icon('companies') ?>One group, six companies</h3>
+                    <h3><?= icon('companies') ?>One Group, Six Companies</h3>
                     <p>Chartered accountancy, business consulting, training, investment holding, and education services under coordinated professional leadership.</p>
-                    <ul class="checklist">
+                    <ul class="checklist checklist-gold">
                         <li>Audit, tax, and assurance</li>
                         <li>Consulting and outsourcing</li>
                         <li>Training and education pathways</li>
+                        <li>Investment and holding solutions</li>
                     </ul>
                 </div>
             </div>
+        </div>
+    </div>
+</section>
+
+<section class="hero-stats-section" aria-label="Group highlights">
+    <div class="container">
+        <div class="hero-stats-band">
+            <div class="icon-stat">
+                <span class="icon-stat-icon"><?= icon('teams') ?></span>
+                <div class="icon-stat-body"><strong><?= e((string) $companyDisplayCount) ?></strong><span>Group &amp; Associated Companies</span></div>
+            </div>
+            <div class="icon-stat">
+                <span class="icon-stat-icon"><?= icon('leave') ?></span>
+                <div class="icon-stat-body"><strong>2024</strong><span>Chartered Practice Established</span></div>
+            </div>
+            <div class="icon-stat">
+                <span class="icon-stat-icon"><?= icon('staff') ?></span>
+                <div class="icon-stat-body"><strong>1</strong><span>Professional Firm</span></div>
+            </div>
+            <div class="icon-stat">
+                <span class="icon-stat-icon"><?= icon('services') ?></span>
+                <div class="icon-stat-body"><strong><?= e((string) count($homepageServiceCategories)) ?></strong><span>Core Service Categories</span></div>
+            </div>
+            <div class="icon-stat">
+                <span class="icon-stat-icon"><?= icon('users') ?></span>
+                <div class="icon-stat-body"><strong>50+</strong><span>Experienced Professionals</span></div>
+            </div>
+            <div class="icon-stat">
+                <span class="icon-stat-icon"><?= icon('award') ?></span>
+                <div class="icon-stat-body"><strong>100+</strong><span>Satisfied Clients</span></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="section why-choose-section" id="why-choose-us">
+    <div class="container why-choose-grid">
+        <div class="why-choose-intro">
+            <span class="kicker kicker-solid">Why choose us</span>
+            <h2>Integrity.&nbsp; Expertise.<br>Impact.</h2>
+            <p>We combine professional excellence with ethical standards to deliver measurable value and long-term partnership.</p>
+            <a class="button" href="<?= e(url('about/index.php')) ?>">Learn More About Us<span class="arrow-right" aria-hidden="true"><?= icon('chevron') ?></span></a>
+        </div>
+        <div class="why-choose-cards">
+            <article class="why-card">
+                <span class="why-card-icon"><?= icon('admin') ?></span>
+                <h3>Trusted Professionals</h3>
+                <p>ICAN-compliant team with deep expertise across audit, advisory, and consulting.</p>
+            </article>
+            <article class="why-card">
+                <span class="why-card-icon"><?= icon('target') ?></span>
+                <h3>Client-Centric Approach</h3>
+                <p>Solutions tailored to your needs with a focus on clarity, transparency, and results.</p>
+            </article>
+            <article class="why-card">
+                <span class="why-card-icon"><?= icon('insights') ?></span>
+                <h3>Quality &amp; Excellence</h3>
+                <p>Robust methodologies, international standards, and consistent quality delivery.</p>
+            </article>
+            <article class="why-card">
+                <span class="why-card-icon"><?= icon('handshake') ?></span>
+                <h3>Long-Term Partnership</h3>
+                <p>Building lasting relationships to support your growth and success.</p>
+            </article>
+        </div>
+    </div>
+</section>
+
+<section class="affiliates-section" aria-label="Professional affiliations">
+    <div class="container">
+        <h2 class="affiliates-title">Proud Partner &amp; Affiliates</h2>
+        <div class="affiliates-strip">
+            <?php foreach ($affiliations as $affiliate): ?>
+                <div class="affiliate-item">
+                    <span class="affiliate-mark"><?= e($affiliate['mark']) ?></span>
+                    <span class="affiliate-name"><?= e($affiliate['name']) ?></span>
+                </div>
+            <?php endforeach; ?>
         </div>
     </div>
 </section>
@@ -103,12 +206,6 @@ include __DIR__ . '/../app/views/partials/header.php';
             <h2>A coordinated group of professional-service companies</h2>
             <p>The group brings together an associated chartered-accountancy practice, an investment holding company, and specialised subsidiaries in consulting, training, and education — each focused on disciplined, integrity-led service.</p>
         </div>
-    </div>
-    <div class="container stats-grid">
-        <div class="stat-card"><strong><?= e($companyDisplayCount) ?></strong><span>Group &amp; associated companies</span></div>
-        <div class="stat-card"><strong>2024</strong><span>Chartered practice established</span></div>
-        <div class="stat-card"><strong><?= e(count($publicTeamMembers)) ?></strong><span>Published team profiles</span></div>
-        <div class="stat-card"><strong><?= e(count($homepageServiceCategories)) ?></strong><span>Service categories</span></div>
     </div>
 </section>
 
