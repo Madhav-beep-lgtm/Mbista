@@ -275,17 +275,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a class="mbw-tab is-active" href="<?= e(url('admin/voucher-form.php')) ?>"><?= icon('receipt-voucher') ?>New Voucher</a>
 </nav>
 
-<div class="frm-stepper mbw-card" aria-label="Form progress">
-    <?php foreach ([['Basic Info', 'Capture key details'], ['Context', 'Select organization context'], ['Details', 'Enter form details'], ['Review', 'Validate & review'], ['Approval', 'Submit for approval']] as $stepIndex => [$stepLabel, $stepHint]): ?>
-        <div class="frm-step <?= $stepIndex === 0 ? 'is-active' : '' ?>" data-step="<?= $stepIndex + 1 ?>">
-            <span class="frm-step-dot"><?= $stepIndex + 1 ?></span>
-            <span class="frm-step-text"><strong><?= e($stepLabel) ?></strong><small><?= e($stepHint) ?></small></span>
-        </div>
-        <?php if ($stepIndex < 4): ?><span class="frm-step-line" aria-hidden="true"></span><?php endif; ?>
-    <?php endforeach; ?>
-</div>
 
-<form method="post" action="<?= e(url('admin/voucher-form.php')) ?>" enctype="multipart/form-data" id="voucher-form" class="frm-layout">
+<form method="post" action="<?= e(url('admin/voucher-form.php')) ?>" enctype="multipart/form-data" id="voucher-form">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <input type="hidden" name="save_mode" id="frm-save-mode" value="submit">
     <div class="frm-main">
@@ -476,43 +467,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </div>
 
-    <aside class="frm-rail">
-        <section class="mbw-card frm-rail-card">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-blue"><?= icon('about') ?></span><h2>Form Summary</h2></div>
-            <dl class="frm-summary">
-                <div><dt>Form Type</dt><dd id="sum-type">—</dd></div>
-                <div><dt>Company</dt><dd><?= e($company['name']) ?></dd></div>
-                <div><dt>Total Amount</dt><dd id="sum-total"><?= e($currency) ?>0.00</dd></div>
-                <div><dt>Status</dt><dd><span class="mbw-pill tone-blue">● Draft</span></dd></div>
-                <div><dt>Created On</dt><dd><?= e(date('m/d/Y h:i A')) ?></dd></div>
-                <div><dt>Created By</dt><dd><?= e($currentUser['name'] ?? 'User') ?></dd></div>
-            </dl>
-        </section>
-
-        <section class="mbw-card frm-rail-card">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-green"><?= icon('tasks') ?></span><h2>Validation Checklist</h2></div>
-            <ul class="frm-checklist" id="frm-checklist">
-                <li data-check="type">Form type is selected</li>
-                <li data-check="company" class="is-ok">Company is selected</li>
-                <li data-check="date">Transaction date is valid</li>
-                <li data-check="lines">At least one ledger line is required</li>
-                <li data-check="balanced">Total debit equals total credit</li>
-                <li data-check="narration">Title / narration is provided</li>
-                <li data-check="attachments">Attachments (if required)</li>
-                <li data-check="ready">Ready for submission</li>
-            </ul>
-        </section>
-
-        <section class="mbw-card frm-rail-card">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-amber"><?= icon('reconcile') ?></span><h2>Approval Trail Preview</h2></div>
-            <ol class="frm-trail">
-                <li class="is-done"><span class="frm-trail-dot">1</span><div><strong>Prepared By</strong><small><?= e($currentUser['name'] ?? 'User') ?></small></div><div class="frm-trail-state"><span class="mbw-pill tone-green">Completed</span><small><?= e(date('m/d/Y h:i A')) ?></small></div></li>
-                <li><span class="frm-trail-dot">2</span><div><strong>Review By</strong><small>Not assigned</small></div><div class="frm-trail-state"><span class="mbw-pill tone-amber">Pending</span></div></li>
-                <li><span class="frm-trail-dot">3</span><div><strong>Approve By</strong><small><?= $canApprove ? 'Auto (you can approve)' : 'Not assigned' ?></small></div><div class="frm-trail-state"><span class="mbw-pill tone-amber">Pending</span></div></li>
-                <li><span class="frm-trail-dot">4</span><div><strong>Post By</strong><small><?= $canApprove ? 'Auto on submit' : 'Not assigned' ?></small></div><div class="frm-trail-state"><span class="mbw-pill tone-amber">Pending</span></div></li>
-            </ol>
-        </section>
-    </aside>
 </form>
 
 <script>
@@ -630,41 +584,9 @@ document.addEventListener('DOMContentLoaded', function () {
         pill.textContent = balanced ? '✓ Balanced' : (totalDr === 0 && totalCr === 0 ? 'Enter lines' : 'Not balanced');
         pill.className = 'mbw-pill ' + (balanced ? 'tone-green' : (totalDr === 0 && totalCr === 0 ? 'tone-gray' : 'tone-red'));
         document.getElementById('frm-display-total').value = currency + totalDr.toFixed(2);
-        document.getElementById('sum-total').textContent = currency + totalDr.toFixed(2);
-        refreshChecklist(lineCount, balanced);
     }
 
-    function setCheck(key, ok) {
-        var li = document.querySelector('#frm-checklist [data-check="' + key + '"]');
-        if (li) { li.classList.toggle('is-ok', !!ok); }
-    }
 
-    function refreshChecklist(lineCount, balanced) {
-        var typeSel = document.getElementById('frm-type');
-        var titleOk = document.getElementById('frm-title').value.trim() !== '';
-        var dateOk = document.getElementById('frm-date').value !== '';
-        setCheck('type', typeSel.value !== '');
-        setCheck('date', dateOk);
-        setCheck('lines', lineCount >= 2);
-        setCheck('balanced', balanced);
-        setCheck('narration', titleOk);
-        setCheck('attachments', true);
-        var ready = typeSel.value !== '' && titleOk && dateOk && lineCount >= 2 && balanced;
-        setCheck('ready', ready);
-        document.getElementById('sum-type').textContent = typeSel.value ? typeSel.options[typeSel.selectedIndex].text : '—';
-
-        var steps = document.querySelectorAll('.frm-step');
-        steps.forEach(function (step) { step.classList.remove('is-active', 'is-done'); });
-        var progress = 1 + (typeSel.value && titleOk ? 1 : 0) + (dateOk ? 1 : 0) + (lineCount >= 2 && balanced ? 1 : 0);
-        steps.forEach(function (step, index) {
-            if (index + 1 < progress) { step.classList.add('is-done'); }
-            if (index + 1 === progress) { step.classList.add('is-active'); }
-        });
-    }
-
-    document.getElementById('frm-type').addEventListener('change', recalc);
-    document.getElementById('frm-title').addEventListener('input', recalc);
-    document.getElementById('frm-date').addEventListener('change', recalc);
 
     var partySelect = document.getElementById('frm-party');
     if (partySelect) {
