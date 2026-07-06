@@ -5,7 +5,9 @@ require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/reports_engine.php';
 
 require_staff_or_admin();
-require_company_context();
+if ((string) (current_user()['role'] ?? '') === 'admin') {
+    require_company_context();
+}
 accounting_module_repair_database();
 
 $clientId = (int) ($_GET['client'] ?? ($_POST['client_id'] ?? 0));
@@ -94,6 +96,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash('success', $needsClientApproval ? 'Entry submitted — waiting for the client\'s approval.' : 'Entry posted to the client\'s books.');
         redirect($booksUrl('vouchers'));
     }
+    if ($action === 'set_client_business_type' && table_exists('company_accounting_preferences')) {
+        $bt = in_array((string) ($_POST['business_type'] ?? ''), ['service', 'trading', 'manufacturing'], true) ? (string) $_POST['business_type'] : 'service';
+        db()->prepare('INSERT INTO company_accounting_preferences (company_id, business_type, updated_by) VALUES (:cid, :bt, :uid)
+            ON DUPLICATE KEY UPDATE business_type = VALUES(business_type), updated_by = VALUES(updated_by)')
+            ->execute(['cid' => $booksCompanyId, 'bt' => $bt, 'uid' => $userId ?: null]);
+        flash('success', 'Client business type set to ' . ucfirst($bt) . '.');
+        redirect($booksUrl('overview'));
+    }
     if ($action === 'cancel_client_voucher') {
         $vid = (int) ($_POST['voucher_id'] ?? 0);
         $where = $access === 'direct' ? '' : " AND approval_state = 'pending_approval' AND submitted_by = " . $userId;
@@ -103,6 +113,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+$booksBusinessType = company_accounting_business_type($booksCompanyId);
+$booksProfile = accounting_business_profile($booksBusinessType);
 $snapshot = $booksFyId > 0 ? company_financials_snapshot($booksCompanyId, $booksFyId) : ['cash' => 0.0, 'receivables' => 0.0, 'payables' => 0.0, 'income' => 0.0, 'expenses' => 0.0, 'net' => 0.0];
 $fmtMoney = static fn (float $a): string => $currency . number_format($a, 2);
 
@@ -127,6 +139,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </nav>
 
 <?php if ($tab === 'overview'): ?>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Client Business Type</h2><span class="frm-optional">Drives the statement formats and available features for this client</span></div>
+        <form method="post" style="display:flex;gap:8px;flex-wrap:wrap">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="set_client_business_type">
+            <input type="hidden" name="client_id" value="<?= (int) $clientId ?>">
+            <?php foreach (['service' => 'Service', 'trading' => 'Trading', 'manufacturing' => 'Manufacturing'] as $btValue => $btLabel): ?>
+                <button type="submit" name="business_type" value="<?= e($btValue) ?>" class="button <?= $booksBusinessType === $btValue ? '' : 'secondary' ?>"><?= e($btLabel) ?></button>
+            <?php endforeach; ?>
+        </form>
+    </section>
     <section class="mbw-kpi-grid">
         <?php foreach ([['Cash & Bank', $snapshot['cash'], 'blue', 'bank'], ['Receivables', $snapshot['receivables'], 'green', 'clients'], ['Payables', $snapshot['payables'], 'red', 'card'], ['Income', $snapshot['income'], 'purple', 'analytics'], ['Net Profit', $snapshot['net'], 'green', 'trend-up']] as [$label, $amount, $tone, $iconName]): ?>
             <article class="mbw-kpi"><div><span class="mbw-kpi-label"><?= e($label) ?></span><div class="mbw-kpi-value"><?= e($fmtMoney((float) $amount)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e($booksFy['label'] ?? '') ?></span></span></div><span class="mbw-chip tone-<?= e($tone) ?>"><?= icon($iconName) ?></span></article>
@@ -201,10 +224,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 <?php else: ?>
     <?php
-    $reportId = in_array((string) ($_GET['report'] ?? ''), ['trial-balance', 'profit-loss', 'balance-sheet', 'cash-flow', 'ledger-report'], true) ? (string) $_GET['report'] : 'trial-balance';
+    $clientReports = ['trial-balance' => 'Trial Balance', 'profit-loss' => 'Profit or Loss', 'balance-sheet' => 'Balance Sheet', 'cash-flow' => 'Cash Flow', 'ledger-report' => 'Ledger Report'];
+    if ($booksProfile['show_inventory'] ?? false) {
+        $clientReports['inventory-summary'] = 'Inventory Summary';
+        $clientReports['stock-ledger'] = 'Stock Ledger';
+    }
+    if ($booksProfile['show_manufacturing'] ?? false) {
+        $clientReports['manufacturing-statement'] = 'Manufacturing Statement';
+    }
+    $reportId = array_key_exists((string) ($_GET['report'] ?? ''), $clientReports) ? (string) $_GET['report'] : 'trial-balance';
     $from = (string) ($booksFy['start_date'] ?? date('Y-01-01'));
     $to = (string) ($booksFy['end_date'] ?? date('Y-12-31'));
-    $report = rc_generate($reportId, $booksCompanyId, $from, $to, ['currency' => $currency, 'vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => 'service', 'org_default' => 'service', 'company_id' => $booksCompanyId, 'company_name' => (string) $client['organization_name'], 'subsidiaries' => []]);
+    $report = rc_generate($reportId, $booksCompanyId, $from, $to, ['currency' => $currency, 'vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => $booksBusinessType, 'org_default' => $booksBusinessType, 'company_id' => $booksCompanyId, 'company_name' => (string) $client['organization_name'], 'subsidiaries' => []]);
     $reportMeta = [
         'company_name' => (string) $client['organization_name'],
         'fiscal_label' => (string) ($booksFy['label'] ?? ''),
@@ -214,7 +245,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     ];
     ?>
     <section class="mbw-card rpt-picker">
-        <?php foreach (['trial-balance' => 'Trial Balance', 'profit-loss' => 'Profit or Loss', 'balance-sheet' => 'Balance Sheet', 'cash-flow' => 'Cash Flow', 'ledger-report' => 'Ledger Report'] as $rid => $rlabel): ?>
+        <?php foreach ($clientReports as $rid => $rlabel): ?>
             <a class="rpt-pick <?= $rid === $reportId ? 'is-active' : '' ?>" href="<?= e($booksUrl('reports') . '&report=' . $rid) ?>"><?= icon('reports') ?><span><?= e($rlabel) ?></span></a>
         <?php endforeach; ?>
     </section>

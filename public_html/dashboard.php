@@ -940,7 +940,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
             <?php if ($abFy): ?>
                 <?php
                 $abReportId = in_array((string) ($_GET['report'] ?? ''), ['trial-balance', 'profit-loss', 'balance-sheet', 'cash-flow', 'ledger-report'], true) ? (string) $_GET['report'] : 'trial-balance';
-                $abReport = rc_generate($abReportId, $abCompanyId, (string) $abFy['start_date'], (string) $abFy['end_date'], ['currency' => $abCurrency, 'vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => 'service', 'org_default' => 'service', 'company_id' => $abCompanyId, 'company_name' => (string) $clientProfile['organization_name'], 'subsidiaries' => []]);
+                $abReport = rc_generate($abReportId, $abCompanyId, (string) $abFy['start_date'], (string) $abFy['end_date'], ['currency' => $abCurrency, 'vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => company_accounting_business_type($abCompanyId), 'org_default' => company_accounting_business_type($abCompanyId), 'company_id' => $abCompanyId, 'company_name' => (string) $clientProfile['organization_name'], 'subsidiaries' => []]);
                 ?>
                 <section class="mbw-card rpt-picker">
                     <?php foreach (['trial-balance' => 'Trial Balance', 'profit-loss' => 'Profit or Loss', 'balance-sheet' => 'Balance Sheet', 'cash-flow' => 'Cash Flow', 'ledger-report' => 'Ledger Report'] as $abRid => $abRlabel): ?>

@@ -3385,8 +3385,9 @@ function client_books_access_level(array $clientProfile): string
         return '';
     }
     $role = (string) ($user['role'] ?? '');
-    $portalCode = (string) (current_company()['code'] ?? '');
-    $servesFromPortal = (int) ($clientProfile['company_id'] ?? 0) === (int) (current_company()['id'] ?? 0);
+    $portal = current_company() ?: (!empty($user['company_id']) ? company_by_id((int) $user['company_id']) : null);
+    $portalCode = (string) ($portal['code'] ?? '');
+    $servesFromPortal = (int) ($clientProfile['company_id'] ?? 0) === (int) ($portal['id'] ?? 0);
 
     if ($role === 'admin') {
         return ($portalCode === 'MBAACA' || $servesFromPortal) ? 'direct' : '';
@@ -3406,7 +3407,7 @@ function client_books_clients_for_scope(): array
     }
     $user = current_user();
     $role = (string) ($user['role'] ?? '');
-    $portal = current_company();
+    $portal = current_company() ?: (!empty($user['company_id']) ? company_by_id((int) $user['company_id']) : null);
     $portalCode = (string) ($portal['code'] ?? '');
     $portalId = (int) ($portal['id'] ?? 0);
 

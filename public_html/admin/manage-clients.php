@@ -4,7 +4,9 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_staff_or_admin();
-require_company_context();
+if ((string) (current_user()['role'] ?? '') === 'admin') {
+    require_company_context();
+}
 $repairErrors = accounting_module_repair_database();
 
 $currentUser = current_user();
