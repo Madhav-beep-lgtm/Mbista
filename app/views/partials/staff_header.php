@@ -48,6 +48,11 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
                 <h1><?= e($pageTitle) ?></h1>
                 <p>Signed in as <?= e($currentUser['name'] ?? 'Staff') ?></p>
             </div>
+            <form method="get" action="<?= e(url('search.php')) ?>" class="admin-topbar-search" role="search">
+                <label class="sr-only" for="staff-global-search">Search</label>
+                <input id="staff-global-search" type="search" name="q" placeholder="Search tasks, clients, documents..." value="<?= e((string) ($_GET['q'] ?? '')) ?>">
+                <button type="submit" class="admin-icon-button" aria-label="Search" title="Search"><?= icon('reports') ?></button>
+            </form>
             <?php if ($headerStaffCompany): ?>
                 <div class="admin-context-chip" aria-label="Current staff context">
                     <span class="admin-context-icon"><?= icon('staff') ?></span>

@@ -243,19 +243,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <nav class="accounting-tabs" aria-label="Chart of accounts sections">
     <a class="is-active" href="#hierarchy">Hierarchy View</a>
-    <a href="#create-group">Groups</a>
-    <a href="#create-ledger">Ledgers</a>
-    <a href="#posting-accounts">Posting Accounts</a>
-    <a href="#audit-log">Audit Log</a>
+    <a href="<?= e(url('admin/chart-groups.php')) ?>">Groups</a>
+    <a href="<?= e(url('admin/chart-ledgers.php')) ?>">Ledgers</a>
+    <a href="<?= e(url('admin/chart-posting-accounts.php')) ?>">Posting Accounts</a>
+    <a href="<?= e(url('admin/chart-audit-log.php')) ?>">Audit Log</a>
 </nav>
 
 <section class="coa-module-grid" aria-label="Chart of accounts module structure">
-    <article><span><?= icon('accounting') ?></span><strong>Masters</strong><small>Chart framework</small></article>
-    <article><span><?= icon('teams') ?></span><strong>Groups</strong><small>Classification</small></article>
-    <article><span><?= icon('documents') ?></span><strong>Ledgers</strong><small>Accounts</small></article>
-    <article><span><?= icon('services') ?></span><strong>Opening Balances</strong><small>OB controls</small></article>
-    <article><span><?= icon('settings') ?></span><strong>Automated Posting</strong><small>Mapped accounts</small></article>
-    <article><span><?= icon('reports') ?></span><strong>Dimensions</strong><small>Cost centers and projects</small></article>
+    <a class="coa-module-card" href="<?= e(url('admin/chart-groups.php')) ?>"><span><?= icon('accounting') ?></span><strong>Masters</strong><small>Chart framework</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/chart-groups.php')) ?>"><span><?= icon('teams') ?></span><strong>Groups</strong><small>Classification</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/chart-ledgers.php')) ?>"><span><?= icon('documents') ?></span><strong>Ledgers</strong><small>Accounts</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/accounting.php')) ?>"><span><?= icon('services') ?></span><strong>Opening Balances</strong><small>OB controls</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><span><?= icon('settings') ?></span><strong>Automated Posting</strong><small>Mapped accounts</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/workspace.php?view=home')) ?>"><span><?= icon('reports') ?></span><strong>Dimensions</strong><small>Cost centers and projects</small></a>
 </section>
 
 <div class="accounting-stat-grid">
@@ -334,45 +334,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
     </details>
 
-    <details class="feature-disclosure" id="posting-accounts">
-        <summary>
-            <span>
-                <strong><?= icon('settings') ?>Automated Posting Accounts</strong>
-                <small>Choose the accounts used by invoice, receipt, refund, and tax postings.</small>
-            </span>
-            <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-        </summary>
-        <?php if (!table_exists('company_ledger_mappings')): ?>
-            <p class="muted">The ledger-mapping migration has not been applied yet.</p>
-        <?php elseif ($flatLedgers === []): ?>
-            <p class="muted">Create ledger accounts before assigning automated posting roles.</p>
-        <?php else: ?>
-            <form method="post" class="workspace-form-grid">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="save_ledger_mappings">
-                <?php foreach ($mappingRoles as $mapKey => $role): ?>
-                    <label><?= e($role['label']) ?>
-                        <select name="mapping[<?= e($mapKey) ?>]">
-                            <option value="0">Use legacy default</option>
-                            <?php foreach ($flatLedgers as $ledger): ?>
-                                <?php
-                                $matchesNature = (string) $ledger['type'] === (string) $role['nature'];
-                                $matchesCashRole = empty($role['cash_only']) || (int) $ledger['is_cash_or_bank'] === 1;
-                                if (!$matchesNature || !$matchesCashRole) {
-                                    continue;
-                                }
-                                ?>
-                                <option value="<?= (int) $ledger['id'] ?>" <?= ($currentMappings[$mapKey] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>>
-                                    <?= e($ledger['code']) ?> - <?= e($ledger['name']) ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-                <?php endforeach; ?>
-                <button type="submit"><?= icon('settings') ?>Save Posting Accounts</button>
-            </form>
-        <?php endif; ?>
-    </details>
+    <article class="feature-disclosure">
+        <div>
+            <strong><?= icon('settings') ?>Automated Posting Accounts</strong>
+            <small>Choose the accounts used by invoice, receipt, refund, and tax postings.</small>
+        </div>
+        <a class="button secondary" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><?= icon('settings') ?>Open posting accounts</a>
+    </article>
 </div>
 
 <div class="coa-workspace-grid" id="hierarchy">
@@ -402,7 +370,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <section class="mbw-governance-note" id="audit-log">
     <span><?= icon('admin') ?></span>
-    <p>All company-specific ledgers, groups, posting accounts, cost centers, and projects must be created under the assigned company node. Super Admin can review the full group, while subsidiary users remain inside their company scope.</p>
+    <p>All company-specific ledgers, groups, posting accounts, cost centers, and projects must be created under the assigned company node. <a href="<?= e(url('admin/chart-posting-accounts.php')) ?>">Posting accounts</a> and <a href="<?= e(url('admin/chart-audit-log.php')) ?>">audit log</a> open in their own screens now, while subsidiary users remain inside their company scope.</p>
 </section>
 
 <?php

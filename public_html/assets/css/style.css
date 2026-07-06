@@ -8576,3 +8576,271 @@ body.theme-dark .affiliate-mark {
   border-color: rgba(233, 239, 248, 0.4);
   color: #dbe6f5;
 }
+
+/* ==========================================================================
+   Public-site dark theme layer
+   The premium visual refresh hardcodes light backgrounds (white header,
+   white cards, light body gradient) below the dark-token definitions, so
+   dark mode rendered light text on light surfaces. This layer restores a
+   genuinely dark rendering for every hardcoded light rule.
+   ========================================================================== */
+
+body.theme-dark {
+  background:
+    radial-gradient(circle at 80% 8%, rgba(217, 163, 58, 0.06), transparent 28rem),
+    linear-gradient(180deg, #0a1120 0%, #0d1728 48%, #0a1120 100%);
+}
+
+body.theme-dark .site-header {
+  background: rgba(10, 17, 32, 0.94);
+  border-bottom: 1px solid rgba(148, 178, 215, 0.14);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+body.theme-dark .nav a,
+body.theme-dark .theme-toggle-link,
+body.theme-dark .dropdown-toggle,
+body.theme-dark.home-page .nav a,
+body.theme-dark.home-page .theme-toggle-link,
+body.theme-dark.home-page .dropdown-toggle {
+  color: #b9c8dd;
+}
+
+body.theme-dark .nav a:hover,
+body.theme-dark .nav a.is-active,
+body.theme-dark .theme-toggle-link:hover {
+  color: #fff;
+  background: rgba(148, 178, 215, 0.12);
+}
+
+body.theme-dark .brand strong,
+body.theme-dark.home-page .brand strong {
+  color: #e8eef7;
+}
+
+body.theme-dark .brand small,
+body.theme-dark.home-page .brand small {
+  color: #9fb1c6;
+}
+
+body.theme-dark .mobile-menu-button {
+  color: #fff;
+}
+
+body.theme-dark .dropdown-menu {
+  background: #111b30;
+  border-color: rgba(148, 178, 215, 0.22);
+}
+
+body.theme-dark .dropdown-menu a {
+  color: #c9d6e8;
+}
+
+body.theme-dark .dropdown-menu a:hover {
+  color: #fff;
+}
+
+body.theme-dark .dropdown-heading {
+  color: #8fa4bf;
+}
+
+/* Buttons: premium sets a navy gradient; give them light text and a
+   slightly lifted navy so they read on dark surfaces. */
+
+body.theme-dark .button,
+body.theme-dark button,
+body.theme-dark input[type="submit"] {
+  color: #fff;
+  background: linear-gradient(135deg, #14335f, #1c4487);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+body.theme-dark .button:hover,
+body.theme-dark button:hover,
+body.theme-dark input[type="submit"]:hover {
+  background: linear-gradient(135deg, #1c4487, #14335f);
+}
+
+body.theme-dark .button.secondary,
+body.theme-dark .button.outline,
+body.theme-dark button.secondary,
+body.theme-dark input[type="submit"].secondary {
+  color: #dbe6f5;
+  border-color: rgba(148, 178, 215, 0.32);
+  background: #16233c;
+  box-shadow: none;
+}
+
+body.theme-dark .button.secondary:hover,
+body.theme-dark .button.outline:hover,
+body.theme-dark button.secondary:hover {
+  color: #fff;
+  border-color: rgba(217, 163, 58, 0.65);
+  background: #1a2a46;
+}
+
+body.theme-dark .nav-button {
+  color: #0b1420 !important;
+}
+
+/* Cards and panels: mirror of the premium hardcoded-white list */
+
+body.theme-dark .stat-card,
+body.theme-dark .card,
+body.theme-dark .notice,
+body.theme-dark .form-card,
+body.theme-dark .table-card,
+body.theme-dark .metric,
+body.theme-dark .admin-stats .card,
+body.theme-dark .about-item,
+body.theme-dark .invoice-card,
+body.theme-dark .modal-card,
+body.theme-dark .admin-hero,
+body.theme-dark .package-card,
+body.theme-dark .admin-chart-card,
+body.theme-dark .admin-analysis-card,
+body.theme-dark .digital-click-card,
+body.theme-dark .section-sidebar,
+body.theme-dark .link-tile {
+  border: 1px solid rgba(148, 178, 215, 0.18);
+  background: rgba(17, 27, 48, 0.96);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+}
+
+body.theme-dark .table-card h2,
+body.theme-dark .table-card h3,
+body.theme-dark .card h2,
+body.theme-dark .card h3 {
+  border-bottom-color: rgba(148, 178, 215, 0.14);
+}
+
+body.theme-dark .package-card.featured {
+  border-color: rgba(127, 176, 245, 0.45);
+  background: linear-gradient(180deg, rgba(127, 176, 245, 0.10), rgba(17, 27, 48, 0.96));
+}
+
+body.theme-dark .section-head {
+  border-color: rgba(148, 178, 215, 0.18);
+  background: rgba(17, 27, 48, 0.96);
+}
+
+body.theme-dark table th {
+  color: #b9c8dd;
+  background: #12203a;
+}
+
+body.theme-dark table td,
+body.theme-dark table th {
+  border-color: rgba(148, 178, 215, 0.16);
+}
+
+body.theme-dark input,
+body.theme-dark select,
+body.theme-dark textarea {
+  color: #e8eef7;
+  border-color: rgba(148, 178, 215, 0.28);
+  background: #101c33;
+}
+
+body.theme-dark input::placeholder,
+body.theme-dark textarea::placeholder {
+  color: #7186a0;
+}
+
+/* Group structure boxes and contact cards inherit the card layer above;
+   keep the structure connectors visible on dark. */
+
+body.theme-dark .group-structure-parent,
+body.theme-dark .group-structure-child,
+body.theme-dark .group-structure-associate {
+  border-color: rgba(148, 178, 215, 0.22);
+  background: rgba(17, 27, 48, 0.96);
+}
+
+body.theme-dark .site-footer {
+  border-top-color: rgba(148, 178, 215, 0.16);
+  background: #0d1626;
+}
+
+/* Dark layer: home-page card variants that hardcode white backgrounds */
+
+body.theme-dark.home-page .package-card,
+body.theme-dark.home-page .feature-grid .card,
+body.theme-dark.home-page .card,
+body.theme-dark.home-page .team-card {
+  border-color: rgba(148, 178, 215, 0.18);
+  background: rgba(17, 27, 48, 0.96);
+}
+
+body.theme-dark.home-page .package-card.featured {
+  border-color: rgba(127, 176, 245, 0.45);
+  background: rgba(17, 27, 48, 0.96);
+}
+
+body.theme-dark .why-choose-intro h2 {
+  color: #e9eff8;
+}
+
+/* Dark layer: internal page header band and auth screens */
+
+body.theme-dark .page-header-band {
+  border-bottom-color: rgba(148, 178, 215, 0.16);
+  background: linear-gradient(180deg, #0d1728, #0a1120);
+}
+
+/* Dark layer: internal public section pages (About/Team/Services/Contact).
+   The band hardcodes a white background and the sidebar hardcodes light-mode
+   link colors; the card layer above already darkens the sidebar surface. */
+
+body.theme-dark .internal-page-band {
+  background: transparent;
+}
+
+body.theme-dark .section-sidebar h2 {
+  color: #e8eef7;
+}
+
+body.theme-dark .section-sidebar a {
+  color: #b9c8dd;
+}
+
+body.theme-dark .section-sidebar a:hover {
+  color: #fff;
+  background: rgba(148, 178, 215, 0.12);
+}
+
+body.theme-dark .section-sidebar a.active {
+  color: #fff;
+  border-left-color: #d9a33a;
+  background: rgba(127, 176, 245, 0.16);
+}
+
+body.theme-dark .link-tile:hover {
+  border-color: rgba(127, 176, 245, 0.55);
+  background: rgba(23, 36, 62, 0.98);
+}
+
+body.theme-dark .auth-shell {
+  background: #0a1120;
+}
+
+/* Dark layer: home main element is hardcoded white by the reference design */
+
+body.theme-dark.home-page main {
+  background: transparent;
+}
+
+/* Dark layer: re-declare chained tokens. :root defines these as
+   var(--primary) etc., which resolve against the root's light values;
+   re-declaring on the themed body makes them resolve against dark values. */
+
+body.theme-dark {
+  --heading: var(--primary);
+  --brand: var(--primary);
+  --brand-3: var(--accent);
+  --accent-blue: var(--secondary);
+  --accent-green: var(--success);
+  --border: var(--border-color);
+  --shadow: var(--shadow-sm);
+  --shadow-strong: var(--shadow-md);
+}

@@ -464,8 +464,13 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             if (!table_exists('task_invoices')) {
                 return ['subtitle' => 'Invoice module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
             }
+            $hasExciseColumns = column_exists('task_invoices', 'excise_rate') && column_exists('task_invoices', 'excise_amount');
+            $exciseSelect = $hasExciseColumns
+                ? 'COALESCE(ti.excise_rate, 0) AS excise_rate, COALESCE(ti.excise_amount, 0) AS excise_amount,'
+                : '0 AS excise_rate, 0 AS excise_amount,';
             $sql = '
                 SELECT ti.invoice_no, ti.invoice_category, ti.invoice_source_type, ti.status, ti.total_amount, ti.vat_amount, ti.taxable_amount,
+                       ' . $exciseSelect . '
                        COALESCE(ti.issued_on, DATE(ti.created_at)) AS idate,
                        COALESCE(ap.name, cp.organization_name, "Direct") AS party_name
                 FROM task_invoices ti
@@ -484,19 +489,38 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             $sql .= ' ORDER BY idate ASC, ti.id ASC LIMIT 500';
             $stmt = db()->prepare($sql);
             $stmt->execute($params);
+            $salesRows = $stmt->fetchAll();
+            $showExcise = $hasExciseColumns && (($ctx['biz'] ?? '') === 'manufacturing');
             $rows = [];
-            $totals = ['taxable' => 0.0, 'vat' => 0.0, 'total' => 0.0];
-            foreach ($stmt->fetchAll() as $inv) {
-                $rows[] = [date('d M Y', strtotime((string) $inv['idate'])), $inv['invoice_no'], $inv['party_name'], ucfirst((string) $inv['invoice_category']), ucfirst((string) ($inv['invoice_source_type'] ?? 'task')), rc_fmt((float) $inv['taxable_amount']), rc_fmt((float) $inv['vat_amount']), rc_fmt((float) $inv['total_amount'])];
+            $totals = ['taxable' => 0.0, 'excise' => 0.0, 'vat' => 0.0, 'total' => 0.0];
+            foreach ($salesRows as $candidateRow) {
+                if ($hasExciseColumns && ((string) ($candidateRow['invoice_source_type'] ?? 'task') === 'manufacturing' || (float) ($candidateRow['excise_amount'] ?? 0) > 0)) {
+                    $showExcise = true;
+                    break;
+                }
+            }
+            foreach ($salesRows as $inv) {
+                $row = [date('d M Y', strtotime((string) $inv['idate'])), $inv['invoice_no'], $inv['party_name'], ucfirst((string) $inv['invoice_category']), ucfirst((string) ($inv['invoice_source_type'] ?? 'task')), rc_fmt((float) $inv['taxable_amount'])];
+                if ($showExcise) {
+                    $row[] = rc_fmt((float) $inv['excise_amount']);
+                }
+                $row[] = rc_fmt((float) $inv['vat_amount']);
+                $row[] = rc_fmt((float) $inv['total_amount']);
+                $rows[] = $row;
                 $totals['taxable'] += (float) $inv['taxable_amount'];
+                $totals['excise'] += (float) $inv['excise_amount'];
                 $totals['vat'] += (float) $inv['vat_amount'];
                 $totals['total'] += (float) $inv['total_amount'];
             }
             return [
                 'subtitle' => 'Sales transaction details' . ($ctx['biz'] !== 'all' ? ' — ' . ucfirst($ctx['biz']) . ' only' : '') . '.',
-                'columns' => [['Date', 'left', ''], ['Invoice No.', 'left', ''], ['Party', 'left', ''], ['Category', 'left', ''], ['Source', 'left', ''], ['Taxable', 'right', ''], ['VAT', 'right', ''], ['Total (' . $sym . ')', 'right', '']],
+                'columns' => $showExcise
+                    ? [['Date', 'left', ''], ['Invoice No.', 'left', ''], ['Party', 'left', ''], ['Category', 'left', ''], ['Source', 'left', ''], ['Taxable', 'right', ''], ['Excise', 'right', ''], ['VAT', 'right', ''], ['Total (' . $sym . ')', 'right', '']]
+                    : [['Date', 'left', ''], ['Invoice No.', 'left', ''], ['Party', 'left', ''], ['Category', 'left', ''], ['Source', 'left', ''], ['Taxable', 'right', ''], ['VAT', 'right', ''], ['Total (' . $sym . ')', 'right', '']],
                 'rows' => $rows,
-                'totals' => ['', '', '', '', 'Total', rc_fmt($totals['taxable']), rc_fmt($totals['vat']), rc_fmt($totals['total'])],
+                'totals' => $showExcise
+                    ? ['', '', '', '', 'Total', rc_fmt($totals['taxable']), rc_fmt($totals['excise']), rc_fmt($totals['vat']), rc_fmt($totals['total'])]
+                    : ['', '', '', '', 'Total', rc_fmt($totals['taxable']), rc_fmt($totals['vat']), rc_fmt($totals['total'])],
             ];
         }
 

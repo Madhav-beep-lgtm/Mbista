@@ -1,0 +1,183 @@
+<?php
+declare(strict_types=1);
+require_once __DIR__ . '/../../app/bootstrap.php';
+require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/reports_engine.php';
+require_once __DIR__ . '/../../app/mailer.php';
+
+require_staff_or_admin();
+require_company_context();
+$repairErrors = accounting_module_repair_database();
+
+$pageTitle = 'Report Schedules';
+$company = current_company();
+$companyId = (int) ($company['id'] ?? 0);
+$currentUser = current_user();
+$userId = (int) ($currentUser['id'] ?? 0);
+$reportRegistry = rc_report_registry();
+$reportKey = (string) ($_GET['report_key'] ?? 'trial-balance');
+if (!isset($reportRegistry[$reportKey])) {
+    $reportKey = array_key_first($reportRegistry) ?: 'trial-balance';
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verify_csrf();
+    $action = (string) ($_POST['action'] ?? '');
+    if ($action === 'create_schedule') {
+        $recipient = trim((string) ($_POST['recipient_email'] ?? ''));
+        $frequency = (string) ($_POST['frequency'] ?? 'monthly');
+        $format = (string) ($_POST['export_format'] ?? 'both');
+        $selectedReportKey = (string) ($_POST['report_key'] ?? $reportKey);
+        if (!isset($reportRegistry[$selectedReportKey])) {
+            $selectedReportKey = $reportKey;
+        }
+        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            flash('error', 'Enter a valid recipient email address.');
+        } elseif (!in_array($frequency, ['daily', 'weekly', 'monthly'], true) || !in_array($format, ['csv', 'html', 'both'], true)) {
+            flash('error', 'Choose a valid frequency and format.');
+        } else {
+            $nextRun = match ($frequency) {
+                'daily' => date('Y-m-d', strtotime('tomorrow')),
+                'weekly' => date('Y-m-d', strtotime('+7 days')),
+                default => date('Y-m-01', strtotime('first day of next month')),
+            };
+            $filters = json_encode(array_filter([
+                'report_key' => $selectedReportKey,
+                'fy' => $_POST['fy'] ?? null,
+                'from' => trim((string) ($_POST['from'] ?? '')),
+                'to' => trim((string) ($_POST['to'] ?? '')),
+                'biz' => trim((string) ($_POST['biz'] ?? '')),
+            ], static fn ($value): bool => $value !== null && $value !== ''), JSON_UNESCAPED_SLASHES);
+            db()->prepare('
+                INSERT INTO report_schedules (company_id, report_key, recipient_email, frequency, export_format, filters, next_run_on, created_by)
+                VALUES (:company_id, :report_key, :recipient_email, :frequency, :export_format, :filters, :next_run_on, :created_by)
+            ')->execute([
+                'company_id' => $companyId,
+                'report_key' => $selectedReportKey,
+                'recipient_email' => $recipient,
+                'frequency' => $frequency,
+                'export_format' => $format,
+                'filters' => $filters,
+                'next_run_on' => $nextRun,
+                'created_by' => $userId ?: null,
+            ]);
+            flash('success', 'Schedule created.');
+        }
+        redirect('admin/report-schedules.php?report_key=' . urlencode($selectedReportKey));
+    }
+    if ($action === 'delete_schedule') {
+        $scheduleId = (int) ($_POST['schedule_id'] ?? 0);
+        if ($scheduleId > 0) {
+            db()->prepare('DELETE FROM report_schedules WHERE id = :id AND company_id = :company_id')
+                ->execute(['id' => $scheduleId, 'company_id' => $companyId]);
+            flash('success', 'Schedule removed.');
+        }
+        redirect('admin/report-schedules.php?report_key=' . urlencode($reportKey));
+    }
+}
+
+$scheduleStmt = db()->prepare('
+    SELECT *
+    FROM report_schedules
+    WHERE company_id = :company_id
+      AND report_key = :report_key
+    ORDER BY is_active DESC, next_run_on ASC, id DESC
+');
+$scheduleStmt->execute(['company_id' => $companyId, 'report_key' => $reportKey]);
+$schedules = $scheduleStmt->fetchAll();
+
+$bodyClass = 'admin-layout accounting-module-page reports-center-page';
+include __DIR__ . '/../../app/views/partials/admin_header.php';
+?>
+<div class="reference-head">
+    <div>
+        <h2>Report Schedules</h2>
+        <p>Manage recurring report deliveries and routing.</p>
+    </div>
+    <div class="rc-breadcrumb">Home / <strong>Report Schedules</strong></div>
+</div>
+
+<?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
+
+<section class="coa-module-grid" aria-label="Reports module switcher">
+    <?php foreach ($reportRegistry as $key => [$label, $description, $iconName]): ?>
+        <a class="coa-module-card <?= $key === $reportKey ? 'is-active' : '' ?>" href="<?= e(url('admin/report-schedules.php?report_key=' . urlencode($key))) ?>">
+            <div class="coa-module-icon"><?= icon($iconName) ?></div>
+            <div>
+                <strong><?= e($label) ?></strong>
+                <span><?= e($description) ?></span>
+            </div>
+        </a>
+    <?php endforeach; ?>
+</section>
+
+<div class="rc-workspace">
+    <main class="rc-report-view">
+        <div class="rc-report-head">
+            <div>
+                <h3><?= icon('compliance') ?><?= e($reportRegistry[$reportKey][0]) ?></h3>
+                <p><?= e($reportRegistry[$reportKey][1]) ?></p>
+            </div>
+            <span class="rc-asof"><?= $schedules !== [] ? e((string) count($schedules)) . ' schedules' : 'No schedules yet' ?></span>
+        </div>
+
+        <section class="rc-actions-card">
+            <h4>Create Schedule</h4>
+            <?php if (!mail_is_configured()): ?>
+                <p class="muted rc-mail-hint">SMTP is not configured. Delivery previews are stored locally until MAIL_* is set in <code>.env</code>.</p>
+            <?php endif; ?>
+            <form method="post" class="rc-schedule-form">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="create_schedule">
+                <label>Report
+                    <select name="report_key">
+                        <?php foreach ($reportRegistry as $key => [$label]) : ?>
+                            <option value="<?= e($key) ?>" <?= $key === $reportKey ? 'selected' : '' ?>><?= e($label) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Recipient Email<input type="email" name="recipient_email" placeholder="name@company.com" required></label>
+                <div class="rc-compare-dates">
+                    <label>Frequency
+                        <select name="frequency">
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly" selected>Monthly</option>
+                        </select>
+                    </label>
+                    <label>Format
+                        <select name="export_format">
+                            <option value="both" selected>CSV + HTML</option>
+                            <option value="csv">CSV only</option>
+                            <option value="html">HTML only</option>
+                        </select>
+                    </label>
+                </div>
+                <button class="button secondary" type="submit"><?= icon('compliance') ?>Save Schedule</button>
+            </form>
+        </section>
+
+        <section class="rc-actions-card">
+            <h4>Saved Schedules</h4>
+            <?php if ($schedules === []): ?>
+                <p class="muted">No schedules created for this report yet.</p>
+            <?php endif; ?>
+            <?php foreach ($schedules as $schedule): ?>
+                <div class="rc-schedule-row">
+                    <div>
+                        <strong><?= e($schedule['recipient_email']) ?></strong>
+                        <small><?= e(ucfirst((string) $schedule['frequency'])) ?> · <?= e(strtoupper((string) $schedule['export_format'])) ?> · next <?= e(date('d M Y', strtotime((string) $schedule['next_run_on']))) ?></small>
+                        <?php if (!empty($schedule['last_run_status'])): ?><small class="muted"><?= e($schedule['last_run_status']) ?></small><?php endif; ?>
+                    </div>
+                    <form method="post">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                        <input type="hidden" name="action" value="delete_schedule">
+                        <input type="hidden" name="schedule_id" value="<?= e((int) $schedule['id']) ?>">
+                        <button type="submit" title="Remove schedule">&times;</button>
+                    </form>
+                </div>
+            <?php endforeach; ?>
+        </section>
+    </main>
+</div>
+<?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

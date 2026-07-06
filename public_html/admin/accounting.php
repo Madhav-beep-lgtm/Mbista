@@ -391,6 +391,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </div>
 
+<section class="coa-module-grid" aria-label="Accounting workspace shortcuts">
+    <a class="coa-module-card" href="<?= e(url('admin/accounting.php')) ?>"><span><?= icon('documents') ?></span><strong>Vouchers</strong><small>Post and approve entries</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/accounting-parties.php')) ?>"><span><?= icon('users') ?></span><strong>Parties</strong><small>Customers and suppliers</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><span><?= icon('accounting') ?></span><strong>Chart</strong><small>Masters and ledgers</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/chart-groups.php')) ?>"><span><?= icon('teams') ?></span><strong>Groups</strong><small>Classification</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/chart-ledgers.php')) ?>"><span><?= icon('documents') ?></span><strong>Ledgers</strong><small>Accounts</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><span><?= icon('settings') ?></span><strong>Posting</strong><small>Mapped accounts</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/audit-trail.php')) ?>"><span><?= icon('reports') ?></span><strong>Audit</strong><small>History and approvals</small></a>
+    <a class="coa-module-card" href="<?= e(url('admin/reports-center.php')) ?>"><span><?= icon('reports') ?></span><strong>Reports</strong><small>All accounting reports</small></a>
+</section>
+
 <nav class="accounting-tabs" aria-label="Accounting sections">
     <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Dashboard</a>
     <a class="is-active" href="<?= e(url('admin/accounting.php')) ?>">Vouchers</a>

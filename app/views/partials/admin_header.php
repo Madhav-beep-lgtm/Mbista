@@ -93,6 +93,11 @@ $headerPortalLabel = match ($headerCompanyCode) {
                 <h1><?= e($pageTitle) ?></h1>
                 <p>Signed in as <?= e($currentUser['name'] ?? 'Admin') ?></p>
             </div>
+            <form method="get" action="<?= e(url('search.php')) ?>" class="admin-topbar-search" role="search">
+                <label class="sr-only" for="admin-global-search">Search</label>
+                <input id="admin-global-search" type="search" name="q" placeholder="Search dashboard, reports, invoices..." value="<?= e((string) ($_GET['q'] ?? '')) ?>">
+                <button type="submit" class="admin-icon-button" aria-label="Search" title="Search"><?= icon('reports') ?></button>
+            </form>
             <?php if ($headerCompany): ?>
                 <div class="admin-context-chip" aria-label="Current admin portal">
                     <span class="admin-context-icon"><?= icon($headerCompanyCode === 'MBAACA' ? 'admin' : 'companies') ?></span>

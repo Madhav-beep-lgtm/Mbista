@@ -1,9 +1,11 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
+require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_staff_or_admin();
 require_company_context();
+$repairErrors = accounting_module_repair_database();
 
 function accounting_dashboard_aging(int $companyId, int $fiscalYearId, int $ledgerId, string $chargeType, string $asOfDate): array
 {
@@ -413,6 +415,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
 <section class="ad-kpi-grid" aria-label="Financial overview">
     <?php foreach ($kpis as $kpi): ?>

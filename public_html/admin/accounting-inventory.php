@@ -306,14 +306,14 @@ $inventoryTypeCards = $inventoryProfile['show_manufacturing']
         ['Stock Item', 'Physical items bought, sold, and inventoried.'],
         ['Service Item', 'Non-physical service lines used in billing.'],
         ['Consumable', 'Low-value operational items tracked for stock control.'],
-    ];
+];
 $pageTitle = $inventoryProfile['show_manufacturing'] ? 'Inventory & Manufacturing' : 'Inventory';
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <div class="accounting-page-head">
     <div>
-        <h2>Items, stock movements, and production</h2>
+        <h2><?= $inventoryProfile['show_manufacturing'] ? 'Items, stock movements, and production' : 'Items and stock movements' ?></h2>
         <p><?= e($company['name'] ?? 'Company') ?> / <?= e($fiscalYear['label'] ?? 'No fiscal year') ?></p>
     </div>
     <div class="accounting-actions">
@@ -327,29 +327,30 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a href="<?= e(url('admin/accounting-parties.php')) ?>">Parties</a>
     <a href="<?= e(url('admin/accounting.php')) ?>">Vouchers</a>
     <a class="is-active" href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory</a>
-    <a href="#manufacturing">Manufacturing</a>
+    <?php if ($inventoryProfile['show_manufacturing']): ?><a href="#manufacturing">Manufacturing</a><?php endif; ?>
     <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a>
     <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Reports</a>
 </nav>
 
 <section class="inventory-process-grid" aria-label="Inventory process click flow">
-    <?php foreach ([['Create Item', 'Master data'], ['Set Type, Unit & Category', 'Classification'], ['Save Item Master', 'Available for transactions'], ['Record Stock Movement', 'Receipt / issue / transfer'], ['Update Stock Summary', 'Qty on hand'], ['Update Valuation', 'Cost and value'], ['Update Reports', 'Analytics']] as $index => $process): ?>
-        <article><b><?= e((string) ($index + 1)) ?></b><span><?= icon($index === 0 ? 'services' : ($index === 4 ? 'reports' : 'documents')) ?></span><strong><?= e($process[0]) ?></strong><small><?= e($process[1]) ?></small></article>
+    <?php foreach ($inventoryProcessSteps as $index => $process): ?>
+        <article><b><?= e((string) ($index + 1)) ?></b><span><?= icon($index === 0 ? 'services' : ($index === count($inventoryProcessSteps) - 1 ? 'reports' : 'documents')) ?></span><strong><?= e($process[0]) ?></strong><small><?= e($process[1]) ?></small></article>
     <?php endforeach; ?>
 </section>
 
 <section class="inventory-type-grid" aria-label="Inventory item types">
-    <article><strong>Stock Item</strong><span>Physical items bought, sold, and inventoried.</span></article>
-    <article><strong>Service Item</strong><span>Non-physical service lines used in billing.</span></article>
-    <article><strong>Raw Material</strong><span>Inputs consumed in manufacturing or production.</span></article>
-    <article><strong>Finished Goods</strong><span>Completed products ready for sale to customers.</span></article>
+    <?php foreach ($inventoryTypeCards as [$typeLabel, $typeDescription]): ?>
+        <article><strong><?= e($typeLabel) ?></strong><span><?= e($typeDescription) ?></span></article>
+    <?php endforeach; ?>
 </section>
 
 <div class="accounting-stat-grid">
-    <div class="accounting-stat-card accent-blue"><span class="stat-icon"><?= icon('services') ?></span><small>Items</small><strong><?= e((string) count($items)) ?></strong><em>Stock, service, raw material</em></div>
+    <div class="accounting-stat-card accent-blue"><span class="stat-icon"><?= icon('services') ?></span><small>Items</small><strong><?= e((string) count($items)) ?></strong><em><?= e(implode(', ', array_map(static fn (array $card): string => $card[0], $inventoryTypeCards))) ?></em></div>
     <div class="accounting-stat-card accent-green"><span class="stat-icon"><?= icon('accounting') ?></span><small>Estimated stock value</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format($stockValue, 2)) ?></strong><em>Based on purchase rates</em></div>
     <div class="accounting-stat-card accent-orange"><span class="stat-icon"><?= icon('tasks') ?></span><small>Low stock</small><strong><?= e((string) $lowStockCount) ?></strong><em>At or below reorder level</em></div>
-    <div class="accounting-stat-card accent-purple"><span class="stat-icon"><?= icon('settings') ?></span><small>Manufacturing orders</small><strong><?= e((string) count($manufacturingOrders)) ?></strong><em>Recent production records</em></div>
+    <?php if ($inventoryProfile['show_manufacturing']): ?>
+        <div class="accounting-stat-card accent-purple"><span class="stat-icon"><?= icon('settings') ?></span><small>Manufacturing orders</small><strong><?= e((string) count($manufacturingOrders)) ?></strong><em>Recent production records</em></div>
+    <?php endif; ?>
 </div>
 
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
@@ -394,33 +395,37 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </form>
     </details>
 
-    <details class="feature-disclosure" id="manufacturing">
-        <summary><span><strong><?= icon('settings') ?>Production Completion</strong><small>Consume input items and produce finished goods in one step.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
-        <form method="post" class="workspace-form-grid">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="create_manufacturing_order">
-            <label>Order no<input type="text" name="order_no" placeholder="Leave blank for auto"></label>
-            <label>Finished item<select name="finished_item_id" required><option value="">Select finished item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
-            <label>Quantity produced<input type="number" step="0.001" min="0.001" name="quantity" required></label>
-            <label>Completed on<input type="date" name="completed_on" value="<?= e(date('Y-m-d')) ?>"></label>
-            <?php for ($i = 0; $i < 4; $i++): ?>
-                <div class="workspace-span-2 workspace-form-grid">
-                    <label>Input item<select name="input_item_id[]"><option value="">Select input</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
-                    <label>Input qty<input type="number" step="0.001" min="0" name="input_quantity[]"></label>
-                    <label>Input rate<input type="number" step="0.01" min="0" name="input_rate[]"></label>
-                </div>
-            <?php endfor; ?>
-            <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
-            <button type="submit"><?= icon('settings') ?>Complete order</button>
-        </form>
-    </details>
+    <?php if ($inventoryProfile['show_manufacturing']): ?>
+        <details class="feature-disclosure" id="manufacturing">
+            <summary><span><strong><?= icon('settings') ?>Production Completion</strong><small>Consume input items and produce finished goods in one step.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+            <form method="post" class="workspace-form-grid">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="create_manufacturing_order">
+                <label>Order no<input type="text" name="order_no" placeholder="Leave blank for auto"></label>
+                <label>Finished item<select name="finished_item_id" required><option value="">Select finished item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+                <label>Quantity produced<input type="number" step="0.001" min="0.001" name="quantity" required></label>
+                <label>Completed on<input type="date" name="completed_on" value="<?= e(date('Y-m-d')) ?>"></label>
+                <?php for ($i = 0; $i < 4; $i++): ?>
+                    <div class="workspace-span-2 workspace-form-grid">
+                        <label>Input item<select name="input_item_id[]"><option value="">Select input</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+                        <label>Input qty<input type="number" step="0.001" min="0" name="input_quantity[]"></label>
+                        <label>Input rate<input type="number" step="0.01" min="0" name="input_rate[]"></label>
+                    </div>
+                <?php endfor; ?>
+                <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
+                <button type="submit"><?= icon('settings') ?>Complete order</button>
+            </form>
+        </details>
+    <?php endif; ?>
 </div>
 
-<section class="mbw-flow-panel manufacturing-flow" aria-label="Manufacturing production workflow">
-    <?php foreach (['Create Production Order', 'Select Finished Item & BOM', 'Issue Materials', 'Record Work in Progress', 'Complete Production', 'Finished Goods Receipt', 'Update Stock & Accounting'] as $stepIndex => $stepLabel): ?>
-        <div><b><?= e((string) ($stepIndex + 1)) ?></b><span><?= e($stepLabel) ?></span></div>
-    <?php endforeach; ?>
-</section>
+<?php if ($inventoryProfile['show_manufacturing']): ?>
+    <section class="mbw-flow-panel manufacturing-flow" aria-label="Manufacturing production workflow">
+        <?php foreach (['Create Production Order', 'Select Finished Item & BOM', 'Issue Materials', 'Record Work in Progress', 'Complete Production', 'Finished Goods Receipt', 'Update Stock & Accounting'] as $stepIndex => $stepLabel): ?>
+            <div><b><?= e((string) ($stepIndex + 1)) ?></b><span><?= e($stepLabel) ?></span></div>
+        <?php endforeach; ?>
+    </section>
+<?php endif; ?>
 
 <div class="table-card">
     <h2>Item stock summary</h2>
@@ -452,16 +457,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </table>
 </div>
 
-<div class="table-card">
-    <h2>Manufacturing orders</h2>
-    <table>
-        <thead><tr><th>Order</th><th>Finished item</th><th>Quantity</th><th>Status</th><th>Completed</th></tr></thead>
-        <tbody>
-            <?php if ($manufacturingOrders === []): ?><tr><td colspan="5">No manufacturing orders yet.</td></tr><?php endif; ?>
-            <?php foreach ($manufacturingOrders as $order): ?>
-                <tr><td><?= e($order['order_no']) ?></td><td><?= e($order['sku'] . ' - ' . $order['finished_item_name']) ?></td><td><?= e(number_format((float) $order['quantity'], 3)) ?></td><td><span class="tag"><?= e($order['status']) ?></span></td><td><?= e($order['completed_on'] ?? '-') ?></td></tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
-</div>
+<?php if ($inventoryProfile['show_manufacturing']): ?>
+    <div class="table-card">
+        <h2>Manufacturing orders</h2>
+        <table>
+            <thead><tr><th>Order</th><th>Finished item</th><th>Quantity</th><th>Status</th><th>Completed</th></tr></thead>
+            <tbody>
+                <?php if ($manufacturingOrders === []): ?><tr><td colspan="5">No manufacturing orders yet.</td></tr><?php endif; ?>
+                <?php foreach ($manufacturingOrders as $order): ?>
+                    <tr><td><?= e($order['order_no']) ?></td><td><?= e($order['sku'] . ' - ' . $order['finished_item_name']) ?></td><td><?= e(number_format((float) $order['quantity'], 3)) ?></td><td><span class="tag"><?= e($order['status']) ?></span></td><td><?= e($order['completed_on'] ?? '-') ?></td></tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+<?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

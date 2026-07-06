@@ -1,15 +1,19 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
+require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_once __DIR__ . '/../../app/reports_engine.php';
 require_once __DIR__ . '/../../app/mailer.php';
 require_staff_or_admin();
 require_company_context();
+$repairErrors = accounting_module_repair_database();
 
 $pageTitle = 'Reports Center';
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
+$companyBusinessType = company_accounting_business_type($companyId);
+$companyBusinessProfile = accounting_business_profile($companyBusinessType);
 $currentUser = current_user();
 $userId = (int) ($currentUser['id'] ?? 0);
 $currencySymbol = site_currency_symbol();
@@ -18,13 +22,21 @@ $currencySymbol = site_currency_symbol();
 // Report registry.
 // ---------------------------------------------------------------------------
 $reportRegistry = rc_report_registry();
+$allowedReportKeys = array_keys($reportRegistry);
+if (!($companyBusinessProfile['show_inventory'] ?? false)) {
+    $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['inventory-summary', 'stock-ledger']));
+}
+if (!($companyBusinessProfile['show_manufacturing'] ?? false)) {
+    $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['manufacturing-statement']));
+}
+$allowedReportRegistry = array_intersect_key($reportRegistry, array_flip($allowedReportKeys));
 
 // ---------------------------------------------------------------------------
 // Filters.
 // ---------------------------------------------------------------------------
 $reportId = (string) ($_GET['report'] ?? 'trial-balance');
-if (!isset($reportRegistry[$reportId])) {
-    $reportId = 'trial-balance';
+if (!isset($allowedReportRegistry[$reportId])) {
+    $reportId = array_key_first($allowedReportRegistry) ?: 'trial-balance';
 }
 
 $fiscalYears = fiscal_years_for_company($companyId, false);
@@ -61,7 +73,14 @@ $ledgerFilterId = (int) ($_GET['ledger_id'] ?? 0);
 $groupFilterId = (int) ($_GET['group_id'] ?? 0);
 $itemFilterId = (int) ($_GET['item_id'] ?? 0);
 $businessType = (string) ($_GET['biz'] ?? 'all');
-if (!in_array($businessType, ['all', 'service', 'trading', 'manufacturing'], true)) {
+$businessTypeOptions = ['all' => 'All', 'service' => 'Service'];
+if ($companyBusinessProfile['show_inventory'] ?? false) {
+    $businessTypeOptions['trading'] = 'Trading';
+}
+if ($companyBusinessProfile['show_manufacturing'] ?? false) {
+    $businessTypeOptions['manufacturing'] = 'Manufacturing';
+}
+if (!array_key_exists($businessType, $businessTypeOptions)) {
     $businessType = 'all';
 }
 
@@ -92,80 +111,6 @@ function rc_url(array $overrides = []): string
     $query = http_build_query($params);
     return url('admin/reports-center.php' . ($query !== '' ? '?' . $query : ''));
 }
-
-// ---------------------------------------------------------------------------
-// Report notes (stored in settings per company + report).
-// ---------------------------------------------------------------------------
-$noteKey = 'report_note_' . $companyId . '_' . $reportId;
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    verify_csrf();
-    $action = (string) ($_POST['action'] ?? '');
-    if ($action === 'save_report_note') {
-        update_settings([$noteKey => trim((string) ($_POST['note'] ?? ''))]);
-        flash('success', 'Report note saved.');
-        redirect('admin/reports-center.php?' . http_build_query(array_diff_key($_GET, ['export' => 1, 'view' => 1])));
-    }
-    if ($action === 'create_schedule') {
-        $recipient = trim((string) ($_POST['recipient_email'] ?? ''));
-        $frequency = (string) ($_POST['frequency'] ?? 'monthly');
-        $format = (string) ($_POST['export_format'] ?? 'both');
-        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
-            flash('error', 'Enter a valid recipient email address.');
-        } elseif (!in_array($frequency, ['daily', 'weekly', 'monthly'], true) || !in_array($format, ['csv', 'html', 'both'], true)) {
-            flash('error', 'Choose a valid frequency and format.');
-        } else {
-            $nextRun = match ($frequency) {
-                'daily' => date('Y-m-d', strtotime('tomorrow')),
-                'weekly' => date('Y-m-d', strtotime('+7 days')),
-                default => date('Y-m-01', strtotime('first day of next month')),
-            };
-            $scheduleFilters = json_encode([
-                'vtype' => $voucherType,
-                'ledger_id' => $ledgerFilterId,
-                'group_id' => $groupFilterId,
-                'item_id' => $itemFilterId,
-                'biz' => $businessType,
-                'scope_company' => $scopeCompanyId,
-            ]);
-            db()->prepare('
-                INSERT INTO report_schedules (company_id, report_key, recipient_email, frequency, export_format, filters, next_run_on, created_by)
-                VALUES (:company_id, :report_key, :recipient_email, :frequency, :export_format, :filters, :next_run_on, :created_by)
-            ')->execute([
-                'company_id' => $companyId,
-                'report_key' => $reportId,
-                'recipient_email' => $recipient,
-                'frequency' => $frequency,
-                'export_format' => $format,
-                'filters' => $scheduleFilters,
-                'next_run_on' => $nextRun,
-                'created_by' => $userId,
-            ]);
-            $message = 'Schedule created. First delivery on ' . date('d M Y', strtotime($nextRun)) . '.';
-            if (!mail_is_configured()) {
-                $message .= ' Email (SMTP) is not configured yet, so deliveries will be saved to storage/mail/ until you add MAIL_* settings in .env.';
-            }
-            flash('success', $message);
-        }
-        redirect('admin/reports-center.php?' . http_build_query(array_diff_key($_GET, ['export' => 1, 'view' => 1])));
-    }
-    if ($action === 'delete_schedule') {
-        $scheduleId = (int) ($_POST['schedule_id'] ?? 0);
-        if ($scheduleId > 0) {
-            db()->prepare('DELETE FROM report_schedules WHERE id = :id AND company_id = :company_id')
-                ->execute(['id' => $scheduleId, 'company_id' => $companyId]);
-            flash('success', 'Schedule removed.');
-        }
-        redirect('admin/reports-center.php?' . http_build_query(array_diff_key($_GET, ['export' => 1, 'view' => 1])));
-    }
-}
-
-$reportSchedules = [];
-if (table_exists('report_schedules')) {
-    $scheduleStmt = db()->prepare('SELECT * FROM report_schedules WHERE company_id = :company_id AND report_key = :report_key ORDER BY id DESC');
-    $scheduleStmt->execute(['company_id' => $companyId, 'report_key' => $reportId]);
-    $reportSchedules = $scheduleStmt->fetchAll();
-}
-$reportNote = (string) setting($noteKey, '');
 
 $generatorContext = [
     'currency' => $currencySymbol,
@@ -320,7 +265,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </select>
         </label>
-        <?php if ($allItems !== []): ?>
+        <?php if (($companyBusinessProfile['show_inventory'] ?? false) && $allItems !== []): ?>
             <label>Inventory Item
                 <select name="item_id">
                     <option value="0">First item</option>
@@ -333,7 +278,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="rc-biz-toggle">
             <span>Business Type</span>
             <div>
-                <?php foreach (['all' => 'All', 'service' => 'Service', 'trading' => 'Trading', 'manufacturing' => 'Manufacturing'] as $bizValue => $bizLabel): ?>
+                <?php foreach ($businessTypeOptions as $bizValue => $bizLabel): ?>
                     <button type="submit" name="biz" value="<?= e($bizValue) ?>" class="<?= $businessType === $bizValue ? 'is-active' : '' ?>"><?= e($bizLabel) ?></button>
                 <?php endforeach; ?>
             </div>
@@ -342,11 +287,30 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </form>
 
+<section class="coa-module-grid" aria-label="Report modules">
+    <?php foreach ($allowedReportRegistry as $key => [$label, $description, $iconName]): ?>
+        <a class="coa-module-card <?= $key === $reportId ? 'is-active' : '' ?>" href="<?= e(rc_url(['report' => $key])) ?>">
+            <div class="coa-module-icon"><?= icon($iconName) ?></div>
+            <div>
+                <strong><?= e($label) ?></strong>
+                <span><?= e($description) ?></span>
+            </div>
+        </a>
+    <?php endforeach; ?>
+    <a class="coa-module-card" href="<?= e(url('admin/report-schedules.php')) ?>">
+        <div class="coa-module-icon"><?= icon('compliance') ?></div>
+        <div>
+            <strong>Schedule Reports</strong>
+            <span>Manage recurring deliveries</span>
+        </div>
+    </a>
+</section>
+
 <div class="rc-workspace">
     <aside class="rc-report-list">
         <h3><?= icon('documents') ?>All Reports</h3>
         <div class="rc-report-grid">
-            <?php foreach ($reportRegistry as $key => [$label, $description, $iconName]): ?>
+            <?php foreach ($allowedReportRegistry as $key => [$label, $description, $iconName]): ?>
                 <a class="rc-report-card <?= $key === $reportId ? 'is-active' : '' ?>" href="<?= e(rc_url(['report' => $key])) ?>">
                     <span><?= icon($iconName) ?></span>
                     <strong><?= e($label) ?></strong>
@@ -390,50 +354,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <a class="button rc-action-primary" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>"><?= icon('documents') ?>Export PDF</a>
             <a class="button secondary" href="<?= e(rc_url(['export' => 'csv'])) ?>"><?= icon('documents') ?>Export Excel</a>
             <a class="button secondary" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>"><?= icon('documents') ?>Print Report</a>
-        </section>
-
-        <section class="rc-actions-card">
-            <h4>Schedule Report</h4>
-            <?php if (!mail_is_configured()): ?>
-                <p class="muted rc-mail-hint">SMTP is not configured — scheduled deliveries are saved to <code>storage/mail/</code>. Add MAIL_* settings in <code>.env</code> to send real emails.</p>
-            <?php endif; ?>
-            <?php foreach ($reportSchedules as $schedule): ?>
-                <div class="rc-schedule-row">
-                    <div>
-                        <strong><?= e($schedule['recipient_email']) ?></strong>
-                        <small><?= e(ucfirst((string) $schedule['frequency'])) ?> · <?= e(strtoupper((string) $schedule['export_format'])) ?> · next <?= e(date('d M', strtotime((string) $schedule['next_run_on']))) ?></small>
-                        <?php if (!empty($schedule['last_run_status'])): ?><small class="muted"><?= e($schedule['last_run_status']) ?></small><?php endif; ?>
-                    </div>
-                    <form method="post">
-                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                        <input type="hidden" name="action" value="delete_schedule">
-                        <input type="hidden" name="schedule_id" value="<?= e((int) $schedule['id']) ?>">
-                        <button type="submit" title="Remove schedule">&times;</button>
-                    </form>
-                </div>
-            <?php endforeach; ?>
-            <form method="post" class="rc-schedule-form">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="create_schedule">
-                <label>Send to<input type="email" name="recipient_email" placeholder="name@company.com" required></label>
-                <div class="rc-compare-dates">
-                    <label>Frequency
-                        <select name="frequency">
-                            <option value="daily">Daily</option>
-                            <option value="weekly">Weekly</option>
-                            <option value="monthly" selected>Monthly</option>
-                        </select>
-                    </label>
-                    <label>Format
-                        <select name="export_format">
-                            <option value="both" selected>CSV + HTML</option>
-                            <option value="csv">CSV only</option>
-                            <option value="html">HTML only</option>
-                        </select>
-                    </label>
-                </div>
-                <button class="button secondary" type="submit"><?= icon('compliance') ?>Schedule Report</button>
-            </form>
+            <a class="button secondary" href="<?= e(url('admin/report-schedules.php')) ?>"><?= icon('compliance') ?>Schedule Reports</a>
         </section>
 
         <section class="rc-actions-card">
@@ -461,15 +382,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endif; ?>
         </section>
 
-        <section class="rc-actions-card">
-            <h4>Report Notes</h4>
-            <form method="post">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="save_report_note">
-                <textarea name="note" rows="4" placeholder="Notes shown for this report"><?= e($reportNote) ?></textarea>
-                <button class="button secondary" type="submit">Save Note</button>
-            </form>
-        </section>
     </aside>
 </div>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
