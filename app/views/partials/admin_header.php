@@ -35,8 +35,6 @@ $headerAccountingChildren = [
     ['Vouchers', 'admin/accounting.php', 'journal', in_array($headerScript, ['accounting.php', 'voucher-form.php'], true)],
     ['Sales & Invoices', 'admin/accounting-parties.php?tab=sales', 'invoices', $headerScript === 'accounting-parties.php' && in_array($headerTab, ['', 'sales'], true)],
     ['Purchases', 'admin/accounting-parties.php?tab=purchases', 'cart', $headerScript === 'accounting-parties.php' && $headerTab === 'purchases'],
-    ['Receipts', 'admin/reports-center.php?report=collections-register', 'receipt-voucher', $headerScript === 'reports-center.php' && ($_GET['report'] ?? '') === 'collections-register'],
-    ['Payments', 'admin/reports-center.php?report=payments-register', 'card', $headerScript === 'reports-center.php' && ($_GET['report'] ?? '') === 'payments-register'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
 ];
@@ -239,7 +237,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                         </button>
                     </form>
                 <?php endif; ?>
-                <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
+                <?php if (!$headerIsClientBooks): ?>
+                    <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
+                <?php endif; ?>
                 <button type="button" class="theme-toggle-link admin-icon-button" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
                     <?= icon('theme') ?>
                     <span class="sr-only" data-theme-toggle-label>Dark mode</span>
