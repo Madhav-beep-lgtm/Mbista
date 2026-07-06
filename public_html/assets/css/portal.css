@@ -1686,6 +1686,507 @@ body.admin-layout .rpt-compare-form button {
 }
 
 /* ==========================================================================
+   Reusable form template (frm-*) — voucher form and future module forms
+   ========================================================================== */
+
+body.admin-layout .frm-stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+}
+
+body.admin-layout .frm-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+body.admin-layout .frm-step-dot {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--mbw-gray-soft);
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+body.admin-layout .frm-step.is-active .frm-step-dot {
+  background: var(--mbw-primary);
+  color: #fff;
+}
+
+body.admin-layout .frm-step.is-done .frm-step-dot {
+  background: var(--mbw-green-soft);
+  color: var(--mbw-green);
+}
+
+body.admin-layout .frm-step-text strong {
+  display: block;
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+
+body.admin-layout .frm-step-text small {
+  color: var(--mbw-muted);
+  font-size: 11px;
+}
+
+body.admin-layout .frm-step-line {
+  flex: 1 1 24px;
+  min-width: 18px;
+  border-top: 2px dashed var(--mbw-border);
+}
+
+body.admin-layout .frm-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 1180px) {
+  body.admin-layout .frm-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+body.admin-layout .frm-main {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+body.admin-layout .frm-rail {
+  display: grid;
+  gap: 16px;
+  position: sticky;
+  top: 84px;
+}
+
+body.admin-layout .frm-section {
+  padding: 16px 18px;
+}
+
+body.admin-layout .frm-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+body.admin-layout .frm-section-head h2 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .frm-section-head .mbw-chip {
+  width: 30px;
+  height: 30px;
+}
+
+body.admin-layout .frm-optional {
+  color: var(--mbw-muted);
+  font-size: 11.5px;
+}
+
+body.admin-layout .frm-head-toggle {
+  margin-left: auto;
+}
+
+body.admin-layout .frm-grid {
+  display: grid;
+  gap: 12px 14px;
+}
+
+body.admin-layout .frm-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+body.admin-layout .frm-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+body.admin-layout .frm-span-3 { grid-column: span 3; }
+
+@media (max-width: 1100px) {
+  body.admin-layout .frm-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.admin-layout .frm-span-3 { grid-column: span 2; }
+}
+
+@media (max-width: 640px) {
+  body.admin-layout .frm-grid-4,
+  body.admin-layout .frm-grid-2 { grid-template-columns: minmax(0, 1fr); }
+  body.admin-layout .frm-span-3 { grid-column: span 1; }
+}
+
+body.admin-layout .frm-grid label,
+body.admin-layout .frm-grid > div {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mbw-muted);
+  align-content: start;
+}
+
+body.admin-layout .frm-grid label em {
+  color: var(--mbw-red);
+  font-style: normal;
+}
+
+body.admin-layout .frm-grid input,
+body.admin-layout .frm-grid select,
+body.admin-layout .frm-grid textarea {
+  min-height: 38px;
+  font-size: 13px;
+}
+
+body.admin-layout .frm-grid input:disabled,
+body.admin-layout .frm-grid select:disabled {
+  background: var(--mbw-card-soft);
+  color: var(--mbw-muted);
+}
+
+/* Toggle switch */
+body.admin-layout .frm-toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+}
+
+body.admin-layout .frm-toggle input {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+body.admin-layout .frm-toggle i {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--mbw-gray-soft);
+  transition: background 0.15s ease;
+}
+
+body.admin-layout .frm-toggle i::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(22, 38, 62, 0.3);
+  transition: transform 0.15s ease;
+}
+
+body.admin-layout .frm-toggle input:checked + i {
+  background: var(--mbw-primary);
+}
+
+body.admin-layout .frm-toggle input:checked + i::after {
+  transform: translateX(18px);
+}
+
+/* Entries table */
+body.admin-layout .frm-entries th {
+  font-size: 11.5px;
+  padding: 8px 8px;
+  white-space: nowrap;
+}
+
+body.admin-layout .frm-entries td {
+  padding: 6px 6px;
+}
+
+body.admin-layout .frm-entries input,
+body.admin-layout .frm-entries select {
+  min-height: 34px;
+  width: 100%;
+  min-width: 110px;
+  font-size: 12.5px;
+  padding: 5px 8px;
+}
+
+body.admin-layout .frm-entries .frm-num {
+  min-width: 90px;
+  text-align: right;
+}
+
+body.admin-layout .frm-del {
+  min-height: 30px;
+  width: 30px;
+  padding: 0;
+  border: 1px solid var(--mbw-border);
+  border-radius: 8px;
+  background: var(--mbw-card);
+  color: var(--mbw-red);
+  font-size: 13px;
+}
+
+body.admin-layout .frm-del:hover {
+  background: var(--mbw-red-soft);
+  color: var(--mbw-red);
+}
+
+body.admin-layout .frm-entries-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+body.admin-layout .frm-entry-totals {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-left: auto;
+  color: var(--mbw-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+body.admin-layout .frm-entry-totals strong {
+  color: var(--mbw-heading);
+  font-size: 13.5px;
+  padding: 4px 10px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 8px;
+  background: var(--mbw-card-soft);
+}
+
+/* Dropzone */
+body.admin-layout .frm-dropzone {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 22px 14px;
+  border: 1.5px dashed var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card-soft);
+  text-align: center;
+  cursor: pointer;
+}
+
+body.admin-layout .frm-dropzone:hover {
+  border-color: var(--mbw-primary);
+}
+
+body.admin-layout .frm-dropzone .ui-icon {
+  width: 22px;
+  height: 22px;
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .frm-dropzone strong {
+  color: var(--mbw-text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+body.admin-layout .frm-dropzone strong u {
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .frm-dropzone small {
+  color: var(--mbw-muted);
+  font-size: 11px;
+}
+
+body.admin-layout .frm-dropzone input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+body.admin-layout .frm-dropzone #frm-file-list {
+  color: var(--mbw-primary);
+  font-size: 11.5px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+/* Approvers preview strip */
+body.admin-layout .frm-approvers > div {
+  gap: 3px;
+}
+
+body.admin-layout .frm-approvers small {
+  color: var(--mbw-muted);
+  font-size: 11px;
+}
+
+body.admin-layout .frm-approvers strong {
+  color: var(--mbw-heading);
+  font-size: 13px;
+}
+
+body.admin-layout .frm-approvers span {
+  color: var(--mbw-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+body.admin-layout .frm-approvers .frm-muted {
+  color: var(--mbw-muted);
+  font-weight: 500;
+}
+
+/* Sticky footer actions */
+body.admin-layout .frm-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  position: sticky;
+  bottom: 12px;
+  z-index: 30;
+}
+
+body.admin-layout .frm-footer .frm-submit {
+  margin-left: auto;
+}
+
+/* Right rail cards */
+body.admin-layout .frm-rail-card {
+  padding: 14px 16px;
+}
+
+body.admin-layout .frm-summary {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+}
+
+body.admin-layout .frm-summary > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+body.admin-layout .frm-summary dt {
+  color: var(--mbw-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+body.admin-layout .frm-summary dd {
+  margin: 0;
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Validation checklist */
+body.admin-layout .frm-checklist {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+body.admin-layout .frm-checklist li {
+  position: relative;
+  padding-left: 26px;
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+}
+
+body.admin-layout .frm-checklist li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 1px;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--mbw-border);
+  border-radius: 50%;
+  background: var(--mbw-card);
+}
+
+body.admin-layout .frm-checklist li.is-ok {
+  color: var(--mbw-text);
+}
+
+body.admin-layout .frm-checklist li.is-ok::before {
+  content: "✓";
+  display: grid;
+  place-items: center;
+  border-color: var(--mbw-green);
+  background: var(--mbw-green-soft);
+  color: var(--mbw-green);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Approval trail */
+body.admin-layout .frm-trail {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+body.admin-layout .frm-trail li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+body.admin-layout .frm-trail-dot {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--mbw-gray-soft);
+  color: var(--mbw-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+body.admin-layout .frm-trail li.is-done .frm-trail-dot {
+  background: var(--mbw-primary);
+  color: #fff;
+}
+
+body.admin-layout .frm-trail li > div strong {
+  display: block;
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+}
+
+body.admin-layout .frm-trail li > div small {
+  color: var(--mbw-muted);
+  font-size: 11px;
+}
+
+body.admin-layout .frm-trail-state {
+  margin-left: auto;
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+}
+
+/* ==========================================================================
    Modals, misc
    ========================================================================== */
 

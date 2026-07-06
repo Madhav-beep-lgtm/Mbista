@@ -92,6 +92,34 @@ function accounting_module_repair_database(): array
         accounting_repair_add_index('vouchers', 'idx_vouchers_party', 'KEY `idx_vouchers_party` (`party_id`)');
     });
 
+    $run('Upgrade voucher form metadata', static function (): void {
+        accounting_repair_add_column('vouchers', 'priority', "`priority` ENUM('low', 'medium', 'high') NOT NULL DEFAULT 'medium' AFTER `narration`");
+        accounting_repair_add_column('vouchers', 'department', '`department` VARCHAR(80) DEFAULT NULL AFTER `priority`');
+        accounting_repair_add_column('vouchers', 'location', '`location` VARCHAR(80) DEFAULT NULL AFTER `department`');
+        accounting_repair_add_column('vouchers', 'cost_centre', '`cost_centre` VARCHAR(80) DEFAULT NULL AFTER `location`');
+        accounting_repair_add_column('vouchers', 'posting_date', '`posting_date` DATE DEFAULT NULL AFTER `voucher_date`');
+        accounting_repair_add_column('vouchers', 'due_date', '`due_date` DATE DEFAULT NULL AFTER `posting_date`');
+        accounting_repair_add_column('vouchers', 'payment_terms', '`payment_terms` VARCHAR(40) DEFAULT NULL AFTER `due_date`');
+        accounting_repair_add_column('vouchers', 'exchange_rate', '`exchange_rate` DECIMAL(12,4) NOT NULL DEFAULT 1.0000 AFTER `payment_terms`');
+        accounting_repair_add_column('vouchers', 'tax_category', '`tax_category` VARCHAR(40) DEFAULT NULL AFTER `exchange_rate`');
+        accounting_repair_add_column('voucher_entries', 'cost_centre', '`cost_centre` VARCHAR(80) DEFAULT NULL AFTER `memo`');
+        accounting_repair_add_column('voucher_entries', 'tax_code', '`tax_code` VARCHAR(40) DEFAULT NULL AFTER `cost_centre`');
+        accounting_repair_add_column('voucher_entries', 'line_reference', '`line_reference` VARCHAR(120) DEFAULT NULL AFTER `tax_code`');
+        db()->exec("
+            CREATE TABLE IF NOT EXISTS `voucher_attachments` (
+              `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+              `voucher_id` INT UNSIGNED NOT NULL,
+              `file_path` VARCHAR(255) NOT NULL,
+              `original_name` VARCHAR(255) NOT NULL,
+              `file_size` INT UNSIGNED NOT NULL DEFAULT 0,
+              `uploaded_by` INT UNSIGNED DEFAULT NULL,
+              `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `idx_voucher_attachments_voucher` (`voucher_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    });
+
     $run('Upgrade banking and reconciliation metadata', static function (): void {
         accounting_repair_add_column('ledgers', 'bank_name', '`bank_name` VARCHAR(120) DEFAULT NULL AFTER `name`');
         accounting_repair_add_column('ledgers', 'bank_account_no', '`bank_account_no` VARCHAR(40) DEFAULT NULL AFTER `bank_name`');

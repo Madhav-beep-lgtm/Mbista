@@ -279,12 +279,21 @@ CREATE TABLE IF NOT EXISTS `vouchers` (
   `fiscal_year_id` INT UNSIGNED NOT NULL,
   `voucher_no` VARCHAR(80) NOT NULL,
   `voucher_date` DATE DEFAULT NULL,
+  `posting_date` DATE DEFAULT NULL,
+  `due_date` DATE DEFAULT NULL,
+  `payment_terms` VARCHAR(40) DEFAULT NULL,
+  `exchange_rate` DECIMAL(12,4) NOT NULL DEFAULT 1.0000,
+  `tax_category` VARCHAR(40) DEFAULT NULL,
   `voucher_type` ENUM('payment', 'receipt', 'journal', 'sales', 'purchase', 'contra', 'debit_note', 'credit_note') NOT NULL DEFAULT 'journal',
   `source_type` VARCHAR(80) DEFAULT NULL,
   `source_id` INT UNSIGNED DEFAULT NULL,
   `party_id` INT UNSIGNED DEFAULT NULL,
   `reference_no` VARCHAR(120) DEFAULT NULL,
   `narration` TEXT DEFAULT NULL,
+  `priority` ENUM('low', 'medium', 'high') NOT NULL DEFAULT 'medium',
+  `department` VARCHAR(80) DEFAULT NULL,
+  `location` VARCHAR(80) DEFAULT NULL,
+  `cost_centre` VARCHAR(80) DEFAULT NULL,
   `total_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `status` ENUM('draft', 'posted', 'cancelled') NOT NULL DEFAULT 'posted',
   `approval_state` ENUM('draft', 'pending_approval', 'approved', 'rejected') NOT NULL DEFAULT 'approved',
@@ -313,6 +322,9 @@ CREATE TABLE IF NOT EXISTS `voucher_entries` (
   `entry_type` ENUM('debit', 'credit') NOT NULL,
   `amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `memo` VARCHAR(255) DEFAULT NULL,
+  `cost_centre` VARCHAR(80) DEFAULT NULL,
+  `tax_code` VARCHAR(40) DEFAULT NULL,
+  `line_reference` VARCHAR(120) DEFAULT NULL,
   `reconciled_at` DATETIME DEFAULT NULL,
   `reconciled_by` INT UNSIGNED DEFAULT NULL,
   `statement_date` DATE DEFAULT NULL,
@@ -322,6 +334,19 @@ CREATE TABLE IF NOT EXISTS `voucher_entries` (
   KEY `idx_voucher_entries_reconciled` (`ledger_id`, `reconciled_at`),
   CONSTRAINT `fk_voucher_entries_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_voucher_entries_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `voucher_attachments` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `voucher_id` INT UNSIGNED NOT NULL,
+  `file_path` VARCHAR(255) NOT NULL,
+  `original_name` VARCHAR(255) NOT NULL,
+  `file_size` INT UNSIGNED NOT NULL DEFAULT 0,
+  `uploaded_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_voucher_attachments_voucher` (`voucher_id`),
+  CONSTRAINT `fk_voucher_attachments_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `settings` (

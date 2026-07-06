@@ -968,15 +968,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-card" aria-label="Quick actions">
     <div class="mbw-card-head"><h2>Quick Actions</h2></div>
     <div class="mbw-qa-grid">
-        <a class="mbw-qa" href="<?= e(url('admin/accounting.php#post-voucher')) ?>">
+        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=journal')) ?>">
             <span class="mbw-chip is-square tone-green"><?= icon('journal') ?></span>
             <div><strong>Journal Voucher</strong><span>Create new journal entry</span></div>
         </a>
-        <a class="mbw-qa" href="<?= e(url('admin/accounting.php#post-voucher')) ?>">
+        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=receipt')) ?>">
             <span class="mbw-chip is-square tone-blue"><?= icon('receipt-voucher') ?></span>
             <div><strong>Receipt Voucher</strong><span>Record customer receipt</span></div>
         </a>
-        <a class="mbw-qa" href="<?= e(url('admin/accounting.php#post-voucher')) ?>">
+        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=payment')) ?>">
             <span class="mbw-chip is-square tone-amber"><?= icon('card') ?></span>
             <div><strong>Payment Voucher</strong><span>Make vendor payment</span></div>
         </a>
