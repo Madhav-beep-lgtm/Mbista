@@ -688,16 +688,41 @@ $pageTitle = match ($view) {
     'tickets' => $ticket['subject'] ?? 'Support Tickets',
     default => 'Dashboard',
 };
+$pageSubtitle = match ($view) {
+    'tasks' => 'Track the progress, stages, and deadlines of your assigned work.',
+    'contracts' => 'Your service contracts, values, and billing cycles.',
+    'invoices' => 'Invoices issued to you, payment requests, and adjustment options.',
+    'documents' => 'Latest versions of documents shared with you.',
+    'document-requests' => 'Documents your service provider has asked you to upload.',
+    'compliance' => 'Statutory deadlines, filing status, and supporting documents.',
+    'messages' => $thread ? 'Conversation with your service provider.' : 'Message threads with your service provider.',
+    'tickets' => $ticket ? 'Ticket conversation and resolution history.' : 'Raise and track support requests.',
+    default => 'Your workspace overview: tasks, invoices, compliance, and messages.',
+};
+
+$mbwTone = static function (?string $status): string {
+    return match (strtolower((string) $status)) {
+        'paid', 'completed', 'complete', 'active', 'approved', 'filed', 'resolved', 'verified', 'leader' => 'green',
+        'pending', 'partial', 'in_progress', 'on_hold', 'waiting_for_client', 'upcoming', 'uploaded', 'assigned', 'high', 'signed' => 'amber',
+        'overdue', 'cancelled', 'rejected', 'expired', 'urgent', 'declined', 'closed' => 'red',
+        'draft', 'new', 'open', 'sent', 'issued', 'requested', 'normal', 'not_started', 'low' => 'blue',
+        default => 'gray',
+    };
+};
+$mbwPill = static function (?string $status, ?string $label = null) use ($mbwTone): string {
+    $text = $label ?? str_replace('_', ' ', (string) $status);
+    return '<span class="mbw-pill tone-' . $mbwTone($status) . '">' . e($text) . '</span>';
+};
 
 include __DIR__ . '/../app/views/partials/client_header.php';
 ?>
 
 <?php if (!$clientProfile): ?>
-    <div class="table-card">
-        <h2><?= icon('insights') ?>Workspace guidance</h2>
-        <p>Your account is not yet linked to a client workspace.</p>
-        <p>Contact your service provider so they can create your client profile and link it to this login.</p>
-    </div>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Workspace guidance</h2></div>
+        <p style="color: var(--mbw-muted);">Your account is not yet linked to a client workspace.</p>
+        <p style="color: var(--mbw-muted);">Contact your service provider so they can create your client profile and link it to this login.</p>
+    </section>
 <?php else: ?>
 
     <?php if ($view === 'home'): ?>
@@ -707,19 +732,19 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                 awaiting your response — <a href="<?= e(url('dashboard.php?view=invoices')) ?>">open My Invoices</a> to make a payment or ask for more time.
             </div>
         <?php endif; ?>
-        <div class="admin-stats">
-            <div class="card"><span class="stat-icon"><?= icon('clients') ?></span><strong><?= e($clientProfile['organization_name']) ?></strong><p>Organization</p></div>
-            <div class="card"><span class="stat-icon"><?= icon('reports') ?></span><strong><?= e($clientProfile['client_code'] ?? 'N/A') ?></strong><p>Client code</p></div>
-            <div class="card"><span class="stat-icon"><?= icon('accounting') ?></span><strong><?= e($clientProfile['industry_name'] ?? 'N/A') ?></strong><p>Industry</p></div>
-            <div class="card"><span class="stat-icon"><?= icon('tasks') ?></span><strong><?= e((string) count($tasks)) ?></strong><p>Tracked tasks</p></div>
-            <div class="card"><span class="stat-icon"><?= icon('compliance') ?></span><strong><?= e((string) $upcomingComplianceCount) ?></strong><p>Upcoming compliance deadlines</p></div>
-            <div class="card"><span class="stat-icon"><?= icon('messages') ?></span><strong><?= e((string) $unreadMessageCount) ?></strong><p>Unread messages</p></div>
-            <div class="card"><span class="stat-icon"><?= icon('tickets') ?></span><strong><?= e((string) $openTicketCount) ?></strong><p>Open support tickets</p></div>
-        </div>
+        <section class="mbw-kpi-grid">
+            <article class="mbw-kpi"><div><span class="mbw-kpi-label">Organization</span><div class="mbw-kpi-value" style="font-size:1.05rem;"><?= e($clientProfile['organization_name']) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Code <?= e($clientProfile['client_code'] ?? 'N/A') ?></span></span></div><span class="mbw-chip tone-blue"><?= icon('clients') ?></span></article>
+            <article class="mbw-kpi"><div><span class="mbw-kpi-label">Industry</span><div class="mbw-kpi-value" style="font-size:1.05rem;"><?= e($clientProfile['industry_name'] ?? 'N/A') ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Business classification</span></span></div><span class="mbw-chip tone-purple"><?= icon('accounting') ?></span></article>
+            <a class="mbw-kpi" href="<?= e(url('dashboard.php?view=tasks')) ?>"><div><span class="mbw-kpi-label">Tracked tasks</span><div class="mbw-kpi-value"><?= e((string) count($tasks)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">View progress</span></span></div><span class="mbw-chip tone-teal"><?= icon('tasks') ?></span></a>
+            <a class="mbw-kpi" href="<?= e(url('dashboard.php?view=compliance')) ?>"><div><span class="mbw-kpi-label">Compliance deadlines</span><div class="mbw-kpi-value"><?= e((string) $upcomingComplianceCount) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Upcoming or overdue</span></span></div><span class="mbw-chip <?= $upcomingComplianceCount > 0 ? 'tone-amber' : 'tone-green' ?>"><?= icon('compliance') ?></span></a>
+            <a class="mbw-kpi" href="<?= e(url('dashboard.php?view=messages')) ?>"><div><span class="mbw-kpi-label">Unread messages</span><div class="mbw-kpi-value"><?= e((string) $unreadMessageCount) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Open inbox</span></span></div><span class="mbw-chip <?= $unreadMessageCount > 0 ? 'tone-amber' : 'tone-blue' ?>"><?= icon('messages') ?></span></a>
+            <a class="mbw-kpi" href="<?= e(url('dashboard.php?view=tickets')) ?>"><div><span class="mbw-kpi-label">Open support tickets</span><div class="mbw-kpi-value"><?= e((string) $openTicketCount) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Track requests</span></span></div><span class="mbw-chip <?= $openTicketCount > 0 ? 'tone-red' : 'tone-green' ?>"><?= icon('tickets') ?></span></a>
+        </section>
 
         <?php if ($teamMembers !== []): ?>
-        <div class="table-card">
-            <h2><?= icon('teams') ?>Team members</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Team members</h2></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -733,16 +758,18 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                         <tr>
                             <td><?= e($member['name']) ?></td>
                             <td><?= e($member['email']) ?></td>
-                            <td><span class="tag"><?= e($member['member_role'] ?? 'member') ?></span></td>
+                            <td><?= $mbwPill($member['member_role'] ?? 'member') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
         <?php endif; ?>
 
-        <div class="table-card">
-            <h2><?= icon('tasks') ?>Recent tasks</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Recent tasks</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('dashboard.php?view=tasks')) ?>">View All</a></div></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -764,24 +791,26 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                 <div class="progress-track"><div class="progress-fill" style="width: <?= e((string) $progress) ?>%"></div></div>
                                 <small><?= e((string) $progress) ?>%</small>
                             </td>
-                            <td><span class="tag"><?= e($task['status']) ?></span></td>
+                            <td><?= $mbwPill($task['status']) ?></td>
                             <td><?= e($task['due_date'] ?? '-') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
             <?php if (count($tasks) > 5): ?>
                 <p><a href="<?= e(url('dashboard.php?view=tasks')) ?>">View all <?= e((string) count($tasks)) ?> tasks &rarr;</a></p>
             <?php endif; ?>
-        </div>
+        </section>
 
-        <div class="table-card">
-            <h2><?= icon('invoices') ?>Recent invoices</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Recent invoices</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('dashboard.php?view=invoices')) ?>">View All</a></div></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
                         <th>Invoice</th>
-                        <th>Amount</th>
+                        <th class="is-numeric">Amount</th>
                         <th>Status</th>
                         <th>Issued</th>
                     </tr>
@@ -793,22 +822,24 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                     <?php foreach (array_slice($invoices, 0, 5) as $invoice): ?>
                         <tr>
                             <td><?= e($invoice['invoice_no']) ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $invoice['amount'], 2)) ?></td>
-                            <td><span class="tag"><?= e($invoice['status']) ?></span></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $invoice['amount'], 2)) ?></td>
+                            <td><?= $mbwPill($invoice['status']) ?></td>
                             <td><?= e($invoice['issued_on']) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
             <?php if (count($invoices) > 5): ?>
                 <p><a href="<?= e(url('dashboard.php?view=invoices')) ?>">View all <?= e((string) count($invoices)) ?> invoices &rarr;</a></p>
             <?php endif; ?>
-        </div>
+        </section>
     <?php endif; ?>
 
     <?php if ($view === 'tasks'): ?>
-        <div class="table-card">
-            <h2><?= icon('tasks') ?>Tasks and work progress</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Tasks and work progress</h2></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -838,24 +869,26 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                 <div class="progress-track"><div class="progress-fill" style="width: <?= e((string) $progress) ?>%"></div></div>
                                 <small><?= e((string) $progress) ?>% <?= $taskStages !== [] ? '(' . e((string) count(array_filter($taskStages, static fn (array $s): bool => ($s['status'] ?? '') === 'completed'))) . ' of ' . e((string) count($taskStages)) . ' stages)' : '' ?></small>
                             </td>
-                            <td><span class="tag"><?= e($task['status']) ?></span></td>
-                            <td><span class="tag"><?= e($task['priority']) ?></span></td>
+                            <td><?= $mbwPill($task['status']) ?></td>
+                            <td><?= $mbwPill($task['priority']) ?></td>
                             <td><?= e($task['due_date'] ?? '-') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
     <?php endif; ?>
 
     <?php if ($view === 'contracts'): ?>
-        <div class="table-card">
-            <h2><?= icon('contracts') ?>Service contracts</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Service contracts</h2></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
                         <th>Contract</th>
-                        <th>Value</th>
+                        <th class="is-numeric">Value</th>
                         <th>Status</th>
                         <th>Period</th>
                         <th>Billing cycle</th>
@@ -868,15 +901,16 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                     <?php foreach ($contracts as $contract): ?>
                         <tr>
                             <td><?= e($contract['contract_no']) ?><br><small><?= e($contract['title']) ?></small></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $contract['total_value'], 2)) ?></td>
-                            <td><span class="tag"><?= e($contract['status']) ?></span></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $contract['total_value'], 2)) ?></td>
+                            <td><?= $mbwPill($contract['status']) ?></td>
                             <td><?= e($contract['start_date'] ?? '-') ?> to <?= e($contract['end_date'] ?? '-') ?></td>
                             <td><?= e($contract['billing_cycle'] ?? '-') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
     <?php endif; ?>
 
     <?php if ($view === 'invoices'): ?>
@@ -886,15 +920,16 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                 below <?= $pendingPaymentResponseCount > 1 ? 'are' : 'is' ?> awaiting your response. Use the buttons under each invoice to submit your payment details or ask for more time / a discount.
             </div>
         <?php endif; ?>
-        <div class="table-card">
-            <h2><?= icon('invoices') ?>Invoices</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Invoices</h2></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
                         <th>Invoice</th>
                         <th>Task / Stage</th>
-                        <th>Amount</th>
-                        <th>Total (incl. VAT)</th>
+                        <th class="is-numeric">Amount</th>
+                        <th class="is-numeric">Total (incl. VAT)</th>
                         <th>Status</th>
                         <th>Issued</th>
                         <th>Due</th>
@@ -909,9 +944,9 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                         <tr>
                             <td><?= e($invoice['invoice_no']) ?><br><small><?= e($invoice['invoice_type']) ?> invoice · <?= e($invoice['invoice_category'] ?? 'proforma') ?></small></td>
                             <td><?= e($invoice['task_title']) ?><br><small><?= e($invoice['stage_name'] ?? 'Full task invoice') ?></small></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $invoice['amount'], 2)) ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) ($invoice['total_amount'] ?? 0) > 0 ? (float) $invoice['total_amount'] : (float) $invoice['amount'], 2)) ?></td>
-                            <td><span class="tag"><?= e($invoice['status']) ?></span></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $invoice['amount'], 2)) ?></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) ($invoice['total_amount'] ?? 0) > 0 ? (float) $invoice['total_amount'] : (float) $invoice['amount'], 2)) ?></td>
+                            <td><?= $mbwPill($invoice['status']) ?></td>
                             <td><?= e($invoice['issued_on']) ?></td>
                             <td><?= e($invoice['due_on'] ?? '-') ?></td>
                         </tr>
@@ -923,10 +958,10 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                             $prOpen = in_array((string) $paymentRequest['status'], ['pending', 'partial'], true);
                                             $prDeclared = (string) ($paymentRequest['client_declared_status'] ?? 'none') !== 'none';
                                         ?>
-                                        <div style="border: 1px solid var(--border-color, #d1d5db); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.75rem;">
-                                            <strong><?= icon('invoices') ?>Payment request:</strong>
+                                        <div style="border: 1px solid var(--mbw-border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.75rem;">
+                                            <strong style="color: var(--mbw-heading);"><?= icon('invoices') ?>Payment request:</strong>
                                             <?= e(site_currency_symbol()) ?><?= e(number_format((float) $paymentRequest['amount_requested'], 2)) ?>
-                                            <span class="tag"><?= e($paymentRequest['status']) ?></span>
+                                            <?= $mbwPill($paymentRequest['status']) ?>
                                             <small>requested <?= e((string) $paymentRequest['requested_on']) ?></small>
                                             <?php if (!empty($paymentRequest['notes'])): ?>
                                                 <br><small><?= e($paymentRequest['notes']) ?></small>
@@ -934,7 +969,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
 
                                             <?php if ($prDeclared): ?>
                                                 <p style="margin: 0.5rem 0 0;">
-                                                    <span class="tag">You declared a <?= e((string) $paymentRequest['client_declared_status']) ?> payment</span>
+                                                    <?= $mbwPill((string) $paymentRequest['client_declared_status'], 'You declared a ' . (string) $paymentRequest['client_declared_status'] . ' payment') ?>
                                                     of <?= e(site_currency_symbol()) ?><?= e(number_format((float) ($paymentRequest['client_declared_amount'] ?? 0), 2)) ?>
                                                     on <?= e((string) ($paymentRequest['client_declared_on'] ?? '')) ?>
                                                     <?php if ($prOpen): ?>— awaiting verification by your service provider.<?php else: ?>— confirmed.<?php endif; ?>
@@ -1003,12 +1038,14 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
     <?php endif; ?>
 
     <?php if ($view === 'documents'): ?>
-        <div class="table-card">
-            <h2><?= icon('documents') ?>My documents</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>My documents</h2></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -1039,12 +1076,14 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
     <?php endif; ?>
 
     <?php if ($view === 'document-requests'): ?>
-        <div class="table-card">
-            <h2><?= icon('documents') ?>Document requests</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Document requests</h2></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -1063,8 +1102,8 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                     <?php foreach ($documentRequests as $request): ?>
                         <tr>
                             <td><?= e($request['title']) ?><?= $request['description'] ? '<br><small>' . e($request['description']) . '</small>' : '' ?></td>
-                            <td><span class="tag"><?= e($request['status']) ?></span></td>
-                            <td><span class="tag"><?= e($request['priority']) ?></span></td>
+                            <td><?= $mbwPill($request['status']) ?></td>
+                            <td><?= $mbwPill($request['priority']) ?></td>
                             <td><?= e($request['due_date'] ?? '-') ?></td>
                             <td>
                                 <?php if ($request['staff_comment']): ?><small>Staff: <?= e($request['staff_comment']) ?></small><?php endif; ?>
@@ -1086,12 +1125,14 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
     <?php endif; ?>
 
     <?php if ($view === 'compliance'): ?>
-        <div class="table-card">
-            <h2><?= icon('compliance') ?>Compliance calendar</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Compliance calendar</h2></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -1111,7 +1152,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                             <td><?= e($deadline['compliance_type_name']) ?></td>
                             <td><?= e($deadline['applicable_period']) ?></td>
                             <td><?= e($deadline['statutory_due_date']) ?></td>
-                            <td><span class="tag"><?= e($complianceStatusLabels[$deadline['effective_status']] ?? $deadline['effective_status']) ?></span></td>
+                            <td><?= $mbwPill($deadline['effective_status'], $complianceStatusLabels[$deadline['effective_status']] ?? $deadline['effective_status']) ?></td>
                             <td>
                                 <?php if ($deadline['filing_date']): ?>
                                     <small>Filed: <?= e($deadline['filing_date']) ?><?= $deadline['filing_reference'] ? ' (' . e($deadline['filing_reference']) . ')' : '' ?></small><br>
@@ -1128,12 +1169,13 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
     <?php endif; ?>
 
     <?php if ($view === 'messages' && !$thread): ?>
-        <div class="table-card">
-            <h2><?= icon('messages') ?>Messages</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Messages</h2></div>
             <details class="feature-disclosure">
                 <summary>
                     <span>
@@ -1154,7 +1196,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                 </form>
             </details>
 
-            <div class="table-card">
+            <div style="overflow-x:auto; margin-top: 1rem;">
                 <table>
                     <thead>
                         <tr>
@@ -1173,7 +1215,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                 <td>
                                     <a href="<?= e(url('dashboard.php?view=messages&thread_id=' . (int) $t['id'])) ?>"><?= e($t['subject']) ?></a>
                                     <?php if ((int) ($t['unread_count'] ?? 0) > 0): ?>
-                                        <span class="tag"><?= e((string) $t['unread_count']) ?> new</span>
+                                        <span class="mbw-pill tone-amber"><?= e((string) $t['unread_count']) ?> new</span>
                                     <?php endif; ?>
                                 </td>
                                 <td><small><?= e(mb_strimwidth((string) ($t['last_message'] ?? ''), 0, 80, '...')) ?></small></td>
@@ -1184,17 +1226,16 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                     </tbody>
                 </table>
             </div>
-        </div>
+        </section>
     <?php endif; ?>
 
     <?php if ($view === 'messages' && $thread): ?>
-        <div class="table-card">
-            <h2><?= icon('messages') ?><?= e($thread['subject']) ?></h2>
-            <p><a href="<?= e(url('dashboard.php?view=messages')) ?>">&larr; Back to messages</a></p>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2><?= e($thread['subject']) ?></h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('dashboard.php?view=messages')) ?>">Back to messages</a></div></div>
 
-            <div class="table-card">
+            <div>
                 <?php foreach ($threadMessages as $message): ?>
-                    <div style="padding:12px 0; border-bottom:1px solid var(--border);">
+                    <div style="padding:12px 0; border-bottom:1px solid var(--mbw-border);">
                         <strong><?= e($message['sender_name']) ?></strong> <small><?= e($message['created_at']) ?></small>
                         <p><?= nl2br(e($message['body'])) ?></p>
                         <?php if ($message['attachment_path']): ?>
@@ -1214,12 +1255,12 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                     <button type="submit"><?= icon('messages') ?>Send reply</button>
                 </div>
             </form>
-        </div>
+        </section>
     <?php endif; ?>
 
     <?php if ($view === 'tickets' && !$ticket): ?>
-        <div class="table-card">
-            <h2><?= icon('tickets') ?>Support tickets</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Support tickets</h2></div>
             <details class="feature-disclosure">
                 <summary>
                     <span>
@@ -1281,7 +1322,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                 </form>
             </details>
 
-            <div class="table-card">
+            <div style="overflow-x:auto; margin-top: 1rem;">
                 <table>
                     <thead>
                         <tr>
@@ -1301,22 +1342,21 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                 <td><a href="<?= e(url('dashboard.php?view=tickets&ticket_id=' . (int) $t['id'])) ?>"><?= e($t['ticket_no']) ?></a><br><small><?= e($t['subject']) ?></small></td>
                                 <td><?= e($ticketRequestTypeLabels[$t['request_type'] ?? 'none'] ?? 'General support') ?></td>
                                 <td><?= e($ticketCategoryLabels[$t['category']] ?? $t['category']) ?></td>
-                                <td><span class="tag"><?= e($t['priority']) ?></span></td>
-                                <td><span class="tag"><?= e($ticketStatusLabels[$t['status']] ?? $t['status']) ?></span></td>
+                                <td><?= $mbwPill($t['priority']) ?></td>
+                                <td><?= $mbwPill($t['status'], $ticketStatusLabels[$t['status']] ?? $t['status']) ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
-        </div>
+        </section>
     <?php endif; ?>
 
     <?php if ($view === 'tickets' && $ticket): ?>
-        <div class="table-card">
-            <h2><?= icon('tickets') ?><?= e($ticket['ticket_no']) ?> - <?= e($ticket['subject']) ?></h2>
-            <p><a href="<?= e(url('dashboard.php?view=tickets')) ?>">&larr; Back to tickets</a> | Status: <span class="tag"><?= e($ticketStatusLabels[$ticket['status']] ?? $ticket['status']) ?></span></p>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2><?= e($ticket['ticket_no']) ?> - <?= e($ticket['subject']) ?></h2><div class="mbw-card-tools"><?= $mbwPill($ticket['status'], $ticketStatusLabels[$ticket['status']] ?? $ticket['status']) ?><a class="mbw-view-all" href="<?= e(url('dashboard.php?view=tickets')) ?>">Back to tickets</a></div></div>
 
-            <div class="table-card">
+            <div style="margin-bottom: 1rem;">
                 <p><strong>Category:</strong> <?= e($ticketCategoryLabels[$ticket['category']] ?? $ticket['category']) ?> | <strong>Priority:</strong> <?= e($ticket['priority']) ?></p>
                 <p><strong>Request Type:</strong> <?= e($ticketRequestTypeLabels[$ticket['request_type'] ?? 'none'] ?? 'General support') ?></p>
                 <?php if (!empty($ticket['decision_status']) && ($ticket['decision_status'] ?? 'pending') !== 'pending'): ?>
@@ -1328,10 +1368,10 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                 <?php endif; ?>
             </div>
 
-            <div class="table-card">
-                <h3>Conversation</h3>
+            <div>
+                <h3 style="color: var(--mbw-heading);">Conversation</h3>
                 <?php foreach ($ticketMessages as $message): ?>
-                    <div style="padding:12px 0; border-bottom:1px solid var(--border);">
+                    <div style="padding:12px 0; border-bottom:1px solid var(--mbw-border);">
                         <strong><?= e($message['sender_name']) ?></strong> <small><?= e($message['created_at']) ?></small>
                         <p><?= nl2br(e($message['body'])) ?></p>
                         <?php if ($message['attachment_path']): ?>
@@ -1351,7 +1391,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                     </div>
                 </form>
             </div>
-        </div>
+        </section>
     <?php endif; ?>
 
 <?php endif; ?>

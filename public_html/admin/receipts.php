@@ -8,13 +8,14 @@ require_company_context();
 $currentCompany = current_company();
 $companyId = (int) ($currentCompany['id'] ?? 0);
 $pageTitle = 'Payment Receipts';
+$pageSubtitle = 'Register of payment receipts by date, method, and invoice';
 
 if (!table_exists('invoice_payment_receipts')) {
     include __DIR__ . '/../../app/views/partials/admin_header.php';
     ?>
-    <section class="card">
-        <h2>Payment receipts unavailable</h2>
-        <p>Apply the latest database migration to enable receipt records and reporting.</p>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Payment receipts unavailable</h2></div>
+        <p style="color:var(--mbw-muted);">Apply the latest database migration to enable receipt records and reporting.</p>
     </section>
     <?php
     include __DIR__ . '/../../app/views/partials/admin_footer.php';
@@ -238,19 +239,35 @@ $pdfQuery['export'] = 'pdf';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 
-<section class="card" style="display:grid; gap:1rem;">
-    <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+<section class="mbw-kpi-grid">
+    <article class="mbw-kpi">
         <div>
-            <h2 style="margin:0;">Receipt Register</h2>
-            <p style="margin:0.35rem 0 0; color:#5f6c82;">Track payment receipts by date, method, and invoice.</p>
+            <span class="mbw-kpi-label">Total Receipts</span>
+            <div class="mbw-kpi-value"><?php echo number_format($totalRows); ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">matching current filters</span></span>
         </div>
-        <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <span class="mbw-chip tone-blue"><?= icon('receipt-voucher') ?></span>
+    </article>
+    <article class="mbw-kpi">
+        <div>
+            <span class="mbw-kpi-label">Total Amount Received</span>
+            <div class="mbw-kpi-value">NPR <?php echo number_format($totalAmount, 2); ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">matching current filters</span></span>
+        </div>
+        <span class="mbw-chip tone-green"><?= icon('wallet') ?></span>
+    </article>
+</section>
+
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2>Receipt Register</h2>
+        <div class="mbw-card-tools">
             <a class="btn btn-secondary" href="<?php echo e(url('admin/receipts.php?' . http_build_query($pdfQuery))); ?>" target="_blank" rel="noopener">Print / Export PDF</a>
             <a class="btn btn-secondary" href="<?php echo e(url('admin/receipts.php?' . http_build_query($csvQuery))); ?>">Export CSV</a>
         </div>
     </div>
 
-    <form method="get" style="display:grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap:0.75rem; align-items:end;">
+    <form method="get" style="display:grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap:0.75rem; align-items:end; margin-bottom:1rem;">
         <div>
             <label for="q">Search</label>
             <input id="q" type="text" name="q" value="<?php echo e($search); ?>" placeholder="Receipt, invoice, reference, client">
@@ -278,24 +295,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </form>
 
-    <div style="display:flex; gap:1rem; flex-wrap:wrap;">
-        <div class="stat-card" style="min-width:220px;">
-            <h3>Total Receipts</h3>
-            <strong><?php echo number_format($totalRows); ?></strong>
-        </div>
-        <div class="stat-card" style="min-width:220px;">
-            <h3>Total Amount Received</h3>
-            <strong>NPR <?php echo number_format($totalAmount, 2); ?></strong>
-        </div>
-    </div>
-
-    <div style="overflow:auto;">
+    <div style="overflow-x:auto;">
         <table class="invoice-table">
             <thead>
                 <tr>
                     <th>Receipt No</th>
                     <th>Received On</th>
-                    <th>Amount</th>
+                    <th class="is-numeric">Amount</th>
                     <th>Method</th>
                     <th>Reference</th>
                     <th>Invoice</th>
@@ -314,15 +320,22 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <tr>
                             <td><?php echo e((string) ($receipt['receipt_no'] ?? '')); ?></td>
                             <td><?php echo e((string) ($receipt['received_on'] ?? '')); ?></td>
-                            <td>NPR <?php echo number_format((float) ($receipt['amount_received'] ?? 0), 2); ?></td>
+                            <td class="is-numeric">NPR <?php echo number_format((float) ($receipt['amount_received'] ?? 0), 2); ?></td>
                             <td><?php echo e((string) ($receipt['payment_method'] ?? '')); ?></td>
                             <td><?php echo e((string) ($receipt['payment_reference'] ?? '')); ?></td>
                             <td><?php echo e((string) ($receipt['invoice_no'] ?? '')); ?></td>
                             <td><?php echo e((string) ($receipt['organization_name'] ?: ($receipt['client_user_name'] ?? ''))); ?></td>
                             <td>
-                                <span class="badge badge-<?php echo ($receipt['payment_request_status'] ?? '') === 'paid' ? 'success' : 'primary'; ?>">
-                                    <?php echo e(ucfirst((string) ($receipt['payment_request_status'] ?? 'recorded'))); ?>
-                                </span>
+                                <?php
+                                    $receiptStatus = (string) ($receipt['payment_request_status'] ?? 'recorded');
+                                    $receiptTone = match ($receiptStatus) {
+                                        'paid', 'completed', 'approved' => 'tone-green',
+                                        'pending', 'partial' => 'tone-amber',
+                                        'cancelled', 'rejected', 'overdue' => 'tone-red',
+                                        default => 'tone-blue',
+                                    };
+                                ?>
+                                <span class="mbw-pill <?php echo $receiptTone; ?>"><?php echo e(ucfirst($receiptStatus !== '' ? $receiptStatus : 'recorded')); ?></span>
                             </td>
                             <td>
                                 <a class="btn btn-secondary" href="<?php echo e(url('admin/export-payment-receipt.php?request_id=' . (int) ($receipt['payment_request_id'] ?? 0))); ?>" target="_blank" rel="noopener">View</a>

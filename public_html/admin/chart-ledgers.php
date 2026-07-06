@@ -6,6 +6,7 @@ require_staff_or_admin();
 require_company_context();
 
 $pageTitle = 'Chart Ledgers';
+$pageSubtitle = 'Manage ledger accounts, edit rows, and remove unused ledgers.';
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
@@ -68,21 +69,16 @@ if ($editId > 0) {
 
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<div class="accounting-page-head">
-    <div>
-        <h2>Ledgers</h2>
-        <p>Manage ledger accounts, edit rows, and remove unused ledgers.</p>
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2><?= $editLedger ? 'Edit Ledger' : 'Create Ledger' ?></h2>
+        <div class="mbw-card-tools">
+            <a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php')) ?>">Overview</a>
+            <a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php')) ?>">Groups</a>
+        </div>
     </div>
-    <div class="accounting-actions">
-        <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?>Overview</a>
-        <a class="button secondary" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('teams') ?>Groups</a>
-    </div>
-</div>
-
-<section class="workspace-feature-stack">
-    <details class="feature-disclosure" open>
-        <summary><span><strong><?= icon('documents') ?><?= $editLedger ? 'Edit Ledger' : 'Create Ledger' ?></strong><small>One place for the ledger record and its actions.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
-        <form method="post" class="workspace-form-grid">
+    <p style="margin:0 0 12px;color:var(--mbw-muted)">One place for the ledger record and its actions.</p>
+    <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_ledger">
             <input type="hidden" name="ledger_id" value="<?= e((int) ($editLedger['id'] ?? 0)) ?>">
@@ -100,12 +96,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <button type="submit"><?= icon('documents') ?>Save ledger</button>
                 <?php if ($editLedger): ?><a class="button secondary" href="<?= e(url('admin/chart-ledgers.php')) ?>">Cancel</a><?php endif; ?>
             </div>
-        </form>
-    </details>
+    </form>
 </section>
 
-<div class="table-card">
-    <h2>Ledger table</h2>
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2>Ledger table</h2>
+    </div>
+    <div style="overflow-x:auto">
     <table>
         <thead><tr><th>Code</th><th>Name</th><th>Group</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
@@ -116,7 +114,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td><?= e($ledger['name']) ?></td>
                     <td><?= e($ledger['group_name'] ?? '-') ?></td>
                     <td><?= e($ledger['type']) ?></td>
-                    <td><?= e($ledger['status']) ?></td>
+                    <td><span class="mbw-pill <?= ($ledger['status'] ?? '') === 'active' ? 'tone-green' : 'tone-red' ?>"><?= e($ledger['status']) ?></span></td>
                     <td>
                         <a class="button secondary" href="<?= e(url('admin/chart-ledgers.php?edit_id=' . (int) $ledger['id'])) ?>">Edit</a>
                         <form method="post" style="display:inline">
@@ -130,5 +128,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endforeach; ?>
         </tbody>
     </table>
-</div>
+    </div>
+</section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

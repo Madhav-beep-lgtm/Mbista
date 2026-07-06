@@ -10,6 +10,7 @@ require_company_context();
 $repairErrors = accounting_module_repair_database();
 
 $pageTitle = 'Report Schedules';
+$pageSubtitle = 'Manage recurring report deliveries, recipients, and routing.';
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
 $currentUser = current_user();
@@ -89,95 +90,108 @@ $schedules = $scheduleStmt->fetchAll();
 $bodyClass = 'admin-layout accounting-module-page reports-center-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<div class="reference-head">
-    <div>
-        <h2>Report Schedules</h2>
-        <p>Manage recurring report deliveries and routing.</p>
-    </div>
-    <div class="rc-breadcrumb">Home / <strong>Report Schedules</strong></div>
-</div>
-
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
-<section class="coa-module-grid" aria-label="Reports module switcher">
-    <?php foreach ($reportRegistry as $key => [$label, $description, $iconName]): ?>
-        <a class="coa-module-card <?= $key === $reportKey ? 'is-active' : '' ?>" href="<?= e(url('admin/report-schedules.php?report_key=' . urlencode($key))) ?>">
-            <div class="coa-module-icon"><?= icon($iconName) ?></div>
-            <div>
-                <strong><?= e($label) ?></strong>
-                <span><?= e($description) ?></span>
-            </div>
-        </a>
-    <?php endforeach; ?>
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2>Report Library</h2>
+        <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/reports-center.php')) ?>">Reports Center</a></div>
+    </div>
+    <div class="mbw-qa-grid" aria-label="Reports module switcher">
+        <?php foreach ($reportRegistry as $key => [$label, $description, $iconName]): ?>
+            <a class="mbw-qa" href="<?= e(url('admin/report-schedules.php?report_key=' . urlencode($key))) ?>" <?= $key === $reportKey ? 'style="border-color:var(--mbw-primary)" aria-current="page"' : '' ?>>
+                <span class="mbw-chip is-square <?= $key === $reportKey ? 'tone-green' : 'tone-blue' ?>"><?= icon($iconName) ?></span>
+                <div>
+                    <strong><?= e($label) ?></strong>
+                    <span><?= e($description) ?></span>
+                </div>
+            </a>
+        <?php endforeach; ?>
+    </div>
 </section>
 
-<div class="rc-workspace">
-    <main class="rc-report-view">
-        <div class="rc-report-head">
-            <div>
-                <h3><?= icon('compliance') ?><?= e($reportRegistry[$reportKey][0]) ?></h3>
-                <p><?= e($reportRegistry[$reportKey][1]) ?></p>
-            </div>
-            <span class="rc-asof"><?= $schedules !== [] ? e((string) count($schedules)) . ' schedules' : 'No schedules yet' ?></span>
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2>Create Schedule — <?= e($reportRegistry[$reportKey][0]) ?></h2>
+        <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:.85rem"><?= e($reportRegistry[$reportKey][1]) ?></span></div>
+    </div>
+    <?php if (!mail_is_configured()): ?>
+        <p style="color:var(--mbw-muted);font-size:.85rem">SMTP is not configured. Delivery previews are stored locally until MAIL_* is set in <code>.env</code>.</p>
+    <?php endif; ?>
+    <form method="post" class="rc-schedule-form">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="create_schedule">
+        <label>Report
+            <select name="report_key">
+                <?php foreach ($reportRegistry as $key => [$label]) : ?>
+                    <option value="<?= e($key) ?>" <?= $key === $reportKey ? 'selected' : '' ?>><?= e($label) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>Recipient Email<input type="email" name="recipient_email" placeholder="name@company.com" required></label>
+        <div class="rc-compare-dates">
+            <label>Frequency
+                <select name="frequency">
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly" selected>Monthly</option>
+                </select>
+            </label>
+            <label>Format
+                <select name="export_format">
+                    <option value="both" selected>CSV + HTML</option>
+                    <option value="csv">CSV only</option>
+                    <option value="html">HTML only</option>
+                </select>
+            </label>
         </div>
+        <button class="button secondary" type="submit"><?= icon('compliance') ?>Save Schedule</button>
+    </form>
+</section>
 
-        <section class="rc-actions-card">
-            <h4>Create Schedule</h4>
-            <?php if (!mail_is_configured()): ?>
-                <p class="muted rc-mail-hint">SMTP is not configured. Delivery previews are stored locally until MAIL_* is set in <code>.env</code>.</p>
-            <?php endif; ?>
-            <form method="post" class="rc-schedule-form">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="create_schedule">
-                <label>Report
-                    <select name="report_key">
-                        <?php foreach ($reportRegistry as $key => [$label]) : ?>
-                            <option value="<?= e($key) ?>" <?= $key === $reportKey ? 'selected' : '' ?>><?= e($label) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Recipient Email<input type="email" name="recipient_email" placeholder="name@company.com" required></label>
-                <div class="rc-compare-dates">
-                    <label>Frequency
-                        <select name="frequency">
-                            <option value="daily">Daily</option>
-                            <option value="weekly">Weekly</option>
-                            <option value="monthly" selected>Monthly</option>
-                        </select>
-                    </label>
-                    <label>Format
-                        <select name="export_format">
-                            <option value="both" selected>CSV + HTML</option>
-                            <option value="csv">CSV only</option>
-                            <option value="html">HTML only</option>
-                        </select>
-                    </label>
-                </div>
-                <button class="button secondary" type="submit"><?= icon('compliance') ?>Save Schedule</button>
-            </form>
-        </section>
-
-        <section class="rc-actions-card">
-            <h4>Saved Schedules</h4>
-            <?php if ($schedules === []): ?>
-                <p class="muted">No schedules created for this report yet.</p>
-            <?php endif; ?>
-            <?php foreach ($schedules as $schedule): ?>
-                <div class="rc-schedule-row">
-                    <div>
-                        <strong><?= e($schedule['recipient_email']) ?></strong>
-                        <small><?= e(ucfirst((string) $schedule['frequency'])) ?> · <?= e(strtoupper((string) $schedule['export_format'])) ?> · next <?= e(date('d M Y', strtotime((string) $schedule['next_run_on']))) ?></small>
-                        <?php if (!empty($schedule['last_run_status'])): ?><small class="muted"><?= e($schedule['last_run_status']) ?></small><?php endif; ?>
-                    </div>
-                    <form method="post">
-                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                        <input type="hidden" name="action" value="delete_schedule">
-                        <input type="hidden" name="schedule_id" value="<?= e((int) $schedule['id']) ?>">
-                        <button type="submit" title="Remove schedule">&times;</button>
-                    </form>
-                </div>
-            <?php endforeach; ?>
-        </section>
-    </main>
-</div>
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2>Saved Schedules</h2>
+        <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:.85rem"><?= $schedules !== [] ? e((string) count($schedules)) . ' schedules' : 'No schedules yet' ?></span></div>
+    </div>
+    <?php if ($schedules === []): ?>
+        <p style="color:var(--mbw-muted)">No schedules created for this report yet.</p>
+    <?php else: ?>
+        <div style="overflow-x:auto">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Recipient</th>
+                        <th>Frequency</th>
+                        <th>Format</th>
+                        <th>Next Run</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($schedules as $schedule): ?>
+                        <tr>
+                            <td><strong style="color:var(--mbw-heading)"><?= e($schedule['recipient_email']) ?></strong>
+                                <?php if (!empty($schedule['last_run_status'])): ?><br><small style="color:var(--mbw-muted)"><?= e($schedule['last_run_status']) ?></small><?php endif; ?>
+                            </td>
+                            <td><?= e(ucfirst((string) $schedule['frequency'])) ?></td>
+                            <td><span class="mbw-pill tone-blue"><?= e(strtoupper((string) $schedule['export_format'])) ?></span></td>
+                            <td><?= e(date('d M Y', strtotime((string) $schedule['next_run_on']))) ?></td>
+                            <td><?= !empty($schedule['is_active']) ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
+                            <td>
+                                <form method="post">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="delete_schedule">
+                                    <input type="hidden" name="schedule_id" value="<?= e((int) $schedule['id']) ?>">
+                                    <button type="submit" title="Remove schedule">&times;</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    <?php endif; ?>
+</section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

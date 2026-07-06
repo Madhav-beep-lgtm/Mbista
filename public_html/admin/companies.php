@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 
 require_admin();
 $pageTitle = 'Companies & Fiscal Years';
+$pageSubtitle = 'Create companies, manage group relationships, and set up fiscal years.';
 $currentAdmin = current_user();
 $parentColumnExists = false;
 if (table_exists('companies')) {
@@ -123,8 +124,8 @@ $fiscalYears = db()->query('SELECT fy.*, c.name AS company_name FROM fiscal_year
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <div class="admin-grid">
-    <div class="form-card">
-        <h2>Create company</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Create Company</h2></div>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="create_company">
@@ -144,10 +145,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label><input type="checkbox" name="is_active" checked> Active</label>
             <button type="submit">Create company</button>
         </form>
-    </div>
+    </section>
 
-    <div class="form-card">
-        <h2>Create Fiscal Year</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Create Fiscal Year</h2></div>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="create_fiscal_year">
@@ -166,11 +167,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label><input type="checkbox" name="is_default"> Default for company</label>
             <button type="submit">Create Fiscal Year</button>
         </form>
-    </div>
+    </section>
 </div>
 
-<div class="table-card">
-    <h2>Companies</h2>
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Companies</h2></div>
+    <div style="overflow-x:auto">
     <table>
         <thead>
             <tr><th>ID</th><th>Name</th><th>Code</th><?php if ($parentColumnExists): ?><th>Relationship</th><?php endif; ?><th>Status</th><th>PIN</th><th>Action</th></tr>
@@ -193,8 +195,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <?php endif; ?>
                         </td>
                     <?php endif; ?>
-                    <td><?= (int) $company['is_active'] === 1 ? 'Active' : 'Inactive' ?></td>
-                    <td><?= company_pin_is_set((int) $company['id']) ? 'Configured' : 'Required' ?></td>
+                    <td><?php if ((int) $company['is_active'] === 1): ?><span class="mbw-pill tone-green">Active</span><?php else: ?><span class="mbw-pill tone-red">Inactive</span><?php endif; ?></td>
+                    <td><?php if (company_pin_is_set((int) $company['id'])): ?><span class="mbw-pill tone-green">Configured</span><?php else: ?><span class="mbw-pill tone-amber">Required</span><?php endif; ?></td>
                     <td>
                         <?php if ((int) $company['is_active'] === 1): ?>
                             <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" class="inline-form">
@@ -211,10 +213,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endforeach; ?>
         </tbody>
     </table>
-</div>
+    </div>
+</section>
 
-<div class="table-card">
-    <h2>Fiscal years</h2>
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Fiscal Years</h2></div>
+    <div style="overflow-x:auto">
     <table>
         <thead>
             <tr><th>ID</th><th>Company</th><th>Label</th><th>Period</th><th>Default</th><th>Status</th></tr>
@@ -229,11 +233,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td><?= e($fy['company_name']) ?></td>
                     <td><?= e($fy['label']) ?></td>
                     <td><?= e($fy['start_date']) ?> to <?= e($fy['end_date']) ?></td>
-                    <td><?= (int) $fy['is_default'] === 1 ? 'Yes' : 'No' ?></td>
-                    <td><?= (int) $fy['is_active'] === 1 ? 'Active' : 'Inactive' ?></td>
+                    <td><?php if ((int) $fy['is_default'] === 1): ?><span class="mbw-pill tone-blue">Default</span><?php else: ?><span class="mbw-pill tone-gray">No</span><?php endif; ?></td>
+                    <td><?php if ((int) $fy['is_active'] === 1): ?><span class="mbw-pill tone-green">Active</span><?php else: ?><span class="mbw-pill tone-red">Inactive</span><?php endif; ?></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
-</div>
+    </div>
+</section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

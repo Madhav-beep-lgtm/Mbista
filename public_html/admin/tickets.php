@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_staff_or_admin();
 
 $pageTitle = 'Support Tickets';
+$pageSubtitle = 'Track, assign and resolve client support requests with SLA visibility';
 $user = current_user();
 $role = (string) ($user['role'] ?? '');
 $userId = (int) $user['id'];
@@ -486,17 +487,42 @@ if ($ticketId === 0 && $clientIdsInScope !== []) {
 }
 
 $pageTitle = $ticket ? $ticket['subject'] : 'Support Tickets';
+$pageSubtitle = $ticket
+    ? 'Ticket ' . (string) $ticket['ticket_no'] . ' — ' . (string) $ticket['organization_name']
+    : 'Track, assign and resolve client support requests with SLA visibility';
+
+$statusTones = [
+    'open' => 'tone-blue',
+    'assigned' => 'tone-blue',
+    'in_progress' => 'tone-amber',
+    'waiting_for_client' => 'tone-amber',
+    'resolved' => 'tone-green',
+    'closed' => 'tone-gray',
+];
+$priorityTones = [
+    'urgent' => 'tone-red',
+    'high' => 'tone-red',
+    'medium' => 'tone-amber',
+    'normal' => 'tone-blue',
+    'low' => 'tone-gray',
+];
+$decisionTones = [
+    'pending' => 'tone-amber',
+    'approved' => 'tone-green',
+    'rejected' => 'tone-red',
+    'negotiation' => 'tone-blue',
+    'deferred' => 'tone-gray',
+];
 
 include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_header' : 'staff_header') . '.php';
 ?>
 
 <?php if ($ticketId === 0): ?>
-    <div class="table-card">
-        <h2><?= icon('tickets') ?>Support tickets</h2>
-
-        <div class="users-filters-card">
-            <h3>Filters</h3>
-            <form method="get" class="users-filter-grid">
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Filters</h2>
+        </div>
+        <form method="get" class="users-filter-grid">
                 <label>Status
                     <select name="status">
                         <option value="all" <?= $statusFilter === 'all' ? 'selected' : '' ?>>All</option>
@@ -518,9 +544,13 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <a class="button secondary" href="<?= e(url('admin/tickets.php')) ?>">Reset</a>
                 </div>
             </form>
-        </div>
+    </section>
 
-        <div class="table-card" style="margin-top:20px;">
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Support tickets</h2>
+        </div>
+        <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -545,30 +575,30 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td>
                                 <?= e($requestTypeLabels[$t['request_type'] ?? 'none'] ?? 'General support') ?>
                                 <?php if (!empty($t['decision_status']) && ($t['decision_status'] ?? 'pending') !== 'pending'): ?>
-                                    <br><small><?= e($requestDecisionLabels[$t['decision_status']] ?? $t['decision_status']) ?></small>
+                                    <br><span class="mbw-pill <?= e($decisionTones[$t['decision_status']] ?? 'tone-gray') ?>"><?= e($requestDecisionLabels[$t['decision_status']] ?? $t['decision_status']) ?></span>
                                 <?php endif; ?>
                             </td>
                             <td><?= e($categoryLabels[$t['category']] ?? $t['category']) ?></td>
-                            <td><span class="tag"><?= e($t['priority']) ?></span></td>
-                            <td><span class="tag"><?= e($statusLabels[$t['status']] ?? $t['status']) ?></span></td>
+                            <td><span class="mbw-pill <?= e($priorityTones[strtolower((string) $t['priority'])] ?? 'tone-gray') ?>"><?= e($t['priority']) ?></span></td>
+                            <td><span class="mbw-pill <?= e($statusTones[$t['status']] ?? 'tone-gray') ?>"><?= e($statusLabels[$t['status']] ?? $t['status']) ?></span></td>
                             <?php if ($hasTicketSla): ?>
                                 <td>
                                     <?php
-                                    $slaBadge = ['label' => 'No SLA', 'class' => 'sla-none'];
+                                    $slaBadge = ['label' => 'No SLA', 'class' => 'tone-gray'];
                                     if (!empty($t['resolved_at'])) {
-                                        $slaBadge = ['label' => 'Resolved', 'class' => 'sla-ok'];
+                                        $slaBadge = ['label' => 'Resolved', 'class' => 'tone-green'];
                                     } elseif (!empty($t['sla_due_at'])) {
                                         $hoursLeft = (strtotime((string) $t['sla_due_at']) - time()) / 3600;
                                         if ($hoursLeft < 0) {
-                                            $slaBadge = ['label' => 'Breached', 'class' => 'sla-breach'];
+                                            $slaBadge = ['label' => 'Breached', 'class' => 'tone-red'];
                                         } elseif ($hoursLeft <= 8) {
-                                            $slaBadge = ['label' => 'At Risk', 'class' => 'sla-risk'];
+                                            $slaBadge = ['label' => 'At Risk', 'class' => 'tone-amber'];
                                         } else {
-                                            $slaBadge = ['label' => 'On Track', 'class' => 'sla-ok'];
+                                            $slaBadge = ['label' => 'On Track', 'class' => 'tone-green'];
                                         }
                                     }
                                     ?>
-                                    <span class="sla-badge <?= e($slaBadge['class']) ?>"><?= e($slaBadge['label']) ?></span>
+                                    <span class="mbw-pill <?= e($slaBadge['class']) ?>"><?= e($slaBadge['label']) ?></span>
                                     <?php if (!empty($t['sla_due_at']) && empty($t['resolved_at'])): ?><br><small>Due <?= e(date('d M H:i', strtotime((string) $t['sla_due_at']))) ?></small><?php endif; ?>
                                 </td>
                             <?php endif; ?>
@@ -578,14 +608,19 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </tbody>
             </table>
         </div>
-    </div>
+    </section>
 <?php else: ?>
-    <div class="table-card">
-        <h2><?= icon('tickets') ?><?= e($ticket['ticket_no']) ?> - <?= e($ticket['subject']) ?></h2>
-        <p><a href="<?= e(url('admin/tickets.php')) ?>">&larr; Back to tickets</a> | Client: <?= e($ticket['organization_name']) ?></p>
-
-        <div class="table-card">
-            <p><strong>Category:</strong> <?= e($categoryLabels[$ticket['category']] ?? $ticket['category']) ?> | <strong>Priority:</strong> <?= e($ticket['priority']) ?></p>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2><?= e($ticket['ticket_no']) ?> - <?= e($ticket['subject']) ?></h2>
+            <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/tickets.php')) ?>">&larr; Back to tickets</a></div>
+        </div>
+        <p style="color:var(--mbw-muted);">Client: <?= e($ticket['organization_name']) ?></p>
+        <p>
+            <strong>Category:</strong> <?= e($categoryLabels[$ticket['category']] ?? $ticket['category']) ?>
+            | <strong>Priority:</strong> <span class="mbw-pill <?= e($priorityTones[strtolower((string) $ticket['priority'])] ?? 'tone-gray') ?>"><?= e($ticket['priority']) ?></span>
+            | <strong>Status:</strong> <span class="mbw-pill <?= e($statusTones[$ticket['status']] ?? 'tone-gray') ?>"><?= e($statusLabels[$ticket['status']] ?? $ticket['status']) ?></span>
+        </p>
             <?php if ($hasTicketSla): ?>
                 <p><strong>SLA due:</strong> <?= e($ticket['sla_due_at'] ?? '-') ?> | <strong>Resolved:</strong> <?= e($ticket['resolved_at'] ?? '-') ?></p>
             <?php endif; ?>
@@ -600,14 +635,16 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <?php if (!empty($ticket['requested_percent'])): ?>Percent <?= e(number_format((float) $ticket['requested_percent'], 2)) ?>% <?php endif; ?>
                     <?php if (!empty($ticket['requested_due_on'])): ?>Due <?= e($ticket['requested_due_on']) ?><?php endif; ?>
                 </p>
-                <p><strong>Decision Status:</strong> <?= e($requestDecisionLabels[$ticket['decision_status'] ?? 'pending'] ?? ($ticket['decision_status'] ?? 'pending')) ?></p>
+                <p><strong>Decision Status:</strong> <span class="mbw-pill <?= e($decisionTones[$ticket['decision_status'] ?? 'pending'] ?? 'tone-gray') ?>"><?= e($requestDecisionLabels[$ticket['decision_status'] ?? 'pending'] ?? ($ticket['decision_status'] ?? 'pending')) ?></span></p>
             <?php endif; ?>
             <p><?= nl2br(e($ticket['description'])) ?></p>
-        </div>
+    </section>
 
         <?php if ($role === 'admin' && ($ticket['request_type'] ?? 'none') !== 'none'): ?>
-            <div class="table-card">
-                <h3>Process request</h3>
+            <section class="mbw-card">
+                <div class="mbw-card-head">
+                    <h2>Process request</h2>
+                </div>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="process_ticket_request">
@@ -635,11 +672,13 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                         <button type="submit"><?= icon('tickets') ?>Apply decision and notify client</button>
                     </div>
                 </form>
-            </div>
+            </section>
         <?php endif; ?>
 
-        <div class="table-card">
-            <h3>Update ticket</h3>
+        <section class="mbw-card">
+            <div class="mbw-card-head">
+                <h2>Update ticket</h2>
+            </div>
             <form method="post" class="workspace-form-grid">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="update_ticket">
@@ -669,13 +708,15 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <button type="submit"><?= icon('tickets') ?>Save</button>
                 </div>
             </form>
-        </div>
+        </section>
 
-        <div class="table-card">
-            <h3>Conversation</h3>
+        <section class="mbw-card">
+            <div class="mbw-card-head">
+                <h2>Conversation</h2>
+            </div>
             <?php foreach ($ticketMessages as $message): ?>
-                <div style="padding:12px 0; border-bottom:1px solid var(--border);">
-                    <strong><?= e($message['sender_name']) ?></strong> <small><?= e($message['created_at']) ?></small>
+                <div style="padding:12px 0; border-bottom:1px solid var(--mbw-border);">
+                    <strong style="color:var(--mbw-heading);"><?= e($message['sender_name']) ?></strong> <small style="color:var(--mbw-muted);"><?= e($message['created_at']) ?></small>
                     <p><?= nl2br(e($message['body'])) ?></p>
                     <?php if ($message['attachment_path']): ?>
                         <p><a href="<?= e(url('attachment-download.php?type=ticket_message&id=' . (int) $message['id'])) ?>">📎 <?= e((string) $message['attachment_name']) ?></a></p>
@@ -693,7 +734,6 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <button type="submit"><?= icon('tickets') ?>Send reply</button>
                 </div>
             </form>
-        </div>
-    </div>
+        </section>
 <?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_footer' : 'staff_footer') . '.php'; ?>

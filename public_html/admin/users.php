@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_admin();
 require_company_context();
 $pageTitle = 'Users Workflow';
+$pageSubtitle = 'Manage user accounts, roles, approvals, and staff KYC records.';
 $currentAdmin = current_user();
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
@@ -581,6 +582,18 @@ if ($editUserId > 0) {
 
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2>Manage user lifecycle, approvals, and account activity</h2>
+        <div class="mbw-card-tools">
+            <button type="button" class="button" data-modal-open="user-create-modal">New user</button>
+            <a class="button secondary" href="<?= e($buildUsersUrl(['export' => 'csv', 'page' => null])) ?>">Export CSV</a>
+            <button type="button" class="button secondary" onclick="window.print()">Print</button>
+        </div>
+    </div>
+    <p style="color:var(--mbw-muted);margin:0;">Create and maintain customer or admin accounts, control active status, and review related order and activity records.</p>
+</section>
+
 <details class="role-matrix-panel">
     <summary><?= icon('users') ?>Role Matrix — who can do what</summary>
     <div class="rc-table-scroll">
@@ -607,29 +620,56 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
     <p class="muted">Assign a role to each user via New user / Edit. Capabilities are enforced on voucher approval and posting; broader per-module enforcement rolls out as modules adopt <code>user_can()</code>.</p>
 </details>
-<div class="admin-hero">
-    <div>
-        <div class="badge">Users workflow</div>
-        <h2>Manage user lifecycle, approvals, and account activity.</h2>
-        <p>Create and maintain customer or admin accounts, control active status, and review related order and activity records.</p>
-    </div>
-    <div class="actions">
-        <button type="button" class="button" data-modal-open="user-create-modal">New user</button>
-        <a class="button secondary" href="<?= e($buildUsersUrl(['export' => 'csv', 'page' => null])) ?>">Export CSV</a>
-        <button type="button" class="button secondary" onclick="window.print()">Print</button>
-    </div>
-</div>
+<section class="mbw-kpi-grid">
+    <a class="mbw-kpi" href="<?= e(url('admin/users.php')) ?>">
+        <div>
+            <span class="mbw-kpi-label">Total Users</span>
+            <div class="mbw-kpi-value"><?= e((string) $summary['all']) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">all accounts</span></span>
+        </div>
+        <span class="mbw-chip tone-blue"><?= icon('users') ?></span>
+    </a>
+    <a class="mbw-kpi" href="<?= e(url('admin/users.php?status=active')) ?>">
+        <div>
+            <span class="mbw-kpi-label">Active</span>
+            <div class="mbw-kpi-value"><?= e((string) $summary['active']) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">can sign in</span></span>
+        </div>
+        <span class="mbw-chip tone-green"><?= icon('insights') ?></span>
+    </a>
+    <a class="mbw-kpi" href="<?= e(url('admin/users.php?status=inactive')) ?>">
+        <div>
+            <span class="mbw-kpi-label">Inactive</span>
+            <div class="mbw-kpi-value"><?= e((string) $summary['inactive']) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">suspended / pending</span></span>
+        </div>
+        <span class="mbw-chip tone-amber"><?= icon('settings') ?></span>
+    </a>
+    <a class="mbw-kpi" href="<?= e(url('admin/users.php?role=customer')) ?>">
+        <div>
+            <span class="mbw-kpi-label">Customers</span>
+            <div class="mbw-kpi-value"><?= e((string) $summary['customers']) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">client logins</span></span>
+        </div>
+        <span class="mbw-chip tone-teal"><?= icon('clients') ?></span>
+    </a>
+    <a class="mbw-kpi" href="<?= e(url('admin/users.php?role=admin')) ?>">
+        <div>
+            <span class="mbw-kpi-label">Admins</span>
+            <div class="mbw-kpi-value"><?= e((string) $summary['admins']) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">full access</span></span>
+        </div>
+        <span class="mbw-chip tone-purple"><?= icon('admin') ?></span>
+    </a>
+</section>
 
-<div class="admin-stats users-stats-grid">
-    <div class="card"><span class="stat-icon"><?= icon('users') ?></span><strong><?= e((string) $summary['all']) ?></strong><p>Total users</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('insights') ?></span><strong><?= e((string) $summary['active']) ?></strong><p>Active</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('settings') ?></span><strong><?= e((string) $summary['inactive']) ?></strong><p>Inactive</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('clients') ?></span><strong><?= e((string) $summary['customers']) ?></strong><p>Customers</p></div>
-    <div class="card"><span class="stat-icon"><?= icon('admin') ?></span><strong><?= e((string) $summary['admins']) ?></strong><p>Admins</p></div>
-</div>
-
-<div class="form-card users-filters-card">
-    <h2>Search and filters</h2>
+<section class="mbw-card users-filters-card">
+    <div class="mbw-card-head">
+        <h2>Search &amp; Filters</h2>
+        <div class="mbw-card-tools">
+            <a class="mbw-view-all" href="<?= e(url('admin/users.php')) ?>">Reset</a>
+        </div>
+    </div>
     <form method="get" class="users-filter-grid" id="users-filter-form">
         <label>Search
             <input type="text" name="q" value="<?= e($search) ?>" placeholder="Name, email, phone, company">
@@ -671,11 +711,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <a class="button secondary" href="<?= e(url('admin/users.php')) ?>">Reset</a>
         </div>
     </form>
-</div>
+</section>
 
-<div class="table-card">
-    <h2>Users directory</h2>
-    <p>Showing <?= e((string) count($users)) ?> of <?= e((string) $totalUsers) ?> user(s).</p>
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2>Users Directory</h2>
+        <div class="mbw-card-tools">
+            <span style="color:var(--mbw-muted);font-size:0.85rem;">Showing <?= e((string) count($users)) ?> of <?= e((string) $totalUsers) ?> user(s)</span>
+        </div>
+    </div>
+    <div style="overflow-x:auto">
     <table>
         <thead>
             <tr>
@@ -703,16 +748,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td><?= e($user['name']) ?></td>
                     <td><?= e($user['email']) ?></td>
                     <td>
-                        <span class="tag"><?= e($user['role']) ?></span>
+                        <?php $roleTone = ($user['role'] ?? '') === 'admin' ? 'tone-purple' : (($user['role'] ?? '') === 'staff' ? 'tone-blue' : 'tone-teal'); ?>
+                        <span class="mbw-pill <?= $roleTone ?>"><?= e($user['role']) ?></span>
                         <?php if (in_array(($user['role'] ?? ''), ['staff', 'admin'], true)): ?>
                             <?php $rowKycStatus = staff_kyc_status((int) $user['id']); ?>
-                            <br><small class="muted">KYC: <?= e($rowKycStatus) ?></small>
+                            <br><small style="color:var(--mbw-muted);">KYC: <?= e($rowKycStatus) ?></small>
                         <?php endif; ?>
                     </td>
                     <?php if ($hasAccessLevels): ?>
-                        <td><span class="tag"><?= e(ACCESS_LEVELS[$user['access_level']] ?? $user['access_level']) ?></span></td>
+                        <td><span class="mbw-pill tone-gray"><?= e(ACCESS_LEVELS[$user['access_level']] ?? $user['access_level']) ?></span></td>
                     <?php endif; ?>
-                    <td><span class="tag"><?= e($user['status']) ?></span></td>
+                    <td><span class="mbw-pill <?= ($user['status'] ?? '') === 'active' ? 'tone-green' : 'tone-red' ?>"><?= e($user['status']) ?></span></td>
                     <td><?= e($user['phone'] ?? '-') ?></td>
                     <td><?= e($user['company'] ?? '-') ?></td>
                     <td><small><?= e($user['created_at']) ?></small></td>
@@ -745,7 +791,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <button type="submit" class="secondary">Delete</button>
                                 </form>
                             <?php else: ?>
-                                <span class="tag">Protected</span>
+                                <span class="mbw-pill tone-gray">Protected</span>
                             <?php endif; ?>
                         </div>
                     </td>
@@ -753,6 +799,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endforeach; ?>
         </tbody>
     </table>
+    </div>
 
     <div class="admin-orders-pagination">
         <?php if ($page > 1): ?>
@@ -763,7 +810,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <a class="button secondary" href="<?= e($buildUsersUrl(['page' => $page + 1])) ?>">Next</a>
         <?php endif; ?>
     </div>
-</div>
+</section>
 
 <?php if ($viewUser): ?>
     <div class="modal-overlay is-open" data-modal="user-view-modal" role="dialog" aria-modal="true" aria-labelledby="user-view-title">
@@ -863,11 +910,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <div class="form-card">
                     <h3>KYC documents
                         <?php if ($viewKycStatus === 'verified'): ?>
-                            <span class="tag" style="background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success);">KYC verified</span>
+                            <span class="mbw-pill tone-green">KYC verified</span>
                         <?php elseif ($viewKycStatus === 'submitted'): ?>
-                            <span class="tag" style="background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info);">KYC submitted</span>
+                            <span class="mbw-pill tone-blue">KYC submitted</span>
                         <?php else: ?>
-                            <span class="tag" style="background: color-mix(in srgb, var(--warning) 16%, transparent); color: var(--warning);">KYC pending</span>
+                            <span class="mbw-pill tone-amber">KYC pending</span>
                         <?php endif; ?>
                     </h3>
                     <?php if ($viewKycStatus !== 'verified'): ?>
@@ -908,7 +955,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                             <br><small class="muted"><?= e(number_format(((int) $kycDoc['file_size']) / 1024, 0)) ?> KB &middot; uploaded <?= e($kycDoc['uploaded_at']) ?></small>
                                         </td>
                                         <td>
-                                            <span class="tag"><?= e(str_replace('_', ' ', $kycDoc['verification_status'])) ?></span>
+                                            <?php $kycTone = $kycDoc['verification_status'] === 'verified' ? 'tone-green' : ($kycDoc['verification_status'] === 'rejected' ? 'tone-red' : 'tone-amber'); ?>
+                                            <span class="mbw-pill <?= $kycTone ?>"><?= e(str_replace('_', ' ', $kycDoc['verification_status'])) ?></span>
                                             <?php if (!empty($kycDoc['remarks'])): ?>
                                                 <br><small class="muted"><?= e($kycDoc['remarks']) ?></small>
                                             <?php endif; ?>

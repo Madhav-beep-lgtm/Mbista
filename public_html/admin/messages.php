@@ -214,13 +214,16 @@ if ($threadId === 0) {
 }
 
 $pageTitle = $thread ? $thread['subject'] : 'Messages';
+$pageSubtitle = $thread ? 'Conversation thread with full message history and replies.' : 'Client and internal message threads for your team.';
 
 include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_header' : 'staff_header') . '.php';
 ?>
 
 <?php if ($threadId === 0): ?>
-    <div class="table-card">
-        <h2><?= icon('messages') ?>Inbox</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Inbox</h2>
+        </div>
 
         <details class="feature-disclosure">
             <summary>
@@ -258,7 +261,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </form>
         </details>
 
-        <div class="table-card">
+        <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -278,7 +281,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td>
                                 <a href="<?= e(url('admin/messages.php?thread_id=' . (int) $t['id'])) ?>"><?= e($t['subject']) ?></a>
                                 <?php if ((int) ($t['unread_count'] ?? 0) > 0): ?>
-                                    <span class="tag"><?= e((string) $t['unread_count']) ?> new</span>
+                                    <span class="mbw-pill tone-blue"><?= e((string) $t['unread_count']) ?> new</span>
                                 <?php endif; ?>
                             </td>
                             <td><?= e($t['organization_name'] ?? 'Internal') ?></td>
@@ -290,16 +293,25 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </tbody>
             </table>
         </div>
-    </div>
+    </section>
 <?php else: ?>
-    <div class="table-card">
-        <h2><?= icon('messages') ?><?= e($thread['subject']) ?></h2>
-        <p><a href="<?= e(url('admin/messages.php')) ?>">&larr; Back to inbox</a> | Client: <?= e($thread['organization_name'] ?? 'Internal') ?></p>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2><?= e($thread['subject']) ?></h2>
+            <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/messages.php')) ?>">Back to inbox</a></div>
+        </div>
+        <p style="color:var(--mbw-muted); margin-bottom:12px;">
+            <?php if (!empty($thread['organization_name'])): ?>
+                Client: <?= e($thread['organization_name']) ?>
+            <?php else: ?>
+                <span class="mbw-pill tone-gray">Internal thread</span>
+            <?php endif; ?>
+        </p>
 
-        <div class="table-card">
+        <div>
             <?php foreach ($threadMessages as $message): ?>
-                <div style="padding:12px 0; border-bottom:1px solid var(--border);">
-                    <strong><?= e($message['sender_name']) ?></strong> <small><?= e($message['created_at']) ?></small>
+                <div style="padding:12px 0; border-bottom:1px solid var(--mbw-border, var(--border));">
+                    <strong style="color:var(--mbw-heading);"><?= e($message['sender_name']) ?></strong> <small style="color:var(--mbw-muted);"><?= e($message['created_at']) ?></small>
                     <p><?= nl2br(e($message['body'])) ?></p>
                     <?php if ($message['attachment_path']): ?>
                         <p><a href="<?= e(url('attachment-download.php?type=message&id=' . (int) $message['id'])) ?>">📎 <?= e((string) $message['attachment_name']) ?></a></p>
@@ -318,6 +330,6 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 <button type="submit"><?= icon('messages') ?>Send reply</button>
             </div>
         </form>
-    </div>
+    </section>
 <?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_footer' : 'staff_footer') . '.php'; ?>

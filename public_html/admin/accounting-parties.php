@@ -8,6 +8,7 @@ require_company_context();
 
 $repairErrors = accounting_module_repair_database();
 $pageTitle = 'Sales, Purchases & Party Management';
+$pageSubtitle = 'Manage invoices, bills, parties, collections, payments and outstanding balances';
 $company = current_company();
 $fiscalYear = current_fiscal_year();
 $companyId = (int) ($company['id'] ?? 0);
@@ -727,8 +728,8 @@ $showingTo = min($totalRows, $page * $perPage);
 ?>
 <div class="reference-head">
     <div>
-        <h2>Sales, Purchases &amp; Party Management</h2>
-        <p>Manage invoices, bills, parties, collections, payments and track outstanding balances.</p>
+        <h2 style="color:var(--mbw-heading)">Party Workspace</h2>
+        <p style="color:var(--mbw-muted)">Invoices, bills, collections and payments in one place.</p>
     </div>
     <div class="reference-head-actions">
         <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) ($selectedParty['id'] ?? 0)])) ?>"><?= icon('documents') ?>Send Statement</a>
@@ -748,14 +749,28 @@ $showingTo = min($totalRows, $page * $perPage);
     <a href="#aging">Aging</a>
 </nav>
 
-<div class="reference-stat-grid">
-    <div class="reference-stat accent-green"><span><?= icon('users') ?></span><small>Outstanding Receivables</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format($summary['receivables'], 2)) ?></strong><em>up from live vouchers</em></div>
-    <div class="reference-stat accent-red"><span><?= icon('services') ?></span><small>Outstanding Payables</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format($summary['payables'], 2)) ?></strong><em>supplier bills pending</em></div>
-    <div class="reference-stat accent-blue"><span><?= icon('invoices') ?></span><small>This Month Sales</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format($summary['month_sales'], 2)) ?></strong><em>sales invoices</em></div>
-    <div class="reference-stat accent-purple"><span><?= icon('documents') ?></span><small>This Month Purchases</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format($summary['month_purchases'], 2)) ?></strong><em>purchase bills</em></div>
-    <div class="reference-stat accent-orange"><span><?= icon('tasks') ?></span><small>Overdue Invoices</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format($summary['overdue'], 2)) ?></strong><em><?= e((string) $summary['overdue_count']) ?> invoices</em></div>
-    <div class="reference-stat accent-green"><span><?= icon('dashboard') ?></span><small>Collection Efficiency</small><strong><?= e(number_format($collectionEfficiency, 1)) ?>%</strong><em>paid vs outstanding</em></div>
-</div>
+<section class="mbw-kpi-grid" aria-label="Sales and purchase overview">
+    <?php
+    $partiesKpis = [
+        ['label' => 'Outstanding Receivables', 'value' => site_currency_symbol() . number_format($summary['receivables'], 2), 'note' => 'from live vouchers', 'tone' => 'green', 'icon' => 'wallet', 'href' => parties_page_url(['tab' => 'sales', 'type' => null, 'status' => 'open', 'page' => null])],
+        ['label' => 'Outstanding Payables', 'value' => site_currency_symbol() . number_format($summary['payables'], 2), 'note' => 'supplier bills pending', 'tone' => 'red', 'icon' => 'receipt-voucher', 'href' => parties_page_url(['tab' => 'purchases', 'type' => null, 'status' => null, 'page' => null])],
+        ['label' => 'This Month Sales', 'value' => site_currency_symbol() . number_format($summary['month_sales'], 2), 'note' => 'sales invoices', 'tone' => 'blue', 'icon' => 'invoices', 'href' => parties_page_url(['tab' => 'sales', 'type' => null, 'status' => null, 'page' => null])],
+        ['label' => 'This Month Purchases', 'value' => site_currency_symbol() . number_format($summary['month_purchases'], 2), 'note' => 'purchase bills', 'tone' => 'purple', 'icon' => 'cart', 'href' => parties_page_url(['tab' => 'purchases', 'type' => null, 'status' => null, 'page' => null])],
+        ['label' => 'Overdue Invoices', 'value' => site_currency_symbol() . number_format($summary['overdue'], 2), 'note' => $summary['overdue_count'] . ' invoices', 'tone' => 'amber', 'icon' => 'calendar', 'href' => parties_page_url(['tab' => 'sales', 'type' => null, 'status' => 'overdue', 'page' => null])],
+        ['label' => 'Collection Efficiency', 'value' => number_format($collectionEfficiency, 1) . '%', 'note' => 'paid vs outstanding', 'tone' => 'teal', 'icon' => 'trend-up', 'href' => parties_page_url(['tab' => 'collections', 'type' => null, 'status' => null, 'page' => null])],
+    ];
+    ?>
+    <?php foreach ($partiesKpis as $kpi): ?>
+        <a class="mbw-kpi" href="<?= e($kpi['href']) ?>">
+            <div>
+                <span class="mbw-kpi-label"><?= e($kpi['label']) ?></span>
+                <div class="mbw-kpi-value"><?= e($kpi['value']) ?></div>
+                <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e($kpi['note']) ?></span></span>
+            </div>
+            <span class="mbw-chip tone-<?= e($kpi['tone']) ?>"><?= icon($kpi['icon']) ?></span>
+        </a>
+    <?php endforeach; ?>
+</section>
 
 <div class="reference-toolbar">
     <div class="reference-toolbar-actions">
@@ -802,8 +817,8 @@ $showingTo = min($totalRows, $page * $perPage);
 </div>
 
 <?php if ($panel === 'payment'): ?>
-    <section id="panel-forms" class="reference-panel-card">
-        <h3><?= icon('documents') ?>Record a customer payment</h3>
+    <section id="panel-forms" class="mbw-card reference-panel-card">
+        <div class="mbw-card-head"><h2>Record a Customer Payment</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(parties_page_url(['panel' => null])) ?>">Close</a></div></div>
         <form method="post" class="reference-party-form">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="record_payment">
@@ -826,8 +841,8 @@ $showingTo = min($totalRows, $page * $perPage);
         </form>
     </section>
 <?php elseif ($panel === 'purchase'): ?>
-    <section id="panel-forms" class="reference-panel-card">
-        <h3><?= icon('documents') ?>Record a purchase bill</h3>
+    <section id="panel-forms" class="mbw-card reference-panel-card">
+        <div class="mbw-card-head"><h2>Record a Purchase Bill</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(parties_page_url(['panel' => null])) ?>">Close</a></div></div>
         <?php if ($supplierParties === []): ?>
             <p class="muted">Create a supplier first (More Actions → Save party with type Supplier).</p>
         <?php else: ?>
@@ -862,8 +877,8 @@ $showingTo = min($totalRows, $page * $perPage);
         <?php endif; ?>
     </section>
 <?php elseif ($panel === 'supplier-payment'): ?>
-    <section id="panel-forms" class="reference-panel-card">
-        <h3><?= icon('services') ?>Pay a supplier</h3>
+    <section id="panel-forms" class="mbw-card reference-panel-card">
+        <div class="mbw-card-head"><h2>Pay a Supplier</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(parties_page_url(['panel' => null])) ?>">Close</a></div></div>
         <?php if ($supplierParties === []): ?>
             <p class="muted">Create a supplier first (More Actions → Save party with type Supplier).</p>
         <?php else: ?>
@@ -889,43 +904,66 @@ $showingTo = min($totalRows, $page * $perPage);
     </section>
 <?php endif; ?>
 
+<?php
+$statusPillTone = static function (string $status): string {
+    return match (strtolower($status)) {
+        'paid', 'completed', 'active' => 'green',
+        'open', 'pending', 'partial', 'partially paid' => 'amber',
+        'overdue', 'cancelled', 'inactive' => 'red',
+        'draft' => 'blue',
+        default => 'gray',
+    };
+};
+$tabHeadings = [
+    'overview' => 'Sales Invoices',
+    'sales' => 'Sales Invoices',
+    'purchases' => 'Purchase Bills',
+    'collections' => 'Collections Received',
+    'payments' => 'Supplier Payments',
+    'customers' => 'Customers',
+    'suppliers' => 'Suppliers',
+];
+?>
 <div class="reference-workspace">
-    <main id="documents" class="reference-table-card">
+    <main id="documents" class="mbw-card reference-table-card">
+        <div class="mbw-card-head">
+            <h2><?= e($tabHeadings[$tab] ?? 'Documents') ?></h2>
+            <div class="mbw-card-tools"><a class="mbw-view-all" href="#aging">Aging</a></div>
+        </div>
         <?php if (in_array($tab, ['overview', 'sales'], true)): ?>
+            <div style="overflow-x:auto">
             <table class="reference-table">
                 <thead>
                     <tr>
                         <th><input type="checkbox" aria-label="Select all"></th>
-                        <th>Invoice No.</th><th>Party Name</th><th>Type</th><th>Invoice Date</th><th>Due Date</th><th>Amount</th><th>Paid</th><th>Outstanding</th><th>Status</th><th>Actions</th>
+                        <th>Invoice No.</th><th>Party Name</th><th>Type</th><th>Invoice Date</th><th>Due Date</th><th class="is-numeric">Amount</th><th class="is-numeric">Paid</th><th class="is-numeric">Outstanding</th><th>Status</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if ($pagedRows === []): ?><tr><td colspan="11">No invoices match the current filters.</td></tr><?php endif; ?>
                     <?php foreach ($pagedRows as $document): ?>
-                        <?php
-                        $statusClass = strtolower((string) $document['display_status']);
-                        $typeClass = str_contains(strtolower((string) $document['display_type']), 'purchase') ? 'purchase' : (str_contains(strtolower((string) $document['display_type']), 'service') ? 'service' : 'sales');
-                        ?>
                         <tr>
                             <td><input type="checkbox" aria-label="Select <?= e($document['voucher_no']) ?>"></td>
                             <td><a class="reference-link" href="<?= e(parties_page_url(['party_id' => (int) ($document['party_id'] ?? 0)])) ?>"><?= e($document['voucher_no']) ?></a></td>
                             <td><?= e($document['party_name'] ?: 'Direct entry') ?></td>
-                            <td><span class="reference-pill type-<?= e($typeClass) ?>"><?= e($document['display_type']) ?></span></td>
+                            <td><span class="mbw-pill tone-blue"><?= e($document['display_type']) ?></span></td>
                             <td><?= e($document['invoice_date']) ?></td>
                             <td class="<?= $document['display_status'] === 'Overdue' ? 'text-danger' : '' ?>"><?= e($document['due_date']) ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['total_amount'], 2)) ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['paid_amount'], 2)) ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['outstanding_amount'], 2)) ?></td>
-                            <td><span class="reference-pill status-<?= e($statusClass) ?>"><?= e($document['display_status']) ?></span></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['total_amount'], 2)) ?></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['paid_amount'], 2)) ?></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['outstanding_amount'], 2)) ?></td>
+                            <td><span class="mbw-pill tone-<?= e($statusPillTone((string) $document['display_status'])) ?>"><?= e($document['display_status']) ?></span></td>
                             <td><div class="reference-row-actions"><a href="<?= e(parties_page_url(['party_id' => (int) ($document['party_id'] ?? 0), 'ptab' => 'ledger'])) ?>#party-panel" title="View ledger"><?= icon('portal') ?></a><a href="<?= e(url('admin/export-invoice.php?id=' . (int) $document['id'])) ?>" title="Export invoice"><?= icon('documents') ?></a></div></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         <?php elseif ($tab === 'purchases'): ?>
+            <div style="overflow-x:auto">
             <table class="reference-table">
                 <thead>
-                    <tr><th>Bill No.</th><th>Supplier</th><th>Bill Date</th><th>Reference</th><th>Amount</th><th>Outstanding</th><th>Narration</th></tr>
+                    <tr><th>Bill No.</th><th>Supplier</th><th>Bill Date</th><th>Reference</th><th class="is-numeric">Amount</th><th class="is-numeric">Outstanding</th><th>Narration</th></tr>
                 </thead>
                 <tbody>
                     <?php if ($pagedRows === []): ?><tr><td colspan="7">No purchase bills recorded yet. Use Record Purchase to add one.</td></tr><?php endif; ?>
@@ -935,17 +973,19 @@ $showingTo = min($totalRows, $page * $perPage);
                             <td><?= e($bill['party_name'] ?: 'Direct entry') ?></td>
                             <td><?= e(date('d M Y', strtotime((string) ($bill['voucher_date'] ?: $bill['created_at'])))) ?></td>
                             <td><?= e($bill['reference_no'] ?? '-') ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $bill['total_amount'], 2)) ?></td>
-                            <td class="<?= ($billOutstanding[(int) $bill['id']] ?? 0) > 0 ? 'text-danger' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format((float) ($billOutstanding[(int) $bill['id']] ?? 0), 2)) ?></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $bill['total_amount'], 2)) ?></td>
+                            <td class="is-numeric <?= ($billOutstanding[(int) $bill['id']] ?? 0) > 0 ? 'text-danger' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format((float) ($billOutstanding[(int) $bill['id']] ?? 0), 2)) ?></td>
                             <td><?= e($bill['narration'] ?? '') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         <?php elseif ($tab === 'collections'): ?>
+            <div style="overflow-x:auto">
             <table class="reference-table">
                 <thead>
-                    <tr><th>Received On</th><th>Invoice</th><th>Party</th><th>Method</th><th>Amount</th><th>Status</th><th>Notes</th></tr>
+                    <tr><th>Received On</th><th>Invoice</th><th>Party</th><th>Method</th><th class="is-numeric">Amount</th><th>Status</th><th>Notes</th></tr>
                 </thead>
                 <tbody>
                     <?php if ($pagedRows === []): ?><tr><td colspan="7">No payments received in this period.</td></tr><?php endif; ?>
@@ -955,17 +995,19 @@ $showingTo = min($totalRows, $page * $perPage);
                             <td><span class="reference-link"><?= e($collection['invoice_no']) ?></span></td>
                             <td><?= e($collection['party_name']) ?></td>
                             <td><?= e($collection['payment_method'] ?? '-') ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $collection['payment_amount'], 2)) ?></td>
-                            <td><span class="reference-pill status-<?= e((string) $collection['status'] === 'paid' ? 'paid' : 'open') ?>"><?= e(ucfirst((string) $collection['status'])) ?></span></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $collection['payment_amount'], 2)) ?></td>
+                            <td><span class="mbw-pill tone-<?= e((string) $collection['status'] === 'paid' ? 'green' : 'amber') ?>"><?= e((string) $collection['status'] === 'partial' ? 'Partially Paid' : ucfirst((string) $collection['status'])) ?></span></td>
                             <td><?= e($collection['notes'] ?? '') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         <?php elseif ($tab === 'payments'): ?>
+            <div style="overflow-x:auto">
             <table class="reference-table">
                 <thead>
-                    <tr><th>Paid On</th><th>Voucher No.</th><th>Supplier</th><th>Reference</th><th>Amount</th><th>Narration</th></tr>
+                    <tr><th>Paid On</th><th>Voucher No.</th><th>Supplier</th><th>Reference</th><th class="is-numeric">Amount</th><th>Narration</th></tr>
                 </thead>
                 <tbody>
                     <?php if ($pagedRows === []): ?><tr><td colspan="6">No supplier payments in this period. Use Pay Supplier to add one.</td></tr><?php endif; ?>
@@ -975,16 +1017,18 @@ $showingTo = min($totalRows, $page * $perPage);
                             <td><span class="reference-link"><?= e($payment['voucher_no']) ?></span></td>
                             <td><?= e($payment['party_name'] ?: 'Direct entry') ?></td>
                             <td><?= e($payment['reference_no'] ?? '-') ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $payment['total_amount'], 2)) ?></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $payment['total_amount'], 2)) ?></td>
                             <td><?= e($payment['narration'] ?? '') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         <?php else: ?>
+            <div style="overflow-x:auto">
             <table class="reference-table">
                 <thead>
-                    <tr><th>Code</th><th>Name</th><th>Type</th><th>Email</th><th>Phone</th><th>Credit Limit</th><th>Status</th><th>Actions</th></tr>
+                    <tr><th>Code</th><th>Name</th><th>Type</th><th>Email</th><th>Phone</th><th class="is-numeric">Credit Limit</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
                     <?php if ($pagedRows === []): ?><tr><td colspan="8">No <?= e($tab === 'suppliers' ? 'suppliers' : 'customers') ?> yet. Use More Actions to create one.</td></tr><?php endif; ?>
@@ -992,11 +1036,11 @@ $showingTo = min($totalRows, $page * $perPage);
                         <tr>
                             <td><span class="reference-link"><?= e($party['code']) ?></span></td>
                             <td><a class="reference-link" href="<?= e(parties_page_url(['party_id' => (int) $party['id']])) ?>#party-panel"><?= e($party['name']) ?></a></td>
-                            <td><span class="reference-pill type-sales"><?= e(ucfirst((string) $party['party_type'])) ?></span></td>
+                            <td><span class="mbw-pill tone-blue"><?= e(ucfirst((string) $party['party_type'])) ?></span></td>
                             <td><?= e($party['email'] ?? '-') ?></td>
                             <td><?= e($party['phone'] ?? '-') ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $party['credit_limit'], 2)) ?></td>
-                            <td><span class="reference-pill status-<?= e((string) $party['status'] === 'active' ? 'paid' : 'overdue') ?>"><?= e(ucfirst((string) $party['status'])) ?></span></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $party['credit_limit'], 2)) ?></td>
+                            <td><span class="mbw-pill tone-<?= e((string) $party['status'] === 'active' ? 'green' : 'red') ?>"><?= e(ucfirst((string) $party['status'])) ?></span></td>
                             <td>
                                 <div class="reference-row-actions">
                                     <a href="<?= e(parties_page_url(['edit_id' => (int) $party['id']])) ?>" title="Edit"><?= icon('settings') ?></a>
@@ -1012,6 +1056,7 @@ $showingTo = min($totalRows, $page * $perPage);
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         <?php endif; ?>
         <div class="reference-pagination">
             <span>Showing <?= e((string) $showingFrom) ?> to <?= e((string) $showingTo) ?> of <?= e((string) $totalRows) ?> entries</span>
@@ -1032,7 +1077,7 @@ $showingTo = min($totalRows, $page * $perPage);
             <div class="party-panel-head">
                 <div>
                     <h3><?= e($selectedParty['name']) ?></h3>
-                    <span class="reference-pill type-sales"><?= e(ucfirst($selectedParty['party_type'])) ?></span>
+                    <span class="mbw-pill tone-blue"><?= e(ucfirst($selectedParty['party_type'])) ?></span>
                     <small>Since <?= e(date('M Y', strtotime((string) ($selectedParty['created_at'] ?? 'now')))) ?></small>
                 </div>
                 <a href="<?= e(url('admin/accounting-parties.php')) ?>" aria-label="Close">x</a>
@@ -1088,7 +1133,7 @@ $showingTo = min($totalRows, $page * $perPage);
                                 <li>
                                     <a class="reference-link" href="<?= e(url('admin/export-invoice.php?id=' . (int) $row['id'])) ?>"><?= e($row['voucher_no']) ?></a>
                                     <span><?= e($row['invoice_date']) ?> · <?= e(site_currency_symbol()) ?><?= e(number_format((float) $row['total_amount'], 2)) ?></span>
-                                    <span class="reference-pill status-<?= e(strtolower((string) $row['display_status'])) ?>"><?= e($row['display_status']) ?></span>
+                                    <span class="mbw-pill tone-<?= e($statusPillTone((string) $row['display_status'])) ?>"><?= e($row['display_status']) ?></span>
                                 </li>
                             <?php endforeach; ?>
                         </ul>
@@ -1116,8 +1161,11 @@ $showingTo = min($totalRows, $page * $perPage);
 
 <div id="aging" class="reference-aging-grid">
     <?php foreach ([['Receivables Aging', $receivableAging, $summary['receivables']], ['Payables Aging', $payableAging, $summary['payables']]] as $agingCard): ?>
-        <section class="aging-card">
-            <h3><?= e($agingCard[0]) ?> <small>(as of <?= e(date('d M Y')) ?>)</small></h3>
+        <section class="mbw-card aging-card">
+            <div class="mbw-card-head">
+                <h2><?= e($agingCard[0]) ?></h2>
+                <div class="mbw-card-tools"><span style="font-size:12px;color:var(--mbw-muted)">as of <?= e(date('d M Y')) ?></span></div>
+            </div>
             <div class="aging-body">
                 <div class="donut-chart"></div>
                 <div class="aging-legend">

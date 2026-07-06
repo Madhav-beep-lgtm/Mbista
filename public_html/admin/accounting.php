@@ -13,6 +13,7 @@ if (!empty($_GET['fiscal_year_id'])) {
 }
 
 $pageTitle = 'Vouchers';
+$pageSubtitle = 'Post balanced voucher entries, manage approvals, fiscal years, and period locks.';
 $company = current_company();
 $fiscalYear = current_fiscal_year();
 $currentAdmin = current_user();
@@ -372,35 +373,20 @@ $ledgerCreditTotal = array_sum(array_map(static fn (array $row): float => (float
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<div class="accounting-page-head">
-    <div>
-        <h2>Ledger and voucher postings</h2>
-        <p>Company: <?= e($company['name'] ?? 'N/A') ?> | Fiscal year: <?= e($fiscalYear['label'] ?? 'N/A') ?></p>
-    </div>
-    <!-- I'm adding a link to the new Chart of Accounts page here for easy access. -->
-    <div class="accounting-actions">
-        <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?>Chart of accounts</a>
-        <a class="button secondary" href="<?= e(url('admin/accounting-parties.php')) ?>"><?= icon('users') ?>Parties</a>
-        <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?>Inventory</a>
-        <a class="button secondary" href="<?= e(url('admin/accounting-dashboard.php')) ?>">📊 Dashboard</a>
-        <a class="button secondary" href="<?= e(url('admin/reports-center.php')) ?>">Reports Center</a>
-        <?php if ($company && $fiscalYear): ?>
-            <a class="button secondary" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank">📄 Export PDF</a>
-            <a class="button secondary" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>">📊 Export Excel</a>
-        <?php endif; ?>
-    </div>
-</div>
+<p style="color:var(--mbw-muted); margin:0 0 1rem;">Company: <?= e($company['name'] ?? 'N/A') ?> &middot; Fiscal year: <?= e($fiscalYear['label'] ?? 'N/A') ?></p>
 
-<section class="coa-module-grid" aria-label="Accounting workspace shortcuts">
-    <a class="coa-module-card" href="<?= e(url('admin/accounting.php')) ?>"><span><?= icon('documents') ?></span><strong>Vouchers</strong><small>Post and approve entries</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/accounting-parties.php')) ?>"><span><?= icon('users') ?></span><strong>Parties</strong><small>Customers and suppliers</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><span><?= icon('accounting') ?></span><strong>Chart</strong><small>Masters and ledgers</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/chart-groups.php')) ?>"><span><?= icon('teams') ?></span><strong>Groups</strong><small>Classification</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/chart-ledgers.php')) ?>"><span><?= icon('documents') ?></span><strong>Ledgers</strong><small>Accounts</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><span><?= icon('settings') ?></span><strong>Posting</strong><small>Mapped accounts</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/audit-trail.php')) ?>"><span><?= icon('reports') ?></span><strong>Audit</strong><small>History and approvals</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/reports-center.php')) ?>"><span><?= icon('reports') ?></span><strong>Reports</strong><small>All accounting reports</small></a>
-</section>
+<div class="mbw-qa-grid" aria-label="Accounting workspace shortcuts">
+    <a class="mbw-qa" href="<?= e(url('admin/accounting.php')) ?>"><span class="mbw-chip is-square tone-blue"><?= icon('journal') ?></span><div><strong>Vouchers</strong><span>Post and approve entries</span></div></a>
+    <a class="mbw-qa" href="<?= e(url('admin/accounting-parties.php')) ?>"><span class="mbw-chip is-square tone-teal"><?= icon('users') ?></span><div><strong>Parties</strong><span>Customers and suppliers</span></div></a>
+    <a class="mbw-qa" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><span class="mbw-chip is-square tone-green"><?= icon('accounting') ?></span><div><strong>Chart</strong><span>Masters and ledgers</span></div></a>
+    <a class="mbw-qa" href="<?= e(url('admin/chart-groups.php')) ?>"><span class="mbw-chip is-square tone-purple"><?= icon('layers') ?></span><div><strong>Groups</strong><span>Classification</span></div></a>
+    <a class="mbw-qa" href="<?= e(url('admin/chart-ledgers.php')) ?>"><span class="mbw-chip is-square tone-amber"><?= icon('documents') ?></span><div><strong>Ledgers</strong><span>Accounts</span></div></a>
+    <a class="mbw-qa" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><span class="mbw-chip is-square tone-gray"><?= icon('settings') ?></span><div><strong>Posting</strong><span>Mapped accounts</span></div></a>
+    <a class="mbw-qa" href="<?= e(url('admin/audit-trail.php')) ?>"><span class="mbw-chip is-square tone-red"><?= icon('compliance') ?></span><div><strong>Audit</strong><span>History and approvals</span></div></a>
+    <a class="mbw-qa" href="<?= e(url('admin/reports-center.php')) ?>"><span class="mbw-chip is-square tone-blue"><?= icon('reports') ?></span><div><strong>Reports</strong><span>All accounting reports</span></div></a>
+    <a class="mbw-qa" href="<?= e(url('admin/accounting-inventory.php')) ?>"><span class="mbw-chip is-square tone-teal"><?= icon('cart') ?></span><div><strong>Inventory</strong><span>Items and stock</span></div></a>
+    <a class="mbw-qa" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><span class="mbw-chip is-square tone-purple"><?= icon('dashboard') ?></span><div><strong>Dashboard</strong><span>Accounting overview</span></div></a>
+</div>
 
 <nav class="accounting-tabs" aria-label="Accounting sections">
     <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Dashboard</a>
@@ -451,12 +437,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endforeach; ?>
 </section>
 
-<div class="accounting-stat-grid">
-    <div class="accounting-stat-card accent-blue"><span class="stat-icon"><?= icon('documents') ?></span><small>Posted vouchers</small><strong><?= e((string) count($vouchers)) ?></strong><em><?= e(site_currency_symbol()) ?><?= e(number_format($voucherTotal, 2)) ?> total</em></div>
-    <div class="accounting-stat-card accent-green"><span class="stat-icon"><?= icon('accounting') ?></span><small>Total debits</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format($ledgerDebitTotal, 2)) ?></strong><em>Selected fiscal year</em></div>
-    <div class="accounting-stat-card accent-red"><span class="stat-icon"><?= icon('tasks') ?></span><small>Total credits</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format($ledgerCreditTotal, 2)) ?></strong><em>Selected fiscal year</em></div>
-    <div class="accounting-stat-card accent-purple"><span class="stat-icon"><?= icon('users') ?></span><small>Active parties</small><strong><?= e((string) count($parties)) ?></strong><em>Available for voucher posting</em></div>
-</div>
+<section class="mbw-kpi-grid">
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Posted vouchers</span><div class="mbw-kpi-value"><?= e((string) count($vouchers)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e(site_currency_symbol()) ?><?= e(number_format($voucherTotal, 2)) ?> total</span></span></div><span class="mbw-chip tone-blue"><?= icon('journal') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Total debits</span><div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($ledgerDebitTotal, 2)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Selected fiscal year</span></span></div><span class="mbw-chip tone-green"><?= icon('trend-up') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Total credits</span><div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($ledgerCreditTotal, 2)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Selected fiscal year</span></span></div><span class="mbw-chip tone-red"><?= icon('trend-down') ?></span></article>
+    <a class="mbw-kpi" href="<?= e(url('admin/accounting-parties.php')) ?>"><div><span class="mbw-kpi-label">Active parties</span><div class="mbw-kpi-value"><?= e((string) count($parties)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Available for voucher posting</span></span></div><span class="mbw-chip tone-purple"><?= icon('users') ?></span></a>
+</section>
 
 <?php if ($lockedThrough !== null): ?>
     <div class="alert alert-info">Accounting entries dated on or before <?= e($lockedThrough) ?> are locked for this fiscal year.</div>
@@ -467,27 +453,28 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 $fiscalYears = table_exists('fiscal_years') ? fiscal_years_for_company((int) $company['id']) : [];
 if ($fiscalYears):
 ?>
-<div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem;">
-    <form method="GET" style="display: flex; gap: 1rem; align-items: center;">
-        <label for="fiscal_year" style="margin: 0; font-weight: 600;">Select Fiscal Year:</label>
-        <select name="fiscal_year_id" id="fiscal_year" onchange="document.location='<?= url("admin/accounting.php?fiscal_year_id=") ?>' + this.value;" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Fiscal Year</h2></div>
+    <form method="GET" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+        <label for="fiscal_year" style="margin: 0; font-weight: 600; color: var(--mbw-heading);">Select Fiscal Year:</label>
+        <select name="fiscal_year_id" id="fiscal_year" onchange="document.location='<?= url("admin/accounting.php?fiscal_year_id=") ?>' + this.value;">
             <?php foreach ($fiscalYears as $fy): ?>
                 <option value="<?= (int) $fy['id'] ?>" <?= ((int) ($fiscalYear['id'] ?? 0) === (int) $fy['id']) ? 'selected' : '' ?>>
                     <?= e($fy['label']) ?> (<?= e($fy['start_date']) ?> - <?= e($fy['end_date']) ?>)
                 </option>
             <?php endforeach; ?>
         </select>
-        <span style="color: #666; font-size: 0.875rem;">
-            <?php if ((int) ($fiscalYear['is_active'] ?? 0) === 1): ?>
-                <span style="color: #27ae60;">✓ Active</span>
-            <?php else: ?>
-                <span style="color: #e74c3c;">Closed</span>
-            <?php endif; ?>
-        </span>
+        <?php if ((int) ($fiscalYear['is_active'] ?? 0) === 1): ?>
+            <span class="mbw-pill tone-green">Active</span>
+        <?php else: ?>
+            <span class="mbw-pill tone-red">Closed</span>
+        <?php endif; ?>
     </form>
-</div>
+</section>
 <?php endif; ?>
 
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Posting &amp; Setup</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a></div></div>
 <div class="workspace-feature-stack">
     <details class="feature-disclosure">
         <summary>
@@ -508,10 +495,7 @@ if ($fiscalYears):
         </form>
     </details>
 
-    <div class="table-card">
-        <h3><?= icon('accounting') ?>Add ledger account</h3>
-        <p>Ledger accounts are now created inside a group under a fixed master. Use the <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a> page to create groups and ledgers.</p>
-    </div>
+    <p style="color:var(--mbw-muted); margin:0;"><?= icon('accounting') ?> Ledger accounts are now created inside a group under a fixed master. Use the <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a> page to create groups and ledgers.</p>
 
     <details class="feature-disclosure" id="post-voucher">
         <summary>
@@ -653,19 +637,21 @@ if ($fiscalYears):
         </details>
     <?php endif; ?>
 </div>
+</section>
 
 <?php if ($shareholdings !== []): ?>
-<div class="table-card">
-    <h2>Shareholding and consolidation rules</h2>
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Shareholding and consolidation rules</h2></div>
+    <div style="overflow-x:auto">
     <table>
         <thead>
-            <tr><th>Investee</th><th>Ownership</th><th>Relationship</th><th>Method</th><th>Effective From</th></tr>
+            <tr><th>Investee</th><th class="is-numeric">Ownership</th><th>Relationship</th><th>Method</th><th>Effective From</th></tr>
         </thead>
         <tbody>
             <?php foreach ($shareholdings as $shareholding): ?>
                 <tr>
                     <td><?= e($shareholding['investee_name'] . ' / ' . $shareholding['investee_code']) ?></td>
-                    <td><?= e(number_format((float) $shareholding['ownership_percent'], 2)) ?>%</td>
+                    <td class="is-numeric"><?= e(number_format((float) $shareholding['ownership_percent'], 2)) ?>%</td>
                     <td><?= e(str_replace('_', ' ', $shareholding['relationship_type'])) ?></td>
                     <td><?= e(str_replace('_', ' ', $shareholding['consolidation_method'])) ?></td>
                     <td><?= e($shareholding['effective_from'] ?? '') ?></td>
@@ -673,14 +659,16 @@ if ($fiscalYears):
             <?php endforeach; ?>
         </tbody>
     </table>
-</div>
+    </div>
+</section>
 <?php endif; ?>
 
-<div class="table-card">
-    <h2>Ledger balances</h2>
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Ledger balances</h2><div class="mbw-card-tools"><?php if ($company && $fiscalYear): ?><a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank">Export PDF</a> <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>">Export Excel</a><?php endif; ?></div></div>
+    <div style="overflow-x:auto">
     <table>
         <thead>
-            <tr><th>Code</th><th>Name</th><th>Type</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th></tr>
+            <tr><th>Code</th><th>Name</th><th>Type</th><th class="is-numeric">Total Debit</th><th class="is-numeric">Total Credit</th><th class="is-numeric">Balance</th></tr>
         </thead>
         <tbody>
             <?php if ($balances === []): ?>
@@ -692,20 +680,22 @@ if ($fiscalYears):
                     <td><?= e($row['code']) ?></td>
                     <td><?= e($row['name']) ?></td>
                     <td><?= e($row['type']) ?></td>
-                    <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $row['debit_total'], 2)) ?></td>
-                    <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $row['credit_total'], 2)) ?></td>
-                    <td><?= e(site_currency_symbol()) ?><?= e(number_format($balance, 2)) ?></td>
+                    <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $row['debit_total'], 2)) ?></td>
+                    <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $row['credit_total'], 2)) ?></td>
+                    <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format($balance, 2)) ?></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
-</div>
+    </div>
+</section>
 
-<div class="table-card">
-    <h2>Posted vouchers</h2>
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Posted vouchers</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="#post-voucher">Post Voucher</a></div></div>
+    <div style="overflow-x:auto">
     <table>
         <thead>
-            <tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Reference</th><th>Total</th><th>Status</th><th>Posted At</th><?php if ($hasVoucherApprovals): ?><th>Approval</th><?php endif; ?></tr>
+            <tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Reference</th><th class="is-numeric">Total</th><th>Status</th><th>Posted At</th><?php if ($hasVoucherApprovals): ?><th>Approval</th><?php endif; ?></tr>
         </thead>
         <tbody>
             <?php if ($vouchers === []): ?>
@@ -718,12 +708,19 @@ if ($fiscalYears):
                     <td><?= e($voucher['voucher_type']) ?></td>
                     <td><?= e($voucher['party_name'] ?? '') ?></td>
                     <td><?= e($voucher['reference_no'] ?? '') ?></td>
-                    <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $voucher['total_amount'], 2)) ?></td>
-                    <td><?= e($voucher['status']) ?></td>
+                    <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $voucher['total_amount'], 2)) ?></td>
+                    <td><?php
+                        $voucherStatus = (string) $voucher['status'];
+                        $statusTone = ['posted' => 'green', 'draft' => 'blue', 'cancelled' => 'red'][$voucherStatus] ?? 'gray';
+                    ?><span class="mbw-pill tone-<?= e($statusTone) ?>"><?= e($voucherStatus) ?></span></td>
                     <td><?= e($voucher['posted_at']) ?></td>
                     <?php if ($hasVoucherApprovals): ?>
                         <td>
-                            <span class="tag"><?= e(str_replace('_', ' ', (string) ($voucher['approval_state'] ?? 'approved'))) ?></span>
+                            <?php
+                                $approvalState = (string) ($voucher['approval_state'] ?? 'approved');
+                                $approvalTone = ['approved' => 'green', 'pending_approval' => 'amber', 'rejected' => 'red'][$approvalState] ?? 'gray';
+                            ?>
+                            <span class="mbw-pill tone-<?= e($approvalTone) ?>"><?= e(str_replace('_', ' ', $approvalState)) ?></span>
                             <?php if (($voucher['approval_state'] ?? '') === 'pending_approval' && user_can('approve')): ?>
                                 <form method="post" class="inline-action-form">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -747,13 +744,15 @@ if ($fiscalYears):
             <?php endforeach; ?>
         </tbody>
     </table>
-</div>
+    </div>
+</section>
 
-<div class="table-card" id="daybook">
-    <h2>Daybook</h2>
+<section class="mbw-card" id="daybook">
+    <div class="mbw-card-head"><h2>Daybook</h2></div>
+    <div style="overflow-x:auto">
     <table>
         <thead>
-            <tr><th>Date</th><th>Voucher</th><th>Type</th><th>Party</th><th>Ledger</th><th>Debit</th><th>Credit</th><th>Memo</th></tr>
+            <tr><th>Date</th><th>Voucher</th><th>Type</th><th>Party</th><th>Ledger</th><th class="is-numeric">Debit</th><th class="is-numeric">Credit</th><th>Memo</th></tr>
         </thead>
         <tbody>
             <?php if ($daybookEntries === []): ?>
@@ -766,12 +765,13 @@ if ($fiscalYears):
                     <td><?= e($entry['voucher_type']) ?></td>
                     <td><?= e($entry['party_name'] ?? '') ?></td>
                     <td><?= e($entry['ledger_code'] . ' - ' . $entry['ledger_name']) ?></td>
-                    <td><?= $entry['entry_type'] === 'debit' ? e(site_currency_symbol()) . e(number_format((float) $entry['amount'], 2)) : '' ?></td>
-                    <td><?= $entry['entry_type'] === 'credit' ? e(site_currency_symbol()) . e(number_format((float) $entry['amount'], 2)) : '' ?></td>
+                    <td class="is-numeric"><?= $entry['entry_type'] === 'debit' ? e(site_currency_symbol()) . e(number_format((float) $entry['amount'], 2)) : '' ?></td>
+                    <td class="is-numeric"><?= $entry['entry_type'] === 'credit' ? e(site_currency_symbol()) . e(number_format((float) $entry['amount'], 2)) : '' ?></td>
                     <td><?= e($entry['memo'] ?: $entry['narration']) ?></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
-</div>
+    </div>
+</section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

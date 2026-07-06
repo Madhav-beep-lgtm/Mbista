@@ -308,6 +308,9 @@ $inventoryTypeCards = $inventoryProfile['show_manufacturing']
         ['Consumable', 'Low-value operational items tracked for stock control.'],
 ];
 $pageTitle = $inventoryProfile['show_manufacturing'] ? 'Inventory & Manufacturing' : 'Inventory';
+$pageSubtitle = $inventoryProfile['show_manufacturing']
+    ? 'Item master, stock movements, valuation, and production orders'
+    : 'Item master, stock movements, and valuation';
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
@@ -332,29 +335,65 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Reports</a>
 </nav>
 
-<section class="inventory-process-grid" aria-label="Inventory process click flow">
-    <?php foreach ($inventoryProcessSteps as $index => $process): ?>
-        <article><b><?= e((string) ($index + 1)) ?></b><span><?= icon($index === 0 ? 'services' : ($index === count($inventoryProcessSteps) - 1 ? 'reports' : 'documents')) ?></span><strong><?= e($process[0]) ?></strong><small><?= e($process[1]) ?></small></article>
-    <?php endforeach; ?>
-</section>
-
-<section class="inventory-type-grid" aria-label="Inventory item types">
-    <?php foreach ($inventoryTypeCards as [$typeLabel, $typeDescription]): ?>
-        <article><strong><?= e($typeLabel) ?></strong><span><?= e($typeDescription) ?></span></article>
-    <?php endforeach; ?>
-</section>
-
-<div class="accounting-stat-grid">
-    <div class="accounting-stat-card accent-blue"><span class="stat-icon"><?= icon('services') ?></span><small>Items</small><strong><?= e((string) count($items)) ?></strong><em><?= e(implode(', ', array_map(static fn (array $card): string => $card[0], $inventoryTypeCards))) ?></em></div>
-    <div class="accounting-stat-card accent-green"><span class="stat-icon"><?= icon('accounting') ?></span><small>Estimated stock value</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format($stockValue, 2)) ?></strong><em>Based on purchase rates</em></div>
-    <div class="accounting-stat-card accent-orange"><span class="stat-icon"><?= icon('tasks') ?></span><small>Low stock</small><strong><?= e((string) $lowStockCount) ?></strong><em>At or below reorder level</em></div>
+<section class="mbw-kpi-grid" aria-label="Inventory overview">
+    <article class="mbw-kpi">
+        <div>
+            <span class="mbw-kpi-label">Items</span>
+            <div class="mbw-kpi-value"><?= e((string) count($items)) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e(implode(', ', array_map(static fn (array $card): string => $card[0], $inventoryTypeCards))) ?></span></span>
+        </div>
+        <span class="mbw-chip tone-blue"><?= icon('cart') ?></span>
+    </article>
+    <article class="mbw-kpi">
+        <div>
+            <span class="mbw-kpi-label">Estimated Stock Value</span>
+            <div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($stockValue, 2)) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Based on purchase rates</span></span>
+        </div>
+        <span class="mbw-chip tone-green"><?= icon('wallet') ?></span>
+    </article>
+    <article class="mbw-kpi">
+        <div>
+            <span class="mbw-kpi-label">Low Stock</span>
+            <div class="mbw-kpi-value"><?= e((string) $lowStockCount) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">At or below reorder level</span></span>
+        </div>
+        <span class="mbw-chip tone-amber"><?= icon('tag') ?></span>
+    </article>
     <?php if ($inventoryProfile['show_manufacturing']): ?>
-        <div class="accounting-stat-card accent-purple"><span class="stat-icon"><?= icon('settings') ?></span><small>Manufacturing orders</small><strong><?= e((string) count($manufacturingOrders)) ?></strong><em>Recent production records</em></div>
+        <article class="mbw-kpi">
+            <div>
+                <span class="mbw-kpi-label">Manufacturing Orders</span>
+                <div class="mbw-kpi-value"><?= e((string) count($manufacturingOrders)) ?></div>
+                <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Recent production records</span></span>
+            </div>
+            <span class="mbw-chip tone-purple"><?= icon('layers') ?></span>
+        </article>
     <?php endif; ?>
-</div>
+</section>
+
+<section class="mbw-card" aria-label="Inventory process click flow">
+    <div class="mbw-card-head"><h2>Inventory Process Flow</h2></div>
+    <div class="inventory-process-grid">
+        <?php foreach ($inventoryProcessSteps as $index => $process): ?>
+            <article><b><?= e((string) ($index + 1)) ?></b><span><?= icon($index === 0 ? 'services' : ($index === count($inventoryProcessSteps) - 1 ? 'reports' : 'documents')) ?></span><strong><?= e($process[0]) ?></strong><small><?= e($process[1]) ?></small></article>
+        <?php endforeach; ?>
+    </div>
+</section>
+
+<section class="mbw-card" aria-label="Inventory item types">
+    <div class="mbw-card-head"><h2>Item Types</h2></div>
+    <div class="inventory-type-grid">
+        <?php foreach ($inventoryTypeCards as [$typeLabel, $typeDescription]): ?>
+            <article><strong><?= e($typeLabel) ?></strong><span><?= e($typeDescription) ?></span></article>
+        <?php endforeach; ?>
+    </div>
+</section>
 
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
+<section class="mbw-card" aria-label="Inventory workbench">
+    <div class="mbw-card-head"><h2>Create &amp; Record</h2></div>
 <div class="workspace-feature-stack">
     <details class="feature-disclosure" id="create-item" open>
         <summary><span><strong><?= icon('services') ?><?= $editItem ? 'Edit item' : 'Create item' ?></strong><small>Maintain inventory, service, raw material, and finished-goods master data.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
@@ -418,6 +457,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </details>
     <?php endif; ?>
 </div>
+</section>
 
 <?php if ($inventoryProfile['show_manufacturing']): ?>
     <section class="mbw-flow-panel manufacturing-flow" aria-label="Manufacturing production workflow">
@@ -427,48 +467,54 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 <?php endif; ?>
 
-<div class="table-card">
-    <h2>Item stock summary</h2>
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Item Stock Summary</h2></div>
+    <div style="overflow-x:auto">
     <table>
-        <thead><tr><th>SKU</th><th>Name</th><th>Type</th><th>Unit</th><th>HS</th><th>On hand</th><th>Sales rate</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>SKU</th><th>Name</th><th>Type</th><th>Unit</th><th>HS</th><th class="is-numeric">On hand</th><th class="is-numeric">Sales rate</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
             <?php if ($items === []): ?><tr><td colspan="9">No items yet.</td></tr><?php endif; ?>
             <?php foreach ($items as $item): ?>
                 <tr>
                     <td><?= e($item['sku']) ?></td><td><?= e($item['name']) ?></td><td><?= e(str_replace('_', ' ', $item['item_type'])) ?></td><td><?= e($item['unit']) ?></td><td><?= e($item['hs_code'] ?? '-') ?></td>
-                    <td><?= e(number_format((float) $item['on_hand'], 3)) ?></td><td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $item['sales_rate'], 2)) ?></td><td><span class="tag"><?= e($item['status']) ?></span></td>
+                    <td class="is-numeric"><?= e(number_format((float) $item['on_hand'], 3)) ?></td><td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $item['sales_rate'], 2)) ?></td><td><span class="mbw-pill <?= $item['status'] === 'active' ? 'tone-green' : 'tone-red' ?>"><?= e(ucfirst($item['status'])) ?></span></td>
                     <td><a class="button secondary" href="<?= e(url('admin/accounting-inventory.php?edit_id=' . (int) $item['id'])) ?>">Edit</a></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
-</div>
+    </div>
+</section>
 
-<div class="table-card">
-    <h2>Recent stock movements</h2>
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Recent Stock Movements</h2></div>
+    <div style="overflow-x:auto">
     <table>
-        <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>In</th><th>Out</th><th>Rate</th><th>Amount</th><th>Ref</th></tr></thead>
+        <thead><tr><th>Date</th><th>Item</th><th>Type</th><th class="is-numeric">In</th><th class="is-numeric">Out</th><th class="is-numeric">Rate</th><th class="is-numeric">Amount</th><th>Ref</th></tr></thead>
         <tbody>
             <?php if ($movements === []): ?><tr><td colspan="8">No stock movements yet.</td></tr><?php endif; ?>
             <?php foreach ($movements as $movement): ?>
-                <tr><td><?= e($movement['transaction_date']) ?></td><td><?= e($movement['sku'] . ' - ' . $movement['item_name']) ?></td><td><?= e($movement['transaction_type']) ?></td><td><?= e(number_format((float) $movement['qty_in'], 3)) ?></td><td><?= e(number_format((float) $movement['qty_out'], 3)) ?></td><td><?= e(number_format((float) $movement['rate'], 2)) ?></td><td><?= e(number_format((float) $movement['amount'], 2)) ?></td><td><?= e($movement['ref_no'] ?? '-') ?></td></tr>
+                <tr><td><?= e($movement['transaction_date']) ?></td><td><?= e($movement['sku'] . ' - ' . $movement['item_name']) ?></td><td><span class="mbw-pill <?= inventory_direction($movement['transaction_type']) === 'in' ? 'tone-blue' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', ucfirst($movement['transaction_type']))) ?></span></td><td class="is-numeric"><?= e(number_format((float) $movement['qty_in'], 3)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['qty_out'], 3)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['rate'], 2)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['amount'], 2)) ?></td><td><?= e($movement['ref_no'] ?? '-') ?></td></tr>
             <?php endforeach; ?>
         </tbody>
     </table>
-</div>
+    </div>
+</section>
 
 <?php if ($inventoryProfile['show_manufacturing']): ?>
-    <div class="table-card">
-        <h2>Manufacturing orders</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Manufacturing Orders</h2></div>
+        <div style="overflow-x:auto">
         <table>
-            <thead><tr><th>Order</th><th>Finished item</th><th>Quantity</th><th>Status</th><th>Completed</th></tr></thead>
+            <thead><tr><th>Order</th><th>Finished item</th><th class="is-numeric">Quantity</th><th>Status</th><th>Completed</th></tr></thead>
             <tbody>
                 <?php if ($manufacturingOrders === []): ?><tr><td colspan="5">No manufacturing orders yet.</td></tr><?php endif; ?>
                 <?php foreach ($manufacturingOrders as $order): ?>
-                    <tr><td><?= e($order['order_no']) ?></td><td><?= e($order['sku'] . ' - ' . $order['finished_item_name']) ?></td><td><?= e(number_format((float) $order['quantity'], 3)) ?></td><td><span class="tag"><?= e($order['status']) ?></span></td><td><?= e($order['completed_on'] ?? '-') ?></td></tr>
+                    <tr><td><?= e($order['order_no']) ?></td><td><?= e($order['sku'] . ' - ' . $order['finished_item_name']) ?></td><td class="is-numeric"><?= e(number_format((float) $order['quantity'], 3)) ?></td><td><span class="mbw-pill <?= $order['status'] === 'completed' ? 'tone-green' : 'tone-amber' ?>"><?= e(ucfirst($order['status'])) ?></span></td><td><?= e($order['completed_on'] ?? '-') ?></td></tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
-    </div>
+        </div>
+    </section>
 <?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

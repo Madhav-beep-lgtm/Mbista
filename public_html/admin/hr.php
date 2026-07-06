@@ -504,6 +504,21 @@ $pageTitle = match ($view) {
     'timesheets' => 'Timesheets',
     default => 'Attendance',
 };
+$pageSubtitle = match ($view) {
+    'leave' => 'Manage leave types, balances, and approval of leave requests',
+    'timesheets' => 'Record time worked, submit drafts, and review staff utilization',
+    default => 'Daily check-in/out, attendance records, and correction requests',
+};
+
+$hrPillTone = static function (string $status): string {
+    return match (strtolower($status)) {
+        'approved', 'active', 'paid', 'completed' => 'tone-green',
+        'pending', 'submitted', 'partial' => 'tone-amber',
+        'rejected', 'inactive', 'cancelled', 'overdue' => 'tone-red',
+        'draft' => 'tone-blue',
+        default => 'tone-gray',
+    };
+};
 
 include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_header' : 'staff_header') . '.php';
 ?>
@@ -524,8 +539,8 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 }
             }
         ?>
-        <div class="table-card">
-            <h2><?= icon('attendance') ?>Today</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Today</h2></div>
             <div class="actions">
                 <?php if (!$todayRow || !$todayRow['check_in_time']): ?>
                     <form method="post" style="display:inline;">
@@ -544,13 +559,14 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <p>Checked in <?= e($todayRow['check_in_time']) ?>, checked out <?= e($todayRow['check_out_time']) ?> (<?= e((string) attendance_hours_worked($todayRow['check_in_time'], $todayRow['check_out_time'])) ?> hrs)</p>
                 <?php endif; ?>
             </div>
-        </div>
+        </section>
 
-        <div class="table-card">
-            <h3>My recent attendance</h3>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>My Recent Attendance</h2></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
-                    <tr><th>Date</th><th>Check in</th><th>Check out</th><th>Hours</th><th>Flags</th></tr>
+                    <tr><th>Date</th><th>Check in</th><th>Check out</th><th class="is-numeric">Hours</th><th>Flags</th></tr>
                 </thead>
                 <tbody>
                     <?php if ($myAttendance === []): ?>
@@ -561,16 +577,17 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td><?= e($row['attendance_date']) ?></td>
                             <td><?= e($row['check_in_time'] ?? '-') ?></td>
                             <td><?= e($row['check_out_time'] ?? '-') ?></td>
-                            <td><?= e((string) attendance_hours_worked($row['check_in_time'], $row['check_out_time'])) ?></td>
+                            <td class="is-numeric"><?= e((string) attendance_hours_worked($row['check_in_time'], $row['check_out_time'])) ?></td>
                             <td>
-                                <?php if (attendance_is_late($row['check_in_time'])): ?><span class="tag">Late</span><?php endif; ?>
-                                <?php if (attendance_is_early_departure($row['check_out_time'])): ?><span class="tag">Early departure</span><?php endif; ?>
+                                <?php if (attendance_is_late($row['check_in_time'])): ?><span class="mbw-pill tone-amber">Late</span><?php endif; ?>
+                                <?php if (attendance_is_early_departure($row['check_out_time'])): ?><span class="mbw-pill tone-red">Early departure</span><?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
 
         <details class="feature-disclosure">
             <summary>
@@ -588,8 +605,9 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </form>
         </details>
 
-        <div class="table-card">
-            <h3>My correction requests</h3>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>My Correction Requests</h2></div>
+            <div style="overflow-x:auto">
             <table>
                 <thead><tr><th>Date</th><th>Requested</th><th>Reason</th><th>Status</th><th>Remarks</th></tr></thead>
                 <tbody>
@@ -601,16 +619,17 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td><?= e($row['attendance_date']) ?></td>
                             <td><?= e($row['requested_check_in'] ?? '-') ?> / <?= e($row['requested_check_out'] ?? '-') ?></td>
                             <td><?= e($row['reason']) ?></td>
-                            <td><span class="tag"><?= e($row['status']) ?></span></td>
+                            <td><span class="mbw-pill <?= e($hrPillTone((string) $row['status'])) ?>"><?= e($row['status']) ?></span></td>
                             <td><?= e($row['reviewer_remarks'] ?? '-') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
     <?php else: ?>
-        <div class="table-card">
-            <h2><?= icon('attendance') ?>Company attendance</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Company Attendance</h2></div>
             <details class="feature-disclosure">
                 <summary>
                     <span><strong><?= icon('attendance') ?>Manual entry</strong><small>Record attendance for a staff member.</small></span>
@@ -635,11 +654,13 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <div class="workspace-span-2"><button type="submit"><?= icon('attendance') ?>Save</button></div>
                 </form>
             </details>
+        </section>
 
-            <div class="table-card">
-                <h3>Recent records</h3>
+            <section class="mbw-card">
+                <div class="mbw-card-head"><h2>Recent Records</h2></div>
+                <div style="overflow-x:auto">
                 <table>
-                    <thead><tr><th>Staff</th><th>Date</th><th>Check in</th><th>Check out</th><th>Hours</th><th>Flags</th></tr></thead>
+                    <thead><tr><th>Staff</th><th>Date</th><th>Check in</th><th>Check out</th><th class="is-numeric">Hours</th><th>Flags</th></tr></thead>
                     <tbody>
                         <?php if ($companyAttendance === []): ?>
                             <tr><td colspan="6">No attendance recorded yet.</td></tr>
@@ -650,19 +671,21 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                                 <td><?= e($row['attendance_date']) ?></td>
                                 <td><?= e($row['check_in_time'] ?? '-') ?></td>
                                 <td><?= e($row['check_out_time'] ?? '-') ?></td>
-                                <td><?= e((string) attendance_hours_worked($row['check_in_time'], $row['check_out_time'])) ?></td>
+                                <td class="is-numeric"><?= e((string) attendance_hours_worked($row['check_in_time'], $row['check_out_time'])) ?></td>
                                 <td>
-                                    <?php if (attendance_is_late($row['check_in_time'])): ?><span class="tag">Late</span><?php endif; ?>
-                                    <?php if (attendance_is_early_departure($row['check_out_time'])): ?><span class="tag">Early</span><?php endif; ?>
+                                    <?php if (attendance_is_late($row['check_in_time'])): ?><span class="mbw-pill tone-amber">Late</span><?php endif; ?>
+                                    <?php if (attendance_is_early_departure($row['check_out_time'])): ?><span class="mbw-pill tone-red">Early</span><?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
-            </div>
+                </div>
+            </section>
 
-            <div class="table-card">
-                <h3>Correction requests</h3>
+            <section class="mbw-card">
+                <div class="mbw-card-head"><h2>Correction Requests</h2></div>
+                <div style="overflow-x:auto">
                 <table>
                     <thead><tr><th>Staff</th><th>Date</th><th>Requested</th><th>Reason</th><th>Status</th><th>Review</th></tr></thead>
                     <tbody>
@@ -675,7 +698,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                                 <td><?= e($row['attendance_date']) ?></td>
                                 <td><?= e($row['requested_check_in'] ?? '-') ?> / <?= e($row['requested_check_out'] ?? '-') ?></td>
                                 <td><?= e($row['reason']) ?></td>
-                                <td><span class="tag"><?= e($row['status']) ?></span></td>
+                                <td><span class="mbw-pill <?= e($hrPillTone((string) $row['status'])) ?>"><?= e($row['status']) ?></span></td>
                                 <td>
                                     <?php if ($row['status'] === 'pending'): ?>
                                         <form method="post" class="inline-action-form">
@@ -701,15 +724,15 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                         <?php endforeach; ?>
                     </tbody>
                 </table>
-            </div>
-        </div>
+                </div>
+            </section>
     <?php endif; ?>
 <?php endif; ?>
 
 <?php if ($view === 'leave'): ?>
     <?php if ($role === 'admin'): ?>
-        <div class="table-card">
-            <h2><?= icon('leave') ?>Leave types</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Leave Types</h2></div>
             <details class="feature-disclosure">
                 <summary>
                     <span><strong><?= icon('leave') ?>Create type</strong><small>Add a leave type for this company.</small></span>
@@ -723,15 +746,15 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <div><button type="submit"><?= icon('leave') ?>Create</button></div>
                 </form>
             </details>
-            <div class="table-card">
+            <div style="overflow-x:auto">
                 <table>
-                    <thead><tr><th>Name</th><th>Days/year</th><th>Status</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>Name</th><th class="is-numeric">Days/year</th><th>Status</th><th>Actions</th></tr></thead>
                     <tbody>
                         <?php foreach ($leaveTypes as $type): ?>
                             <tr>
                                 <td><?= e($type['name']) ?></td>
-                                <td><?= e((string) $type['default_days_per_year']) ?></td>
-                                <td><?= (int) $type['is_active'] === 1 ? 'Active' : 'Inactive' ?></td>
+                                <td class="is-numeric"><?= e((string) $type['default_days_per_year']) ?></td>
+                                <td><?= (int) $type['is_active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
                                 <td>
                                     <form method="post" class="inline-action-form">
                                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -745,12 +768,13 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     </tbody>
                 </table>
             </div>
-        </div>
+        </section>
 
-        <div class="table-card">
-            <h2><?= icon('leave') ?>Leave requests</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Leave Requests</h2></div>
+            <div style="overflow-x:auto">
             <table>
-                <thead><tr><th>Staff</th><th>Type</th><th>Dates</th><th>Days</th><th>Reason</th><th>Status</th><th>Review</th></tr></thead>
+                <thead><tr><th>Staff</th><th>Type</th><th>Dates</th><th class="is-numeric">Days</th><th>Reason</th><th>Status</th><th>Review</th></tr></thead>
                 <tbody>
                     <?php if ($allLeaveRequests === []): ?>
                         <tr><td colspan="7">No leave requests yet.</td></tr>
@@ -760,9 +784,9 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td><?= e($row['staff_name']) ?></td>
                             <td><?= e($row['leave_type_name']) ?></td>
                             <td><?= e($row['start_date']) ?> to <?= e($row['end_date']) ?></td>
-                            <td><?= e((string) $row['total_days']) ?></td>
+                            <td class="is-numeric"><?= e((string) $row['total_days']) ?></td>
                             <td><?= e($row['reason']) ?><?php if ($row['attachment_path']): ?><br><a href="<?= e(url('attachment-download.php?type=leave&id=' . (int) $row['id'])) ?>">📎 <?= e((string) $row['attachment_name']) ?></a><?php endif; ?></td>
-                            <td><span class="tag"><?= e($row['status']) ?></span></td>
+                            <td><span class="mbw-pill <?= e($hrPillTone((string) $row['status'])) ?>"><?= e($row['status']) ?></span></td>
                             <td>
                                 <?php if ($row['status'] === 'pending'): ?>
                                     <form method="post" class="inline-action-form">
@@ -788,16 +812,21 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
-    <?php else: ?>
-        <div class="table-card">
-            <h2><?= icon('leave') ?>My leave balance</h2>
-            <div class="admin-stats">
-                <?php foreach ($leaveBalances as $balance): ?>
-                    <div class="card"><span class="stat-icon"><?= icon('leave') ?></span><strong><?= e((string) $balance['remaining']) ?></strong><p><?= e($balance['name']) ?> (of <?= e((string) $balance['default_days']) ?>)</p></div>
-                <?php endforeach; ?>
             </div>
-        </div>
+        </section>
+    <?php else: ?>
+        <section class="mbw-kpi-grid">
+            <?php foreach ($leaveBalances as $balance): ?>
+                <article class="mbw-kpi">
+                    <div>
+                        <span class="mbw-kpi-label"><?= e($balance['name']) ?></span>
+                        <div class="mbw-kpi-value"><?= e((string) $balance['remaining']) ?></div>
+                        <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">of <?= e((string) $balance['default_days']) ?> days/year</span></span>
+                    </div>
+                    <span class="mbw-chip tone-teal"><?= icon('leave') ?></span>
+                </article>
+            <?php endforeach; ?>
+        </section>
 
         <details class="feature-disclosure">
             <summary>
@@ -825,10 +854,11 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </form>
         </details>
 
-        <div class="table-card">
-            <h3>My leave requests</h3>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>My Leave Requests</h2></div>
+            <div style="overflow-x:auto">
             <table>
-                <thead><tr><th>Type</th><th>Dates</th><th>Days</th><th>Status</th><th>Remarks</th></tr></thead>
+                <thead><tr><th>Type</th><th>Dates</th><th class="is-numeric">Days</th><th>Status</th><th>Remarks</th></tr></thead>
                 <tbody>
                     <?php if ($myLeaveRequests === []): ?>
                         <tr><td colspan="5">No leave requests yet.</td></tr>
@@ -837,23 +867,25 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                         <tr>
                             <td><?= e($row['leave_type_name']) ?></td>
                             <td><?= e($row['start_date']) ?> to <?= e($row['end_date']) ?></td>
-                            <td><?= e((string) $row['total_days']) ?></td>
-                            <td><span class="tag"><?= e($row['status']) ?></span></td>
+                            <td class="is-numeric"><?= e((string) $row['total_days']) ?></td>
+                            <td><span class="mbw-pill <?= e($hrPillTone((string) $row['status'])) ?>"><?= e($row['status']) ?></span></td>
                             <td><?= e($row['reviewer_remarks'] ?? '-') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
     <?php endif; ?>
 <?php endif; ?>
 
 <?php if ($view === 'timesheets'): ?>
     <?php if ($role === 'admin'): ?>
-        <div class="table-card">
-            <h2><?= icon('timesheets') ?>Timesheets pending approval</h2>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Timesheets Pending Approval</h2></div>
+            <div style="overflow-x:auto">
             <table>
-                <thead><tr><th>Staff</th><th>Date</th><th>Client</th><th>Task</th><th>Description</th><th>Hours</th><th>Billable</th><th>Review</th></tr></thead>
+                <thead><tr><th>Staff</th><th>Date</th><th>Client</th><th>Task</th><th>Description</th><th class="is-numeric">Hours</th><th>Billable</th><th>Review</th></tr></thead>
                 <tbody>
                     <?php if ($submittedTimesheetEntries === []): ?>
                         <tr><td colspan="8">No entries pending approval.</td></tr>
@@ -865,8 +897,8 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td><?= e($entry['organization_name'] ?? '-') ?></td>
                             <td><?= e($entry['task_title'] ?? '-') ?></td>
                             <td><?= e($entry['description']) ?></td>
-                            <td><?= e((string) $entry['total_hours']) ?></td>
-                            <td><?= (int) $entry['is_billable'] === 1 ? 'Yes' : 'No' ?></td>
+                            <td class="is-numeric"><?= e((string) $entry['total_hours']) ?></td>
+                            <td><?= (int) $entry['is_billable'] === 1 ? '<span class="mbw-pill tone-green">Yes</span>' : '<span class="mbw-pill tone-gray">No</span>' ?></td>
                             <td>
                                 <form method="post" class="inline-action-form">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -888,12 +920,14 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
 
-        <div class="table-card">
-            <h3>Staff utilization (approved entries)</h3>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Staff Utilization (Approved Entries)</h2></div>
+            <div style="overflow-x:auto">
             <table>
-                <thead><tr><th>Staff</th><th>Total hours</th><th>Billable hours</th><th>Billable %</th></tr></thead>
+                <thead><tr><th>Staff</th><th class="is-numeric">Total hours</th><th class="is-numeric">Billable hours</th><th class="is-numeric">Billable %</th></tr></thead>
                 <tbody>
                     <?php if ($utilizationSummary === []): ?>
                         <tr><td colspan="4">No approved entries yet.</td></tr>
@@ -902,14 +936,15 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                         <?php $pct = (float) $row['total_hours'] > 0 ? round(((float) $row['billable_hours'] / (float) $row['total_hours']) * 100, 1) : 0; ?>
                         <tr>
                             <td><?= e($row['staff_name']) ?></td>
-                            <td><?= e((string) $row['total_hours']) ?></td>
-                            <td><?= e((string) $row['billable_hours']) ?></td>
-                            <td><?= e((string) $pct) ?>%</td>
+                            <td class="is-numeric"><?= e((string) $row['total_hours']) ?></td>
+                            <td class="is-numeric"><?= e((string) $row['billable_hours']) ?></td>
+                            <td class="is-numeric"><?= e((string) $pct) ?>%</td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
     <?php else: ?>
         <details class="feature-disclosure">
             <summary>
@@ -945,15 +980,16 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </form>
         </details>
 
-        <div class="table-card">
-            <h3>My timesheet entries</h3>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>My Timesheet Entries</h2></div>
             <form method="post" style="margin-bottom:12px;">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="submit_draft_timesheets">
                 <button type="submit"><?= icon('timesheets') ?>Submit all drafts for approval</button>
             </form>
+            <div style="overflow-x:auto">
             <table>
-                <thead><tr><th>Date</th><th>Client</th><th>Description</th><th>Hours</th><th>Billable</th><th>Status</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Date</th><th>Client</th><th>Description</th><th class="is-numeric">Hours</th><th>Billable</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody>
                     <?php if ($myTimesheetEntries === []): ?>
                         <tr><td colspan="7">No timesheet entries yet.</td></tr>
@@ -963,9 +999,9 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td><?= e($entry['entry_date']) ?></td>
                             <td><?= e($entry['organization_name'] ?? '-') ?></td>
                             <td><?= e($entry['description']) ?></td>
-                            <td><?= e((string) $entry['total_hours']) ?></td>
-                            <td><?= (int) $entry['is_billable'] === 1 ? 'Yes' : 'No' ?></td>
-                            <td><span class="tag"><?= e($entry['status']) ?></span><?php if ($entry['reviewer_remarks']): ?><br><small><?= e($entry['reviewer_remarks']) ?></small><?php endif; ?></td>
+                            <td class="is-numeric"><?= e((string) $entry['total_hours']) ?></td>
+                            <td><?= (int) $entry['is_billable'] === 1 ? '<span class="mbw-pill tone-green">Yes</span>' : '<span class="mbw-pill tone-gray">No</span>' ?></td>
+                            <td><span class="mbw-pill <?= e($hrPillTone((string) $entry['status'])) ?>"><?= e($entry['status']) ?></span><?php if ($entry['reviewer_remarks']): ?><br><small style="color:var(--mbw-muted)"><?= e($entry['reviewer_remarks']) ?></small><?php endif; ?></td>
                             <td>
                                 <?php if ($entry['status'] === 'draft'): ?>
                                     <form method="post" class="inline-action-form">
@@ -982,7 +1018,8 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
+            </div>
+        </section>
     <?php endif; ?>
 <?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_footer' : 'staff_footer') . '.php'; ?>

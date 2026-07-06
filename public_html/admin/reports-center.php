@@ -10,6 +10,7 @@ require_company_context();
 $repairErrors = accounting_module_repair_database();
 
 $pageTitle = 'Reports Center';
+$pageSubtitle = 'Smart, reliable and actionable reports for better financial insights.';
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
 $companyBusinessType = company_accounting_business_type($companyId);
@@ -208,14 +209,6 @@ if (table_exists('inventory_items')) {
 $bodyClass = 'admin-layout accounting-module-page reports-center-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<div class="reference-head">
-    <div>
-        <h2>Reports Center</h2>
-        <p>Smart, reliable and actionable reports for better financial insights.</p>
-    </div>
-    <div class="rc-breadcrumb">Home / <strong>Reports Center</strong></div>
-</div>
-
 <form method="get" action="<?= e(url('admin/reports-center.php')) ?>" class="rc-filter-card">
     <input type="hidden" name="report" value="<?= e($reportId) ?>">
     <?php if ($compareEnabled): ?><input type="hidden" name="compare" value="1"><?php endif; ?>

@@ -6,6 +6,7 @@ require_staff_or_admin();
 require_company_context();
 
 $pageTitle = 'Chart Groups';
+$pageSubtitle = 'Manage account groups, hierarchy, and cash/bank flags for the chart of accounts.';
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
@@ -81,21 +82,15 @@ if ($editId > 0) {
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<div class="accounting-page-head">
-    <div>
-        <h2>Groups</h2>
-        <p>Manage group tables, edit rows, and remove unused groups.</p>
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2><?= $editGroup ? 'Edit Group' : 'Create Group' ?></h2>
+        <div class="mbw-card-tools">
+            <a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php')) ?>">Overview</a>
+            <a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>">Ledgers</a>
+        </div>
     </div>
-    <div class="accounting-actions">
-        <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?>Overview</a>
-        <a class="button secondary" href="<?= e(url('admin/chart-ledgers.php')) ?>"><?= icon('documents') ?>Ledgers</a>
-    </div>
-</div>
-
-<section class="workspace-feature-stack">
-    <details class="feature-disclosure" open>
-        <summary><span><strong><?= icon('accounting') ?><?= $editGroup ? 'Edit Group' : 'Create Group' ?></strong><small>One place for the group record and its actions.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
-        <form method="post" class="workspace-form-grid">
+    <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_group">
             <input type="hidden" name="group_id" value="<?= e((int) ($editGroup['id'] ?? 0)) ?>">
@@ -123,14 +118,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <button type="submit"><?= icon('accounting') ?>Save group</button>
                 <?php if ($editGroup): ?><a class="button secondary" href="<?= e(url('admin/chart-groups.php')) ?>">Cancel</a><?php endif; ?>
             </div>
-        </form>
-    </details>
+    </form>
 </section>
 
-<div class="table-card">
-    <h2>Group table</h2>
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2>Group Table</h2>
+        <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:.85rem"><?= count($groups) ?> groups</span></div>
+    </div>
+    <div style="overflow-x:auto">
     <table>
-        <thead><tr><th>Code</th><th>Name</th><th>Master</th><th>Parent</th><th>Ledgers</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Code</th><th>Name</th><th>Master</th><th>Parent</th><th class="is-numeric">Ledgers</th><th>Actions</th></tr></thead>
         <tbody>
             <?php if ($groups === []): ?><tr><td colspan="6">No groups yet.</td></tr><?php endif; ?>
             <?php foreach ($groups as $group): ?>
@@ -139,7 +137,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td><?= e($group['name']) ?></td>
                     <td><?= e($masters[$group['master_key']]['label'] ?? $group['master_key']) ?></td>
                     <td><?= e($group['parent_group_id'] ? (string) $group['parent_group_id'] : '-') ?></td>
-                    <td><?= e((string) $group['ledger_count']) ?></td>
+                    <td class="is-numeric"><?= e((string) $group['ledger_count']) ?></td>
                     <td>
                         <a class="button secondary" href="<?= e(url('admin/chart-groups.php?edit_id=' . (int) $group['id'])) ?>">Edit</a>
                         <form method="post" style="display:inline">
@@ -153,5 +151,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endforeach; ?>
         </tbody>
     </table>
-</div>
+    </div>
+</section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

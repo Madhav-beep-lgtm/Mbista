@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../app/admin_work_portal_repair.php';
 require_admin();
 require_company_context();
 $pageTitle = 'Admin Work Portal';
+$pageSubtitle = 'Operations hub for clients, teams, contracts, tasks, and invoicing';
 $bodyClass = 'admin-layout admin-workspace';
 $currentAdmin = current_user();
 $adminId = (int) ($currentAdmin['id'] ?? 0);
@@ -1313,6 +1314,12 @@ if ($missingTables === []) {
     $invoices = $invoiceStmt->fetchAll();
 }
 
+$mbwStatusTone = [
+    'new' => 'blue', 'in_progress' => 'amber', 'on_hold' => 'gray', 'completed' => 'green',
+    'cancelled' => 'red', 'pending' => 'amber', 'draft' => 'blue', 'issued' => 'amber',
+    'paid' => 'green', 'active' => 'green', 'inactive' => 'red', 'suspended' => 'red', 'terminated' => 'red',
+];
+$mbwPriorityTone = ['low' => 'gray', 'normal' => 'blue', 'high' => 'amber', 'urgent' => 'red'];
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <div class="actions workspace-module-bar" style="margin-bottom: 16px;">
@@ -1337,27 +1344,34 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 <?php else: ?>
     <?php if ($view === 'home'): ?>
-    <div class="admin-stats">
-        <div class="card"><span class="stat-icon"><?= icon('users') ?></span><strong><?= e((string) count($portalUsers)) ?></strong><p>Users (latest 150)</p></div>
-        <div class="card"><span class="stat-icon"><?= icon('clients') ?></span><strong><?= e((string) count($clients)) ?></strong><p>Client profiles</p></div>
-        <div class="card"><span class="stat-icon"><?= icon('teams') ?></span><strong><?= e((string) count($teams)) ?></strong><p>Teams</p></div>
-        <div class="card"><span class="stat-icon"><?= icon('tasks') ?></span><strong><?= e((string) $totalTasks) ?></strong><p>Tracked tasks</p></div>
-    </div>
+    <section class="mbw-kpi-grid">
+        <a class="mbw-kpi" href="<?= e(url('admin/users.php')) ?>"><div><span class="mbw-kpi-label">Users</span><div class="mbw-kpi-value"><?= e((string) count($portalUsers)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">latest 150</span></span></div><span class="mbw-chip tone-blue"><?= icon('users') ?></span></a>
+        <a class="mbw-kpi" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><div><span class="mbw-kpi-label">Client Profiles</span><div class="mbw-kpi-value"><?= e((string) count($clients)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">all clients</span></span></div><span class="mbw-chip tone-teal"><?= icon('clients') ?></span></a>
+        <a class="mbw-kpi" href="<?= e(url('admin/workspace.php?view=teams')) ?>"><div><span class="mbw-kpi-label">Teams</span><div class="mbw-kpi-value"><?= e((string) count($teams)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">active groups</span></span></div><span class="mbw-chip tone-purple"><?= icon('teams') ?></span></a>
+        <a class="mbw-kpi" href="<?= e(url('admin/workspace.php?view=tasks')) ?>"><div><span class="mbw-kpi-label">Tracked Tasks</span><div class="mbw-kpi-value"><?= e((string) $totalTasks) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">all statuses</span></span></div><span class="mbw-chip tone-amber"><?= icon('tasks') ?></span></a>
+    </section>
 
-    <div class="admin-grid">
-        <a class="digital-click-card" href="<?= e(url('admin/users.php')) ?>"><h3><?= icon('users') ?>Users workflow</h3><p>Create, edit, filter, suspend, and delete users in the dedicated workflow.</p><span class="digital-cta"><?= icon('users') ?>Open users workflow</span></a>
-        <a class="digital-click-card" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><h3><?= icon('clients') ?>Clients</h3><p>Create client profiles, credentials, industries, and service-provider relationships.</p><span class="digital-cta"><?= icon('clients') ?>Open clients</span></a>
-        <a class="digital-click-card" href="<?= e(url('admin/workspace.php?view=teams')) ?>"><h3><?= icon('teams') ?>Teams</h3><p>Create teams from staff and assign leaders.</p><span class="digital-cta"><?= icon('teams') ?>Open teams</span></a>
-        <a class="digital-click-card" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><h3><?= icon('contracts') ?>Contracts</h3><p>Define service contracts and billing terms.</p><span class="digital-cta"><?= icon('contracts') ?>Open contracts</span></a>
-        <a class="digital-click-card" href="<?= e(url('admin/workspace.php?view=tasks')) ?>"><h3><?= icon('tasks') ?>Tasks</h3><p>Track client tasks, stages, and completion.</p><span class="digital-cta"><?= icon('tasks') ?>Open tasks</span></a>
-        <a class="digital-click-card" href="<?= e(url('admin/workspace.php?view=invoices')) ?>"><h3><?= icon('invoices') ?>Invoices</h3><p>Issue stage/task invoices with amount checks.</p><span class="digital-cta"><?= icon('invoices') ?>Open invoices</span></a>
-        <a class="digital-click-card" href="<?= e(url('admin/workspace.php?view=staff')) ?>"><h3><?= icon('staff') ?>Staff workload</h3><p>See what each staff member can see in their staff portal.</p><span class="digital-cta"><?= icon('staff') ?>Open staff workload</span></a>
-    </div>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Work Modules</h2>
+        </div>
+        <div class="mbw-qa-grid">
+            <a class="mbw-qa" href="<?= e(url('admin/users.php')) ?>"><span class="mbw-chip is-square tone-blue"><?= icon('users') ?></span><div><strong>Users workflow</strong><span>Create, edit, filter, suspend, and delete users.</span></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><span class="mbw-chip is-square tone-teal"><?= icon('clients') ?></span><div><strong>Clients</strong><span>Profiles, credentials, industries, and providers.</span></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=teams')) ?>"><span class="mbw-chip is-square tone-purple"><?= icon('teams') ?></span><div><strong>Teams</strong><span>Create teams from staff and assign leaders.</span></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><span class="mbw-chip is-square tone-green"><?= icon('contracts') ?></span><div><strong>Contracts</strong><span>Define service contracts and billing terms.</span></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=tasks')) ?>"><span class="mbw-chip is-square tone-amber"><?= icon('tasks') ?></span><div><strong>Tasks</strong><span>Track client tasks, stages, and completion.</span></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=invoices')) ?>"><span class="mbw-chip is-square tone-red"><?= icon('invoices') ?></span><div><strong>Invoices</strong><span>Issue stage/task invoices with amount checks.</span></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=staff')) ?>"><span class="mbw-chip is-square tone-gray"><?= icon('staff') ?></span><div><strong>Staff workload</strong><span>See what each staff member sees in their portal.</span></div></a>
+        </div>
+    </section>
     <?php endif; ?>
 
     <?php if ($view === 'clients'): ?>
-    <div class="table-card" id="clients">
-        <h2>Clients</h2>
+    <section class="mbw-card" id="clients">
+        <div class="mbw-card-head">
+            <h2>Clients</h2>
+        </div>
         <details class="feature-disclosure">
             <summary>
                 <span class="stat-icon"><?= icon('clients') ?></span>
@@ -1416,22 +1430,29 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </details>
 
         <?php if ($selectedClient && $clientMode === 'view'): ?>
-            <div class="table-card">
-                <h3>Client profile</h3>
-                <div class="admin-grid">
-                    <div class="card">
-                        <?php if (!empty($selectedClient['company_logo_path'])): ?>
-                            <img src="<?= e(url((string) $selectedClient['company_logo_path'])) ?>" alt="" style="max-width: 120px; max-height: 80px; object-fit: contain;">
-                        <?php else: ?>
-                            <span class="stat-icon"><?= icon('clients') ?></span>
-                        <?php endif; ?>
-                        <strong><?= e($selectedClient['organization_name']) ?></strong>
-                        <p><?= e($selectedClient['client_code'] ?? 'N/A') ?></p>
-                    </div>
-                    <div class="card"><strong><?= e($selectedClient['registration_no'] ?? 'N/A') ?></strong><p>Registration No.</p></div>
-                    <div class="card"><strong><?= e($selectedClient['pan_no'] ?? 'N/A') ?></strong><p>PAN No.</p></div>
-                    <div class="card"><strong><?= e($selectedClient['client_status'] ?? 'active') ?></strong><p>Status</p></div>
+            <section class="mbw-card">
+                <div class="mbw-card-head">
+                    <h2>Client Profile</h2>
+                    <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/workspace.php?view=clients')) ?>">Back to List</a></div>
                 </div>
+                <section class="mbw-kpi-grid">
+                    <article class="mbw-kpi">
+                        <div>
+                            <span class="mbw-kpi-label">Organization</span>
+                            <div class="mbw-kpi-value" style="font-size:1rem;"><?= e($selectedClient['organization_name']) ?></div>
+                            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e($selectedClient['client_code'] ?? 'N/A') ?></span></span>
+                        </div>
+                        <?php if (!empty($selectedClient['company_logo_path'])): ?>
+                            <img src="<?= e(url((string) $selectedClient['company_logo_path'])) ?>" alt="" style="max-width: 64px; max-height: 48px; object-fit: contain;">
+                        <?php else: ?>
+                            <span class="mbw-chip tone-teal"><?= icon('clients') ?></span>
+                        <?php endif; ?>
+                    </article>
+                    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Registration No.</span><div class="mbw-kpi-value" style="font-size:1rem;"><?= e($selectedClient['registration_no'] ?? 'N/A') ?></div></div><span class="mbw-chip tone-blue"><?= icon('documents') ?></span></article>
+                    <article class="mbw-kpi"><div><span class="mbw-kpi-label">PAN No.</span><div class="mbw-kpi-value" style="font-size:1rem;"><?= e($selectedClient['pan_no'] ?? 'N/A') ?></div></div><span class="mbw-chip tone-purple"><?= icon('tag') ?></span></article>
+                    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Status</span><div class="mbw-kpi-value" style="font-size:1rem;"><span class="mbw-pill tone-<?= e($mbwStatusTone[$selectedClient['client_status'] ?? 'active'] ?? 'gray') ?>"><?= e(ucfirst((string) ($selectedClient['client_status'] ?? 'active'))) ?></span></div></div><span class="mbw-chip tone-green"><?= icon('compliance') ?></span></article>
+                </section>
+                <div style="overflow-x:auto">
                 <table>
                     <tbody>
                         <tr><th>Industry</th><td><?= e($selectedClient['industry_name'] ?? 'N/A') ?></td></tr>
@@ -1447,11 +1468,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <tr><th>Updated</th><td><?= e($selectedClient['updated_at'] ?? '') ?></td></tr>
                     </tbody>
                 </table>
+                </div>
                 <div class="actions">
                     <a class="button secondary" href="<?= e(url('admin/workspace.php?view=clients&mode=edit&client_id=' . (int) $selectedClient['id'])) ?>"><?= icon('settings') ?>Edit</a>
                     <a class="button secondary" href="<?= e(url('admin/workspace.php?view=clients')) ?>">Return to Client List</a>
                 </div>
-            </div>
+            </section>
         <?php endif; ?>
 
         <?php if ($selectedClient && $clientMode === 'edit'): ?>
@@ -1504,8 +1526,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
         <?php endif; ?>
 
-        <div class="table-card">
-            <h3>Recent client profiles</h3>
+        <section class="mbw-card">
+            <div class="mbw-card-head">
+                <h2>Recent Client Profiles</h2>
+            </div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -1548,13 +1573,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
-    </div>
+            </div>
+        </section>
+    </section>
     <?php endif; ?>
 
     <?php if ($view === 'industries'): ?>
-    <div class="table-card" id="industries">
-        <h2>Industry Management</h2>
+    <section class="mbw-card" id="industries">
+        <div class="mbw-card-head">
+            <h2>Industry Management</h2>
+        </div>
         <details class="feature-disclosure" open>
             <summary>
                 <span class="stat-icon"><?= icon('settings') ?></span>
@@ -1572,6 +1600,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <button type="submit"><?= icon('settings') ?>Save industry</button>
             </form>
         </details>
+        <div style="overflow-x:auto">
         <table>
             <thead><tr><th>Industry</th><th>Status</th><th>Action</th></tr></thead>
             <tbody>
@@ -1601,12 +1630,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </tbody>
         </table>
-    </div>
+        </div>
+    </section>
     <?php endif; ?>
 
     <?php if ($view === 'service-providers'): ?>
-    <div class="table-card" id="service-providers">
-        <h2>Service Provider Entity Management</h2>
+    <section class="mbw-card" id="service-providers">
+        <div class="mbw-card-head">
+            <h2>Service Provider Entity Management</h2>
+        </div>
         <details class="feature-disclosure" open>
             <summary>
                 <span class="stat-icon"><?= icon('companies') ?></span>
@@ -1632,8 +1664,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </form>
         </details>
 
+        <div style="overflow-x:auto">
         <table>
-            <thead><tr><th>Entity</th><th>Contact</th><th>Status</th><th>Connected Clients</th></tr></thead>
+            <thead><tr><th>Entity</th><th>Contact</th><th>Status</th><th class="is-numeric">Connected Clients</th></tr></thead>
             <tbody>
                 <?php $allEntities = table_exists('service_provider_entities') ? db()->query('SELECT spe.*, (SELECT COUNT(*) FROM client_service_provider_entities cspe WHERE cspe.service_provider_entity_id = spe.id) AS client_count FROM service_provider_entities spe ORDER BY spe.name ASC')->fetchAll() : []; ?>
                 <?php if ($allEntities === []): ?><tr><td colspan="4">No service provider entities found.</td></tr><?php endif; ?>
@@ -1641,18 +1674,21 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <tr>
                         <td><?= e($entity['name']) ?><br><small><?= e($entity['code'] ?? '') ?></small></td>
                         <td><?= e($entity['contact_email'] ?? '') ?><br><small><?= e($entity['contact_number'] ?? '') ?></small></td>
-                        <td><?= (int) $entity['is_active'] === 1 ? 'Active' : 'Inactive' ?></td>
-                        <td><?= e((string) (int) $entity['client_count']) ?></td>
+                        <td><?= (int) $entity['is_active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
+                        <td class="is-numeric"><?= e((string) (int) $entity['client_count']) ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
-    </div>
+        </div>
+    </section>
     <?php endif; ?>
 
     <?php if ($view === 'teams'): ?>
-    <div class="table-card" id="teams">
-        <h2>Team creation with staff leader assignment</h2>
+    <section class="mbw-card" id="teams">
+        <div class="mbw-card-head">
+            <h2>Teams</h2>
+        </div>
         <details class="feature-disclosure">
             <summary>
                 <span class="stat-icon"><?= icon('teams') ?></span>
@@ -1691,14 +1727,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
         </details>
 
-        <div class="table-card">
-            <h3>Teams</h3>
+        <section class="mbw-card">
+            <div class="mbw-card-head">
+                <h2>Team List</h2>
+            </div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
                         <th>Team</th>
                         <th>Leader</th>
-                        <th>Members</th>
+                        <th class="is-numeric">Members</th>
                         <th>Status</th>
                     </tr>
                 </thead>
@@ -1710,19 +1749,22 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <tr>
                             <td><?= e($team['name']) ?></td>
                             <td><?= e($team['leader_name']) ?></td>
-                            <td><?= e((int) $team['member_count']) ?></td>
-                            <td><?= (int) $team['is_active'] === 1 ? 'Active' : 'Inactive' ?></td>
+                            <td class="is-numeric"><?= e((int) $team['member_count']) ?></td>
+                            <td><?= (int) $team['is_active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
-    </div>
+            </div>
+        </section>
+    </section>
     <?php endif; ?>
 
     <?php if ($view === 'contracts'): ?>
-    <div class="table-card" id="contracts">
-        <h2>Service contracts</h2>
+    <section class="mbw-card" id="contracts">
+        <div class="mbw-card-head">
+            <h2>Service Contracts</h2>
+        </div>
         <?php if ($documentLogoPath !== '' || $documentSignaturePath !== '' || $documentStampPath !== ''): ?>
             <div class="document-preview-card">
                 <div class="invoice-brand-block">
@@ -1794,14 +1836,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
         </details>
 
-        <div class="table-card">
-            <h3>Recent service contracts</h3>
+        <section class="mbw-card">
+            <div class="mbw-card-head">
+                <h2>Recent Service Contracts</h2>
+            </div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
                         <th>Contract</th>
                         <th>Client</th>
-                        <th>Value</th>
+                        <th class="is-numeric">Value</th>
                         <th>Status</th>
                         <th>Period</th>
                         <th>Actions</th>
@@ -1815,7 +1860,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <tr>
                             <td><?= e($contract['contract_no']) ?><br><small><?= e($contract['title']) ?></small></td>
                             <td><?= e($contract['organization_name']) ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $contract['total_value'], 2)) ?></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $contract['total_value'], 2)) ?></td>
                             <td>
                                 <form method="post" class="inline-action-form">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1837,13 +1882,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
-        </div>
-    </div>
+            </div>
+        </section>
+    </section>
     <?php endif; ?>
 
     <?php if ($view === 'tasks'): ?>
-    <div class="table-card" id="tasks">
-        <h2>Task creation (clients only) with team assignment</h2>
+    <section class="mbw-card" id="tasks">
+        <div class="mbw-card-head">
+            <h2>Tasks</h2>
+        </div>
         <div class="workspace-feature-stack">
             <details class="feature-disclosure">
                 <summary>
@@ -2080,8 +2128,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </form>
         </div>
 
-        <div class="table-card" style="margin-top:20px;">
-            <h3>Tasks</h3>
+        <section class="mbw-card" style="margin-top:20px;">
+            <div class="mbw-card-head">
+                <h2>Task List</h2>
+            </div>
+            <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -2089,8 +2140,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <th>Client</th>
                         <th>Team</th>
                         <th>Assigned staff</th>
-                        <th>Quoted fee</th>
-                        <th>Invoiced</th>
+                        <th class="is-numeric">Quoted fee</th>
+                        <th class="is-numeric">Invoiced</th>
                         <th>Status</th>
                         <th>Priority</th>
                         <th>Due</th>
@@ -2124,15 +2175,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <?= e($task['assigned_staff_name'] ?? 'Unassigned') ?>
                                 <?php endif; ?>
                             </td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $task['quoted_fee'], 2)) ?></td>
-                            <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $task['invoiced_total'], 2)) ?><br><small>Remaining: <?= e(site_currency_symbol()) ?><?= e(number_format($remaining, 2)) ?></small></td>
-                            <td><span class="tag"><?= e($task['status']) ?></span></td>
-                            <td><span class="tag"><?= e($task['priority']) ?></span></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $task['quoted_fee'], 2)) ?></td>
+                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $task['invoiced_total'], 2)) ?><br><small>Remaining: <?= e(site_currency_symbol()) ?><?= e(number_format($remaining, 2)) ?></small></td>
+                            <td><span class="mbw-pill tone-<?= e($mbwStatusTone[$task['status']] ?? 'gray') ?>"><?= e(str_replace('_', ' ', (string) $task['status'])) ?></span></td>
+                            <td><span class="mbw-pill tone-<?= e($mbwPriorityTone[$task['priority']] ?? 'gray') ?>"><?= e($task['priority']) ?></span></td>
                             <td><?= e($task['due_date'] ?? '-') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
 
             <div class="admin-orders-pagination">
                 <span>Page <?= e((string) $page) ?> of <?= e((string) $totalPages) ?></span>
@@ -2143,13 +2195,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <a class="button secondary" href="<?= e(url('admin/workspace.php?view=tasks&page=' . ($page + 1) . '&q=' . rawurlencode($search) . '&task_status=' . rawurlencode($taskStatusFilter) . '&client_id=' . $clientFilter . '&sort=' . rawurlencode($sort))) ?>">Next</a>
                  <?php endif; ?>
              </div>
-         </div>
-     </div>
+         </section>
+     </section>
     <?php endif; ?>
 
     <?php if ($view === 'invoices'): ?>
-     <div class="table-card" id="invoices">
-         <h2>Issue invoice for completed stage or completed task</h2>
+     <section class="mbw-card" id="invoices">
+         <div class="mbw-card-head">
+             <h2>Invoices</h2>
+         </div>
          <details class="feature-disclosure">
              <summary>
                  <span class="stat-icon"><?= icon('invoices') ?></span>
@@ -2205,15 +2259,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
              </div>
          </details>
 
-             <div class="table-card">
-                 <h3>Recent invoices</h3>
+             <section class="mbw-card">
+                 <div class="mbw-card-head">
+                     <h2>Recent Invoices</h2>
+                 </div>
+                 <div style="overflow-x:auto">
                  <table>
                      <thead>
                          <tr>
                              <th>Invoice</th>
                              <th>Task / Stage</th>
                              <th>Client</th>
-                             <th>Amount</th>
+                             <th class="is-numeric">Amount</th>
                              <th>Status</th>
                              <th>Issued</th>
                              <th>Actions</th>
@@ -2228,8 +2285,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                  <td><?= e($invoice['invoice_no']) ?><br><small><?= e($invoice['invoice_type']) ?> invoice</small></td>
                                  <td><?= e($invoice['task_title']) ?><br><small><?= e($invoice['stage_name'] ?? 'Full task invoice') ?></small></td>
                                  <td><?= e($invoice['organization_name']) ?></td>
-                                 <td><?= e(site_currency_symbol()) ?><?= e(number_format((float) $invoice['amount'], 2)) ?></td>
-                                 <td><span class="tag"><?= e($invoice['status']) ?></span></td>
+                                 <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $invoice['amount'], 2)) ?></td>
+                                 <td><span class="mbw-pill tone-<?= e($mbwStatusTone[$invoice['status']] ?? 'gray') ?>"><?= e($invoice['status']) ?></span></td>
                                  <td><?= e($invoice['issued_on']) ?></td>
                                  <td>
                                      <a class="button secondary" href="<?= e(url('admin/invoice.php?action=view&id=' . (int) $invoice['id'])) ?>">Open</a>
@@ -2239,22 +2296,27 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                          <?php endforeach; ?>
                      </tbody>
                  </table>
-             </div>
-     </div>
+                 </div>
+             </section>
+     </section>
     <?php endif; ?>
 
     <?php if ($view === 'staff'): ?>
-    <div class="table-card" id="staff">
-        <h2>Staff workload and portal visibility</h2>
-        <p>Shows what each active staff member can see in their staff portal: clients assigned to them directly or through a team, and the open/completed tasks under those clients. Assign clients and teams from the <a href="<?= e(url('admin/workspace.php?view=clients')) ?>">Clients</a> and <a href="<?= e(url('admin/workspace.php?view=teams')) ?>">Teams</a> tabs.</p>
+    <section class="mbw-card" id="staff">
+        <div class="mbw-card-head">
+            <h2>Staff Workload</h2>
+            <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/workspace.php?view=teams')) ?>">Manage Teams</a></div>
+        </div>
+        <p style="color:var(--mbw-muted);">Shows what each active staff member can see in their staff portal: clients assigned to them directly or through a team, and the open/completed tasks under those clients. Assign clients and teams from the <a href="<?= e(url('admin/workspace.php?view=clients')) ?>">Clients</a> and <a href="<?= e(url('admin/workspace.php?view=teams')) ?>">Teams</a> tabs.</p>
+        <div style="overflow-x:auto">
         <table>
             <thead>
                 <tr>
                     <th>Staff</th>
-                    <th>Teams</th>
-                    <th>Assigned clients</th>
-                    <th>Open tasks</th>
-                    <th>Completed tasks</th>
+                    <th class="is-numeric">Teams</th>
+                    <th class="is-numeric">Assigned clients</th>
+                    <th class="is-numeric">Open tasks</th>
+                    <th class="is-numeric">Completed tasks</th>
                 </tr>
             </thead>
             <tbody>
@@ -2264,15 +2326,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php foreach ($staffWorkloads as $workload): ?>
                     <tr>
                         <td><?= e($workload['name']) ?><br><small><?= e($workload['email']) ?></small></td>
-                        <td><?= e((string) $workload['team_count']) ?></td>
-                        <td><?= e((string) $workload['client_count']) ?></td>
-                        <td><?= e((string) $workload['open_tasks']) ?></td>
-                        <td><?= e((string) $workload['completed_tasks']) ?></td>
+                        <td class="is-numeric"><?= e((string) $workload['team_count']) ?></td>
+                        <td class="is-numeric"><?= e((string) $workload['client_count']) ?></td>
+                        <td class="is-numeric"><?= e((string) $workload['open_tasks']) ?></td>
+                        <td class="is-numeric"><?= e((string) $workload['completed_tasks']) ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
-    </div>
+        </div>
+    </section>
     <?php endif; ?>
 <?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

@@ -8,6 +8,7 @@ require_company_context();
 accounting_module_repair_database();
 
 $pageTitle = 'Posting Accounts';
+$pageSubtitle = 'Map company ledgers to automated posting roles for invoices, receipts, taxes, and revenue.';
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
@@ -98,8 +99,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <div class="accounting-page-head">
     <div>
-        <h2>Automated Posting Accounts</h2>
-        <p>Map company ledgers to the roles used by invoices, receipts, taxes, and revenue posting.</p>
+        <h2 style="color:var(--mbw-heading)">Automated Posting Accounts</h2>
+        <p style="color:var(--mbw-muted)">Map company ledgers to the roles used by invoices, receipts, taxes, and revenue posting.</p>
     </div>
     <div class="accounting-actions">
         <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?>Overview</a>
@@ -111,10 +112,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php if (!table_exists('company_ledger_mappings')): ?>
     <div class="notice error">Run the ledger-mapping migration before configuring automated posting accounts.</div>
 <?php else: ?>
-    <div class="table-card">
-        <h2>Posting map</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Posting map</h2>
+            <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>">View Ledgers</a></div>
+        </div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+
             <?php foreach ($mappingRoles as $mapKey => $role): ?>
                 <label><?= e($role['label']) ?>
                     <select name="mapping[<?= e($mapKey) ?>]">
@@ -138,7 +143,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <button type="submit"><?= icon('settings') ?>Save Posting Accounts</button>
             </div>
         </form>
-    </div>
+    </section>
 <?php endif; ?>
 
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 
 require_admin();
 $pageTitle = 'Settings';
+$pageSubtitle = 'Fiscal controls, company profile, payments, invoice numbering, and notification setup.';
 $bodyClass = 'admin-layout settings-page';
 
 function settings_upload_image(string $field, array $settings): string
@@ -199,15 +200,12 @@ $currentLockThrough = period_locked_through($settingsCompanyId, $settingsFiscalY
 <form method="post" class="settings-form" id="fiscal-controls">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <input type="hidden" name="action" value="save_fiscal_controls">
-    <div class="settings-component">
-        <div class="settings-component-head">
-            <span class="stat-icon"><?= icon('compliance') ?></span>
-            <div>
-                <p class="badge">Fiscal &amp; Accounting Controls</p>
-                <h2>Approvals, Period Lock &amp; Tax</h2>
-                <p>Governance controls for the accounting workspace (blueprint pages 5, 18, 19).</p>
-            </div>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Approvals, Period Lock &amp; Tax</h2>
+            <div class="mbw-card-tools"><span class="mbw-pill tone-blue">Fiscal &amp; Accounting Controls</span><span class="mbw-chip tone-amber"><?= icon('compliance') ?></span></div>
         </div>
+        <p style="margin:0 0 12px;color:var(--mbw-muted)">Governance controls for the accounting workspace (blueprint pages 5, 18, 19).</p>
         <div class="settings-grid">
             <label class="settings-check">
                 <input type="checkbox" name="approvals_enabled" value="1" <?= approvals_enabled() ? 'checked' : '' ?>>
@@ -222,21 +220,18 @@ $currentLockThrough = period_locked_through($settingsCompanyId, $settingsFiscalY
             </label>
         </div>
         <div class="settings-actions"><button type="submit" class="button"><?= icon('settings') ?>Save fiscal controls</button></div>
-    </div>
+    </section>
 </form>
 
 <form method="post" class="settings-form" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 
-    <div class="settings-component" id="company-profile">
-        <div class="settings-component-head">
-            <span class="stat-icon"><?= icon('companies') ?></span>
-            <div>
-                <p class="badge">Component 1</p>
-                <h2>Company Profile</h2>
-                <p>Public identity, contact details, homepage text, and default currency.</p>
-            </div>
+    <section class="mbw-card" id="company-profile">
+        <div class="mbw-card-head">
+            <h2>Company Profile</h2>
+            <div class="mbw-card-tools"><span class="mbw-chip tone-blue"><?= icon('companies') ?></span></div>
         </div>
+        <p style="margin:0 0 12px;color:var(--mbw-muted)">Public identity, contact details, homepage text, and default currency.</p>
         <div class="settings-grid">
             <label>Site name<input type="text" name="site_name" value="<?= e($settings['site_name'] ?? APP_NAME) ?>"></label>
             <label>Site tagline<input type="text" name="site_tagline" value="<?= e($settings['site_tagline'] ?? '') ?>"></label>
@@ -268,17 +263,14 @@ $currentLockThrough = period_locked_through($settingsCompanyId, $settingsFiscalY
             <label class="settings-span-2">Hero description<textarea name="hero_description"><?= e($settings['hero_description'] ?? '') ?></textarea></label>
             <label class="settings-span-2">About text<textarea name="about_text"><?= e($settings['about_text'] ?? '') ?></textarea></label>
         </div>
-    </div>
+    </section>
 
-    <div class="settings-component" id="payment">
-        <div class="settings-component-head">
-            <span class="stat-icon"><?= icon('accounting') ?></span>
-            <div>
-                <p class="badge">Component 2</p>
-                <h2>Payment</h2>
-                <p>Manual bank details and hosted checkout links.</p>
-            </div>
+    <section class="mbw-card" id="payment">
+        <div class="mbw-card-head">
+            <h2>Payment</h2>
+            <div class="mbw-card-tools"><span class="mbw-chip tone-green"><?= icon('wallet') ?></span></div>
         </div>
+        <p style="margin:0 0 12px;color:var(--mbw-muted)">Manual bank details and hosted checkout links.</p>
         <div class="settings-grid">
             <label>Payment mode
                 <select name="payment_mode">
@@ -295,17 +287,14 @@ $currentLockThrough = period_locked_through($settingsCompanyId, $settingsFiscalY
             <label>PayPal checkout URL<input type="url" name="paypal_checkout_url" value="<?= e($settings['paypal_checkout_url'] ?? '') ?>" placeholder="https://www.paypal.com/..."></label>
             <label class="settings-span-2">Payment note<textarea name="payment_note"><?= e($settings['payment_note'] ?? '') ?></textarea></label>
         </div>
-    </div>
+    </section>
 
-    <div class="settings-component" id="invoice-settings">
-        <div class="settings-component-head">
-            <span class="stat-icon"><?= icon('invoices') ?></span>
-            <div>
-                <p class="badge">Component 3</p>
-                <h2>Invoice settings</h2>
-                <p>Separate setup for proforma invoices and tax invoices.</p>
-            </div>
+    <section class="mbw-card" id="invoice-settings">
+        <div class="mbw-card-head">
+            <h2>Invoice settings</h2>
+            <div class="mbw-card-tools"><span class="mbw-chip tone-purple"><?= icon('invoices') ?></span></div>
         </div>
+        <p style="margin:0 0 12px;color:var(--mbw-muted)">Separate setup for proforma invoices and tax invoices.</p>
         <div class="settings-subgrid">
             <div class="settings-subcard">
                 <h3><?= icon('invoices') ?>Proforma invoice settings</h3>
@@ -330,17 +319,14 @@ $currentLockThrough = period_locked_through($settingsCompanyId, $settingsFiscalY
                 </div>
             </div>
         </div>
-    </div>
+    </section>
 
-    <div class="settings-component" id="notification-access">
-        <div class="settings-component-head">
-            <span class="stat-icon"><?= icon('contact') ?></span>
-            <div>
-                <p class="badge">Component 4</p>
-                <h2>Notification access</h2>
-                <p>Control who receives system emails and how outgoing messages identify the firm.</p>
-            </div>
+    <section class="mbw-card" id="notification-access">
+        <div class="mbw-card-head">
+            <h2>Notification access</h2>
+            <div class="mbw-card-tools"><span class="mbw-chip tone-teal"><?= icon('contact') ?></span></div>
         </div>
+        <p style="margin:0 0 12px;color:var(--mbw-muted)">Control who receives system emails and how outgoing messages identify the firm.</p>
         <div class="settings-grid">
             <label>From email<input type="email" name="notification_from_email" value="<?= e($settings['notification_from_email'] ?? '') ?>"></label>
             <label>Reply-to email<input type="email" name="notification_reply_to_email" value="<?= e($settings['notification_reply_to_email'] ?? '') ?>"></label>
@@ -353,7 +339,7 @@ $currentLockThrough = period_locked_through($settingsCompanyId, $settingsFiscalY
             </div>
             <label class="settings-span-2">Notification footer text<textarea name="notification_footer_text"><?= e($settings['notification_footer_text'] ?? '') ?></textarea></label>
         </div>
-    </div>
+    </section>
 
     <div class="settings-save-bar">
         <button type="submit"><?= icon('settings') ?>Save settings</button>

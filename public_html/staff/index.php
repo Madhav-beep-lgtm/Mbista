@@ -198,23 +198,50 @@ $pageTitle = match ($view) {
     'tasks' => 'Client Tasks',
     default => 'Staff Portal',
 };
+$pageSubtitle = match ($view) {
+    'clients' => 'Clients assigned to you through tasks, stages, or team work',
+    'tasks' => 'Track, progress, and complete tasks for your assigned clients',
+    default => 'Your workload at a glance: clients, contracts, tasks, and deadlines',
+};
+
+function staff_status_tone(string $status): string
+{
+    return match ($status) {
+        'completed', 'active' => 'green',
+        'in_progress' => 'blue',
+        'on_hold' => 'amber',
+        'cancelled' => 'red',
+        default => 'gray',
+    };
+}
+
+function staff_priority_tone(string $priority): string
+{
+    return match ($priority) {
+        'high', 'urgent' => 'red',
+        'medium' => 'amber',
+        'low' => 'gray',
+        default => 'blue',
+    };
+}
 
 include __DIR__ . '/../../app/views/partials/staff_header.php';
 ?>
 
 <?php if ($view === 'home'): ?>
-    <div class="admin-stats">
-        <div class="card"><span class="stat-icon"><?= icon('clients') ?></span><strong><?= e((string) $activeClients) ?></strong><p>My active clients</p></div>
-        <div class="card"><span class="stat-icon"><?= icon('contracts') ?></span><strong><?= e((string) $activeContracts) ?></strong><p>My active contracts</p></div>
-        <div class="card"><span class="stat-icon"><?= icon('tasks') ?></span><strong><?= e((string) $openTasks) ?></strong><p>My open tasks</p></div>
-        <div class="card"><span class="stat-icon"><?= icon('insights') ?></span><strong><?= e((string) $completedTasks) ?></strong><p>My completed tasks</p></div>
-        <div class="card"><span class="stat-icon"><?= icon('compliance') ?></span><strong><?= e((string) $upcomingComplianceCount) ?></strong><p>Upcoming compliance deadlines</p></div>
-        <div class="card"><span class="stat-icon"><?= icon('messages') ?></span><strong><?= e((string) $unreadMessageCount) ?></strong><p>Unread messages</p></div>
-        <div class="card"><span class="stat-icon"><?= icon('timesheets') ?></span><strong><?= e((string) $weeklyHours) ?></strong><p>Hours recorded this week</p></div>
-    </div>
+    <section class="mbw-kpi-grid">
+        <a class="mbw-kpi" href="<?= e(url('staff/index.php?view=clients')) ?>"><div><span class="mbw-kpi-label">My Active Clients</span><div class="mbw-kpi-value"><?= e((string) $activeClients) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">assigned to me</span></span></div><span class="mbw-chip tone-blue"><?= icon('clients') ?></span></a>
+        <article class="mbw-kpi"><div><span class="mbw-kpi-label">My Active Contracts</span><div class="mbw-kpi-value"><?= e((string) $activeContracts) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">across my clients</span></span></div><span class="mbw-chip tone-purple"><?= icon('contracts') ?></span></article>
+        <a class="mbw-kpi" href="<?= e(url('staff/index.php?view=tasks')) ?>"><div><span class="mbw-kpi-label">My Open Tasks</span><div class="mbw-kpi-value"><?= e((string) $openTasks) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">new, in progress, on hold</span></span></div><span class="mbw-chip tone-amber"><?= icon('tasks') ?></span></a>
+        <a class="mbw-kpi" href="<?= e(url('staff/index.php?view=tasks')) ?>"><div><span class="mbw-kpi-label">My Completed Tasks</span><div class="mbw-kpi-value"><?= e((string) $completedTasks) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">all time</span></span></div><span class="mbw-chip tone-green"><?= icon('insights') ?></span></a>
+        <article class="mbw-kpi"><div><span class="mbw-kpi-label">Compliance Deadlines</span><div class="mbw-kpi-value"><?= e((string) $upcomingComplianceCount) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">upcoming or overdue</span></span></div><span class="mbw-chip tone-red"><?= icon('compliance') ?></span></article>
+        <article class="mbw-kpi"><div><span class="mbw-kpi-label">Unread Messages</span><div class="mbw-kpi-value"><?= e((string) $unreadMessageCount) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">awaiting reply</span></span></div><span class="mbw-chip tone-teal"><?= icon('messages') ?></span></article>
+        <article class="mbw-kpi"><div><span class="mbw-kpi-label">Hours This Week</span><div class="mbw-kpi-value"><?= e((string) $weeklyHours) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">recorded on timesheets</span></span></div><span class="mbw-chip tone-gray"><?= icon('timesheets') ?></span></article>
+    </section>
 
-    <div class="table-card">
-        <h2><?= icon('tasks') ?>Recent tasks for my clients</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Recent Tasks for My Clients</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('staff/index.php?view=tasks')) ?>">View All</a></div></div>
+        <div style="overflow-x:auto">
         <table>
             <thead>
                 <tr>
@@ -233,19 +260,21 @@ include __DIR__ . '/../../app/views/partials/staff_header.php';
                     <tr>
                         <td>#<?= e((int) $task['id']) ?> <?= e($task['title']) ?></td>
                         <td><?= e($task['organization_name']) ?></td>
-                        <td><span class="tag"><?= e($task['status']) ?></span></td>
-                        <td><span class="tag"><?= e($task['priority']) ?></span></td>
+                        <td><span class="mbw-pill tone-<?= e(staff_status_tone((string) $task['status'])) ?>"><?= e($task['status']) ?></span></td>
+                        <td><span class="mbw-pill tone-<?= e(staff_priority_tone((string) $task['priority'])) ?>"><?= e($task['priority']) ?></span></td>
                         <td><?= e($task['created_at']) ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
-    </div>
+        </div>
+    </section>
 <?php endif; ?>
 
 <?php if ($view === 'clients'): ?>
-    <div class="table-card">
-        <h2><?= icon('clients') ?>Clients assigned to me</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Clients Assigned to Me</h2></div>
+        <div style="overflow-x:auto">
         <table>
             <thead>
                 <tr>
@@ -262,17 +291,19 @@ include __DIR__ . '/../../app/views/partials/staff_header.php';
                     <tr>
                         <td><?= e($client['organization_name']) ?><br><small><?= e($client['name']) ?> (<?= e($client['email']) ?>)</small></td>
                         <td><?= e($client['client_code'] ?? 'N/A') ?></td>
-                        <td><?= (int) $client['is_active'] === 1 ? 'Active' : 'Inactive' ?></td>
+                        <td><?= (int) $client['is_active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
-    </div>
+        </div>
+    </section>
 <?php endif; ?>
 
 <?php if ($view === 'tasks'): ?>
-    <div class="table-card">
-        <h2><?= icon('tasks') ?>Tasks for my clients</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Tasks for My Clients</h2></div>
+        <div style="overflow-x:auto">
         <table>
             <thead>
                 <tr>
@@ -302,8 +333,8 @@ include __DIR__ . '/../../app/views/partials/staff_header.php';
                             <div class="progress-track"><div class="progress-fill" style="width: <?= e((string) $progress) ?>%"></div></div>
                             <small><?= e((string) $progress) ?>%</small>
                         </td>
-                        <td><span class="tag"><?= e($task['status']) ?></span></td>
-                        <td><span class="tag"><?= e($task['priority']) ?></span></td>
+                        <td><span class="mbw-pill tone-<?= e(staff_status_tone((string) $task['status'])) ?>"><?= e($task['status']) ?></span></td>
+                        <td><span class="mbw-pill tone-<?= e(staff_priority_tone((string) $task['priority'])) ?>"><?= e($task['priority']) ?></span></td>
                         <td><?= e($task['due_date'] ?? '-') ?></td>
                         <td>
                             <?php if ($pendingStages !== []): ?>
@@ -331,7 +362,8 @@ include __DIR__ . '/../../app/views/partials/staff_header.php';
                 <?php endforeach; ?>
             </tbody>
         </table>
-    </div>
+        </div>
+    </section>
 <?php endif; ?>
 
 <?php include __DIR__ . '/../../app/views/partials/staff_footer.php'; ?>

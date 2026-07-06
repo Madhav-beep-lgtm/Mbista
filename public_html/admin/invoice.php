@@ -22,11 +22,12 @@ $invoiceSchemaReady = table_exists('task_invoices')
     && column_exists('task_invoices', 'total_amount');
 if (!$invoiceSchemaReady) {
     $pageTitle = 'Invoice Management';
+    $pageSubtitle = 'Create, issue, convert, and collect client invoices.';
     $bodyClass = 'admin-layout';
     include __DIR__ . '/../../app/views/partials/admin_header.php';
     ?>
-    <section class="card">
-        <h2>Invoice module unavailable</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Invoice module unavailable</h2></div>
         <p>The database is missing invoice tables or columns. Apply the pending migrations
             (<code>010</code>, <code>018</code>, <code>019</code> — or run
             <code>database/production_upgrade_invoice_module.sql</code> once via phpMyAdmin), then reload this page.</p>
@@ -626,12 +627,11 @@ $showManufacturingFields = $selectedInvoiceSourceType === 'manufacturing';
 $showServiceFields = in_array($selectedInvoiceSourceType, ['task', 'other'], true);
 
 $pageTitle = 'Invoice Management';
+$pageSubtitle = 'Create, issue, convert, and collect client invoices for ' . (string) ($currentCompany['name'] ?? 'this portal') . '.';
 $bodyClass = 'admin-layout';
 require __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
     <style>
-        .invoice-header { margin-bottom: 1.5rem; }
-        .invoice-details { background: var(--surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); padding: 1.5rem; margin-bottom: 1rem; }
         .invoice-line { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-color); }
         .invoice-line.header { font-weight: 600; background: var(--surface-soft); padding: 0.75rem 0.5rem; }
         .invoice-total { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 1rem; padding: 1rem 0; margin-top: 1rem; border-top: 2px solid var(--border-dark); font-weight: 600; }
@@ -658,13 +658,8 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
         .invoice-table thead { background: var(--surface-soft); }
         .invoice-table th, .invoice-table td { padding: 0.7rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border-color); }
         .invoice-table tbody tr:hover { background: var(--surface-soft); }
-        .invoice-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
-        .invoice-summary-card { background: var(--surface-soft); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.75rem; }
-        .invoice-summary-card strong { display: block; font-size: 1.15rem; margin-bottom: 0.25rem; color: var(--primary); }
-        .invoice-empty-state { border: 1px dashed var(--border-dark); border-radius: var(--radius-md); padding: 1rem; background: var(--surface-soft); margin-top: 1rem; }
+        .invoice-empty-state { border: 1px dashed var(--mbw-border); border-radius: var(--mbw-radius-sm); padding: 1rem; background: var(--mbw-card-soft); margin-top: 1rem; }
         .invoice-empty-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
-        .section-title { margin-top: 2rem; margin-bottom: 0.75rem; }
-        .create-invoice-box { border: 1px solid color-mix(in srgb, var(--secondary) 28%, var(--border-color)); background: color-mix(in srgb, var(--secondary) 4%, var(--surface)); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1rem; }
         .create-invoice-grid { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 0.75rem; }
         .create-invoice-grid .full { grid-column: 1 / -1; }
         .create-invoice-grid label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
@@ -680,11 +675,6 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
         }
     </style>
     <div class="container">
-        <div class="invoice-header">
-            <h1>Invoice Management - <?php echo e($currentCompany['name']); ?></h1>
-            <p class="text-muted">Company ID: <?php echo e($currentCompany['id']); ?></p>
-        </div>
-
         <?php if ($message): ?>
             <div class="alert alert-success"><?php echo e($message); ?></div>
         <?php endif; ?>
@@ -695,12 +685,52 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
 
         <?php if ($action === 'list'): ?>
             <!-- List View -->
-            <div class="invoice-details">
-                <h2>Invoices</h2>
+            <?php if ($declarationsAwaitingReview > 0): ?>
+                <div class="alert" style="background: var(--mbw-amber-soft); color: var(--mbw-amber); border-left-color: var(--mbw-amber);">
+                    <strong><?php echo (int) $declarationsAwaitingReview; ?></strong> client payment declaration(s) awaiting your review — open the flagged invoice(s) below to verify and record the payment.
+                </div>
+            <?php endif; ?>
 
-                <div class="create-invoice-box">
-                    <h3 style="margin-top: 0;">Create Invoice</h3>
-                    <p class="text-muted" style="margin-top: 0;">Create directly from this tab without leaving Invoice Management.</p>
+            <section class="mbw-kpi-grid">
+                <a class="mbw-kpi" href="<?php echo e(url('admin/invoice.php')); ?>">
+                    <div>
+                        <span class="mbw-kpi-label">Portal Invoices</span>
+                        <div class="mbw-kpi-value"><?php echo (int) count($invoices); ?></div>
+                        <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">in current view</span></span>
+                    </div>
+                    <span class="mbw-chip tone-blue"><?= icon('invoices') ?></span>
+                </a>
+                <a class="mbw-kpi" href="<?php echo e(url('admin/invoice.php?status=draft')); ?>">
+                    <div>
+                        <span class="mbw-kpi-label">Draft</span>
+                        <div class="mbw-kpi-value"><?php echo (int) count(array_filter($invoices, static fn(array $row): bool => ($row['status'] ?? '') === 'draft')); ?></div>
+                        <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">not yet issued</span></span>
+                    </div>
+                    <span class="mbw-chip tone-gray"><?= icon('documents') ?></span>
+                </a>
+                <a class="mbw-kpi" href="<?php echo e(url('admin/invoice.php?status=issued')); ?>">
+                    <div>
+                        <span class="mbw-kpi-label">Issued</span>
+                        <div class="mbw-kpi-value"><?php echo (int) count(array_filter($invoices, static fn(array $row): bool => ($row['status'] ?? '') === 'issued')); ?></div>
+                        <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">awaiting payment</span></span>
+                    </div>
+                    <span class="mbw-chip tone-amber"><?= icon('receipt-voucher') ?></span>
+                </a>
+                <a class="mbw-kpi" href="<?php echo e(url('admin/invoice.php?status=paid')); ?>">
+                    <div>
+                        <span class="mbw-kpi-label">Paid</span>
+                        <div class="mbw-kpi-value"><?php echo (int) count(array_filter($invoices, static fn(array $row): bool => ($row['status'] ?? '') === 'paid')); ?></div>
+                        <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">collected</span></span>
+                    </div>
+                    <span class="mbw-chip tone-green"><?= icon('wallet') ?></span>
+                </a>
+            </section>
+
+            <section class="mbw-card">
+                <div class="mbw-card-head">
+                    <h2>Create Invoice</h2>
+                    <div class="mbw-card-tools"><span style="color: var(--mbw-muted); font-size: 0.85rem;">Create directly from this tab without leaving Invoice Management.</span></div>
+                </div>
                     <form method="post" class="create-invoice-grid">
                         <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
                         <input type="hidden" name="action" value="create_invoice">
@@ -858,35 +888,15 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         </div>
                     </form>
                     <?php if ($taskOptions === []): ?>
-                        <p class="text-muted" style="margin-bottom: 0;">No tasks available yet. Create a task in Work Portal first, then return here to issue invoices.</p>
+                        <p style="margin-bottom: 0; color: var(--mbw-muted);">No tasks available yet. Create a task in Work Portal first, then return here to issue invoices.</p>
                     <?php endif; ?>
-                </div>
+            </section>
 
-                <?php if ($declarationsAwaitingReview > 0): ?>
-                    <div class="alert alert-success" style="background: #fff3e0; color: #b45309;">
-                        <strong><?php echo (int) $declarationsAwaitingReview; ?></strong> client payment declaration(s) awaiting your review — open the flagged invoice(s) below to verify and record the payment.
-                    </div>
-                <?php endif; ?>
-
-                <div class="invoice-summary-grid">
-                    <div class="invoice-summary-card">
-                        <strong><?php echo (int) count($invoices); ?></strong>
-                        <span>Current portal invoices</span>
-                    </div>
-                    <div class="invoice-summary-card">
-                        <strong><?php echo (int) count(array_filter($invoices, static fn(array $row): bool => ($row['status'] ?? '') === 'draft')); ?></strong>
-                        <span>Draft</span>
-                    </div>
-                    <div class="invoice-summary-card">
-                        <strong><?php echo (int) count(array_filter($invoices, static fn(array $row): bool => ($row['status'] ?? '') === 'issued')); ?></strong>
-                        <span>Issued</span>
-                    </div>
-                    <div class="invoice-summary-card">
-                        <strong><?php echo (int) count(array_filter($invoices, static fn(array $row): bool => ($row['status'] ?? '') === 'paid')); ?></strong>
-                        <span>Paid</span>
-                    </div>
+            <section class="mbw-card">
+                <div class="mbw-card-head">
+                    <h2>Invoices</h2>
+                    <div class="mbw-card-tools"><a class="mbw-view-all" href="<?php echo e(url('admin/receipts.php')); ?>">Receipt Register</a></div>
                 </div>
-                
                 <form method="get" style="margin-bottom: 1rem;">
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 0.5rem; margin-bottom: 1rem;">
                         <input type="text" name="search" placeholder="Search invoice #" value="<?php echo e($search ?? ''); ?>">
@@ -923,6 +933,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         <?php endif; ?>
                     </div>
                 <?php else: ?>
+                    <div style="overflow-x:auto">
                     <table class="invoice-table">
                         <thead>
                             <tr>
@@ -930,7 +941,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <th>Type</th>
                                 <th>Status</th>
                                 <th>Task</th>
-                                <th>Amount</th>
+                                <th class="is-numeric">Amount</th>
                                 <th>Issued Date</th>
                                 <th>Actions</th>
                             </tr>
@@ -941,13 +952,13 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <td>
                                         <?php echo e($inv['invoice_no']); ?>
                                         <?php if (in_array((int) $inv['id'], $invoiceIdsWithDeclarations, true)): ?>
-                                            <br><span class="badge badge-warning">Client payment declared</span>
+                                            <br><span class="mbw-pill tone-amber">Client payment declared</span>
                                         <?php endif; ?>
                                     </td>
-                                    <td><span class="badge badge-info"><?php echo e(ucfirst($inv['invoice_category'])); ?></span></td>
-                                    <td><span class="badge badge-<?php echo $inv['status'] === 'paid' ? 'success' : ($inv['status'] === 'cancelled' ? 'danger' : 'primary'); ?>"><?php echo e(ucfirst($inv['status'])); ?></span></td>
+                                    <td><span class="mbw-pill tone-blue"><?php echo e(ucfirst($inv['invoice_category'])); ?></span></td>
+                                    <td><span class="mbw-pill tone-<?php echo $inv['status'] === 'paid' ? 'green' : ($inv['status'] === 'cancelled' ? 'red' : ($inv['status'] === 'issued' ? 'amber' : 'blue')); ?>"><?php echo e(ucfirst($inv['status'])); ?></span></td>
                                     <td><?php echo e($inv['task_title'] ?? 'N/A'); ?></td>
-                                    <td>NPR <?php echo number_format((float) ($inv['total_amount'] ?? $inv['amount']), 2); ?></td>
+                                    <td class="is-numeric">NPR <?php echo number_format((float) ($inv['total_amount'] ?? $inv['amount']), 2); ?></td>
                                     <td><?php echo e($inv['issued_on']); ?></td>
                                     <td>
                                         <a href="?action=view&id=<?php echo (int) $inv['id']; ?>" class="btn btn-primary">View</a>
@@ -962,10 +973,14 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+                    </div>
                 <?php endif; ?>
+            </section>
 
-                <?php if (!empty($subsidiaryInvoices)): ?>
-                    <h3 class="section-title">Recent Subsidiary Invoices</h3>
+            <?php if (!empty($subsidiaryInvoices)): ?>
+                <section class="mbw-card">
+                    <div class="mbw-card-head"><h2>Recent Subsidiary Invoices</h2></div>
+                    <div style="overflow-x:auto">
                     <table class="invoice-table">
                         <thead>
                             <tr>
@@ -974,7 +989,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <th>Type</th>
                                 <th>Status</th>
                                 <th>Task</th>
-                                <th>Amount</th>
+                                <th class="is-numeric">Amount</th>
                                 <th>Issued Date</th>
                             </tr>
                         </thead>
@@ -983,22 +998,26 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <tr>
                                     <td><?php echo e($subInv['company_name'] ?? 'Subsidiary'); ?></td>
                                     <td><?php echo e($subInv['invoice_no']); ?></td>
-                                    <td><span class="badge badge-info"><?php echo e(ucfirst($subInv['invoice_category'])); ?></span></td>
-                                    <td><span class="badge badge-<?php echo ($subInv['status'] ?? '') === 'paid' ? 'success' : (($subInv['status'] ?? '') === 'cancelled' ? 'danger' : 'primary'); ?>"><?php echo e(ucfirst($subInv['status'] ?? 'draft')); ?></span></td>
+                                    <td><span class="mbw-pill tone-blue"><?php echo e(ucfirst($subInv['invoice_category'])); ?></span></td>
+                                    <td><span class="mbw-pill tone-<?php echo ($subInv['status'] ?? '') === 'paid' ? 'green' : ((($subInv['status'] ?? '') === 'cancelled') ? 'red' : ((($subInv['status'] ?? '') === 'issued') ? 'amber' : 'blue')); ?>"><?php echo e(ucfirst($subInv['status'] ?? 'draft')); ?></span></td>
                                     <td><?php echo e($subInv['task_title'] ?? 'N/A'); ?></td>
-                                    <td>NPR <?php echo number_format((float) ($subInv['total_amount'] ?? $subInv['amount']), 2); ?></td>
+                                    <td class="is-numeric">NPR <?php echo number_format((float) ($subInv['total_amount'] ?? $subInv['amount']), 2); ?></td>
                                     <td><?php echo e($subInv['issued_on']); ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
                     </table>
-                <?php endif; ?>
-            </div>
+                    </div>
+                </section>
+            <?php endif; ?>
 
         <?php elseif ($action === 'view' && $invoice): ?>
             <!-- View Invoice -->
-            <div class="invoice-details">
-                <h2>Invoice: <?php echo e($invoice['invoice_no']); ?></h2>
+            <section class="mbw-card">
+                <div class="mbw-card-head">
+                    <h2>Invoice: <?php echo e($invoice['invoice_no']); ?></h2>
+                    <div class="mbw-card-tools"><a class="mbw-view-all" href="?action=list">Back to List</a></div>
+                </div>
                 <div><?php echo get_invoice_status_badge($invoice); ?></div>
 
                 <div style="margin-top: 2rem; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2rem;">
@@ -1119,7 +1138,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         <strong>VAT Amount:</strong>
                         <span>NPR <?php echo number_format((float) $invoice['vat_amount'], 2); ?></span>
                     </div>
-                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 1rem; border-top: 2px solid #333; padding-top: 0.5rem; margin-top: 0.5rem;">
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 1rem; border-top: 2px solid var(--mbw-border); padding-top: 0.5rem; margin-top: 0.5rem;">
                         <strong style="font-size: 1.1rem;">Total Amount:</strong>
                         <span style="font-size: 1.1rem;">NPR <?php echo number_format((float) $invoice['total_amount'], 2); ?></span>
                     </div>
@@ -1149,10 +1168,11 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php if (!empty($invoice['payment_requests'])): ?>
                     <div style="margin-top: 2rem;">
                         <h3>Payment Requests</h3>
+                        <div style="overflow-x:auto">
                         <table class="invoice-table">
                             <thead>
                                 <tr>
-                                    <th>Amount</th>
+                                    <th class="is-numeric">Amount</th>
                                     <th>Method</th>
                                     <th>Status</th>
                                     <th>Requested On</th>
@@ -1173,14 +1193,14 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                         $prefillReference = $prDeclared ? (string) ($pr['client_declared_reference'] ?? '') : '';
                                     ?>
                                     <tr>
-                                        <td>NPR <?php echo number_format((float) $pr['amount_requested'], 2); ?></td>
+                                        <td class="is-numeric">NPR <?php echo number_format((float) $pr['amount_requested'], 2); ?></td>
                                         <td><?php echo e($pr['payment_method'] ?? 'Not specified'); ?></td>
-                                        <td><span class="badge badge-<?php echo $pr['status'] === 'paid' ? 'success' : ($pr['status'] === 'cancelled' ? 'danger' : 'primary'); ?>"><?php echo e(ucfirst($pr['status'])); ?></span></td>
+                                        <td><span class="mbw-pill tone-<?php echo $pr['status'] === 'paid' ? 'green' : ($pr['status'] === 'cancelled' ? 'red' : 'amber'); ?>"><?php echo e(ucfirst($pr['status'])); ?></span></td>
                                         <td><?php echo e($pr['requested_on']); ?></td>
                                         <td><?php echo e($pr['payment_received_on'] ?? 'Pending'); ?></td>
                                         <td>
                                             <?php if ($prDeclared && in_array($pr['status'], ['pending', 'partial'], true)): ?>
-                                                <div style="background:#fff3e0; border:1px solid #fcd34d; border-radius:6px; padding:0.5rem 0.75rem; margin-bottom:0.5rem; max-width:260px;">
+                                                <div style="background:var(--mbw-amber-soft); color:var(--mbw-heading); border:1px solid var(--mbw-border); border-radius:6px; padding:0.5rem 0.75rem; margin-bottom:0.5rem; max-width:260px;">
                                                     <strong>Client declared <?php echo e($pr['client_declared_status']); ?> payment</strong><br>
                                                     Amount: NPR <?php echo number_format((float) ($pr['client_declared_amount'] ?? 0), 2); ?><br>
                                                     <?php if (!empty($pr['client_declared_method'])): ?>Method: <?php echo e($pr['client_declared_method']); ?><br><?php endif; ?>
@@ -1219,14 +1239,18 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 <?php endif; ?>
-            </div>
+            </section>
 
         <?php elseif ($action === 'edit' && $invoice): ?>
             <!-- Edit Invoice -->
-            <div class="invoice-details">
-                <h2>Edit Invoice: <?php echo e($invoice['invoice_no']); ?></h2>
+            <section class="mbw-card">
+                <div class="mbw-card-head">
+                    <h2>Edit Invoice: <?php echo e($invoice['invoice_no']); ?></h2>
+                    <div class="mbw-card-tools"><a class="mbw-view-all" href="?action=view&id=<?php echo (int) $invoice['id']; ?>">Back to Invoice</a></div>
+                </div>
                 <?php $editShowsExcise = (string) ($invoice['invoice_source_type'] ?? 'task') === 'manufacturing'; ?>
                 <form method="post" action="">
                     <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
@@ -1272,7 +1296,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         <a href="?action=view&id=<?php echo (int) $invoice['id']; ?>" class="btn btn-secondary">Cancel</a>
                     </div>
                 </form>
-            </div>
+            </section>
         <?php endif; ?>
     </div>
 

@@ -291,6 +291,30 @@ if (table_exists('documents') && $clientIdsInScope !== []) {
 }
 
 $pageTitle = $view === 'library' ? 'Document Library' : 'Document Requests';
+$pageSubtitle = $view === 'library'
+    ? 'Upload, version, and approve documents across your client portfolios.'
+    : 'Request documents from clients and review their uploads.';
+
+$statusTones = [
+    'requested' => 'tone-blue',
+    'uploaded' => 'tone-amber',
+    'under_review' => 'tone-amber',
+    'accepted' => 'tone-green',
+    'rejected' => 'tone-red',
+    'waived' => 'tone-gray',
+];
+$priorityTones = [
+    'low' => 'tone-gray',
+    'normal' => 'tone-blue',
+    'high' => 'tone-amber',
+    'urgent' => 'tone-red',
+];
+$approvalTones = [
+    'approved' => 'tone-green',
+    'rejected' => 'tone-red',
+    'under_review' => 'tone-amber',
+    'draft' => 'tone-blue',
+];
 
 include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_header' : 'staff_header') . '.php';
 ?>
@@ -300,10 +324,12 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 </div>
 
 <?php if ($view === 'requests'): ?>
-    <div class="table-card">
-        <h2><?= icon('documents') ?>Request a document from a client</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Request a document from a client</h2>
+        </div>
         <?php if ($clients === []): ?>
-            <p class="muted">No clients in scope yet.</p>
+            <p style="color: var(--mbw-muted);">No clients in scope yet.</p>
         <?php else: ?>
             <details class="feature-disclosure">
                 <summary>
@@ -341,9 +367,13 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </form>
             </details>
         <?php endif; ?>
+    </section>
 
-        <div class="table-card">
-            <h3>Requests</h3>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Requests</h2>
+        </div>
+        <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -364,8 +394,8 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                         <tr>
                             <td><?= e($request['title']) ?><?= $request['document_title'] ? '<br><small>' . e($request['document_title']) . '</small>' : '' ?></td>
                             <td><?= e($request['organization_name']) ?></td>
-                            <td><span class="tag"><?= e($request['status']) ?></span></td>
-                            <td><span class="tag"><?= e($request['priority']) ?></span></td>
+                            <td><span class="mbw-pill <?= e($statusTones[$request['status']] ?? 'tone-gray') ?>"><?= e(str_replace('_', ' ', (string) $request['status'])) ?></span></td>
+                            <td><span class="mbw-pill <?= e($priorityTones[$request['priority']] ?? 'tone-gray') ?>"><?= e($request['priority']) ?></span></td>
                             <td><?= e($request['due_date'] ?? '-') ?></td>
                             <td>
                                 <?php if ($request['client_comment']): ?><small>Client: <?= e($request['client_comment']) ?></small><br><?php endif; ?>
@@ -403,14 +433,16 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </tbody>
             </table>
         </div>
-    </div>
+    </section>
 <?php endif; ?>
 
 <?php if ($view === 'library'): ?>
-    <div class="table-card">
-        <h2><?= icon('documents') ?>Document library</h2>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Upload to the library</h2>
+        </div>
         <?php if ($clients === []): ?>
-            <p class="muted">No clients in scope yet.</p>
+            <p style="color: var(--mbw-muted);">No clients in scope yet.</p>
         <?php else: ?>
             <details class="feature-disclosure">
                 <summary>
@@ -452,9 +484,13 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </form>
             </details>
         <?php endif; ?>
+    </section>
 
-        <div class="table-card">
-            <h3>Documents</h3>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Documents</h2>
+        </div>
+        <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -465,7 +501,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                         <th>Visibility</th>
                         <?php if ($hasDocumentApprovals): ?><th>Approval</th><?php endif; ?>
                         <th>Uploaded</th>
-                        <th>Size</th>
+                        <th class="is-numeric">Size</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -480,10 +516,10 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td><?= e($allowedCategories[$document['category']] ?? $document['category']) ?></td>
                             <td><?= e($document['organization_name']) ?></td>
                             <td>v<?= e((string) $document['version_number']) ?><?= count($historyByLineage[$lineageId] ?? []) > 1 ? ' (' . e((string) count($historyByLineage[$lineageId])) . ' versions)' : '' ?></td>
-                            <td><span class="tag"><?= e($document['visibility']) ?></span></td>
+                            <td><span class="mbw-pill <?= $document['visibility'] === 'client' ? 'tone-green' : 'tone-gray' ?>"><?= e($document['visibility']) ?></span></td>
                             <?php if ($hasDocumentApprovals): ?>
                                 <td>
-                                    <span class="tag"><?= e(str_replace('_', ' ', (string) ($document['approval_status'] ?? 'approved'))) ?></span>
+                                    <span class="mbw-pill <?= e($approvalTones[(string) ($document['approval_status'] ?? 'approved')] ?? 'tone-gray') ?>"><?= e(str_replace('_', ' ', (string) ($document['approval_status'] ?? 'approved'))) ?></span>
                                     <?php if (user_can('approve') && in_array((string) ($document['approval_status'] ?? ''), ['draft', 'under_review'], true)): ?>
                                         <form method="post" class="inline-action-form">
                                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -496,7 +532,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                                 </td>
                             <?php endif; ?>
                             <td><?= e($document['uploaded_by_name'] ?? 'N/A') ?><br><small><?= e($document['created_at']) ?></small></td>
-                            <td><?= e(number_format((int) $document['file_size'] / 1024, 1)) ?> KB</td>
+                            <td class="is-numeric"><?= e(number_format((int) $document['file_size'] / 1024, 1)) ?> KB</td>
                             <td>
                                 <a class="button secondary" href="<?= e(url('document-download.php?id=' . (int) $document['id'] . '&inline=1')) ?>" target="_blank" rel="noopener">Preview</a>
                                 <a class="button secondary" href="<?= e(url('document-download.php?id=' . (int) $document['id'])) ?>">Download</a>
@@ -513,6 +549,6 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </tbody>
             </table>
         </div>
-    </div>
+    </section>
 <?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_footer' : 'staff_footer') . '.php'; ?>

@@ -6,6 +6,7 @@ require_staff_or_admin();
 require_company_context();
 
 $pageTitle = 'Audit Trail & Approvals';
+$pageSubtitle = 'Track who did what, when, and under which company scope.';
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
 $fiscalYear = current_fiscal_year();
@@ -149,30 +150,22 @@ function audit_url(array $overrides = []): string
 $bodyClass = 'admin-layout accounting-module-page reports-center-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<div class="reference-head">
-    <div>
-        <h2>Audit Trail &amp; Approvals</h2>
-        <p>Track who did what, when, and under which company scope.</p>
-    </div>
-    <div class="rc-breadcrumb">Home / <strong>Audit Trail &amp; Approvals</strong></div>
-</div>
+<section class="mbw-kpi-grid">
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Pending Approval</span><div class="mbw-kpi-value"><?= e((string) $approvalSummary['pending']) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">awaiting review</span></span></div><span class="mbw-chip tone-amber"><?= icon('compliance') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Approved</span><div class="mbw-kpi-value"><?= e((string) $approvalSummary['approved']) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">posted vouchers</span></span></div><span class="mbw-chip tone-green"><?= icon('dashboard') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Rejected</span><div class="mbw-kpi-value"><?= e((string) $approvalSummary['rejected']) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">returned entries</span></span></div><span class="mbw-chip tone-red"><?= icon('tickets') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Activity Entries</span><div class="mbw-kpi-value"><?= e((string) count($activityRows)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">latest actions</span></span></div><span class="mbw-chip tone-blue"><?= icon('documents') ?></span></article>
+</section>
 
-<div class="reference-stat-grid">
-    <div class="reference-stat accent-orange"><span><?= icon('compliance') ?></span><small>Pending Approval</small><strong><?= e((string) $approvalSummary['pending']) ?></strong><em>awaiting review</em></div>
-    <div class="reference-stat accent-green"><span><?= icon('dashboard') ?></span><small>Approved</small><strong><?= e((string) $approvalSummary['approved']) ?></strong><em>posted vouchers</em></div>
-    <div class="reference-stat accent-red"><span><?= icon('tickets') ?></span><small>Rejected</small><strong><?= e((string) $approvalSummary['rejected']) ?></strong><em>returned entries</em></div>
-    <div class="reference-stat accent-blue"><span><?= icon('documents') ?></span><small>Activity Entries</small><strong><?= e((string) count($activityRows)) ?></strong><em>latest actions</em></div>
-</div>
-
-<section class="reference-panel-card">
-    <h3><?= icon('compliance') ?>Approval Queue (Pending Action)</h3>
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Approval Queue (Pending Action)</h2></div>
     <?php if (!approvals_enabled()): ?>
-        <p class="muted">Approval workflow is currently <strong>off</strong>. Vouchers post immediately. Turn it on in Settings → Fiscal &amp; Accounting Controls to route new manual vouchers through this queue.</p>
+        <p style="color:var(--mbw-muted)">Approval workflow is currently <strong>off</strong>. Vouchers post immediately. Turn it on in Settings → Fiscal &amp; Accounting Controls to route new manual vouchers through this queue.</p>
     <?php endif; ?>
-    <div class="rc-table-scroll">
+    <div style="overflow-x:auto">
         <table class="rc-table">
             <thead>
-                <tr><th>Voucher No.</th><th>Type</th><th>Party</th><th class="align-right">Amount</th><th>Submitted By</th><th>Submitted</th><th>Action</th></tr>
+                <tr><th>Voucher No.</th><th>Type</th><th>Party</th><th class="is-numeric">Amount</th><th>Submitted By</th><th>Submitted</th><th>Action</th></tr>
             </thead>
             <tbody>
                 <?php if ($pendingVouchers === []): ?>
@@ -181,9 +174,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php foreach ($pendingVouchers as $voucher): ?>
                     <tr>
                         <td><strong><?= e($voucher['voucher_no']) ?></strong></td>
-                        <td><span class="reference-pill type-sales"><?= e(ucfirst(str_replace('_', ' ', (string) $voucher['voucher_type']))) ?></span></td>
+                        <td><span class="mbw-pill tone-blue"><?= e(ucfirst(str_replace('_', ' ', (string) $voucher['voucher_type']))) ?></span></td>
                         <td><?= e($voucher['party_name'] ?? '-') ?></td>
-                        <td class="align-right"><?= e($sym) ?><?= e(number_format((float) $voucher['total_amount'], 2)) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= e(number_format((float) $voucher['total_amount'], 2)) ?></td>
                         <td><?= e($voucher['submitter_name'] ?? '-') ?></td>
                         <td><?= e(date('d M Y H:i', strtotime((string) $voucher['created_at']))) ?></td>
                         <td>
@@ -207,7 +200,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     </details>
                                 </div>
                             <?php else: ?>
-                                <span class="muted">Approver only</span>
+                                <span style="color:var(--mbw-muted)">Approver only</span>
                             <?php endif; ?>
                         </td>
                     </tr>
@@ -217,11 +210,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
-<div class="rc-workspace audit-workspace">
-    <main class="rc-report-view">
-        <div class="rc-report-head">
-            <div><h3><?= icon('documents') ?>Activity Log</h3><p>Chronological record of actions across modules.</p></div>
-        </div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Activity Log</h2></div>
+        <p style="color:var(--mbw-muted);margin-top:0">Chronological record of actions across modules.</p>
         <form method="get" class="reference-filter-group audit-filter">
             <select name="module">
                 <option value="">All modules</option>
@@ -232,7 +224,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <div class="reference-search"><?= icon('portal') ?><input type="search" name="q" value="<?= e($searchQuery) ?>" placeholder="Search actions or details"></div>
             <button class="button secondary" type="submit"><?= icon('settings') ?>Apply</button>
         </form>
-        <div class="rc-table-scroll">
+        <div style="overflow-x:auto">
             <table class="rc-table">
                 <thead><tr><th>Date &amp; Time</th><th>User</th><th>Module</th><th>Action</th><th>Details</th><th>IP</th></tr></thead>
                 <tbody>
@@ -241,7 +233,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <tr>
                             <td><?= e(date('d M Y H:i', strtotime((string) $row['created_at']))) ?></td>
                             <td><?= e($row['actor_name'] ?? 'System') ?></td>
-                            <td><span class="reference-pill type-sales"><?= e(ucfirst(str_replace('_', ' ', (string) $row['entity_type']))) ?></span></td>
+                            <td><span class="mbw-pill tone-blue"><?= e(ucfirst(str_replace('_', ' ', (string) $row['entity_type']))) ?></span></td>
                             <td><?= e(ucfirst(str_replace('_', ' ', (string) $row['action']))) ?></td>
                             <td><?= e((string) ($row['details'] ?? '')) ?></td>
                             <td><?= e((string) ($row['ip_address'] ?? '')) ?></td>
@@ -250,11 +242,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </tbody>
             </table>
         </div>
-    </main>
+    </section>
 
-    <aside class="rc-report-view audit-change-panel">
-        <div class="rc-report-head"><div><h3><?= icon('settings') ?>Field-Level Changes</h3><p>Before → after history.</p></div></div>
-        <div class="rc-table-scroll">
+    <aside class="mbw-card audit-change-panel">
+        <div class="mbw-card-head"><h2>Field-Level Changes</h2></div>
+        <p style="color:var(--mbw-muted);margin-top:0">Before &rarr; after history.</p>
+        <div style="overflow-x:auto">
             <table class="rc-table">
                 <thead><tr><th>When</th><th>Entity</th><th>Field</th><th>Old → New</th><th>By</th></tr></thead>
                 <tbody>

@@ -6,6 +6,7 @@ require_staff_or_admin();
 require_company_context();
 
 $pageTitle = 'Chart of Accounts';
+$pageSubtitle = 'Masters, groups, ledgers, and automated posting structure for the company chart.';
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 $currentCompany = current_company();
 $currentAdmin = current_user();
@@ -232,8 +233,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <div class="accounting-page-head">
     <div>
-        <h2>Masters, groups, ledgers, and posting structure</h2>
-        <p><?= e($currentCompany['name'] ?? 'Company') ?> / Foundation for vouchers, invoices, purchases, inventory, manufacturing, and reports.</p>
+        <h2 style="color:var(--mbw-heading)">Masters, groups, ledgers, and posting structure</h2>
+        <p style="color:var(--mbw-muted)"><?= e($currentCompany['name'] ?? 'Company') ?> / Foundation for vouchers, invoices, purchases, inventory, manufacturing, and reports.</p>
     </div>
     <div class="accounting-actions">
         <a class="button secondary" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
@@ -258,13 +259,46 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a class="coa-module-card" href="<?= e(url('admin/workspace.php?view=home')) ?>"><span><?= icon('reports') ?></span><strong>Dimensions</strong><small>Cost centers and projects</small></a>
 </section>
 
-<div class="accounting-stat-grid">
-    <div class="accounting-stat-card accent-blue"><span class="stat-icon"><?= icon('accounting') ?></span><small>Masters</small><strong><?= e((string) count($masters)) ?></strong><em>Fixed framework</em></div>
-    <div class="accounting-stat-card accent-green"><span class="stat-icon"><?= icon('teams') ?></span><small>Groups</small><strong><?= e((string) $groupCount) ?></strong><em>Active classifications</em></div>
-    <div class="accounting-stat-card accent-purple"><span class="stat-icon"><?= icon('documents') ?></span><small>Ledgers</small><strong><?= e((string) $ledgerCount) ?></strong><em>Posting accounts</em></div>
-    <div class="accounting-stat-card accent-orange"><span class="stat-icon"><?= icon('settings') ?></span><small>Mapped accounts</small><strong><?= e((string) $mappedCount) ?></strong><em>Automation ready</em></div>
-</div>
+<section class="mbw-kpi-grid">
+    <article class="mbw-kpi">
+        <div>
+            <span class="mbw-kpi-label">Masters</span>
+            <div class="mbw-kpi-value"><?= e((string) count($masters)) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Fixed framework</span></span>
+        </div>
+        <span class="mbw-chip tone-blue"><?= icon('layers') ?></span>
+    </article>
+    <a class="mbw-kpi" href="<?= e(url('admin/chart-groups.php')) ?>">
+        <div>
+            <span class="mbw-kpi-label">Groups</span>
+            <div class="mbw-kpi-value"><?= e((string) $groupCount) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Active classifications</span></span>
+        </div>
+        <span class="mbw-chip tone-green"><?= icon('tree') ?></span>
+    </a>
+    <a class="mbw-kpi" href="<?= e(url('admin/chart-ledgers.php')) ?>">
+        <div>
+            <span class="mbw-kpi-label">Ledgers</span>
+            <div class="mbw-kpi-value"><?= e((string) $ledgerCount) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Posting accounts</span></span>
+        </div>
+        <span class="mbw-chip tone-purple"><?= icon('journal') ?></span>
+    </a>
+    <a class="mbw-kpi" href="<?= e(url('admin/chart-posting-accounts.php')) ?>">
+        <div>
+            <span class="mbw-kpi-label">Mapped Accounts</span>
+            <div class="mbw-kpi-value"><?= e((string) $mappedCount) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Automation ready</span></span>
+        </div>
+        <span class="mbw-chip tone-amber"><?= icon('settings') ?></span>
+    </a>
+</section>
 
+<section class="mbw-card">
+    <div class="mbw-card-head">
+        <h2>Setup &amp; Automation</h2>
+        <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/chart-posting-accounts.php')) ?>">Posting Accounts</a></div>
+    </div>
 <div class="workspace-feature-stack">
     <details class="feature-disclosure" id="create-group">
         <summary>
@@ -342,30 +376,32 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <a class="button secondary" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><?= icon('settings') ?>Open posting accounts</a>
     </article>
 </div>
+</section>
 
 <div class="coa-workspace-grid" id="hierarchy">
-<div class="card coa-tree-card">
-    <div class="card-header">
-        <h3><?= e($currentCompany['name']) ?> chart hierarchy</h3>
+<section class="mbw-card coa-tree-card">
+    <div class="mbw-card-head">
+        <h2><?= e($currentCompany['name']) ?> chart hierarchy</h2>
+        <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>">View All</a></div>
     </div>
-    <div class="card-body">
-        <?php if (empty($chartOfAccounts)): ?>
-            <p>No chart of accounts has been configured for this company.</p>
-        <?php else: ?>
-            <div class="account-tree">
-                <?php render_account_tree($chartOfAccounts); ?>
-            </div>
-        <?php endif; ?>
-    </div>
-</div>
+    <?php if (empty($chartOfAccounts)): ?>
+        <p style="color:var(--mbw-muted)">No chart of accounts has been configured for this company.</p>
+    <?php else: ?>
+        <div class="account-tree">
+            <?php render_account_tree($chartOfAccounts); ?>
+        </div>
+    <?php endif; ?>
+</section>
 
-<aside class="coa-impact-card">
-    <h3>Click flows and impact</h3>
+<section class="mbw-card coa-impact-card">
+    <div class="mbw-card-head">
+        <h2>Click flows and impact</h2>
+    </div>
     <div><strong>Create Group</strong><span>Vouchers, sales, purchases, inventory, manufacturing, and reports inherit classification.</span></div>
     <div><strong>Create Ledger Account</strong><span>New account becomes available for postings and mapped automation.</span></div>
     <div><strong>Automated Posting</strong><span>Invoices, receipts, payments, VAT, and cash/bank entries use approved ledgers.</span></div>
     <div><strong>Audit Enabled</strong><span>All account changes are tracked through activity logs and field history.</span></div>
-</aside>
+</section>
 </div>
 
 <section class="mbw-governance-note" id="audit-log">

@@ -245,6 +245,32 @@ $statusLabels = [
 ];
 
 $pageTitle = $view === 'types' ? 'Compliance Types' : 'Compliance Calendar';
+$pageSubtitle = $view === 'types'
+    ? 'Manage the statutory compliance types available for this company'
+    : 'Track statutory deadlines, filings, and assignments across your clients';
+
+$statusTones = [
+    'not_started' => 'gray',
+    'upcoming' => 'blue',
+    'in_progress' => 'amber',
+    'waiting_for_client' => 'amber',
+    'filed' => 'green',
+    'completed' => 'green',
+    'overdue' => 'red',
+    'not_applicable' => 'gray',
+];
+
+$statusCounts = ['total' => count($deadlines), 'overdue' => 0, 'open' => 0, 'done' => 0];
+foreach ($deadlines as $d) {
+    $es = (string) $d['effective_status'];
+    if ($es === 'overdue') {
+        $statusCounts['overdue']++;
+    } elseif (in_array($es, ['filed', 'completed'], true)) {
+        $statusCounts['done']++;
+    } elseif ($es !== 'not_applicable') {
+        $statusCounts['open']++;
+    }
+}
 
 include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_header' : 'staff_header') . '.php';
 ?>
@@ -256,10 +282,46 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 </div>
 
 <?php if ($view === 'deadlines'): ?>
-    <div class="table-card">
-        <h2><?= icon('compliance') ?>Compliance deadlines</h2>
+    <section class="mbw-kpi-grid">
+        <article class="mbw-kpi">
+            <div>
+                <span class="mbw-kpi-label">Deadlines Shown</span>
+                <div class="mbw-kpi-value"><?= e((string) $statusCounts['total']) ?></div>
+                <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">matching current filters</span></span>
+            </div>
+            <span class="mbw-chip tone-blue"><?= icon('compliance') ?></span>
+        </article>
+        <a class="mbw-kpi" href="<?= e(url('admin/compliance.php?view=deadlines&status=overdue')) ?>">
+            <div>
+                <span class="mbw-kpi-label">Overdue</span>
+                <div class="mbw-kpi-value"><?= e((string) $statusCounts['overdue']) ?></div>
+                <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">past statutory due date</span></span>
+            </div>
+            <span class="mbw-chip tone-red"><?= icon('calendar') ?></span>
+        </a>
+        <article class="mbw-kpi">
+            <div>
+                <span class="mbw-kpi-label">Open</span>
+                <div class="mbw-kpi-value"><?= e((string) $statusCounts['open']) ?></div>
+                <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">not yet filed</span></span>
+            </div>
+            <span class="mbw-chip tone-amber"><?= icon('tasks') ?></span>
+        </article>
+        <a class="mbw-kpi" href="<?= e(url('admin/compliance.php?view=deadlines&status=completed')) ?>">
+            <div>
+                <span class="mbw-kpi-label">Filed / Completed</span>
+                <div class="mbw-kpi-value"><?= e((string) $statusCounts['done']) ?></div>
+                <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">closed out</span></span>
+            </div>
+            <span class="mbw-chip tone-green"><?= icon('award') ?></span>
+        </a>
+    </section>
 
-        <?php if ($role === 'admin' && $clients !== [] && $activeComplianceTypes !== []): ?>
+    <?php if ($role === 'admin' && $clients !== [] && $activeComplianceTypes !== []): ?>
+    <section class="mbw-card" style="margin-bottom:16px;">
+        <div class="mbw-card-head">
+            <h2>Create Deadline</h2>
+        </div>
             <details class="feature-disclosure">
                 <summary>
                     <span>
@@ -311,10 +373,13 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     </div>
                 </form>
             </details>
-        <?php endif; ?>
+    </section>
+    <?php endif; ?>
 
-        <div class="users-filters-card" style="margin-top:20px;">
-            <h3>Filters</h3>
+    <section class="mbw-card" style="margin-bottom:16px;">
+        <div class="mbw-card-head">
+            <h2>Filters</h2>
+        </div>
             <form method="get" class="users-filter-grid">
                 <input type="hidden" name="view" value="deadlines">
                 <label>Status
@@ -340,9 +405,13 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <a class="button secondary" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>">Reset</a>
                 </div>
             </form>
-        </div>
+    </section>
 
-        <div class="table-card" style="margin-top:20px;">
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Compliance Deadlines</h2>
+        </div>
+        <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -364,7 +433,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td><?= e($deadline['organization_name']) ?></td>
                             <td><?= e($deadline['compliance_type_name']) ?><br><small><?= e($deadline['applicable_period']) ?></small></td>
                             <td><?= e($deadline['statutory_due_date']) ?></td>
-                            <td><span class="tag"><?= e($statusLabels[$deadline['effective_status']] ?? $deadline['effective_status']) ?></span></td>
+                            <td><span class="mbw-pill tone-<?= e($statusTones[$deadline['effective_status']] ?? 'gray') ?>"><?= e($statusLabels[$deadline['effective_status']] ?? $deadline['effective_status']) ?></span></td>
                             <td><?= e($deadline['assigned_staff_name'] ?? 'Unassigned') ?></td>
                             <td>
                                 <?php if ($deadline['filing_date']): ?>
@@ -405,12 +474,14 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </tbody>
             </table>
         </div>
-    </div>
+    </section>
 <?php endif; ?>
 
 <?php if ($view === 'types' && $role === 'admin'): ?>
-    <div class="table-card">
-        <h2><?= icon('compliance') ?>Compliance types</h2>
+    <section class="mbw-card" style="margin-bottom:16px;">
+        <div class="mbw-card-head">
+            <h2>Create Type</h2>
+        </div>
         <details class="feature-disclosure">
             <summary>
                 <span>
@@ -428,8 +499,13 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </div>
             </form>
         </details>
+    </section>
 
-        <div class="table-card">
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Compliance Types</h2>
+        </div>
+        <div style="overflow-x:auto">
             <table>
                 <thead>
                     <tr>
@@ -445,7 +521,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <?php foreach ($complianceTypes as $type): ?>
                         <tr>
                             <td><?= e($type['name']) ?></td>
-                            <td><?= (int) $type['is_active'] === 1 ? 'Active' : 'Inactive' ?></td>
+                            <td><span class="mbw-pill <?= (int) $type['is_active'] === 1 ? 'tone-green' : 'tone-red' ?>"><?= (int) $type['is_active'] === 1 ? 'Active' : 'Inactive' ?></span></td>
                             <td>
                                 <form method="post" class="inline-action-form">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -459,6 +535,6 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </tbody>
             </table>
         </div>
-    </div>
+    </section>
 <?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_footer' : 'staff_footer') . '.php'; ?>
