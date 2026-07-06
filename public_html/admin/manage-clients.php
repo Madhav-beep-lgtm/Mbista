@@ -102,6 +102,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td>
                         <?php if ($hasBooks): ?>
                             <a class="button soft" style="min-height:32px;padding:4px 12px" href="<?= e(url('admin/client-books.php?client=' . (int) $client['id'])) ?>"><?= icon('journal') ?>Open Books</a>
+                            <?php if ($access === 'direct'): ?>
+                                <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" style="display:inline">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="company_id" value="<?= (int) $client['books_company_id'] ?>">
+                                    <button type="submit" class="button" style="min-height:32px;padding:4px 12px"><?= icon('accounting') ?>Full Accounting</button>
+                                </form>
+                            <?php endif; ?>
                         <?php elseif ($role === 'admin'): ?>
                             <form method="post" style="display:inline">
                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

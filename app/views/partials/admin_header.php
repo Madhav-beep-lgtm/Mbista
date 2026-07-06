@@ -20,9 +20,10 @@ $headerBusinessProfile = accounting_business_profile($headerBusinessType);
 $headerAltioraCompany = $headerCompanyCode === 'MBAACA' ? company_by_code('AGHPL') : null;
 $headerMbistaCompany = $headerCompanyCode !== 'MBAACA' ? company_by_code('MBAACA') : null;
 $headerSubsidiaryCompanies = $headerCompanyCode === 'AGHPL' && $headerCompanyId > 0 ? child_companies_for_company($headerCompanyId) : [];
-$headerPortalLabel = match ($headerCompanyCode) {
-    'MBAACA' => 'M.Bista superadmin portal',
-    'AGHPL' => 'Altiora parent admin portal',
+$headerPortalLabel = match (true) {
+    $headerCompanyCode === 'MBAACA' => 'M.Bista superadmin portal',
+    $headerCompanyCode === 'AGHPL' => 'Altiora parent admin portal',
+    (int) ($headerCompany['is_client_company'] ?? 0) === 1 => 'Client accounting books',
     default => $headerCompany ? 'Subsidiary company portal' : 'Admin portal',
 };
 

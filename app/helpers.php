@@ -995,6 +995,23 @@ function handle_company_switch(int $companyId, string $failureUrl): never
         redirect($failureUrl);
     }
 
+    // Client books companies open PIN-free for admins with direct access.
+    if ((int) ($company['is_client_company'] ?? 0) === 1) {
+        $bookProfileStmt = db()->prepare('SELECT * FROM client_profiles WHERE books_company_id = :cid LIMIT 1');
+        $bookProfileStmt->execute(['cid' => $companyId]);
+        $bookProfile = $bookProfileStmt->fetch();
+        if (!$bookProfile || client_books_access_level($bookProfile) !== 'direct') {
+            flash('error', 'You do not have direct access to the books of that client.');
+            redirect($failureUrl);
+        }
+        if (!activate_company_context($companyId, true)) {
+            flash('error', 'No active fiscal year is available for the books of this client.');
+            redirect($failureUrl);
+        }
+        flash('success', 'Opened full accounting for ' . ($bookProfile['organization_name'] ?? 'client') . '.');
+        redirect('admin/accounting-dashboard.php');
+    }
+
     if ((string) ($company['code'] ?? '') === 'MBAACA') {
         if (!activate_company_context($companyId, true)) {
             flash('error', 'No active fiscal year is available for M.Bista and Associates.');

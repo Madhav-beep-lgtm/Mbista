@@ -136,6 +136,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a class="mbw-tab <?= $tab === 'vouchers' ? 'is-active' : '' ?>" href="<?= e($booksUrl('vouchers')) ?>"><?= icon('journal') ?>Vouchers</a>
     <a class="mbw-tab <?= $tab === 'reports' ? 'is-active' : '' ?>" href="<?= e($booksUrl('reports')) ?>"><?= icon('reports') ?>Reports</a>
     <a class="mbw-tab" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('chevron-right') ?>All Clients</a>
+    <?php if ($access === 'direct'): ?>
+        <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" style="margin-left:auto">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="company_id" value="<?= (int) $booksCompanyId ?>">
+            <button type="submit" class="button" style="min-height:36px"><?= icon('accounting') ?>Open Full Accounting</button>
+        </form>
+    <?php endif; ?>
 </nav>
 
 <?php if ($tab === 'overview'): ?>
