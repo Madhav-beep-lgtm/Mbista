@@ -295,7 +295,7 @@ if ($typeFilter === 'customer') {
 } elseif ($typeFilter === 'supplier') {
     $tab = 'suppliers';
 }
-$validTabs = ['overview', 'sales', 'purchases', 'customers', 'suppliers', 'collections', 'payments', 'aging'];
+$validTabs = ['overview', 'sales', 'purchases', 'customers', 'suppliers', 'collections', 'payments'];
 if (!in_array($tab, $validTabs, true)) {
     $tab = 'overview';
 }
@@ -703,7 +703,6 @@ $tabLinks = [
     'suppliers' => ['Suppliers', parties_page_url(['tab' => null, 'type' => 'supplier', 'page' => null])],
     'collections' => ['Collections', parties_page_url(['tab' => 'collections', 'type' => null, 'page' => null])],
     'payments' => ['Payments', parties_page_url(['tab' => 'payments', 'type' => null, 'page' => null])],
-    'aging' => ['Aging', parties_page_url(['tab' => 'aging', 'type' => null, 'page' => null])],
 ];
 
 // Rows for the active tab's table + pagination.
@@ -891,7 +890,6 @@ $tabHeadings = [
     'payments' => 'Supplier Payments',
     'customers' => 'Customers',
     'suppliers' => 'Suppliers',
-    'aging' => 'Aging',
 ];
 ?>
 <?php if ($tab !== 'aging'): ?>
@@ -899,7 +897,7 @@ $tabHeadings = [
     <main id="documents" class="mbw-card reference-table-card">
         <div class="mbw-card-head">
             <h2><?= e($tabHeadings[$tab] ?? 'Documents') ?></h2>
-            <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(parties_page_url(['tab' => 'aging', 'type' => null, 'page' => null])) ?>">Aging</a></div>
+            <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=party-wise')) ?>">Aging Report</a></div>
         </div>
         <?php if (in_array($tab, ['overview', 'sales'], true)): ?>
             <div style="overflow-x:auto">
@@ -1131,45 +1129,4 @@ $tabHeadings = [
 </div>
 <?php endif; ?>
 
-<?php if ($tab === 'aging'): ?>
-<div id="aging" class="reference-aging-grid">
-    <?php foreach ([['Receivables Aging', $receivableAging, $summary['receivables']], ['Payables Aging', $payableAging, $summary['payables']]] as $agingCard): ?>
-        <section class="mbw-card aging-card">
-            <div class="mbw-card-head">
-                <h2><?= e($agingCard[0]) ?></h2>
-                <div class="mbw-card-tools"><span style="font-size:12px;color:var(--mbw-muted)">as of <?= e(date('d M Y')) ?></span></div>
-            </div>
-            <div class="aging-body">
-                <?php
-                $agingColors = ['0 - 30 Days' => '#22a861', '31 - 60 Days' => '#f2b705', '61 - 90 Days' => '#f57520', '90+ Days' => '#e83d3d'];
-                $agingSum = array_sum(array_map('floatval', $agingCard[1]));
-                if ($agingSum > 0) {
-                    $agingStops = [];
-                    $agingStart = 0.0;
-                    foreach ($agingCard[1] as $agingLabel => $agingAmount) {
-                        $agingEnd = $agingStart + ((float) $agingAmount / $agingSum) * 100;
-                        $agingStops[] = ($agingColors[$agingLabel] ?? '#94a3b8') . ' ' . number_format($agingStart, 2, '.', '') . '% ' . number_format($agingEnd, 2, '.', '') . '%';
-                        $agingStart = $agingEnd;
-                    }
-                    $agingStyle = 'background:conic-gradient(' . implode(',', $agingStops) . ')';
-                } else {
-                    $agingStyle = 'background:var(--mbw-gray-soft)';
-                }
-                ?>
-                <div class="donut-chart" style="<?= e($agingStyle) ?>"></div>
-                <div class="aging-legend">
-                    <?php foreach ($agingCard[1] as $label => $amount): ?>
-                        <div><span style="background:<?= e($agingColors[$label] ?? '#94a3b8') ?>"></span><?= e($label) ?><strong><?= e(site_currency_symbol()) ?><?= e(number_format((float) $amount, 2)) ?></strong></div>
-                    <?php endforeach; ?>
-                </div>
-                <div class="aging-total"><small>Total</small><strong><?= e(site_currency_symbol()) ?><?= e(number_format((float) $agingCard[2], 2)) ?></strong><small>Overdue (&gt; 30 Days)</small><em><?= e(site_currency_symbol()) ?><?= e(number_format((float) (($agingCard[1]['31 - 60 Days'] ?? 0) + ($agingCard[1]['61 - 90 Days'] ?? 0) + ($agingCard[1]['90+ Days'] ?? 0)), 2)) ?></em></div>
-            </div>
-        </section>
-    <?php endforeach; ?>
-</div>
-<section class="mbw-card">
-    <div class="mbw-card-head"><h2>Detailed Aging</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=party-wise')) ?>">Receivables Aging Report</a></div></div>
-    <p style="margin:0;color:var(--mbw-muted);font-size:13px">Open the Receivables Aging Report for customer-wise buckets, credit limits, and overdue percentages.</p>
-</section>
-<?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
