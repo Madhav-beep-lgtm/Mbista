@@ -14,8 +14,7 @@ function rc_report_registry(): array
         'group-report' => ['Group Report', 'Summary by ledger groups', 'teams'],
         'consolidated' => ['Consolidated Report', 'Consolidated financials', 'companies'],
         'party-wise' => ['Receivables Aging Report', 'Customer dues by age bucket', 'users'],
-        'cash-book' => ['Cash Book', 'Cash account transactions', 'documents'],
-        'bank-book' => ['Bank Book', 'Bank account transactions', 'accounting'],
+        'cash-book' => ['Cash & Bank Book', 'Cash and bank transactions with running balance', 'bank'],
         'daybook' => ['Daybook', 'All day transactions', 'compliance'],
         'sales-register' => ['Sales Register', 'Sales transaction details', 'invoices'],
         'collections-register' => ['Collections Register', 'Customer payments received', 'wallet'],
@@ -802,10 +801,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
 
         case 'cash-book':
         case 'bank-book': {
-            $isCash = $reportId === 'cash-book';
-            $sql = $isCash
-                ? "SELECT id FROM ledgers WHERE company_id = ? AND code = 'CASH'"
-                : "SELECT l.id FROM ledgers l LEFT JOIN ledger_groups lg ON lg.id = l.group_id WHERE l.company_id = ? AND ((lg.is_cash_or_bank = 1 AND l.code <> 'CASH') OR l.name LIKE '%bank%')";
+            $sql = "SELECT l.id FROM ledgers l LEFT JOIN ledger_groups lg ON lg.id = l.group_id WHERE l.company_id = ? AND COALESCE(lg.is_cash_or_bank, 0) = 1";
             $stmt = db()->prepare($sql);
             $stmt->execute([$scopeCompanyId]);
             $ledgerIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
@@ -819,7 +815,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 $rows[] = [date('d M Y', strtotime((string) $line['vdate'])), $line['voucher_no'], $line['ledger_code'], $line['memo'] ?: ($line['narration'] ?? ''), rc_fmt($dr), rc_fmt($cr), rc_fmt(abs($running)) . ($running >= 0 ? ' Dr' : ' Cr')];
             }
             return [
-                'subtitle' => ($isCash ? 'Cash' : 'Bank') . ' account transactions with running balance.',
+                'subtitle' => 'Cash and bank account transactions with running balance.',
                 'columns' => [['Date', 'left', ''], ['Voucher', 'left', ''], ['Account', 'left', ''], ['Particulars', 'left', ''], ['Receipts (Dr.)', 'right', ''], ['Payments (Cr.)', 'right', ''], ['Balance', 'right', '']],
                 'rows' => $rows,
                 'totals' => null,

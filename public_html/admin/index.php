@@ -181,11 +181,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <div class="admin-stats">
     <a class="card stat-link" href="<?= e(url('admin/companies.php')) ?>"><span class="stat-icon"><?= icon('companies') ?></span><strong><?= e($companyCount) ?></strong><p>Companies</p><small>Click → View all companies</small></a>
     <a class="card stat-link" href="<?= e(url('admin/users.php')) ?>"><span class="stat-icon"><?= icon('staff') ?></span><strong><?= e($activeStaffCount) ?></strong><p>Active staff</p><small>Click → View all staff</small></a>
-    <a class="card stat-link" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><span class="stat-icon"><?= icon('clients') ?></span><strong><?= e($activeClientCount) ?></strong><p>Active clients</p><small>Click → View all clients</small></a>
+    <a class="card stat-link" href="<?= e(url('admin/manage-clients.php')) ?>"><span class="stat-icon"><?= icon('clients') ?></span><strong><?= e($activeClientCount) ?></strong><p>Active clients</p><small>Click → View all clients</small></a>
     <a class="card stat-link" href="<?= e(url('admin/workspace.php?view=home')) ?>"><span class="stat-icon"><?= icon('tasks') ?></span><strong><?= e($openTaskCount) ?></strong><p>Open tasks</p><small>Click → View all tasks</small></a>
     <a class="card stat-link" href="<?= e(url('admin/workspace.php?view=home')) ?>"><span class="stat-icon"><?= icon('insights') ?></span><strong><?= e(number_format($overallTaskProgress, 1)) ?>%</strong><p>Overall task progress</p><small>Click → Open task analytics</small></a>
     <a class="card stat-link" href="<?= e(url('admin/invoice.php')) ?>"><span class="stat-icon"><?= icon('invoices') ?></span><strong><?= e($pendingInvoiceCount) ?></strong><p>Pending invoices</p><small>Click → View pending invoices</small></a>
-    <a class="card stat-link" href="<?= e(url('admin/invoice.php')) ?>"><span class="stat-icon"><?= icon('accounting') ?></span><strong>Rs.<?= e(number_format($pendingInvoiceAmount, 2)) ?></strong><p>Pending invoice amount</p><small>Click → View amount details</small></a>
     <a class="card stat-link" href="<?= e(url('admin/reports-center.php?report=collections-register')) ?>"><span class="stat-icon"><?= icon('reports') ?></span><strong><?= e(number_format($invoiceCollectionRate, 1)) ?>%</strong><p>Invoice collection rate</p><small>Click → View collection analytics</small></a>
 </div>
 

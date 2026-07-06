@@ -29,15 +29,18 @@ $headerPortalLabel = match (true) {
 
 // Accounting workspace submenu: [label, url, icon, active?]
 $headerChartPages = ['chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php'];
-$headerAccountingChildren = [
-    ['Overview', 'admin/accounting-dashboard.php', 'dashboard', $headerScript === 'accounting-dashboard.php'],
+$headerAccountingChildren = [];
+if ($headerCompanyCode !== 'MBAACA') {
+    $headerAccountingChildren[] = ['Overview', 'admin/accounting-dashboard.php', 'dashboard', $headerScript === 'accounting-dashboard.php'];
+}
+$headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Chart of Accounts', 'admin/chart-of-accounts.php', 'tree', in_array($headerScript, $headerChartPages, true)],
     ['Vouchers', 'admin/accounting.php', 'journal', in_array($headerScript, ['accounting.php', 'voucher-form.php'], true)],
     ['Sales & Invoices', 'admin/accounting-parties.php?tab=sales', 'invoices', $headerScript === 'accounting-parties.php' && in_array($headerTab, ['', 'sales'], true)],
     ['Purchases', 'admin/accounting-parties.php?tab=purchases', 'cart', $headerScript === 'accounting-parties.php' && $headerTab === 'purchases'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
-];
+]);
 $headerAccountingActive = false;
 foreach ($headerAccountingChildren as $headerChild) {
     if ($headerChild[3]) {
@@ -166,7 +169,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <span class="admin-nav-group">Operations</span>
             <a class="<?= $headerScript === 'workspace.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('portal') ?>Work Portal</a>
             <a class="<?= $headerScript === 'companies.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/companies.php')) ?>"><?= icon('companies') ?>Companies</a>
-            <a class="<?= $headerScript === 'invoice.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Client Invoices</a>
             <a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
             <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
             <a class="<?= $headerScript === 'hr.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>HR &amp; Attendance</a>

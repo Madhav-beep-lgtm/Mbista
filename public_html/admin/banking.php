@@ -174,7 +174,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-card" aria-label="Recent bank activity">
     <div class="mbw-card-head">
         <h2>Recent Bank &amp; Cash Activity</h2>
-        <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=bank-book&fy=' . $fiscalYearId)) ?>">Bank Book</a></div>
+        <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=cash-book&fy=' . $fiscalYearId)) ?>">Cash &amp; Bank Book</a></div>
     </div>
     <div style="overflow-x:auto">
         <table>
