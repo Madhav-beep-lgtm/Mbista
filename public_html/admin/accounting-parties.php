@@ -727,16 +727,6 @@ $pagedRows = array_slice($activeRows, ($page - 1) * $perPage, $perPage);
 $showingFrom = $totalRows === 0 ? 0 : (($page - 1) * $perPage) + 1;
 $showingTo = min($totalRows, $page * $perPage);
 ?>
-<div class="reference-head">
-    <div>
-        <h2 style="color:var(--mbw-heading)">Party Workspace</h2>
-        <p style="color:var(--mbw-muted)">Invoices, bills, collections and payments in one place.</p>
-    </div>
-    <div class="reference-head-actions">
-        <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) ($selectedParty['id'] ?? 0)])) ?>"><?= icon('documents') ?>Send Statement</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) ($selectedParty['id'] ?? 0)])) ?>"><?= icon('accounting') ?>View Party Ledger</a>
-    </div>
-</div>
 
 <?php if ($repairErrors !== []): ?>
     <div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div>
@@ -748,28 +738,6 @@ $showingTo = min($totalRows, $page * $perPage);
     <?php endforeach; ?>
 </nav>
 
-<section class="mbw-kpi-grid" aria-label="Sales and purchase overview">
-    <?php
-    $partiesKpis = [
-        ['label' => 'Outstanding Receivables', 'value' => site_currency_symbol() . number_format($summary['receivables'], 2), 'note' => 'from live vouchers', 'tone' => 'green', 'icon' => 'wallet', 'href' => parties_page_url(['tab' => 'sales', 'type' => null, 'status' => 'open', 'page' => null])],
-        ['label' => 'Outstanding Payables', 'value' => site_currency_symbol() . number_format($summary['payables'], 2), 'note' => 'supplier bills pending', 'tone' => 'red', 'icon' => 'receipt-voucher', 'href' => parties_page_url(['tab' => 'purchases', 'type' => null, 'status' => null, 'page' => null])],
-        ['label' => 'This Month Sales', 'value' => site_currency_symbol() . number_format($summary['month_sales'], 2), 'note' => 'sales invoices', 'tone' => 'blue', 'icon' => 'invoices', 'href' => parties_page_url(['tab' => 'sales', 'type' => null, 'status' => null, 'page' => null])],
-        ['label' => 'This Month Purchases', 'value' => site_currency_symbol() . number_format($summary['month_purchases'], 2), 'note' => 'purchase bills', 'tone' => 'purple', 'icon' => 'cart', 'href' => parties_page_url(['tab' => 'purchases', 'type' => null, 'status' => null, 'page' => null])],
-        ['label' => 'Overdue Invoices', 'value' => site_currency_symbol() . number_format($summary['overdue'], 2), 'note' => $summary['overdue_count'] . ' invoices', 'tone' => 'amber', 'icon' => 'calendar', 'href' => parties_page_url(['tab' => 'sales', 'type' => null, 'status' => 'overdue', 'page' => null])],
-        ['label' => 'Collection Efficiency', 'value' => number_format($collectionEfficiency, 1) . '%', 'note' => 'paid vs outstanding', 'tone' => 'teal', 'icon' => 'trend-up', 'href' => parties_page_url(['tab' => 'collections', 'type' => null, 'status' => null, 'page' => null])],
-    ];
-    ?>
-    <?php foreach ($partiesKpis as $kpi): ?>
-        <a class="mbw-kpi" href="<?= e($kpi['href']) ?>">
-            <div>
-                <span class="mbw-kpi-label"><?= e($kpi['label']) ?></span>
-                <div class="mbw-kpi-value"><?= e($kpi['value']) ?></div>
-                <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e($kpi['note']) ?></span></span>
-            </div>
-            <span class="mbw-chip tone-<?= e($kpi['tone']) ?>"><?= icon($kpi['icon']) ?></span>
-        </a>
-    <?php endforeach; ?>
-</section>
 
 <div class="reference-toolbar">
     <div class="reference-toolbar-actions">
@@ -777,6 +745,8 @@ $showingTo = min($totalRows, $page * $perPage);
         <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'payment'])) ?>"><?= icon('documents') ?>Record Payment</a>
         <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'purchase'])) ?>"><?= icon('documents') ?>Record Purchase</a>
         <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'supplier-payment'])) ?>"><?= icon('services') ?>Pay Supplier</a>
+        <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) ($selectedParty['id'] ?? 0)])) ?>"><?= icon('documents') ?>Send Statement</a>
+        <a class="button secondary" href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) ($selectedParty['id'] ?? 0)])) ?>"><?= icon('accounting') ?>View Party Ledger</a>
         <details class="reference-menu" <?= ($editParty || isset($_GET['create'])) ? 'open' : '' ?>>
             <summary>More Actions</summary>
             <form method="post" class="reference-party-form">
