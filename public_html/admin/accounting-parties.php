@@ -734,8 +734,7 @@ $showingTo = min($totalRows, $page * $perPage);
     </div>
     <div class="reference-head-actions">
         <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) ($selectedParty['id'] ?? 0)])) ?>"><?= icon('documents') ?>Send Statement</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) ($selectedParty['id'] ?? 0)])) ?>#party-panel"><?= icon('accounting') ?>View Party Ledger</a>
-        <a class="button" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Create Invoice</a>
+        <a class="button secondary" href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) ($selectedParty['id'] ?? 0)])) ?>"><?= icon('accounting') ?>View Party Ledger</a>
     </div>
 </div>
 
@@ -775,9 +774,9 @@ $showingTo = min($totalRows, $page * $perPage);
 <div class="reference-toolbar">
     <div class="reference-toolbar-actions">
         <a class="button" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Create Invoice</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'payment'])) ?>#panel-forms"><?= icon('documents') ?>Record Payment</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'purchase'])) ?>#panel-forms"><?= icon('documents') ?>Record Purchase</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'supplier-payment'])) ?>#panel-forms"><?= icon('services') ?>Pay Supplier</a>
+        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'payment'])) ?>"><?= icon('documents') ?>Record Payment</a>
+        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'purchase'])) ?>"><?= icon('documents') ?>Record Purchase</a>
+        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'supplier-payment'])) ?>"><?= icon('services') ?>Pay Supplier</a>
         <details class="reference-menu" <?= ($editParty || isset($_GET['create'])) ? 'open' : '' ?>>
             <summary>More Actions</summary>
             <form method="post" class="reference-party-form">
@@ -1153,7 +1152,7 @@ $tabHeadings = [
                     </form>
                 </section>
             <?php endif; ?>
-            <a class="button" href="<?= e(parties_page_url(['panel' => 'payment', 'party_id' => (int) $selectedParty['id']])) ?>#panel-forms"><?= icon('documents') ?>Record Payment</a>
+            <a class="button" href="<?= e(parties_page_url(['panel' => 'payment', 'party_id' => (int) $selectedParty['id']])) ?>"><?= icon('documents') ?>Record Payment</a>
             <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) $selectedParty['id']])) ?>"><?= icon('documents') ?>Send Statement</a>
         <?php else: ?>
             <section><h3>No party selected</h3><p class="muted">Create a customer or supplier to populate this panel.</p></section>
