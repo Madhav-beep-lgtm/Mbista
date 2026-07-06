@@ -388,6 +388,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Creation forms are always visible now (modern fields, no Open form).
+  if (document.body.classList.contains('admin-layout')) {
+    document.querySelectorAll('details.feature-disclosure').forEach((disclosure) => {
+      disclosure.setAttribute('open', '');
+    });
+  }
+
   // Sidebar collapsible groups (Accounting workspace submenu).
   document.querySelectorAll('[data-nav-parent]').forEach((parent) => {
     const toggle = parent.querySelector('[data-nav-toggle]');

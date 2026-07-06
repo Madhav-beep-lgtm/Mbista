@@ -92,7 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($companyId <= 0 || $label === '' || $startDate === '' || $endDate === '' || $startDate > $endDate) {
             flash('error', 'Fiscal year label, start date, and end date are required.');
-            redirect('admin/accounting.php');
+            redirect('admin/settings.php');
         }
 
         if ($isDefault === 1) {
@@ -117,7 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Could not create fiscal year.');
         }
 
-        redirect('admin/accounting.php');
+        redirect('admin/settings.php');
     }
 
     if ($postAction === 'create_voucher') {
@@ -269,7 +269,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($companyId <= 0 || $investeeCompanyId <= 0 || $investeeCompanyId === $companyId) {
             flash('error', 'Select a valid investee company.');
-            redirect('admin/accounting.php');
+            redirect('admin/settings.php');
         }
 
         $stmt = db()->prepare('
@@ -293,7 +293,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
 
         flash('success', 'Shareholding rule saved.');
-        redirect('admin/accounting.php');
+        redirect('admin/settings.php');
     }
 }
 
@@ -415,29 +415,7 @@ if ($fiscalYears):
 <?php endif; ?>
 
 <section class="mbw-card">
-    <div class="mbw-card-head"><h2>Posting &amp; Setup</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a></div></div>
-<div class="workspace-feature-stack">
-    <details class="feature-disclosure">
-        <summary>
-            <span>
-                <strong><?= icon('settings') ?>Create Fiscal Year</strong>
-                <small>Fiscal-year setup is used inside accounting reports and voucher posting.</small>
-            </span>
-            <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-        </summary>
-        <form method="post" class="workspace-form-grid">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="create_fiscal_year">
-            <label>Fiscal year label<input type="text" name="label" placeholder="FY 2026-2027" required></label>
-            <label>Start date<input type="date" name="start_date" required></label>
-            <label>End date<input type="date" name="end_date" required></label>
-            <label class="checkbox-line"><input type="checkbox" name="is_default" value="1" checked> Use as default accounting year</label>
-            <button type="submit"><?= icon('settings') ?>Create Fiscal Year</button>
-        </form>
-    </details>
-
-    <p style="color:var(--mbw-muted); margin:0;"><?= icon('accounting') ?> Ledger accounts are now created inside a group under a fixed master. Use the <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a> page to create groups and ledgers.</p>
-
+    <div class="mbw-card-head"><h2>Create Vouchers</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/settings.php')) ?>">Fiscal setup moved to Settings</a></div></div>
     <div class="mbw-qa-grid" id="post-voucher">
         <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php')) ?>">
             <span class="mbw-chip is-square tone-green"><?= icon('receipt-voucher') ?></span>
@@ -456,69 +434,6 @@ if ($fiscalYears):
             <div><strong>Payment Voucher</strong><span>Record money paid out</span></div>
         </a>
     </div>
-
-    <?php if (user_can('admin') && table_exists('fiscal_period_locks')): ?>
-        <details class="feature-disclosure">
-            <summary>
-                <span>
-                    <strong><?= icon('settings') ?>Fiscal period lock</strong>
-                    <small>Prevent new postings inside a closed accounting period.</small>
-                </span>
-                <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-            </summary>
-            <form method="post" class="workspace-form-grid">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="save_period_lock">
-                <label>Locked through<input type="date" name="locked_through" value="<?= e($lockedThrough ?? '') ?>" required></label>
-                <button type="submit"><?= icon('settings') ?>Save lock</button>
-            </form>
-        </details>
-    <?php endif; ?>
-
-    <?php if ($availableInvesteeCompanies !== []): ?>
-        <details class="feature-disclosure">
-            <summary>
-                <span>
-                    <strong><?= icon('companies') ?>Shareholding and consolidation</strong>
-                    <small>Set subsidiary, associate, joint venture, and investment treatment for reports.</small>
-                </span>
-                <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-            </summary>
-            <form method="post" class="workspace-form-grid">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="save_shareholding">
-                <label>Investee company
-                    <select name="investee_company_id" required>
-                        <option value="">Select company</option>
-                        <?php foreach ($availableInvesteeCompanies as $investee): ?>
-                            <option value="<?= e((int) $investee['id']) ?>"><?= e($investee['name'] . ' / ' . $investee['code']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Ownership %<input type="number" name="ownership_percent" step="0.01" min="0" max="100" value="100" required></label>
-                <label>Relationship
-                    <select name="relationship_type">
-                        <option value="subsidiary">Subsidiary</option>
-                        <option value="associate">Associate</option>
-                        <option value="joint_venture">Joint venture</option>
-                        <option value="investment">Investment</option>
-                    </select>
-                </label>
-                <label>Consolidation method
-                    <select name="consolidation_method">
-                        <option value="full">Full consolidation</option>
-                        <option value="equity">Equity method</option>
-                        <option value="proportionate">Proportionate</option>
-                        <option value="cost">Cost / no consolidation</option>
-                    </select>
-                </label>
-                <label>Effective from<input type="date" name="effective_from"></label>
-                <label class="workspace-span-2">Notes<textarea name="notes" placeholder="IAS 28, IFRS 10, NCI, associate basis, or internal note"></textarea></label>
-                <button type="submit"><?= icon('settings') ?>Save shareholding rule</button>
-            </form>
-        </details>
-    <?php endif; ?>
-</div>
 </section>
 
 <?php if ($shareholdings !== []): ?>

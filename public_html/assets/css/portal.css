@@ -2348,3 +2348,80 @@ body.admin-layout .stc-caret .ui-icon {
 body.admin-layout .stc-card[open] > summary .stc-caret {
   transform: rotate(180deg);
 }
+
+
+/* Modern always-open creation forms (replaces the Open form disclosure) */
+body.admin-layout .feature-disclosure {
+  border: 1px solid var(--mbw-border);
+  border-radius: var(--mbw-radius);
+  background: var(--mbw-card);
+  box-shadow: var(--mbw-shadow);
+  padding: 14px 18px;
+}
+
+body.admin-layout .feature-disclosure > summary {
+  list-style: none;
+  cursor: default;
+  pointer-events: none;
+}
+
+body.admin-layout .feature-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+body.admin-layout .feature-disclosure-action {
+  display: none !important;
+}
+
+body.admin-layout .feature-disclosure > summary strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mbw-heading);
+  font-size: 14.5px;
+}
+
+body.admin-layout .feature-disclosure > summary small {
+  color: var(--mbw-muted);
+  font-size: 12px;
+}
+
+body.admin-layout .workspace-form-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 14px;
+  margin-top: 14px;
+}
+
+body.admin-layout .workspace-form-grid label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .workspace-form-grid .workspace-span-2 {
+  grid-column: span 2;
+}
+
+body.admin-layout .workspace-form-grid button[type="submit"] {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+@media (max-width: 1100px) {
+  body.admin-layout .workspace-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  body.admin-layout .workspace-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.admin-layout .workspace-form-grid .workspace-span-2 {
+    grid-column: span 1;
+  }
+}

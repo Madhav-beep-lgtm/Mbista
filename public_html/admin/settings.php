@@ -311,6 +311,75 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
 </details>
 
+<details class="mbw-card stc-card" data-section="accounting" open>
+    <summary class="stc-head">
+        <span class="mbw-chip is-square tone-blue"><?= icon('calendar') ?></span>
+        <span class="stc-title"><strong>Create Fiscal Year</strong><small>Fiscal years drive voucher posting, reports, and period locks.</small></span>
+        <span class="stc-caret"><?= icon('chevron') ?></span>
+    </summary>
+    <form method="post" action="<?= e(url('admin/accounting.php')) ?>" class="frm-grid frm-grid-4" style="padding-top:14px">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="create_fiscal_year">
+        <label>Fiscal year label<input type="text" name="label" placeholder="FY 2026-2027" required></label>
+        <label>Start date<input type="date" name="start_date" required></label>
+        <label>End date<input type="date" name="end_date" required></label>
+        <label class="frm-toggle-wrap">Use as default year
+            <span class="frm-toggle"><input type="checkbox" name="is_default" value="1" checked><i></i></span>
+        </label>
+        <div style="grid-column:1/-1"><button type="submit" class="button secondary"><?= icon('calendar') ?>Create Fiscal Year</button></div>
+    </form>
+</details>
+
+<?php
+$settingsInvestees = [];
+if (table_exists('company_shareholdings')) {
+    $investeeStmt = db()->prepare('SELECT id, name, code FROM companies WHERE id <> :cid AND is_active = 1 AND COALESCE(is_client_company, 0) = 0 ORDER BY name ASC');
+    $investeeStmt->execute(['cid' => $settingsCompanyId]);
+    $settingsInvestees = $investeeStmt->fetchAll();
+}
+?>
+<?php if ($settingsInvestees !== []): ?>
+<details class="mbw-card stc-card" data-section="accounting">
+    <summary class="stc-head">
+        <span class="mbw-chip is-square tone-purple"><?= icon('companies') ?></span>
+        <span class="stc-title"><strong>Shareholding &amp; Consolidation</strong><small>Set subsidiary, associate, joint venture, and investment treatment for consolidated reports.</small></span>
+        <span class="stc-caret"><?= icon('chevron') ?></span>
+    </summary>
+    <form method="post" action="<?= e(url('admin/accounting.php')) ?>" class="frm-grid frm-grid-4" style="padding-top:14px">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="save_shareholding">
+        <label>Investee company
+            <select name="investee_company_id" required>
+                <option value="">Select company</option>
+                <?php foreach ($settingsInvestees as $investee): ?>
+                    <option value="<?= (int) $investee['id'] ?>"><?= e($investee['name'] . ' / ' . $investee['code']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>Ownership %<input type="number" name="ownership_percent" step="0.01" min="0" max="100" value="100" required></label>
+        <label>Relationship
+            <select name="relationship_type">
+                <option value="subsidiary">Subsidiary</option>
+                <option value="associate">Associate</option>
+                <option value="joint_venture">Joint venture</option>
+                <option value="investment">Investment</option>
+            </select>
+        </label>
+        <label>Consolidation method
+            <select name="consolidation_method">
+                <option value="full">Full consolidation</option>
+                <option value="equity">Equity method</option>
+                <option value="proportionate">Proportionate</option>
+                <option value="cost">Cost / no consolidation</option>
+            </select>
+        </label>
+        <label>Effective from<input type="date" name="effective_from"></label>
+        <label class="frm-span-3" style="grid-column:span 3">Notes<input type="text" name="notes" placeholder="IAS 28, IFRS 10, NCI, associate basis, or internal note"></label>
+        <div style="grid-column:1/-1"><button type="submit" class="button secondary"><?= icon('companies') ?>Save Shareholding Rule</button></div>
+    </form>
+</details>
+<?php endif; ?>
+
 <form method="post" enctype="multipart/form-data" id="stc-main-form">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <input type="hidden" name="save_mode" id="stc-save-mode" value="save">
