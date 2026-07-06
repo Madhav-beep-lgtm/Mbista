@@ -84,41 +84,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/accounting.php');
     }
 
-    if ($postAction === 'create_fiscal_year') {
-        $label = trim((string) ($_POST['label'] ?? ''));
-        $startDate = (string) ($_POST['start_date'] ?? '');
-        $endDate = (string) ($_POST['end_date'] ?? '');
-        $isDefault = isset($_POST['is_default']) ? 1 : 0;
-
-        if ($companyId <= 0 || $label === '' || $startDate === '' || $endDate === '' || $startDate > $endDate) {
-            flash('error', 'Fiscal year label, start date, and end date are required.');
-            redirect('admin/settings.php');
-        }
-
-        if ($isDefault === 1) {
-            $resetStmt = db()->prepare('UPDATE fiscal_years SET is_default = 0 WHERE company_id = :company_id');
-            $resetStmt->execute(['company_id' => $companyId]);
-        }
-
-        try {
-            $stmt = db()->prepare('INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_active, is_default) VALUES (:company_id, :label, :start_date, :end_date, 1, :is_default)');
-            $stmt->execute([
-                'company_id' => $companyId,
-                'label' => $label,
-                'start_date' => $startDate,
-                'end_date' => $endDate,
-                'is_default' => $isDefault,
-            ]);
-            if ($isDefault === 1) {
-                $_SESSION['fiscal_year_id'] = (int) db()->lastInsertId();
-            }
-            flash('success', 'Fiscal year created for accounting.');
-        } catch (Throwable $exception) {
-            flash('error', 'Could not create fiscal year.');
-        }
-
-        redirect('admin/settings.php');
-    }
 
     if ($postAction === 'create_voucher') {
         if (!user_can('create')) {
@@ -240,61 +205,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/accounting.php');
     }
 
-    if ($postAction === 'save_shareholding' && table_exists('company_shareholdings')) {
-        $investeeCompanyId = (int) ($_POST['investee_company_id'] ?? 0);
-        $ownershipPercent = max(0, min(100, (float) ($_POST['ownership_percent'] ?? 0)));
-        $relationshipType = (string) ($_POST['relationship_type'] ?? 'investment');
-        $method = (string) ($_POST['consolidation_method'] ?? 'cost');
-
-        if (!in_array($relationshipType, ['subsidiary', 'associate', 'joint_venture', 'investment'], true)) {
-            $relationshipType = $ownershipPercent > 50 ? 'subsidiary' : ($ownershipPercent >= 20 ? 'associate' : 'investment');
-        }
-        if (!in_array($method, ['full', 'equity', 'proportionate', 'cost'], true)) {
-            $method = $ownershipPercent > 50 ? 'full' : ($ownershipPercent >= 20 ? 'equity' : 'cost');
-        }
-
-        if ($ownershipPercent > 50) {
-            $relationshipType = 'subsidiary';
-            $method = 'full';
-        } elseif ($ownershipPercent == 50.0) {
-            $relationshipType = 'joint_venture';
-            $method = 'proportionate';
-        } elseif ($ownershipPercent >= 20) {
-            $relationshipType = 'associate';
-            $method = 'equity';
-        } else {
-            $relationshipType = 'investment';
-            $method = 'cost';
-        }
-
-        if ($companyId <= 0 || $investeeCompanyId <= 0 || $investeeCompanyId === $companyId) {
-            flash('error', 'Select a valid investee company.');
-            redirect('admin/settings.php');
-        }
-
-        $stmt = db()->prepare('
-            INSERT INTO company_shareholdings (investor_company_id, investee_company_id, ownership_percent, relationship_type, consolidation_method, effective_from, notes)
-            VALUES (:investor_company_id, :investee_company_id, :ownership_percent, :relationship_type, :consolidation_method, :effective_from, :notes)
-            ON DUPLICATE KEY UPDATE
-                ownership_percent = VALUES(ownership_percent),
-                relationship_type = VALUES(relationship_type),
-                consolidation_method = VALUES(consolidation_method),
-                effective_from = VALUES(effective_from),
-                notes = VALUES(notes)
-        ');
-        $stmt->execute([
-            'investor_company_id' => $companyId,
-            'investee_company_id' => $investeeCompanyId,
-            'ownership_percent' => $ownershipPercent,
-            'relationship_type' => $relationshipType,
-            'consolidation_method' => $method,
-            'effective_from' => $_POST['effective_from'] !== '' ? $_POST['effective_from'] : null,
-            'notes' => trim((string) ($_POST['notes'] ?? '')),
-        ]);
-
-        flash('success', 'Shareholding rule saved.');
-        redirect('admin/settings.php');
-    }
 }
 
 $ledgers = [];
