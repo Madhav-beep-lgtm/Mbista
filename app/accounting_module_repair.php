@@ -92,6 +92,14 @@ function accounting_module_repair_database(): array
         accounting_repair_add_index('vouchers', 'idx_vouchers_party', 'KEY `idx_vouchers_party` (`party_id`)');
     });
 
+    $run('Upgrade client accounting books metadata', static function (): void {
+        accounting_repair_add_column('companies', 'is_client_company', '`is_client_company` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_active`');
+        accounting_repair_add_column('client_profiles', 'books_company_id', '`books_company_id` INT UNSIGNED DEFAULT NULL AFTER `company_id`');
+        accounting_repair_add_column('vouchers', 'requires_client_approval', '`requires_client_approval` TINYINT(1) NOT NULL DEFAULT 0 AFTER `approval_state`');
+        accounting_repair_add_column('vouchers', 'client_approved_by', '`client_approved_by` INT UNSIGNED DEFAULT NULL AFTER `requires_client_approval`');
+        accounting_repair_add_column('vouchers', 'client_approved_at', '`client_approved_at` DATETIME DEFAULT NULL AFTER `client_approved_by`');
+    });
+
     $run('Upgrade voucher form metadata', static function (): void {
         accounting_repair_add_column('vouchers', 'priority', "`priority` ENUM('low', 'medium', 'high') NOT NULL DEFAULT 'medium' AFTER `narration`");
         accounting_repair_add_column('vouchers', 'department', '`department` VARCHAR(80) DEFAULT NULL AFTER `priority`');

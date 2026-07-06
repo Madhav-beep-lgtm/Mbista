@@ -36,6 +36,8 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
             <a href="<?= e(url('staff/index.php?view=home')) ?>"><?= icon('dashboard') ?>Dashboard</a>
             <a href="<?= e(url('staff/index.php?view=clients')) ?>"><?= icon('clients') ?>My Clients</a>
             <a href="<?= e(url('staff/index.php?view=tasks')) ?>"><?= icon('tasks') ?>Client Tasks</a>
+            <span class="admin-nav-group">Manage Clients</span>
+            <a href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('clients') ?>Client Accounting</a>
             <span class="admin-nav-group">Documents &amp; Compliance</span>
             <a href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
             <a href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>

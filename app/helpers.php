@@ -3288,6 +3288,157 @@ function group_dashboard_companies(int $referenceFiscalYearId): array
 }
 
 /**
+ * Provision a dedicated accounting books space for a client: a flagged
+ * companies row with seeded ledger groups, starter ledgers, AR/AP
+ * mappings, and a fiscal year mirroring the serving company's.
+ * Returns the books company id (existing or newly created).
+ */
+function provision_client_books(int $clientProfileId): int
+{
+    $profileStmt = db()->prepare('SELECT * FROM client_profiles WHERE id = :id LIMIT 1');
+    $profileStmt->execute(['id' => $clientProfileId]);
+    $profile = $profileStmt->fetch();
+    if (!$profile) {
+        return 0;
+    }
+    if ((int) ($profile['books_company_id'] ?? 0) > 0) {
+        return (int) $profile['books_company_id'];
+    }
+
+    $code = 'CLB' . str_pad((string) $clientProfileId, 4, '0', STR_PAD_LEFT);
+    db()->prepare('INSERT INTO companies (name, code, is_active, is_client_company) VALUES (:name, :code, 1, 1)')
+        ->execute(['name' => (string) $profile['organization_name'] . ' (Client Books)', 'code' => $code]);
+    $booksCompanyId = (int) db()->lastInsertId();
+
+    // Fiscal year mirrors the serving company's default/active year.
+    $servingCompanyId = (int) ($profile['company_id'] ?? 0);
+    $fyRow = null;
+    if ($servingCompanyId > 0) {
+        $fyStmt = db()->prepare('SELECT label, start_date, end_date FROM fiscal_years WHERE company_id = :cid ORDER BY is_default DESC, is_active DESC, id DESC LIMIT 1');
+        $fyStmt->execute(['cid' => $servingCompanyId]);
+        $fyRow = $fyStmt->fetch();
+    }
+    db()->prepare('INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_active, is_default) VALUES (:cid, :label, :sd, :ed, 1, 1)')
+        ->execute([
+            'cid' => $booksCompanyId,
+            'label' => (string) ($fyRow['label'] ?? ('FY ' . date('Y'))),
+            'sd' => (string) ($fyRow['start_date'] ?? date('Y-01-01')),
+            'ed' => (string) ($fyRow['end_date'] ?? date('Y-12-31')),
+        ]);
+
+    // Seed the standard ledger group set (mirrors schema.sql seeds).
+    $groupSeeds = [
+        ['BANK', 'Bank', 'current_asset', 1], ['CASH_GRP', 'Cash in Hand', 'current_asset', 1],
+        ['RECEIVABLE', 'Trade Receivables', 'current_asset', 0], ['PREPAID_GRP', 'Prepaid Expenses', 'current_asset', 0],
+        ['INVEST_GRP', 'Investments', 'non_current_asset', 0], ['PAYABLE', 'Trade Payables', 'current_liability', 0],
+        ['DUTIES_TAXES', 'Duties and Taxes', 'current_liability', 0], ['SHARE_CAPITAL_GRP', 'Share Capital', 'equity', 0],
+        ['RESERVE_SURPLUS', 'Reserve & Surplus', 'equity', 0], ['DIRECT_INCOME_GRP', 'Sales / Service Income', 'direct_income', 0],
+        ['INDIRECT_INCOME_GRP', 'Other Income', 'indirect_income', 0], ['ADMIN_EXP', 'Administrative Expenses', 'indirect_expense', 0],
+        ['EMP_BENEFIT_EXP', 'Employee Benefit Expenses', 'indirect_expense', 0], ['SALES_MKT_EXP', 'Sales and Marketing Expenses', 'indirect_expense', 0],
+        ['OTHER_NONOP_EXP', 'Other Non-operating Expenses', 'indirect_expense', 0], ['DIRECT_EXP_GRP', 'Direct Expenses', 'direct_expense', 0],
+        ['TAX_EXP_GRP', 'Tax Expenses', 'indirect_expense', 0],
+    ];
+    $groupInsert = db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, :name, :mk, :cb, 1)');
+    $groupIds = [];
+    foreach ($groupSeeds as [$gCode, $gName, $gMaster, $gCashBank]) {
+        $groupInsert->execute(['cid' => $booksCompanyId, 'code' => $gCode, 'name' => $gName, 'mk' => $gMaster, 'cb' => $gCashBank]);
+        $groupIds[$gCode] = (int) db()->lastInsertId();
+    }
+
+    // Starter ledgers + default AR/AP mappings.
+    $ledgerSeeds = [
+        ['CASH', 'Cash and bank', 'asset', 'BANK'], ['AR', 'Accounts receivable', 'asset', 'RECEIVABLE'],
+        ['AP', 'Accounts payable', 'liability', 'PAYABLE'], ['CAPITAL', 'Owner capital', 'equity', 'SHARE_CAPITAL_GRP'],
+        ['SALES', 'Sales / service revenue', 'revenue', 'DIRECT_INCOME_GRP'], ['EXPENSES', 'General expenses', 'expense', 'ADMIN_EXP'],
+    ];
+    $ledgerInsert = db()->prepare('INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:cid, :gid, :code, :name, :type, 1, \'active\')');
+    $ledgerIds = [];
+    foreach ($ledgerSeeds as [$lCode, $lName, $lType, $lGroup]) {
+        $ledgerInsert->execute(['cid' => $booksCompanyId, 'gid' => $groupIds[$lGroup] ?? null, 'code' => $lCode, 'name' => $lName, 'type' => $lType]);
+        $ledgerIds[$lCode] = (int) db()->lastInsertId();
+    }
+    if (table_exists('company_ledger_mappings')) {
+        $mapInsert = db()->prepare('INSERT INTO company_ledger_mappings (company_id, map_key, ledger_id) VALUES (:cid, :k, :lid)');
+        $mapInsert->execute(['cid' => $booksCompanyId, 'k' => 'default_accounts_receivable', 'lid' => $ledgerIds['AR']]);
+        $mapInsert->execute(['cid' => $booksCompanyId, 'k' => 'default_accounts_payable', 'lid' => $ledgerIds['AP']]);
+    }
+
+    db()->prepare('UPDATE client_profiles SET books_company_id = :bid WHERE id = :id')
+        ->execute(['bid' => $booksCompanyId, 'id' => $clientProfileId]);
+
+    return $booksCompanyId;
+}
+
+/**
+ * Access level of the current user for a client's accounting books:
+ * 'direct' (post without client approval), 'approval' (edits need the
+ * client's approval), or '' (no access).
+ * Rules: Super Admins in the M.Bista portal reach every client
+ * directly; admins reach clients served by their current portal
+ * company directly; staff reach only clients assigned to them, with
+ * mandatory client approval.
+ */
+function client_books_access_level(array $clientProfile): string
+{
+    $user = current_user();
+    if (!$user) {
+        return '';
+    }
+    $role = (string) ($user['role'] ?? '');
+    $portalCode = (string) (current_company()['code'] ?? '');
+    $servesFromPortal = (int) ($clientProfile['company_id'] ?? 0) === (int) (current_company()['id'] ?? 0);
+
+    if ($role === 'admin') {
+        return ($portalCode === 'MBAACA' || $servesFromPortal) ? 'direct' : '';
+    }
+    if ($role === 'staff') {
+        $assigned = (int) ($clientProfile['assigned_staff_user_id'] ?? 0) === (int) ($user['id'] ?? 0);
+        return ($assigned && $servesFromPortal) ? 'approval' : ($assigned && $portalCode === 'MBAACA' ? 'approval' : '');
+    }
+    return '';
+}
+
+/** Client profiles visible in the current portal for the current user. */
+function client_books_clients_for_scope(): array
+{
+    if (!table_exists('client_profiles')) {
+        return [];
+    }
+    $user = current_user();
+    $role = (string) ($user['role'] ?? '');
+    $portal = current_company();
+    $portalCode = (string) ($portal['code'] ?? '');
+    $portalId = (int) ($portal['id'] ?? 0);
+
+    $sql = 'SELECT cp.*, u.name AS user_name, u.email AS user_email, s.name AS staff_name, c.name AS serving_company
+            FROM client_profiles cp
+            LEFT JOIN users u ON u.id = cp.user_id
+            LEFT JOIN users s ON s.id = cp.assigned_staff_user_id
+            LEFT JOIN companies c ON c.id = cp.company_id
+            WHERE cp.is_active = 1';
+    $params = [];
+    if ($role === 'admin') {
+        if ($portalCode !== 'MBAACA') {
+            $sql .= ' AND cp.company_id = :portal_id';
+            $params['portal_id'] = $portalId;
+        }
+    } elseif ($role === 'staff') {
+        $sql .= ' AND cp.assigned_staff_user_id = :staff_id';
+        $params['staff_id'] = (int) ($user['id'] ?? 0);
+        if ($portalCode !== 'MBAACA') {
+            $sql .= ' AND cp.company_id = :portal_id';
+            $params['portal_id'] = $portalId;
+        }
+    } else {
+        return [];
+    }
+    $sql .= ' ORDER BY cp.organization_name ASC';
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+/**
  * Prepare chart data for financial dashboard
  */
 function prepare_chart_data(int $companyId, int $fiscalYearId, array $subsidiaries, bool $isAltiora): array

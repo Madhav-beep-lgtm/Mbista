@@ -39,6 +39,8 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
             <span class="admin-nav-group">Overview</span>
             <a href="<?= e(url('dashboard.php?view=home')) ?>"><?= icon('dashboard') ?>Dashboard</a>
             <a href="<?= e(url('dashboard.php?view=tasks')) ?>"><?= icon('tasks') ?>My Tasks</a>
+            <span class="admin-nav-group">My Accounting</span>
+            <a href="<?= e(url('dashboard.php?view=accounting')) ?>"><?= icon('accounting') ?>Accounting &amp; Approvals</a>
             <span class="admin-nav-group">Engagements</span>
             <a href="<?= e(url('dashboard.php?view=contracts')) ?>"><?= icon('contracts') ?>My Contracts</a>
             <a href="<?= e(url('dashboard.php?view=invoices')) ?>"><?= icon('invoices') ?>My Invoices</a>

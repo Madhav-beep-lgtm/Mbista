@@ -7,7 +7,7 @@ $pageTitle = 'Dashboard';
 $user = current_user();
 $userId = (int) $user['id'];
 
-$allowedViews = ['home', 'tasks', 'contracts', 'invoices', 'documents', 'document-requests', 'compliance', 'messages', 'tickets'];
+$allowedViews = ['home', 'tasks', 'contracts', 'invoices', 'documents', 'document-requests', 'compliance', 'messages', 'tickets', 'accounting'];
 $view = (string) ($_GET['view'] ?? 'home');
 if (!in_array($view, $allowedViews, true)) {
     $view = 'home';
@@ -50,6 +50,31 @@ if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
     $clientId = (int) $clientProfile['id'];
+
+    // Approve or reject accounting entries submitted by assigned staff.
+    if ($action === 'client_voucher_decision' && column_exists('vouchers', 'requires_client_approval')) {
+        $voucherId = (int) ($_POST['voucher_id'] ?? 0);
+        $decision = (string) ($_POST['decision'] ?? '');
+        $booksCompanyId = (int) ($clientProfile['books_company_id'] ?? 0);
+        $checkStmt = db()->prepare("SELECT id, submitted_by FROM vouchers WHERE id = :id AND company_id = :cid AND requires_client_approval = 1 AND approval_state = 'pending_approval' LIMIT 1");
+        $checkStmt->execute(['id' => $voucherId, 'cid' => $booksCompanyId]);
+        $pendingVoucher = $checkStmt->fetch();
+        if (!$pendingVoucher || $booksCompanyId <= 0 || !in_array($decision, ['approve', 'reject'], true)) {
+            flash('error', 'That entry is not awaiting your approval.');
+            redirect('dashboard.php?view=accounting');
+        }
+        if ($decision === 'approve') {
+            db()->prepare("UPDATE vouchers SET status = 'posted', approval_state = 'approved', client_approved_by = :uid, client_approved_at = NOW(), posted_by = submitted_by, posted_at = NOW() WHERE id = :id")
+                ->execute(['uid' => $userId, 'id' => $voucherId]);
+            flash('success', 'Entry approved and posted to your books.');
+        } else {
+            db()->prepare("UPDATE vouchers SET status = 'cancelled', approval_state = 'rejected', client_approved_by = :uid, client_approved_at = NOW() WHERE id = :id")
+                ->execute(['uid' => $userId, 'id' => $voucherId]);
+            flash('success', 'Entry rejected.');
+        }
+        log_activity('client_books', $clientId, 'client_voucher_decision', 'Client ' . $decision . 'd voucher #' . $voucherId . '.', $userId);
+        redirect('dashboard.php?view=accounting');
+    }
 
     if ($action === 'respond_document_request') {
         $requestId = (int) ($_POST['request_id'] ?? 0);
@@ -834,6 +859,102 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                 <p><a href="<?= e(url('dashboard.php?view=invoices')) ?>">View all <?= e((string) count($invoices)) ?> invoices &rarr;</a></p>
             <?php endif; ?>
         </section>
+    <?php endif; ?>
+
+    <?php if ($view === 'accounting' && $clientProfile): ?>
+        <?php
+        require_once __DIR__ . '/../app/reports_engine.php';
+        $abCompanyId = (int) ($clientProfile['books_company_id'] ?? 0);
+        $abFy = null;
+        $abVouchers = [];
+        $abPending = [];
+        $abSnapshot = ['cash' => 0.0, 'receivables' => 0.0, 'payables' => 0.0, 'income' => 0.0, 'expenses' => 0.0, 'net' => 0.0];
+        if ($abCompanyId > 0) {
+            $abFyStmt = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = :cid ORDER BY is_default DESC, is_active DESC, id DESC LIMIT 1');
+            $abFyStmt->execute(['cid' => $abCompanyId]);
+            $abFy = $abFyStmt->fetch() ?: null;
+            if ($abFy) {
+                $abSnapshot = company_financials_snapshot($abCompanyId, (int) $abFy['id']);
+            }
+            $abVoucherStmt = db()->prepare('SELECT * FROM vouchers WHERE company_id = :cid ORDER BY id DESC LIMIT 25');
+            $abVoucherStmt->execute(['cid' => $abCompanyId]);
+            $abVouchers = $abVoucherStmt->fetchAll();
+            $abPending = array_values(array_filter($abVouchers, static fn (array $v): bool => (string) $v['approval_state'] === 'pending_approval' && (int) ($v['requires_client_approval'] ?? 0) === 1));
+        }
+        $abCurrency = site_currency_symbol();
+        $abMoney = static fn (float $a): string => $abCurrency . number_format($a, 2);
+        ?>
+        <?php if ($abCompanyId <= 0): ?>
+            <section class="mbw-card"><div class="mbw-card-head"><h2>My Accounting</h2></div><p style="color:var(--mbw-muted)">Your accounting books have not been set up yet. Please contact your service provider.</p></section>
+        <?php else: ?>
+            <section class="mbw-kpi-grid">
+                <?php foreach ([['Cash & Bank', $abSnapshot['cash'], 'blue', 'bank'], ['Receivables', $abSnapshot['receivables'], 'green', 'clients'], ['Payables', $abSnapshot['payables'], 'red', 'card'], ['Net Profit', $abSnapshot['net'], 'purple', 'trend-up']] as [$abLabel, $abAmount, $abTone, $abIcon]): ?>
+                    <article class="mbw-kpi"><div><span class="mbw-kpi-label"><?= e($abLabel) ?></span><div class="mbw-kpi-value"><?= e($abMoney((float) $abAmount)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e($abFy['label'] ?? '') ?></span></span></div><span class="mbw-chip tone-<?= e($abTone) ?>"><?= icon($abIcon) ?></span></article>
+                <?php endforeach; ?>
+            </section>
+
+            <section class="mbw-card">
+                <div class="mbw-card-head"><h2>Entries Awaiting Your Approval</h2><span class="mbw-pill <?= $abPending === [] ? 'tone-green' : 'tone-amber' ?>"><?= count($abPending) ?> pending</span></div>
+                <?php if ($abPending === []): ?>
+                    <p style="color:var(--mbw-muted);font-size:13px">Nothing waiting for you. Entries submitted by your accountant will appear here for approval.</p>
+                <?php else: ?>
+                    <div style="overflow-x:auto"><table>
+                        <thead><tr><th>Date</th><th>Voucher No.</th><th>Type</th><th>Narration</th><th class="is-numeric">Amount</th><th>Decision</th></tr></thead>
+                        <tbody>
+                        <?php foreach ($abPending as $v): ?>
+                            <tr>
+                                <td><?= e(date('d M Y', strtotime((string) ($v['voucher_date'] ?? $v['created_at'])))) ?></td>
+                                <td><?= e($v['voucher_no']) ?></td>
+                                <td><span class="mbw-pill tone-blue"><?= e(ucfirst((string) $v['voucher_type'])) ?></span></td>
+                                <td><?= e((string) ($v['narration'] ?: '—')) ?></td>
+                                <td class="is-numeric"><?= e($abMoney((float) $v['total_amount'])) ?></td>
+                                <td>
+                                    <form method="post" style="display:inline-flex;gap:6px">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="client_voucher_decision">
+                                        <input type="hidden" name="voucher_id" value="<?= (int) $v['id'] ?>">
+                                        <button type="submit" name="decision" value="approve" class="button success" style="min-height:32px;padding:4px 12px">Approve</button>
+                                        <button type="submit" name="decision" value="reject" class="button danger" style="min-height:32px;padding:4px 12px">Reject</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table></div>
+                <?php endif; ?>
+            </section>
+
+            <section class="mbw-card">
+                <div class="mbw-card-head"><h2>Recent Entries</h2></div>
+                <div style="overflow-x:auto"><table>
+                    <thead><tr><th>Date</th><th>Voucher No.</th><th>Type</th><th>Narration</th><th class="is-numeric">Amount</th><th>Status</th></tr></thead>
+                    <tbody>
+                    <?php if ($abVouchers === []): ?><tr><td colspan="6" style="color:var(--mbw-muted)">No entries in your books yet.</td></tr><?php endif; ?>
+                    <?php foreach (array_slice($abVouchers, 0, 10) as $v): ?>
+                        <tr><td><?= e(date('d M Y', strtotime((string) ($v['voucher_date'] ?? $v['created_at'])))) ?></td><td><?= e($v['voucher_no']) ?></td><td><span class="mbw-pill tone-blue"><?= e(ucfirst((string) $v['voucher_type'])) ?></span></td><td><?= e((string) ($v['narration'] ?: '—')) ?></td><td class="is-numeric"><?= e($abMoney((float) $v['total_amount'])) ?></td><td><?= (string) $v['status'] === 'posted' ? '<span class="mbw-pill tone-green">Posted</span>' : ((string) $v['approval_state'] === 'pending_approval' ? '<span class="mbw-pill tone-amber">Awaiting you</span>' : '<span class="mbw-pill tone-red">' . e(ucfirst((string) $v['status'])) . '</span>') ?></td></tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table></div>
+            </section>
+
+            <?php if ($abFy): ?>
+                <?php
+                $abReportId = in_array((string) ($_GET['report'] ?? ''), ['trial-balance', 'profit-loss', 'balance-sheet', 'cash-flow', 'ledger-report'], true) ? (string) $_GET['report'] : 'trial-balance';
+                $abReport = rc_generate($abReportId, $abCompanyId, (string) $abFy['start_date'], (string) $abFy['end_date'], ['currency' => $abCurrency, 'vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => 'service', 'org_default' => 'service', 'company_id' => $abCompanyId, 'company_name' => (string) $clientProfile['organization_name'], 'subsidiaries' => []]);
+                ?>
+                <section class="mbw-card rpt-picker">
+                    <?php foreach (['trial-balance' => 'Trial Balance', 'profit-loss' => 'Profit or Loss', 'balance-sheet' => 'Balance Sheet', 'cash-flow' => 'Cash Flow', 'ledger-report' => 'Ledger Report'] as $abRid => $abRlabel): ?>
+                        <a class="rpt-pick <?= $abRid === $abReportId ? 'is-active' : '' ?>" href="<?= e(url('dashboard.php?view=accounting&report=' . $abRid)) ?>"><?= icon('reports') ?><span><?= e($abRlabel) ?></span></a>
+                    <?php endforeach; ?>
+                </section>
+                <main class="rc-report-view rpt-statement">
+                    <div class="rpt-bar"><?= e(($abReport['number'] ?? '') !== '' ? $abReport['number'] . '. ' : '') ?><?= e($abReport['title'] ?? 'Report') ?></div>
+                    <?php rc_render_letterhead($abReport, ['company_name' => (string) $clientProfile['organization_name'], 'fiscal_label' => (string) $abFy['label'], 'from' => (string) $abFy['start_date'], 'to' => (string) $abFy['end_date'], 'currency_code' => trim($abCurrency) !== '' ? trim($abCurrency) : 'NPR', 'generated_by' => (string) ($user['name'] ?? 'Client')]); ?>
+                    <div class="rc-table-scroll"><?php rc_render_table($abReport, rc_has_group_columns($abReport)); ?></div>
+                    <?php rc_render_report_foot(['generated_by' => (string) ($user['name'] ?? 'Client')]); ?>
+                </main>
+            <?php endif; ?>
+        <?php endif; ?>
     <?php endif; ?>
 
     <?php if ($view === 'tasks'): ?>

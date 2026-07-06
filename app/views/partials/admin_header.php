@@ -106,6 +106,9 @@ foreach ($headerAccountingChildren as $headerChild) {
                 <?php endif; ?>
             <?php endif; ?>
 
+            <span class="admin-nav-group">Manage Clients</span>
+            <a class="<?= in_array($headerScript, ['manage-clients.php', 'client-books.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('clients') ?>Client Accounting</a>
+
             <span class="admin-nav-group">Reports &amp; Controls</span>
             <a class="<?= in_array($headerScript, ['reports-center.php', 'report-schedules.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
