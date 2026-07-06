@@ -1177,39 +1177,6 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 
-<div class="ad-bottom-grid">
-    <section class="ad-panel ad-shortcuts">
-        <header><h3>Shortcuts</h3></header>
-        <div>
-            <a href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?><span><strong>Chart of Accounts</strong><small>Browse all accounts</small></span></a>
-            <a href="<?= e(accounting_dashboard_report_url('ledger-report', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('documents') ?><span><strong>Ledger Directory</strong><small>Search ledger reports</small></span></a>
-            <?php if ($showInventoryFeatures): ?>
-                <a href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?><span><strong>Item Directory</strong><small>View inventory items</small></span></a>
-            <?php endif; ?>
-            <a href="<?= e(url('admin/accounting.php')) ?>"><?= icon('documents') ?><span><strong>Voucher List</strong><small>All accounting vouchers</small></span></a>
-            <a href="<?= e(accounting_dashboard_report_url('bank-book', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('companies') ?><span><strong>Bank Book</strong><small>Review bank activity</small></span></a>
-            <a href="<?= e(url('admin/reports-center.php?report=journal-register')) ?>"><?= icon('compliance') ?><span><strong>Audit Trail</strong><small>Review journal activity</small></span></a>
-        </div>
-    </section>
-    <section class="ad-panel ad-report-links">
-        <header><h3>Reports</h3><a href="<?= e(url('admin/reports-center.php')) ?>">View All</a></header>
-        <div>
-            <a href="<?= e(accounting_dashboard_report_url('trial-balance', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('accounting') ?><span>Trial Balance</span></a>
-            <a href="<?= e(accounting_dashboard_report_url('profit-loss', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('reports') ?><span>Profit & Loss</span></a>
-            <a href="<?= e(accounting_dashboard_report_url('balance-sheet', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('documents') ?><span>Balance Sheet</span></a>
-            <?php if ($showInventoryFeatures): ?>
-                <a href="<?= e(accounting_dashboard_report_url('inventory-summary', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('services') ?><span>Inventory Summary</span></a>
-                <a href="<?= e(accounting_dashboard_report_url('stock-ledger', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('tasks') ?><span>Stock Ledger</span></a>
-            <?php endif; ?>
-            <?php if ($showManufacturingFeatures): ?>
-                <a href="<?= e(accounting_dashboard_report_url('manufacturing-statement', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('settings') ?><span>Manufacturing Statement</span></a>
-            <?php endif; ?>
-            <a href="<?= e(accounting_dashboard_report_url('cash-book', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('companies') ?><span>Cash Flow</span></a>
-            <a href="<?= e(accounting_dashboard_report_url('ledger-report', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('documents') ?><span>Ledger Report</span></a>
-            <a href="<?= e(accounting_dashboard_report_url('financial-ratios', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>"><?= icon('insights') ?><span>More Reports</span></a>
-        </div>
-    </section>
-</div>
 
 <?php if ((string) ($company['code'] ?? '') === 'AGHPL'): ?>
     <?php $investeeCompanies = array_values(array_filter(accounting_companies_for_group($companyId), static fn (array $row): bool => (int) $row['id'] !== $companyId)); ?>

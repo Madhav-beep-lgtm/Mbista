@@ -240,24 +240,7 @@ $statusPill = static fn (string $status): string => $status === 'active'
         </div>
     </section>
 
-    <section class="mbw-card frm-rail-card">
-        <div class="frm-section-head"><span class="mbw-chip is-square tone-blue"><?= icon('about') ?></span><h2>Code Structure Rules</h2></div>
-        <div style="display:grid;gap:10px;font-size:12px">
-            <div style="border:1px solid var(--mbw-primary-soft);background:var(--mbw-primary-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-primary)"># Master Code = 1 Digit</strong><br><span style="color:var(--mbw-muted)">Examples: 1 Assets · 2 Liabilities · 3 Equity · 4 Revenue · 5 Expenses</span></div>
-            <div style="border:1px solid var(--mbw-green-soft);background:var(--mbw-green-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-green)">## Group Code = 2 Digits</strong><br><span style="color:var(--mbw-muted)">Examples: 11 Current Assets · 12 Non-Current Assets · 21 Current Liabilities · 41 Operating Revenue · 51 Administrative Expenses</span></div>
-            <div style="border:1px solid var(--mbw-purple-soft);background:var(--mbw-purple-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-purple)">### Ledger Code = 3 Digits</strong><br><span style="color:var(--mbw-muted)">Examples: 111 Cash in Hand · 112 Bank Account · 113 Trade Receivables · 211 Trade Payables · 411 Service Revenue · 511 Office Rent</span></div>
-            <p style="margin:0;color:var(--mbw-muted)">Codes are generated automatically — never typed by hand. Existing legacy codes remain valid.</p>
-        </div>
-    </section>
 
-    <section class="mbw-card frm-rail-card">
-        <div class="frm-section-head"><span class="mbw-chip is-square tone-amber"><?= icon('settings') ?></span><h2>Modify Features</h2></div>
-        <ul class="frm-checklist" style="gap:6px">
-            <?php foreach ([['Edit code / name', 'admin/chart-ledgers.php'], ['Move ledger to another group', 'admin/chart-ledgers.php'], ['Deactivate / Archive', 'admin/chart-ledgers.php'], ['Set opening balance', 'admin/accounting.php'], ['Map auto-posting accounts', 'admin/chart-posting-accounts.php'], ['View audit history', 'admin/audit-trail.php']] as [$featureLabel, $featureUrl]): ?>
-                <li class="is-ok" style="padding-left:0;list-style:none"><a class="mbw-view-all" href="<?= e(url($featureUrl)) ?>" style="display:flex;justify-content:space-between"><?= e($featureLabel) ?><span>→</span></a></li>
-            <?php endforeach; ?>
-        </ul>
-    </section>
 
     <section class="mbw-card frm-rail-card">
         <div class="frm-section-head"><span class="mbw-chip is-square tone-green"><?= icon('tasks') ?></span><h2>Impact &amp; Validation</h2></div>
