@@ -954,7 +954,7 @@ $tabHeadings = [
                             <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['paid_amount'], 2)) ?></td>
                             <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['outstanding_amount'], 2)) ?></td>
                             <td><span class="mbw-pill tone-<?= e($statusPillTone((string) $document['display_status'])) ?>"><?= e($document['display_status']) ?></span></td>
-                            <td><div class="reference-row-actions"><a href="<?= e(parties_page_url(['party_id' => (int) ($document['party_id'] ?? 0), 'ptab' => 'ledger'])) ?>#party-panel" title="View ledger"><?= icon('portal') ?></a><a href="<?= e(url('admin/export-invoice.php?id=' . (int) $document['id'])) ?>" title="Export invoice"><?= icon('documents') ?></a></div></td>
+                            <td><div class="reference-row-actions"><a href="<?= e(parties_page_url(['party_id' => (int) ($document['party_id'] ?? 0), 'ptab' => 'ledger'])) ?>" title="View ledger"><?= icon('portal') ?></a><a href="<?= e(url('admin/export-invoice.php?id=' . (int) $document['id'])) ?>" title="Export invoice"><?= icon('documents') ?></a></div></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -1036,7 +1036,7 @@ $tabHeadings = [
                     <?php foreach ($pagedRows as $party): ?>
                         <tr>
                             <td><span class="reference-link"><?= e($party['code']) ?></span></td>
-                            <td><a class="reference-link" href="<?= e(parties_page_url(['party_id' => (int) $party['id']])) ?>#party-panel"><?= e($party['name']) ?></a></td>
+                            <td><a class="reference-link" href="<?= e(parties_page_url(['party_id' => (int) $party['id']])) ?>"><?= e($party['name']) ?></a></td>
                             <td><span class="mbw-pill tone-blue"><?= e(ucfirst((string) $party['party_type'])) ?></span></td>
                             <td><?= e($party['email'] ?? '-') ?></td>
                             <td><?= e($party['phone'] ?? '-') ?></td>
@@ -1085,7 +1085,7 @@ $tabHeadings = [
             </div>
             <nav class="party-panel-tabs">
                 <?php foreach (['profile' => 'Profile', 'ledger' => 'Ledger', 'documents' => 'Documents', 'notes' => 'Notes'] as $ptabKey => $ptabLabel): ?>
-                    <a class="<?= $ptab === $ptabKey ? 'is-active' : '' ?>" href="<?= e(parties_page_url(['ptab' => $ptabKey, 'party_id' => (int) $selectedParty['id']])) ?>#party-panel"><?= e($ptabLabel) ?></a>
+                    <a class="<?= $ptab === $ptabKey ? 'is-active' : '' ?>" href="<?= e(parties_page_url(['ptab' => $ptabKey, 'party_id' => (int) $selectedParty['id']])) ?>"><?= e($ptabLabel) ?></a>
                 <?php endforeach; ?>
             </nav>
             <?php if ($ptab === 'profile'): ?>
@@ -1098,7 +1098,7 @@ $tabHeadings = [
                     <dl><dt>Credit Limit</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format((float) $selectedParty['credit_limit'], 2)) ?></dd><dt>Current Balance</dt><dd class="text-danger"><?= e(site_currency_symbol()) ?><?= e(number_format((float) (end($partyLedgerRows)['balance'] ?? $selectedParty['opening_balance']), 2)) ?></dd><dt>Tax / VAT No.</dt><dd><?= e($selectedParty['pan_no'] ?? '-') ?></dd><dt>PAN No.</dt><dd><?= e($selectedParty['pan_no'] ?? '-') ?></dd></dl>
                 </section>
                 <section>
-                    <h4 id="party-ledger">Account Summary <a href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) $selectedParty['id']])) ?>#party-panel">View Ledger</a></h4>
+                    <h4 id="party-ledger">Account Summary <a href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) $selectedParty['id']])) ?>">View Ledger</a></h4>
                     <dl><dt>Total Sales</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['total_amount'], $partyTransactions)), 2)) ?></dd><dt>Payments Received</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['paid_amount'], $partyTransactions)), 2)) ?></dd><dt>Outstanding</dt><dd class="text-danger"><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['outstanding_amount'], $partyTransactions)), 2)) ?></dd><dt>Last Invoice</dt><dd><?= e($partyTransactions[0]['invoice_date'] ?? '-') ?></dd></dl>
                 </section>
             <?php elseif ($ptab === 'ledger'): ?>
