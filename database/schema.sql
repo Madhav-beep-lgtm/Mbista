@@ -209,6 +209,8 @@ CREATE TABLE IF NOT EXISTS `ledgers` (
   `group_id` INT UNSIGNED DEFAULT NULL,
   `code` VARCHAR(40) NOT NULL,
   `name` VARCHAR(150) NOT NULL,
+  `bank_name` VARCHAR(120) DEFAULT NULL,
+  `bank_account_no` VARCHAR(40) DEFAULT NULL,
   `type` ENUM('asset', 'liability', 'equity', 'revenue', 'expense') NOT NULL,
   `is_system` TINYINT(1) NOT NULL DEFAULT 0,
   `status` ENUM('active', 'suspended') NOT NULL DEFAULT 'active',
@@ -311,9 +313,13 @@ CREATE TABLE IF NOT EXISTS `voucher_entries` (
   `entry_type` ENUM('debit', 'credit') NOT NULL,
   `amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `memo` VARCHAR(255) DEFAULT NULL,
+  `reconciled_at` DATETIME DEFAULT NULL,
+  `reconciled_by` INT UNSIGNED DEFAULT NULL,
+  `statement_date` DATE DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_voucher_entries_voucher` (`voucher_id`),
   KEY `idx_voucher_entries_ledger` (`ledger_id`),
+  KEY `idx_voucher_entries_reconciled` (`ledger_id`, `reconciled_at`),
   CONSTRAINT `fk_voucher_entries_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_voucher_entries_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

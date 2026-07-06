@@ -1,6 +1,7 @@
 <?php
 $pageTitle = $pageTitle ?? 'Staff Portal';
-$bodyClass = 'admin-layout admin-workspace staff-portal';
+$pageSubtitle = $pageSubtitle ?? '';
+$bodyClass = trim('admin-layout admin-workspace staff-portal ' . ($bodyClass ?? ''));
 $currentUser = current_user();
 $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $currentUser['company_id']) : null;
 ?>
@@ -10,7 +11,9 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260704">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e2240'/%3E%3Ctext x='16' y='21.5' font-family='Georgia,serif' font-size='13' font-weight='700' fill='%23e3a13c' text-anchor='middle'%3EMB%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260706-portal">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260706a">
 </head>
 <body class="<?= e($bodyClass) ?>">
 <div class="admin-shell">
@@ -18,8 +21,8 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
         <a class="brand brand-admin" href="<?= e(url('staff/index.php')) ?>">
             <span class="brand-mark">MB</span>
             <span>
-                <strong>Staff Portal</strong>
-                <small><?= e(app_name()) ?></small>
+                <strong>MB World</strong>
+                <small>Staff Portal</small>
             </span>
         </a>
         <?php if ($headerStaffCompany): ?>
@@ -29,16 +32,21 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
             </div>
         <?php endif; ?>
         <nav class="admin-nav">
+            <span class="admin-nav-group">Workspace</span>
             <a href="<?= e(url('staff/index.php?view=home')) ?>"><?= icon('dashboard') ?>Dashboard</a>
-            <a href="<?= e(url('staff/index.php?view=clients')) ?>"><?= icon('clients') ?>My clients</a>
-            <a href="<?= e(url('staff/index.php?view=tasks')) ?>"><?= icon('tasks') ?>Client tasks</a>
+            <a href="<?= e(url('staff/index.php?view=clients')) ?>"><?= icon('clients') ?>My Clients</a>
+            <a href="<?= e(url('staff/index.php?view=tasks')) ?>"><?= icon('tasks') ?>Client Tasks</a>
+            <span class="admin-nav-group">Documents &amp; Compliance</span>
             <a href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
             <a href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>
+            <span class="admin-nav-group">Communication</span>
             <a href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
             <a href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
+            <span class="admin-nav-group">HR &amp; Time</span>
             <a href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>Attendance</a>
             <a href="<?= e(url('admin/hr.php?view=leave')) ?>"><?= icon('leave') ?>Leave</a>
             <a href="<?= e(url('admin/hr.php?view=timesheets')) ?>"><?= icon('timesheets') ?>Timesheets</a>
+            <span class="admin-nav-group">System</span>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
         </nav>
     </aside>
@@ -46,23 +54,25 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
         <header class="admin-topbar">
             <div class="admin-topbar-title">
                 <h1><?= e($pageTitle) ?></h1>
-                <p>Signed in as <?= e($currentUser['name'] ?? 'Staff') ?></p>
+                <p><?= $pageSubtitle !== '' ? e($pageSubtitle) : 'Signed in as ' . e($currentUser['name'] ?? 'Staff') ?></p>
             </div>
             <form method="get" action="<?= e(url('search.php')) ?>" class="admin-topbar-search" role="search">
+                <span class="mbw-search-glyph"><?= icon('search') ?></span>
                 <label class="sr-only" for="staff-global-search">Search</label>
                 <input id="staff-global-search" type="search" name="q" placeholder="Search tasks, clients, documents..." value="<?= e((string) ($_GET['q'] ?? '')) ?>">
-                <button type="submit" class="admin-icon-button" aria-label="Search" title="Search"><?= icon('reports') ?></button>
+                <button type="submit" aria-label="Search" title="Search"><?= icon('search') ?></button>
             </form>
             <?php if ($headerStaffCompany): ?>
                 <div class="admin-context-chip" aria-label="Current staff context">
                     <span class="admin-context-icon"><?= icon('staff') ?></span>
                     <span>
-                        <strong>Staff portal</strong>
-                        <em><?= e($headerStaffCompany['name'] ?? 'Company') ?></em>
+                        <strong><?= e($headerStaffCompany['name'] ?? 'Company') ?></strong>
+                        <small>Staff portal</small>
                     </span>
                 </div>
             <?php endif; ?>
             <div class="admin-topbar-actions">
+                <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
                 <button type="button" class="theme-toggle-link admin-icon-button" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
                     <?= icon('theme') ?>
                     <span class="sr-only" data-theme-toggle-label>Dark mode</span>

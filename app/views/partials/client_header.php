@@ -1,6 +1,7 @@
 <?php
 $pageTitle = $pageTitle ?? 'Client Portal';
-$bodyClass = 'admin-layout admin-workspace client-portal';
+$pageSubtitle = $pageSubtitle ?? '';
+$bodyClass = trim('admin-layout admin-workspace client-portal ' . ($bodyClass ?? ''));
 $currentUser = current_user();
 $headerClientProfile = $headerClientProfile ?? null;
 $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id'])
@@ -13,7 +14,9 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260704">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e2240'/%3E%3Ctext x='16' y='21.5' font-family='Georgia,serif' font-size='13' font-weight='700' fill='%23e3a13c' text-anchor='middle'%3EMB%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260706-portal">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260706a">
 </head>
 <body class="<?= e($bodyClass) ?>">
 <div class="admin-shell">
@@ -21,8 +24,8 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
         <a class="brand brand-admin" href="<?= e(url('dashboard.php')) ?>">
             <span class="brand-mark">MB</span>
             <span>
-                <strong>Client Portal</strong>
-                <small><?= e(app_name()) ?></small>
+                <strong>MB World</strong>
+                <small>Client Portal</small>
             </span>
         </a>
         <?php if ($headerClientProfile): ?>
@@ -33,16 +36,20 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
             </div>
         <?php endif; ?>
         <nav class="admin-nav">
+            <span class="admin-nav-group">Overview</span>
             <a href="<?= e(url('dashboard.php?view=home')) ?>"><?= icon('dashboard') ?>Dashboard</a>
-            <a href="<?= e(url('dashboard.php?view=tasks')) ?>"><?= icon('tasks') ?>My tasks</a>
-            <a href="<?= e(url('dashboard.php?view=contracts')) ?>"><?= icon('contracts') ?>My contracts</a>
-            <a href="<?= e(url('dashboard.php?view=invoices')) ?>"><?= icon('invoices') ?>My invoices</a>
-            <a href="<?= e(url('dashboard.php?view=documents')) ?>"><?= icon('documents') ?>My documents</a>
-            <a href="<?= e(url('dashboard.php?view=document-requests')) ?>"><?= icon('documents') ?>Document requests</a>
-            <a href="<?= e(url('dashboard.php?view=compliance')) ?>"><?= icon('compliance') ?>Compliance calendar</a>
+            <a href="<?= e(url('dashboard.php?view=tasks')) ?>"><?= icon('tasks') ?>My Tasks</a>
+            <span class="admin-nav-group">Engagements</span>
+            <a href="<?= e(url('dashboard.php?view=contracts')) ?>"><?= icon('contracts') ?>My Contracts</a>
+            <a href="<?= e(url('dashboard.php?view=invoices')) ?>"><?= icon('invoices') ?>My Invoices</a>
+            <span class="admin-nav-group">Documents &amp; Compliance</span>
+            <a href="<?= e(url('dashboard.php?view=documents')) ?>"><?= icon('documents') ?>My Documents</a>
+            <a href="<?= e(url('dashboard.php?view=document-requests')) ?>"><?= icon('contracts') ?>Document Requests</a>
+            <a href="<?= e(url('dashboard.php?view=compliance')) ?>"><?= icon('compliance') ?>Compliance Calendar</a>
+            <span class="admin-nav-group">Support</span>
             <a href="<?= e(url('dashboard.php?view=messages')) ?>"><?= icon('messages') ?>Messages</a>
-            <a href="<?= e(url('dashboard.php?view=tickets')) ?>"><?= icon('tickets') ?>Support tickets</a>
-            <a href="<?= e(url('contact.php')) ?>"><?= icon('contact') ?>Contact support</a>
+            <a href="<?= e(url('dashboard.php?view=tickets')) ?>"><?= icon('tickets') ?>Support Tickets</a>
+            <a href="<?= e(url('contact.php')) ?>"><?= icon('contact') ?>Contact Support</a>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
         </nav>
     </aside>
@@ -50,14 +57,13 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
         <header class="admin-topbar">
             <div class="admin-topbar-title">
                 <h1><?= e($pageTitle) ?></h1>
-                <p>Signed in as <?= e($currentUser['name'] ?? 'Client') ?></p>
+                <p><?= $pageSubtitle !== '' ? e($pageSubtitle) : 'Signed in as ' . e($currentUser['name'] ?? 'Client') ?></p>
             </div>
             <?php if ($headerClientProfile): ?>
                 <div class="admin-context-chip" aria-label="Your client context">
                     <span class="admin-context-icon"><?= icon('clients') ?></span>
                     <span>
-                        <strong>Client portal</strong>
-                        <em><?= e($headerClientProfile['organization_name']) ?></em>
+                        <strong><?= e($headerClientProfile['organization_name']) ?></strong>
                         <small><?= e($headerCompany['name'] ?? 'Service provider') ?></small>
                     </span>
                 </div>

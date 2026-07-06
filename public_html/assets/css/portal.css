@@ -1,0 +1,1459 @@
+/* ==========================================================================
+   MB World Portal Design System (portal.css)
+   Loaded AFTER style.css on admin/staff/client portal pages only.
+   Single --mbw-* token system cloned from the approved reference dashboard:
+   dark navy sidebar w/ gold active state, light blue-gray canvas, white
+   cards with soft borders, colored icon chips, pill statuses, clean tables.
+   Overrides the three legacy shell layers and five per-page mini design
+   systems (accounting-*, reference-*, ad-*, rc-*, blueprint) so every
+   portal page renders in one coherent language, light and dark.
+   ========================================================================== */
+
+body.admin-layout {
+  /* Light tokens */
+  --mbw-canvas: #eef2f7;
+  --mbw-card: #ffffff;
+  --mbw-card-soft: #f7fafd;
+  --mbw-border: #e3e9f2;
+  --mbw-border-soft: #edf1f7;
+  --mbw-heading: #16263e;
+  --mbw-text: #3f4c61;
+  --mbw-muted: #6b7a90;
+  --mbw-primary: #2563eb;
+  --mbw-primary-soft: #e7effd;
+  --mbw-green: #16a34a;
+  --mbw-green-soft: #e5f6ec;
+  --mbw-red: #e5484d;
+  --mbw-red-soft: #fdeaea;
+  --mbw-amber: #e28a09;
+  --mbw-amber-soft: #fdf1dd;
+  --mbw-purple: #8b5cf6;
+  --mbw-purple-soft: #f0eafd;
+  --mbw-teal: #0d9488;
+  --mbw-teal-soft: #e0f5f4;
+  --mbw-gray-soft: #eef1f6;
+  --mbw-sidebar: #0e2240;
+  --mbw-sidebar-deep: #0b1c36;
+  --mbw-sidebar-line: rgba(148, 178, 215, 0.14);
+  --mbw-sidebar-text: #b9c8dd;
+  --mbw-sidebar-active: #1d3a63;
+  --mbw-gold: #e3a13c;
+  --mbw-shadow: 0 1px 2px rgba(22, 38, 62, 0.05), 0 4px 14px rgba(22, 38, 62, 0.04);
+  --mbw-radius: 12px;
+  --mbw-radius-sm: 8px;
+  --mbw-font: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+
+  /* Re-point legacy alias tokens consumed by old markup */
+  --background: var(--mbw-canvas);
+  --surface: var(--mbw-card);
+  --surface-soft: var(--mbw-card-soft);
+  --border: var(--mbw-border);
+  --border-color: var(--mbw-border);
+  --heading: var(--mbw-heading);
+  --text-primary: var(--mbw-text);
+  --text-secondary: var(--mbw-muted);
+  --secondary: var(--mbw-primary);
+  --success: var(--mbw-green);
+  --danger: var(--mbw-red);
+  --warning: var(--mbw-amber);
+  --radius-sm: var(--mbw-radius-sm);
+  --radius-md: var(--mbw-radius);
+  --shadow-sm: var(--mbw-shadow);
+  --admin-topbar-sticky-height: 72px;
+
+  font-family: var(--mbw-font);
+  background: var(--mbw-canvas);
+  color: var(--mbw-text);
+}
+
+/* Dark tokens — both portal dark classes behave identically */
+body.admin-layout.theme-dark,
+body.admin-layout.admin-dark {
+  --mbw-canvas: #0a1120;
+  --mbw-card: #111b30;
+  --mbw-card-soft: #16223a;
+  --mbw-border: rgba(148, 178, 215, 0.18);
+  --mbw-border-soft: rgba(148, 178, 215, 0.10);
+  --mbw-heading: #e8eef7;
+  --mbw-text: #c3cfe0;
+  --mbw-muted: #8fa1b8;
+  --mbw-primary: #7fb0f5;
+  --mbw-primary-soft: rgba(127, 176, 245, 0.16);
+  --mbw-green: #3ecf7d;
+  --mbw-green-soft: rgba(62, 207, 125, 0.14);
+  --mbw-red: #f47c80;
+  --mbw-red-soft: rgba(244, 124, 128, 0.14);
+  --mbw-amber: #f3b04c;
+  --mbw-amber-soft: rgba(243, 176, 76, 0.14);
+  --mbw-purple: #b39af8;
+  --mbw-purple-soft: rgba(179, 154, 248, 0.15);
+  --mbw-teal: #46c4b9;
+  --mbw-teal-soft: rgba(70, 196, 185, 0.14);
+  --mbw-gray-soft: rgba(148, 178, 215, 0.12);
+  --mbw-sidebar: #0a1728;
+  --mbw-sidebar-deep: #081221;
+  --mbw-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
+  background: var(--mbw-canvas);
+  color: var(--mbw-text);
+}
+
+body.admin-layout,
+body.admin-layout h1, body.admin-layout h2, body.admin-layout h3,
+body.admin-layout h4, body.admin-layout table, body.admin-layout input,
+body.admin-layout select, body.admin-layout textarea, body.admin-layout button {
+  font-family: var(--mbw-font);
+}
+
+body.admin-layout h1, body.admin-layout h2, body.admin-layout h3, body.admin-layout h4 {
+  color: var(--mbw-heading);
+}
+
+/* ==========================================================================
+   Shell — beats base(264px), premium(292px) and reference(228px) layers
+   ========================================================================== */
+
+body.admin-layout .admin-shell {
+  grid-template-columns: 236px minmax(0, 1fr);
+  background: var(--mbw-canvas);
+}
+
+body.admin-layout .admin-sidebar {
+  padding: 18px 14px 22px;
+  border-right: 1px solid var(--mbw-sidebar-line);
+  background: linear-gradient(180deg, var(--mbw-sidebar) 0%, var(--mbw-sidebar-deep) 100%);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 178, 215, 0.35) transparent;
+}
+
+body.admin-layout .admin-sidebar .brand.brand-admin {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 4px 14px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--mbw-sidebar-line);
+}
+
+body.admin-layout .admin-sidebar .brand-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1.5px solid var(--mbw-gold);
+  border-radius: 10px;
+  background: rgba(227, 161, 60, 0.08);
+  color: var(--mbw-gold);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+body.admin-layout .admin-sidebar .brand strong {
+  display: block;
+  color: #f2f6fc;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+body.admin-layout .admin-sidebar .brand small {
+  display: block;
+  color: #8fa4bf;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+body.admin-layout .admin-sidebar-context {
+  margin: 0 4px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--mbw-sidebar-line);
+  border-radius: 10px;
+  background: rgba(148, 178, 215, 0.07);
+  color: #9fb1c6;
+  font-size: 11px;
+}
+
+body.admin-layout .admin-sidebar-context strong {
+  color: #dbe6f5;
+  font-size: 12px;
+}
+
+body.admin-layout .admin-nav {
+  display: grid;
+  gap: 2px;
+}
+
+body.admin-layout .admin-nav-group {
+  margin: 14px 4px 4px;
+  color: #7d93b8;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+body.admin-layout .admin-nav a {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: var(--mbw-radius-sm);
+  background: transparent;
+  color: var(--mbw-sidebar-text);
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+body.admin-layout .admin-nav a .ui-icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  opacity: 0.9;
+}
+
+body.admin-layout .admin-nav a:hover {
+  background: rgba(148, 178, 215, 0.10);
+  color: #ffffff;
+}
+
+body.admin-layout .admin-nav a.is-active {
+  background: var(--mbw-sidebar-active);
+  color: var(--mbw-gold);
+  font-weight: 600;
+}
+
+body.admin-layout .admin-nav a.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--mbw-gold);
+}
+
+/* Expandable submenu (Accounting workspace) */
+body.admin-layout .mbw-nav-parent {
+  position: relative;
+}
+
+body.admin-layout .mbw-nav-parent > a .mbw-nav-caret {
+  margin-left: auto;
+  display: inline-flex;
+  transition: transform 0.18s ease;
+}
+
+body.admin-layout .mbw-nav-parent > a .mbw-nav-caret .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+body.admin-layout .mbw-nav-parent.is-open > a .mbw-nav-caret {
+  transform: rotate(180deg);
+}
+
+body.admin-layout .mbw-subnav {
+  display: none;
+  margin: 2px 0 4px 20px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(148, 178, 215, 0.25);
+}
+
+body.admin-layout .mbw-nav-parent.is-open .mbw-subnav {
+  display: grid;
+  gap: 1px;
+}
+
+body.admin-layout .mbw-subnav a {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+body.admin-layout .mbw-subnav a .ui-icon {
+  width: 15px;
+  height: 15px;
+}
+
+body.admin-layout .mbw-subnav a.is-active::before {
+  display: none;
+}
+
+/* ==========================================================================
+   Main column, topbar, page head
+   ========================================================================== */
+
+body.admin-layout .admin-main {
+  padding: 20px 24px 32px;
+  background: var(--mbw-canvas);
+}
+
+body.admin-layout .admin-topbar {
+  position: sticky !important;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-height: 64px;
+  margin: -20px -24px 18px;
+  padding: 12px 24px;
+  border: 0;
+  border-bottom: 1px solid var(--mbw-border);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--mbw-canvas) 88%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: none;
+}
+
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  body.admin-layout .admin-topbar { background: var(--mbw-canvas); }
+}
+
+body.admin-layout .admin-topbar-title h1 {
+  margin: 0;
+  color: var(--mbw-heading);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+body.admin-layout .admin-topbar-title p {
+  margin: 2px 0 0;
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+}
+
+body.admin-layout .admin-topbar-search {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: 0 1 300px;
+  margin-left: auto;
+  position: relative;
+}
+
+body.admin-layout .admin-topbar-search input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px 8px 36px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  color: var(--mbw-text);
+  font-size: 13px;
+  box-shadow: var(--mbw-shadow);
+}
+
+body.admin-layout .admin-topbar-search input:focus {
+  outline: none;
+  border-color: var(--mbw-primary);
+  box-shadow: 0 0 0 3px var(--mbw-primary-soft);
+}
+
+body.admin-layout .admin-topbar-search .mbw-search-glyph {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  color: var(--mbw-muted);
+  pointer-events: none;
+}
+
+body.admin-layout .admin-topbar-search .mbw-search-glyph .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+body.admin-layout .admin-topbar-search button {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mbw-muted);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+body.admin-layout .admin-topbar-search button:hover {
+  background: var(--mbw-gray-soft);
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .admin-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+body.admin-layout .admin-icon-button,
+body.admin-layout .admin-topbar-actions .admin-icon-button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  color: var(--mbw-text);
+  box-shadow: var(--mbw-shadow);
+  cursor: pointer;
+}
+
+body.admin-layout .admin-icon-button:hover {
+  border-color: var(--mbw-primary);
+  color: var(--mbw-primary);
+  background: var(--mbw-card);
+}
+
+body.admin-layout .admin-icon-button .ui-icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* Company selector chip — replaces 3 legacy hardcoded navy chips */
+body.admin-layout .admin-context-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  box-shadow: var(--mbw-shadow);
+}
+
+body.admin-layout .admin-context-chip .admin-context-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--mbw-amber-soft);
+  color: var(--mbw-amber);
+}
+
+body.admin-layout .admin-context-chip .admin-context-icon .ui-icon {
+  width: 15px;
+  height: 15px;
+}
+
+body.admin-layout .admin-context-chip strong {
+  display: block;
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body.admin-layout .admin-context-chip small,
+body.admin-layout .admin-context-chip span:not(.admin-context-icon) {
+  color: var(--mbw-muted);
+  font-size: 11px;
+}
+
+body.admin-layout .topbar-company-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+body.admin-layout .topbar-company-select,
+body.admin-layout .admin-topbar select {
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+  font-weight: 600;
+  box-shadow: var(--mbw-shadow);
+}
+
+/* Hierarchy strip + breadcrumb */
+body.admin-layout .admin-hierarchy-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 8px 14px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  color: var(--mbw-muted);
+  font-size: 12px;
+  box-shadow: var(--mbw-shadow);
+}
+
+body.admin-layout .admin-hierarchy-strip strong {
+  color: var(--mbw-heading);
+  font-weight: 600;
+}
+
+body.admin-layout .admin-breadcrumb {
+  margin: 0 0 12px;
+  color: var(--mbw-muted);
+  font-size: 12px;
+}
+
+body.admin-layout .admin-breadcrumb a {
+  color: var(--mbw-primary);
+  text-decoration: none;
+}
+
+body.admin-layout .admin-content {
+  display: grid;
+  gap: 18px;
+}
+
+/* ==========================================================================
+   Cards (mega-list of legacy card classes + new mbw-card)
+   ========================================================================== */
+
+body.admin-layout .card,
+body.admin-layout .stat-card,
+body.admin-layout .notice,
+body.admin-layout .form-card,
+body.admin-layout .table-card,
+body.admin-layout .metric,
+body.admin-layout .admin-stats .card,
+body.admin-layout .invoice-card,
+body.admin-layout .modal-card,
+body.admin-layout .admin-hero,
+body.admin-layout .admin-chart-card,
+body.admin-layout .admin-analysis-card,
+body.admin-layout .digital-click-card,
+body.admin-layout .digital-panel,
+body.admin-layout .ad-panel,
+body.admin-layout .ad-kpi,
+body.admin-layout .accounting-stat-card,
+body.admin-layout .accounting-panel,
+body.admin-layout .reference-stat,
+body.admin-layout .reference-panel,
+body.admin-layout .reference-party-panel,
+body.admin-layout .accounting-side-panel,
+body.admin-layout .rc-filter-card,
+body.admin-layout .rc-report-card,
+body.admin-layout .coa-impact-card,
+body.admin-layout .settings-component,
+body.admin-layout .settings-subcard,
+body.admin-layout .mbw-card {
+  border: 1px solid var(--mbw-border);
+  border-radius: var(--mbw-radius);
+  background: var(--mbw-card);
+  box-shadow: var(--mbw-shadow);
+  color: var(--mbw-text);
+}
+
+body.admin-layout .admin-hero {
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .mbw-card {
+  padding: 16px 18px;
+}
+
+body.admin-layout .mbw-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+body.admin-layout .mbw-card-head h2,
+body.admin-layout .mbw-card-head h3 {
+  margin: 0;
+  color: var(--mbw-heading);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+body.admin-layout .mbw-card-head .mbw-info {
+  display: inline-flex;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .mbw-card-head .mbw-info .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+body.admin-layout .mbw-card-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+body.admin-layout .mbw-view-all {
+  color: var(--mbw-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+body.admin-layout .mbw-view-all:hover {
+  text-decoration: underline;
+}
+
+body.admin-layout .mbw-select,
+body.admin-layout .mbw-card-tools select {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 8px;
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   Icon chips + KPI stat cards
+   ========================================================================== */
+
+.mbw-chip {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.mbw-chip.is-square {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+
+.mbw-chip .ui-icon {
+  width: 19px;
+  height: 19px;
+}
+
+.mbw-chip.tone-green  { background: var(--mbw-green-soft);  color: var(--mbw-green); }
+.mbw-chip.tone-red    { background: var(--mbw-red-soft);    color: var(--mbw-red); }
+.mbw-chip.tone-blue   { background: var(--mbw-primary-soft); color: var(--mbw-primary); }
+.mbw-chip.tone-amber  { background: var(--mbw-amber-soft);  color: var(--mbw-amber); }
+.mbw-chip.tone-purple { background: var(--mbw-purple-soft); color: var(--mbw-purple); }
+.mbw-chip.tone-teal   { background: var(--mbw-teal-soft);   color: var(--mbw-teal); }
+.mbw-chip.tone-gray   { background: var(--mbw-gray-soft);   color: var(--mbw-muted); }
+
+body.admin-layout .mbw-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(208px, 1fr));
+  gap: 14px;
+}
+
+body.admin-layout .mbw-kpi {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 15px 16px;
+  border: 1px solid var(--mbw-border);
+  border-radius: var(--mbw-radius);
+  background: var(--mbw-card);
+  box-shadow: var(--mbw-shadow);
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+body.admin-layout a.mbw-kpi:hover {
+  border-color: var(--mbw-primary);
+  transform: translateY(-1px);
+}
+
+body.admin-layout .mbw-kpi-label {
+  color: var(--mbw-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+body.admin-layout .mbw-kpi-value {
+  margin: 4px 0 6px;
+  color: var(--mbw-heading);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+body.admin-layout .mbw-kpi-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .mbw-kpi-delta .ui-icon {
+  width: 13px;
+  height: 13px;
+}
+
+body.admin-layout .mbw-kpi-delta.is-up   { color: var(--mbw-green); }
+body.admin-layout .mbw-kpi-delta.is-down { color: var(--mbw-red); }
+
+body.admin-layout .mbw-kpi-delta .mbw-kpi-vs {
+  color: var(--mbw-muted);
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   Quick action tiles
+   ========================================================================== */
+
+body.admin-layout .mbw-qa-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+body.admin-layout .mbw-qa {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 14px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+body.admin-layout .mbw-qa:hover {
+  border-color: var(--mbw-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--mbw-shadow);
+}
+
+body.admin-layout .mbw-qa strong {
+  display: block;
+  color: var(--mbw-heading);
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+body.admin-layout .mbw-qa span {
+  display: block;
+  color: var(--mbw-muted);
+  font-size: 12px;
+}
+
+/* ==========================================================================
+   Upcoming due list
+   ========================================================================== */
+
+body.admin-layout .mbw-due-list {
+  display: grid;
+  gap: 14px;
+}
+
+body.admin-layout .mbw-due {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+}
+
+body.admin-layout .mbw-due .mbw-chip {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+
+body.admin-layout .mbw-due-label {
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+body.admin-layout .mbw-due-value {
+  color: var(--mbw-heading);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+body.admin-layout .mbw-due-sub {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+body.admin-layout .mbw-due-sub.tone-red   { color: var(--mbw-red); }
+body.admin-layout .mbw-due-sub.tone-amber { color: var(--mbw-amber); }
+body.admin-layout .mbw-due-sub.tone-blue  { color: var(--mbw-primary); }
+
+/* ==========================================================================
+   Tables — reference design applied to every legacy table family
+   ========================================================================== */
+
+body.admin-layout table {
+  width: 100%;
+  border-collapse: collapse;
+  background: transparent;
+  font-size: 13.5px;
+}
+
+body.admin-layout table th,
+body.admin-layout .accounting-table th,
+body.admin-layout .reference-table th,
+body.admin-layout .rc-table th,
+body.admin-layout .ad-panel table th,
+body.admin-layout .party-ledger-table th {
+  position: static;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--mbw-border);
+  background: transparent;
+  color: var(--mbw-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  text-align: left;
+}
+
+body.admin-layout table td,
+body.admin-layout .accounting-table td,
+body.admin-layout .reference-table td,
+body.admin-layout .rc-table td,
+body.admin-layout .ad-panel table td {
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--mbw-border-soft);
+  color: var(--mbw-text);
+  font-size: 13.5px;
+}
+
+body.admin-layout table tbody tr:hover td {
+  background: var(--mbw-card-soft);
+}
+
+body.admin-layout table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+body.admin-layout table tfoot td {
+  border-top: 1px solid var(--mbw-border);
+  border-bottom: 0;
+  color: var(--mbw-heading);
+  font-weight: 700;
+}
+
+body.admin-layout .amount-cell,
+body.admin-layout td.is-numeric,
+body.admin-layout th.is-numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+body.admin-layout .amount-positive { color: var(--mbw-green); }
+body.admin-layout .amount-negative { color: var(--mbw-red); }
+
+body.admin-layout .table-card {
+  padding: 16px 18px;
+  overflow-x: auto;
+}
+
+/* ==========================================================================
+   Pills — one system, mapped onto every legacy pill/badge family
+   ========================================================================== */
+
+body.admin-layout .mbw-pill,
+body.admin-layout .badge,
+body.admin-layout .tag,
+body.admin-layout .accounting-pill,
+body.admin-layout .reference-pill,
+body.admin-layout .ad-type,
+body.admin-layout .sla-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--mbw-gray-soft);
+  color: var(--mbw-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+body.admin-layout .mbw-pill.tone-green,
+body.admin-layout .tag.status-completed,
+body.admin-layout .tag.status-paid,
+body.admin-layout .accounting-pill.pill-paid,
+body.admin-layout .reference-pill.status-paid,
+body.admin-layout .sla-badge.sla-ok,
+body.admin-layout .badge.success {
+  background: var(--mbw-green-soft);
+  color: var(--mbw-green);
+}
+
+body.admin-layout .mbw-pill.tone-amber,
+body.admin-layout .tag.status-pending,
+body.admin-layout .reference-pill.status-pending,
+body.admin-layout .reference-pill.status-partially-paid,
+body.admin-layout .sla-badge.sla-risk,
+body.admin-layout .badge.warning {
+  background: var(--mbw-amber-soft);
+  color: var(--mbw-amber);
+}
+
+body.admin-layout .mbw-pill.tone-red,
+body.admin-layout .tag.status-overdue,
+body.admin-layout .tag.status-cancelled,
+body.admin-layout .reference-pill.status-overdue,
+body.admin-layout .reference-pill.status-cancelled,
+body.admin-layout .sla-badge.sla-breach,
+body.admin-layout .badge.danger {
+  background: var(--mbw-red-soft);
+  color: var(--mbw-red);
+}
+
+body.admin-layout .mbw-pill.tone-blue,
+body.admin-layout .tag.status-draft,
+body.admin-layout .reference-pill.status-draft,
+body.admin-layout .accounting-pill.pill-open,
+body.admin-layout .badge.info {
+  background: var(--mbw-primary-soft);
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .mbw-pill.tone-purple { background: var(--mbw-purple-soft); color: var(--mbw-purple); }
+body.admin-layout .mbw-pill.tone-teal   { background: var(--mbw-teal-soft);   color: var(--mbw-teal); }
+
+/* ==========================================================================
+   Buttons — flatten the five legacy button systems
+   ========================================================================== */
+
+body.admin-layout .button,
+body.admin-layout button,
+body.admin-layout input[type="submit"],
+body.admin-layout .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--mbw-radius-sm);
+  background: var(--mbw-primary);
+  color: #ffffff;
+  font-family: var(--mbw-font);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-decoration: none;
+  box-shadow: none;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+body.admin-layout .button:hover,
+body.admin-layout button:hover,
+body.admin-layout input[type="submit"]:hover,
+body.admin-layout .btn:hover {
+  background: #1d4fd7;
+  color: #ffffff;
+  transform: none;
+  box-shadow: none;
+}
+
+body.admin-layout.theme-dark .button:hover,
+body.admin-layout.theme-dark button:hover,
+body.admin-layout.admin-dark .button:hover,
+body.admin-layout.admin-dark button:hover {
+  background: #99c0f8;
+}
+
+body.admin-layout.theme-dark .button,
+body.admin-layout.theme-dark button,
+body.admin-layout.theme-dark input[type="submit"],
+body.admin-layout.theme-dark .btn,
+body.admin-layout.admin-dark .button,
+body.admin-layout.admin-dark button,
+body.admin-layout.admin-dark input[type="submit"],
+body.admin-layout.admin-dark .btn {
+  color: #0b1420;
+}
+
+body.admin-layout .button.secondary,
+body.admin-layout .button.outline,
+body.admin-layout button.secondary,
+body.admin-layout .btn-secondary,
+body.admin-layout input[type="submit"].secondary {
+  border-color: var(--mbw-border);
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .button.secondary:hover,
+body.admin-layout .button.outline:hover,
+body.admin-layout button.secondary:hover,
+body.admin-layout .btn-secondary:hover {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-card);
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .mbw-button-soft,
+body.admin-layout .button.soft {
+  border-color: transparent;
+  background: var(--mbw-primary-soft);
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .mbw-button-soft:hover,
+body.admin-layout .button.soft:hover {
+  background: var(--mbw-primary);
+  color: #ffffff;
+}
+
+body.admin-layout .btn-danger,
+body.admin-layout .button.danger {
+  background: var(--mbw-red-soft);
+  color: var(--mbw-red);
+}
+
+body.admin-layout .btn-danger:hover,
+body.admin-layout .button.danger:hover {
+  background: var(--mbw-red);
+  color: #ffffff;
+}
+
+body.admin-layout .btn-success,
+body.admin-layout .button.success {
+  background: var(--mbw-green-soft);
+  color: var(--mbw-green);
+}
+
+body.admin-layout .btn-success:hover,
+body.admin-layout .button.success:hover {
+  background: var(--mbw-green);
+  color: #ffffff;
+}
+
+body.admin-layout .icon-action {
+  min-height: 32px;
+  width: 32px;
+  padding: 0;
+  border: 1px solid var(--mbw-border);
+  background: var(--mbw-card);
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .icon-action:hover {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-card);
+  color: var(--mbw-primary);
+}
+
+/* Theme toggle + search submit inherit icon-button style, not primary blue */
+body.admin-layout button[data-theme-toggle] {
+  border: 1px solid var(--mbw-border);
+  background: var(--mbw-card);
+  color: var(--mbw-text);
+}
+
+body.admin-layout button[data-theme-toggle]:hover {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-card);
+  color: var(--mbw-primary);
+}
+
+/* ==========================================================================
+   Forms
+   ========================================================================== */
+
+body.admin-layout input,
+body.admin-layout select,
+body.admin-layout textarea {
+  border: 1px solid var(--mbw-border);
+  border-radius: var(--mbw-radius-sm);
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  font-size: 13.5px;
+}
+
+body.admin-layout input:focus,
+body.admin-layout select:focus,
+body.admin-layout textarea:focus {
+  outline: none;
+  border-color: var(--mbw-primary);
+  box-shadow: 0 0 0 3px var(--mbw-primary-soft);
+}
+
+body.admin-layout input::placeholder,
+body.admin-layout textarea::placeholder {
+  color: var(--mbw-muted);
+}
+
+body.admin-layout label {
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+body.admin-layout .notice.success {
+  border-color: var(--mbw-green);
+  background: var(--mbw-green-soft);
+  color: var(--mbw-green);
+}
+
+body.admin-layout .notice.error {
+  border-color: var(--mbw-red);
+  background: var(--mbw-red-soft);
+  color: var(--mbw-red);
+}
+
+/* ==========================================================================
+   Tabs (3 legacy families) — underline style with primary accent
+   ========================================================================== */
+
+body.admin-layout .accounting-tabs a,
+body.admin-layout .reference-tabs a,
+body.admin-layout .party-panel-tabs a {
+  color: var(--mbw-muted);
+  border-color: transparent;
+  background: transparent;
+  font-weight: 600;
+}
+
+body.admin-layout .accounting-tabs a.is-active,
+body.admin-layout .reference-tabs a.is-active,
+body.admin-layout .party-panel-tabs a.is-active {
+  color: var(--mbw-primary);
+  border-bottom: 2px solid var(--mbw-primary);
+  background: transparent;
+}
+
+/* ==========================================================================
+   Legacy mini-system compat: ad-*, accounting-*, reference-*, rc-*
+   Re-tint their hardcoded chips/accents with tokens
+   ========================================================================== */
+
+body.admin-layout .ad-kpi-icon,
+body.admin-layout .stat-icon,
+body.admin-layout .accounting-stat-icon {
+  border: 0;
+  border-radius: 50%;
+  background: var(--mbw-primary-soft);
+  color: var(--mbw-primary);
+  box-shadow: none;
+}
+
+body.admin-layout .ad-kpi-icon.tone-green,  body.admin-layout .accent-green .accounting-stat-icon  { background: var(--mbw-green-soft);  color: var(--mbw-green); }
+body.admin-layout .ad-kpi-icon.tone-orange, body.admin-layout .ad-kpi-icon.tone-amber,
+body.admin-layout .accent-orange .accounting-stat-icon { background: var(--mbw-amber-soft);  color: var(--mbw-amber); }
+body.admin-layout .ad-kpi-icon.tone-purple, body.admin-layout .accent-purple .accounting-stat-icon { background: var(--mbw-purple-soft); color: var(--mbw-purple); }
+body.admin-layout .ad-kpi-icon.tone-cyan,   body.admin-layout .ad-kpi-icon.tone-teal   { background: var(--mbw-teal-soft);   color: var(--mbw-teal); }
+body.admin-layout .accent-red .accounting-stat-icon    { background: var(--mbw-red-soft);    color: var(--mbw-red); }
+
+/* Legacy ad-head context block: hardcoded ink colors go invisible in dark */
+body.admin-layout .ad-head,
+body.admin-layout .ad-head .ad-company-title h2,
+body.admin-layout .ad-head h2 {
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .ad-head .ad-company-title p,
+body.admin-layout .ad-head span,
+body.admin-layout .ad-head label {
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .rc-total-row td {
+  background: var(--mbw-card-soft);
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .rc-group-head td {
+  background: var(--mbw-gray-soft);
+  color: var(--mbw-heading);
+  font-weight: 700;
+}
+
+/* Workspace module bar */
+body.admin-layout .workspace-module-bar {
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  box-shadow: var(--mbw-shadow);
+}
+
+body.admin-layout .workspace-module-bar a {
+  color: var(--mbw-muted);
+  border-radius: 8px;
+}
+
+body.admin-layout .workspace-module-bar a.is-active {
+  background: var(--mbw-primary-soft);
+  color: var(--mbw-primary);
+}
+
+/* ==========================================================================
+   Charts
+   ========================================================================== */
+
+body.admin-layout .mbw-chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 260px;
+}
+
+body.admin-layout .mbw-chart-wrap canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+body.admin-layout .mbw-donut-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+body.admin-layout .mbw-donut-box {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  flex: 0 0 auto;
+}
+
+body.admin-layout .mbw-donut-box canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+body.admin-layout .mbw-legend {
+  display: grid;
+  gap: 10px;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+body.admin-layout .mbw-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+body.admin-layout .mbw-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+body.admin-layout .mbw-legend-label {
+  color: var(--mbw-muted);
+  font-weight: 600;
+}
+
+body.admin-layout .mbw-legend-value {
+  display: block;
+  color: var(--mbw-heading);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+body.admin-layout .mbw-legend-pct {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--mbw-gray-soft);
+  color: var(--mbw-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+body.admin-layout .mbw-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--mbw-muted);
+  font-weight: 600;
+}
+
+body.admin-layout .mbw-chart-legend .mbw-legend-dot.is-line {
+  width: 14px;
+  height: 3px;
+  border-radius: 3px;
+}
+
+.mbw-chart-tooltip {
+  position: absolute;
+  z-index: 90;
+  min-width: 150px;
+  padding: 10px 12px;
+  border: 1px solid var(--mbw-border, #e3e9f2);
+  border-radius: 8px;
+  background: var(--mbw-card, #fff);
+  box-shadow: 0 8px 24px rgba(22, 38, 62, 0.14);
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--mbw-text, #3f4c61);
+  pointer-events: none;
+}
+
+.mbw-chart-tooltip .mbw-tip-title {
+  margin-bottom: 6px;
+  color: var(--mbw-heading, #16263e);
+  font-weight: 700;
+}
+
+.mbw-chart-tooltip .mbw-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.mbw-chart-tooltip .mbw-tip-row b {
+  margin-left: auto;
+  color: var(--mbw-heading, #16263e);
+}
+
+.mbw-chart-tooltip .mbw-tip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* ==========================================================================
+   Dashboard layout rows
+   ========================================================================== */
+
+body.admin-layout .mbw-row-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(0, 1.25fr) minmax(0, 0.9fr);
+  gap: 18px;
+}
+
+body.admin-layout .mbw-row-tables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+@media (max-width: 1360px) {
+  body.admin-layout .mbw-row-charts {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1080px) {
+  body.admin-layout .mbw-row-charts,
+  body.admin-layout .mbw-row-tables {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ==========================================================================
+   Modals, misc
+   ========================================================================== */
+
+body.admin-layout .modal-card {
+  border-radius: var(--mbw-radius);
+}
+
+body.admin-layout .progress-track {
+  background: var(--mbw-gray-soft);
+  border-radius: 999px;
+}
+
+body.admin-layout .progress-fill {
+  background: var(--mbw-primary);
+  border-radius: 999px;
+}
+
+body.admin-layout ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+body.admin-layout ::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background: rgba(107, 122, 144, 0.4);
+  background-clip: content-box;
+}
+
+/* Responsive shell */
+@media (max-width: 1100px) {
+  body.admin-layout .admin-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.admin-layout .admin-sidebar {
+    position: static;
+    height: auto;
+  }
+
+  body.admin-layout .admin-topbar {
+    margin: -16px -16px 14px;
+    padding: 10px 16px;
+  }
+
+  body.admin-layout .admin-main {
+    padding: 16px;
+  }
+
+  body.admin-layout .admin-topbar-search {
+    order: 5;
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+}
+
+@media print {
+  body.admin-layout .admin-sidebar,
+  body.admin-layout .admin-topbar,
+  body.admin-layout .admin-hierarchy-strip {
+    display: none !important;
+  }
+}

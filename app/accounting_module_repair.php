@@ -92,6 +92,15 @@ function accounting_module_repair_database(): array
         accounting_repair_add_index('vouchers', 'idx_vouchers_party', 'KEY `idx_vouchers_party` (`party_id`)');
     });
 
+    $run('Upgrade banking and reconciliation metadata', static function (): void {
+        accounting_repair_add_column('ledgers', 'bank_name', '`bank_name` VARCHAR(120) DEFAULT NULL AFTER `name`');
+        accounting_repair_add_column('ledgers', 'bank_account_no', '`bank_account_no` VARCHAR(40) DEFAULT NULL AFTER `bank_name`');
+        accounting_repair_add_column('voucher_entries', 'reconciled_at', '`reconciled_at` DATETIME DEFAULT NULL AFTER `memo`');
+        accounting_repair_add_column('voucher_entries', 'reconciled_by', '`reconciled_by` INT UNSIGNED DEFAULT NULL AFTER `reconciled_at`');
+        accounting_repair_add_column('voucher_entries', 'statement_date', '`statement_date` DATE DEFAULT NULL AFTER `reconciled_by`');
+        accounting_repair_add_index('voucher_entries', 'idx_voucher_entries_reconciled', 'KEY `idx_voucher_entries_reconciled` (`ledger_id`, `reconciled_at`)');
+    });
+
     $run('Create accounting parties', static function (): void {
         db()->exec("
             CREATE TABLE IF NOT EXISTS `accounting_parties` (

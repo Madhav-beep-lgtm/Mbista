@@ -193,13 +193,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="card admin-chart-card">
         <div class="badge"><?= icon('tasks') ?>Task analysis</div>
         <h3><?= icon('insights') ?>Task progress by status</h3>
-        <canvas id="taskStatusChart" height="220"></canvas>
+        <div class="mbw-chart-wrap" style="height:220px"><canvas id="taskStatusChart"></canvas></div>
     </div>
 
     <div class="card admin-chart-card">
         <div class="badge"><?= icon('invoices') ?>Invoice analysis</div>
         <h3><?= icon('reports') ?>Invoice pipeline by status</h3>
-        <canvas id="invoiceStatusChart" height="220"></canvas>
+        <div class="mbw-donut-row">
+            <div class="mbw-donut-box" style="width:150px;height:150px"><canvas id="invoiceStatusChart"></canvas></div>
+            <div class="mbw-chart-legend" id="invoiceStatusLegend" style="flex-direction:column;align-items:flex-start;gap:8px"></div>
+        </div>
     </div>
 
     <div class="card admin-analysis-card">
@@ -305,10 +308,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
-(() => {
-    if (!window.Chart) {
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.MBWCharts) {
         return;
     }
 
@@ -329,52 +331,34 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
     const taskCanvas = document.getElementById('taskStatusChart');
     if (taskCanvas) {
-        new Chart(taskCanvas, {
-            type: 'bar',
-            data: {
-                labels: ['New', 'In progress', 'On hold', 'Completed', 'Cancelled'],
-                datasets: [{
-                    label: 'Tasks',
-                    data: [taskStatusData.new, taskStatusData.in_progress, taskStatusData.on_hold, taskStatusData.completed, taskStatusData.cancelled],
-                    backgroundColor: ['#c96b3b', '#2f7d74', '#a270d6', '#1f9d55', '#b45309'],
-                    borderRadius: 8,
-                    maxBarThickness: 52
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                },
-                scales: {
-                    y: { beginAtZero: true, ticks: { precision: 0 } }
-                }
-            }
+        MBWCharts.barLine(taskCanvas, {
+            labels: ['New', 'In progress', 'On hold', 'Completed', 'Cancelled'],
+            bars: [{
+                label: 'Tasks',
+                color: 'primary',
+                values: [taskStatusData.new, taskStatusData.in_progress, taskStatusData.on_hold, taskStatusData.completed, taskStatusData.cancelled]
+            }],
+            format: (v) => v.toLocaleString()
         });
     }
 
     const invoiceCanvas = document.getElementById('invoiceStatusChart');
     if (invoiceCanvas) {
-        new Chart(invoiceCanvas, {
-            type: 'doughnut',
-            data: {
-                labels: ['Draft', 'Issued', 'Paid', 'Cancelled'],
-                datasets: [{
-                    label: 'Invoices',
-                    data: [invoiceStatusData.draft, invoiceStatusData.issued, invoiceStatusData.paid, invoiceStatusData.cancelled],
-                    backgroundColor: ['#f1a678', '#16324f', '#2f7d74', '#a8702f']
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'bottom' }
-                }
-            }
-        });
+        const segments = [
+            { label: 'Draft', value: invoiceStatusData.draft, color: 'amber' },
+            { label: 'Issued', value: invoiceStatusData.issued, color: 'primary' },
+            { label: 'Paid', value: invoiceStatusData.paid, color: 'green' },
+            { label: 'Cancelled', value: invoiceStatusData.cancelled, color: 'red' }
+        ];
+        MBWCharts.donut(invoiceCanvas, { segments: segments, thickness: 0.36 });
+        const legend = document.getElementById('invoiceStatusLegend');
+        if (legend) {
+            const tokens = { amber: 'var(--mbw-amber)', primary: 'var(--mbw-primary)', green: 'var(--mbw-green)', red: 'var(--mbw-red)' };
+            legend.innerHTML = segments.map((seg) =>
+                '<span><i class="mbw-legend-dot" style="background:' + tokens[seg.color] + '"></i> ' + seg.label + ' — ' + seg.value.toLocaleString() + '</span>'
+            ).join('');
+        }
     }
-})();
+});
 </script>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

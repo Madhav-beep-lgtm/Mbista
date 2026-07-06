@@ -1,8 +1,9 @@
 <?php
 $pageTitle = $pageTitle ?? 'Admin';
+$pageSubtitle = $pageSubtitle ?? '';
 $bodyClass = $bodyClass ?? 'admin-layout';
-// Every admin shell page uses the reference design language (sidebar theme,
-// bold components, stat cards) introduced on the accounting module.
+// Legacy rc-*/blueprint styles resolve their tokens from this body class;
+// keep it so pages that still use them don't lose their variables.
 if (str_contains($bodyClass, 'admin-layout') && !str_contains($bodyClass, 'accounting-reference-layout')) {
     $bodyClass .= ' accounting-reference-layout';
 }
@@ -10,8 +11,8 @@ $currentUser = current_user();
 $headerCompany = current_company();
 $headerFiscalYear = current_fiscal_year();
 $headerScript = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
-$headerReportId = (string) ($_GET['report'] ?? '');
-$headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php'], true);
+$headerTab = (string) ($_GET['tab'] ?? '');
+$headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php'], true);
 $headerCompanyId = (int) ($headerCompany['id'] ?? 0);
 $headerCompanyCode = (string) ($headerCompany['code'] ?? '');
 $headerBusinessType = company_accounting_business_type($headerCompanyId);
@@ -24,6 +25,27 @@ $headerPortalLabel = match ($headerCompanyCode) {
     'AGHPL' => 'Altiora parent admin portal',
     default => $headerCompany ? 'Subsidiary company portal' : 'Admin portal',
 };
+
+// Accounting workspace submenu: [label, url, icon, active?]
+$headerChartPages = ['chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php'];
+$headerAccountingChildren = [
+    ['Overview', 'admin/accounting-dashboard.php', 'dashboard', $headerScript === 'accounting-dashboard.php'],
+    ['Chart of Accounts', 'admin/chart-of-accounts.php', 'tree', in_array($headerScript, $headerChartPages, true)],
+    ['Vouchers', 'admin/accounting.php', 'journal', $headerScript === 'accounting.php'],
+    ['Sales & Invoices', 'admin/accounting-parties.php?tab=sales', 'invoices', $headerScript === 'accounting-parties.php' && in_array($headerTab, ['', 'sales'], true)],
+    ['Purchases', 'admin/accounting-parties.php?tab=purchases', 'cart', $headerScript === 'accounting-parties.php' && $headerTab === 'purchases'],
+    ['Receipts', 'admin/accounting-parties.php?tab=collections', 'receipt-voucher', $headerScript === 'accounting-parties.php' && $headerTab === 'collections'],
+    ['Payments', 'admin/accounting-parties.php?tab=payments', 'card', $headerScript === 'accounting-parties.php' && $headerTab === 'payments'],
+    ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
+    ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
+];
+$headerAccountingActive = false;
+foreach ($headerAccountingChildren as $headerChild) {
+    if ($headerChild[3]) {
+        $headerAccountingActive = true;
+        break;
+    }
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -31,12 +53,14 @@ $headerPortalLabel = match ($headerCompanyCode) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260704-reference-appwide">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e2240'/%3E%3Ctext x='16' y='21.5' font-family='Georgia,serif' font-size='13' font-weight='700' fill='%23e3a13c' text-anchor='middle'%3EMB%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260706-portal">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260706a">
 </head>
 <body class="<?= e($bodyClass) ?>">
 <div class="admin-shell">
     <aside class="admin-sidebar">
-        <a class="brand brand-admin" href="<?= e(url('admin/index.php')) ?>">
+        <a class="brand brand-admin" href="<?= e(url('admin/accounting-dashboard.php')) ?>">
             <span class="brand-mark">MB</span>
             <span>
                 <strong>MB World</strong>
@@ -56,32 +80,43 @@ $headerPortalLabel = match ($headerCompanyCode) {
             <span class="admin-nav-group">Core Admin</span>
             <a class="<?= $headerScript === 'accounting-dashboard.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
             <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/index.php')) ?>"><?= icon('home') ?>Admin Overview</a>
+
             <span class="admin-nav-group">Accounting Workspace</span>
-            <a class="<?= $headerScript === 'accounting-parties.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-parties.php')) ?>"><?= icon('accounting') ?>Accounting</a>
-            <a class="<?= $headerScript === 'chart-of-accounts.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?>Chart of Accounts</a>
-            <a class="<?= $headerScript === 'accounting.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('documents') ?>Vouchers</a>
-            <span class="admin-nav-group">Commercial Operations</span>
-            <a class="<?= $headerScript === 'invoice.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Sales &amp; Invoices</a>
-            <a href="<?= e(url('admin/accounting-parties.php?tab=purchases')) ?>"><?= icon('services') ?>Purchases</a>
-            <a class="<?= $headerScript === 'receipts.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/receipts.php')) ?>"><?= icon('documents') ?>Receipts</a>
+            <div class="mbw-nav-parent<?= $headerAccountingActive ? ' is-open' : '' ?>" data-nav-parent="accounting">
+                <a href="#" data-nav-toggle aria-expanded="<?= $headerAccountingActive ? 'true' : 'false' ?>" class="<?= $headerAccountingActive ? 'is-active' : '' ?>">
+                    <?= icon('accounting') ?>Accounting
+                    <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
+                </a>
+                <div class="mbw-subnav">
+                    <?php foreach ($headerAccountingChildren as [$headerChildLabel, $headerChildUrl, $headerChildIcon, $headerChildActive]): ?>
+                        <a class="<?= $headerChildActive ? 'is-active' : '' ?>" href="<?= e(url($headerChildUrl)) ?>"><?= icon($headerChildIcon) ?><?= e($headerChildLabel) ?></a>
+                    <?php endforeach; ?>
+                </div>
+            </div>
             <?php if (($headerBusinessProfile['show_inventory'] ?? false) || ($headerBusinessProfile['show_manufacturing'] ?? false)): ?>
-                <span class="admin-nav-group">Inventory &amp; Manufacturing</span>
                 <?php if ($headerBusinessProfile['show_inventory'] ?? false): ?>
-                    <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('services') ?>Inventory</a>
-                <?php endif; ?>
-                <?php if ($headerBusinessProfile['show_manufacturing'] ?? false): ?>
-                    <a href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>"><?= icon('settings') ?>Manufacturing</a>
+                    <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('layers') ?>Inventory &amp; Manufacturing</a>
+                <?php elseif ($headerBusinessProfile['show_manufacturing'] ?? false): ?>
+                    <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>"><?= icon('layers') ?>Manufacturing</a>
                 <?php endif; ?>
             <?php endif; ?>
+
             <span class="admin-nav-group">Reports &amp; Controls</span>
-            <a class="<?= $headerScript === 'reports-center.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
+            <a class="<?= in_array($headerScript, ['reports-center.php', 'report-schedules.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
             <a class="<?= $headerScript === 'compliance.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>
-            <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('reports') ?>Audit Trail &amp; Approvals</a>
-            <span class="admin-nav-group">Shared / Supporting</span>
+            <a class="<?= in_array($headerScript, ['audit-trail.php', 'chart-audit-log.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Trail &amp; Approvals</a>
+
+            <span class="admin-nav-group">Operations</span>
             <a class="<?= $headerScript === 'workspace.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('portal') ?>Work Portal</a>
+            <a class="<?= $headerScript === 'companies.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/companies.php')) ?>"><?= icon('companies') ?>Companies</a>
+            <a class="<?= $headerScript === 'invoice.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Client Invoices</a>
+            <a class="<?= $headerScript === 'receipts.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/receipts.php')) ?>"><?= icon('wallet') ?>Order Receipts</a>
             <a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
             <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
+            <a class="<?= $headerScript === 'hr.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>HR &amp; Attendance</a>
+
+            <span class="admin-nav-group">Users &amp; System</span>
             <a class="<?= $headerScript === 'users.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?>Users</a>
             <a class="<?= $headerScript === 'settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
             <a href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?>Logout</a>
@@ -91,22 +126,21 @@ $headerPortalLabel = match ($headerCompanyCode) {
         <header class="admin-topbar">
             <div class="admin-topbar-title">
                 <h1><?= e($pageTitle) ?></h1>
-                <p>Signed in as <?= e($currentUser['name'] ?? 'Admin') ?></p>
+                <p><?= $pageSubtitle !== '' ? e($pageSubtitle) : 'Signed in as ' . e($currentUser['name'] ?? 'Admin') ?></p>
             </div>
             <form method="get" action="<?= e(url('search.php')) ?>" class="admin-topbar-search" role="search">
+                <span class="mbw-search-glyph"><?= icon('search') ?></span>
                 <label class="sr-only" for="admin-global-search">Search</label>
-                <input id="admin-global-search" type="search" name="q" placeholder="Search dashboard, reports, invoices..." value="<?= e((string) ($_GET['q'] ?? '')) ?>">
-                <button type="submit" class="admin-icon-button" aria-label="Search" title="Search"><?= icon('reports') ?></button>
+                <input id="admin-global-search" type="search" name="q" placeholder="Search transactions, reports, ledgers..." value="<?= e((string) ($_GET['q'] ?? '')) ?>">
+                <button type="submit" aria-label="Search" title="Search"><?= icon('search') ?></button>
             </form>
+            <a class="admin-icon-button" href="<?= e(url('admin/reports-center.php')) ?>" aria-label="Open Reports Center" title="Reports Center"><?= icon('analytics') ?></a>
             <?php if ($headerCompany): ?>
-                <div class="admin-context-chip" aria-label="Current admin portal">
+                <div class="admin-context-chip" aria-label="Current admin portal" title="<?= e($headerPortalLabel) ?>">
                     <span class="admin-context-icon"><?= icon($headerCompanyCode === 'MBAACA' ? 'admin' : 'companies') ?></span>
                     <span>
-                        <strong><?= e($headerPortalLabel) ?></strong>
-                        <em><?= e($headerCompany['name'] ?? 'Company') ?><?= $headerCompanyCode !== '' ? ' · ' . e($headerCompanyCode) : '' ?></em>
-                        <?php if ($headerShowFiscalYear): ?>
-                            <small><?= e($headerFiscalYear['label'] ?? 'No fiscal year selected') ?></small>
-                        <?php endif; ?>
+                        <strong><?= e($headerCompany['name'] ?? 'Company') ?></strong>
+                        <small><?= $headerShowFiscalYear ? e($headerFiscalYear['label'] ?? 'No fiscal year') : e($headerPortalLabel) ?></small>
                     </span>
                 </div>
             <?php endif; ?>
@@ -142,11 +176,12 @@ $headerPortalLabel = match ($headerCompanyCode) {
                             <?php endforeach; ?>
                         </select>
                         <button class="admin-icon-button" type="submit" aria-label="Open selected subsidiary" title="Open selected subsidiary">
-                            <?= icon('portal') ?>
+                            <?= icon('chevron-right') ?>
                             <span class="sr-only">Open selected subsidiary</span>
                         </button>
                     </form>
                 <?php endif; ?>
+                <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
                 <button type="button" class="theme-toggle-link admin-icon-button" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
                     <?= icon('theme') ?>
                     <span class="sr-only" data-theme-toggle-label>Dark mode</span>

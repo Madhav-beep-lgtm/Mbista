@@ -352,9 +352,12 @@ document.addEventListener('DOMContentLoaded', () => {
       document.body.classList.toggle('theme-dark', isDark);
 
       // Keep compatibility with the admin workspace styles that also key off this class.
-      if (document.body.classList.contains('admin-workspace')) {
+      if (document.body.classList.contains('admin-workspace') || document.body.classList.contains('admin-layout')) {
         document.body.classList.toggle('admin-dark', isDark);
       }
+
+      // Let canvas charts re-read design tokens for the new theme.
+      window.dispatchEvent(new CustomEvent('mbw:theme'));
 
       themeToggleButtons.forEach((button) => {
         const labelText = isDark ? 'Light mode' : 'Dark mode';
@@ -385,6 +388,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Sidebar collapsible groups (Accounting workspace submenu).
+  document.querySelectorAll('[data-nav-parent]').forEach((parent) => {
+    const toggle = parent.querySelector('[data-nav-toggle]');
+    if (!toggle) {
+      return;
+    }
+    const storageKey = 'mbwNavOpen:' + parent.getAttribute('data-nav-parent');
+    const stored = localStorage.getItem(storageKey);
+    if (stored === '1' && !parent.classList.contains('is-open')) {
+      parent.classList.add('is-open');
+      toggle.setAttribute('aria-expanded', 'true');
+    }
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      const isOpen = parent.classList.toggle('is-open');
+      toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      localStorage.setItem(storageKey, isOpen ? '1' : '0');
+    });
+  });
+
   const currentParams = new URLSearchParams(window.location.search);
   document.querySelectorAll('.admin-nav a, .site-header .nav a').forEach((link) => {
     let linkUrl;
@@ -396,8 +419,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (linkUrl.hash || linkUrl.pathname !== window.location.pathname) {
       return;
     }
-    const linkView = new URLSearchParams(linkUrl.search).get('view');
+    const linkParams = new URLSearchParams(linkUrl.search);
+    const linkView = linkParams.get('view');
     if (linkView !== null && linkView !== currentParams.get('view')) {
+      return;
+    }
+    const linkTab = linkParams.get('tab');
+    if (linkTab !== null && linkTab !== (currentParams.get('tab') || 'sales')) {
       return;
     }
     link.classList.add('is-active');
