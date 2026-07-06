@@ -47,6 +47,19 @@ foreach ($headerAccountingChildren as $headerChild) {
         break;
     }
 }
+
+// Client-books awareness: when the portal IS a client books space, the
+// Accounting Workspace points back home and the client submenu takes over.
+$headerIsClientBooks = (int) ($headerCompany['is_client_company'] ?? 0) === 1;
+$headerClientBooksOptions = [];
+if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') && column_exists('client_profiles', 'books_company_id')) {
+    $headerClientsStmt = db()->query('SELECT * FROM client_profiles WHERE is_active = 1 AND books_company_id IS NOT NULL ORDER BY organization_name ASC');
+    foreach ($headerClientsStmt->fetchAll() as $headerClientRow) {
+        if (client_books_access_level($headerClientRow) === 'direct') {
+            $headerClientBooksOptions[] = $headerClientRow;
+        }
+    }
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -88,6 +101,16 @@ foreach ($headerAccountingChildren as $headerChild) {
             <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/index.php')) ?>"><?= icon('home') ?>Admin Overview</a>
 
             <span class="admin-nav-group">Accounting Workspace</span>
+            <?php if ($headerIsClientBooks): ?>
+                <?php $headerHomeCompany = company_by_code('MBAACA'); ?>
+                <?php if ($headerHomeCompany): ?>
+                    <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" style="margin:0">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                        <input type="hidden" name="company_id" value="<?= (int) $headerHomeCompany['id'] ?>">
+                        <button type="submit" style="all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;min-height:38px;padding:8px 12px;border-radius:8px;color:var(--mbw-sidebar-text);font-size:13.5px;font-weight:500;cursor:pointer;width:100%"><?= icon('accounting') ?>My Company Accounting</button>
+                    </form>
+                <?php endif; ?>
+            <?php else: ?>
             <div class="mbw-nav-parent<?= $headerAccountingActive ? ' is-open' : '' ?>" data-nav-parent="accounting">
                 <a href="#" data-nav-toggle aria-expanded="<?= $headerAccountingActive ? 'true' : 'false' ?>" class="<?= $headerAccountingActive ? 'is-active' : '' ?>">
                     <?= icon('accounting') ?>Accounting
@@ -106,9 +129,35 @@ foreach ($headerAccountingChildren as $headerChild) {
                     <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php#manufacturing')) ?>"><?= icon('layers') ?>Manufacturing</a>
                 <?php endif; ?>
             <?php endif; ?>
+            <?php endif; ?>
 
             <span class="admin-nav-group">Manage Clients</span>
-            <a class="<?= in_array($headerScript, ['manage-clients.php', 'client-books.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('clients') ?>Client Accounting</a>
+            <a class="<?= in_array($headerScript, ['manage-clients.php', 'client-books.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('clients') ?>Client Directory</a>
+            <?php if ($headerClientBooksOptions !== []): ?>
+                <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" style="margin:2px 12px 4px; display:flex; gap:6px">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <label class="sr-only" for="sidebar-client-books">Open client accounting</label>
+                    <select id="sidebar-client-books" name="company_id" style="flex:1;min-height:32px;font-size:12px;border-radius:8px;border:1px solid var(--mbw-sidebar-line);background:rgba(148,178,215,0.08);color:#dbe6f5;padding:4px 8px" onchange="if(this.value){this.form.submit();}">
+                        <option value="">Select client...</option>
+                        <?php foreach ($headerClientBooksOptions as $headerClientOption): ?>
+                            <option value="<?= (int) $headerClientOption['books_company_id'] ?>" <?= $headerIsClientBooks && (int) $headerClientOption['books_company_id'] === $headerCompanyId ? 'selected' : '' ?>><?= e($headerClientOption['organization_name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </form>
+            <?php endif; ?>
+            <?php if ($headerIsClientBooks): ?>
+                <div class="mbw-nav-parent is-open" data-nav-parent="client-accounting">
+                    <a href="#" data-nav-toggle aria-expanded="true" class="is-active">
+                        <?= icon('accounting') ?>Client Accounting
+                        <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
+                    </a>
+                    <div class="mbw-subnav">
+                        <?php foreach ($headerAccountingChildren as [$headerChildLabel, $headerChildUrl, $headerChildIcon, $headerChildActive]): ?>
+                            <a class="<?= $headerChildActive ? 'is-active' : '' ?>" href="<?= e(url($headerChildUrl)) ?>"><?= icon($headerChildIcon) ?><?= e($headerChildLabel) ?></a>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
 
             <span class="admin-nav-group">Reports &amp; Controls</span>
             <a class="<?= in_array($headerScript, ['reports-center.php', 'report-schedules.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
