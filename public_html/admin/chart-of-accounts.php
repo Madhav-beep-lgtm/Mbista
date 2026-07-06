@@ -160,8 +160,7 @@ $statusPill = static fn (string $status): string => $status === 'active'
     <a class="mbw-tab" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Log</a>
 </nav>
 
-<div class="frm-layout">
-<div class="frm-main">
+
     <section class="mbw-card" aria-label="Chart of accounts hierarchy">
         <div class="mbw-card-head">
             <h2>Chart of Accounts Hierarchy</h2>
@@ -224,20 +223,6 @@ $statusPill = static fn (string $status): string => $status === 'active'
 
 </div>
 
-<aside class="frm-rail">
-    <section class="mbw-card frm-rail-card">
-        <div class="frm-section-head"><span class="mbw-chip is-square tone-blue"><?= icon('portal') ?></span><h2>Quick Actions</h2></div>
-        <div class="mbw-qa-grid" style="grid-template-columns:1fr 1fr">
-            <a class="mbw-qa" href="<?= e(url('admin/chart-groups.php')) ?>"><span class="mbw-chip is-square tone-green"><?= icon('tree') ?></span><div><strong>Create Group</strong></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/chart-ledgers.php')) ?>"><span class="mbw-chip is-square tone-purple"><?= icon('journal') ?></span><div><strong>Create Ledger</strong></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/chart-masters.php')) ?>"><span class="mbw-chip is-square tone-amber"><?= icon('layers') ?></span><div><strong>Bulk Import</strong></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>"><span class="mbw-chip is-square tone-teal"><?= icon('analytics') ?></span><div><strong>Export COA</strong></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/accounting.php')) ?>"><span class="mbw-chip is-square tone-blue"><?= icon('wallet') ?></span><div><strong>Opening Balances</strong></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><span class="mbw-chip is-square tone-red"><?= icon('settings') ?></span><div><strong>Posting Mappings</strong></div></a>
-        </div>
-    </section>
-</aside>
-</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
