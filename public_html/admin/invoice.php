@@ -895,7 +895,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
             <section class="mbw-card">
                 <div class="mbw-card-head">
                     <h2>Invoices</h2>
-                    <div class="mbw-card-tools"><a class="mbw-view-all" href="<?php echo e(url('admin/receipts.php')); ?>">Receipt Register</a></div>
+                    <div class="mbw-card-tools"><a class="mbw-view-all" href="<?php echo e(url('admin/reports-center.php?report=collections-register')); ?>">Receipt Register</a></div>
                 </div>
                 <form method="get" style="margin-bottom: 1rem;">
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 0.5rem; margin-bottom: 1rem;">
@@ -1160,7 +1160,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         <button onclick="convertToTax(<?php echo (int) $invoice['id']; ?>)" class="btn btn-success">Convert to Tax Invoice</button>
                     <?php endif; ?>
                     <button onclick="showPaymentModal(<?php echo (int) $invoice['id']; ?>)" class="btn btn-primary">Request Payment</button>
-                    <a href="<?php echo e(url('admin/receipts.php')); ?>" class="btn btn-secondary">Receipt Register</a>
+                    <a href="<?php echo e(url('admin/reports-center.php?report=collections-register')); ?>" class="btn btn-secondary">Receipt Register</a>
                     <a href="<?php echo e(url('admin/export-invoice.php?id=' . $invoice['id'] . '&format=pdf')); ?>" class="btn btn-secondary" target="_blank">📄 Export PDF</a>
                     <a href="<?php echo e(url('admin/export-invoice.php?id=' . $invoice['id'] . '&format=excel')); ?>" class="btn btn-secondary">📊 Export Excel</a>
                 </div>

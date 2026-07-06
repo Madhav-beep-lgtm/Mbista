@@ -13,12 +13,10 @@ function rc_report_registry(): array
         'ledger-report' => ['Ledger Report', 'Account statement with running balance', 'accounting'],
         'group-report' => ['Group Report', 'Summary by ledger groups', 'teams'],
         'consolidated' => ['Consolidated Report', 'Consolidated financials', 'companies'],
-        'ledger-wise' => ['Ledger-wise Report', 'Report by specific ledger', 'documents'],
         'party-wise' => ['Receivables Aging Report', 'Customer dues by age bucket', 'users'],
         'cash-book' => ['Cash Book', 'Cash account transactions', 'documents'],
         'bank-book' => ['Bank Book', 'Bank account transactions', 'accounting'],
         'daybook' => ['Daybook', 'All day transactions', 'compliance'],
-        'journal-register' => ['Journal Register', 'Journal entries listing', 'documents'],
         'sales-register' => ['Sales Register', 'Sales transaction details', 'invoices'],
         'collections-register' => ['Collections Register', 'Customer payments received', 'wallet'],
         'payments-register' => ['Payments Register', 'Supplier and expense payments', 'card'],
@@ -633,30 +631,6 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             ];
         }
 
-        case 'ledger-wise': {
-            $targetLedger = $ctx['ledger_id'];
-            if ($targetLedger <= 0) {
-                $first = db()->prepare("SELECT id FROM ledgers WHERE company_id = ? AND status = 'active' ORDER BY code ASC LIMIT 1");
-                $first->execute([$scopeCompanyId]);
-                $targetLedger = (int) $first->fetchColumn();
-            }
-            $lines = rc_entry_lines($scopeCompanyId, [$targetLedger], $from, $to);
-            $running = 0.0;
-            $rows = [];
-            foreach ($lines as $line) {
-                $dr = $line['entry_type'] === 'debit' ? (float) $line['amount'] : 0.0;
-                $cr = $line['entry_type'] === 'credit' ? (float) $line['amount'] : 0.0;
-                $running += $dr - $cr;
-                $rows[] = [date('d M Y', strtotime((string) $line['vdate'])), $line['voucher_no'], ucfirst((string) $line['voucher_type']), $line['memo'] ?: ($line['narration'] ?? ''), rc_fmt($dr), rc_fmt($cr), rc_fmt(abs($running)) . ($running >= 0 ? ' Dr' : ' Cr')];
-            }
-            $ledgerLabel = $lines[0]['ledger_code'] ?? '';
-            return [
-                'subtitle' => 'Transactions for the selected ledger' . ($ledgerLabel !== '' ? ' (' . $ledgerLabel . ')' : '') . '. Pick a ledger in the filter bar.',
-                'columns' => [['Date', 'left', ''], ['Voucher', 'left', ''], ['Type', 'left', ''], ['Particulars', 'left', ''], ['Dr. (' . $sym . ')', 'right', ''], ['Cr. (' . $sym . ')', 'right', ''], ['Balance', 'right', '']],
-                'rows' => $rows,
-                'totals' => null,
-            ];
-        }
 
         case 'party-wise': {
             if (!table_exists('accounting_parties')) {
@@ -883,29 +857,6 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             ];
         }
 
-        case 'journal-register': {
-            $stmt = db()->prepare("
-                SELECT e.entry_type, e.amount, e.memo, v.voucher_no, v.narration,
-                       COALESCE(v.voucher_date, DATE(v.created_at)) AS vdate, l.code AS ledger_code, l.name AS ledger_name
-                FROM voucher_entries e
-                INNER JOIN vouchers v ON v.id = e.voucher_id AND v.status = 'posted' AND v.voucher_type = 'journal' AND v.company_id = :company_id
-                INNER JOIN ledgers l ON l.id = e.ledger_id
-                WHERE COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :f AND :t
-                ORDER BY vdate ASC, v.id ASC, e.entry_type ASC
-                LIMIT 500
-            ");
-            $stmt->execute(['company_id' => $scopeCompanyId, 'f' => $from, 't' => $to]);
-            $rows = [];
-            foreach ($stmt->fetchAll() as $line) {
-                $rows[] = [date('d M Y', strtotime((string) $line['vdate'])), $line['voucher_no'], $line['ledger_code'] . ' - ' . $line['ledger_name'], $line['memo'] ?: ($line['narration'] ?? ''), $line['entry_type'] === 'debit' ? rc_fmt((float) $line['amount']) : '–', $line['entry_type'] === 'credit' ? rc_fmt((float) $line['amount']) : '–'];
-            }
-            return [
-                'subtitle' => 'Journal voucher entries listing.',
-                'columns' => [['Date', 'left', ''], ['Voucher', 'left', ''], ['Ledger', 'left', ''], ['Particulars', 'left', ''], ['Dr. (' . $sym . ')', 'right', ''], ['Cr. (' . $sym . ')', 'right', '']],
-                'rows' => $rows,
-                'totals' => null,
-            ];
-        }
 
         case 'sales-register': {
             if (!table_exists('task_invoices')) {
