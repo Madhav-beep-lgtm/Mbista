@@ -437,6 +437,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endforeach; ?>
 </section>
 
+<nav class="mbw-tabbar" aria-label="Voucher workspace">
+    <a class="mbw-tab is-active" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('journal') ?>Voucher Register</a>
+    <a class="mbw-tab" href="<?= e(url('admin/voucher-form.php')) ?>"><?= icon('receipt-voucher') ?>New Voucher</a>
+</nav>
+
 <section class="mbw-kpi-grid">
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Posted vouchers</span><div class="mbw-kpi-value"><?= e((string) count($vouchers)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e(site_currency_symbol()) ?><?= e(number_format($voucherTotal, 2)) ?> total</span></span></div><span class="mbw-chip tone-blue"><?= icon('journal') ?></span></article>
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Total debits</span><div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($ledgerDebitTotal, 2)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Selected fiscal year</span></span></div><span class="mbw-chip tone-green"><?= icon('trend-up') ?></span></article>
@@ -497,83 +502,24 @@ if ($fiscalYears):
 
     <p style="color:var(--mbw-muted); margin:0;"><?= icon('accounting') ?> Ledger accounts are now created inside a group under a fixed master. Use the <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a> page to create groups and ledgers.</p>
 
-    <details class="feature-disclosure" id="post-voucher">
-        <summary>
-            <span>
-                <strong><?= icon('invoices') ?><?= approvals_enabled() && !user_can('approve') ? 'Submit manual voucher' : 'Post manual voucher' ?></strong>
-                <small>Record balanced debit and credit accounting entries for the selected fiscal year.</small>
-            </span>
-            <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-        </summary>
-        <?php if ($ledgers === []): ?>
-            <p class="muted">Create ledger accounts before posting vouchers.</p>
-        <?php else: ?>
-            <script>
-            window.voucherLedgerData = <?= json_encode(array_map(static function (array $l): array {
-                return [
-                    'id' => (int) $l['id'],
-                    'label' => $l['code'] . ' - ' . $l['name'],
-                    'is_cash_or_bank' => (int) ($l['is_cash_or_bank'] ?? 0) === 1,
-                    'master_key' => $l['master_key'],
-                ];
-            }, $ledgers), JSON_THROW_ON_ERROR) ?>;
-            </script>
-            <form method="post" class="workspace-form-grid">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="create_voucher">
-                <label>Voucher no<input type="text" name="voucher_no" placeholder="Leave blank for auto number"></label>
-                <label>Voucher date<input type="date" name="voucher_date" value="<?= e(date('Y-m-d')) ?>"></label>
-                <label>Voucher type
-                    <select id="voucher_type_select" name="voucher_type">
-                        <option value="journal">Journal</option>
-                        <option value="receipt">Receipt</option>
-                        <option value="payment">Payment</option>
-                        <option value="sales">Sales</option>
-                        <option value="purchase">Purchase</option>
-                        <option value="contra">Contra</option>
-                        <option value="debit_note">Debit note</option>
-                        <option value="credit_note">Credit note</option>
-                    </select>
-                </label>
-                <label>Reference no<input type="text" name="reference_no" placeholder="Invoice, bill, cheque, or PO no"></label>
-                <label class="workspace-span-2">Party
-                    <select name="party_id">
-                        <option value="">No party</option>
-                        <?php foreach ($parties as $party): ?>
-                            <option value="<?= e((int) $party['id']) ?>">
-                                <?= e($party['code'] . ' - ' . $party['name'] . ' (' . str_replace('_', ' ', $party['party_type']) . ')') ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label class="workspace-span-2">Narration<textarea name="narration" placeholder="Reason or description for this accounting entry"></textarea></label>
-
-                <?php for ($i = 0; $i < 4; $i++): ?>
-                    <div class="voucher-entry-row workspace-span-2 workspace-form-grid" data-row-index="<?= e((string) $i) ?>">
-                        <label>Ledger
-                            <select name="ledger_id[]" class="voucher-ledger-select">
-                                <option value="">Select ledger</option>
-                                <?php foreach ($ledgers as $ledger): ?>
-                                    <option value="<?= e((int) $ledger['id']) ?>"><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </label>
-                        <label>Entry type
-                            <select name="entry_type[]" class="voucher-entrytype-select">
-                                <option value="">Select</option>
-                                <option value="debit">Debit</option>
-                                <option value="credit">Credit</option>
-                            </select>
-                        </label>
-                        <label>Amount<input type="number" name="amount[]" step="0.01" min="0"></label>
-                        <label>Memo<input type="text" name="memo[]" maxlength="255"></label>
-                    </div>
-                <?php endfor; ?>
-
-                <button type="submit"><?= icon('accounting') ?><?= approvals_enabled() && !user_can('approve') ? 'Submit for approval' : 'Post voucher' ?></button>
-            </form>
-        <?php endif; ?>
-    </details>
+    <div class="mbw-qa-grid" id="post-voucher">
+        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php')) ?>">
+            <span class="mbw-chip is-square tone-green"><?= icon('receipt-voucher') ?></span>
+            <div><strong><?= approvals_enabled() && !user_can('approve') ? 'Submit Voucher' : 'Post Voucher' ?></strong><span>Guided form with validation checklist &amp; attachments</span></div>
+        </a>
+        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=journal')) ?>">
+            <span class="mbw-chip is-square tone-blue"><?= icon('journal') ?></span>
+            <div><strong>Journal Voucher</strong><span>Create new journal entry</span></div>
+        </a>
+        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=receipt')) ?>">
+            <span class="mbw-chip is-square tone-teal"><?= icon('trend-up') ?></span>
+            <div><strong>Receipt Voucher</strong><span>Record money received</span></div>
+        </a>
+        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=payment')) ?>">
+            <span class="mbw-chip is-square tone-amber"><?= icon('card') ?></span>
+            <div><strong>Payment Voucher</strong><span>Record money paid out</span></div>
+        </a>
+    </div>
 
     <?php if (user_can('admin') && table_exists('fiscal_period_locks')): ?>
         <details class="feature-disclosure">
@@ -691,7 +637,7 @@ if ($fiscalYears):
 </section>
 
 <section class="mbw-card">
-    <div class="mbw-card-head"><h2>Posted vouchers</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="#post-voucher">Post Voucher</a></div></div>
+    <div class="mbw-card-head"><h2>Posted vouchers</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/voucher-form.php')) ?>">＋ New Voucher</a></div></div>
     <div style="overflow-x:auto">
     <table>
         <thead>

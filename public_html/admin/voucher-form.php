@@ -270,6 +270,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
+<nav class="mbw-tabbar" aria-label="Voucher workspace">
+    <a class="mbw-tab" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('journal') ?>Voucher Register</a>
+    <a class="mbw-tab is-active" href="<?= e(url('admin/voucher-form.php')) ?>"><?= icon('receipt-voucher') ?>New Voucher</a>
+</nav>
+
 <div class="frm-stepper mbw-card" aria-label="Form progress">
     <?php foreach ([['Basic Info', 'Capture key details'], ['Context', 'Select organization context'], ['Details', 'Enter form details'], ['Review', 'Validate & review'], ['Approval', 'Submit for approval']] as $stepIndex => [$stepLabel, $stepHint]): ?>
         <div class="frm-step <?= $stepIndex === 0 ? 'is-active' : '' ?>" data-step="<?= $stepIndex + 1 ?>">

@@ -1685,6 +1685,52 @@ body.admin-layout .rpt-compare-form button {
   font-size: 12.5px;
 }
 
+/* Horizontal feature tab bar (Voucher Register | New Voucher, etc.) */
+body.admin-layout .mbw-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 12px;
+  background: var(--mbw-card);
+  box-shadow: var(--mbw-shadow);
+}
+
+body.admin-layout .mbw-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  color: var(--mbw-muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+body.admin-layout .mbw-tab .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+body.admin-layout .mbw-tab:hover {
+  background: var(--mbw-gray-soft);
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .mbw-tab.is-active {
+  background: var(--mbw-primary);
+  color: #ffffff;
+}
+
+body.admin-layout.theme-dark .mbw-tab.is-active,
+body.admin-layout.admin-dark .mbw-tab.is-active {
+  color: #0b1420;
+}
+
 /* ==========================================================================
    Reusable form template (frm-*) — voucher form and future module forms
    ========================================================================== */
