@@ -16,9 +16,9 @@ body.admin-layout {
   --mbw-card-soft: #f7fafd;
   --mbw-border: #e3e9f2;
   --mbw-border-soft: #edf1f7;
-  --mbw-heading: #16263e;
-  --mbw-text: #3f4c61;
-  --mbw-muted: #6b7a90;
+  --mbw-heading: #0f1e33;
+  --mbw-text: #26344c;
+  --mbw-muted: #4d5d76;
   --mbw-primary: #2563eb;
   --mbw-primary-soft: #e7effd;
   --mbw-green: #16a34a;
@@ -35,7 +35,7 @@ body.admin-layout {
   --mbw-sidebar: #0e2240;
   --mbw-sidebar-deep: #0b1c36;
   --mbw-sidebar-line: rgba(148, 178, 215, 0.14);
-  --mbw-sidebar-text: #b9c8dd;
+  --mbw-sidebar-text: #cdd9ea;
   --mbw-sidebar-active: #1d3a63;
   --mbw-gold: #e3a13c;
   --mbw-shadow: 0 1px 2px rgba(22, 38, 62, 0.05), 0 4px 14px rgba(22, 38, 62, 0.04);
@@ -74,9 +74,9 @@ body.admin-layout.admin-dark {
   --mbw-card-soft: #16223a;
   --mbw-border: rgba(148, 178, 215, 0.18);
   --mbw-border-soft: rgba(148, 178, 215, 0.10);
-  --mbw-heading: #e8eef7;
-  --mbw-text: #c3cfe0;
-  --mbw-muted: #8fa1b8;
+  --mbw-heading: #f2f6fc;
+  --mbw-text: #dbe4f0;
+  --mbw-muted: #a9b9cf;
   --mbw-primary: #7fb0f5;
   --mbw-primary-soft: rgba(127, 176, 245, 0.16);
   --mbw-green: #3ecf7d;
