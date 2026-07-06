@@ -3407,7 +3407,10 @@ function client_books_access_level(array $clientProfile): string
     $servesFromPortal = (int) ($clientProfile['company_id'] ?? 0) === (int) ($portal['id'] ?? 0);
 
     if ($role === 'admin') {
-        return ($portalCode === 'MBAACA' || $servesFromPortal) ? 'direct' : '';
+        // Admins keep direct access while inside any client-books portal,
+        // so the sidebar client switcher can hop between clients.
+        $inClientBooks = (int) ($portal['is_client_company'] ?? 0) === 1;
+        return ($portalCode === 'MBAACA' || $servesFromPortal || $inClientBooks) ? 'direct' : '';
     }
     if ($role === 'staff') {
         $assigned = (int) ($clientProfile['assigned_staff_user_id'] ?? 0) === (int) ($user['id'] ?? 0);
