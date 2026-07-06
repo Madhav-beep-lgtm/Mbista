@@ -3195,6 +3195,99 @@ function get_consolidated_financial_summary(int $parentCompanyId, int $fiscalYea
 }
 
 /**
+ * One company's headline financials for a fiscal year: cash & bank,
+ * mapped receivables/payables balances, income, expenses, net profit.
+ * Used by the group dashboard and the consolidated tabular report.
+ */
+function company_financials_snapshot(int $companyId, int $fiscalYearId): array
+{
+    $snapshot = ['cash' => 0.0, 'receivables' => 0.0, 'payables' => 0.0, 'income' => 0.0, 'expenses' => 0.0, 'net' => 0.0];
+    if ($companyId <= 0 || $fiscalYearId <= 0) {
+        return $snapshot;
+    }
+
+    $stmt = db()->prepare('
+        SELECT l.id, l.type, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank,
+               COALESCE(SUM(CASE WHEN ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) AS debit_total,
+               COALESCE(SUM(CASE WHEN ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS credit_total
+        FROM ledgers l
+        LEFT JOIN ledger_groups g ON g.id = l.group_id
+        INNER JOIN voucher_entries ve ON ve.ledger_id = l.id
+        INNER JOIN vouchers v ON v.id = ve.voucher_id
+            AND v.company_id = l.company_id
+            AND v.fiscal_year_id = :fiscal_year_id
+            AND v.status = \'posted\'
+        WHERE l.company_id = :company_id
+        GROUP BY l.id, l.type, g.is_cash_or_bank
+    ');
+    $stmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
+
+    $receivableLedgerId = (int) (get_mapped_ledger($companyId, 'default_accounts_receivable')['id'] ?? 0);
+    $payableLedgerId = (int) (get_mapped_ledger($companyId, 'default_accounts_payable')['id'] ?? 0);
+
+    foreach ($stmt->fetchAll() as $row) {
+        $debit = (float) $row['debit_total'];
+        $credit = (float) $row['credit_total'];
+        $type = (string) $row['type'];
+        $natural = in_array($type, ['liability', 'equity', 'revenue'], true) ? $credit - $debit : $debit - $credit;
+
+        if ((int) $row['is_cash_or_bank'] === 1) {
+            $snapshot['cash'] += $debit - $credit;
+        }
+        if ($type === 'revenue') {
+            $snapshot['income'] += $natural;
+        } elseif ($type === 'expense') {
+            $snapshot['expenses'] += $natural;
+        }
+        if ((int) $row['id'] === $receivableLedgerId) {
+            $snapshot['receivables'] = max(0, $natural);
+        } elseif ((int) $row['id'] === $payableLedgerId) {
+            $snapshot['payables'] = max(0, $natural);
+        }
+    }
+
+    $snapshot['net'] = $snapshot['income'] - $snapshot['expenses'];
+
+    return $snapshot;
+}
+
+/**
+ * Companies visible on the superadmin group dashboard and consolidated
+ * report: the accounting firm itself plus Altiora and every company in
+ * its group, each mapped to its fiscal year matching the reference FY.
+ * Returns [['company' => row, 'fiscal_year_id' => int], ...].
+ */
+function group_dashboard_companies(int $referenceFiscalYearId): array
+{
+    $result = [];
+    $seen = [];
+    $candidates = [];
+
+    $mbista = company_by_code('MBAACA');
+    if ($mbista) {
+        $candidates[] = $mbista;
+    }
+    $altiora = company_by_code('AGHPL');
+    if ($altiora) {
+        foreach (accounting_companies_for_group((int) $altiora['id']) as $groupCompany) {
+            $candidates[] = $groupCompany;
+        }
+    }
+
+    foreach ($candidates as $candidate) {
+        $companyId = (int) ($candidate['id'] ?? 0);
+        if ($companyId <= 0 || isset($seen[$companyId]) || (int) ($candidate['is_active'] ?? 1) !== 1) {
+            continue;
+        }
+        $seen[$companyId] = true;
+        $fiscalYearId = matching_fiscal_year_id_for_company($companyId, $referenceFiscalYearId);
+        $result[] = ['company' => $candidate, 'fiscal_year_id' => $fiscalYearId];
+    }
+
+    return $result;
+}
+
+/**
  * Prepare chart data for financial dashboard
  */
 function prepare_chart_data(int $companyId, int $fiscalYearId, array $subsidiaries, bool $isAltiora): array

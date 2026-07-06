@@ -78,7 +78,12 @@ foreach ($headerAccountingChildren as $headerChild) {
         <?php endif; ?>
         <nav class="admin-nav">
             <span class="admin-nav-group">Core Admin</span>
-            <a class="<?= $headerScript === 'accounting-dashboard.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
+            <?php if ($headerCompanyCode === 'MBAACA'): ?>
+                <a class="<?= $headerScript === 'accounting-dashboard.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
+                <?php if (($currentUser['role'] ?? '') === 'admin'): ?>
+                    <a class="<?= $headerScript === 'consolidated-report.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/consolidated-report.php')) ?>"><?= icon('layers') ?>Consolidated Report</a>
+                <?php endif; ?>
+            <?php endif; ?>
             <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/index.php')) ?>"><?= icon('home') ?>Admin Overview</a>
 
             <span class="admin-nav-group">Accounting Workspace</span>

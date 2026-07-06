@@ -530,8 +530,205 @@ $voucherTypeTones = [
     'sales' => 'green', 'purchase' => 'red', 'debit_note' => 'purple', 'credit_note' => 'purple',
 ];
 
-$pageTitle = 'Accounting Dashboard';
-$pageSubtitle = 'Monitor your financial health and key accounting activities';
+// Normalized rows for the Bank Accounts widget (single-company default).
+$bankRows = [];
+foreach ($cashLedgers as $ledger) {
+    $ledgerId = (int) $ledger['id'];
+    $meta = $bankMetaById[$ledgerId] ?? [];
+    $bankRows[] = [
+        'name' => (string) ((($meta['bank_name'] ?? '') !== '' && $meta['bank_name'] !== null) ? $meta['bank_name'] . ' - ' . $ledger['name'] : $ledger['name']),
+        'account_no' => (string) ($meta['bank_account_no'] ?? ''),
+        'balance' => (float) $ledger['debit_total'] - (float) $ledger['credit_total'],
+        'last_move' => $lastMovementByLedger[$ledgerId] ?? null,
+        'company' => null,
+    ];
+}
+foreach ($recentVouchers as $recentIndex => $recentVoucher) {
+    $recentVouchers[$recentIndex]['company_name'] = null;
+}
+
+// ---------------------------------------------------------------------------
+// Group dashboard: the M.Bista superadmin portal shows every group company.
+// All headline widgets aggregate across the firm + Altiora and its group.
+// ---------------------------------------------------------------------------
+$isGroupDashboard = (string) ($company['code'] ?? '') === 'MBAACA';
+$groupRows = [];
+$groupTotals = ['cash' => 0.0, 'receivables' => 0.0, 'payables' => 0.0, 'income' => 0.0, 'expenses' => 0.0, 'net' => 0.0];
+if ($isGroupDashboard) {
+    $groupEntries = group_dashboard_companies($fiscalYearId);
+    $pairs = [];
+    $groupCompanyIds = [];
+    foreach ($groupEntries as $entry) {
+        $entryCompanyId = (int) $entry['company']['id'];
+        $entryFiscalYearId = (int) $entry['fiscal_year_id'];
+        $snapshot = $entryFiscalYearId > 0
+            ? company_financials_snapshot($entryCompanyId, $entryFiscalYearId)
+            : ['cash' => 0.0, 'receivables' => 0.0, 'payables' => 0.0, 'income' => 0.0, 'expenses' => 0.0, 'net' => 0.0];
+        $groupRows[] = ['company' => $entry['company'], 'fiscal_year_id' => $entryFiscalYearId, 'data' => $snapshot];
+        foreach ($groupTotals as $key => $value) {
+            $groupTotals[$key] += $snapshot[$key];
+        }
+        $groupCompanyIds[] = $entryCompanyId;
+        if ($entryFiscalYearId > 0) {
+            $pairs[] = 'SELECT ' . $entryCompanyId . ' AS cid, ' . $entryFiscalYearId . ' AS fyid';
+        }
+    }
+
+    if ($pairs !== []) {
+        $pairsDerived = '(' . implode(' UNION ALL ', $pairs) . ')';
+
+        // Group monthly income vs expense over this portal's FY calendar.
+        $groupMonthlyStmt = db()->query('
+            SELECT DATE_FORMAT(COALESCE(v.voucher_date, DATE(v.created_at)), \'%Y-%m\') AS month_key,
+                   SUM(CASE WHEN l.type = \'revenue\' AND ve.entry_type = \'credit\' THEN ve.amount WHEN l.type = \'revenue\' THEN -ve.amount ELSE 0 END) AS income,
+                   SUM(CASE WHEN l.type = \'expense\' AND ve.entry_type = \'debit\' THEN ve.amount WHEN l.type = \'expense\' THEN -ve.amount ELSE 0 END) AS expense
+            FROM vouchers v
+            INNER JOIN ' . $pairsDerived . ' p ON p.cid = v.company_id AND p.fyid = v.fiscal_year_id
+            INNER JOIN voucher_entries ve ON ve.voucher_id = v.id
+            INNER JOIN ledgers l ON l.id = ve.ledger_id
+            WHERE v.status = \'posted\'
+            GROUP BY month_key
+            ORDER BY month_key ASC
+        ');
+        $monthlyLookup = [];
+        foreach ($groupMonthlyStmt->fetchAll() as $row) {
+            $monthlyLookup[(string) $row['month_key']] = ['income' => (float) $row['income'], 'expense' => (float) $row['expense']];
+        }
+        $monthlyData = [];
+        $monthCursor = new DateTimeImmutable(date('Y-m-01', strtotime($fromDate)));
+        $monthEnd = new DateTimeImmutable(date('Y-m-01', strtotime($toDate)));
+        while ($monthCursor <= $monthEnd && count($monthlyData) < 18) {
+            $key = $monthCursor->format('Y-m');
+            $amounts = $monthlyLookup[$key] ?? ['income' => 0.0, 'expense' => 0.0];
+            $monthlyData[] = [
+                'key' => $key,
+                'label' => $monthCursor->format('M'),
+                'income' => (float) $amounts['income'],
+                'expense' => (float) $amounts['expense'],
+                'net' => (float) $amounts['income'] - (float) $amounts['expense'],
+            ];
+            $monthCursor = $monthCursor->modify('+1 month');
+        }
+
+        // Group cash flow by activity.
+        $groupCashFlowStmt = db()->query('
+            SELECT v.id,
+                   SUM(CASE WHEN COALESCE(g.is_cash_or_bank, 0) = 1 THEN (CASE WHEN ve.entry_type = \'debit\' THEN ve.amount ELSE -ve.amount END) ELSE 0 END) AS cash_net,
+                   SUM(CASE WHEN COALESCE(g.is_cash_or_bank, 0) = 0 AND g.master_key = \'non_current_asset\' THEN ve.amount ELSE 0 END) AS w_investing,
+                   SUM(CASE WHEN COALESCE(g.is_cash_or_bank, 0) = 0 AND g.master_key = \'equity\' THEN ve.amount ELSE 0 END) AS w_financing,
+                   SUM(CASE WHEN COALESCE(g.is_cash_or_bank, 0) = 0 AND (g.master_key NOT IN (\'non_current_asset\', \'equity\') OR g.master_key IS NULL) THEN ve.amount ELSE 0 END) AS w_operating
+            FROM vouchers v
+            INNER JOIN ' . $pairsDerived . ' p ON p.cid = v.company_id AND p.fyid = v.fiscal_year_id
+            INNER JOIN voucher_entries ve ON ve.voucher_id = v.id
+            INNER JOIN ledgers l ON l.id = ve.ledger_id
+            LEFT JOIN ledger_groups g ON g.id = l.group_id
+            WHERE v.status = \'posted\'
+            GROUP BY v.id
+            HAVING cash_net <> 0
+        ');
+        $cashFlow = ['operating' => 0.0, 'investing' => 0.0, 'financing' => 0.0];
+        foreach ($groupCashFlowStmt->fetchAll() as $row) {
+            $weights = ['operating' => (float) $row['w_operating'], 'investing' => (float) $row['w_investing'], 'financing' => (float) $row['w_financing']];
+            arsort($weights);
+            $cashFlow[(string) array_key_first($weights)] += (float) $row['cash_net'];
+        }
+        $netCashChange = $cashFlow['operating'] + $cashFlow['investing'] + $cashFlow['financing'];
+        $cashFlowSegments = [
+            ['label' => 'Operating Activities', 'amount' => $cashFlow['operating'], 'color' => 'green'],
+            ['label' => 'Investing Activities', 'amount' => $cashFlow['investing'], 'color' => 'primary'],
+            ['label' => 'Financing Activities', 'amount' => $cashFlow['financing'], 'color' => 'red'],
+            ['label' => 'Net Change in Cash', 'amount' => $netCashChange, 'color' => 'amber'],
+        ];
+        $cashFlowTotalAbs = array_sum(array_map(static fn (array $seg): float => abs((float) $seg['amount']), $cashFlowSegments));
+
+        // Group recent transactions with the originating company.
+        $groupRecentStmt = db()->query('
+            SELECT v.id, v.voucher_no, v.voucher_type, v.narration, v.total_amount,
+                   COALESCE(v.voucher_date, DATE(v.created_at)) AS voucher_date,
+                   ap.name AS party_name, c.name AS company_name
+            FROM vouchers v
+            INNER JOIN ' . $pairsDerived . ' p ON p.cid = v.company_id AND p.fyid = v.fiscal_year_id
+            INNER JOIN companies c ON c.id = v.company_id
+            LEFT JOIN accounting_parties ap ON ap.id = v.party_id
+            WHERE v.status = \'posted\'
+            ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) DESC, v.id DESC
+            LIMIT 6
+        ');
+        $recentVouchers = $groupRecentStmt->fetchAll();
+
+        // Group bank accounts (top balances across all companies).
+        $groupBankStmt = db()->query('
+            SELECT l.id, l.name, c.name AS company_name,
+                   ' . ($hasBankMeta ? 'l.bank_name, l.bank_account_no,' : 'NULL AS bank_name, NULL AS bank_account_no,') . '
+                   COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) AS debit_total,
+                   COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS credit_total,
+                   MAX(COALESCE(v.voucher_date, DATE(v.created_at))) AS last_move
+            FROM ledgers l
+            INNER JOIN ledger_groups g ON g.id = l.group_id AND COALESCE(g.is_cash_or_bank, 0) = 1
+            INNER JOIN companies c ON c.id = l.company_id
+            INNER JOIN ' . $pairsDerived . ' p2 ON p2.cid = l.company_id
+            LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
+            LEFT JOIN vouchers v ON v.id = ve.voucher_id AND v.status = \'posted\'
+                AND v.company_id = p2.cid AND v.fiscal_year_id = p2.fyid
+            GROUP BY l.id, l.name, c.name' . ($hasBankMeta ? ', l.bank_name, l.bank_account_no' : '') . '
+            ORDER BY (COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0)) DESC
+            LIMIT 6
+        ');
+        $bankRows = [];
+        foreach ($groupBankStmt->fetchAll() as $row) {
+            $bankRows[] = [
+                'name' => (string) ((($row['bank_name'] ?? '') !== '' && $row['bank_name'] !== null) ? $row['bank_name'] . ' - ' . $row['name'] : $row['name']),
+                'account_no' => (string) ($row['bank_account_no'] ?? ''),
+                'balance' => (float) $row['debit_total'] - (float) $row['credit_total'],
+                'last_move' => $row['last_move'] ?? null,
+                'company' => (string) $row['company_name'],
+            ];
+        }
+
+        // Group upcoming due across every company.
+        if (table_exists('task_invoices') && column_exists('task_invoices', 'due_on') && $groupCompanyIds !== []) {
+            $idList = implode(',', array_map('intval', $groupCompanyIds));
+            $groupDueStmt = db()->prepare('
+                SELECT
+                    SUM(CASE WHEN due_on < :today1 AND COALESCE(invoice_category, \'sales\') <> \'purchase\' THEN total_amount ELSE 0 END) AS overdue_recv_amount,
+                    SUM(CASE WHEN due_on < :today2 AND COALESCE(invoice_category, \'sales\') <> \'purchase\' THEN 1 ELSE 0 END) AS overdue_recv_count,
+                    SUM(CASE WHEN due_on < :today3 AND COALESCE(invoice_category, \'sales\') = \'purchase\' THEN total_amount ELSE 0 END) AS overdue_pay_amount,
+                    SUM(CASE WHEN due_on < :today4 AND COALESCE(invoice_category, \'sales\') = \'purchase\' THEN 1 ELSE 0 END) AS overdue_pay_count,
+                    SUM(CASE WHEN due_on >= :today5 AND due_on < DATE_ADD(:today6, INTERVAL 7 DAY) THEN total_amount ELSE 0 END) AS next7_amount,
+                    SUM(CASE WHEN due_on >= :today7 AND due_on < DATE_ADD(:today8, INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS next7_count
+                FROM task_invoices
+                WHERE company_id IN (' . $idList . ')
+                  AND due_on IS NOT NULL
+                  AND LOWER(COALESCE(status, \'\')) NOT IN (\'paid\', \'cancelled\', \'draft\')
+            ');
+            $groupDueStmt->execute([
+                'today1' => $today, 'today2' => $today, 'today3' => $today, 'today4' => $today,
+                'today5' => $today, 'today6' => $today, 'today7' => $today, 'today8' => $today,
+            ]);
+            if ($dueRow = $groupDueStmt->fetch()) {
+                $dueSummary['overdue_receivable'] = ['amount' => (float) $dueRow['overdue_recv_amount'], 'count' => (int) $dueRow['overdue_recv_count']];
+                $dueSummary['overdue_payable'] = ['amount' => (float) $dueRow['overdue_pay_amount'], 'count' => (int) $dueRow['overdue_pay_count']];
+                $dueSummary['next7'] = ['amount' => (float) $dueRow['next7_amount'], 'count' => (int) $dueRow['next7_count']];
+            }
+        }
+    }
+
+    // Group-wide KPI row; drill-downs land on the consolidated report.
+    $groupNote = 'Across ' . count($groupRows) . ' group companies';
+    $consolidatedUrl = url('admin/consolidated-report.php');
+    $primaryKpis = [
+        ['label' => 'Total Receivables', 'amount' => $groupTotals['receivables'], 'delta' => null, 'vs' => $groupNote, 'tone' => 'green', 'icon' => 'clients', 'href' => $consolidatedUrl],
+        ['label' => 'Total Payables', 'amount' => $groupTotals['payables'], 'delta' => null, 'vs' => $groupNote, 'tone' => 'red', 'icon' => 'card', 'href' => $consolidatedUrl],
+        ['label' => 'Cash & Bank Balance', 'amount' => $groupTotals['cash'], 'delta' => null, 'vs' => $groupNote, 'tone' => 'blue', 'icon' => 'bank', 'href' => url('admin/banking.php')],
+        ['label' => 'Net Profit (YTD)', 'amount' => $groupTotals['net'], 'delta' => null, 'vs' => $groupNote, 'tone' => 'green', 'icon' => 'trend-up', 'href' => $consolidatedUrl],
+        ['label' => 'Total Income (YTD)', 'amount' => $groupTotals['income'], 'delta' => null, 'vs' => $groupNote, 'tone' => 'purple', 'icon' => 'analytics', 'href' => $consolidatedUrl],
+    ];
+}
+
+$pageTitle = $isGroupDashboard ? 'Group Dashboard' : 'Accounting Dashboard';
+$pageSubtitle = $isGroupDashboard
+    ? 'Group-wide financial health across all companies'
+    : 'Monitor your financial health and key accounting activities';
 $bodyClass = 'admin-layout accounting-module-page accounting-dashboard-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
@@ -554,6 +751,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </select>
         </form>
+        <?php if (!$isGroupDashboard): ?>
         <form method="post" class="ad-business-form">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="set_business_type">
@@ -576,6 +774,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </div>
             </form>
         <?php endif; ?>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -594,7 +793,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <span class="mbw-kpi-vs"><?= e($kpi['vs']) ?></span>
                     </span>
                 <?php else: ?>
-                    <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">No prior month yet</span></span>
+                    <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= $isGroupDashboard ? e($kpi['vs']) : 'No prior month yet' ?></span></span>
                 <?php endif; ?>
             </div>
             <span class="mbw-chip tone-<?= e($kpi['tone']) ?>"><?= icon($kpi['icon']) ?></span>
@@ -602,6 +801,60 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endforeach; ?>
 </section>
 
+<?php if ($isGroupDashboard): ?>
+<section class="mbw-card" aria-label="Group companies snapshot">
+    <div class="mbw-card-head">
+        <h2>Group Companies Snapshot</h2>
+        <span class="mbw-info"><?= icon('about') ?></span>
+        <div class="mbw-card-tools">
+            <?php if (($currentUser['role'] ?? '') === 'admin'): ?>
+                <a class="mbw-view-all" href="<?= e(url('admin/consolidated-report.php')) ?>">Consolidated Report</a>
+            <?php endif; ?>
+        </div>
+    </div>
+    <div style="overflow-x:auto">
+        <table>
+            <thead>
+                <tr>
+                    <th>Company</th><th>Fiscal Year</th>
+                    <th class="is-numeric">Cash &amp; Bank</th><th class="is-numeric">Receivables</th>
+                    <th class="is-numeric">Payables</th><th class="is-numeric">Income</th>
+                    <th class="is-numeric">Expenses</th><th class="is-numeric">Net Profit</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($groupRows as $groupRow): ?>
+                <?php $rowData = $groupRow['data']; $rowCompany = $groupRow['company']; ?>
+                <tr>
+                    <td>
+                        <strong style="color:var(--mbw-heading)"><?= e($rowCompany['name']) ?></strong>
+                        <span class="mbw-pill tone-<?= (string) ($rowCompany['code'] ?? '') === 'MBAACA' ? 'purple' : ((string) ($rowCompany['code'] ?? '') === 'AGHPL' ? 'blue' : 'gray') ?>"><?= e((string) ($rowCompany['code'] ?? '')) ?></span>
+                    </td>
+                    <td><?= $groupRow['fiscal_year_id'] > 0 ? '<span class="mbw-pill tone-green">Mapped</span>' : '<span class="mbw-pill tone-amber">No matching FY</span>' ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney($rowData['cash'])) ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney($rowData['receivables'])) ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney($rowData['payables'])) ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney($rowData['income'])) ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney($rowData['expenses'])) ?></td>
+                    <td class="is-numeric <?= $rowData['net'] < 0 ? 'amount-negative' : 'amount-positive' ?>"><?= e($fmtMoney($rowData['net'])) ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="2">Group Total</td>
+                    <td class="is-numeric"><?= e($fmtMoney($groupTotals['cash'])) ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney($groupTotals['receivables'])) ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney($groupTotals['payables'])) ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney($groupTotals['income'])) ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney($groupTotals['expenses'])) ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney($groupTotals['net'])) ?></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</section>
+<?php else: ?>
 <details class="mbw-card mbw-more-kpis">
     <summary class="mbw-view-all" style="cursor:pointer"><?= icon('more-v') ?> More financial indicators</summary>
     <div class="mbw-kpi-grid" style="margin-top:12px">
@@ -617,6 +870,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endforeach; ?>
     </div>
 </details>
+<?php endif; ?>
 
 <div class="mbw-row-charts">
     <section class="mbw-card" aria-label="Profit and loss overview">
@@ -770,13 +1024,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
         <div style="overflow-x:auto">
             <table>
-                <thead><tr><th>Date</th><th>Type</th><th>Voucher No.</th><th>Party / Account</th><th class="is-numeric">Amount</th><th>Status</th></tr></thead>
+                <thead><tr><th>Date</th><?php if ($isGroupDashboard): ?><th>Company</th><?php endif; ?><th>Type</th><th>Voucher No.</th><th>Party / Account</th><th class="is-numeric">Amount</th><th>Status</th></tr></thead>
                 <tbody>
-                <?php if ($recentVouchers === []): ?><tr><td colspan="6" style="color:var(--mbw-muted)">No posted vouchers in this fiscal year.</td></tr><?php endif; ?>
+                <?php if ($recentVouchers === []): ?><tr><td colspan="<?= $isGroupDashboard ? 7 : 6 ?>" style="color:var(--mbw-muted)">No posted vouchers in this fiscal year.</td></tr><?php endif; ?>
                 <?php foreach ($recentVouchers as $voucher): ?>
                     <?php $tone = $voucherTypeTones[(string) $voucher['voucher_type']] ?? 'blue'; ?>
                     <tr>
                         <td><?= e(date('d M Y', strtotime((string) $voucher['voucher_date']))) ?></td>
+                        <?php if ($isGroupDashboard): ?><td><?= e((string) ($voucher['company_name'] ?? '—')) ?></td><?php endif; ?>
                         <td><span class="mbw-pill tone-<?= e($tone) ?>"><?= e(ucwords(str_replace('_', ' ', (string) $voucher['voucher_type']))) ?></span></td>
                         <td><a href="<?= e(url('admin/accounting.php')) ?>" style="color:var(--mbw-primary);text-decoration:none"><?= e($voucher['voucher_no']) ?></a></td>
                         <td><?= e($voucher['party_name'] ?: ($voucher['narration'] ?: '—')) ?></td>
@@ -797,22 +1052,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
         <div style="overflow-x:auto">
             <table>
-                <thead><tr><th>Bank Account</th><th>Account No.</th><th class="is-numeric">Balance</th><th>Updated On</th></tr></thead>
+                <thead><tr><th>Bank Account</th><?php if ($isGroupDashboard): ?><th>Company</th><?php endif; ?><th>Account No.</th><th class="is-numeric">Balance</th><th>Updated On</th></tr></thead>
                 <tbody>
-                <?php if ($cashLedgers === []): ?><tr><td colspan="4" style="color:var(--mbw-muted)">No cash or bank ledgers configured.</td></tr><?php endif; ?>
-                <?php foreach ($cashLedgers as $ledger): ?>
-                    <?php
-                    $ledgerId = (int) $ledger['id'];
-                    $meta = $bankMetaById[$ledgerId] ?? [];
-                    $accountNo = (string) ($meta['bank_account_no'] ?? '');
-                    $displayName = (string) (($meta['bank_name'] ?? '') !== '' ? $meta['bank_name'] . ' - ' . $ledger['name'] : $ledger['name']);
-                    $lastMove = $lastMovementByLedger[$ledgerId] ?? null;
-                    ?>
+                <?php if ($bankRows === []): ?><tr><td colspan="<?= $isGroupDashboard ? 5 : 4 ?>" style="color:var(--mbw-muted)">No cash or bank ledgers configured.</td></tr><?php endif; ?>
+                <?php foreach ($bankRows as $bankRow): ?>
                     <tr>
-                        <td><?= e($displayName) ?></td>
-                        <td><?= $accountNo !== '' ? '**** **** ' . e(substr($accountNo, -4)) : '<span style="color:var(--mbw-muted)">—</span>' ?></td>
-                        <td class="is-numeric"><?= e($fmtMoney((float) $ledger['debit_total'] - (float) $ledger['credit_total'])) ?></td>
-                        <td><?= $lastMove ? e(date('d M Y', strtotime($lastMove))) : '<span style="color:var(--mbw-muted)">No activity</span>' ?></td>
+                        <td><?= e($bankRow['name']) ?></td>
+                        <?php if ($isGroupDashboard): ?><td><?= e((string) ($bankRow['company'] ?? '—')) ?></td><?php endif; ?>
+                        <td><?= $bankRow['account_no'] !== '' ? '**** **** ' . e(substr($bankRow['account_no'], -4)) : '<span style="color:var(--mbw-muted)">—</span>' ?></td>
+                        <td class="is-numeric"><?= e($fmtMoney((float) $bankRow['balance'])) ?></td>
+                        <td><?= $bankRow['last_move'] ? e(date('d M Y', strtotime((string) $bankRow['last_move']))) : '<span style="color:var(--mbw-muted)">No activity</span>' ?></td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -824,6 +1073,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 </div>
 
+<?php if (!$isGroupDashboard): ?>
 <div class="mbw-row-tables">
     <?php foreach ([['title' => 'Receivables Aging', 'totalLabel' => 'Total Outstanding', 'total' => $receivableAgingTotal, 'buckets' => $receivableAging, 'report' => 'party-wise'], ['title' => 'Payables Aging', 'totalLabel' => 'Total Payable', 'total' => $payableAgingTotal, 'buckets' => $payableAging, 'report' => 'party-wise']] as $aging): ?>
         <section class="mbw-card" aria-label="<?= e($aging['title']) ?>">
@@ -899,6 +1149,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </section>
     <?php endif; ?>
 </div>
+<?php endif; ?>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
