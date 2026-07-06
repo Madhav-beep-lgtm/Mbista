@@ -186,7 +186,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a class="card stat-link" href="<?= e(url('admin/workspace.php?view=home')) ?>"><span class="stat-icon"><?= icon('insights') ?></span><strong><?= e(number_format($overallTaskProgress, 1)) ?>%</strong><p>Overall task progress</p><small>Click → Open task analytics</small></a>
     <a class="card stat-link" href="<?= e(url('admin/invoice.php')) ?>"><span class="stat-icon"><?= icon('invoices') ?></span><strong><?= e($pendingInvoiceCount) ?></strong><p>Pending invoices</p><small>Click → View pending invoices</small></a>
     <a class="card stat-link" href="<?= e(url('admin/invoice.php')) ?>"><span class="stat-icon"><?= icon('accounting') ?></span><strong>Rs.<?= e(number_format($pendingInvoiceAmount, 2)) ?></strong><p>Pending invoice amount</p><small>Click → View amount details</small></a>
-    <a class="card stat-link" href="<?= e(url('admin/accounting-parties.php?tab=collections')) ?>"><span class="stat-icon"><?= icon('reports') ?></span><strong><?= e(number_format($invoiceCollectionRate, 1)) ?>%</strong><p>Invoice collection rate</p><small>Click → View collection analytics</small></a>
+    <a class="card stat-link" href="<?= e(url('admin/reports-center.php?report=collections-register')) ?>"><span class="stat-icon"><?= icon('reports') ?></span><strong><?= e(number_format($invoiceCollectionRate, 1)) ?>%</strong><p>Invoice collection rate</p><small>Click → View collection analytics</small></a>
 </div>
 
 <div class="admin-dashboard-grid">

@@ -20,6 +20,8 @@ function rc_report_registry(): array
         'daybook' => ['Daybook', 'All day transactions', 'compliance'],
         'journal-register' => ['Journal Register', 'Journal entries listing', 'documents'],
         'sales-register' => ['Sales Register', 'Sales transaction details', 'invoices'],
+        'collections-register' => ['Collections Register', 'Customer payments received', 'wallet'],
+        'payments-register' => ['Payments Register', 'Supplier and expense payments', 'card'],
         'purchase-register' => ['Purchase Register', 'Purchase transaction details', 'services'],
         'inventory-summary' => ['Inventory Summary', 'Stock summary by item', 'services'],
         'stock-ledger' => ['Stock Ledger', 'Item-wise stock ledger', 'tasks'],
@@ -761,6 +763,66 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 ],
                 'rows' => $rows,
                 'totals' => ['', 'Total', rc_fmt($totals['out']), rc_fmt($totals['current']), rc_fmt($totals['b30']), rc_fmt($totals['b60']), rc_fmt($totals['b90']), rc_fmt($totals['b90plus']), '', $totals['out'] > 0.004 ? number_format(($totalOverdue / $totals['out']) * 100, 2) . '%' : '–'],
+            ];
+        }
+
+        case 'collections-register': {
+            if (!table_exists('invoice_payment_requests') || !table_exists('task_invoices')) {
+                return ['title' => 'Collections Register', 'subtitle' => 'Invoice payment module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $stmt = db()->prepare("
+                SELECT COALESCE(pr.payment_received_on, DATE(pr.requested_on)) AS received_on,
+                       ti.invoice_no, COALESCE(ap.name, 'Direct') AS party_name,
+                       pr.payment_method, pr.payment_amount, pr.status
+                FROM invoice_payment_requests pr
+                INNER JOIN task_invoices ti ON ti.id = pr.invoice_id AND ti.company_id = :company_id
+                LEFT JOIN accounting_parties ap ON ap.id = ti.party_id
+                WHERE pr.status IN ('paid', 'partial')
+                  AND COALESCE(pr.payment_received_on, DATE(pr.requested_on)) BETWEEN :from AND :to
+                ORDER BY received_on ASC
+                LIMIT 500
+            ");
+            $stmt->execute(['company_id' => $scopeCompanyId, 'from' => $from, 'to' => $to]);
+            $rows = [];
+            $total = 0.0;
+            foreach ($stmt->fetchAll() as $r) {
+                $rows[] = [date('d M Y', strtotime((string) $r['received_on'])), $r['invoice_no'], $r['party_name'], ucfirst((string) ($r['payment_method'] ?: '-')), rc_fmt((float) $r['payment_amount']), (string) $r['status'] === 'partial' ? 'Partially Paid' : ucfirst((string) $r['status'])];
+                $total += (float) $r['payment_amount'];
+            }
+            return [
+                'title' => 'Collections Register',
+                'subtitle' => 'Customer payments received during the period.',
+                'columns' => [['Received On', 'left', ''], ['Invoice', 'left', ''], ['Party', 'left', ''], ['Method', 'left', ''], ['Amount (' . $sym . ')', 'right', ''], ['Status', 'left', '']],
+                'rows' => $rows,
+                'totals' => ['', '', '', 'Total', rc_fmt($total), ''],
+            ];
+        }
+
+        case 'payments-register': {
+            $stmt = db()->prepare("
+                SELECT COALESCE(v.voucher_date, DATE(v.created_at)) AS paid_on,
+                       v.voucher_no, COALESCE(ap.name, 'Direct entry') AS party_name,
+                       v.reference_no, v.total_amount, v.narration
+                FROM vouchers v
+                LEFT JOIN accounting_parties ap ON ap.id = v.party_id
+                WHERE v.company_id = :company_id AND v.status = 'posted' AND v.voucher_type = 'payment'
+                  AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :from AND :to
+                ORDER BY paid_on ASC
+                LIMIT 500
+            ");
+            $stmt->execute(['company_id' => $scopeCompanyId, 'from' => $from, 'to' => $to]);
+            $rows = [];
+            $total = 0.0;
+            foreach ($stmt->fetchAll() as $r) {
+                $rows[] = [date('d M Y', strtotime((string) $r['paid_on'])), $r['voucher_no'], $r['party_name'], (string) ($r['reference_no'] ?: '-'), rc_fmt((float) $r['total_amount']), (string) ($r['narration'] ?: '-')];
+                $total += (float) $r['total_amount'];
+            }
+            return [
+                'title' => 'Payments Register',
+                'subtitle' => 'Supplier and expense payments during the period.',
+                'columns' => [['Paid On', 'left', ''], ['Voucher No.', 'left', ''], ['Party', 'left', ''], ['Reference', 'left', ''], ['Amount (' . $sym . ')', 'right', ''], ['Narration', 'left', '']],
+                'rows' => $rows,
+                'totals' => ['', '', '', 'Total', rc_fmt($total), ''],
             ];
         }
 

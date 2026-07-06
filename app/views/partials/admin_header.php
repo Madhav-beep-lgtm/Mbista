@@ -35,8 +35,8 @@ $headerAccountingChildren = [
     ['Vouchers', 'admin/accounting.php', 'journal', in_array($headerScript, ['accounting.php', 'voucher-form.php'], true)],
     ['Sales & Invoices', 'admin/accounting-parties.php?tab=sales', 'invoices', $headerScript === 'accounting-parties.php' && in_array($headerTab, ['', 'sales'], true)],
     ['Purchases', 'admin/accounting-parties.php?tab=purchases', 'cart', $headerScript === 'accounting-parties.php' && $headerTab === 'purchases'],
-    ['Receipts', 'admin/accounting-parties.php?tab=collections', 'receipt-voucher', $headerScript === 'accounting-parties.php' && $headerTab === 'collections'],
-    ['Payments', 'admin/accounting-parties.php?tab=payments', 'card', $headerScript === 'accounting-parties.php' && $headerTab === 'payments'],
+    ['Receipts', 'admin/reports-center.php?report=collections-register', 'receipt-voucher', $headerScript === 'reports-center.php' && ($_GET['report'] ?? '') === 'collections-register'],
+    ['Payments', 'admin/reports-center.php?report=payments-register', 'card', $headerScript === 'reports-center.php' && ($_GET['report'] ?? '') === 'payments-register'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
 ];

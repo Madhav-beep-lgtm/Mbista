@@ -167,7 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         log_activity('invoice_payment', $paymentRequestId, 'recorded', 'Payment recorded against invoice ' . $invoice['invoice_no'] . '.', $userId);
         flash('success', 'Payment of ' . site_currency_symbol() . number_format($amount, 2) . ' recorded against ' . $invoice['invoice_no'] . '.');
-        redirect('admin/accounting-parties.php?tab=collections');
+        redirect('admin/accounting-parties.php?tab=sales');
     }
 
     if ($action === 'record_purchase') {
@@ -281,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Could not record the supplier payment.');
         }
 
-        redirect('admin/accounting-parties.php?tab=payments');
+        redirect('admin/accounting-parties.php?tab=purchases');
     }
 }
 
@@ -295,9 +295,9 @@ if ($typeFilter === 'customer') {
 } elseif ($typeFilter === 'supplier') {
     $tab = 'suppliers';
 }
-$validTabs = ['overview', 'sales', 'purchases', 'customers', 'suppliers', 'collections', 'payments'];
+$validTabs = ['sales', 'purchases', 'customers', 'suppliers'];
 if (!in_array($tab, $validTabs, true)) {
-    $tab = 'overview';
+    $tab = 'sales';
 }
 
 $panel = (string) ($_GET['panel'] ?? '');
@@ -696,13 +696,10 @@ $bodyClass = 'admin-layout accounting-module-page accounting-reference-layout';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 $tabLinks = [
-    'overview' => ['Overview', parties_page_url(['tab' => null, 'type' => null, 'page' => null])],
     'sales' => ['Sales Invoices', parties_page_url(['tab' => 'sales', 'type' => null, 'page' => null])],
     'purchases' => ['Purchase Bills', parties_page_url(['tab' => 'purchases', 'type' => null, 'page' => null])],
     'customers' => ['Customers', parties_page_url(['tab' => null, 'type' => 'customer', 'page' => null])],
     'suppliers' => ['Suppliers', parties_page_url(['tab' => null, 'type' => 'supplier', 'page' => null])],
-    'collections' => ['Collections', parties_page_url(['tab' => 'collections', 'type' => null, 'page' => null])],
-    'payments' => ['Payments', parties_page_url(['tab' => 'payments', 'type' => null, 'page' => null])],
 ];
 
 // Rows for the active tab's table + pagination.
@@ -883,11 +880,8 @@ $statusPillTone = static function (string $status): string {
     };
 };
 $tabHeadings = [
-    'overview' => 'Sales Invoices',
     'sales' => 'Sales Invoices',
     'purchases' => 'Purchase Bills',
-    'collections' => 'Collections Received',
-    'payments' => 'Supplier Payments',
     'customers' => 'Customers',
     'suppliers' => 'Suppliers',
 ];
@@ -899,7 +893,7 @@ $tabHeadings = [
             <h2><?= e($tabHeadings[$tab] ?? 'Documents') ?></h2>
             <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=party-wise')) ?>">Aging Report</a></div>
         </div>
-        <?php if (in_array($tab, ['overview', 'sales'], true)): ?>
+        <?php if ($tab === 'sales'): ?>
             <div style="overflow-x:auto">
             <table class="reference-table">
                 <thead>
@@ -945,49 +939,6 @@ $tabHeadings = [
                             <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $bill['total_amount'], 2)) ?></td>
                             <td class="is-numeric <?= ($billOutstanding[(int) $bill['id']] ?? 0) > 0 ? 'text-danger' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format((float) ($billOutstanding[(int) $bill['id']] ?? 0), 2)) ?></td>
                             <td><?= e($bill['narration'] ?? '') ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-            </div>
-        <?php elseif ($tab === 'collections'): ?>
-            <div style="overflow-x:auto">
-            <table class="reference-table">
-                <thead>
-                    <tr><th>Received On</th><th>Invoice</th><th>Party</th><th>Method</th><th class="is-numeric">Amount</th><th>Status</th><th>Notes</th></tr>
-                </thead>
-                <tbody>
-                    <?php if ($pagedRows === []): ?><tr><td colspan="7">No payments received in this period.</td></tr><?php endif; ?>
-                    <?php foreach ($pagedRows as $collection): ?>
-                        <tr>
-                            <td><?= e(date('d M Y', strtotime((string) ($collection['payment_received_on'] ?: $collection['requested_on'])))) ?></td>
-                            <td><span class="reference-link"><?= e($collection['invoice_no']) ?></span></td>
-                            <td><?= e($collection['party_name']) ?></td>
-                            <td><?= e($collection['payment_method'] ?? '-') ?></td>
-                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $collection['payment_amount'], 2)) ?></td>
-                            <td><span class="mbw-pill tone-<?= e((string) $collection['status'] === 'paid' ? 'green' : 'amber') ?>"><?= e((string) $collection['status'] === 'partial' ? 'Partially Paid' : ucfirst((string) $collection['status'])) ?></span></td>
-                            <td><?= e($collection['notes'] ?? '') ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-            </div>
-        <?php elseif ($tab === 'payments'): ?>
-            <div style="overflow-x:auto">
-            <table class="reference-table">
-                <thead>
-                    <tr><th>Paid On</th><th>Voucher No.</th><th>Supplier</th><th>Reference</th><th class="is-numeric">Amount</th><th>Narration</th></tr>
-                </thead>
-                <tbody>
-                    <?php if ($pagedRows === []): ?><tr><td colspan="6">No supplier payments in this period. Use Pay Supplier to add one.</td></tr><?php endif; ?>
-                    <?php foreach ($pagedRows as $payment): ?>
-                        <tr>
-                            <td><?= e(date('d M Y', strtotime((string) ($payment['voucher_date'] ?: $payment['created_at'])))) ?></td>
-                            <td><span class="reference-link"><?= e($payment['voucher_no']) ?></span></td>
-                            <td><?= e($payment['party_name'] ?: 'Direct entry') ?></td>
-                            <td><?= e($payment['reference_no'] ?? '-') ?></td>
-                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $payment['total_amount'], 2)) ?></td>
-                            <td><?= e($payment['narration'] ?? '') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
