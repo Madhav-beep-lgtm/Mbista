@@ -124,9 +124,6 @@ if (table_exists('company_ledger_mappings')) {
     $mappingsCount = (int) $mapStmt->fetchColumn();
 }
 $activeLedgers = count(array_filter($ledgers, static fn (array $l): bool => (string) $l['status'] === 'active'));
-$dupStmt = db()->prepare('SELECT COUNT(*) FROM (SELECT code FROM ledgers WHERE company_id = :cid GROUP BY code HAVING COUNT(*) > 1) d');
-$dupStmt->execute(['cid' => $companyId]);
-$duplicateCodes = (int) $dupStmt->fetchColumn();
 $activePct = count($ledgers) > 0 ? (int) round($activeLedgers / count($ledgers) * 100) : 0;
 
 $pageTitle = 'Chart of Accounts';
@@ -238,24 +235,6 @@ $statusPill = static fn (string $status): string => $status === 'active'
             <a class="mbw-qa" href="<?= e(url('admin/accounting.php')) ?>"><span class="mbw-chip is-square tone-blue"><?= icon('wallet') ?></span><div><strong>Opening Balances</strong></div></a>
             <a class="mbw-qa" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><span class="mbw-chip is-square tone-red"><?= icon('settings') ?></span><div><strong>Posting Mappings</strong></div></a>
         </div>
-    </section>
-
-
-
-    <section class="mbw-card frm-rail-card">
-        <div class="frm-section-head"><span class="mbw-chip is-square tone-green"><?= icon('tasks') ?></span><h2>Impact &amp; Validation</h2></div>
-        <ul class="frm-checklist">
-            <li class="<?= $duplicateCodes === 0 ? 'is-ok' : '' ?>">Unique code validation<br><small style="color:var(--mbw-muted)"><?= $duplicateCodes === 0 ? 'No duplicates found' : $duplicateCodes . ' duplicate codes!' ?></small></li>
-            <li class="<?= $orphanLedgers === [] ? 'is-ok' : '' ?>">Parent-child dependency<br><small style="color:var(--mbw-muted)"><?= $orphanLedgers === [] ? 'Structure is valid' : count($orphanLedgers) . ' ledgers without a group' ?></small></li>
-            <li class="<?= $activeLedgers === count($ledgers) ? 'is-ok' : '' ?>">Active / Inactive status<br><small style="color:var(--mbw-muted)"><?= $activeLedgers === count($ledgers) ? 'All accounts are active' : (count($ledgers) - $activeLedgers) . ' inactive accounts' ?></small></li>
-        </ul>
-        <p style="margin:12px 0 4px;color:var(--mbw-muted);font-size:11.5px;font-weight:600">Mapped modules affected</p>
-        <div style="display:flex;gap:5px;flex-wrap:wrap">
-            <?php foreach (['Vouchers' => 'blue', 'Sales' => 'green', 'Purchases' => 'red', 'Banking' => 'teal', 'Inventory' => 'amber', 'Reports' => 'purple'] as $module => $tone): ?>
-                <span class="mbw-pill tone-<?= e($tone) ?>"><?= e($module) ?></span>
-            <?php endforeach; ?>
-        </div>
-        <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:11px"><?= icon('tasks') ?> Last validation: <?= e(date('d M Y, h:i A')) ?></p>
     </section>
 </aside>
 </div>
