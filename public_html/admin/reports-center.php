@@ -307,92 +307,70 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </form>
 
-<section class="coa-module-grid" aria-label="Report modules">
+<section class="mbw-card rpt-picker" aria-label="Choose report">
     <?php foreach ($allowedReportRegistry as $key => [$label, $description, $iconName]): ?>
-        <a class="coa-module-card <?= $key === $reportId ? 'is-active' : '' ?>" href="<?= e(rc_url(['report' => $key])) ?>">
-            <div class="coa-module-icon"><?= icon($iconName) ?></div>
-            <div>
-                <strong><?= e($label) ?></strong>
-                <span><?= e($description) ?></span>
-            </div>
+        <a class="rpt-pick <?= $key === $reportId ? 'is-active' : '' ?>" href="<?= e(rc_url(['report' => $key])) ?>" title="<?= e($description) ?>">
+            <?= icon($iconName) ?><span><?= e($label) ?></span>
         </a>
     <?php endforeach; ?>
-    <a class="coa-module-card" href="<?= e(url('admin/report-schedules.php')) ?>">
-        <div class="coa-module-icon"><?= icon('compliance') ?></div>
-        <div>
-            <strong>Schedule Reports</strong>
-            <span>Manage recurring deliveries</span>
-        </div>
+    <a class="rpt-pick" href="<?= e(url('admin/report-schedules.php')) ?>" title="Manage recurring deliveries">
+        <?= icon('calendar') ?><span>Schedule Reports</span>
     </a>
 </section>
 
-<div class="rc-workspace">
-    <aside class="rc-report-list">
-        <h3><?= icon('documents') ?>All Reports</h3>
-        <div class="rc-report-grid">
-            <?php foreach ($allowedReportRegistry as $key => [$label, $description, $iconName]): ?>
-                <a class="rc-report-card <?= $key === $reportId ? 'is-active' : '' ?>" href="<?= e(rc_url(['report' => $key])) ?>">
-                    <span><?= icon($iconName) ?></span>
-                    <strong><?= e($label) ?></strong>
-                    <small><?= e($description) ?></small>
-                </a>
-            <?php endforeach; ?>
-        </div>
-    </aside>
-
+<div class="rpt-fullwidth">
     <main class="rc-report-view rpt-statement">
         <div class="rpt-bar"><?= e($reportNumberedTitle) ?></div>
         <?php rc_render_letterhead($report, $reportMeta); ?>
         <div class="rc-table-scroll">
             <?php rc_render_table($report, $hasGroups); ?>
         </div>
-        <?php rc_render_report_foot($reportMeta); ?>
         <?php if ($compareEnabled && $compareReport !== null): ?>
             <div class="rpt-bar rpt-bar-compare">Comparison Period — <?= e(date('d M Y', strtotime($compareFrom))) ?> to <?= e(date('d M Y', strtotime($compareTo))) ?></div>
             <div class="rc-table-scroll">
                 <?php rc_render_table($compareReport, $hasGroups); ?>
             </div>
         <?php endif; ?>
+        <?php rc_render_report_foot(['generated_by' => $reportMeta['generated_by']]); ?>
+
+        <div class="rpt-action-bar" aria-label="Report actions">
+            <a class="rpt-action" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>">
+                <span class="mbw-chip is-square tone-red"><?= icon('documents') ?></span>
+                <span class="rpt-action-text"><strong>Export PDF</strong><small>Print-ready statement</small></span>
+            </a>
+            <a class="rpt-action" href="<?= e(rc_url(['export' => 'csv'])) ?>">
+                <span class="mbw-chip is-square tone-green"><?= icon('analytics') ?></span>
+                <span class="rpt-action-text"><strong>Export Excel</strong><small>Download CSV data</small></span>
+            </a>
+            <a class="rpt-action" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>">
+                <span class="mbw-chip is-square tone-blue"><?= icon('receipt-voucher') ?></span>
+                <span class="rpt-action-text"><strong>Print Report</strong><small>Send to printer</small></span>
+            </a>
+            <a class="rpt-action" href="<?= e(url('admin/report-schedules.php?report=' . $reportId)) ?>">
+                <span class="mbw-chip is-square tone-purple"><?= icon('calendar') ?></span>
+                <span class="rpt-action-text"><strong>Schedule Reports</strong><small>Recurring email delivery</small></span>
+            </a>
+            <a class="rpt-action <?= $compareEnabled ? 'is-active' : '' ?>" href="<?= e(rc_url(['compare' => $compareEnabled ? null : '1'])) ?>">
+                <span class="mbw-chip is-square tone-amber"><?= icon('reconcile') ?></span>
+                <span class="rpt-action-text"><strong>Compare Period</strong><small><?= $compareEnabled ? 'On — click to turn off' : 'Second period side by side' ?></small></span>
+            </a>
+            <?php if ($compareEnabled): ?>
+                <form method="get" action="<?= e(url('admin/reports-center.php')) ?>" class="rpt-compare-form">
+                    <?php foreach (array_diff_key($_GET, ['cfrom' => 1, 'cto' => 1]) as $keepKey => $keepValue): ?>
+                        <?php if (is_scalar($keepValue)): ?><input type="hidden" name="<?= e((string) $keepKey) ?>" value="<?= e((string) $keepValue) ?>"><?php endif; ?>
+                    <?php endforeach; ?>
+                    <input type="hidden" name="compare" value="1">
+                    <label>From<input type="date" name="cfrom" value="<?= e($compareFrom) ?>"></label>
+                    <label>To<input type="date" name="cto" value="<?= e($compareTo) ?>"></label>
+                    <button type="submit"><?= icon('reconcile') ?>Apply</button>
+                </form>
+            <?php endif; ?>
+        </div>
+
         <div class="rc-report-foot">
             <span><?= e($report['subtitle']) ?></span>
             <span>All amounts are in <?= e($reportMeta['currency_code']) ?>, rounded to 2 decimal places</span>
         </div>
     </main>
-
-    <aside class="rc-actions-col">
-        <section class="rc-actions-card">
-            <h4>Actions</h4>
-            <a class="button rc-action-primary" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>"><?= icon('documents') ?>Export PDF</a>
-            <a class="button secondary" href="<?= e(rc_url(['export' => 'csv'])) ?>"><?= icon('documents') ?>Export Excel</a>
-            <a class="button secondary" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>"><?= icon('documents') ?>Print Report</a>
-            <a class="button secondary" href="<?= e(url('admin/report-schedules.php')) ?>"><?= icon('compliance') ?>Schedule Reports</a>
-        </section>
-
-        <section class="rc-actions-card">
-            <div class="rc-compare-toggle">
-                <h4>Compare Period</h4>
-                <a class="rc-switch <?= $compareEnabled ? 'is-on' : '' ?>" href="<?= e(rc_url(['compare' => $compareEnabled ? null : '1'])) ?>" aria-label="Toggle comparison"><span></span></a>
-            </div>
-            <?php if ($compareEnabled): ?>
-                <form method="get" action="<?= e(url('admin/reports-center.php')) ?>" class="rc-compare-form">
-                    <?php foreach (array_diff_key($_GET, ['cfrom' => 1, 'cto' => 1]) as $keepKey => $keepValue): ?>
-                        <?php if (is_scalar($keepValue)): ?><input type="hidden" name="<?= e((string) $keepKey) ?>" value="<?= e((string) $keepValue) ?>"><?php endif; ?>
-                    <?php endforeach; ?>
-                    <input type="hidden" name="compare" value="1">
-                    <label>Compare With
-                        <select disabled><option>Previous Period</option></select>
-                    </label>
-                    <div class="rc-compare-dates">
-                        <label>From Date<input type="date" name="cfrom" value="<?= e($compareFrom) ?>"></label>
-                        <label>To Date<input type="date" name="cto" value="<?= e($compareTo) ?>"></label>
-                    </div>
-                    <button class="button rc-apply-comparison" type="submit"><?= icon('dashboard') ?>Apply Comparison</button>
-                </form>
-            <?php else: ?>
-                <p class="muted">Turn on to view this report for a second period side by side.</p>
-            <?php endif; ?>
-        </section>
-
-    </aside>
 </div>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

@@ -1547,6 +1547,144 @@ body.admin-layout .rpt-statement .rc-report-foot {
   padding: 8px 16px 14px;
 }
 
+/* Compact report picker strip (replaces the tile grid + sidebar list) */
+body.admin-layout .rpt-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+body.admin-layout .rpt-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 999px;
+  background: var(--mbw-card);
+  color: var(--mbw-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+body.admin-layout .rpt-pick .ui-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .rpt-pick:hover {
+  border-color: var(--mbw-primary);
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .rpt-pick:hover .ui-icon {
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .rpt-pick.is-active {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-primary-soft);
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .rpt-pick.is-active .ui-icon {
+  color: var(--mbw-primary);
+}
+
+/* Full-width statement now that the side columns are gone */
+body.admin-layout .rpt-fullwidth {
+  display: block;
+}
+
+body.admin-layout .rpt-fullwidth .rc-report-view {
+  width: 100%;
+  max-width: none;
+}
+
+/* Action bar at the end of every report */
+body.admin-layout .rpt-action-bar {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--mbw-border);
+  background: var(--mbw-card-soft);
+}
+
+body.admin-layout .rpt-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 170px;
+  padding: 10px 14px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+body.admin-layout .rpt-action:hover {
+  border-color: var(--mbw-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--mbw-shadow);
+}
+
+body.admin-layout .rpt-action.is-active {
+  border-color: var(--mbw-amber);
+  background: var(--mbw-amber-soft);
+}
+
+body.admin-layout .rpt-action-text strong {
+  display: block;
+  color: var(--mbw-heading);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+body.admin-layout .rpt-action-text small {
+  display: block;
+  color: var(--mbw-muted);
+  font-size: 11px;
+}
+
+body.admin-layout .rpt-compare-form {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border: 1px dashed var(--mbw-amber);
+  border-radius: 10px;
+  background: var(--mbw-card);
+}
+
+body.admin-layout .rpt-compare-form label {
+  display: grid;
+  gap: 2px;
+  color: var(--mbw-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+body.admin-layout .rpt-compare-form input[type="date"] {
+  min-height: 34px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+}
+
+body.admin-layout .rpt-compare-form button {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
 /* ==========================================================================
    Modals, misc
    ========================================================================== */
