@@ -136,7 +136,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="mbw-card-head">
         <h2>Bank Accounts</h2>
         <div class="mbw-card-tools">
-            <a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php#create-ledger')) ?>">Add Bank Ledger</a>
+            <a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>">Add Bank Ledger</a>
         </div>
     </div>
     <div style="overflow-x:auto">

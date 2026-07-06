@@ -1,438 +1,335 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
+require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_staff_or_admin();
 require_company_context();
+$repairErrors = accounting_module_repair_database();
 
-$pageTitle = 'Chart of Accounts';
-$pageSubtitle = 'Masters, groups, ledgers, and automated posting structure for the company chart.';
-$bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
-$currentCompany = current_company();
-$currentAdmin = current_user();
-$companyId = (int) ($currentCompany['id'] ?? 0);
-$adminId = (int) ($currentAdmin['id'] ?? 0);
+$company = current_company();
+$companyId = (int) ($company['id'] ?? 0);
+$currentUser = current_user();
+$userId = (int) ($currentUser['id'] ?? 0);
 
 $masters = ledger_masters();
-$allowedMasterKeys = array_keys($masters);
-$supportsGroupHierarchy = column_exists('ledger_groups', 'parent_group_id');
-$mappingRoles = [
-    'default_cash_bank' => ['label' => 'Cash / bank account', 'nature' => 'asset', 'cash_only' => true],
-    'default_accounts_receivable' => ['label' => 'Accounts receivable', 'nature' => 'asset'],
-    'default_accounts_payable' => ['label' => 'Accounts payable', 'nature' => 'liability'],
-    'default_tax_payable' => ['label' => 'Tax payable', 'nature' => 'liability'],
-    'default_service_revenue' => ['label' => 'Service revenue', 'nature' => 'revenue'],
-    'default_hosting_revenue' => ['label' => 'Hosting revenue', 'nature' => 'revenue'],
-];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+$groupsStmt = db()->prepare('SELECT * FROM ledger_groups WHERE company_id = :cid ORDER BY name ASC');
+$groupsStmt->execute(['cid' => $companyId]);
+$groups = $groupsStmt->fetchAll();
+$groupsById = [];
+foreach ($groups as $g) {
+    $groupsById[(int) $g['id']] = $g;
+}
+
+$ledgersStmt = db()->prepare('SELECT * FROM ledgers WHERE company_id = :cid ORDER BY code ASC');
+$ledgersStmt->execute(['cid' => $companyId]);
+$ledgers = $ledgersStmt->fetchAll();
+
+// ---------------------------------------------------------------------------
+// Export COA as CSV.
+// ---------------------------------------------------------------------------
+if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="chart-of-accounts-' . preg_replace('/[^A-Za-z0-9]+/', '-', (string) ($company['name'] ?? 'company')) . '.csv"');
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Level', 'Code', 'Name', 'Master', 'Nature', 'Group Code', 'Status']);
+    foreach ($masters as $masterKey => $master) {
+        fputcsv($out, ['Master', $masterKey, $master['label'], $masterKey, $master['nature'], '', 'Active']);
+    }
+    foreach ($groups as $g) {
+        fputcsv($out, ['Group', $g['code'], $g['name'], $g['master_key'], ledger_master_nature((string) $g['master_key']) ?? '', '', ((int) $g['is_active'] === 1 ? 'Active' : 'Inactive')]);
+    }
+    foreach ($ledgers as $l) {
+        $g = $groupsById[(int) ($l['group_id'] ?? 0)] ?? null;
+        fputcsv($out, ['Ledger', $l['code'], $l['name'], $g['master_key'] ?? '', $l['type'], $g['code'] ?? '', ucfirst((string) $l['status'])]);
+    }
+    fclose($out);
+    exit;
+}
+
+// ---------------------------------------------------------------------------
+// Bulk import ledgers (CSV: group_code, ledger_code, ledger_name, type).
+// ---------------------------------------------------------------------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'bulk_import') {
     verify_csrf();
-    $action = (string) ($_POST['action'] ?? '');
-
-    if ($action === 'create_group') {
-        $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
-        $name = trim((string) ($_POST['name'] ?? ''));
-        $masterKey = (string) ($_POST['master_key'] ?? '');
-        $parentGroupId = $supportsGroupHierarchy ? (int) ($_POST['parent_group_id'] ?? 0) : 0;
-        $isCashOrBank = isset($_POST['is_cash_or_bank']) ? 1 : 0;
-
-        if ($parentGroupId > 0) {
-            $parentStmt = db()->prepare('SELECT id, master_key FROM ledger_groups WHERE id = :id AND company_id = :company_id LIMIT 1');
-            $parentStmt->execute(['id' => $parentGroupId, 'company_id' => $companyId]);
-            $parentGroup = $parentStmt->fetch();
-            if (!$parentGroup) {
-                flash('error', 'Select a valid parent group from this company.');
-                redirect('admin/chart-of-accounts.php');
-            }
-            $masterKey = (string) $parentGroup['master_key'];
-        }
-
-        if ($code === '' || $name === '' || !in_array($masterKey, $allowedMasterKeys, true)) {
-            flash('error', 'Group code, name, and a valid master are required.');
-            redirect('admin/chart-of-accounts.php');
-        }
-
-        try {
-            $parentColumn = $supportsGroupHierarchy ? ', parent_group_id' : '';
-            $parentValue = $supportsGroupHierarchy ? ', :parent_group_id' : '';
-            $params = ['company_id' => $companyId, 'code' => $code, 'name' => $name, 'master_key' => $masterKey, 'is_cash_or_bank' => $isCashOrBank];
-            if ($supportsGroupHierarchy) {
-                $params['parent_group_id'] = $parentGroupId > 0 ? $parentGroupId : null;
-            }
-            $stmt = db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system' . $parentColumn . ') VALUES (:company_id, :code, :name, :master_key, :is_cash_or_bank, 0' . $parentValue . ')');
-            $stmt->execute($params);
-            log_activity('ledger_group', (int) db()->lastInsertId(), 'created', 'Ledger group created.', $adminId);
-            flash('success', 'Group created.');
-        } catch (Throwable $exception) {
-            flash('error', 'Could not create group. The code may already exist.');
-        }
+    if (!user_can('create')) {
+        flash('error', 'You do not have permission to import ledgers.');
         redirect('admin/chart-of-accounts.php');
     }
-
-    if ($action === 'create_ledger') {
-        $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
-        $name = trim((string) ($_POST['name'] ?? ''));
-        $groupId = (int) ($_POST['group_id'] ?? 0);
-
-        $groupStmt = db()->prepare('SELECT id, master_key FROM ledger_groups WHERE id = :id AND company_id = :company_id AND is_active = 1 LIMIT 1');
-        $groupStmt->execute(['id' => $groupId, 'company_id' => $companyId]);
-        $group = $groupStmt->fetch();
-        $ledgerType = $group ? ledger_master_nature((string) $group['master_key']) : null;
-
-        if ($code === '' || $name === '' || !$group || $ledgerType === null) {
-            flash('error', 'Ledger code, name, and a valid active group are required.');
-            redirect('admin/chart-of-accounts.php');
-        }
-
-        try {
-            $stmt = db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:company_id, :group_id, :code, :name, :type, 0, 'active')");
-            $stmt->execute([
-                'company_id' => $companyId,
-                'group_id' => $groupId,
-                'code' => $code,
-                'name' => $name,
-                'type' => $ledgerType,
-            ]);
-            log_activity('ledger', (int) db()->lastInsertId(), 'created', 'Ledger account created.', $adminId);
-            flash('success', 'Ledger account created.');
-        } catch (Throwable $exception) {
-            flash('error', 'Could not create ledger account. The code may already exist.');
-        }
+    $tmp = (string) ($_FILES['import_file']['tmp_name'] ?? '');
+    if ($tmp === '' || !is_uploaded_file($tmp)) {
+        flash('error', 'Choose a CSV file to import.');
         redirect('admin/chart-of-accounts.php');
     }
-
-    if ($action === 'save_ledger_mappings') {
-        if (!table_exists('company_ledger_mappings')) {
-            flash('error', 'Run the ledger-mapping migration before configuring automated posting accounts.');
-            redirect('admin/chart-of-accounts.php');
+    $groupsByCode = [];
+    foreach ($groups as $g) {
+        $groupsByCode[strtoupper((string) $g['code'])] = $g;
+    }
+    $created = 0;
+    $skipped = 0;
+    $handle = fopen($tmp, 'r');
+    $insert = db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:cid, :gid, :code, :name, :type, 0, 'active')");
+    $exists = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE company_id = :cid AND code = :code');
+    while (($row = fgetcsv($handle)) !== false) {
+        $groupCode = strtoupper(trim((string) ($row[0] ?? '')));
+        $code = strtoupper(trim((string) ($row[1] ?? '')));
+        $name = trim((string) ($row[2] ?? ''));
+        $type = strtolower(trim((string) ($row[3] ?? '')));
+        if ($groupCode === 'GROUP_CODE' || $code === '' || $name === '' || !isset($groupsByCode[$groupCode]) || !in_array($type, ['asset', 'liability', 'equity', 'revenue', 'expense'], true)) {
+            $skipped++;
+            continue;
         }
-
-        $ledgerStmt = db()->prepare('SELECT l.id, l.type, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank FROM ledgers l LEFT JOIN ledger_groups g ON g.id = l.group_id WHERE l.company_id = :company_id');
-        $ledgerStmt->execute(['company_id' => $companyId]);
-        $companyLedgers = [];
-        foreach ($ledgerStmt->fetchAll() as $ledger) {
-            $companyLedgers[(int) $ledger['id']] = $ledger;
+        $exists->execute(['cid' => $companyId, 'code' => $code]);
+        if ((int) $exists->fetchColumn() > 0) {
+            $skipped++;
+            continue;
         }
+        $insert->execute(['cid' => $companyId, 'gid' => (int) $groupsByCode[$groupCode]['id'], 'code' => $code, 'name' => $name, 'type' => $type]);
+        $created++;
+    }
+    fclose($handle);
+    log_activity('company', $companyId, 'coa_bulk_import', $created . ' ledgers imported, ' . $skipped . ' rows skipped.', $userId ?: null);
+    flash($created > 0 ? 'success' : 'error', $created . ' ledgers imported' . ($skipped > 0 ? ', ' . $skipped . ' rows skipped (bad group/type, duplicate, or header)' : '') . '.');
+    redirect('admin/chart-of-accounts.php');
+}
 
-        $requestedMappings = [];
-        foreach ($mappingRoles as $mapKey => $role) {
-            $ledgerId = (int) ($_POST['mapping'][$mapKey] ?? 0);
-            if ($ledgerId === 0) {
-                $requestedMappings[$mapKey] = null;
-                continue;
-            }
-
-            $ledger = $companyLedgers[$ledgerId] ?? null;
-            $validNature = $ledger && (string) $ledger['type'] === (string) $role['nature'];
-            $validCashAccount = empty($role['cash_only']) || (int) ($ledger['is_cash_or_bank'] ?? 0) === 1;
-            if (!$validNature || !$validCashAccount) {
-                flash('error', 'One or more automated posting accounts are not valid for their assigned role.');
-                redirect('admin/chart-of-accounts.php');
-            }
-
-            $requestedMappings[$mapKey] = $ledgerId;
-        }
-
-        db()->beginTransaction();
-        try {
-            $deleteStmt = db()->prepare('DELETE FROM company_ledger_mappings WHERE company_id = :company_id AND map_key = :map_key');
-            $upsertStmt = db()->prepare('INSERT INTO company_ledger_mappings (company_id, map_key, ledger_id) VALUES (:company_id, :map_key, :ledger_id) ON DUPLICATE KEY UPDATE ledger_id = VALUES(ledger_id)');
-            foreach ($requestedMappings as $mapKey => $ledgerId) {
-                if ($ledgerId === null) {
-                    $deleteStmt->execute(['company_id' => $companyId, 'map_key' => $mapKey]);
-                } else {
-                    $upsertStmt->execute(['company_id' => $companyId, 'map_key' => $mapKey, 'ledger_id' => $ledgerId]);
-                }
-            }
-            db()->commit();
-        } catch (Throwable $exception) {
-            if (db()->inTransaction()) {
-                db()->rollBack();
-            }
-            flash('error', 'Could not save the automated posting accounts.');
-            redirect('admin/chart-of-accounts.php');
-        }
-
-        log_activity('company', $companyId, 'ledger_mappings_updated', 'Automated posting ledger mappings updated.', $adminId);
-        flash('success', 'Automated posting accounts saved.');
-        redirect('admin/chart-of-accounts.php');
+// ---------------------------------------------------------------------------
+// Hierarchy: nature (1-5) -> groups -> ledgers. Real validation checks.
+// ---------------------------------------------------------------------------
+$natureOrder = ['asset' => ['1', 'Assets'], 'liability' => ['2', 'Liabilities'], 'equity' => ['3', 'Equity'], 'revenue' => ['4', 'Revenue'], 'expense' => ['5', 'Expenses']];
+$groupsByNature = ['asset' => [], 'liability' => [], 'equity' => [], 'revenue' => [], 'expense' => []];
+foreach ($groups as $g) {
+    $nature = ledger_master_nature((string) $g['master_key']) ?? 'asset';
+    $groupsByNature[$nature][] = $g;
+}
+$ledgersByGroup = [];
+$orphanLedgers = [];
+foreach ($ledgers as $l) {
+    $gid = (int) ($l['group_id'] ?? 0);
+    if ($gid > 0 && isset($groupsById[$gid])) {
+        $ledgersByGroup[$gid][] = $l;
+    } else {
+        $orphanLedgers[] = $l;
     }
 }
 
-$groupStmt = db()->prepare('SELECT * FROM ledger_groups WHERE company_id = :company_id AND is_active = 1 ORDER BY master_key ASC, name ASC');
-$groupStmt->execute(['company_id' => $companyId]);
-$flatGroups = $groupStmt->fetchAll();
-
-$ledgerStmt = db()->prepare('SELECT l.*, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank FROM ledgers l LEFT JOIN ledger_groups g ON g.id = l.group_id WHERE l.company_id = :company_id AND l.status = \'active\' ORDER BY l.code ASC');
-$ledgerStmt->execute(['company_id' => $companyId]);
-$flatLedgers = $ledgerStmt->fetchAll();
-
-$currentMappings = [];
+$mappingsCount = 0;
 if (table_exists('company_ledger_mappings')) {
-    $mappingStmt = db()->prepare('SELECT map_key, ledger_id FROM company_ledger_mappings WHERE company_id = :company_id');
-    $mappingStmt->execute(['company_id' => $companyId]);
-    foreach ($mappingStmt->fetchAll() as $mapping) {
-        $currentMappings[(string) $mapping['map_key']] = (int) $mapping['ledger_id'];
-    }
+    $mapStmt = db()->prepare('SELECT COUNT(*) FROM company_ledger_mappings WHERE company_id = :cid');
+    $mapStmt->execute(['cid' => $companyId]);
+    $mappingsCount = (int) $mapStmt->fetchColumn();
 }
+$activeLedgers = count(array_filter($ledgers, static fn (array $l): bool => (string) $l['status'] === 'active'));
+$dupStmt = db()->prepare('SELECT COUNT(*) FROM (SELECT code FROM ledgers WHERE company_id = :cid GROUP BY code HAVING COUNT(*) > 1) d');
+$dupStmt->execute(['cid' => $companyId]);
+$duplicateCodes = (int) $dupStmt->fetchColumn();
+$activePct = count($ledgers) > 0 ? (int) round($activeLedgers / count($ledgers) * 100) : 0;
 
-$chartOfAccounts = get_chart_of_accounts_tree($companyId);
-$ledgerCount = count($flatLedgers);
-$groupCount = count($flatGroups);
-$mappedCount = count(array_filter($currentMappings));
-
-/**
- * Recursive function to render the account tree.
- *
- * @param array $nodes The current nodes (groups) to render.
- * @param int $level The current depth for indentation.
- */
-function render_account_tree(array $nodes, int $level = 0): void
-{
-    $indent = str_repeat('&nbsp;&nbsp;&nbsp;&nbsp;', $level);
-
-    foreach ($nodes as $group) {
-        $hasChildren = !empty($group['children']) || !empty($group['ledgers']);
-        $isRoot = $level === 0;
-
-        echo '<div class="tree-node">';
-        if ($hasChildren) {
-            echo '<details ' . ($isRoot ? 'open' : '') . '>';
-            echo '<summary class="tree-group">';
-            echo $indent . e($group['name']) . ' <span class="muted">(' . e($group['code']) . ')</span>';
-            echo '</summary>';
-            echo '<div class="tree-content">';
-
-            // Render child groups recursively
-            if (!empty($group['children'])) {
-                render_account_tree($group['children'], $level + 1);
-            }
-
-            // Render ledgers within this group
-            if (!empty($group['ledgers'])) {
-                foreach ($group['ledgers'] as $ledger) {
-                    echo '<div class="tree-ledger" style="padding-left: ' . (($level + 1) * 20) . 'px;">';
-                    echo e($ledger['name']) . ' <span class="muted">(' . e($ledger['code']) . ')</span>';
-                    echo '</div>';
-                }
-            }
-
-            echo '</div>'; // .tree-content
-            echo '</details>';
-        } else {
-            // Group with no children or ledgers
-            echo '<div class="tree-group" style="padding-left: ' . ($level * 20) . 'px;">';
-            echo $indent . e($group['name']) . ' <span class="muted">(' . e($group['code']) . ')</span>';
-            echo '</div>';
-        }
-        echo '</div>'; // .tree-node
-    }
-}
-
+$pageTitle = 'Chart of Accounts';
+$pageSubtitle = 'Manage masters, groups, ledgers, opening balances, and posting structure.';
+$bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
+$statusPill = static fn (string $status): string => $status === 'active'
+    ? '<span class="mbw-pill tone-green">Active</span>'
+    : '<span class="mbw-pill tone-red">' . e(ucfirst($status)) . '</span>';
 ?>
-<div class="accounting-page-head">
-    <div>
-        <h2 style="color:var(--mbw-heading)">Masters, groups, ledgers, and posting structure</h2>
-        <p style="color:var(--mbw-muted)"><?= e($currentCompany['name'] ?? 'Company') ?> / Foundation for vouchers, invoices, purchases, inventory, manufacturing, and reports.</p>
-    </div>
-    <div class="accounting-actions">
-        <a class="button secondary" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
-        <a class="button secondary" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('documents') ?>Vouchers</a>
-    </div>
+<?php if ($repairErrors !== []): ?><div class="notice error">Repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
+
+<div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+    <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('reconcile') ?>Refresh</a>
+    <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>"><?= icon('analytics') ?>Export COA</a>
+    <a class="button" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('layers') ?>＋ Create Group</a>
+    <a class="button" href="<?= e(url('admin/chart-ledgers.php')) ?>" id="create-ledger"><?= icon('journal') ?>＋ Create Ledger</a>
 </div>
 
-<nav class="accounting-tabs" aria-label="Chart of accounts sections">
-    <a class="is-active" href="#hierarchy">Hierarchy View</a>
-    <a href="<?= e(url('admin/chart-groups.php')) ?>">Groups</a>
-    <a href="<?= e(url('admin/chart-ledgers.php')) ?>">Ledgers</a>
-    <a href="<?= e(url('admin/chart-posting-accounts.php')) ?>">Posting Accounts</a>
-    <a href="<?= e(url('admin/chart-audit-log.php')) ?>">Audit Log</a>
+<section class="mbw-kpi-grid" aria-label="Chart of accounts overview">
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Masters</span><div class="mbw-kpi-value"><?= count($natureOrder) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">System-defined</span></span></div><span class="mbw-chip tone-blue"><?= icon('layers') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Groups</span><div class="mbw-kpi-value"><?= count($groups) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Active</span></span></div><span class="mbw-chip tone-green"><?= icon('tree') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Ledgers</span><div class="mbw-kpi-value"><?= count($ledgers) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Posting accounts</span></span></div><span class="mbw-chip tone-purple"><?= icon('journal') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Posting Mappings</span><div class="mbw-kpi-value"><?= $mappingsCount ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Configured</span></span></div><span class="mbw-chip tone-amber"><?= icon('settings') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Active Ledgers</span><div class="mbw-kpi-value"><?= $activeLedgers ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= $activePct ?>% of total</span></span></div><span class="mbw-chip tone-teal"><?= icon('tasks') ?></span></article>
+</section>
+
+<nav class="mbw-tabbar" aria-label="Chart of accounts sections">
+    <a class="mbw-tab is-active" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('tree') ?>Hierarchy View</a>
+    <a class="mbw-tab" href="#coa-masters" onclick="document.getElementById('coa-masters').scrollIntoView({behavior:'smooth'});return false;"><?= icon('layers') ?>Masters</a>
+    <a class="mbw-tab" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('teams') ?>Groups</a>
+    <a class="mbw-tab" href="<?= e(url('admin/chart-ledgers.php')) ?>"><?= icon('journal') ?>Ledgers</a>
+    <a class="mbw-tab" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><?= icon('settings') ?>Posting Accounts</a>
+    <a class="mbw-tab" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Log</a>
 </nav>
 
-<section class="coa-module-grid" aria-label="Chart of accounts module structure">
-    <a class="coa-module-card" href="<?= e(url('admin/chart-groups.php')) ?>"><span><?= icon('accounting') ?></span><strong>Masters</strong><small>Chart framework</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/chart-groups.php')) ?>"><span><?= icon('teams') ?></span><strong>Groups</strong><small>Classification</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/chart-ledgers.php')) ?>"><span><?= icon('documents') ?></span><strong>Ledgers</strong><small>Accounts</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/accounting.php')) ?>"><span><?= icon('services') ?></span><strong>Opening Balances</strong><small>OB controls</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><span><?= icon('settings') ?></span><strong>Automated Posting</strong><small>Mapped accounts</small></a>
-    <a class="coa-module-card" href="<?= e(url('admin/workspace.php?view=home')) ?>"><span><?= icon('reports') ?></span><strong>Dimensions</strong><small>Cost centers and projects</small></a>
-</section>
-
-<section class="mbw-kpi-grid">
-    <article class="mbw-kpi">
-        <div>
-            <span class="mbw-kpi-label">Masters</span>
-            <div class="mbw-kpi-value"><?= e((string) count($masters)) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Fixed framework</span></span>
+<div class="frm-layout">
+<div class="frm-main">
+    <section class="mbw-card" aria-label="Chart of accounts hierarchy">
+        <div class="mbw-card-head">
+            <h2>Chart of Accounts Hierarchy</h2>
+            <div class="mbw-card-tools">
+                <button type="button" class="button secondary" style="min-height:32px;padding:4px 12px" onclick="document.querySelectorAll('.coa-node').forEach(function(r){r.style.display='';});document.querySelectorAll('.coa-tgl').forEach(function(t){t.textContent='▾';})">Expand All</button>
+                <button type="button" class="button secondary" style="min-height:32px;padding:4px 12px" onclick="document.querySelectorAll('.coa-node.coa-child').forEach(function(r){r.style.display='none';});document.querySelectorAll('.coa-tgl').forEach(function(t){t.textContent='▸';})">Collapse All</button>
+                <input type="search" id="coa-search" placeholder="Search in hierarchy..." style="min-height:34px;padding:5px 10px;font-size:12.5px;border:1px solid var(--mbw-border);border-radius:8px;background:var(--mbw-card);color:var(--mbw-text)">
+            </div>
         </div>
-        <span class="mbw-chip tone-blue"><?= icon('layers') ?></span>
-    </article>
-    <a class="mbw-kpi" href="<?= e(url('admin/chart-groups.php')) ?>">
-        <div>
-            <span class="mbw-kpi-label">Groups</span>
-            <div class="mbw-kpi-value"><?= e((string) $groupCount) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Active classifications</span></span>
-        </div>
-        <span class="mbw-chip tone-green"><?= icon('tree') ?></span>
-    </a>
-    <a class="mbw-kpi" href="<?= e(url('admin/chart-ledgers.php')) ?>">
-        <div>
-            <span class="mbw-kpi-label">Ledgers</span>
-            <div class="mbw-kpi-value"><?= e((string) $ledgerCount) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Posting accounts</span></span>
-        </div>
-        <span class="mbw-chip tone-purple"><?= icon('journal') ?></span>
-    </a>
-    <a class="mbw-kpi" href="<?= e(url('admin/chart-posting-accounts.php')) ?>">
-        <div>
-            <span class="mbw-kpi-label">Mapped Accounts</span>
-            <div class="mbw-kpi-value"><?= e((string) $mappedCount) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Automation ready</span></span>
-        </div>
-        <span class="mbw-chip tone-amber"><?= icon('settings') ?></span>
-    </a>
-</section>
-
-<section class="mbw-card">
-    <div class="mbw-card-head">
-        <h2>Setup &amp; Automation</h2>
-        <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/chart-posting-accounts.php')) ?>">Posting Accounts</a></div>
-    </div>
-<div class="workspace-feature-stack">
-    <details class="feature-disclosure" id="create-group">
-        <summary>
-            <span>
-                <strong><?= icon('accounting') ?>Create New Group</strong>
-                <small>Add a new group under one of the main accounting masters.</small>
-            </span>
-            <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-        </summary>
-        <form method="post" class="workspace-form-grid">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="create_group">
-            <label>Group Code<input type="text" name="code" maxlength="40" placeholder="e.g., ADMIN_EXP" required></label>
-            <label>Group Name<input type="text" name="name" maxlength="150" placeholder="e.g., Administrative Expenses" required></label>
-            <label>Master Category
-                <select id="group-master-key" name="master_key" required>
-                    <?php foreach ($masters as $key => $master): ?>
-                        <option value="<?= e($key) ?>"><?= e($master['label']) ?></option>
+        <div style="overflow-x:auto">
+            <table id="coa-tree">
+                <thead><tr><th style="width:120px">Code</th><th>Name</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th style="width:140px">Actions</th></tr></thead>
+                <tbody>
+                <?php foreach ($natureOrder as $nature => [$digit, $natureLabel]): ?>
+                    <tr class="coa-node" data-name="<?= e(strtolower($natureLabel)) ?>">
+                        <td><button type="button" class="coa-tgl" data-parent="m<?= e($digit) ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <strong style="color:var(--mbw-heading)"><?= e($digit) ?></strong></td>
+                        <td><strong style="color:var(--mbw-heading)"><?= e($natureLabel) ?></strong></td>
+                        <td><span class="mbw-pill tone-blue">Master</span></td>
+                        <td><span class="mbw-pill tone-green">Active</span></td>
+                        <td><span style="color:var(--mbw-muted);font-size:11.5px">System-defined</span></td>
+                    </tr>
+                    <?php foreach ($groupsByNature[$nature] as $g): ?>
+                        <?php $gid = (int) $g['id']; ?>
+                        <tr class="coa-node coa-child" data-parent-of="m<?= e($digit) ?>" data-name="<?= e(strtolower($g['name'] . ' ' . $g['code'])) ?>">
+                            <td style="padding-left:32px"><button type="button" class="coa-tgl" data-parent="g<?= $gid ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <?= e($g['code']) ?></td>
+                            <td style="padding-left:18px"><?= e($g['name']) ?></td>
+                            <td><span class="mbw-pill tone-purple">Group</span></td>
+                            <td><?= (int) $g['is_active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
+                            <td><a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php')) ?>">Edit</a></td>
+                        </tr>
+                        <?php foreach ($ledgersByGroup[$gid] ?? [] as $l): ?>
+                            <tr class="coa-node coa-child" data-parent-of="m<?= e($digit) ?> g<?= $gid ?>" data-name="<?= e(strtolower($l['name'] . ' ' . $l['code'])) ?>">
+                                <td style="padding-left:64px"><?= e($l['code']) ?></td>
+                                <td style="padding-left:36px"><?= e($l['name']) ?></td>
+                                <td><span class="mbw-pill tone-teal">Ledger</span></td>
+                                <td><?= $statusPill((string) $l['status']) ?></td>
+                                <td style="display:flex;gap:10px">
+                                    <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . (int) $l['id'])) ?>" title="View statement"><?= icon('search') ?></a>
+                                    <a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>" title="Edit"><?= icon('settings') ?></a>
+                                    <a class="mbw-view-all" href="<?= e(url('admin/audit-trail.php')) ?>" title="History"><?= icon('admin') ?></a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
                     <?php endforeach; ?>
-                </select>
-            </label>
-            <?php if ($supportsGroupHierarchy): ?>
-                <label>Parent Group
-                    <select id="parent-group-id" name="parent_group_id">
-                        <option value="0">None (top-level group)</option>
-                        <?php foreach ($flatGroups as $group): ?>
-                            <option value="<?= (int) $group['id'] ?>" data-master-key="<?= e($group['master_key']) ?>">
-                                <?= e($masters[$group['master_key']]['label'] ?? $group['master_key']) ?> / <?= e($group['name']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-            <?php endif; ?>
-            <label class="checkbox-line"><input type="checkbox" name="is_cash_or_bank" value="1"> Holds Cash/Bank Ledgers</label>
-            <button type="submit"><?= icon('accounting') ?>Create Group</button>
+                <?php endforeach; ?>
+                <?php foreach ($orphanLedgers as $l): ?>
+                    <tr class="coa-node" data-name="<?= e(strtolower($l['name'] . ' ' . $l['code'])) ?>">
+                        <td><?= e($l['code']) ?></td>
+                        <td><?= e($l['name']) ?> <span class="mbw-pill tone-amber">No group</span></td>
+                        <td><span class="mbw-pill tone-teal">Ledger</span></td>
+                        <td><?= $statusPill((string) $l['status']) ?></td>
+                        <td><a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>">Assign group</a></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="mbw-card" id="coa-masters" aria-label="Masters">
+        <div class="mbw-card-head"><h2>Masters</h2><span class="frm-optional">Fixed accounting taxonomy — groups attach to a master, ledgers to a group</span></div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Master</th><th>Nature</th><th class="is-numeric">Groups</th><th class="is-numeric">Ledgers</th></tr></thead>
+            <tbody>
+            <?php foreach ($masters as $masterKey => $master): ?>
+                <?php
+                $mGroups = array_filter($groups, static fn (array $g): bool => (string) $g['master_key'] === $masterKey);
+                $mLedgers = 0;
+                foreach ($mGroups as $mg) {
+                    $mLedgers += count($ledgersByGroup[(int) $mg['id']] ?? []);
+                }
+                ?>
+                <tr>
+                    <td><strong style="color:var(--mbw-heading)"><?= e($master['label']) ?></strong> <span class="mbw-pill tone-gray"><?= e($masterKey) ?></span></td>
+                    <td><span class="mbw-pill tone-blue"><?= e(ucfirst((string) $master['nature'])) ?></span></td>
+                    <td class="is-numeric"><?= count($mGroups) ?></td>
+                    <td class="is-numeric"><?= $mLedgers ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table></div>
+    </section>
+
+    <section class="mbw-card" id="coa-import" aria-label="Bulk import">
+        <div class="mbw-card-head"><h2>Bulk Import Ledgers</h2><span class="frm-optional">CSV columns: group_code, ledger_code, ledger_name, type (asset/liability/equity/revenue/expense)</span></div>
+        <form method="post" enctype="multipart/form-data" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="bulk_import">
+            <input type="file" name="import_file" accept=".csv" required style="min-height:38px">
+            <button type="submit" class="button"><?= icon('layers') ?>Import CSV</button>
+            <a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>">Download current COA as a template</a>
         </form>
-    </details>
-
-    <details class="feature-disclosure" id="create-ledger">
-        <summary>
-            <span>
-                <strong><?= icon('accounting') ?>Create Ledger Account</strong>
-                <small>Add an account to an active group.</small>
-            </span>
-            <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-        </summary>
-        <?php if ($flatGroups === []): ?>
-            <p class="muted">Create a group before adding ledger accounts.</p>
-        <?php else: ?>
-            <form method="post" class="workspace-form-grid">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="create_ledger">
-                <label>Ledger Code<input type="text" name="code" maxlength="40" placeholder="e.g., OFFICE_RENT" required></label>
-                <label>Ledger Name<input type="text" name="name" maxlength="150" placeholder="e.g., Office Rent" required></label>
-                <label>Account Group
-                    <select name="group_id" required>
-                        <option value="">Select group</option>
-                        <?php foreach ($flatGroups as $group): ?>
-                            <option value="<?= (int) $group['id'] ?>">
-                                <?= e($masters[$group['master_key']]['label'] ?? $group['master_key']) ?> / <?= e($group['name']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <button type="submit"><?= icon('accounting') ?>Create Ledger</button>
-            </form>
-        <?php endif; ?>
-    </details>
-
-    <article class="feature-disclosure">
-        <div>
-            <strong><?= icon('settings') ?>Automated Posting Accounts</strong>
-            <small>Choose the accounts used by invoice, receipt, refund, and tax postings.</small>
-        </div>
-        <a class="button secondary" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><?= icon('settings') ?>Open posting accounts</a>
-    </article>
-</div>
-</section>
-
-<div class="coa-workspace-grid" id="hierarchy">
-<section class="mbw-card coa-tree-card">
-    <div class="mbw-card-head">
-        <h2><?= e($currentCompany['name']) ?> chart hierarchy</h2>
-        <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>">View All</a></div>
-    </div>
-    <?php if (empty($chartOfAccounts)): ?>
-        <p style="color:var(--mbw-muted)">No chart of accounts has been configured for this company.</p>
-    <?php else: ?>
-        <div class="account-tree">
-            <?php render_account_tree($chartOfAccounts); ?>
-        </div>
-    <?php endif; ?>
-</section>
-
-<section class="mbw-card coa-impact-card">
-    <div class="mbw-card-head">
-        <h2>Click flows and impact</h2>
-    </div>
-    <div><strong>Create Group</strong><span>Vouchers, sales, purchases, inventory, manufacturing, and reports inherit classification.</span></div>
-    <div><strong>Create Ledger Account</strong><span>New account becomes available for postings and mapped automation.</span></div>
-    <div><strong>Automated Posting</strong><span>Invoices, receipts, payments, VAT, and cash/bank entries use approved ledgers.</span></div>
-    <div><strong>Audit Enabled</strong><span>All account changes are tracked through activity logs and field history.</span></div>
-</section>
+    </section>
 </div>
 
-<section class="mbw-governance-note" id="audit-log">
-    <span><?= icon('admin') ?></span>
-    <p>All company-specific ledgers, groups, posting accounts, cost centers, and projects must be created under the assigned company node. <a href="<?= e(url('admin/chart-posting-accounts.php')) ?>">Posting accounts</a> and <a href="<?= e(url('admin/chart-audit-log.php')) ?>">audit log</a> open in their own screens now, while subsidiary users remain inside their company scope.</p>
-</section>
+<aside class="frm-rail">
+    <section class="mbw-card frm-rail-card">
+        <div class="frm-section-head"><span class="mbw-chip is-square tone-blue"><?= icon('portal') ?></span><h2>Quick Actions</h2></div>
+        <div class="mbw-qa-grid" style="grid-template-columns:1fr 1fr">
+            <a class="mbw-qa" href="<?= e(url('admin/chart-groups.php')) ?>"><span class="mbw-chip is-square tone-green"><?= icon('tree') ?></span><div><strong>Create Group</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/chart-ledgers.php')) ?>"><span class="mbw-chip is-square tone-purple"><?= icon('journal') ?></span><div><strong>Create Ledger</strong></div></a>
+            <a class="mbw-qa" href="#coa-import" onclick="document.getElementById('coa-import').scrollIntoView({behavior:'smooth'});return false;"><span class="mbw-chip is-square tone-amber"><?= icon('layers') ?></span><div><strong>Bulk Import</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>"><span class="mbw-chip is-square tone-teal"><?= icon('analytics') ?></span><div><strong>Export COA</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/accounting.php')) ?>"><span class="mbw-chip is-square tone-blue"><?= icon('wallet') ?></span><div><strong>Opening Balances</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><span class="mbw-chip is-square tone-red"><?= icon('settings') ?></span><div><strong>Posting Mappings</strong></div></a>
+        </div>
+    </section>
 
-<?php
-include __DIR__ . '/../../app/views/partials/admin_footer.php';
-?>
+    <section class="mbw-card frm-rail-card">
+        <div class="frm-section-head"><span class="mbw-chip is-square tone-blue"><?= icon('about') ?></span><h2>Code Structure Rules</h2></div>
+        <div style="display:grid;gap:10px;font-size:12px">
+            <div style="border:1px solid var(--mbw-primary-soft);background:var(--mbw-primary-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-primary)"># Master = Nature (1–5)</strong><br><span style="color:var(--mbw-muted)">1 Assets · 2 Liabilities · 3 Equity · 4 Revenue · 5 Expenses</span></div>
+            <div style="border:1px solid var(--mbw-green-soft);background:var(--mbw-green-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-green)">## Group = short code</strong><br><span style="color:var(--mbw-muted)">e.g. BANK, RECEIVABLE, PAYABLE, ADMIN_EXP</span></div>
+            <div style="border:1px solid var(--mbw-purple-soft);background:var(--mbw-purple-soft);border-radius:8px;padding:8px 10px"><strong style="color:var(--mbw-purple)">### Ledger = unique code</strong><br><span style="color:var(--mbw-muted)">e.g. CASH, AR, AP, SALES — unique per company</span></div>
+        </div>
+    </section>
+
+    <section class="mbw-card frm-rail-card">
+        <div class="frm-section-head"><span class="mbw-chip is-square tone-amber"><?= icon('settings') ?></span><h2>Modify Features</h2></div>
+        <ul class="frm-checklist" style="gap:6px">
+            <?php foreach ([['Edit code / name', 'admin/chart-ledgers.php'], ['Move ledger to another group', 'admin/chart-ledgers.php'], ['Deactivate / Archive', 'admin/chart-ledgers.php'], ['Set opening balance', 'admin/accounting.php'], ['Map auto-posting accounts', 'admin/chart-posting-accounts.php'], ['View audit history', 'admin/audit-trail.php']] as [$featureLabel, $featureUrl]): ?>
+                <li class="is-ok" style="padding-left:0;list-style:none"><a class="mbw-view-all" href="<?= e(url($featureUrl)) ?>" style="display:flex;justify-content:space-between"><?= e($featureLabel) ?><span>→</span></a></li>
+            <?php endforeach; ?>
+        </ul>
+    </section>
+
+    <section class="mbw-card frm-rail-card">
+        <div class="frm-section-head"><span class="mbw-chip is-square tone-green"><?= icon('tasks') ?></span><h2>Impact &amp; Validation</h2></div>
+        <ul class="frm-checklist">
+            <li class="<?= $duplicateCodes === 0 ? 'is-ok' : '' ?>">Unique code validation<br><small style="color:var(--mbw-muted)"><?= $duplicateCodes === 0 ? 'No duplicates found' : $duplicateCodes . ' duplicate codes!' ?></small></li>
+            <li class="<?= $orphanLedgers === [] ? 'is-ok' : '' ?>">Parent-child dependency<br><small style="color:var(--mbw-muted)"><?= $orphanLedgers === [] ? 'Structure is valid' : count($orphanLedgers) . ' ledgers without a group' ?></small></li>
+            <li class="<?= $activeLedgers === count($ledgers) ? 'is-ok' : '' ?>">Active / Inactive status<br><small style="color:var(--mbw-muted)"><?= $activeLedgers === count($ledgers) ? 'All accounts are active' : (count($ledgers) - $activeLedgers) . ' inactive accounts' ?></small></li>
+        </ul>
+        <p style="margin:12px 0 4px;color:var(--mbw-muted);font-size:11.5px;font-weight:600">Mapped modules affected</p>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <?php foreach (['Vouchers' => 'blue', 'Sales' => 'green', 'Purchases' => 'red', 'Banking' => 'teal', 'Inventory' => 'amber', 'Reports' => 'purple'] as $module => $tone): ?>
+                <span class="mbw-pill tone-<?= e($tone) ?>"><?= e($module) ?></span>
+            <?php endforeach; ?>
+        </div>
+        <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:11px"><?= icon('tasks') ?> Last validation: <?= e(date('d M Y, h:i A')) ?></p>
+    </section>
+</aside>
+</div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const parentSelect = document.getElementById('parent-group-id');
-    const masterSelect = document.getElementById('group-master-key');
-    if (!parentSelect || !masterSelect) {
-        return;
-    }
-
-    const syncMasterToParent = function() {
-        const option = parentSelect.options[parentSelect.selectedIndex];
-        const parentMaster = option ? option.dataset.masterKey : '';
-        if (parentMaster) {
-            masterSelect.value = parentMaster;
-            masterSelect.disabled = true;
-        } else {
-            masterSelect.disabled = false;
-        }
-    };
-
-    parentSelect.addEventListener('change', syncMasterToParent);
-    syncMasterToParent();
+document.addEventListener('DOMContentLoaded', function () {
+    // Collapse/expand branches.
+    document.querySelectorAll('.coa-tgl').forEach(function (toggle) {
+        toggle.addEventListener('click', function () {
+            var key = toggle.getAttribute('data-parent');
+            var open = toggle.textContent.trim() === '▾';
+            toggle.textContent = open ? '▸' : '▾';
+            document.querySelectorAll('.coa-node.coa-child').forEach(function (row) {
+                var parents = (row.getAttribute('data-parent-of') || '').split(' ');
+                if (parents.indexOf(key) !== -1) {
+                    row.style.display = open ? 'none' : '';
+                }
+            });
+        });
+    });
+    // Live search across the tree.
+    var search = document.getElementById('coa-search');
+    search.addEventListener('input', function () {
+        var q = search.value.trim().toLowerCase();
+        document.querySelectorAll('.coa-node').forEach(function (row) {
+            row.style.display = q === '' || (row.getAttribute('data-name') || '').indexOf(q) !== -1 ? '' : 'none';
+        });
+    });
 });
 </script>
+<?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

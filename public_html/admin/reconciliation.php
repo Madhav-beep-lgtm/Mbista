@@ -133,7 +133,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/banking.php')) ?>">Banking Overview</a></div>
     </div>
     <?php if ($bankLedgers === []): ?>
-        <p style="color:var(--mbw-muted);font-size:13.5px">No cash or bank ledgers exist yet. <a href="<?= e(url('admin/chart-of-accounts.php#create-ledger')) ?>" style="color:var(--mbw-primary)">Create one from the Chart of Accounts</a>.</p>
+        <p style="color:var(--mbw-muted);font-size:13.5px">No cash or bank ledgers exist yet. <a href="<?= e(url('admin/chart-ledgers.php')) ?>" style="color:var(--mbw-primary)">Create one from the Chart of Accounts</a>.</p>
     <?php else: ?>
         <form method="get" class="mbw-inline-form" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
             <label class="sr-only" for="recon-ledger">Bank ledger</label>
