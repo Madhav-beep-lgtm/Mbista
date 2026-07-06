@@ -246,22 +246,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </button>
             </div>
         </header>
-        <?php
-        $stripParentCompany = company_by_code('AGHPL');
-        $stripSubsidiaries = $stripParentCompany ? child_companies_for_company((int) $stripParentCompany['id']) : [];
-        $stripRoleLabel = ($currentUser['role'] ?? '') === 'admin' ? 'Super Admin' : ucfirst((string) ($currentUser['role'] ?? 'Staff'));
-        ?>
-        <div class="admin-hierarchy-strip" aria-label="Corporate hierarchy">
-            <span><?= icon('admin') ?><strong><?= e($currentUser['name'] ?? 'Admin') ?></strong> — <?= e($stripRoleLabel) ?></span>
-            <?php if ($stripParentCompany): ?>
-                <span class="strip-sep">→</span>
-                <span><?= icon('companies') ?><strong><?= e($stripParentCompany['name']) ?></strong> — Parent Company</span>
-            <?php endif; ?>
-            <?php foreach (array_slice($stripSubsidiaries, 0, 2) as $stripSubsidiary): ?>
-                <span class="strip-sep">→</span>
-                <span><?= icon('companies') ?><strong><?= e($stripSubsidiary['name']) ?></strong> — Subsidiary Company</span>
-            <?php endforeach; ?>
-        </div>
         <div class="admin-content">
             <nav class="admin-breadcrumb" aria-label="Breadcrumb">
                 <a href="<?= e(url('admin/index.php')) ?>">Home</a> / <strong><?= e($pageTitle) ?></strong>
