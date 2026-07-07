@@ -5,6 +5,8 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
+require_once __DIR__ . '/nepali_date.php';
+
 const LEDGER_MASTERS = [
     'equity' => ['label' => 'Equity', 'nature' => 'equity', 'sort_order' => 1],
     'non_current_liability' => ['label' => 'Non-current Liabilities', 'nature' => 'liability', 'sort_order' => 2],

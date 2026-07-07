@@ -70,6 +70,7 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
                     </span>
                 </div>
             <?php endif; ?>
+            <span class="mbw-pill tone-amber" title="Bikram Sambat (today)" style="align-self:center"><?= e(bs_format(date('Y-m-d'))) ?> BS</span>
             <div class="admin-topbar-actions">
                 <button type="button" class="theme-toggle-link admin-icon-button" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
                     <?= icon('theme') ?>

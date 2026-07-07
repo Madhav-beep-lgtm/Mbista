@@ -201,6 +201,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     </span>
                 </div>
             <?php endif; ?>
+            <span class="mbw-pill tone-amber" title="Bikram Sambat (today)" style="align-self:center"><?= e(bs_format(date('Y-m-d'))) ?> BS</span>
             <div class="admin-topbar-actions">
                 <?php if ($headerAltioraCompany): ?>
                     <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" class="topbar-icon-form">

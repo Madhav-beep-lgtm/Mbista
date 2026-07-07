@@ -73,6 +73,7 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
                     </span>
                 </div>
             <?php endif; ?>
+            <span class="mbw-pill tone-amber" title="Bikram Sambat (today)" style="align-self:center"><?= e(bs_format(date('Y-m-d'))) ?> BS</span>
             <div class="admin-topbar-actions">
                 <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
                 <button type="button" class="theme-toggle-link admin-icon-button" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
