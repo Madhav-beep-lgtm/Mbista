@@ -144,7 +144,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $reportId . '-' . $fromDate . '-to-' . $toDate . '.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, [$reportLabel . ' — ' . ($company['name'] ?? '') . ' — ' . $fromDate . ' to ' . $toDate]);
+    fputcsv($out, [$reportLabel . ' — ' . ($company['name'] ?? '') . ' — ' . app_date_range($fromDate, $toDate)]);
     fputcsv($out, array_map(static fn (array $col): string => ($col[2] !== '' ? $col[2] . ' ' : '') . $col[0], $report['columns']));
     foreach ($report['rows'] as $row) {
         fputcsv($out, rc_row_cells($row));

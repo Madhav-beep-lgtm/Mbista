@@ -1188,18 +1188,12 @@ function rc_render_letterhead(array $report, array $meta): void
 {
     $title = (string) ($report['title'] ?? $meta['report_label'] ?? 'Report');
     $asAt = (bool) ($report['as_at'] ?? false);
+    $dateFn = function_exists('app_date');
     $periodLine = $asAt
-        ? 'As at ' . date('d M Y', strtotime((string) $meta['to']))
-        : date('d M Y', strtotime((string) $meta['from'])) . ' – ' . date('d M Y', strtotime((string) $meta['to']));
+        ? 'As at ' . ($dateFn ? app_date((string) $meta['to']) : date('d M Y', strtotime((string) $meta['to'])))
+        : ($dateFn ? app_date_range((string) $meta['from'], (string) $meta['to']) : date('d M Y', strtotime((string) $meta['from'])) . ' - ' . date('d M Y', strtotime((string) $meta['to'])));
     if (!empty($meta['fiscal_label'])) {
         $periodLine = $meta['fiscal_label'] . '  |  ' . $periodLine;
-    }
-    $bsLine = '';
-    if (function_exists('bs_format')) {
-        $bsLine = $asAt
-            ? bs_format((string) $meta['to'])
-            : bs_format_range((string) $meta['from'], (string) $meta['to']);
-        $bsLine = $bsLine !== '' ? $bsLine . ' BS' : '';
     }
     ?>
     <div class="rpt-letterhead">
@@ -1210,7 +1204,6 @@ function rc_render_letterhead(array $report, array $meta): void
                 <div class="rpt-entity"><?= e((string) $report['entity_line']) ?></div>
             <?php endif; ?>
             <div class="rpt-period"><?= e($periodLine) ?></div>
-            <?php if ($bsLine !== ''): ?><div class="rpt-period" style="color:var(--mbw-amber)"><?= e($bsLine) ?></div><?php endif; ?>
         </div>
         <div class="rpt-meta">
             <?php if (!empty($report['org_label'])): ?>

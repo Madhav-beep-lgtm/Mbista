@@ -7,6 +7,64 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
 require_once __DIR__ . '/nepali_date.php';
 
+/**
+ * Active date display mode for the current user: 'ad', 'bs', or 'both'.
+ * Session overrides the company default (settings key 'date_mode').
+ */
+function date_mode(): string
+{
+    $mode = (string) ($_SESSION['app_date_mode'] ?? '');
+    if (!in_array($mode, ['ad', 'bs', 'both'], true)) {
+        $mode = (string) (function_exists('setting') ? setting('date_mode', 'both') : 'both');
+    }
+    return in_array($mode, ['ad', 'bs', 'both'], true) ? $mode : 'both';
+}
+
+/**
+ * Format one AD date (Y-m-d) for display honoring the active date mode:
+ * AD only, BS only, or "AD (BS BS)".
+ */
+function app_date(?string $adDate, string $adFormat = 'd M Y'): string
+{
+    $adDate = (string) $adDate;
+    if ($adDate === '' || strtotime($adDate) === false) {
+        return '';
+    }
+    $ad = date($adFormat, strtotime($adDate));
+    $mode = date_mode();
+    if ($mode === 'ad') {
+        return $ad;
+    }
+    $bs = bs_format(substr($adDate, 0, 10));
+    if ($bs === '') {
+        return $ad;
+    }
+    if ($mode === 'bs') {
+        return $bs . ' BS';
+    }
+    return $ad . ' (' . $bs . ' BS)';
+}
+
+/** Format an AD period (from-to) honoring the active date mode. */
+function app_date_range(?string $fromAd, ?string $toAd): string
+{
+    $fromAd = (string) $fromAd;
+    $toAd = (string) $toAd;
+    $mode = date_mode();
+    $adRange = date('d M Y', strtotime($fromAd)) . ' - ' . date('d M Y', strtotime($toAd));
+    if ($mode === 'ad') {
+        return $adRange;
+    }
+    $bsRange = function_exists('bs_format_range') ? bs_format_range($fromAd, $toAd) : '';
+    if ($bsRange === '') {
+        return $adRange;
+    }
+    if ($mode === 'bs') {
+        return $bsRange . ' BS';
+    }
+    return $adRange . '  |  ' . $bsRange . ' BS';
+}
+
 const LEDGER_MASTERS = [
     'equity' => ['label' => 'Equity', 'nature' => 'equity', 'sort_order' => 1],
     'non_current_liability' => ['label' => 'Non-current Liabilities', 'nature' => 'liability', 'sort_order' => 2],

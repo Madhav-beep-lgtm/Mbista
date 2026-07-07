@@ -737,7 +737,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <span class="ad-company-icon"><?= icon('companies') ?></span>
         <div>
             <h2><?= e($company['name']) ?></h2>
-            <p><?= e($fiscalYear['label']) ?> / As of <?= e(date('d M Y', strtotime($asOfDate))) ?> · <?= e(bs_format($asOfDate)) ?> BS</p>
+            <p><?= e($fiscalYear['label']) ?> / As of <?= e(app_date($asOfDate)) ?></p>
         </div>
     </div>
     <div class="ad-context-controls">

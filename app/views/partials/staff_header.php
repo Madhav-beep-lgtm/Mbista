@@ -15,7 +15,7 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
     <link rel="stylesheet" href="/assets/css/style.css?v=20260706-portal">
     <link rel="stylesheet" href="/assets/css/portal.css?v=20260707c">
 </head>
-<body class="<?= e($bodyClass) ?>">
+<body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
     <aside class="admin-sidebar">
         <a class="brand brand-admin" href="<?= e(url('staff/index.php')) ?>">
@@ -75,6 +75,16 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
             <?php endif; ?>
             <span class="mbw-pill tone-amber" title="Bikram Sambat (today)" style="align-self:center"><?= e(bs_format(date('Y-m-d'))) ?> BS</span>
             <div class="admin-topbar-actions">
+                <form method="post" action="<?= e(url('set-date-mode.php')) ?>" style="align-self:center;margin:0">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="return" value="<?= e($_SERVER['REQUEST_URI'] ?? '') ?>">
+                    <select name="date_mode" onchange="this.form.submit()" title="Date display: English / Nepali" style="min-height:40px;border:1px solid var(--mbw-border);border-radius:10px;background:var(--mbw-card);color:var(--mbw-heading);font-size:12px;font-weight:700;padding:4px 8px;cursor:pointer">
+                        <option value="ad" <?= date_mode() === 'ad' ? 'selected' : '' ?>>AD</option>
+                        <option value="bs" <?= date_mode() === 'bs' ? 'selected' : '' ?>>BS</option>
+                        <option value="both" <?= date_mode() === 'both' ? 'selected' : '' ?>>AD+BS</option>
+                    </select>
+                </form>
+
                 <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
                 <button type="button" class="theme-toggle-link admin-icon-button" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
                     <?= icon('theme') ?>
