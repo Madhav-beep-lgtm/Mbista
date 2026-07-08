@@ -286,6 +286,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <nav class="mbw-tabbar" aria-label="Voucher workspace">
     <a class="mbw-tab is-active" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('journal') ?>Voucher Register</a>
     <a class="mbw-tab" href="<?= e(url('admin/voucher-form.php')) ?>"><?= icon('receipt-voucher') ?>New Voucher</a>
+    <a class="mbw-tab" href="<?= e(url('admin/voucher-import.php')) ?>"><?= icon('upload') ?>Import from Excel</a>
 </nav>
 
 <section class="mbw-kpi-grid">
