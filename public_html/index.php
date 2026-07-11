@@ -74,15 +74,6 @@ if ($heroTitleLines === []) {
 }
 $heroTitleAccent = count($heroTitleLines) > 1 ? array_pop($heroTitleLines) : null;
 
-// Professional affiliations shown in the partner strip.
-$affiliations = [
-    ['mark' => 'ICAN', 'name' => 'The Institute of Chartered Accountants of Nepal'],
-    ['mark' => 'NFRS', 'name' => 'Nepal Financial Reporting Standards'],
-    ['mark' => 'IFRS', 'name' => 'International Financial Reporting Standards'],
-    ['mark' => 'ACCA', 'name' => 'Association of Chartered Certified Accountants'],
-    ['mark' => 'CPA', 'name' => 'Chartered Professional Accountants'],
-];
-
 include __DIR__ . '/../app/views/partials/header.php';
 ?>
 <section class="hero" id="top">
@@ -181,20 +172,6 @@ include __DIR__ . '/../app/views/partials/header.php';
                 <h3>Long-Term Partnership</h3>
                 <p>Building lasting relationships to support your growth and success.</p>
             </article>
-        </div>
-    </div>
-</section>
-
-<section class="affiliates-section" aria-label="Professional affiliations">
-    <div class="container">
-        <h2 class="affiliates-title">Proud Partner &amp; Affiliates</h2>
-        <div class="affiliates-strip">
-            <?php foreach ($affiliations as $affiliate): ?>
-                <div class="affiliate-item">
-                    <span class="affiliate-mark"><?= e($affiliate['mark']) ?></span>
-                    <span class="affiliate-name"><?= e($affiliate['name']) ?></span>
-                </div>
-            <?php endforeach; ?>
         </div>
     </div>
 </section>
