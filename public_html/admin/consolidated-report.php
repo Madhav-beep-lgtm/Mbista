@@ -69,69 +69,117 @@ if ($altiora) {
 $relationshipTones = ['parent' => 'blue', 'subsidiary' => 'green', 'associate' => 'purple', 'joint_venture' => 'teal'];
 $methodLabels = ['full' => 'Full consolidation', 'equity' => 'Equity method', 'proportionate' => 'Proportionate'];
 
+// CSV export of the matrix + consolidation.
+if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    $rows = [['Consolidated Report — ' . ($fiscalYear['label'] ?? '')]];
+    $rows[] = [];
+    $rows[] = ['Company Performance Matrix'];
+    $rows[] = ['Company', 'Code', 'Cash & Bank', 'Receivables', 'Payables', 'Income', 'Expenses', 'Net Profit'];
+    foreach ($matrixRows as $row) {
+        $rows[] = [
+            (string) $row['company']['name'], (string) ($row['company']['code'] ?? ''),
+            $row['data']['cash'], $row['data']['receivables'], $row['data']['payables'],
+            $row['data']['income'], $row['data']['expenses'], $row['data']['net'],
+        ];
+    }
+    if ($consolidated !== null) {
+        $rows[] = [];
+        $rows[] = ['Altiora Group — Consolidated (IFRS 10)'];
+        $rows[] = ['Entity', 'Relationship', 'Ownership %', 'Method', 'Income', 'Expenses', 'Profit', 'NCI Share'];
+        foreach ($consolidated['entities'] as $entity) {
+            $rows[] = [
+                (string) $entity['company_name'], (string) $entity['relationship_type'],
+                (float) $entity['ownership_percent'], (string) $entity['consolidation_method'],
+                (float) $entity['income'], (float) $entity['expenses'],
+                (float) $entity['profit'], (float) $entity['nci_profit'],
+            ];
+        }
+        $rows[] = ['Consolidated', '', '', '', (float) $consolidated['total_income'], (float) $consolidated['total_expenses'], (float) $consolidated['net_profit'], (float) $consolidated['nci_profit']];
+    }
+    export_csv('consolidated-report-' . date('Ymd') . '.csv', $rows);
+}
+
 $pageTitle = 'Consolidated Report';
-$pageSubtitle = 'Group-wide tabular report across all companies — Super Admin';
-$bodyClass = 'admin-layout accounting-module-page';
+$pageSubtitle = 'Group-wide financial view across all companies.';
+$pageBreadcrumb = [['Home', 'admin/index.php'], ['Reports', 'admin/reports-center.php']];
+$bodyClass = 'admin-layout accounting-module-page admin-dashboard';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<section class="mbw-card" aria-label="Report context">
-    <div class="mbw-card-head">
-        <h2>Reporting Period</h2>
-        <div class="mbw-card-tools">
-            <form method="get" class="mbw-inline-form">
-                <label class="sr-only" for="consolidated-fy">Fiscal year</label>
-                <select id="consolidated-fy" class="mbw-select" name="fiscal_year_id" onchange="this.form.submit()">
-                    <?php foreach ($fiscalYears as $year): ?>
-                        <option value="<?= (int) $year['id'] ?>" <?= (int) $year['id'] === $fiscalYearId ? 'selected' : '' ?>><?= e($year['label']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </form>
-            <button type="button" class="button secondary" onclick="window.print()"><?= icon('documents') ?>Print</button>
-            <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php')) ?>">Reports Center</a>
-        </div>
+<div class="cr-head">
+    <span class="cr-head-icon"><?= icon('layers') ?></span>
+    <div>
+        <h2>Consolidated Report</h2>
+        <p>Group-wide financial view across all companies</p>
     </div>
-    <p style="margin:0;color:var(--mbw-muted);font-size:13px">
-        Reference period <?= e($fiscalYear['label']) ?>. Each company reports against its own fiscal year matching this period; companies without a matching fiscal year show zero balances.
-    </p>
+</div>
+
+<section class="mbw-card cr-toolbar" aria-label="Report filters">
+    <form method="get" class="cr-field">
+        <label for="consolidated-fy">Fiscal Year</label>
+        <select id="consolidated-fy" name="fiscal_year_id" onchange="this.form.submit()">
+            <?php foreach ($fiscalYears as $year): ?>
+                <option value="<?= (int) $year['id'] ?>" <?= (int) $year['id'] === $fiscalYearId ? 'selected' : '' ?>><?= e($year['label']) ?></option>
+            <?php endforeach; ?>
+        </select>
+    </form>
+    <div class="cr-field">
+        <label for="consolidated-basis">Report Basis</label>
+        <select id="consolidated-basis" title="Consolidation basis">
+            <option>IFRS 10 - Consolidated</option>
+        </select>
+    </div>
+    <div class="cr-field">
+        <label for="consolidated-group">Group</label>
+        <select id="consolidated-group" title="Reporting group">
+            <option><?= e(($altiora['name'] ?? 'Altiora') === 'Altiora Global Holdings Private Limited' ? 'Altiora Group' : ($altiora['name'] ?? 'Altiora Group')) ?></option>
+        </select>
+    </div>
+    <div class="cr-actions">
+        <div class="rc2-export" data-rc2-export>
+            <button type="button" class="rc2-export-btn"><?= icon('download') ?>Export<span class="rc2-caret"><?= icon('chevron') ?></span></button>
+            <div class="rc2-export-menu" role="menu">
+                <a role="menuitem" href="<?= e(url('admin/consolidated-report.php?fiscal_year_id=' . $fiscalYearId . '&export=csv')) ?>"><?= icon('analytics') ?>Export Excel (CSV)</a>
+                <a role="menuitem" href="#" onclick="window.print(); return false;"><?= icon('documents') ?>Print / Save as PDF</a>
+            </div>
+        </div>
+        <button type="button" class="rc2-reset" onclick="window.print()"><?= icon('receipt-voucher') ?>Print</button>
+        <a class="cr-dark-btn" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
+    </div>
 </section>
 
 <?php if ($consolidated !== null): ?>
-<section class="mbw-kpi-grid" aria-label="Consolidated headline figures">
-    <article class="mbw-kpi">
-        <div>
-            <span class="mbw-kpi-label">Consolidated Income</span>
-            <div class="mbw-kpi-value"><?= e($fmtMoney((float) $consolidated['total_income'])) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Altiora group (IFRS 10)</span></span>
-        </div>
+<section class="cr-kpis" aria-label="Consolidated headline figures">
+    <article class="cr-kpi tone-green">
         <span class="mbw-chip tone-green"><?= icon('analytics') ?></span>
-    </article>
-    <article class="mbw-kpi">
         <div>
-            <span class="mbw-kpi-label">Consolidated Expenses</span>
-            <div class="mbw-kpi-value"><?= e($fmtMoney((float) $consolidated['total_expenses'])) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Altiora group (IFRS 10)</span></span>
+            <span class="cr-kpi-label">Consolidated Income</span>
+            <div class="cr-kpi-value"><?= e($fmtMoney((float) $consolidated['total_income'])) ?></div>
+            <span class="cr-kpi-sub">Altiora group (IFRS 10)</span>
         </div>
+    </article>
+    <article class="cr-kpi tone-red">
         <span class="mbw-chip tone-red"><?= icon('wallet') ?></span>
-    </article>
-    <article class="mbw-kpi">
         <div>
-            <span class="mbw-kpi-label">Consolidated Net Profit</span>
-            <div class="mbw-kpi-value"><?= e($fmtMoney((float) $consolidated['net_profit'])) ?></div>
-            <span class="mbw-kpi-delta <?= (float) $consolidated['net_profit'] >= 0 ? 'is-up' : 'is-down' ?>">
-                <?= icon((float) $consolidated['net_profit'] >= 0 ? 'trend-up' : 'trend-down') ?>
-                <?= e(number_format((float) $consolidated['profit_margin'], 1)) ?>%
-                <span class="mbw-kpi-vs">margin</span>
-            </span>
+            <span class="cr-kpi-label">Consolidated Expenses</span>
+            <div class="cr-kpi-value"><?= e($fmtMoney((float) $consolidated['total_expenses'])) ?></div>
+            <span class="cr-kpi-sub">Altiora group (IFRS 10)</span>
         </div>
+    </article>
+    <article class="cr-kpi tone-blue">
         <span class="mbw-chip tone-blue"><?= icon('trend-up') ?></span>
-    </article>
-    <article class="mbw-kpi">
         <div>
-            <span class="mbw-kpi-label">Attributable to Parent</span>
-            <div class="mbw-kpi-value"><?= e($fmtMoney((float) $consolidated['profit_attributable_to_parent'])) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">NCI share <?= e($fmtMoney((float) $consolidated['nci_profit'])) ?></span></span>
+            <span class="cr-kpi-label">Consolidated Net Profit</span>
+            <div class="cr-kpi-value"><?= e($fmtMoney((float) $consolidated['net_profit'])) ?></div>
+            <span class="cr-kpi-sub <?= (float) $consolidated['net_profit'] >= 0 ? 'is-up' : 'is-down' ?>"><?= e(number_format((float) $consolidated['profit_margin'], 1)) ?>% margin</span>
         </div>
+    </article>
+    <article class="cr-kpi tone-purple">
         <span class="mbw-chip tone-purple"><?= icon('companies') ?></span>
+        <div>
+            <span class="cr-kpi-label">Attributable to Parent</span>
+            <div class="cr-kpi-value"><?= e($fmtMoney((float) $consolidated['profit_attributable_to_parent'])) ?></div>
+            <span class="cr-kpi-sub">NCI share <?= e($fmtMoney((float) $consolidated['nci_profit'])) ?></span>
+        </div>
     </article>
 </section>
 <?php endif; ?>
@@ -288,4 +336,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="notice error">Altiora Global Holdings has no fiscal year matching <?= e($fiscalYear['label']) ?>, so the IFRS consolidation cannot be produced for this period.</div>
 <?php endif; ?>
 
+<script>
+(function () {
+    var wrap = document.querySelector('.cr-toolbar [data-rc2-export]');
+    if (!wrap) { return; }
+    wrap.querySelector('.rc2-export-btn').addEventListener('click', function (event) {
+        event.stopPropagation();
+        wrap.classList.toggle('is-open');
+    });
+    document.addEventListener('click', function () { wrap.classList.remove('is-open'); });
+})();
+</script>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

@@ -14,7 +14,7 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
     <meta name="theme-color" content="#0b1c36">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260711-portal">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712a">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712b">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
