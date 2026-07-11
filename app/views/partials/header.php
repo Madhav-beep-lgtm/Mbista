@@ -157,6 +157,7 @@ if ($navSection === '') {
                             <li><a href="<?= e(url('insights/tax-updates.php')) ?>">Tax Updates</a></li>
                             <li><a href="<?= e(url('insights/audit-insights.php')) ?>">Audit Insights</a></li>
                             <li><a href="<?= e(url('insights/accounting-updates.php')) ?>">Accounting Updates</a></li>
+                            <li><a href="<?= e(url('insights/business-advisory.php')) ?>">Business Advisory</a></li>
                             <li><a href="<?= e(url('insights/publications.php')) ?>">Publications</a></li>
                             <li><a href="<?= e(url('insights/news-events.php')) ?>">News and Events</a></li>
                             <li><a href="<?= e(url('insights/downloads.php')) ?>">Downloads</a></li>

@@ -359,7 +359,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <a role="menuitem" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>"><?= icon('documents') ?>Export PDF</a>
                 <a role="menuitem" href="<?= e(rc_url(['export' => 'csv'])) ?>"><?= icon('analytics') ?>Export Excel (CSV)</a>
                 <a role="menuitem" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>"><?= icon('receipt-voucher') ?>Print Report</a>
-                <a role="menuitem" href="<?= e(url('admin/report-schedules.php?report=' . $reportId)) ?>"><?= icon('calendar') ?>Schedule Reports</a>
+                <a role="menuitem" href="<?= e(url('admin/report-schedules.php?report_key=' . urlencode($reportId))) ?>"><?= icon('calendar') ?>Schedule Reports</a>
                 <a role="menuitem" href="<?= e(rc_url($compareEnabled ? ['compare' => null, 'cfrom' => null, 'cto' => null] : ['compare' => '1'])) ?>"><?= icon('reconcile') ?>Compare Period: <?= $compareEnabled ? 'On' : 'Off' ?></a>
             </div>
         </div>

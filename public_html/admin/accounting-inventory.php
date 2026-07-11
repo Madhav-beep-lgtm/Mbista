@@ -336,7 +336,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a class="<?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory</a>
     <?php if ($inventoryProfile['show_manufacturing']): ?><a class="<?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>">Manufacturing</a><?php endif; ?>
     <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a>
-    <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Reports</a>
+    <a href="<?= e(url('admin/reports-center.php')) ?>">Reports</a>
 </nav>
 
 <section class="mbw-kpi-grid" aria-label="Inventory overview">

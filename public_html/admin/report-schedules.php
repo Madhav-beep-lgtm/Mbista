@@ -16,7 +16,7 @@ $companyId = (int) ($company['id'] ?? 0);
 $currentUser = current_user();
 $userId = (int) ($currentUser['id'] ?? 0);
 $reportRegistry = rc_report_registry();
-$reportKey = (string) ($_GET['report_key'] ?? 'trial-balance');
+$reportKey = (string) ($_GET['report_key'] ?? $_GET['report'] ?? 'trial-balance');
 if (!isset($reportRegistry[$reportKey])) {
     $reportKey = array_key_first($reportRegistry) ?: 'trial-balance';
 }
