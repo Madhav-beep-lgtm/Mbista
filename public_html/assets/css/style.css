@@ -9730,6 +9730,138 @@ body.home-page .section-head {
   color: var(--gold-bright, #f2c766);
 }
 
+/* ==========================================================================
+   App-wide UX polish: toasts, empty states, password strength meter
+   ========================================================================== */
+
+#toast-root {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 2000;
+  display: grid;
+  gap: 10px;
+  width: min(380px, calc(100vw - 36px));
+}
+
+#toast-root .toast {
+  position: relative;
+  margin: 0;
+  padding: 14px 42px 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color, #dfe6f0);
+  background: var(--surface, #fff);
+  color: var(--text-primary, #071838);
+  box-shadow: 0 18px 44px rgba(9, 27, 60, 0.22);
+  font-size: 0.9rem;
+  animation: toast-in 240ms ease;
+}
+
+#toast-root .toast.success {
+  border-left: 4px solid #16a34a;
+}
+
+#toast-root .toast.error {
+  border-left: 4px solid #e5484d;
+}
+
+#toast-root .toast.toast-out {
+  opacity: 0;
+  transform: translateX(14px);
+  transition: opacity 280ms ease, transform 280ms ease;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.toast-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: none;
+  opacity: 0.55;
+}
+
+.toast-close:hover {
+  background: rgba(9, 27, 60, 0.08);
+  opacity: 1;
+  transform: none;
+  box-shadow: none;
+}
+
+body.theme-dark #toast-root .toast,
+body.admin-layout #toast-root .toast {
+  border-color: rgba(148, 178, 215, 0.22);
+  background: #111b30;
+  color: #e8eef7;
+}
+
+td.empty-cell {
+  padding: 30px 16px !important;
+  color: var(--text-muted, #8994aa) !important;
+  font-size: 0.88rem;
+  text-align: center !important;
+}
+
+td.empty-cell::before {
+  content: "";
+  display: block;
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 8px;
+  border: 1.5px dashed currentColor;
+  border-radius: 10px;
+  opacity: 0.55;
+}
+
+.pw-meter {
+  display: grid;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.pw-meter-track {
+  display: block;
+  height: 5px;
+  border-radius: 4px;
+  background: rgba(137, 148, 170, 0.25);
+  overflow: hidden;
+}
+
+.pw-meter-bar {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 4px;
+  background: #e5484d;
+  transition: width 180ms ease, background 180ms ease;
+}
+
+.pw-meter.is-fair .pw-meter-bar { background: #e28a09; }
+.pw-meter.is-good .pw-meter-bar { background: #0c8ce9; }
+.pw-meter.is-strong .pw-meter-bar { background: #16a34a; }
+
+.pw-meter-label {
+  color: var(--text-secondary, #51607a);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
 @media (max-width: 1080px) {
   .auth2 {
     grid-template-columns: 1fr;

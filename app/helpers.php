@@ -414,6 +414,10 @@ function icon(string $name): string
             'viewBox' => '0 0 24 24',
             'paths' => ['M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6'],
         ],
+        'bell' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9', 'M13.73 21a2 2 0 0 1-3.46 0'],
+        ],
     ];
 
     $icon = $icons[$name] ?? [
@@ -4657,6 +4661,79 @@ function get_chart_of_accounts_tree(int $companyId): array
 }
 
 /**
+ * Items that need the signed-in user's attention, for the topbar bell.
+ * Returns rows of ['label' => string, 'count' => int, 'url' => string]
+ * with count > 0 only. Every query is guarded so a missing table or a
+ * missing company context simply omits that row.
+ */
+function attention_summary(): array
+{
+    $user = current_user();
+    if (!$user) {
+        return [];
+    }
+    $role = (string) ($user['role'] ?? '');
+    $items = [];
+
+    try {
+        if ($role === 'admin' || $role === 'staff') {
+            $companyId = current_company_id();
+            if ($companyId > 0) {
+                if (table_exists('support_ticket_requests')) {
+                    $stmt = db()->prepare("SELECT COUNT(*) FROM support_ticket_requests tr INNER JOIN support_tickets st ON st.id = tr.ticket_id WHERE st.company_id = :cid AND tr.decision_status = 'pending'");
+                    $stmt->execute(['cid' => $companyId]);
+                    $items[] = ['label' => 'Billing requests to decide', 'count' => (int) $stmt->fetchColumn(), 'url' => url('admin/tickets.php')];
+                }
+                if (column_exists('invoice_payment_requests', 'client_declared_status')) {
+                    $stmt = db()->prepare("SELECT COUNT(*) FROM invoice_payment_requests WHERE company_id = :cid AND client_declared_status <> 'none' AND status IN ('pending', 'partial')");
+                    $stmt->execute(['cid' => $companyId]);
+                    $items[] = ['label' => 'Client payments to verify', 'count' => (int) $stmt->fetchColumn(), 'url' => url('admin/invoice.php')];
+                }
+                if (column_exists('vouchers', 'approval_state')) {
+                    $stmt = db()->prepare("SELECT COUNT(*) FROM vouchers WHERE company_id = :cid AND approval_state = 'pending_approval'");
+                    $stmt->execute(['cid' => $companyId]);
+                    $items[] = ['label' => 'Vouchers awaiting approval', 'count' => (int) $stmt->fetchColumn(), 'url' => url('admin/audit-trail.php')];
+                }
+                if (table_exists('document_requests')) {
+                    $stmt = db()->prepare("SELECT COUNT(*) FROM document_requests WHERE company_id = :cid AND status = 'uploaded'");
+                    $stmt->execute(['cid' => $companyId]);
+                    $items[] = ['label' => 'Uploaded documents to review', 'count' => (int) $stmt->fetchColumn(), 'url' => url('admin/documents.php?view=requests')];
+                }
+            }
+        } elseif ($role === 'customer') {
+            $profileStmt = db()->prepare('SELECT id, books_company_id FROM client_profiles WHERE user_id = :uid LIMIT 1');
+            $profileStmt->execute(['uid' => (int) $user['id']]);
+            $profile = $profileStmt->fetch();
+            if ($profile) {
+                $clientId = (int) $profile['id'];
+                $booksCompanyId = (int) ($profile['books_company_id'] ?? 0);
+                if ($booksCompanyId > 0 && column_exists('vouchers', 'requires_client_approval')) {
+                    $stmt = db()->prepare("SELECT COUNT(*) FROM vouchers WHERE company_id = :cid AND approval_state = 'pending_approval' AND requires_client_approval = 1");
+                    $stmt->execute(['cid' => $booksCompanyId]);
+                    $items[] = ['label' => 'Vouchers waiting for your approval', 'count' => (int) $stmt->fetchColumn(), 'url' => url('dashboard.php?view=accounting')];
+                }
+                if (table_exists('support_ticket_requests')) {
+                    $stmt = db()->prepare("SELECT COUNT(*) FROM support_ticket_requests tr INNER JOIN support_tickets st ON st.id = tr.ticket_id WHERE st.client_id = :client_id AND tr.decision_status = 'negotiation'");
+                    $stmt->execute(['client_id' => $clientId]);
+                    $items[] = ['label' => 'Counter-offers to review', 'count' => (int) $stmt->fetchColumn(), 'url' => url('dashboard.php?view=tickets')];
+                }
+                $declaredGuard = column_exists('invoice_payment_requests', 'client_declared_status') ? " AND ipr.client_declared_status = 'none'" : '';
+                $stmt = db()->prepare("SELECT COUNT(*) FROM invoice_payment_requests ipr
+                    INNER JOIN task_invoices ti ON ti.id = ipr.invoice_id
+                    INNER JOIN client_tasks ct ON ct.id = ti.task_id
+                    WHERE ct.client_id = :client_id AND ipr.status = 'pending'" . $declaredGuard);
+                $stmt->execute(['client_id' => $clientId]);
+                $items[] = ['label' => 'Payments requested from you', 'count' => (int) $stmt->fetchColumn(), 'url' => url('dashboard.php?view=invoices')];
+            }
+        }
+    } catch (Throwable $exception) {
+        return [];
+    }
+
+    return array_values(array_filter($items, static fn (array $row): bool => $row['count'] > 0));
+}
+
+/**
  * Adds a system/timeline note into a support ticket conversation.
  */
 function ticket_request_note(int $ticketId, int $senderId, string $body): void
@@ -4694,7 +4771,8 @@ function notify_ticket_client_email(int $ticketId, string $subject, string $html
         $stmt->execute(['id' => $ticketId]);
         $email = (string) ($stmt->fetchColumn() ?: '');
         if ($email !== '') {
-            send_app_email($email, $subject, $htmlBody);
+            $wrapped = function_exists('branded_email_html') ? branded_email_html($subject, $htmlBody) : $htmlBody;
+            send_app_email($email, $subject, $wrapped);
         }
     } catch (Throwable $exception) {
         // Never let notification failures break the approval flow.

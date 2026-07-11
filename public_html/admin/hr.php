@@ -1004,7 +1004,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <td><span class="mbw-pill <?= e($hrPillTone((string) $entry['status'])) ?>"><?= e($entry['status']) ?></span><?php if ($entry['reviewer_remarks']): ?><br><small style="color:var(--mbw-muted)"><?= e($entry['reviewer_remarks']) ?></small><?php endif; ?></td>
                             <td>
                                 <?php if ($entry['status'] === 'draft'): ?>
-                                    <form method="post" class="inline-action-form">
+                                    <form method="post" class="inline-action-form" data-confirm="Delete this timesheet entry?">
                                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                         <input type="hidden" name="action" value="delete_timesheet_entry">
                                         <input type="hidden" name="entry_id" value="<?= e((int) $entry['id']) ?>">

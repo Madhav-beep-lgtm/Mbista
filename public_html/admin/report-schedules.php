@@ -180,7 +180,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <td><?= e(date('d M Y', strtotime((string) $schedule['next_run_on']))) ?></td>
                             <td><?= !empty($schedule['is_active']) ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
                             <td>
-                                <form method="post">
+                                <form method="post" data-confirm="Delete this report schedule?">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="delete_schedule">
                                     <input type="hidden" name="schedule_id" value="<?= e((int) $schedule['id']) ?>">

@@ -62,7 +62,7 @@ include __DIR__ . '/../app/views/partials/header.php';
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <label>Current or temporary password<input type="password" name="current_password" required></label>
-                <label>New password<input type="password" name="new_password" minlength="8" required></label>
+                <label>New password<input type="password" name="new_password" minlength="8" required data-strength></label>
                 <label>Confirm new password<input type="password" name="confirm_password" minlength="8" required></label>
                 <button type="submit"><?= icon('settings') ?>Update password</button>
             </form>

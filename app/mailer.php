@@ -36,6 +36,38 @@ function mail_from_name(): string
 }
 
 /**
+ * Wraps plain message HTML in the firm's branded email shell: navy header
+ * with the wordmark, gold accent rule, content card, and footer. Pass the
+ * result to send_app_email().
+ */
+function branded_email_html(string $title, string $innerHtml): string
+{
+    $brand = htmlspecialchars((string) (function_exists('setting') ? setting('brand_name', 'M.Bista & Associates') : 'M.Bista & Associates'), ENT_QUOTES, 'UTF-8');
+    $safeTitle = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
+    $year = date('Y');
+    return <<<HTML
+<div style="margin:0;padding:24px 12px;background:#eef2f7;font-family:'Segoe UI',Arial,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;">
+    <div style="background:#0b1c36;border-radius:12px 12px 0 0;padding:20px 28px;">
+      <span style="display:inline-block;border:2px solid #d9a33a;color:#ffffff;font-family:Georgia,serif;font-weight:bold;font-size:16px;padding:6px 10px;">MB</span>
+      <span style="color:#ffffff;font-family:Georgia,serif;font-size:17px;font-weight:bold;margin-left:12px;">{$brand}</span>
+      <div style="color:#f2c766;font-size:11px;letter-spacing:3px;margin-top:6px;">CHARTERED ACCOUNTANTS</div>
+    </div>
+    <div style="height:3px;background:#d9a33a;"></div>
+    <div style="background:#ffffff;padding:26px 28px;border:1px solid #e3e9f2;border-top:0;">
+      <h2 style="margin:0 0 14px;color:#0f1e33;font-family:Georgia,serif;font-size:19px;">{$safeTitle}</h2>
+      <div style="color:#26344c;font-size:14px;line-height:1.65;">{$innerHtml}</div>
+    </div>
+    <div style="background:#f7fafd;border:1px solid #e3e9f2;border-top:0;border-radius:0 0 12px 12px;padding:14px 28px;color:#4d5d76;font-size:11.5px;line-height:1.6;">
+      This is an automated message from the {$brand} portal — please sign in to respond.<br>
+      &copy; {$year} {$brand}. All rights reserved.
+    </div>
+  </div>
+</div>
+HTML;
+}
+
+/**
  * @param array $attachments Each item: ['name' => string, 'mime' => string, 'content' => string]
  * @return array{ok: bool, error: ?string, transport: string}
  */

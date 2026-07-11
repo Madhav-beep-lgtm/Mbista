@@ -543,4 +543,87 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
   }
+
+  // --- Toast notifications -------------------------------------------------
+  // Server-rendered flash notices slide in as toasts instead of pushing the
+  // page down. Errors stay longer; both can be dismissed.
+  const flashNotices = document.querySelectorAll('main .notice.success, main .notice.error, .admin-content > .notice');
+  if (flashNotices.length) {
+    const toastRoot = document.createElement('div');
+    toastRoot.id = 'toast-root';
+    document.body.appendChild(toastRoot);
+    flashNotices.forEach((notice) => {
+      const holder = notice.parentElement;
+      notice.classList.add('toast');
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'toast-close';
+      close.setAttribute('aria-label', 'Dismiss');
+      close.innerHTML = '&times;';
+      notice.appendChild(close);
+      toastRoot.appendChild(notice);
+      if (holder && holder.classList.contains('container') && holder.children.length === 0) {
+        holder.remove();
+      }
+      const dismiss = () => {
+        notice.classList.add('toast-out');
+        window.setTimeout(() => notice.remove(), 300);
+      };
+      const ttl = notice.classList.contains('error') ? 9000 : 5500;
+      const timer = window.setTimeout(dismiss, ttl);
+      close.addEventListener('click', () => { window.clearTimeout(timer); dismiss(); });
+    });
+  }
+
+  // --- Confirmation for destructive actions --------------------------------
+  document.addEventListener('submit', (event) => {
+    const form = event.target.closest('form[data-confirm]');
+    if (form && !window.confirm(form.getAttribute('data-confirm') || 'Are you sure?')) {
+      event.preventDefault();
+    }
+  }, true);
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest('a[data-confirm]');
+    if (link && !window.confirm(link.getAttribute('data-confirm') || 'Are you sure?')) {
+      event.preventDefault();
+    }
+  });
+
+  // --- Friendly empty states ------------------------------------------------
+  document.querySelectorAll('td[colspan]').forEach((cell) => {
+    const text = cell.textContent.trim();
+    if (/^(no |none |nothing |start typing|not available)/i.test(text)) {
+      cell.classList.add('empty-cell');
+    }
+  });
+
+  // --- Password strength meter ----------------------------------------------
+  document.querySelectorAll('input[type="password"][data-strength]').forEach((input) => {
+    const meter = document.createElement('div');
+    meter.className = 'pw-meter';
+    meter.innerHTML = '<span class="pw-meter-track"><span class="pw-meter-bar"></span></span><small class="pw-meter-label"></small>';
+    input.insertAdjacentElement('afterend', meter);
+    const bar = meter.querySelector('.pw-meter-bar');
+    const label = meter.querySelector('.pw-meter-label');
+    input.addEventListener('input', () => {
+      const value = input.value;
+      let score = 0;
+      if (value.length >= 8) score++;
+      if (value.length >= 12) score++;
+      if (/[a-z]/.test(value) && /[A-Z]/.test(value)) score++;
+      if (/\d/.test(value)) score++;
+      if (/[^A-Za-z0-9]/.test(value)) score++;
+      const levels = [
+        ['', ''],
+        ['is-weak', 'Weak password'],
+        ['is-weak', 'Weak password'],
+        ['is-fair', 'Fair password'],
+        ['is-good', 'Good password'],
+        ['is-strong', 'Strong password'],
+      ];
+      meter.className = 'pw-meter ' + (value ? levels[score][0] : '');
+      bar.style.width = (score * 20) + '%';
+      label.textContent = value ? levels[score][1] : '';
+    });
+  });
 });

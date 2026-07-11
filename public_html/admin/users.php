@@ -1093,7 +1093,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <div class="users-edit-grid">
                     <label>Name<input type="text" name="name" required></label>
                     <label>Email<input type="email" name="email" required></label>
-                    <label>Password<input type="password" name="password" minlength="8" required></label>
+                    <label>Password<input type="password" name="password" minlength="8" required data-strength></label>
                     <input type="hidden" name="role" value="staff">
                     <label>Role<input type="text" value="Staff" readonly></label>
                     <label>Status

@@ -63,7 +63,7 @@ include __DIR__ . '/../app/views/partials/header.php';
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <?php display_flash_messages(); ?>
                     <input type="hidden" name="token" value="<?= e($token) ?>">
-                    <label>New password<input type="password" name="password" minlength="8" required></label>
+                    <label>New password<input type="password" name="password" minlength="8" required data-strength></label>
                     <label>Confirm password<input type="password" name="confirm_password" minlength="8" required></label>
                     <button type="submit">Save password</button>
                 </form>
