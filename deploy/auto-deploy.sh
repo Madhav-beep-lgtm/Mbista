@@ -52,13 +52,10 @@ fi
 
 echo "$(date '+%F %T') deploying $CURRENT_HASH" >> "$LOG"
 
-# Run every task from .cpanel.yml (the lines starting with "- "), so the
-# task list lives in exactly one file.
-grep -E '^[[:space:]]+- ' .cpanel.yml | sed -E 's/^[[:space:]]+- //' | while IFS= read -r task; do
-    if ! eval "$task" >>"$LOG" 2>&1; then
-        echo "$(date '+%F %T') WARNING: task failed: $task" >> "$LOG"
-    fi
-done
+# Run the shared deployment tasks (same script .cpanel.yml uses).
+if ! bash deploy/tasks.sh >>"$LOG" 2>&1; then
+    echo "$(date '+%F %T') WARNING: deploy tasks reported an error" >> "$LOG"
+fi
 
 echo "$CURRENT_HASH" > "$STATE"
 echo "$(date '+%F %T') deployed $(git rev-parse --short HEAD)" >> "$LOG"
