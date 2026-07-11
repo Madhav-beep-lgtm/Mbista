@@ -1,0 +1,4 @@
+# Shell scripts and cPanel deploy config must always use LF line endings,
+# even when checked out on Windows, or they break on the Linux server.
+*.sh text eol=lf
+.cpanel.yml text eol=lf

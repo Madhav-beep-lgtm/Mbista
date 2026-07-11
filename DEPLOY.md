@@ -107,6 +107,25 @@ These directories must be writable by PHP (cPanel usually sets this correctly;
 - `secure_uploads/kyc/` (KYC documents)
 - `storage/mail/` (only if using the file mail fallback)
 
+## Automatic deployment (cron)
+
+Once the repository is connected in cPanel → **Git Version Control**, you can
+make every GitHub push go live automatically instead of clicking
+"Update from Remote" / "Deploy HEAD Commit" by hand:
+
+1. Find your repository path in cPanel → Git Version Control → **Manage**
+   (usually `/home/YOUR_CPANEL_USER/repositories/Mbista`).
+2. In cPanel → Advanced → **Cron Jobs**, add a new job:
+   - **Schedule:** Once Per Five Minutes (`*/5 * * * *`)
+   - **Command:**
+     `/bin/bash /home/YOUR_CPANEL_USER/repositories/Mbista/deploy/auto-deploy.sh >/dev/null 2>&1`
+
+The script (`deploy/auto-deploy.sh`) fetches `origin/main`, exits silently if
+there is nothing new, and otherwise fast-forwards and re-runs the tasks from
+`.cpanel.yml`. Activity is written to `~/auto-deploy.log` — check that file if
+a push does not appear on the site within five minutes. It never overwrites
+server-side uploads or the live `.env` (same guarantees as `.cpanel.yml`).
+
 ## Notes
 
 - **HTTPS:** enable AutoSSL (cPanel → SSL/TLS Status) so the app runs over
