@@ -3241,6 +3241,17 @@ body.admin-layout .cr-kpi.tone-red { background: linear-gradient(115deg, rgba(22
 body.admin-layout .cr-kpi.tone-blue { background: linear-gradient(115deg, rgba(37, 99, 235, 0.10), var(--mbw-card) 65%); }
 body.admin-layout .cr-kpi.tone-purple { background: linear-gradient(115deg, rgba(139, 92, 246, 0.12), var(--mbw-card) 65%); }
 
+/* Apply the same soft tint to every existing KPI card app-wide, keyed off
+   the tone of the icon chip it already contains (graceful no-op in browsers
+   without :has support). */
+body.admin-layout .mbw-kpi:has(.mbw-chip.tone-green) { background: linear-gradient(115deg, rgba(22, 163, 74, 0.09), var(--mbw-card) 65%); }
+body.admin-layout .mbw-kpi:has(.mbw-chip.tone-red) { background: linear-gradient(115deg, rgba(229, 72, 77, 0.09), var(--mbw-card) 65%); }
+body.admin-layout .mbw-kpi:has(.mbw-chip.tone-blue),
+body.admin-layout .mbw-kpi:has(.mbw-chip.tone-primary) { background: linear-gradient(115deg, rgba(37, 99, 235, 0.09), var(--mbw-card) 65%); }
+body.admin-layout .mbw-kpi:has(.mbw-chip.tone-purple) { background: linear-gradient(115deg, rgba(139, 92, 246, 0.11), var(--mbw-card) 65%); }
+body.admin-layout .mbw-kpi:has(.mbw-chip.tone-amber) { background: linear-gradient(115deg, rgba(226, 138, 9, 0.10), var(--mbw-card) 65%); }
+body.admin-layout .mbw-kpi:has(.mbw-chip.tone-teal) { background: linear-gradient(115deg, rgba(13, 148, 136, 0.10), var(--mbw-card) 65%); }
+
 body.admin-layout .cr-kpi-label {
   color: var(--mbw-muted);
   font-size: 12px;

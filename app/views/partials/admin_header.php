@@ -50,6 +50,38 @@ foreach ($headerAccountingChildren as $headerChild) {
     }
 }
 
+// Page hero + breadcrumb trails, applied automatically to every admin page.
+// A page can override with $pageHero = ['icon' => ...] / $pageBreadcrumb, or
+// opt out entirely with $pageHero = false.
+$pageHero = $pageHero ?? [];
+$pageBreadcrumb = $pageBreadcrumb ?? null;
+$headerPageIcons = [
+    'index.php' => 'home', 'accounting-dashboard.php' => 'dashboard', 'consolidated-report.php' => 'layers',
+    'accounting.php' => 'journal', 'voucher-form.php' => 'journal', 'voucher-import.php' => 'upload',
+    'accounting-parties.php' => 'invoices', 'accounting-inventory.php' => 'layers', 'banking.php' => 'bank',
+    'reconciliation.php' => 'reconcile', 'chart-of-accounts.php' => 'tree', 'chart-groups.php' => 'tree',
+    'chart-ledgers.php' => 'tree', 'chart-posting-accounts.php' => 'tree', 'chart-masters.php' => 'tree',
+    'invoice.php' => 'invoices', 'reports-center.php' => 'reports', 'report-schedules.php' => 'calendar',
+    'documents.php' => 'documents', 'compliance.php' => 'compliance', 'audit-trail.php' => 'admin',
+    'workspace.php' => 'portal', 'companies.php' => 'companies', 'users.php' => 'users',
+    'settings.php' => 'settings', 'tickets.php' => 'tickets', 'messages.php' => 'messages',
+    'hr.php' => 'attendance', 'manage-clients.php' => 'clients', 'client-books.php' => 'accounting',
+    'search.php' => 'search', 'export-ledger.php' => 'reports',
+];
+if ($pageBreadcrumb === null) {
+    $headerTrailHome = [['Home', 'admin/index.php']];
+    $headerTrailReports = [['Home', 'admin/index.php'], ['Reports', 'admin/reports-center.php']];
+    $headerTrailAccounting = [['Home', 'admin/index.php'], ['Accounting', 'admin/accounting-dashboard.php']];
+    $headerAccountingScripts = ['accounting.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'accounting-inventory.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php'];
+    if (in_array($headerScript, ['report-schedules.php', 'consolidated-report.php'], true)) {
+        $pageBreadcrumb = $headerTrailReports;
+    } elseif (in_array($headerScript, $headerAccountingScripts, true)) {
+        $pageBreadcrumb = $headerTrailAccounting;
+    } elseif ($headerScript !== 'index.php') {
+        $pageBreadcrumb = $headerTrailHome;
+    }
+}
+
 // Client-books awareness: when the portal IS a client books space, the
 // Accounting Workspace points back home and the client submenu takes over.
 $headerIsClientBooks = (int) ($headerCompany['is_client_company'] ?? 0) === 1;
@@ -72,7 +104,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <meta name="theme-color" content="#0b1c36">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260711-portal">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712b">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712c">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
@@ -272,6 +304,16 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <a href="<?= e(url('admin/index.php')) ?>">Dashboard</a> &#8250; <strong><?= e($pageTitle) ?></strong>
                 <?php endif; ?>
             </nav>
+            <?php if ($pageHero !== false): ?>
+                <div class="cr-head">
+                    <span class="cr-head-icon"><?= icon((string) (is_array($pageHero) && !empty($pageHero['icon']) ? $pageHero['icon'] : ($headerPageIcons[$headerScript] ?? 'dashboard'))) ?></span>
+                    <div>
+                        <h2><?= e(is_array($pageHero) && !empty($pageHero['title']) ? $pageHero['title'] : $pageTitle) ?></h2>
+                        <?php $heroSub = is_array($pageHero) && !empty($pageHero['sub']) ? $pageHero['sub'] : $pageSubtitle; ?>
+                        <?php if ($heroSub !== ''): ?><p><?= e($heroSub) ?></p><?php endif; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
             <?php if ($message = flash('success')): ?>
                 <div class="notice success"><?= e($message) ?></div>
             <?php endif; ?>

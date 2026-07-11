@@ -105,14 +105,6 @@ $pageBreadcrumb = [['Home', 'admin/index.php'], ['Reports', 'admin/reports-cente
 $bodyClass = 'admin-layout accounting-module-page admin-dashboard';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<div class="cr-head">
-    <span class="cr-head-icon"><?= icon('layers') ?></span>
-    <div>
-        <h2>Consolidated Report</h2>
-        <p>Group-wide financial view across all companies</p>
-    </div>
-</div>
-
 <section class="mbw-card cr-toolbar" aria-label="Report filters">
     <form method="get" class="cr-field">
         <label for="consolidated-fy">Fiscal Year</label>
