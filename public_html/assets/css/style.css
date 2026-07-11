@@ -8844,3 +8844,363 @@ body.theme-dark {
   --shadow: var(--shadow-sm);
   --shadow-strong: var(--shadow-md);
 }
+
+/* ==========================================================================
+   Header layout refresh
+   Top bar with badge note + social icons, brand row with search and action
+   buttons, full-width navigation row, and the home-page trust strip.
+   ========================================================================== */
+
+.utility-bar-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.utility-bar-note .ui-icon {
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 0;
+  color: var(--gold-bright);
+}
+
+.utility-bar-contacts {
+  align-items: center;
+}
+
+.utility-bar-social {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding-left: 14px;
+  border-left: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.utility-bar-social a {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.utility-bar-social a:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.utility-bar-social .ui-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 0;
+}
+
+/* Brand row: brand left, search + dark mode + login right */
+
+.header-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  padding: 14px 0;
+}
+
+.header-main .site-header-search {
+  flex: 0 1 300px;
+  margin-left: auto;
+}
+
+.header-main .site-header-search input {
+  border-radius: 8px;
+}
+
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.site-header .header-actions .theme-toggle-link {
+  min-height: 40px;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.site-header .header-actions .theme-toggle-link:hover {
+  background: var(--primary-hover);
+  color: #fff;
+}
+
+.site-header .header-actions .nav-button {
+  min-height: 40px;
+  padding: 9px 18px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff !important;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.site-header .header-actions .nav-button:hover {
+  background: var(--gold-strong);
+}
+
+.site-header .header-actions .mobile-menu-button {
+  border-radius: 8px;
+}
+
+/* Navigation row under the brand row */
+
+.header-nav-bar {
+  border-top: 1px solid rgba(7, 24, 56, 0.08);
+}
+
+@media (min-width: 993px) {
+  .site-header .header-nav-bar .main-navigation {
+    gap: clamp(4px, 2.4vw, 34px);
+  }
+
+  .site-header .header-nav-bar .main-navigation > a,
+  .site-header .header-nav-bar .nav-main-link {
+    min-height: 48px;
+    padding: 12px 4px;
+    border-radius: 0;
+    background: transparent;
+    font-size: 0.76rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #1b2c4e;
+  }
+
+  .site-header .header-nav-bar .main-navigation > a:hover,
+  .site-header .header-nav-bar .nav-main-link:hover {
+    background: transparent;
+    color: var(--gold-strong);
+  }
+
+  .site-header .header-nav-bar .main-navigation > a.is-active,
+  .site-header .header-nav-bar .nav-item.is-active .nav-main-link {
+    background: transparent;
+    color: var(--gold-strong);
+    font-weight: 700;
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+
+  .site-header .header-nav-bar .dropdown-toggle {
+    min-height: 48px;
+    padding: 12px 2px;
+    border-radius: 0;
+    background: transparent;
+  }
+}
+
+@media (max-width: 992px) {
+  .header-nav-bar {
+    border-top: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .header-main {
+    gap: 10px;
+  }
+
+  .header-main .site-header-search {
+    flex: 1 1 100%;
+    order: 5;
+    margin-left: 0;
+  }
+
+  .site-header .header-actions .theme-toggle-link,
+  .site-header .header-actions .nav-button {
+    padding-inline: 12px;
+  }
+}
+
+/* Home-page trust strip under the header */
+
+.trust-strip {
+  background: #fff;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.trust-strip-inner {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.trust-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 24px;
+  border-left: 1px solid var(--border-color);
+}
+
+.trust-item:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.trust-item > .ui-icon {
+  width: 30px;
+  height: 30px;
+  margin-right: 0;
+  color: var(--primary);
+  stroke-width: 1.4;
+}
+
+.trust-item-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.trust-item-text strong {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.trust-item-text span {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 992px) {
+  .trust-strip-inner {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .trust-item {
+    padding: 14px 18px;
+  }
+
+  .trust-item:first-child {
+    padding-left: 18px;
+  }
+
+  .trust-item:nth-child(odd) {
+    border-left: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .trust-strip-inner {
+    grid-template-columns: 1fr;
+  }
+
+  .trust-item {
+    border-left: 0;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .trust-item:first-child {
+    border-top: 0;
+  }
+}
+
+/* Dark-theme companions for the refreshed header */
+
+body.theme-dark .header-nav-bar {
+  border-top-color: rgba(148, 178, 215, 0.14);
+}
+
+@media (min-width: 993px) {
+  body.theme-dark .site-header .header-nav-bar .main-navigation > a,
+  body.theme-dark .site-header .header-nav-bar .nav-main-link {
+    color: #b9c8dd;
+  }
+
+  body.theme-dark .site-header .header-nav-bar .main-navigation > a:hover,
+  body.theme-dark .site-header .header-nav-bar .nav-main-link:hover {
+    color: var(--gold-bright);
+  }
+
+  body.theme-dark .site-header .header-nav-bar .main-navigation > a.is-active,
+  body.theme-dark .site-header .header-nav-bar .nav-item.is-active .nav-main-link {
+    color: var(--gold-bright);
+  }
+}
+
+body.theme-dark .site-header .header-actions .theme-toggle-link {
+  background: #16305c;
+  color: #fff;
+}
+
+body.theme-dark .site-header .header-actions .theme-toggle-link:hover {
+  background: #1d3d73;
+}
+
+body.theme-dark .site-header .header-actions .nav-button {
+  color: #fff !important;
+}
+
+body.theme-dark .trust-strip {
+  background: #0d1728;
+  border-bottom-color: rgba(148, 178, 215, 0.16);
+}
+
+body.theme-dark .trust-item {
+  border-color: rgba(148, 178, 215, 0.16);
+}
+
+body.theme-dark .trust-item > .ui-icon {
+  color: #cfdcf0;
+}
+
+body.theme-dark .trust-item-text strong {
+  color: #e9eff8;
+}
+
+body.theme-dark .trust-item-text span {
+  color: #9fb1c6;
+}
+
+/* Mobile drawer fix: backdrop-filter on the sticky header creates a CSS
+   containing block, so the fixed-position drawer and its overlay were being
+   clipped to the header's own box instead of covering the screen. The drawer
+   only exists below 993px, and the header background is near-opaque anyway,
+   so drop the blur there. */
+
+@media (max-width: 992px) {
+  .site-header,
+  body.home-page .site-header {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* Small screens: let the top-bar contacts wrap cleanly and drop the
+   social-icon divider once the row breaks. */
+
+@media (max-width: 640px) {
+  .utility-bar-inner {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 0;
+    padding: 6px 0;
+  }
+
+  .utility-bar-contacts {
+    justify-content: center;
+    row-gap: 2px;
+  }
+
+  .utility-bar-social {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+}
