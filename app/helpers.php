@@ -2332,14 +2332,20 @@ function get_available_companies(?array $user = null, ?array $company = null): a
 function get_invoice(int $invoiceId): ?array
 {
     $stmt = db()->prepare('
-        SELECT ti.*, 
-               c.name as company_name, 
+        SELECT ti.*,
+               c.name as company_name,
                ct.title as task_title,
-               u.email as issued_by_email, 
-             u.name as issued_by_name
+               u.email as issued_by_email,
+             u.name as issued_by_name,
+               cp.organization_name as client_name,
+               cp.pan_no as client_pan,
+               cu.email as client_email,
+               cu.phone as client_phone
         FROM task_invoices ti
         LEFT JOIN companies c ON ti.company_id = c.id
         LEFT JOIN client_tasks ct ON ti.task_id = ct.id
+        LEFT JOIN client_profiles cp ON cp.id = ct.client_id
+        LEFT JOIN users cu ON cu.id = cp.user_id
         LEFT JOIN users u ON ti.issued_by = u.id
         WHERE ti.id = :id
     ');
@@ -2560,31 +2566,127 @@ function format_currency(float $amount, string $currency = 'NPR'): string
 /**
  * Export invoice as printable HTML (can be printed to PDF)
  */
+/**
+ * Amount in words using the Nepali/Indian numbering system
+ * (crore, lakh, thousand). E.g. 33900 -> "Thirty Three Thousand
+ * Nine Hundred Rupees Only".
+ */
+function npr_amount_in_words(float $amount): string
+{
+    $ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    $tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+    $twoDigits = static function (int $n) use ($ones, $tens): string {
+        if ($n < 20) {
+            return $ones[$n];
+        }
+        return trim($tens[intdiv($n, 10)] . ' ' . $ones[$n % 10]);
+    };
+
+    $rupees = (int) floor(round($amount, 2));
+    $paisa = (int) round((round($amount, 2) - $rupees) * 100);
+
+    if ($rupees === 0 && $paisa === 0) {
+        return 'Zero Rupees Only';
+    }
+
+    $parts = [];
+    $crore = intdiv($rupees, 10000000);
+    $lakh = intdiv($rupees % 10000000, 100000);
+    $thousand = intdiv($rupees % 100000, 1000);
+    $hundred = intdiv($rupees % 1000, 100);
+    $rest = $rupees % 100;
+
+    if ($crore > 0) {
+        $parts[] = ($crore >= 100 ? npr_amount_in_words((float) $crore) : $twoDigits($crore));
+        $parts[count($parts) - 1] = str_replace(' Rupees Only', '', (string) $parts[count($parts) - 1]) . ' Crore';
+    }
+    if ($lakh > 0) {
+        $parts[] = $twoDigits($lakh) . ' Lakh';
+    }
+    if ($thousand > 0) {
+        $parts[] = $twoDigits($thousand) . ' Thousand';
+    }
+    if ($hundred > 0) {
+        $parts[] = $ones[$hundred] . ' Hundred';
+    }
+    if ($rest > 0) {
+        $parts[] = $twoDigits($rest);
+    }
+
+    $words = trim(implode(' ', $parts));
+    $result = ($words !== '' ? $words . ' Rupees' : '');
+    if ($paisa > 0) {
+        $result .= ($result !== '' ? ' and ' : '') . $twoDigits($paisa) . ' Paisa';
+    }
+    return trim($result) . ' Only';
+}
+
 function export_invoice_html(array $invoice): string
 {
-    $company = company_by_id((int) ($invoice['company_id'] ?? 0));
-    $companyName = $company['name'] ?? 'Company';
-    $companyPan = $company['pan_number'] ?? 'N/A';
-    $companyVat = $company['vat_registration_number'] ?? 'N/A';
-    $businessType = company_accounting_business_type((int) ($invoice['company_id'] ?? 0));
-    
-    $issuedByName = $invoice['issued_by_name'] ?? 'N/A';
-    $invoiceNo = $invoice['invoice_no'] ?? 'N/A';
-    $category = $invoice['invoice_category'] ?? 'proforma';
-    $status = $invoice['status'] ?? 'draft';
-    $sourceType = (string) ($invoice['invoice_source_type'] ?? 'task');
-    
-    $categoryLabel = $category === 'tax' ? 'Tax Invoice' : 'Proforma Invoice';
-    $templateLabel = match ($sourceType) {
-        'inventory' => 'Trading Template',
-        'manufacturing' => 'Manufacturing Template',
-        default => 'Service Template',
+    $companyId = (int) ($invoice['company_id'] ?? 0);
+    $company = company_by_id($companyId);
+    $companyName = (string) ($company['name'] ?? app_name());
+    $companyNameNp = (string) setting('company_name_np', '');
+    $companyAddress = (string) setting('office_address', 'Kathmandu, Nepal');
+    $companyPan = (string) setting('company_pan', '');
+    $companyVat = (string) setting('company_vat_no', $companyPan);
+    $companyPhone = (string) setting('support_phone', '');
+    $companyEmail = (string) setting('support_email', '');
+    // Only reference brand images whose files actually exist, so a missing
+    // upload never prints a broken-image icon on the invoice.
+    $assetIfExists = static function (string $settingKey): string {
+        $path = trim((string) setting($settingKey, ''), '/');
+        if ($path === '') {
+            return '';
+        }
+        return is_file(__DIR__ . '/../public_html/' . $path) ? $path : '';
     };
-    $statusBadgeClass = get_status_badge_class($status);
+    $logoPath = $assetIfExists('company_logo_path');
+    $signaturePath = $assetIfExists('company_signature_path');
+    $stampPath = $assetIfExists('company_stamp_path');
+    $qrPath = $assetIfExists('company_qr_path');
+
+    $bankName = (string) setting('bank_name', '');
+    $bankAccountName = (string) setting('bank_account_name', $companyName);
+    $bankAccountNumber = (string) setting('bank_account_number', '');
+    $bankBranch = (string) setting('bank_branch', '');
+
+    $invoiceNo = (string) ($invoice['invoice_no'] ?? 'N/A');
+    $category = (string) ($invoice['invoice_category'] ?? 'proforma');
+    $isTax = $category === 'tax';
+    $sourceType = (string) ($invoice['invoice_source_type'] ?? 'task');
+    $issuedOn = (string) ($invoice['issued_on'] ?? date('Y-m-d'));
+    $issuedOnDisplay = date('d/m/Y', strtotime($issuedOn));
+    $issuedOnBs = function_exists('bs_format') ? bs_format($issuedOn) : '';
+
+    $fiscalYearLabel = '';
+    try {
+        foreach (fiscal_years_for_company($companyId, false) as $fyRow) {
+            $fyStart = (string) ($fyRow['start_date'] ?? '');
+            $fyEnd = (string) ($fyRow['end_date'] ?? '');
+            if ($fyStart !== '' && $fyEnd !== '' && $issuedOn >= $fyStart && $issuedOn <= $fyEnd) {
+                $fiscalYearLabel = (string) ($fyRow['label'] ?? '');
+                break;
+            }
+            if ((int) ($fyRow['is_default'] ?? 0) === 1 && $fiscalYearLabel === '') {
+                $fiscalYearLabel = (string) ($fyRow['label'] ?? '');
+            }
+        }
+    } catch (Throwable $exception) {
+        $fiscalYearLabel = '';
+    }
+
+    $clientName = (string) ($invoice['client_name'] ?? 'Client');
+    $clientEmail = (string) ($invoice['client_email'] ?? '');
+    $clientPhone = (string) ($invoice['client_phone'] ?? '');
+    $clientPan = (string) ($invoice['client_pan'] ?? '');
+
     $vatRate = (float) ($invoice['vat_rate'] ?? 13.00);
     $taxableAmount = (float) ($invoice['taxable_amount'] ?? ($invoice['amount'] ?? 0));
-    $exciseRate = $sourceType === 'manufacturing'
-        ? (float) ($invoice['excise_rate'] ?? company_accounting_default_excise_rate((int) ($invoice['company_id'] ?? 0)))
+    $showExcise = $sourceType === 'manufacturing';
+    $exciseRate = $showExcise
+        ? (float) ($invoice['excise_rate'] ?? company_accounting_default_excise_rate($companyId))
         : 0.0;
     $exciseAmount = (float) ($invoice['excise_amount'] ?? 0);
     $vatAmount = (float) ($invoice['vat_amount'] ?? 0);
@@ -2593,71 +2695,81 @@ function export_invoice_html(array $invoice): string
         $vatAmount = round($vatBase * ($vatRate / 100), 2);
     }
     $totalAmount = (float) ($invoice['total_amount'] ?? ($taxableAmount + $exciseAmount + $vatAmount));
-    
-    $taxableCurrency = format_currency($taxableAmount);
-    $exciseCurrency = format_currency($exciseAmount);
-    $vatCurrency = format_currency($vatAmount);
-    $totalCurrency = format_currency($totalAmount);
-    
+    $discountAmount = (float) ($invoice['discount_amount'] ?? 0);
+    $amountWords = npr_amount_in_words($totalAmount);
+
     $lineItems = $invoice['line_items'] ?? [];
     if ($lineItems === []) {
         $lineItems = [[
-            'description' => $invoice['description'] ?? ($invoice['task_title'] ?? 'Invoice service'),
+            'description' => $invoice['description'] ?? ($invoice['task_title'] ?? 'Professional services'),
             'quantity' => 1,
-            'unit' => 'job',
-            'rate' => $taxableAmount,
-            'taxable_amount' => $taxableAmount,
-            'vat_rate' => $vatRate,
-            'vat_amount' => $vatAmount,
-            'total_amount' => $totalAmount,
+            'rate' => $taxableAmount + $discountAmount,
+            'taxable_amount' => $taxableAmount + $discountAmount,
         ]];
     }
 
-    $showQuantityRate = !in_array($sourceType, ['task', 'other'], true);
-    $showExcise = $sourceType === 'manufacturing';
-    $lineTableHeader = '<tr><th>#</th><th>Description</th>';
-    if ($showQuantityRate) {
-        $lineTableHeader .= '<th>Unit</th><th>Qty</th><th>Rate</th><th>Taxable</th>';
-    } else {
-        $lineTableHeader .= '<th>Amount</th>';
-    }
-    if ($showExcise) {
-        $lineTableHeader .= '<th>Excise Duty</th>';
-    }
-    $lineTableHeader .= '<th>VAT</th><th>Total</th></tr>';
-
     $lineRows = '';
     foreach ($lineItems as $index => $line) {
-        $lineDescription = (string) ($line['description'] ?? 'Invoice line');
-        $lineTaxable = (float) ($line['taxable_amount'] ?? 0);
-        if ($lineTaxable <= 0) {
-            $lineTaxable = round((float) ($line['quantity'] ?? 1) * (float) ($line['rate'] ?? 0), 2);
+        $qty = (float) ($line['quantity'] ?? 1);
+        $rate = (float) ($line['rate'] ?? 0);
+        $lineAmount = (float) ($line['taxable_amount'] ?? 0);
+        if ($lineAmount <= 0) {
+            $lineAmount = round($qty * $rate, 2);
         }
-        $lineExcise = $showExcise ? round($lineTaxable * ($exciseRate / 100), 2) : 0.0;
-        $lineVatRate = (float) ($line['vat_rate'] ?? $vatRate);
-        $lineVatBase = $lineTaxable + $lineExcise;
-        $lineVat = (float) ($line['vat_amount'] ?? round($lineVatBase * ($lineVatRate / 100), 2));
-        $lineTotal = (float) ($line['total_amount'] ?? round($lineVatBase + $lineVat, 2));
+        if ($rate <= 0 && $qty > 0) {
+            $rate = $lineAmount / $qty;
+        }
+        $titleSource = trim((string) ($line['item_name'] ?? ''));
+        $descriptionText = trim((string) ($line['description'] ?? ''));
+        if ($titleSource === '') {
+            // Split "Title - detail" / first sentence into a bold title + detail line.
+            $splitAt = strpos($descriptionText, ' - ');
+            if ($splitAt === false) {
+                $splitAt = strpos($descriptionText, '. ');
+            }
+            if ($splitAt !== false && $splitAt > 3) {
+                $titleSource = substr($descriptionText, 0, $splitAt);
+                $descriptionText = ltrim(substr($descriptionText, $splitAt), ' -.');
+            } else {
+                $titleSource = $descriptionText !== '' ? $descriptionText : 'Professional services';
+                $descriptionText = '';
+            }
+        }
         $lineRows .= '<tr>'
-            . '<td>' . e((string) ($index + 1)) . '</td>'
-            . '<td>' . e($lineDescription) . '</td>';
-        if ($showQuantityRate) {
-            $lineRows .= '<td>' . e((string) ($line['unit'] ?? 'pcs')) . '</td>'
-                . '<td>' . e(number_format((float) ($line['quantity'] ?? 1), 3)) . '</td>'
-                . '<td>' . e(format_currency((float) ($line['rate'] ?? 0))) . '</td>';
-            $lineRows .= '<td>' . e(format_currency($lineTaxable)) . '</td>';
-        } else {
-            $lineRows .= '<td>' . e(format_currency($lineTaxable)) . '</td>';
-        }
-        if ($showExcise) {
-            $lineRows .= '<td>' . e(format_currency($lineExcise)) . '</td>';
-        }
-        $lineRows .= '<td>' . e(format_currency($lineVat)) . '</td>'
-            . '<td>' . e(format_currency($lineTotal)) . '</td>'
+            . '<td class="c">' . e((string) ($index + 1)) . '</td>'
+            . '<td><strong>' . e($titleSource) . '</strong>'
+            . ($descriptionText !== '' ? '<br><span class="line-sub">' . e($descriptionText) . '</span>' : '')
+            . '</td>'
+            . '<td class="c">' . e(rtrim(rtrim(number_format($qty, 2), '0'), '.')) . '</td>'
+            . '<td class="r">' . e(number_format($rate, 2)) . '</td>'
+            . '<td class="r">' . e(number_format($lineAmount, 2)) . '</td>'
             . '</tr>';
     }
 
-    $html = '<!DOCTYPE html>
+    $docTitle = $isTax ? 'TAX<br>INVOICE' : 'PROFORMA<br>INVOICE';
+    $docSubtitle = $isTax ? 'कर बिजक (Tax Invoice)' : 'प्रोफर्मा बिल (Estimate Only)';
+    $docBadge = $isTax
+        ? '<span class="doc-badge is-valid">VALID TAX DOCUMENT — VAT ACT 2052</span>'
+        : '<span class="doc-badge">NOT A VALID TAX DOCUMENT</span>';
+    $footNote = $isTax
+        ? 'TAX INVOICE — Issued in accordance with the Nepal Value Added Tax Act, 2052 and VAT Rules, 2053. Please retain this document for your records.'
+        : 'PROFORMA INVOICE — This is an estimate only and NOT a valid tax document. A formal Tax Invoice will be issued upon confirmation.';
+
+    $logoHtml = $logoPath !== ''
+        ? '<img class="logo" src="' . e(url($logoPath)) . '" alt="Logo">'
+        : '<span class="logo logo-placeholder">' . e(strtoupper(substr($companyName, 0, 2))) . '</span>';
+    $qrHtml = $qrPath !== ''
+        ? '<img class="qr" src="' . e(url($qrPath)) . '" alt="Payment QR">'
+        : '';
+    $signatureHtml = '';
+    if ($signaturePath !== '') {
+        $signatureHtml .= '<img class="sign-img" src="' . e(url($signaturePath)) . '" alt="Signature">';
+    }
+    if ($stampPath !== '') {
+        $signatureHtml .= '<img class="stamp-img" src="' . e(url($stampPath)) . '" alt="Stamp">';
+    }
+
+    return '<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -2665,140 +2777,152 @@ function export_invoice_html(array $invoice): string
     <title>Invoice ' . e($invoiceNo) . '</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; color: #333; line-height: 1.6; }
-        .invoice { max-width: 900px; margin: 0 auto; padding: 40px; background: white; }
-        .header { display: flex; justify-content: space-between; margin-bottom: 40px; border-bottom: 2px solid #2c3e50; padding-bottom: 20px; }
-        .company-info h1 { color: #2c3e50; font-size: 24px; margin-bottom: 10px; }
-        .company-info p { font-size: 14px; color: #7f8c8d; }
-        .invoice-meta { text-align: right; }
-        .invoice-meta h2 { font-size: 32px; color: #e74c3c; margin-bottom: 10px; }
-        .invoice-meta p { font-size: 14px; color: #7f8c8d; margin: 5px 0; }
-        .badge { display: inline-block; padding: 5px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; margin: 3px 0; }
-        .badge-info { background: #3498db; color: white; }
-        .badge-success { background: #27ae60; color: white; }
-        .badge-warning { background: #f39c12; color: white; }
-        .badge-primary { background: #2980b9; color: white; }
-        .badge-danger { background: #e74c3c; color: white; }
-        .details { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-bottom: 40px; }
-        .detail-section h3 { font-size: 12px; color: #7f8c8d; text-transform: uppercase; margin-bottom: 10px; font-weight: 600; }
-        .detail-section p { font-size: 14px; margin-bottom: 5px; }
-        table { width: 100%; border-collapse: collapse; margin: 40px 0; }
-        table thead { background: #ecf0f1; }
-        table th { padding: 12px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 12px; text-transform: uppercase; }
-        table td { padding: 12px; border-bottom: 1px solid #ecf0f1; }
-        .totals { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin: 40px 0; }
-        .total-section { }
-        .total-section p { display: flex; justify-content: space-between; margin: 8px 0; font-size: 14px; }
-        .total-label { font-weight: 600; }
-        .total-amount { display: flex; justify-content: space-between; font-size: 18px; font-weight: bold; color: #2c3e50; margin-top: 15px; padding-top: 15px; border-top: 2px solid #ecf0f1; }
-        .vat-section { background: #ecf0f1; padding: 20px; border-radius: 4px; }
-        .notes { background: #f9f9f9; padding: 20px; border-left: 4px solid #3498db; margin: 20px 0; }
-        .footer { text-align: center; color: #7f8c8d; font-size: 12px; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ecf0f1; }
-        .conversion-info { background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 20px 0; font-size: 13px; }
-        .legal-notes { margin-top: 20px; background: #f8f9fa; border: 1px solid #dee2e6; padding: 16px; border-radius: 6px; }
-        .legal-notes h4 { margin: 0 0 8px 0; font-size: 14px; color: #2c3e50; }
-        .legal-notes ul { margin: 0; padding-left: 18px; }
-        .legal-notes li { margin-bottom: 6px; font-size: 12px; color: #495057; }
-        @media print { body { padding: 0; } .invoice { padding: 0; } button { display: none; } }
+        body { font-family: "Segoe UI", Arial, sans-serif; color: #26313f; background: #f2f4f7; line-height: 1.5; font-size: 13px; }
+        .sheet { max-width: 860px; margin: 18px auto; padding: 34px 38px; background: #fff; box-shadow: 0 4px 24px rgba(20,35,60,0.10); }
+        .top { display: flex; justify-content: space-between; gap: 24px; }
+        .identity { display: flex; gap: 14px; }
+        .logo { width: 74px; height: 74px; object-fit: contain; border: 1px solid #d8dfe8; padding: 4px; }
+        .logo-placeholder { display: grid; place-items: center; font: 700 24px Georgia, serif; color: #7a1f1f; }
+        .identity h1 { color: #7a1f1f; font-size: 23px; line-height: 1.2; font-weight: 800; }
+        .identity .np-name { color: #44515f; font-size: 13px; margin-top: 2px; }
+        .identity .meta { color: #5c6a79; font-size: 11.5px; margin-top: 5px; line-height: 1.55; }
+        .doc { text-align: right; min-width: 250px; }
+        .doc h2 { color: #b05a10; font-size: 27px; font-weight: 800; line-height: 1.08; letter-spacing: 0.5px; }
+        .doc .np { color: #5c6a79; font-size: 12px; margin-top: 3px; }
+        .doc-badge { display: inline-block; margin-top: 6px; padding: 3px 10px; border: 1px solid #d9a33a; color: #a06508; font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; background: #fffaf0; }
+        .doc-badge.is-valid { border-color: #1c7c3c; color: #14602d; background: #f0faf3; }
+        .doc .nums { margin-top: 9px; font-size: 12px; color: #44515f; line-height: 1.6; }
+        .doc .nums strong { color: #1a2635; }
+        .rule { height: 4px; background: #16325d; margin: 18px 0 20px; }
+        .boxes { display: flex; gap: 16px; }
+        .box { flex: 1; border: 1px solid #d8dfe8; padding: 13px 16px; min-height: 108px; }
+        .box h3 { color: #8a97a5; font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; margin-bottom: 7px; }
+        .box .primary { color: #1a2635; font-weight: 700; font-size: 14px; }
+        .box p { font-size: 12px; color: #44515f; margin-top: 2px; }
+        .pay-flex { display: flex; justify-content: space-between; gap: 12px; }
+        .qr { width: 76px; height: 76px; object-fit: contain; border: 1px solid #d8dfe8; padding: 3px; }
+        table.items { width: 100%; border-collapse: collapse; margin-top: 22px; }
+        table.items th { padding: 9px 10px; color: #8a97a5; font-size: 10.5px; letter-spacing: 0.08em; text-align: left; border-bottom: 1.5px solid #d8dfe8; }
+        table.items td { padding: 11px 10px; font-size: 12.5px; border-bottom: 1px solid #e8edf3; vertical-align: top; }
+        table.items .c { text-align: center; }
+        table.items .r { text-align: right; }
+        table.items th.r { text-align: right; }
+        table.items th.c { text-align: center; }
+        .line-sub { color: #5c6a79; font-size: 11.5px; }
+        table.totals { width: 100%; border-collapse: collapse; }
+        table.totals td { padding: 8px 10px; font-size: 12.5px; }
+        table.totals .label { text-align: left; color: #44515f; }
+        table.totals .value { text-align: right; color: #1a2635; }
+        table.totals tr.sep td { border-bottom: 1px solid #e8edf3; }
+        table.totals tr.grand td { border-top: 2.5px solid #16325d; padding-top: 11px; font-size: 15px; font-weight: 800; }
+        table.totals tr.grand .label { color: #7a1f1f; }
+        table.totals tr.grand .value { color: #7a1f1f; }
+        .words { margin-top: 16px; border: 1px solid #d8dfe8; padding: 10px 14px; font-size: 12px; }
+        .words b { color: #1a2635; }
+        .words .cap { color: #8a97a5; font-size: 10.5px; letter-spacing: 0.09em; font-weight: 700; margin-right: 8px; }
+        .signs { display: flex; justify-content: space-between; gap: 40px; margin-top: 52px; }
+        .sign { flex: 1; max-width: 300px; text-align: center; font-size: 11.5px; color: #44515f; }
+        .sign .line { border-top: 1px solid #9aa7b4; margin-bottom: 6px; padding-top: 6px; }
+        .sign-img { max-height: 46px; display: block; margin: 0 auto 2px; }
+        .stamp-img { max-height: 56px; display: block; margin: 4px auto 0; opacity: 0.9; }
+        .foot { margin-top: 34px; padding-top: 12px; border-top: 1px solid #e8edf3; color: #8a97a5; font-size: 10.5px; text-align: center; }
+        .print-button { display: block; margin: 16px auto 30px; padding: 10px 22px; background: #16325d; color: #fff; border: 0; border-radius: 6px; font-size: 13px; cursor: pointer; }
+        @media print {
+            body { background: #fff; }
+            .sheet { margin: 0; padding: 8mm 6mm; box-shadow: none; max-width: none; }
+            .print-button { display: none; }
+        }
     </style>
 </head>
 <body>
-    <div class="invoice">
-        <div class="header">
-            <div class="company-info">
-                <h1>' . e($companyName) . '</h1>
-                <p>PAN: ' . e($companyPan) . '</p>
-                <p>VAT Reg: ' . e($companyVat) . '</p>
-            </div>
-            <div class="invoice-meta">
-                <h2>Invoice</h2>
-                <p><strong>' . e($invoiceNo) . '</strong></p>
+    <div class="sheet">
+        <div class="top">
+            <div class="identity">
+                ' . $logoHtml . '
                 <div>
-                    <span class="badge badge-info">' . e($categoryLabel) . '</span>
-                    <span class="badge badge-primary">' . e($templateLabel) . '</span>
-                    <span class="badge badge-' . e($statusBadgeClass) . '">' . e($status) . '</span>
+                    <h1>' . e($companyName) . '</h1>
+                    ' . ($companyNameNp !== '' ? '<div class="np-name">' . e($companyNameNp) . '</div>' : '') . '
+                    <div class="meta">
+                        ' . e($companyAddress) . '<br>
+                        ' . ($companyPan !== '' ? 'PAN: ' . e($companyPan) : '') . ($companyVat !== '' ? ' | VAT Reg: ' . e($companyVat) : '') . '<br>
+                        ' . ($companyPhone !== '' ? 'Tel: ' . e($companyPhone) : '') . ($companyEmail !== '' ? ' | ' . e($companyEmail) : '') . '
+                    </div>
+                </div>
+            </div>
+            <div class="doc">
+                <h2>' . $docTitle . '</h2>
+                <div class="np">' . e($docSubtitle) . '</div>
+                ' . $docBadge . '
+                <div class="nums">
+                    <strong>Invoice No:</strong> ' . e($invoiceNo) . '<br>
+                    <strong>Date:</strong> ' . e($issuedOnDisplay) . ($issuedOnBs !== '' ? ' | <strong>Miti:</strong> ' . e($issuedOnBs) . ' BS' : '') . '<br>
+                    ' . ($fiscalYearLabel !== '' ? '<strong>Fiscal Year:</strong> ' . e($fiscalYearLabel) : '') . '
                 </div>
             </div>
         </div>
 
-        <div class="details">
-            <div class="detail-section">
-                <h3>Invoice Details</h3>
-                <p><strong>Issued Date:</strong> ' . e($invoice['issued_on'] ?? 'N/A') . '</p>
-                <p><strong>Due Date:</strong> ' . e($invoice['due_on'] ?? 'N/A') . '</p>
-                <p><strong>Issued By:</strong> ' . e($issuedByName) . '</p>
+        <div class="rule"></div>
+
+        <div class="boxes">
+            <div class="box">
+                <h3>BILL TO / खरिदकर्ता</h3>
+                <div class="primary">' . e($clientName) . '</div>
+                ' . ($clientPan !== '' ? '<p>PAN: ' . e($clientPan) . '</p>' : '') . '
+                ' . ($clientEmail !== '' ? '<p>' . e($clientEmail) . '</p>' : '') . '
+                ' . ($clientPhone !== '' ? '<p>' . e($clientPhone) . '</p>' : '') . '
             </div>
-            <div class="detail-section">
-                <h3>Reference</h3>
-                <p><strong>Invoice ID:</strong> ' . e($invoice['id'] ?? 'N/A') . '</p>
-                <p><strong>Task:</strong> ' . e($invoice['task_title'] ?? 'N/A') . '</p>
-                <p><strong>Description:</strong> ' . e($invoice['description'] ?? 'N/A') . '</p>
+            <div class="box">
+                <div class="pay-flex">
+                    <div>
+                        <h3>PAYMENT INFO</h3>
+                        ' . ($bankName !== '' ? '<div class="primary">' . e($bankName) . '</div>' : '<p>Payment details available on request.</p>') . '
+                        ' . ($bankAccountName !== '' && $bankName !== '' ? '<p>A/C Name: ' . e($bankAccountName) . '</p>' : '') . '
+                        ' . ($bankAccountNumber !== '' ? '<p>A/C No: ' . e($bankAccountNumber) . '</p>' : '') . '
+                        ' . ($bankBranch !== '' ? '<p>Branch: ' . e($bankBranch) . '</p>' : '') . '
+                    </div>
+                    ' . $qrHtml . '
+                </div>
             </div>
         </div>
 
-        <table>
+        <table class="items">
             <thead>
-                ' . $lineTableHeader . '
+                <tr>
+                    <th class="c" style="width:44px">S.N.</th>
+                    <th>DESCRIPTION OF SERVICE</th>
+                    <th class="c" style="width:60px">QTY</th>
+                    <th class="r" style="width:110px">RATE (NPR)</th>
+                    <th class="r" style="width:120px">AMOUNT (NPR)</th>
+                </tr>
             </thead>
             <tbody>' . $lineRows . '</tbody>
         </table>
 
-        <div class="totals">
-            <div></div>
-            <div class="total-section">
-                <p><span class="total-label">Taxable Amount:</span> <span>' . e($taxableCurrency) . '</span></p>
-                ' . ($showExcise ? '<p><span class="total-label">Excise Duty (' . e(number_format($exciseRate, 2)) . '%):</span> <span>' . e($exciseCurrency) . '</span></p>' : '') . '
-                <div class="vat-section">
-                    <p><span class="total-label">VAT Rate:</span> <span>' . e($vatRate) . '%</span></p>
-                    <p><span class="total-label">VAT Amount:</span> <span>' . e($vatCurrency) . '</span></p>
-                </div>
-                <div class="total-amount">
-                    <span>Total Amount (NPR):</span>
-                    <span>' . e($totalCurrency) . '</span>
-                </div>
-            </div>
-        </div>';
-    
-    if ($category === 'tax' && !empty($invoice['converted_to_tax_on'])) {
-        $convertedDate = e($invoice['converted_to_tax_on']);
-        $convertedBy = e($invoice['converted_by_name'] ?? 'System');
-        $html .= '
-        <div class="conversion-info">
-            <strong>Tax Invoice Conversion:</strong><br>
-            Converted on ' . $convertedDate . ' by ' . $convertedBy . '<br>
-            This is a legally binding tax invoice per Nepal VAT Act 2052
-        </div>';
-    }
-    
-    if (!empty($invoice['notes'])) {
-        $html .= '
-        <div class="notes">
-            <strong>Notes:</strong><br>
-            ' . nl2br(e($invoice['notes'])) . '
-        </div>';
-    }
+        <table class="totals">
+            ' . ($discountAmount > 0 ? '<tr class="sep"><td class="label">Discount (छुट)</td><td class="value">- ' . e(number_format($discountAmount, 2)) . '</td></tr>' : '') . '
+            <tr class="sep"><td class="label">Taxable Amount</td><td class="value">' . e(number_format($taxableAmount, 2)) . '</td></tr>
+            ' . ($showExcise ? '<tr class="sep"><td class="label">Excise Duty @ ' . e(number_format($exciseRate, 2)) . '% (अन्तःशुल्क)</td><td class="value">' . e(number_format($exciseAmount, 2)) . '</td></tr>' : '') . '
+            <tr class="sep"><td class="label">VAT @ ' . e(rtrim(rtrim(number_format($vatRate, 2), '0'), '.')) . '% (मूल्य अभिवृद्धि कर)</td><td class="value">' . e(number_format($vatAmount, 2)) . '</td></tr>
+            <tr class="grand"><td class="label">Grand Total (जम्मा रकम)</td><td class="value">NPR ' . e(number_format($totalAmount, 2)) . '</td></tr>
+        </table>
 
-    $html .= '
-        <div class="legal-notes">
-            <h4>Statutory Notes (Nepal)</h4>
-            <ul>
-                <li>This invoice is prepared in line with Nepal Value Added Tax Act, 2052 and Value Added Tax Rules, 2053.</li>
-                <li>VAT is applied at the declared rate on taxable value unless exempt by applicable law.</li>
-                <li>Tax invoice records should be retained as required under prevailing tax law and regulations in Nepal.</li>
-                <li>Disputes regarding amount, tax, or supply terms are subject to the governing contract and applicable law of Nepal.</li>
-            </ul>
-        </div>';
-    
-    $html .= '
-        <div class="footer">
-            <p>Invoice exported on ' . date('Y-m-d H:i:s') . '</p>
-            <p>This document was generated by the Invoice Management System</p>
+        <div class="words"><span class="cap">AMOUNT IN WORDS:</span><b>' . e($amountWords) . '</b></div>
+
+        <div class="signs">
+            <div class="sign">
+                <div class="line">Client Signature / Stamp<br>' . e($clientName) . '</div>
+            </div>
+            <div class="sign">
+                ' . $signatureHtml . '
+                <div class="line">Authorized Signature / Stamp<br>For ' . e($companyName) . '</div>
+            </div>
         </div>
+
+        <div class="foot">' . e($footNote) . '</div>
     </div>
+    <button class="print-button" onclick="window.print()">Print / Save as PDF</button>
 </body>
 </html>';
-    
-    return $html;
 }
 
 /**

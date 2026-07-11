@@ -250,6 +250,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $companyLogoPath = settings_upload_image('company_logo', $currentSettings);
     $companySignaturePath = settings_upload_image('company_signature', $currentSettings);
     $companyStampPath = settings_upload_image('company_stamp', $currentSettings);
+    $companyQrPath = settings_upload_image('company_qr', $currentSettings);
 
     update_settings([
         'site_name' => trim((string) ($_POST['site_name'] ?? APP_NAME)),
@@ -257,6 +258,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'support_email' => trim((string) ($_POST['support_email'] ?? '')),
         'support_phone' => trim((string) ($_POST['support_phone'] ?? '')),
         'office_address' => trim((string) ($_POST['office_address'] ?? '')),
+        'company_name_np' => trim((string) ($_POST['company_name_np'] ?? '')),
+        'company_pan' => trim((string) ($_POST['company_pan'] ?? '')),
+        'company_vat_no' => trim((string) ($_POST['company_vat_no'] ?? '')),
         'currency_symbol' => trim((string) ($_POST['currency_symbol'] ?? '$')),
         'hero_title' => trim((string) ($_POST['hero_title'] ?? '')),
         'hero_description' => trim((string) ($_POST['hero_description'] ?? '')),
@@ -264,12 +268,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'company_logo_path' => $companyLogoPath,
         'company_signature_path' => $companySignaturePath,
         'company_stamp_path' => $companyStampPath,
+        'company_qr_path' => $companyQrPath,
 
         'payment_mode' => $paymentMode,
         'payment_label' => trim((string) ($_POST['payment_label'] ?? 'Manual payment / bank transfer')),
         'bank_name' => trim((string) ($_POST['bank_name'] ?? '')),
         'bank_account_name' => trim((string) ($_POST['bank_account_name'] ?? '')),
         'bank_account_number' => trim((string) ($_POST['bank_account_number'] ?? '')),
+        'bank_branch' => trim((string) ($_POST['bank_branch'] ?? '')),
         'payment_note' => trim((string) ($_POST['payment_note'] ?? '')),
         'stripe_checkout_url' => $stripeCheckoutUrl,
         'paypal_checkout_url' => $paypalCheckoutUrl,
@@ -491,10 +497,14 @@ if (table_exists('company_shareholdings')) {
             <label>Support email<input type="email" name="support_email" value="<?= e($settings['support_email'] ?? '') ?>"></label>
             <label>Support phone<input type="text" name="support_phone" value="<?= e($settings['support_phone'] ?? '') ?>"></label>
             <label>Office address<input type="text" name="office_address" value="<?= e($settings['office_address'] ?? '') ?>"></label>
+            <label>Company name (Nepali)<input type="text" name="company_name_np" value="<?= e($settings['company_name_np'] ?? '') ?>" placeholder="एक्सल बिजनेस कन्सल्टिङ प्रा.लि."></label>
+            <label>PAN number<input type="text" name="company_pan" value="<?= e($settings['company_pan'] ?? '') ?>"></label>
+            <label>VAT registration no.<input type="text" name="company_vat_no" value="<?= e($settings['company_vat_no'] ?? '') ?>" placeholder="Same as PAN if unified"></label>
             <label>Currency symbol<input type="text" name="currency_symbol" value="<?= e($settings['currency_symbol'] ?? '$') ?>"></label>
             <label>Company logo<input type="file" name="company_logo" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['company_logo_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '' ?></label>
             <label>Authorized signature<input type="file" name="company_signature" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['company_signature_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '' ?></label>
             <label>Company stamp<input type="file" name="company_stamp" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['company_stamp_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '' ?></label>
+            <label>Payment QR code<input type="file" name="company_qr" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['company_qr_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '' ?></label>
         </div>
     </details>
 
@@ -531,6 +541,7 @@ if (table_exists('company_shareholdings')) {
             <label>Bank name<input type="text" name="bank_name" value="<?= e($settings['bank_name'] ?? '') ?>"></label>
             <label>Bank account name<input type="text" name="bank_account_name" value="<?= e($settings['bank_account_name'] ?? '') ?>"></label>
             <label>Bank account number<input type="text" name="bank_account_number" value="<?= e($settings['bank_account_number'] ?? '') ?>"></label>
+            <label>Bank branch<input type="text" name="bank_branch" value="<?= e($settings['bank_branch'] ?? '') ?>" placeholder="e.g. Sankhamul"></label>
             <label>Stripe checkout URL<input type="url" name="stripe_checkout_url" value="<?= e($settings['stripe_checkout_url'] ?? '') ?>" placeholder="https://buy.stripe.com/..."></label>
             <label>PayPal checkout URL<input type="url" name="paypal_checkout_url" value="<?= e($settings['paypal_checkout_url'] ?? '') ?>" placeholder="https://www.paypal.com/..."></label>
             <label>Payment note<input type="text" name="payment_note" value="<?= e($settings['payment_note'] ?? '') ?>"></label>
