@@ -239,9 +239,11 @@
       var start = -Math.PI / 2;
       (cfg.segments || []).forEach(function (seg) {
         var frac = Math.max(seg.value, 0) / total;
+        if (frac <= 0) { return; } // zero-size arcs would wrap into full circles
         var end = start + frac * Math.PI * 2;
+        var gap = Math.min(0.02, (end - start) / 4);
         ctx.beginPath();
-        ctx.arc(cx, cy, radius, start + 0.02, end - 0.02);
+        ctx.arc(cx, cy, radius, start + gap, end - gap);
         ctx.strokeStyle = resolveColor(seg.color);
         ctx.lineWidth = thickness;
         ctx.lineCap = 'round';
