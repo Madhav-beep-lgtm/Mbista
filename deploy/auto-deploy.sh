@@ -33,18 +33,24 @@ if ! git fetch origin main --quiet 2>>"$LOG"; then
     exit 1
 fi
 
-LOCAL_HASH="$(git rev-parse HEAD)"
-REMOTE_HASH="$(git rev-parse origin/main)"
-if [ "$LOCAL_HASH" = "$REMOTE_HASH" ]; then
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+    if ! git merge --ff-only origin/main >>"$LOG" 2>&1; then
+        echo "$(date '+%F %T') ERROR: fast-forward failed - the server copy has local changes. Fix with: cd $REPO_DIR && git status" >> "$LOG"
+        exit 1
+    fi
+fi
+
+# Deploy whenever the checked-out commit differs from the last one this
+# script deployed (tracked in a state file). This also covers the very
+# first run and pulls done via the cPanel UI.
+STATE="$HOME/.auto-deploy.last"
+CURRENT_HASH="$(git rev-parse HEAD)"
+LAST_DEPLOYED="$(cat "$STATE" 2>/dev/null || echo none)"
+if [ "$CURRENT_HASH" = "$LAST_DEPLOYED" ]; then
     exit 0
 fi
 
-echo "$(date '+%F %T') new commits found, deploying $REMOTE_HASH" >> "$LOG"
-
-if ! git merge --ff-only origin/main >>"$LOG" 2>&1; then
-    echo "$(date '+%F %T') ERROR: fast-forward failed - the server copy has local changes. Fix with: cd $REPO_DIR && git status" >> "$LOG"
-    exit 1
-fi
+echo "$(date '+%F %T') deploying $CURRENT_HASH" >> "$LOG"
 
 # Run every task from .cpanel.yml (the lines starting with "- "), so the
 # task list lives in exactly one file.
@@ -54,6 +60,7 @@ grep -E '^[[:space:]]+- ' .cpanel.yml | sed -E 's/^[[:space:]]+- //' | while IFS
     fi
 done
 
+echo "$CURRENT_HASH" > "$STATE"
 echo "$(date '+%F %T') deployed $(git rev-parse --short HEAD)" >> "$LOG"
 
 tail -n 400 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
