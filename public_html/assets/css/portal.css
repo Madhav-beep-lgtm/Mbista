@@ -2425,3 +2425,500 @@ body.admin-layout .workspace-form-grid button[type="submit"] {
     grid-column: span 1;
   }
 }
+
+/* ==========================================================================
+   Reports Center v2 (rc2-*) — toolbar, collapsible filter card with export
+   menu, and the report preview card. Matches the approved reference design.
+   ========================================================================== */
+
+body.admin-layout .rc2-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+body.admin-layout .rc2-report-view,
+body.admin-layout .rc2-quick,
+body.admin-layout .rc2-saved,
+body.admin-layout .rc2-view-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  cursor: pointer;
+}
+
+body.admin-layout .rc2-report-view > .ui-icon,
+body.admin-layout .rc2-quick > .ui-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 0;
+  flex: 0 0 auto;
+}
+
+body.admin-layout .rc2-report-view select,
+body.admin-layout .rc2-quick select,
+body.admin-layout .rc2-saved select,
+body.admin-layout .rc2-view-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 40px;
+  padding: 0 24px 0 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+
+body.admin-layout .rc2-caret {
+  position: absolute;
+  right: 10px;
+  display: inline-flex;
+  pointer-events: none;
+}
+
+body.admin-layout .rc2-caret .ui-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 0;
+}
+
+body.admin-layout .rc2-report-view {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-primary);
+  color: #fff;
+}
+
+body.admin-layout.theme-dark .rc2-report-view,
+body.admin-layout.admin-dark .rc2-report-view {
+  color: #0b1c36;
+}
+
+body.admin-layout .rc2-report-view select option {
+  color: var(--mbw-heading);
+  background: var(--mbw-card);
+}
+
+body.admin-layout .rc2-quick {
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .rc2-quick > .ui-icon {
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .rc2-saved {
+  flex: 1 1 280px;
+  min-width: 200px;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .rc2-saved select {
+  width: 100%;
+  font-weight: 500;
+}
+
+body.admin-layout .rc2-save-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  margin-left: auto;
+  padding: 0 16px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+body.admin-layout .rc2-save-btn:hover {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-primary-soft);
+  color: var(--mbw-primary);
+  transform: none;
+  box-shadow: none;
+}
+
+body.admin-layout .rc2-save-btn .ui-icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* Filter card */
+
+body.admin-layout .rc2-filters {
+  padding: 14px 18px 16px;
+  margin-bottom: 16px;
+}
+
+body.admin-layout .rc2-filters-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+
+body.admin-layout .rc2-filters-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .rc2-filters-title .ui-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 0;
+}
+
+body.admin-layout .rc2-filters-title strong {
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+body.admin-layout .rc2-filters-title em {
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+body.admin-layout .rc2-collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+body.admin-layout .rc2-collapse:hover {
+  color: var(--mbw-primary);
+  background: transparent;
+  transform: none;
+  box-shadow: none;
+}
+
+body.admin-layout .rc2-collapse .ui-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 0;
+  transform: rotate(180deg);
+  transition: transform 0.15s ease;
+}
+
+body.admin-layout .rc2-collapse.is-collapsed .ui-icon {
+  transform: rotate(0deg);
+}
+
+body.admin-layout .rc2-filters .rc-filter-grid {
+  align-items: start;
+}
+
+body.admin-layout .rc2-filters .rc-filter-grid label {
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  justify-content: start;
+}
+
+body.admin-layout .rc2-filters .rc-filter-grid select,
+body.admin-layout .rc2-filters .rc-filter-grid input[type="date"] {
+  min-height: 42px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Filter action row: Apply + Reset left, Export right */
+
+body.admin-layout .rc2-filter-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--mbw-card-soft);
+}
+
+body.admin-layout .rc2-apply {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--mbw-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+body.admin-layout.theme-dark .rc2-apply,
+body.admin-layout.admin-dark .rc2-apply {
+  color: #0b1c36;
+}
+
+body.admin-layout .rc2-apply .ui-icon {
+  width: 15px;
+  height: 15px;
+}
+
+body.admin-layout .rc2-reset {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+body.admin-layout .rc2-reset:hover {
+  border-color: var(--mbw-primary);
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .rc2-reset .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+body.admin-layout .rc2-export {
+  position: relative;
+  margin-left: auto;
+}
+
+body.admin-layout .rc2-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 34px 0 16px;
+  position: relative;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+body.admin-layout .rc2-export-btn:hover {
+  border-color: var(--mbw-primary);
+  color: var(--mbw-primary);
+  background: var(--mbw-card);
+  transform: none;
+  box-shadow: none;
+}
+
+body.admin-layout .rc2-export-btn .ui-icon {
+  width: 15px;
+  height: 15px;
+  margin-right: 0;
+}
+
+body.admin-layout .rc2-export-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  min-width: 230px;
+  padding: 6px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  box-shadow: 0 12px 32px rgba(22, 38, 62, 0.14);
+}
+
+body.admin-layout .rc2-export.is-open .rc2-export-menu {
+  display: grid;
+  gap: 2px;
+}
+
+body.admin-layout .rc2-export-menu a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  color: var(--mbw-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+body.admin-layout .rc2-export-menu a:hover {
+  background: var(--mbw-primary-soft);
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .rc2-export-menu a .ui-icon {
+  width: 15px;
+  height: 15px;
+  margin-right: 0;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .rc2-export-menu a:hover .ui-icon {
+  color: var(--mbw-primary);
+}
+
+/* Report preview card */
+
+body.admin-layout .rc2-preview {
+  padding: 0;
+  overflow: hidden;
+}
+
+body.admin-layout .rc2-preview-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--mbw-border);
+}
+
+body.admin-layout .rc2-preview-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+body.admin-layout .rc2-preview-title > .ui-icon {
+  width: 18px;
+  height: 18px;
+  margin-right: 0;
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .rc2-preview-title strong {
+  display: block;
+  color: var(--mbw-heading);
+  font-size: 14.5px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+body.admin-layout .rc2-preview-title small {
+  display: block;
+  color: var(--mbw-muted);
+  font-size: 12px;
+}
+
+body.admin-layout .rc2-preview-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+body.admin-layout .rc2-preview-tools #rc2Expand {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+body.admin-layout .rc2-preview-tools #rc2Expand:hover {
+  border-color: var(--mbw-primary);
+  color: var(--mbw-primary);
+  background: var(--mbw-card);
+  transform: none;
+  box-shadow: none;
+}
+
+body.admin-layout .rc2-preview-tools #rc2Expand .ui-icon {
+  width: 15px;
+  height: 15px;
+  margin-right: 0;
+}
+
+body.admin-layout .rc2-preview .rc-report-view {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+}
+
+/* Compact density + fullscreen preview */
+
+body.admin-layout .rpt-statement.is-compact .rc-table th,
+body.admin-layout .rpt-statement.is-compact .rc-table td {
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+body.admin-layout .rc2-preview.rc2-preview-full {
+  position: fixed;
+  inset: 12px;
+  z-index: 1300;
+  overflow: auto;
+}
+
+body.rc2-noscroll {
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  body.admin-layout .rc2-saved {
+    flex-basis: 100%;
+    order: 5;
+  }
+
+  body.admin-layout .rc2-save-btn {
+    margin-left: 0;
+  }
+
+  body.admin-layout .rc2-export {
+    margin-left: 0;
+  }
+}

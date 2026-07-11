@@ -10,7 +10,7 @@ require_company_context();
 $repairErrors = accounting_module_repair_database();
 
 $pageTitle = 'Reports Center';
-$pageSubtitle = 'Smart, reliable and actionable reports for better financial insights.';
+$pageSubtitle = 'Create, view and export your financial and operational reports.';
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
 $companyBusinessType = company_accounting_business_type($companyId);
@@ -233,9 +233,55 @@ if (table_exists('inventory_items')) {
 $bodyClass = 'admin-layout accounting-module-page reports-center-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<form method="get" action="<?= e(url('admin/reports-center.php')) ?>" class="rc-filter-card">
+<div class="rc2-toolbar mbw-card">
+    <label class="rc2-report-view" title="Choose which report to view">
+        <?= icon('reports') ?>
+        <span class="sr-only">Report view</span>
+        <select onchange="if (this.value) { window.location = this.value; }" aria-label="Choose report">
+            <?php foreach ($allowedReportRegistry as $key => [$label, $description, $iconName]): ?>
+                <option value="<?= e(rc_url(['report' => $key])) ?>" <?= $key === $reportId ? 'selected' : '' ?>><?= e($label) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <span class="rc2-caret"><?= icon('chevron') ?></span>
+    </label>
+    <label class="rc2-quick" title="Apply a preset date range">
+        <?= icon('filter') ?>
+        <span class="sr-only">Quick filter</span>
+        <select id="rc2QuickFilter" aria-label="Quick date range">
+            <option value="">Quick Filter</option>
+            <option value="this-month">This Month</option>
+            <option value="last-month">Last Month</option>
+            <option value="this-quarter">This Quarter</option>
+            <option value="fy">This Fiscal Year</option>
+            <option value="last-30">Last 30 Days</option>
+            <option value="ytd">Year to Date</option>
+        </select>
+        <span class="rc2-caret"><?= icon('chevron') ?></span>
+    </label>
+    <label class="rc2-saved">
+        <span class="sr-only">Saved filters</span>
+        <select id="rc2SavedSelect" aria-label="Saved filters"></select>
+        <span class="rc2-caret"><?= icon('chevron') ?></span>
+    </label>
+    <button type="button" class="rc2-save-btn" id="rc2SaveFilter" title="Save the current filters in this browser">
+        <?= icon('star') ?>Save Filter
+    </button>
+</div>
+
+<form method="get" action="<?= e(url('admin/reports-center.php')) ?>" class="rc-filter-card rc2-filters" id="rc2FilterForm" data-fy-start="<?= e((string) ($selectedFiscalYear['start_date'] ?? '')) ?>" data-fy-end="<?= e((string) ($selectedFiscalYear['end_date'] ?? '')) ?>">
     <input type="hidden" name="report" value="<?= e($reportId) ?>">
     <?php if ($compareEnabled): ?><input type="hidden" name="compare" value="1"><?php endif; ?>
+    <div class="rc2-filters-head">
+        <span class="rc2-filters-title">
+            <?= icon('filter') ?>
+            <strong>Filters</strong>
+            <em>Refine your report results</em>
+        </span>
+        <button type="button" class="rc2-collapse" data-rc2-collapse aria-expanded="true">
+            <?= icon('chevron') ?><span>Collapse</span>
+        </button>
+    </div>
+    <div class="rc2-filters-body" data-rc2-body>
     <div class="rc-filter-grid">
         <label>Fiscal Year
             <select name="fy">
@@ -292,34 +338,58 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </select>
             </label>
         <?php endif; ?>
-        <div class="rc-biz-toggle">
-            <span>Organization Type</span>
-            <div>
+        <label>Organization Type
+            <select name="biz">
                 <?php foreach ($businessTypeOptions as $bizValue => $bizLabel): ?>
-                    <button type="submit" name="biz" value="<?= e($bizValue) ?>" class="<?= $businessType === $bizValue ? 'is-active' : '' ?>"><?= e($bizLabel) ?></button>
+                    <option value="<?= e($bizValue) ?>" <?= $businessType === $bizValue ? 'selected' : '' ?>><?= e($bizLabel) ?></option>
                 <?php endforeach; ?>
+            </select>
+        </label>
+        <?php if ($compareEnabled): ?>
+            <label>Compare From<input type="date" name="cfrom" value="<?= e($compareFrom) ?>"></label>
+            <label>Compare To<input type="date" name="cto" value="<?= e($compareTo) ?>"></label>
+        <?php endif; ?>
+    </div>
+    <div class="rc2-filter-actions">
+        <button type="submit" class="rc2-apply"><?= icon('filter') ?>Apply Filters</button>
+        <a class="rc2-reset" href="<?= e(url('admin/reports-center.php?report=' . $reportId)) ?>"><?= icon('reconcile') ?>Reset</a>
+        <div class="rc2-export" data-rc2-export>
+            <button type="button" class="rc2-export-btn"><?= icon('download') ?>Export<span class="rc2-caret"><?= icon('chevron') ?></span></button>
+            <div class="rc2-export-menu" role="menu">
+                <a role="menuitem" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>"><?= icon('documents') ?>Export PDF</a>
+                <a role="menuitem" href="<?= e(rc_url(['export' => 'csv'])) ?>"><?= icon('analytics') ?>Export Excel (CSV)</a>
+                <a role="menuitem" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>"><?= icon('receipt-voucher') ?>Print Report</a>
+                <a role="menuitem" href="<?= e(url('admin/report-schedules.php?report=' . $reportId)) ?>"><?= icon('calendar') ?>Schedule Reports</a>
+                <a role="menuitem" href="<?= e(rc_url($compareEnabled ? ['compare' => null, 'cfrom' => null, 'cto' => null] : ['compare' => '1'])) ?>"><?= icon('reconcile') ?>Compare Period: <?= $compareEnabled ? 'On' : 'Off' ?></a>
             </div>
         </div>
-        <div class="rc-filter-apply">
-            <button type="submit" class="button"><?= icon('settings') ?>Apply Filters</button>
-            <a class="button secondary" href="<?= e(url('admin/reports-center.php?report=' . $reportId)) ?>">Reset</a>
-        </div>
+    </div>
     </div>
 </form>
 
-<section class="mbw-card rpt-picker" aria-label="Choose report">
-    <?php foreach ($allowedReportRegistry as $key => [$label, $description, $iconName]): ?>
-        <a class="rpt-pick <?= $key === $reportId ? 'is-active' : '' ?>" href="<?= e(rc_url(['report' => $key])) ?>" title="<?= e($description) ?>">
-            <?= icon($iconName) ?><span><?= e($label) ?></span>
-        </a>
-    <?php endforeach; ?>
-    <a class="rpt-pick" href="<?= e(url('admin/report-schedules.php')) ?>" title="Manage recurring deliveries">
-        <?= icon('calendar') ?><span>Schedule Reports</span>
-    </a>
-</section>
-
+<section class="rc2-preview mbw-card" id="rc2Preview" aria-label="Report preview">
+    <div class="rc2-preview-head">
+        <span class="rc2-preview-title">
+            <?= icon('documents') ?>
+            <span>
+                <strong>Report Preview</strong>
+                <small>Generated from the applied filters above.</small>
+            </span>
+        </span>
+        <div class="rc2-preview-tools">
+            <span>View</span>
+            <label class="rc2-view-select">
+                <select id="rc2ViewMode" aria-label="Preview density">
+                    <option value="table">Table View</option>
+                    <option value="compact">Compact View</option>
+                </select>
+                <span class="rc2-caret"><?= icon('chevron') ?></span>
+            </label>
+            <button type="button" id="rc2Expand" aria-label="Expand preview" title="Expand preview"><?= icon('maximize') ?></button>
+        </div>
+    </div>
 <div class="rpt-fullwidth">
-    <main class="rc-report-view rpt-statement">
+    <main class="rc-report-view rpt-statement" id="rc2Statement">
         <div class="rpt-bar"><?= e($reportNumberedTitle) ?></div>
         <?php rc_render_letterhead($report, $reportMeta); ?>
         <div class="rc-table-scroll">
@@ -333,44 +403,127 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
         <?php rc_render_report_foot(['generated_by' => $reportMeta['generated_by']]); ?>
 
-        <div class="rpt-action-bar" aria-label="Report actions">
-            <a class="rpt-action" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>">
-                <span class="mbw-chip is-square tone-red"><?= icon('documents') ?></span>
-                <span class="rpt-action-text"><strong>Export PDF</strong><small>Print-ready statement</small></span>
-            </a>
-            <a class="rpt-action" href="<?= e(rc_url(['export' => 'csv'])) ?>">
-                <span class="mbw-chip is-square tone-green"><?= icon('analytics') ?></span>
-                <span class="rpt-action-text"><strong>Export Excel</strong><small>Download CSV data</small></span>
-            </a>
-            <a class="rpt-action" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>">
-                <span class="mbw-chip is-square tone-blue"><?= icon('receipt-voucher') ?></span>
-                <span class="rpt-action-text"><strong>Print Report</strong><small>Send to printer</small></span>
-            </a>
-            <a class="rpt-action" href="<?= e(url('admin/report-schedules.php?report=' . $reportId)) ?>">
-                <span class="mbw-chip is-square tone-purple"><?= icon('calendar') ?></span>
-                <span class="rpt-action-text"><strong>Schedule Reports</strong><small>Recurring email delivery</small></span>
-            </a>
-            <a class="rpt-action <?= $compareEnabled ? 'is-active' : '' ?>" href="<?= e(rc_url(['compare' => $compareEnabled ? null : '1'])) ?>">
-                <span class="mbw-chip is-square tone-amber"><?= icon('reconcile') ?></span>
-                <span class="rpt-action-text"><strong>Compare Period</strong><small><?= $compareEnabled ? 'On — click to turn off' : 'Second period side by side' ?></small></span>
-            </a>
-            <?php if ($compareEnabled): ?>
-                <form method="get" action="<?= e(url('admin/reports-center.php')) ?>" class="rpt-compare-form">
-                    <?php foreach (array_diff_key($_GET, ['cfrom' => 1, 'cto' => 1]) as $keepKey => $keepValue): ?>
-                        <?php if (is_scalar($keepValue)): ?><input type="hidden" name="<?= e((string) $keepKey) ?>" value="<?= e((string) $keepValue) ?>"><?php endif; ?>
-                    <?php endforeach; ?>
-                    <input type="hidden" name="compare" value="1">
-                    <label>From<input type="date" name="cfrom" value="<?= e($compareFrom) ?>"></label>
-                    <label>To<input type="date" name="cto" value="<?= e($compareTo) ?>"></label>
-                    <button type="submit"><?= icon('reconcile') ?>Apply</button>
-                </form>
-            <?php endif; ?>
-        </div>
-
         <div class="rc-report-foot">
             <span><?= e($report['subtitle']) ?></span>
             <span>All amounts are in <?= e($reportMeta['currency_code']) ?>, rounded to 2 decimal places</span>
         </div>
     </main>
 </div>
+</section>
+
+<script>
+(function () {
+    var form = document.getElementById('rc2FilterForm');
+
+    // Collapse / expand the filter card body.
+    var collapseBtn = document.querySelector('[data-rc2-collapse]');
+    var filtersBody = document.querySelector('[data-rc2-body]');
+    if (collapseBtn && filtersBody) {
+        collapseBtn.addEventListener('click', function () {
+            var wasHidden = filtersBody.hasAttribute('hidden');
+            if (wasHidden) { filtersBody.removeAttribute('hidden'); } else { filtersBody.setAttribute('hidden', ''); }
+            collapseBtn.classList.toggle('is-collapsed', !wasHidden);
+            collapseBtn.querySelector('span').textContent = wasHidden ? 'Collapse' : 'Expand';
+            collapseBtn.setAttribute('aria-expanded', wasHidden ? 'true' : 'false');
+        });
+    }
+
+    // Quick Filter: preset date ranges applied to the form.
+    var quick = document.getElementById('rc2QuickFilter');
+    function iso(d) {
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    if (quick && form) {
+        quick.addEventListener('change', function () {
+            if (!quick.value) { return; }
+            var now = new Date();
+            var from = null;
+            var to = null;
+            if (quick.value === 'this-month') { from = new Date(now.getFullYear(), now.getMonth(), 1); to = new Date(now.getFullYear(), now.getMonth() + 1, 0); }
+            if (quick.value === 'last-month') { from = new Date(now.getFullYear(), now.getMonth() - 1, 1); to = new Date(now.getFullYear(), now.getMonth(), 0); }
+            if (quick.value === 'this-quarter') { var q = Math.floor(now.getMonth() / 3); from = new Date(now.getFullYear(), q * 3, 1); to = new Date(now.getFullYear(), q * 3 + 3, 0); }
+            if (quick.value === 'last-30') { to = now; from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29); }
+            if (quick.value === 'ytd') { from = new Date(now.getFullYear(), 0, 1); to = now; }
+            if (quick.value === 'fy' && form.dataset.fyStart && form.dataset.fyEnd) {
+                form.elements.from.value = form.dataset.fyStart;
+                form.elements.to.value = form.dataset.fyEnd;
+                form.submit();
+                return;
+            }
+            if (from && to) {
+                form.elements.from.value = iso(from);
+                form.elements.to.value = iso(to);
+                form.submit();
+            }
+        });
+    }
+
+    // Saved filters (stored in this browser via localStorage).
+    var savedSelect = document.getElementById('rc2SavedSelect');
+    var saveBtn = document.getElementById('rc2SaveFilter');
+    var STORE_KEY = 'rc2SavedFilters';
+    function readSaved() {
+        try { return JSON.parse(window.localStorage.getItem(STORE_KEY)) || []; } catch (e) { return []; }
+    }
+    function fillSaved() {
+        if (!savedSelect) { return; }
+        var items = readSaved();
+        savedSelect.innerHTML = '';
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = items.length ? 'Select a saved filter...' : 'No saved filters yet';
+        savedSelect.appendChild(placeholder);
+        items.forEach(function (item, index) {
+            var option = document.createElement('option');
+            option.value = String(index);
+            option.textContent = item.n;
+            savedSelect.appendChild(option);
+        });
+    }
+    fillSaved();
+    if (savedSelect) {
+        savedSelect.addEventListener('change', function () {
+            var item = readSaved()[Number(savedSelect.value)];
+            if (item) { window.location = window.location.pathname + item.q; }
+        });
+    }
+    if (saveBtn) {
+        saveBtn.addEventListener('click', function () {
+            var name = window.prompt('Name this filter set:');
+            if (!name) { return; }
+            var items = readSaved();
+            items.push({ n: name, q: window.location.search });
+            window.localStorage.setItem(STORE_KEY, JSON.stringify(items));
+            fillSaved();
+        });
+    }
+
+    // Export dropdown menu.
+    var exportWrap = document.querySelector('[data-rc2-export]');
+    if (exportWrap) {
+        exportWrap.querySelector('.rc2-export-btn').addEventListener('click', function (event) {
+            event.stopPropagation();
+            exportWrap.classList.toggle('is-open');
+        });
+        document.addEventListener('click', function () { exportWrap.classList.remove('is-open'); });
+    }
+
+    // Preview density + fullscreen expand.
+    var viewMode = document.getElementById('rc2ViewMode');
+    var statement = document.getElementById('rc2Statement');
+    if (viewMode && statement) {
+        viewMode.addEventListener('change', function () {
+            statement.classList.toggle('is-compact', viewMode.value === 'compact');
+        });
+    }
+    var expandBtn = document.getElementById('rc2Expand');
+    var preview = document.getElementById('rc2Preview');
+    if (expandBtn && preview) {
+        expandBtn.addEventListener('click', function () {
+            preview.classList.toggle('rc2-preview-full');
+            document.body.classList.toggle('rc2-noscroll', preview.classList.contains('rc2-preview-full'));
+        });
+    }
+})();
+</script>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
