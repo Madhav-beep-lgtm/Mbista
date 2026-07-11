@@ -320,6 +320,15 @@ if ($ticketId > 0 && $clientIdsInScope !== []) {
         $msgStmt = db()->prepare('SELECT tm.*, u.name AS sender_name FROM support_ticket_messages tm INNER JOIN users u ON u.id = tm.sender_id WHERE tm.ticket_id = :ticket_id ORDER BY tm.created_at ASC');
         $msgStmt->execute(['ticket_id' => $ticketId]);
         $ticketMessages = $msgStmt->fetchAll();
+
+        // Pull the target invoice so the admin can judge the request against
+        // the real figures and jump straight to the invoice desk.
+        $requestInvoice = null;
+        if (!empty($ticket['target_invoice_id'])) {
+            $reqInvStmt = db()->prepare('SELECT id, invoice_no, status, taxable_amount, vat_amount, total_amount, discount_amount, due_on FROM task_invoices WHERE id = :id AND company_id = :company_id LIMIT 1');
+            $reqInvStmt->execute(['id' => (int) $ticket['target_invoice_id'], 'company_id' => $companyId]);
+            $requestInvoice = $reqInvStmt->fetch() ?: null;
+        }
     } else {
         $ticketId = 0;
     }
@@ -503,11 +512,24 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                     <strong>Request Details:</strong>
                     <?php if (!empty($ticket['target_task_id'])): ?>Task #<?= e((int) $ticket['target_task_id']) ?> <?php endif; ?>
                     <?php if (!empty($ticket['target_stage_id'])): ?>Stage #<?= e((int) $ticket['target_stage_id']) ?> <?php endif; ?>
-                    <?php if (!empty($ticket['target_invoice_id'])): ?>Invoice #<?= e((int) $ticket['target_invoice_id']) ?> <?php endif; ?>
                     <?php if (!empty($ticket['requested_amount'])): ?>Amount <?= e(site_currency_symbol()) ?><?= e(number_format((float) $ticket['requested_amount'], 2)) ?> <?php endif; ?>
                     <?php if (!empty($ticket['requested_percent'])): ?>Percent <?= e(number_format((float) $ticket['requested_percent'], 2)) ?>% <?php endif; ?>
                     <?php if (!empty($ticket['requested_due_on'])): ?>Due <?= e($ticket['requested_due_on']) ?><?php endif; ?>
                 </p>
+                <?php if (!empty($requestInvoice)): ?>
+                    <p>
+                        <strong>Target Invoice:</strong>
+                        <?= e($requestInvoice['invoice_no']) ?>
+                        — taxable <?= e(site_currency_symbol()) ?><?= e(number_format((float) $requestInvoice['taxable_amount'], 2)) ?>,
+                        total <?= e(site_currency_symbol()) ?><?= e(number_format((float) $requestInvoice['total_amount'], 2)) ?>
+                        <?php if ((float) ($requestInvoice['discount_amount'] ?? 0) > 0): ?>, discount already given <?= e(site_currency_symbol()) ?><?= e(number_format((float) $requestInvoice['discount_amount'], 2)) ?><?php endif; ?>
+                        <?php if (!empty($requestInvoice['due_on'])): ?>, due <?= e((string) $requestInvoice['due_on']) ?><?php endif; ?>
+                        (<?= e((string) $requestInvoice['status']) ?>)
+                        &nbsp;<a class="mbw-view-all" href="<?= e(url('admin/invoice.php?invoice_id=' . (int) $requestInvoice['id'])) ?>">Open invoice desk</a>
+                    </p>
+                <?php elseif (!empty($ticket['target_invoice_id'])): ?>
+                    <p><strong>Target Invoice:</strong> #<?= e((int) $ticket['target_invoice_id']) ?></p>
+                <?php endif; ?>
                 <p><strong>Decision Status:</strong> <span class="mbw-pill <?= e($decisionTones[$ticket['decision_status'] ?? 'pending'] ?? 'tone-gray') ?>"><?= e($requestDecisionLabels[$ticket['decision_status'] ?? 'pending'] ?? ($ticket['decision_status'] ?? 'pending')) ?></span></p>
             <?php endif; ?>
             <p><?= nl2br(e($ticket['description'])) ?></p>
@@ -531,14 +553,14 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                             <option value="deferred">Defer</option>
                         </select>
                     </label>
-                    <label>Approved amount (optional)
-                        <input type="number" name="approved_amount" min="0" step="0.01" value="<?= e((string) ($ticket['approved_amount'] ?? '')) ?>">
+                    <label>Approved amount (prefilled with the client's ask — change it to counter)
+                        <input type="number" name="approved_amount" min="0" step="0.01" value="<?= e((string) ($ticket['approved_amount'] ?? $ticket['requested_amount'] ?? '')) ?>">
                     </label>
-                    <label>Approved percent (optional)
-                        <input type="number" name="approved_percent" min="0" max="100" step="0.01" value="<?= e((string) ($ticket['approved_percent'] ?? '')) ?>">
+                    <label>Approved percent
+                        <input type="number" name="approved_percent" min="0" max="100" step="0.01" value="<?= e((string) ($ticket['approved_percent'] ?? $ticket['requested_percent'] ?? '')) ?>">
                     </label>
-                    <label>Approved due date (optional)
-                        <input type="date" name="approved_due_on" value="<?= e((string) ($ticket['approved_due_on'] ?? '')) ?>">
+                    <label>Approved due date
+                        <input type="date" name="approved_due_on" value="<?= e((string) ($ticket['approved_due_on'] ?? $ticket['requested_due_on'] ?? '')) ?>">
                     </label>
                     <label class="workspace-span-2">Admin note<textarea name="admin_note"><?= e((string) ($ticket['admin_note'] ?? '')) ?></textarea></label>
                     <div class="workspace-span-2">
