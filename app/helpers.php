@@ -1739,6 +1739,11 @@ function create_voucher_with_entries(array $voucher, array $entries): int
             $params[$approvalColumn] = $voucher[$approvalColumn] ?? null;
         }
     }
+    // approval_state is NOT NULL: default it from the posting status when the
+    // caller does not manage approvals explicitly (auto-posts, imports, seeds).
+    if (array_key_exists('approval_state', $params) && $params['approval_state'] === null) {
+        $params['approval_state'] = ($params['status'] === 'posted') ? 'approved' : 'draft';
+    }
 
     $stmt = db()->prepare('INSERT INTO vouchers (company_id, fiscal_year_id, voucher_no, voucher_type, source_type, source_id, narration, total_amount, status, posted_by, posted_at' . $extraColumns . ') VALUES (:company_id, :fiscal_year_id, :voucher_no, :voucher_type, :source_type, :source_id, :narration, :total_amount, :status, :posted_by, :posted_at' . $extraValues . ')');
     $stmt->execute($params);
@@ -4641,4 +4646,208 @@ function get_chart_of_accounts_tree(int $companyId): array
     });
 
     return $tree;
+}
+
+/**
+ * Adds a system/timeline note into a support ticket conversation.
+ */
+function ticket_request_note(int $ticketId, int $senderId, string $body): void
+{
+    if (!table_exists('support_ticket_messages') || $body === '') {
+        return;
+    }
+    try {
+        db()->prepare('INSERT INTO support_ticket_messages (ticket_id, sender_id, body) VALUES (:ticket_id, :sender_id, :body)')
+            ->execute(['ticket_id' => $ticketId, 'sender_id' => $senderId, 'body' => $body]);
+    } catch (Throwable $exception) {
+        // The timeline note is best-effort; the decision itself must not fail.
+    }
+}
+
+/**
+ * Emails the ticket's client about a request update when the
+ * "notify_client_email" setting is enabled. Failures are swallowed —
+ * email is a convenience on top of the in-portal timeline.
+ */
+function notify_ticket_client_email(int $ticketId, string $subject, string $htmlBody): void
+{
+    $enabled = strtolower((string) setting('notify_client_email', '0'));
+    if (!in_array($enabled, ['1', 'true', 'yes', 'on'], true)) {
+        return;
+    }
+    try {
+        if (!function_exists('send_app_email')) {
+            require_once __DIR__ . '/mailer.php';
+        }
+        $stmt = db()->prepare('SELECT u.email FROM support_tickets st
+            INNER JOIN client_profiles cp ON cp.id = st.client_id
+            INNER JOIN users u ON u.id = cp.user_id
+            WHERE st.id = :id LIMIT 1');
+        $stmt->execute(['id' => $ticketId]);
+        $email = (string) ($stmt->fetchColumn() ?: '');
+        if ($email !== '') {
+            send_app_email($email, $subject, $htmlBody);
+        }
+    } catch (Throwable $exception) {
+        // Never let notification failures break the approval flow.
+    }
+}
+
+/**
+ * Applies an approved billing request (raised from a support ticket) to its
+ * target: issues the invoice, writes the discount onto the invoice, extends
+ * the due date, or creates the pending payment request. Shared by the admin
+ * decision handler and the client's acceptance of a negotiated counter-offer.
+ *
+ * @return array{error: ?string, invoice_id: ?int}
+ */
+function apply_ticket_request_decision(array $request, int $companyId, ?float $approvedAmount, ?float $approvedPercent, ?string $approvedDueOn, int $actorId): array
+{
+    $requestType = (string) ($request['request_type'] ?? '');
+    $appliedInvoiceId = null;
+
+    if ($requestType === 'invoice_request') {
+        if (!empty($request['target_invoice_id'])) {
+            $appliedInvoiceId = (int) $request['target_invoice_id'];
+        } else {
+            $targetTaskId = (int) ($request['target_task_id'] ?? 0);
+            $targetStageId = (int) ($request['target_stage_id'] ?? 0);
+            $issueAmount = $approvedAmount ?? (is_numeric((string) ($request['requested_amount'] ?? '')) ? round((float) $request['requested_amount'], 2) : 0.0);
+
+            if ($targetTaskId <= 0 || $issueAmount <= 0) {
+                return ['error' => 'Invoice request needs target task and amount.', 'invoice_id' => null];
+            }
+
+            $taskStmt = db()->prepare('SELECT id, status FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1');
+            $taskStmt->execute(['id' => $targetTaskId, 'company_id' => $companyId]);
+            $task = $taskStmt->fetch();
+            if (!$task || ($task['status'] ?? '') !== 'completed') {
+                return ['error' => 'Invoice can be issued only for completed task.', 'invoice_id' => null];
+            }
+
+            if ($targetStageId > 0) {
+                $stageStmt = db()->prepare('SELECT id, status FROM task_stages WHERE id = :id AND task_id = :task_id AND company_id = :company_id LIMIT 1');
+                $stageStmt->execute(['id' => $targetStageId, 'task_id' => $targetTaskId, 'company_id' => $companyId]);
+                $stage = $stageStmt->fetch();
+                if (!$stage || ($stage['status'] ?? '') !== 'completed') {
+                    return ['error' => 'Stage invoice can be issued only for completed stage.', 'invoice_id' => null];
+                }
+            }
+
+            $invoiceNo = 'INV-REQ-' . date('Ymd') . '-' . str_pad((string) $targetTaskId, 5, '0', STR_PAD_LEFT) . '-' . strtoupper(substr(bin2hex(random_bytes(3)), 0, 4));
+            $insertInvoice = db()->prepare('INSERT INTO task_invoices (company_id, task_id, stage_id, invoice_no, invoice_type, amount, status, issued_on, due_on, notes, issued_by) VALUES (:company_id, :task_id, :stage_id, :invoice_no, :invoice_type, :amount, :status, :issued_on, :due_on, :notes, :issued_by)');
+            $insertInvoice->execute([
+                'company_id' => $companyId,
+                'task_id' => $targetTaskId,
+                'stage_id' => $targetStageId > 0 ? $targetStageId : null,
+                'invoice_no' => $invoiceNo,
+                'invoice_type' => $targetStageId > 0 ? 'stage' : 'task',
+                'amount' => $issueAmount,
+                'status' => 'issued',
+                'issued_on' => date('Y-m-d'),
+                'due_on' => $approvedDueOn,
+                'notes' => 'Issued from support ticket request #' . (int) ($request['ticket_id'] ?? 0),
+                'issued_by' => $actorId,
+            ]);
+            $appliedInvoiceId = (int) db()->lastInsertId();
+
+            try {
+                $vatRate = 13.00;
+                $vatAmount = round($issueAmount * ($vatRate / 100), 2);
+                $totalAmount = round($issueAmount + $vatAmount, 2);
+                db()->prepare('UPDATE task_invoices SET invoice_category = :category, vat_rate = :vat_rate, vat_amount = :vat_amount, taxable_amount = :taxable_amount, total_amount = :total_amount WHERE id = :id AND company_id = :company_id')
+                    ->execute([
+                        'category' => 'proforma',
+                        'vat_rate' => $vatRate,
+                        'vat_amount' => $vatAmount,
+                        'taxable_amount' => $issueAmount,
+                        'total_amount' => $totalAmount,
+                        'id' => $appliedInvoiceId,
+                        'company_id' => $companyId,
+                    ]);
+            } catch (Throwable $ignored) {
+            }
+
+            auto_post_task_invoice_voucher($appliedInvoiceId, $actorId);
+        }
+    }
+
+    if ($requestType === 'discount_request') {
+        $targetInvoiceId = (int) ($request['target_invoice_id'] ?? 0);
+        if ($targetInvoiceId <= 0) {
+            return ['error' => 'Discount request needs a target invoice.', 'invoice_id' => null];
+        }
+        $invoiceStmt = db()->prepare('SELECT * FROM task_invoices WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $invoiceStmt->execute(['id' => $targetInvoiceId, 'company_id' => $companyId]);
+        $invoice = $invoiceStmt->fetch();
+        if (!$invoice) {
+            return ['error' => 'Target invoice not found.', 'invoice_id' => null];
+        }
+
+        $taxable = (float) ($invoice['taxable_amount'] ?? $invoice['amount'] ?? 0);
+        $discountPercent = $approvedPercent ?? (is_numeric((string) ($request['requested_percent'] ?? '')) ? (float) $request['requested_percent'] : 0.0);
+        $discountFixed = $approvedAmount ?? (is_numeric((string) ($request['requested_amount'] ?? '')) ? (float) $request['requested_amount'] : 0.0);
+        $discountAmount = $discountFixed > 0
+            ? $discountFixed
+            : ($discountPercent > 0 ? round($taxable * ($discountPercent / 100), 2) : 0.0);
+
+        if ($discountAmount <= 0 || $discountAmount >= $taxable) {
+            return ['error' => 'Discount amount is invalid for selected invoice.', 'invoice_id' => null];
+        }
+
+        $newTaxable = round($taxable - $discountAmount, 2);
+        $vatRate = (float) ($invoice['vat_rate'] ?? 13.00);
+        $newVat = round($newTaxable * ($vatRate / 100), 2);
+        $newTotal = round($newTaxable + $newVat, 2);
+        db()->prepare('UPDATE task_invoices SET taxable_amount = :taxable_amount, vat_amount = :vat_amount, total_amount = :total_amount, discount_type = :discount_type, discount_value = :discount_value, discount_amount = :discount_amount, adjusted_on = NOW(), adjusted_by = :adjusted_by WHERE id = :id AND company_id = :company_id')
+            ->execute([
+                'taxable_amount' => $newTaxable,
+                'vat_amount' => $newVat,
+                'total_amount' => $newTotal,
+                'discount_type' => $discountFixed > 0 ? 'fixed' : 'percent',
+                'discount_value' => $discountFixed > 0 ? $discountFixed : $discountPercent,
+                'discount_amount' => $discountAmount,
+                'adjusted_by' => $actorId,
+                'id' => $targetInvoiceId,
+                'company_id' => $companyId,
+            ]);
+        $appliedInvoiceId = $targetInvoiceId;
+    }
+
+    if ($requestType === 'credit_period_request') {
+        $targetInvoiceId = (int) ($request['target_invoice_id'] ?? 0);
+        $newDue = $approvedDueOn ?: ($request['requested_due_on'] ?? null);
+        if ($targetInvoiceId <= 0 || !$newDue) {
+            return ['error' => 'Credit period request needs target invoice and due date.', 'invoice_id' => null];
+        }
+        db()->prepare('UPDATE task_invoices SET due_on = :due_on, adjusted_on = NOW(), adjusted_by = :adjusted_by WHERE id = :id AND company_id = :company_id')
+            ->execute([
+                'due_on' => $newDue,
+                'adjusted_by' => $actorId,
+                'id' => $targetInvoiceId,
+                'company_id' => $companyId,
+            ]);
+        $appliedInvoiceId = $targetInvoiceId;
+    }
+
+    if (in_array($requestType, ['advance_payment_request', 'partial_payment_request'], true)) {
+        $targetInvoiceId = (int) ($request['target_invoice_id'] ?? 0);
+        $requestAmount = $approvedAmount ?? (is_numeric((string) ($request['requested_amount'] ?? '')) ? round((float) $request['requested_amount'], 2) : 0.0);
+        if ($targetInvoiceId <= 0 || $requestAmount <= 0) {
+            return ['error' => 'Payment request needs target invoice and amount.', 'invoice_id' => null];
+        }
+        db()->prepare('INSERT INTO invoice_payment_requests (invoice_id, company_id, requested_by, amount_requested, payment_method, status, notes) VALUES (:invoice_id, :company_id, :requested_by, :amount_requested, :payment_method, :status, :notes)')
+            ->execute([
+                'invoice_id' => $targetInvoiceId,
+                'company_id' => $companyId,
+                'requested_by' => $actorId,
+                'amount_requested' => $requestAmount,
+                'payment_method' => 'Pending client payment',
+                'status' => 'pending',
+                'notes' => ucfirst(str_replace('_', ' ', $requestType)) . ' approved from support ticket #' . (int) ($request['ticket_id'] ?? 0),
+            ]);
+        $appliedInvoiceId = $targetInvoiceId;
+    }
+
+    return ['error' => null, 'invoice_id' => $appliedInvoiceId];
 }

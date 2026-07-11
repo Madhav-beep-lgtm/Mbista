@@ -9204,3 +9204,71 @@ body.theme-dark .trust-item-text span {
     border-left: 0;
   }
 }
+
+/* ==========================================================================
+   Compact spacing pass
+   The public pages carried very large vertical paddings (60-100px per
+   section), which read as big empty bands — especially in dark mode.
+   This layer tightens every band while keeping the visual rhythm.
+   ========================================================================== */
+
+.section {
+  padding: 18px 0 8px;
+}
+
+.section-head {
+  margin-bottom: 12px;
+}
+
+body.home-page .hero {
+  min-height: 440px;
+}
+
+body.home-page .hero-panel {
+  /* Bottom stays large enough for the stats band's -46px overlap. */
+  padding: 38px 0 78px;
+}
+
+.hero-stats-band {
+  margin-top: -46px;
+  padding: 16px 20px;
+}
+
+body.home-page .section {
+  padding: 32px 0;
+}
+
+body.home-page .section-head {
+  margin-bottom: 16px;
+}
+
+.why-choose-section {
+  padding: 28px 0 14px;
+}
+
+.page-header-band {
+  padding: 26px 0 22px;
+}
+
+.internal-page-band {
+  padding: 26px 0 34px;
+}
+
+.internal-page-layout {
+  gap: 26px;
+}
+
+@media (max-width: 640px) {
+  body.home-page .section,
+  .internal-page-band {
+    padding: 22px 0;
+  }
+
+  body.home-page .hero {
+    min-height: 0;
+  }
+
+  body.home-page .hero-panel {
+    padding: 28px 0 70px;
+  }
+}

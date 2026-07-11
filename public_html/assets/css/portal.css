@@ -2922,3 +2922,24 @@ body.rc2-noscroll {
     margin-left: 0;
   }
 }
+
+/* ==========================================================================
+   Compact spacing pass — tighter content rhythm across the portals.
+   ========================================================================== */
+
+body.admin-layout .admin-main {
+  padding: 14px 20px 22px;
+}
+
+body.admin-layout .admin-content {
+  gap: 14px;
+}
+
+body.admin-layout .admin-topbar {
+  min-height: 56px;
+}
+
+body.admin-layout .admin-hero {
+  margin-bottom: 12px;
+  padding: 16px 18px;
+}

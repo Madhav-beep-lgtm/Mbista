@@ -381,11 +381,18 @@ if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $invStmt->execute(['id' => $targetInvoiceId, 'client_id' => $clientId]);
         $targetInvoice = $invStmt->fetch();
 
+        $adjustmentTypeLabels = [
+            'credit_period_request' => 'Additional credit period',
+            'discount_request' => 'Discount',
+            'partial_payment_request' => 'Partial payment',
+            'advance_payment_request' => 'Advance payment',
+        ];
+
         if (!$targetInvoice) {
             flash('error', 'That invoice is not available.');
             redirect('dashboard.php?view=invoices');
         }
-        if (!in_array($adjustmentType, ['credit_period_request', 'discount_request'], true)) {
+        if (!isset($adjustmentTypeLabels[$adjustmentType])) {
             flash('error', 'Choose a valid request type.');
             redirect('dashboard.php?view=invoices');
         }
@@ -401,8 +408,13 @@ if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Enter the discount amount or percentage you are requesting.');
             redirect('dashboard.php?view=invoices');
         }
+        if (in_array($adjustmentType, ['partial_payment_request', 'advance_payment_request'], true)
+            && ($requestedAmount === '' || !is_numeric($requestedAmount) || (float) $requestedAmount <= 0)) {
+            flash('error', 'Enter the amount you want to pay.');
+            redirect('dashboard.php?view=invoices');
+        }
 
-        $typeLabel = $adjustmentType === 'credit_period_request' ? 'Additional credit period' : 'Discount';
+        $typeLabel = $adjustmentTypeLabels[$adjustmentType];
         $ticketNo = next_ticket_number((int) $clientProfile['company_id']);
         $stmt = db()->prepare('INSERT INTO support_tickets (company_id, client_id, ticket_no, subject, category, priority, description) VALUES (:company_id, :client_id, :ticket_no, :subject, :category, :priority, :description)');
         $stmt->execute([
@@ -432,6 +444,47 @@ if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
         log_activity('support_ticket', $newTicketId, 'created', $typeLabel . ' request raised from invoice view.', $userId);
         flash('success', $typeLabel . ' request sent (ticket ' . $ticketNo . '). Track the decision under Tickets.');
         redirect('dashboard.php?view=tickets&ticket_id=' . $newTicketId);
+    }
+
+    if ($action === 'accept_request_offer' && table_exists('support_ticket_requests')) {
+        $ticketId = (int) ($_POST['ticket_id'] ?? 0);
+
+        $offerStmt = db()->prepare('SELECT st.subject, tr.*
+            FROM support_tickets st
+            INNER JOIN support_ticket_requests tr ON tr.ticket_id = st.id
+            WHERE st.id = :id AND st.client_id = :client_id
+            LIMIT 1');
+        $offerStmt->execute(['id' => $ticketId, 'client_id' => $clientId]);
+        $offer = $offerStmt->fetch();
+
+        if (!$offer || (string) ($offer['decision_status'] ?? '') !== 'negotiation') {
+            flash('error', 'There is no open counter-offer on that ticket.');
+            redirect('dashboard.php?view=tickets');
+        }
+
+        $offerAmount = $offer['approved_amount'] !== null ? (float) $offer['approved_amount'] : null;
+        $offerPercent = $offer['approved_percent'] !== null ? (float) $offer['approved_percent'] : null;
+        $offerDueOn = !empty($offer['approved_due_on']) ? (string) $offer['approved_due_on'] : null;
+
+        $result = apply_ticket_request_decision($offer, (int) $offer['company_id'], $offerAmount, $offerPercent, $offerDueOn, $userId);
+        if ($result['error']) {
+            flash('error', $result['error']);
+            redirect('dashboard.php?view=tickets&ticket_id=' . $ticketId);
+        }
+
+        db()->prepare('UPDATE support_ticket_requests SET decision_status = :status, applied_invoice_id = :invoice_id, processed_on = NOW() WHERE ticket_id = :ticket_id')
+            ->execute([
+                'status' => 'approved',
+                'invoice_id' => $result['invoice_id'],
+                'ticket_id' => $ticketId,
+            ]);
+        db()->prepare('UPDATE support_tickets SET status = :status WHERE id = :id')
+            ->execute(['status' => 'resolved', 'id' => $ticketId]);
+
+        ticket_request_note($ticketId, $userId, 'Client accepted the counter-offer. The agreed terms have been applied.');
+        log_activity('support_ticket', $ticketId, 'counter_accepted', 'Client accepted the negotiated terms.', $userId);
+        flash('success', 'Counter-offer accepted — the agreed terms are now applied.');
+        redirect('dashboard.php?view=tickets&ticket_id=' . $ticketId);
     }
 }
 
@@ -1127,8 +1180,8 @@ include __DIR__ . '/../app/views/partials/client_header.php';
 
                                                 <details class="feature-disclosure" style="margin-top: 0.5rem;">
                                                     <summary>
-                                                        <span><strong><?= icon('tickets') ?>Ask for more time or a discount</strong>
-                                                        <small>Request an additional credit period or a discount on this invoice.</small></span>
+                                                        <span><strong><?= icon('tickets') ?>Ask for more time, a discount, or offer a payment</strong>
+                                                        <small>Request a credit period, a discount, or propose a partial / advance payment on this invoice.</small></span>
                                                         <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
                                                     </summary>
                                                     <form method="post" class="workspace-form-grid">
@@ -1139,10 +1192,12 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                                             <select name="adjustment_type" required>
                                                                 <option value="credit_period_request">Additional credit period</option>
                                                                 <option value="discount_request">Discount</option>
+                                                                <option value="partial_payment_request">Partial payment (pay part now)</option>
+                                                                <option value="advance_payment_request">Advance payment</option>
                                                             </select>
                                                         </label>
                                                         <label>New due date (for credit period)<input type="date" name="requested_due_on"></label>
-                                                        <label>Discount amount (optional)<input type="number" name="requested_amount" min="0" step="0.01"></label>
+                                                        <label>Amount (discount or payment)<input type="number" name="requested_amount" min="0" step="0.01"></label>
                                                         <label>Discount percent (optional)<input type="number" name="requested_percent" min="0" max="100" step="0.01"></label>
                                                         <label class="workspace-span-2">Reason<textarea name="reason" rows="2" required></textarea></label>
                                                         <div class="workspace-span-2">
@@ -1481,7 +1536,23 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                 <p><strong>Category:</strong> <?= e($ticketCategoryLabels[$ticket['category']] ?? $ticket['category']) ?> | <strong>Priority:</strong> <?= e($ticket['priority']) ?></p>
                 <p><strong>Request Type:</strong> <?= e($ticketRequestTypeLabels[$ticket['request_type'] ?? 'none'] ?? 'General support') ?></p>
                 <?php if (!empty($ticket['decision_status']) && ($ticket['decision_status'] ?? 'pending') !== 'pending'): ?>
-                    <p><strong>Decision:</strong> <?= e($ticket['decision_status']) ?></p>
+                    <p><strong>Decision:</strong> <?= e(ucwords(str_replace('_', ' ', (string) $ticket['decision_status']))) ?></p>
+                <?php endif; ?>
+                <?php if (($ticket['decision_status'] ?? '') === 'negotiation'): ?>
+                    <div class="notice">
+                        <strong>Counter-offer from your service provider:</strong>
+                        <?php if ($ticket['approved_amount'] !== null): ?> Amount <?= e(site_currency_symbol()) ?><?= e(number_format((float) $ticket['approved_amount'], 2)) ?>.<?php endif; ?>
+                        <?php if ($ticket['approved_percent'] !== null): ?> <?= e((string) (float) $ticket['approved_percent']) ?>%.<?php endif; ?>
+                        <?php if (!empty($ticket['approved_due_on'])): ?> Proposed due date <?= e((string) $ticket['approved_due_on']) ?>.<?php endif; ?>
+                        <?php if (!empty($ticket['admin_note'])): ?><br><em><?= e((string) $ticket['admin_note']) ?></em><?php endif; ?>
+                        <form method="post" style="margin-top: 10px;">
+                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                            <input type="hidden" name="action" value="accept_request_offer">
+                            <input type="hidden" name="ticket_id" value="<?= e((int) $ticket['id']) ?>">
+                            <button type="submit"><?= icon('tasks') ?>Accept counter-offer</button>
+                        </form>
+                        <small>Not happy with the terms? Just reply below to keep negotiating.</small>
+                    </div>
                 <?php endif; ?>
                 <p><?= nl2br(e($ticket['description'])) ?></p>
                 <?php if ($ticket['resolution']): ?>

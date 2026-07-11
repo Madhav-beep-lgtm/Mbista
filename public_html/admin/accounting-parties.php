@@ -165,6 +165,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Payment stays recorded even if the accounting auto-post cannot run.
         }
 
+        // Issue a receipt here too, so receipts exist no matter which desk
+        // recorded the payment (previously only the invoice desk did this).
+        if (table_exists('invoice_payment_receipts')) {
+            try {
+                db()->prepare('INSERT INTO invoice_payment_receipts (payment_request_id, invoice_id, company_id, receipt_no, amount_received, payment_method, received_on, notes, created_by)
+                    VALUES (:payment_request_id, :invoice_id, :company_id, :receipt_no, :amount_received, :payment_method, :received_on, :notes, :created_by)')
+                    ->execute([
+                        'payment_request_id' => $paymentRequestId,
+                        'invoice_id' => $invoiceId,
+                        'company_id' => $companyId,
+                        'receipt_no' => next_receipt_number($companyId),
+                        'amount_received' => $amount,
+                        'payment_method' => $method !== '' ? $method : null,
+                        'received_on' => $receivedOn !== '' ? $receivedOn : date('Y-m-d'),
+                        'notes' => $note !== '' ? $note : null,
+                        'created_by' => $userId,
+                    ]);
+            } catch (Throwable $exception) {
+                // Receipt issuance is best-effort; the payment is already recorded.
+            }
+        }
+
         log_activity('invoice_payment', $paymentRequestId, 'recorded', 'Payment recorded against invoice ' . $invoice['invoice_no'] . '.', $userId);
         flash('success', 'Payment of ' . site_currency_symbol() . number_format($amount, 2) . ' recorded against ' . $invoice['invoice_no'] . '.');
         redirect('admin/accounting-parties.php?tab=sales');
