@@ -31,13 +31,119 @@ function payroll_settings(int $companyId): array
     return (array) $row;
 }
 
-/** Published tax version for the fiscal year (latest effective first). */
+/**
+ * Put the auto-created payroll ledgers (by code) under classification-correct
+ * groups, so they land on the right statement: expenses under an
+ * indirect-expense group, statutory withholdings under Duties & Taxes, net
+ * salary under Employee Payables, advances under a NON-cash current-asset
+ * group. A misgrouped expense sits on the balance sheet and unbalances it; an
+ * advance inside a cash/bank group corrupts the cash flow statement.
+ * Idempotent — safe from both the seeder and the self-repair.
+ */
+function payroll_fix_ledger_groups(int $companyId): void
+{
+    $findGroup = static function (string $masterKey, array $nameLikes, bool $allowCashBank = true) use ($companyId): int {
+        foreach ($nameLikes as $like) {
+            $stmt = db()->prepare('SELECT id FROM ledger_groups WHERE company_id = :cid AND master_key = :mk AND is_active = 1'
+                . ($allowCashBank ? '' : ' AND is_cash_or_bank = 0')
+                . ' AND LOWER(name) LIKE :like ORDER BY id ASC LIMIT 1');
+            $stmt->execute(['cid' => $companyId, 'mk' => $masterKey, 'like' => $like]);
+            $id = (int) ($stmt->fetchColumn() ?: 0);
+            if ($id > 0) {
+                return $id;
+            }
+        }
+        return 0;
+    };
+    $ensureGroup = static function (string $masterKey, string $code, string $name, array $nameLikes, bool $allowCashBank = true) use ($companyId, $findGroup): int {
+        $id = $findGroup($masterKey, $nameLikes, $allowCashBank);
+        if ($id > 0) {
+            return $id;
+        }
+        db()->prepare('INSERT INTO ledger_groups (company_id, master_key, code, name, is_cash_or_bank, is_system, is_active)
+                VALUES (:cid, :mk, :code, :name, 0, 0, 1)')
+            ->execute(['cid' => $companyId, 'mk' => $masterKey, 'code' => $code, 'name' => $name]);
+        return (int) db()->lastInsertId();
+    };
+
+    $targets = [
+        // code => [target group resolver, list of group masters considered already-correct]
+        'SSF-EXP' => [
+            static fn (): int => $ensureGroup('indirect_expense', 'EMP_BENEFIT_EXP', 'Operating/Employee Benefit Expenses', ['%employee%', '%benefit%', '%operating%', '%admin%']),
+            ['direct_expense', 'indirect_expense'],
+        ],
+        'SAL-EXP' => [
+            static fn (): int => $ensureGroup('indirect_expense', 'EMP_BENEFIT_EXP', 'Operating/Employee Benefit Expenses', ['%employee%', '%benefit%', '%operating%', '%admin%']),
+            ['direct_expense', 'indirect_expense'],
+        ],
+        'TDS-PAY' => [
+            static fn (): int => $ensureGroup('current_liability', 'DUTIES_TAXES', 'Duties and Taxes', ['%duties%', '%tax%']),
+            [],
+        ],
+        'RET-PAY' => [
+            static fn (): int => $ensureGroup('current_liability', 'DUTIES_TAXES', 'Duties and Taxes', ['%duties%', '%tax%']),
+            [],
+        ],
+        'SAL-PAY' => [
+            static fn (): int => $ensureGroup('current_liability', 'EMP_PAYABLE', 'Employee Payables', ['%employee%payable%', '%payroll%', '%salary%payable%']),
+            [],
+        ],
+        'EMP-ADV' => [
+            static fn (): int => $ensureGroup('current_asset', 'LOANS_ADV', 'Loans and Advances', ['%loan%', '%advance%'], false),
+            [],
+        ],
+    ];
+
+    foreach ($targets as $ledgerCode => [$resolveTarget, $okMasters]) {
+        $stmt = db()->prepare('SELECT l.id, lg.master_key, COALESCE(lg.is_cash_or_bank, 0) AS is_cash_or_bank, lg.code AS group_code
+            FROM ledgers l LEFT JOIN ledger_groups lg ON lg.id = l.group_id
+            WHERE l.company_id = :cid AND l.code = :code LIMIT 1');
+        $stmt->execute(['cid' => $companyId, 'code' => $ledgerCode]);
+        $ledger = $stmt->fetch();
+        if (!$ledger) {
+            continue;
+        }
+        // Leave a deliberate, sane placement alone: expenses already under an
+        // expense master stay; liabilities/advances move only out of known-bad
+        // spots (Trade Payables, cash/bank groups, wrong master, no group).
+        $master = (string) ($ledger['master_key'] ?? '');
+        $isBad = match ($ledgerCode) {
+            'SSF-EXP', 'SAL-EXP' => !in_array($master, $okMasters, true),
+            'TDS-PAY', 'RET-PAY', 'SAL-PAY' => $master !== 'current_liability' && $master !== 'non_current_liability'
+                || (string) $ledger['group_code'] === 'PAYABLE',
+            'EMP-ADV' => !in_array($master, ['current_asset', 'non_current_asset'], true) || (int) $ledger['is_cash_or_bank'] === 1,
+            default => false,
+        };
+        if ($isBad) {
+            db()->prepare('UPDATE ledgers SET group_id = :gid WHERE id = :id')
+                ->execute(['gid' => $resolveTarget(), 'id' => (int) $ledger['id']]);
+        }
+    }
+}
+
+/**
+ * Published tax version for the fiscal year (latest effective first).
+ * Income tax slabs are national statute, so a company without its own
+ * published version inherits any company's published version whose fiscal
+ * year covers the same period; a company-specific version always wins.
+ */
 function payroll_active_tax_version(int $companyId, int $fiscalYearId): ?array
 {
     $stmt = db()->prepare("SELECT * FROM payroll_tax_versions
         WHERE company_id = :cid AND fiscal_year_id = :fy AND status = 'published'
         ORDER BY effective_from DESC, id DESC LIMIT 1");
     $stmt->execute(['cid' => $companyId, 'fy' => $fiscalYearId]);
+    $own = $stmt->fetch();
+    if ($own) {
+        return (array) $own;
+    }
+    $stmt = db()->prepare("SELECT tv.* FROM payroll_tax_versions tv
+        INNER JOIN fiscal_years own_fy ON own_fy.id = :fy
+        INNER JOIN fiscal_years their_fy ON their_fy.id = tv.fiscal_year_id
+        WHERE tv.status = 'published'
+          AND their_fy.start_date = own_fy.start_date AND their_fy.end_date = own_fy.end_date
+        ORDER BY tv.effective_from DESC, tv.id DESC LIMIT 1");
+    $stmt->execute(['fy' => $fiscalYearId]);
     return $stmt->fetch() ?: null;
 }
 

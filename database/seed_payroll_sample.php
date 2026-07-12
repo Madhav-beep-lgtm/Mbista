@@ -53,8 +53,11 @@ require_once __DIR__ . '/../app/payroll_engine.php';
     $adminId = (int) (db()->query("SELECT id FROM users WHERE email = 'sample.admin@mbista.local'")->fetchColumn() ?: 0);
 
     // --- Ledgers for mappings (find by name, else create) -------------------
+    // Master-scoped lookup: the name match must never pull a group from a
+    // different master (that once filed an expense under Prepaid Expenses).
     $findGroup = static function (int $companyId, array $masterKeys, string $nameLike): int {
-        $stmt = db()->prepare("SELECT id FROM ledger_groups WHERE company_id = :cid AND (master_key IN ('" . implode("','", $masterKeys) . "') OR LOWER(name) LIKE :like) ORDER BY id ASC LIMIT 1");
+        $stmt = db()->prepare("SELECT id FROM ledger_groups WHERE company_id = :cid AND master_key IN ('" . implode("','", $masterKeys) . "')
+            AND is_active = 1 ORDER BY LOWER(name) LIKE :like DESC, is_cash_or_bank ASC, id ASC LIMIT 1");
         $stmt->execute(['cid' => $companyId, 'like' => $nameLike]);
         return (int) ($stmt->fetchColumn() ?: 0);
     };
@@ -80,6 +83,10 @@ require_once __DIR__ . '/../app/payroll_engine.php';
     $retirementPayable = $ensureLedger($companyId, 'RET-PAY', 'Retirement Fund Payable', 'liability', $liabilityGroup);
     $salaryPayable = $ensureLedger($companyId, 'SAL-PAY', 'Salary Payable', 'liability', $liabilityGroup);
     $advanceLedger = $ensureLedger($companyId, 'EMP-ADV', 'Employee Advances', 'asset', $assetGroup);
+    // Whatever the rough matches above picked, re-home to classification-
+    // correct groups (creates Employee Payables / Loans and Advances if
+    // missing) so the statements stay balanced.
+    payroll_fix_ledger_groups($companyId);
     $bankStmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND status = 'active' AND (LOWER(name) LIKE '%bank%' OR LOWER(name) LIKE '%cash%') ORDER BY id ASC LIMIT 1");
     $bankStmt->execute(['cid' => $companyId]);
     $bankLedger = (int) ($bankStmt->fetchColumn() ?: 0);

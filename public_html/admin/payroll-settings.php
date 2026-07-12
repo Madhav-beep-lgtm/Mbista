@@ -187,6 +187,19 @@ $versions = db()->prepare('SELECT * FROM payroll_tax_versions WHERE company_id =
 $versions->execute(['cid' => $companyId, 'fy' => $fiscalYearId]);
 $versions = $versions->fetchAll();
 
+// Slabs are national statute: with no own published version, payroll inherits
+// a published version from another company for the same FY period. Name it so
+// the tax tab can say what is in effect rather than looking unconfigured.
+$hasOwnPublished = array_filter($versions, static fn (array $v): bool => (string) $v['status'] === 'published') !== [];
+$inheritedVersion = null;
+if (!$hasOwnPublished) {
+    $activeVersion = payroll_active_tax_version($companyId, $fiscalYearId);
+    if ($activeVersion && (int) $activeVersion['company_id'] !== $companyId) {
+        $inheritedFrom = company_by_id((int) $activeVersion['company_id']);
+        $inheritedVersion = $activeVersion + ['source_company_name' => (string) ($inheritedFrom['name'] ?? 'another company')];
+    }
+}
+
 $editVersion = null;
 $editVersionId = (int) ($_GET['tax_version'] ?? 0);
 foreach ($versions as $versionRow) {
@@ -341,11 +354,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="workspace-span-2"><button type="submit"><?= icon('compliance') ?><?= $editVersion ? 'Update Draft Version' : 'Save New Draft Version' ?></button></div>
     </form>
 
+    <?php if ($inheritedVersion): ?>
+        <div class="notice" style="margin-top:14px">Income tax slabs are national, so payroll here currently uses
+            <strong><?= e($inheritedVersion['label']) ?></strong> published under <strong><?= e($inheritedVersion['source_company_name']) ?></strong> for the same fiscal-year period.
+            Publish a version below only if this company needs different rules.</div>
+    <?php endif; ?>
     <div style="overflow-x:auto;margin-top:14px">
     <table>
         <thead><tr><th>#</th><th>Label</th><th>Legal reference</th><th>Effective</th><th>Retirement limit</th><th>Status</th><th></th></tr></thead>
         <tbody>
-            <?php if ($versions === []): ?><tr><td colspan="7">No tax versions for this fiscal year yet — payroll cannot calculate until one is published.</td></tr><?php endif; ?>
+            <?php if ($versions === []): ?><tr><td colspan="7">No tax versions of this company's own for this fiscal year<?= $inheritedVersion ? ' — the inherited national version above is in effect.' : ' — payroll cannot calculate until one is published here or in any company for the same period.' ?></td></tr><?php endif; ?>
             <?php foreach ($versions as $versionRow): ?>
                 <tr>
                     <td>v<?= e((int) $versionRow['id']) ?></td>

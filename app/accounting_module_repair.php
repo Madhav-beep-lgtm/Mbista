@@ -151,10 +151,30 @@ function accounting_module_repair_database(): array
         if (!is_file($migrationFile)) {
             throw new RuntimeException('031_payroll.sql not found beside the app.');
         }
-        foreach (array_filter(array_map('trim', explode(';', (string) file_get_contents($migrationFile)))) as $statement) {
-            if (stripos($statement, 'CREATE TABLE') !== false) {
+        // Drop `--` comment lines BEFORE splitting on ';' — comments may
+        // themselves contain semicolons, which would shear a statement apart.
+        $sqlLines = array_filter(
+            preg_split('/\R/', (string) file_get_contents($migrationFile)) ?: [],
+            static fn (string $line): bool => !str_starts_with(ltrim($line), '--')
+        );
+        foreach (array_filter(array_map('trim', explode(';', implode("\n", $sqlLines)))) as $statement) {
+            if (stripos($statement, 'CREATE TABLE') === 0) {
                 db()->exec($statement);
             }
+        }
+    });
+
+    $run('Re-home payroll ledgers', static function (): void {
+        // Auto-created payroll ledgers once landed in wrong groups (expense
+        // under Prepaid Expenses, advances under Bank), which unbalanced the
+        // balance sheet and corrupted the cash flow. payroll_fix_ledger_groups
+        // is idempotent and only moves misclassified ledgers.
+        require_once __DIR__ . '/payroll_engine.php';
+        $companies = db()->query("SELECT DISTINCT company_id FROM ledgers
+                WHERE code IN ('SSF-EXP', 'SAL-EXP', 'TDS-PAY', 'RET-PAY', 'SAL-PAY', 'EMP-ADV')")
+            ->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($companies as $repairCompanyId) {
+            payroll_fix_ledger_groups((int) $repairCompanyId);
         }
     });
 
