@@ -1708,6 +1708,185 @@ function get_mapped_ledger(int $companyId, string $mapKey): ?array
     return null;
 }
 
+/**
+ * The Trade Receivables / Trade Payables ledger GROUPS. Receivable and
+ * payable balances live in per-party ledgers under these groups; the old
+ * generic AR/AP ledgers remain only as a fallback for postings that have
+ * no party attached.
+ */
+function receivable_payable_group_id(int $companyId, string $side): int
+{
+    if ($companyId <= 0 || !table_exists('ledger_groups')) {
+        return 0;
+    }
+    $code = $side === 'payable' ? 'PAYABLE' : 'RECEIVABLE';
+    $name = $side === 'payable' ? 'Trade Payables' : 'Trade Receivables';
+    $masterKey = $side === 'payable' ? 'current_liability' : 'current_asset';
+
+    // Match by seed code first, then by name + nature: client-books
+    // companies (and structured-code companies) carry the same groups
+    // under generated numeric codes.
+    $stmt = db()->prepare('SELECT id FROM ledger_groups
+        WHERE company_id = :cid AND (code = :code OR (name = :name AND master_key = :master_key))
+        ORDER BY (code = :code2) DESC, id ASC
+        LIMIT 1');
+    $stmt->execute(['cid' => $companyId, 'code' => $code, 'name' => $name, 'master_key' => $masterKey, 'code2' => $code]);
+    $groupId = (int) ($stmt->fetchColumn() ?: 0);
+    if ($groupId > 0) {
+        return $groupId;
+    }
+    // Older companies may predate the seeded group structure.
+    db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, :name, :master_key, 0, 1)')
+        ->execute([
+            'cid' => $companyId,
+            'code' => $code,
+            'name' => $name,
+            'master_key' => $masterKey,
+        ]);
+    return (int) db()->lastInsertId();
+}
+
+/**
+ * Finds or creates the party's own ledger under Trade Receivables /
+ * Trade Payables, so invoices, receipts, purchase bills, and supplier
+ * payments post against the client or supplier by name instead of the
+ * generic AR/AP ledger. Returns 0 when it cannot resolve one (callers
+ * fall back to the mapped default ledger).
+ */
+function ensure_party_ledger(int $companyId, int $partyId, string $side = 'receivable'): int
+{
+    if ($companyId <= 0 || $partyId <= 0 || !table_exists('accounting_parties') || !table_exists('ledgers')) {
+        return 0;
+    }
+    try {
+        $partyStmt = db()->prepare('SELECT * FROM accounting_parties WHERE id = :id AND company_id = :cid LIMIT 1');
+        $partyStmt->execute(['id' => $partyId, 'cid' => $companyId]);
+        $party = $partyStmt->fetch();
+        if (!$party) {
+            return 0;
+        }
+
+        $hasPayableColumn = column_exists('accounting_parties', 'payable_ledger_id');
+        $column = $side === 'payable' ? ($hasPayableColumn ? 'payable_ledger_id' : null) : 'ledger_id';
+
+        $storedId = $column !== null ? (int) ($party[$column] ?? 0) : 0;
+        if ($storedId > 0) {
+            // Honour a stored/admin-linked ledger only when its nature fits
+            // the side, so a mis-linked cash or revenue ledger can never
+            // receive the receivable/payable leg.
+            $expectedType = $side === 'payable' ? 'liability' : 'asset';
+            $check = db()->prepare("SELECT id FROM ledgers WHERE id = :id AND company_id = :cid AND status = 'active' AND type = :type LIMIT 1");
+            $check->execute(['id' => $storedId, 'cid' => $companyId, 'type' => $expectedType]);
+            if ($check->fetchColumn()) {
+                return $storedId;
+            }
+        }
+
+        $groupId = receivable_payable_group_id($companyId, $side);
+        if ($groupId <= 0) {
+            return 0;
+        }
+
+        // Reuse a ledger already named after this party under the group.
+        $existing = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND group_id = :gid AND name = :name AND status = 'active' LIMIT 1");
+        $existing->execute(['cid' => $companyId, 'gid' => $groupId, 'name' => (string) $party['name']]);
+        $ledgerId = (int) ($existing->fetchColumn() ?: 0);
+
+        if ($ledgerId <= 0) {
+            db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status) VALUES (:cid, :gid, :code, :name, :type, 'active')")
+                ->execute([
+                    'cid' => $companyId,
+                    'gid' => $groupId,
+                    'code' => coa_next_ledger_code($companyId, $groupId),
+                    'name' => (string) $party['name'],
+                    'type' => $side === 'payable' ? 'liability' : 'asset',
+                ]);
+            $ledgerId = (int) db()->lastInsertId();
+        }
+
+        if ($ledgerId > 0 && $column !== null) {
+            db()->prepare("UPDATE accounting_parties SET {$column} = :lid WHERE id = :id")
+                ->execute(['lid' => $ledgerId, 'id' => $partyId]);
+        }
+
+        return $ledgerId;
+    } catch (Throwable $exception) {
+        return 0;
+    }
+}
+
+/**
+ * Finds or creates the accounting party that represents a work-portal
+ * client, so client invoices raised from tasks post to the client's own
+ * receivable ledger even when the invoice has no party attached.
+ */
+function ensure_party_for_client(int $companyId, int $clientId): int
+{
+    if ($companyId <= 0 || $clientId <= 0 || !table_exists('accounting_parties') || !table_exists('client_profiles')) {
+        return 0;
+    }
+    try {
+        $clientStmt = db()->prepare('SELECT organization_name, client_code FROM client_profiles WHERE id = :id LIMIT 1');
+        $clientStmt->execute(['id' => $clientId]);
+        $client = $clientStmt->fetch();
+        if (!$client || trim((string) $client['organization_name']) === '') {
+            return 0;
+        }
+        $name = trim((string) $client['organization_name']);
+
+        $existing = db()->prepare('SELECT id FROM accounting_parties WHERE company_id = :cid AND name = :name LIMIT 1');
+        $existing->execute(['cid' => $companyId, 'name' => $name]);
+        $partyId = (int) ($existing->fetchColumn() ?: 0);
+        if ($partyId > 0) {
+            return $partyId;
+        }
+
+        $code = strtoupper(trim((string) ($client['client_code'] ?? '')));
+        if ($code === '') {
+            $code = 'CL-' . $clientId;
+        }
+        $codeTaken = db()->prepare('SELECT id FROM accounting_parties WHERE company_id = :cid AND code = :code LIMIT 1');
+        $codeTaken->execute(['cid' => $companyId, 'code' => $code]);
+        if ($codeTaken->fetchColumn()) {
+            $code .= '-' . $clientId;
+        }
+
+        db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type, status) VALUES (:cid, :code, :name, 'customer', 'active')")
+            ->execute(['cid' => $companyId, 'code' => $code, 'name' => $name]);
+        return (int) db()->lastInsertId();
+    } catch (Throwable $exception) {
+        return 0;
+    }
+}
+
+/**
+ * Resolves the party an invoice belongs to: its own party_id when set,
+ * otherwise the work-portal client behind its task (creating the party
+ * on the fly). Returns 0 when no party can be determined.
+ */
+function invoice_party_id(array $invoice, int $companyId): int
+{
+    $partyId = (int) ($invoice['party_id'] ?? 0);
+    if ($partyId > 0 && table_exists('accounting_parties')) {
+        $check = db()->prepare('SELECT id FROM accounting_parties WHERE id = :id AND company_id = :cid LIMIT 1');
+        $check->execute(['id' => $partyId, 'cid' => $companyId]);
+        if ($check->fetchColumn()) {
+            return $partyId;
+        }
+        $partyId = 0;
+    }
+    $taskId = (int) ($invoice['task_id'] ?? 0);
+    if ($partyId <= 0 && $taskId > 0 && table_exists('client_tasks')) {
+        $clientStmt = db()->prepare('SELECT client_id FROM client_tasks WHERE id = :id LIMIT 1');
+        $clientStmt->execute(['id' => $taskId]);
+        $clientId = (int) ($clientStmt->fetchColumn() ?: 0);
+        if ($clientId > 0) {
+            $partyId = ensure_party_for_client($companyId, $clientId);
+        }
+    }
+    return $partyId;
+}
+
 function create_voucher_with_entries(array $voucher, array $entries): int
 {
     if (!table_exists('vouchers') || !table_exists('voucher_entries')) {
@@ -1954,11 +2133,22 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
         $fiscalYearId = (int) $default['fiscal_year']['id'];
     }
 
-    $receivableLedger = get_mapped_ledger($companyId, 'default_accounts_receivable');
     $revenueLedger = get_mapped_ledger($companyId, 'default_service_revenue');
     $taxPayableLedger = get_mapped_ledger($companyId, 'default_tax_payable');
     $excisePayableLedger = get_mapped_ledger($companyId, 'default_excise_payable');
-    if (!$receivableLedger || !$revenueLedger) {
+    if (!$revenueLedger) {
+        return;
+    }
+
+    // Receivable posts to the client's own ledger under Trade Receivables;
+    // the mapped generic AR ledger is only the no-party fallback.
+    $invoicePartyId = invoice_party_id($invoice, $companyId);
+    $receivableLedgerId = $invoicePartyId > 0 ? ensure_party_ledger($companyId, $invoicePartyId, 'receivable') : 0;
+    if ($receivableLedgerId <= 0) {
+        $receivableLedger = get_mapped_ledger($companyId, 'default_accounts_receivable');
+        $receivableLedgerId = (int) ($receivableLedger['id'] ?? 0);
+    }
+    if ($receivableLedgerId <= 0) {
         return;
     }
 
@@ -1979,7 +2169,7 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
     $voucherNo = 'SV-' . date('Ymd') . '-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT);
     $entries = [
         [
-            'ledger_id' => (int) $receivableLedger['id'],
+            'ledger_id' => $receivableLedgerId,
             'entry_type' => 'debit',
             'amount' => $totalAmount,
             'memo' => 'Amount receivable from client',
@@ -2017,6 +2207,7 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
         'source_id' => $invoiceId,
         'reference_no' => $invoice['invoice_no'] ?? null,
         'voucher_date' => $invoice['issued_on'] ?? date('Y-m-d'),
+        'party_id' => $invoicePartyId > 0 ? $invoicePartyId : null,
         'narration' => 'Auto-posted sales voucher for invoice ' . ($invoice['invoice_no'] ?? '#' . $invoiceId),
         'total_amount' => $totalAmount,
         'status' => 'posted',
@@ -2043,7 +2234,7 @@ function auto_post_invoice_payment_voucher(int $paymentRequestId, ?int $actorId 
     }
 
     $stmt = db()->prepare('
-        SELECT pr.*, ti.invoice_no, ti.company_id AS invoice_company_id
+        SELECT pr.*, ti.invoice_no, ti.company_id AS invoice_company_id, ti.party_id AS invoice_party_id, ti.task_id AS invoice_task_id
         FROM invoice_payment_requests pr
         INNER JOIN task_invoices ti ON ti.id = pr.invoice_id
         WHERE pr.id = :id
@@ -2067,8 +2258,42 @@ function auto_post_invoice_payment_voucher(int $paymentRequestId, ?int $actorId 
     }
 
     $cashLedger = get_mapped_ledger($companyId, 'default_cash_bank');
-    $receivableLedger = get_mapped_ledger($companyId, 'default_accounts_receivable');
-    if (!$cashLedger || !$receivableLedger) {
+    if (!$cashLedger) {
+        return;
+    }
+
+    // Settle against the exact receivable ledger the invoice's sales
+    // voucher debited (keeps old generic-AR invoices and new party-ledger
+    // invoices each internally consistent). Fall back to the party's own
+    // ledger, then to the mapped generic AR ledger.
+    $invoicePartyId = invoice_party_id([
+        'party_id' => $payment['invoice_party_id'] ?? null,
+        'task_id' => $payment['invoice_task_id'] ?? null,
+    ], $companyId);
+    $receivableLedgerId = 0;
+    try {
+        // A sales voucher has exactly one debit leg: the receivable. Reuse
+        // it verbatim so settlements always land where the invoice posted,
+        // whatever ledger or group layout the company uses.
+        $salesLegStmt = db()->prepare("SELECT ve.ledger_id
+            FROM vouchers v
+            INNER JOIN voucher_entries ve ON ve.voucher_id = v.id
+            WHERE v.source_type = 'task_invoice' AND v.source_id = :invoice_id
+              AND v.status = 'posted' AND ve.entry_type = 'debit'
+            LIMIT 1");
+        $salesLegStmt->execute(['invoice_id' => (int) $payment['invoice_id']]);
+        $receivableLedgerId = (int) ($salesLegStmt->fetchColumn() ?: 0);
+    } catch (Throwable $exception) {
+        $receivableLedgerId = 0;
+    }
+    if ($receivableLedgerId <= 0 && $invoicePartyId > 0) {
+        $receivableLedgerId = ensure_party_ledger($companyId, $invoicePartyId, 'receivable');
+    }
+    if ($receivableLedgerId <= 0) {
+        $receivableLedger = get_mapped_ledger($companyId, 'default_accounts_receivable');
+        $receivableLedgerId = (int) ($receivableLedger['id'] ?? 0);
+    }
+    if ($receivableLedgerId <= 0) {
         return;
     }
 
@@ -2087,6 +2312,7 @@ function auto_post_invoice_payment_voucher(int $paymentRequestId, ?int $actorId 
         'source_id' => $paymentRequestId,
         'reference_no' => $payment['invoice_no'] ?? null,
         'voucher_date' => $payment['payment_received_on'] ?? date('Y-m-d'),
+        'party_id' => $invoicePartyId > 0 ? $invoicePartyId : null,
         'narration' => 'Auto-posted receipt for invoice ' . ($payment['invoice_no'] ?? '#' . (int) $payment['invoice_id']),
         'total_amount' => $amount,
         'status' => 'posted',
@@ -2100,7 +2326,7 @@ function auto_post_invoice_payment_voucher(int $paymentRequestId, ?int $actorId 
             'memo' => 'Client payment received',
         ],
         [
-            'ledger_id' => (int) $receivableLedger['id'],
+            'ledger_id' => $receivableLedgerId,
             'entry_type' => 'credit',
             'amount' => $amount,
             'memo' => 'Accounts receivable settled',
@@ -3506,7 +3732,7 @@ function company_financials_snapshot(int $companyId, int $fiscalYearId): array
     }
 
     $stmt = db()->prepare('
-        SELECT l.id, l.type, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank,
+        SELECT l.id, l.type, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank, g.code AS group_code, g.name AS group_name,
                COALESCE(SUM(CASE WHEN ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) AS debit_total,
                COALESCE(SUM(CASE WHEN ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS credit_total
         FROM ledgers l
@@ -3517,17 +3743,24 @@ function company_financials_snapshot(int $companyId, int $fiscalYearId): array
             AND v.fiscal_year_id = :fiscal_year_id
             AND v.status = \'posted\'
         WHERE l.company_id = :company_id
-        GROUP BY l.id, l.type, g.is_cash_or_bank
+        GROUP BY l.id, l.type, g.is_cash_or_bank, g.code, g.name
     ');
     $stmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
 
+    // Receivables/payables are the Trade Receivables / Trade Payables GROUPS
+    // (every party ledger inside them), with the mapped generic ledgers kept
+    // for companies whose ledgers are not grouped yet.
     $receivableLedgerId = (int) (get_mapped_ledger($companyId, 'default_accounts_receivable')['id'] ?? 0);
     $payableLedgerId = (int) (get_mapped_ledger($companyId, 'default_accounts_payable')['id'] ?? 0);
+    $receivableSum = 0.0;
+    $payableSum = 0.0;
 
     foreach ($stmt->fetchAll() as $row) {
         $debit = (float) $row['debit_total'];
         $credit = (float) $row['credit_total'];
         $type = (string) $row['type'];
+        $groupCode = (string) ($row['group_code'] ?? '');
+        $groupName = (string) ($row['group_name'] ?? '');
         $natural = in_array($type, ['liability', 'equity', 'revenue'], true) ? $credit - $debit : $debit - $credit;
 
         if ((int) $row['is_cash_or_bank'] === 1) {
@@ -3538,13 +3771,17 @@ function company_financials_snapshot(int $companyId, int $fiscalYearId): array
         } elseif ($type === 'expense') {
             $snapshot['expenses'] += $natural;
         }
-        if ((int) $row['id'] === $receivableLedgerId) {
-            $snapshot['receivables'] = max(0, $natural);
-        } elseif ((int) $row['id'] === $payableLedgerId) {
-            $snapshot['payables'] = max(0, $natural);
+        // Client-books companies carry the same groups under generated
+        // numeric codes, so match by code OR name.
+        if ($groupCode === 'RECEIVABLE' || $groupName === 'Trade Receivables' || ($groupCode === '' && (int) $row['id'] === $receivableLedgerId)) {
+            $receivableSum += $natural;
+        } elseif ($groupCode === 'PAYABLE' || $groupName === 'Trade Payables' || ($groupCode === '' && (int) $row['id'] === $payableLedgerId)) {
+            $payableSum += $natural;
         }
     }
 
+    $snapshot['receivables'] = max(0, $receivableSum);
+    $snapshot['payables'] = max(0, $payableSum);
     $snapshot['net'] = $snapshot['income'] - $snapshot['expenses'];
 
     return $snapshot;

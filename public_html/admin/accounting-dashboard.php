@@ -233,10 +233,38 @@ foreach ($ledgerRows as $ledger) {
     }
 }
 
-$receivableLedger = get_mapped_ledger($companyId, 'default_accounts_receivable');
-$payableLedger = get_mapped_ledger($companyId, 'default_accounts_payable');
-$receivablesTotal = max(0, (float) ($balancesById[(int) ($receivableLedger['id'] ?? 0)] ?? 0));
-$payablesTotal = max(0, (float) ($balancesById[(int) ($payableLedger['id'] ?? 0)] ?? 0));
+// Receivables/payables are the Trade Receivables / Trade Payables groups
+// (all party ledgers inside them); mapped generic ledgers only count when
+// they sit outside those groups (legacy layouts).
+$receivablesTotal = 0.0;
+$payablesTotal = 0.0;
+$tradeGroupLedgerIds = [];
+$tradeStmt = db()->prepare("SELECT l.id, g.code AS group_code, g.name AS group_name
+    FROM ledgers l
+    INNER JOIN ledger_groups g ON g.id = l.group_id
+    WHERE l.company_id = :cid
+      AND (g.code IN ('RECEIVABLE', 'PAYABLE') OR g.name IN ('Trade Receivables', 'Trade Payables'))");
+$tradeStmt->execute(['cid' => $companyId]);
+foreach ($tradeStmt->fetchAll() as $tradeRow) {
+    $tradeLedgerId = (int) $tradeRow['id'];
+    $tradeGroupLedgerIds[$tradeLedgerId] = true;
+    $tradeBalance = (float) ($balancesById[$tradeLedgerId] ?? 0);
+    if ((string) $tradeRow['group_code'] === 'RECEIVABLE' || (string) $tradeRow['group_name'] === 'Trade Receivables') {
+        $receivablesTotal += $tradeBalance;
+    } else {
+        $payablesTotal += $tradeBalance;
+    }
+}
+$receivableLedgerId = (int) (get_mapped_ledger($companyId, 'default_accounts_receivable')['id'] ?? 0);
+$payableLedgerId = (int) (get_mapped_ledger($companyId, 'default_accounts_payable')['id'] ?? 0);
+if ($receivableLedgerId > 0 && !isset($tradeGroupLedgerIds[$receivableLedgerId])) {
+    $receivablesTotal += (float) ($balancesById[$receivableLedgerId] ?? 0);
+}
+if ($payableLedgerId > 0 && !isset($tradeGroupLedgerIds[$payableLedgerId])) {
+    $payablesTotal += (float) ($balancesById[$payableLedgerId] ?? 0);
+}
+$receivablesTotal = max(0, $receivablesTotal);
+$payablesTotal = max(0, $payablesTotal);
 
 $purchaseStmt = db()->prepare("SELECT COALESCE(SUM(total_amount), 0) FROM vouchers WHERE company_id = :company_id AND fiscal_year_id = :fiscal_year_id AND status = 'posted' AND voucher_type = 'purchase'");
 $purchaseStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);

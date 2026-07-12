@@ -100,6 +100,13 @@ function accounting_module_repair_database(): array
         accounting_repair_add_column('vouchers', 'client_approved_at', '`client_approved_at` DATETIME DEFAULT NULL AFTER `client_approved_by`');
     });
 
+    $run('Upgrade party ledgers (receivable/payable sides)', static function (): void {
+        // Suppliers get their own ledger under Trade Payables; the
+        // receivable side reuses accounting_parties.ledger_id.
+        accounting_repair_add_column('accounting_parties', 'payable_ledger_id', '`payable_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `ledger_id`');
+        accounting_repair_add_index('accounting_parties', 'idx_accounting_parties_payable_ledger', 'KEY `idx_accounting_parties_payable_ledger` (`payable_ledger_id`)');
+    });
+
     $run('Upgrade voucher form metadata', static function (): void {
         accounting_repair_add_column('vouchers', 'priority', "`priority` ENUM('low', 'medium', 'high') NOT NULL DEFAULT 'medium' AFTER `narration`");
         accounting_repair_add_column('vouchers', 'department', '`department` VARCHAR(80) DEFAULT NULL AFTER `priority`');

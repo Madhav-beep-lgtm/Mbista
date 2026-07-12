@@ -69,6 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     WHERE id = :id AND company_id = :company_id
                 ');
                 $stmt->execute($params);
+                $savedPartyId = $partyId;
                 log_activity('accounting_party', $partyId, 'updated', 'Accounting party updated.', $userId);
                 flash('success', 'Party updated.');
             } else {
@@ -82,8 +83,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     )
                 ');
                 $stmt->execute($params);
-                log_activity('accounting_party', (int) db()->lastInsertId(), 'created', 'Accounting party created.', $userId);
+                $savedPartyId = (int) db()->lastInsertId();
+                log_activity('accounting_party', $savedPartyId, 'created', 'Accounting party created.', $userId);
                 flash('success', 'Party created.');
+            }
+
+            // Every party gets its own ledger under Trade Receivables /
+            // Trade Payables so postings land on the party by name.
+            if ($savedPartyId > 0 && $status === 'active') {
+                if (in_array($partyType, ['customer', 'both'], true)) {
+                    ensure_party_ledger($companyId, $savedPartyId, 'receivable');
+                }
+                if (in_array($partyType, ['supplier', 'both'], true)) {
+                    ensure_party_ledger($companyId, $savedPartyId, 'payable');
+                }
             }
         } catch (Throwable $exception) {
             flash('error', 'Could not save party. The code may already exist.');
@@ -217,9 +230,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $expenseLedger = $ledgerCheck->fetch() ?: null;
         }
 
-        $creditLedger = $paidVia === 'cash' ? ledger_by_code($companyId, 'CASH') : ledger_by_code($companyId, 'AP');
+        // Credit purchases go to the supplier's own ledger under Trade
+        // Payables; the generic AP ledger is only the fallback.
+        $creditLedgerId = 0;
+        if ($paidVia === 'cash') {
+            $creditLedgerId = (int) (ledger_by_code($companyId, 'CASH')['id'] ?? 0);
+        } else {
+            $creditLedgerId = $party ? ensure_party_ledger($companyId, (int) $party['id'], 'payable') : 0;
+            if ($creditLedgerId <= 0) {
+                $creditLedgerId = (int) (ledger_by_code($companyId, 'AP')['id'] ?? 0);
+            }
+        }
 
-        if (!$party || !$expenseLedger || !$creditLedger || $total <= 0 || current_fiscal_year_id() <= 0) {
+        if (!$party || !$expenseLedger || $creditLedgerId <= 0 || $total <= 0 || current_fiscal_year_id() <= 0) {
             flash('error', 'Supplier, expense ledger, and a positive amount are required to record a purchase.');
             redirect('admin/accounting-parties.php?panel=purchase');
         }
@@ -243,7 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'posted_at' => date('Y-m-d H:i:s'),
             ], [
                 ['ledger_id' => (int) $expenseLedger['id'], 'entry_type' => 'debit', 'amount' => $total, 'memo' => 'Purchase from ' . $party['name'] . ($vatAmount > 0 ? ' (incl. VAT ' . number_format($vatAmount, 2) . ')' : '')],
-                ['ledger_id' => (int) $creditLedger['id'], 'entry_type' => 'credit', 'amount' => $total, 'memo' => $paidVia === 'cash' ? 'Paid in cash' : 'Payable to supplier'],
+                ['ledger_id' => $creditLedgerId, 'entry_type' => 'credit', 'amount' => $total, 'memo' => $paidVia === 'cash' ? 'Paid in cash' : 'Payable to ' . $party['name']],
             ]);
             log_activity('purchase_bill', $voucherId, 'recorded', 'Purchase bill ' . $voucherNo . ' recorded for ' . $party['name'] . '.', $userId);
             flash('success', 'Purchase bill ' . $voucherNo . ' recorded for ' . $party['name'] . '.');
@@ -269,9 +292,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $cashLedger = ledger_by_code($companyId, 'CASH');
-        $apLedger = ledger_by_code($companyId, 'AP');
+        // Settle against the supplier's own ledger under Trade Payables.
+        $payableLedgerId = $party ? ensure_party_ledger($companyId, (int) $party['id'], 'payable') : 0;
+        if ($payableLedgerId <= 0) {
+            $payableLedgerId = (int) (ledger_by_code($companyId, 'AP')['id'] ?? 0);
+        }
 
-        if (!$party || !$cashLedger || !$apLedger || $amount <= 0 || current_fiscal_year_id() <= 0) {
+        if (!$party || !$cashLedger || $payableLedgerId <= 0 || $amount <= 0 || current_fiscal_year_id() <= 0) {
             flash('error', 'Supplier and a positive amount are required to record a payment.');
             redirect('admin/accounting-parties.php?panel=supplier-payment');
         }
@@ -294,7 +321,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'posted_by' => $userId,
                 'posted_at' => date('Y-m-d H:i:s'),
             ], [
-                ['ledger_id' => (int) $apLedger['id'], 'entry_type' => 'debit', 'amount' => $amount, 'memo' => 'Supplier balance settled'],
+                ['ledger_id' => $payableLedgerId, 'entry_type' => 'debit', 'amount' => $amount, 'memo' => 'Supplier balance settled'],
                 ['ledger_id' => (int) $cashLedger['id'], 'entry_type' => 'credit', 'amount' => $amount, 'memo' => 'Paid to ' . $party['name']],
             ]);
             log_activity('supplier_payment', $voucherId, 'recorded', 'Payment ' . $voucherNo . ' made to ' . $party['name'] . '.', $userId);

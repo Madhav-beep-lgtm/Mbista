@@ -1076,6 +1076,7 @@ CREATE TABLE IF NOT EXISTS `accounting_parties` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `company_id` INT UNSIGNED NOT NULL,
   `ledger_id` INT UNSIGNED DEFAULT NULL,
+  `payable_ledger_id` INT UNSIGNED DEFAULT NULL,
   `code` VARCHAR(60) NOT NULL,
   `name` VARCHAR(190) NOT NULL,
   `party_type` ENUM('customer', 'supplier', 'both', 'other') NOT NULL DEFAULT 'both',
@@ -1094,6 +1095,7 @@ CREATE TABLE IF NOT EXISTS `accounting_parties` (
   UNIQUE KEY `uniq_accounting_parties_company_code` (`company_id`, `code`),
   KEY `idx_accounting_parties_company_type` (`company_id`, `party_type`),
   KEY `idx_accounting_parties_ledger` (`ledger_id`),
+  KEY `idx_accounting_parties_payable_ledger` (`payable_ledger_id`),
   CONSTRAINT `fk_accounting_parties_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_accounting_parties_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

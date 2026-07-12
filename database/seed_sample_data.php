@@ -125,7 +125,12 @@ $partyCustomer = seed_insert('accounting_parties', ['company_id' => $cid, 'code'
 seed_insert('accounting_parties', ['company_id' => $cid, 'code' => 'SMP-CUST2', 'name' => 'Everest Retail Pvt Ltd', 'party_type' => 'customer', 'status' => 'active']);
 $partySupplier = seed_insert('accounting_parties', ['company_id' => $cid, 'code' => 'SMP-SUP1', 'name' => 'Kathmandu Stationers', 'party_type' => 'supplier', 'status' => 'active']);
 seed_insert('accounting_parties', ['company_id' => $cid, 'code' => 'SMP-SUP2', 'name' => 'Valley IT Supplies', 'party_type' => 'supplier', 'status' => 'active']);
-say('Parties created (2 customers, 2 suppliers).');
+if (function_exists('ensure_party_ledger')) {
+    // Each party gets its own ledger under Trade Receivables / Payables.
+    ensure_party_ledger($cid, $partyCustomer, 'receivable');
+    ensure_party_ledger($cid, $partySupplier, 'payable');
+}
+say('Parties created (2 customers, 2 suppliers) with party ledgers.');
 
 // ---------------------------------------------------------------------------
 // 3. Contract, tasks, stages
