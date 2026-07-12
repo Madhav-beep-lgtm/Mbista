@@ -25,10 +25,10 @@ $currencySymbol = site_currency_symbol();
 $reportRegistry = rc_report_registry();
 $allowedReportKeys = array_keys($reportRegistry);
 if (!($companyBusinessProfile['show_inventory'] ?? false)) {
-    $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['inventory-summary', 'stock-ledger']));
+    $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['inventory-summary', 'stock-ledger', 'stock-movement', 'stock-valuation']));
 }
 if (!($companyBusinessProfile['show_manufacturing'] ?? false)) {
-    $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['manufacturing-statement']));
+    $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['manufacturing-statement', 'manufacturing-cost', 'manufacturing-wip']));
 }
 $allowedReportRegistry = array_intersect_key($reportRegistry, array_flip($allowedReportKeys));
 

@@ -300,10 +300,10 @@ foreach ([$cid, (int) (company_by_code('MBTAS')['id'] ?? 0)] as $invCompanyId) {
     $binder = seed_insert('inventory_items', ['company_id' => $invCompanyId, 'sku' => 'SMP-ITM3', 'name' => 'Bound Report Set', 'item_type' => 'finished_good', 'unit' => 'set', 'purchase_rate' => 0, 'sales_rate' => 1500, 'status' => 'active']);
 
     if (table_exists('inventory_transactions')) {
-        seed_insert('inventory_transactions', ['company_id' => $invCompanyId, 'item_id' => $paper, 'transaction_type' => 'opening', 'transaction_date' => $d(0), 'qty_in' => 20, 'rate' => 450, 'amount' => 9000]);
+        // Opening stock lives in inventory_items.opening_qty; transactions
+        // here are movements only (an extra 'opening' row would double it).
         seed_insert('inventory_transactions', ['company_id' => $invCompanyId, 'item_id' => $paper, 'transaction_type' => 'purchase', 'transaction_date' => $d(7), 'qty_in' => 30, 'rate' => 460, 'amount' => 13800]);
         seed_insert('inventory_transactions', ['company_id' => $invCompanyId, 'item_id' => $paper, 'transaction_type' => 'sale', 'transaction_date' => $d(18), 'qty_out' => 15, 'rate' => 600, 'amount' => 9000]);
-        seed_insert('inventory_transactions', ['company_id' => $invCompanyId, 'item_id' => $toner, 'transaction_type' => 'opening', 'transaction_date' => $d(0), 'qty_in' => 4, 'rate' => 6500, 'amount' => 26000]);
     }
 
     if (table_exists('manufacturing_orders')) {

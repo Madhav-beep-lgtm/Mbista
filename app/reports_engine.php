@@ -22,7 +22,11 @@ function rc_report_registry(): array
         'purchase-register' => ['Purchase Register', 'Purchase transaction details', 'services'],
         'inventory-summary' => ['Inventory Summary', 'Stock summary by item', 'services'],
         'stock-ledger' => ['Stock Ledger', 'Item-wise stock ledger', 'tasks'],
+        'stock-movement' => ['Stock Movement Report', 'All stock transactions item-wise with running balances', 'reconcile'],
+        'stock-valuation' => ['Stock Valuation Report', 'Closing stock at weighted average cost with margins', 'pie'],
         'manufacturing-statement' => ['Manufacturing Statement', 'Manufacturing performance', 'settings'],
+        'manufacturing-cost' => ['Manufacturing Cost Report', 'Per-order material cost breakdown', 'layers'],
+        'manufacturing-wip' => ['Work in Progress (WIP)', 'Open production orders and value locked in WIP', 'attendance'],
         'financial-ratios' => ['Financial Ratios', 'Key financial ratios analysis', 'dashboard'],
     ];
 }
@@ -1055,6 +1059,211 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 'columns' => [['Order', 'left', ''], ['Finished Item', 'left', ''], ['Status', 'left', ''], ['Qty', 'right', ''], ['Input Cost', 'right', ''], ['Unit Cost', 'right', ''], ['Started', 'left', ''], ['Completed', 'left', '']],
                 'rows' => $rows,
                 'totals' => null,
+            ];
+        }
+
+        case 'stock-movement': {
+            if (!table_exists('inventory_transactions')) {
+                return ['subtitle' => 'Inventory module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $stmt = db()->prepare('
+                SELECT t.item_id, t.transaction_date, t.transaction_type, t.ref_no, t.qty_in, t.qty_out, t.rate, t.amount,
+                       i.sku, i.name, i.unit, i.opening_qty,
+                       COALESCE((SELECT SUM(pt.qty_in - pt.qty_out) FROM inventory_transactions pt
+                                 WHERE pt.item_id = t.item_id AND pt.transaction_date < :before), 0) AS net_before
+                FROM inventory_transactions t
+                INNER JOIN inventory_items i ON i.id = t.item_id
+                WHERE t.company_id = :company_id AND t.transaction_date BETWEEN :f AND :t
+                ORDER BY i.sku ASC, t.transaction_date ASC, t.id ASC
+                LIMIT 1500
+            ');
+            $stmt->execute(['before' => $from, 'company_id' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+            $rows = [];
+            $totals = ['in' => 0.0, 'out' => 0.0, 'amount' => 0.0];
+            $currentItem = 0;
+            $running = 0.0;
+            foreach ($stmt->fetchAll() as $line) {
+                if ((int) $line['item_id'] !== $currentItem) {
+                    $currentItem = (int) $line['item_id'];
+                    $running = (float) $line['opening_qty'] + (float) $line['net_before'];
+                    $rows[] = rc_row([(string) $line['sku'] . ' — ' . (string) $line['name'] . ' (' . (string) $line['unit'] . ')', '', '', '', '', '', '', ''], 'section');
+                    $rows[] = rc_row(['Opening balance as at ' . date('d M Y', strtotime($from)), '', '', '', '', '', '', number_format($running, 2)], 'bold');
+                }
+                $running += (float) $line['qty_in'] - (float) $line['qty_out'];
+                $totals['in'] += (float) $line['qty_in'];
+                $totals['out'] += (float) $line['qty_out'];
+                $totals['amount'] += (float) $line['amount'];
+                $rows[] = [
+                    date('d M Y', strtotime((string) $line['transaction_date'])),
+                    ucfirst(str_replace('_', ' ', (string) $line['transaction_type'])),
+                    (string) ($line['ref_no'] ?? '-') ?: '-',
+                    (float) $line['qty_in'] > 0 ? number_format((float) $line['qty_in'], 2) : '–',
+                    (float) $line['qty_out'] > 0 ? number_format((float) $line['qty_out'], 2) : '–',
+                    rc_fmt((float) $line['rate']),
+                    rc_fmt((float) $line['amount']),
+                    number_format($running, 2),
+                ];
+            }
+            return [
+                'title' => 'Stock Movement Report',
+                'subtitle' => 'Every stock transaction between ' . date('d M Y', strtotime($from)) . ' and ' . date('d M Y', strtotime($to)) . ', item-wise with running balances.',
+                'columns' => [
+                    ['Date', 'left', ''], ['Type', 'left', ''], ['Ref.', 'left', ''],
+                    ['Qty In', 'right', ''], ['Qty Out', 'right', ''], ['Rate (' . $sym . ')', 'right', ''],
+                    ['Amount (' . $sym . ')', 'right', ''], ['Balance Qty', 'right', ''],
+                ],
+                'rows' => $rows,
+                'totals' => ['Total', '', '', number_format($totals['in'], 2), number_format($totals['out'], 2), '', rc_fmt($totals['amount']), ''],
+            ];
+        }
+
+        case 'stock-valuation': {
+            if (!table_exists('inventory_items')) {
+                return ['subtitle' => 'Inventory module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $stmt = db()->prepare('
+                SELECT i.sku, i.name, i.unit, i.item_type, i.purchase_rate, i.sales_rate, i.opening_qty,
+                       COALESCE(SUM(CASE WHEN t.transaction_date <= :t1 THEN t.qty_in - t.qty_out ELSE 0 END), 0) AS net_to_date,
+                       COALESCE(SUM(CASE WHEN t.transaction_date <= :t2 AND t.qty_in > 0 AND t.rate > 0 THEN t.qty_in * t.rate ELSE 0 END), 0) AS in_value,
+                       COALESCE(SUM(CASE WHEN t.transaction_date <= :t3 AND t.qty_in > 0 AND t.rate > 0 THEN t.qty_in ELSE 0 END), 0) AS in_qty
+                FROM inventory_items i
+                LEFT JOIN inventory_transactions t ON t.item_id = i.id
+                WHERE i.company_id = :company_id
+                GROUP BY i.id
+                ORDER BY i.sku ASC
+            ');
+            $stmt->execute(['t1' => $to, 't2' => $to, 't3' => $to, 'company_id' => $scopeCompanyId]);
+            $rows = [];
+            $totals = ['value' => 0.0, 'potential' => 0.0];
+            foreach ($stmt->fetchAll() as $item) {
+                $closing = (float) $item['opening_qty'] + (float) $item['net_to_date'];
+                // Weighted average of priced inbound movements; falls back to
+                // the item master purchase rate when nothing priced exists.
+                $avgCost = (float) $item['in_qty'] > 0 ? (float) $item['in_value'] / (float) $item['in_qty'] : (float) $item['purchase_rate'];
+                $value = $closing * $avgCost;
+                $salesRate = (float) $item['sales_rate'];
+                $potential = $closing * $salesRate;
+                $marginPct = $value > 0.004 ? (($potential - $value) / $value) * 100 : null;
+                $rows[] = [
+                    (string) $item['sku'], (string) $item['name'],
+                    ucfirst(str_replace('_', ' ', (string) $item['item_type'])), (string) $item['unit'],
+                    number_format($closing, 2), rc_fmt($avgCost), rc_fmt($value),
+                    rc_fmt($salesRate), rc_fmt($potential),
+                    $marginPct === null ? '–' : number_format($marginPct, 1) . '%',
+                ];
+                $totals['value'] += $value;
+                $totals['potential'] += $potential;
+            }
+            return [
+                'title' => 'Stock Valuation Report',
+                'as_at' => true,
+                'subtitle' => 'Closing stock valued at weighted average cost as at ' . date('d M Y', strtotime($to)) . '.',
+                'columns' => [
+                    ['Item Code', 'left', ''], ['Item Name', 'left', ''], ['Category', 'left', ''], ['Unit', 'left', ''],
+                    ['Closing Qty', 'right', ''], ['Avg Cost (' . $sym . ')', 'right', ''], ['Stock Value (' . $sym . ')', 'right', ''],
+                    ['Sales Rate (' . $sym . ')', 'right', ''], ['Potential (' . $sym . ')', 'right', ''], ['Margin %', 'right', ''],
+                ],
+                'rows' => $rows,
+                'totals' => ['', 'Total', '', '', '', '', rc_fmt($totals['value']), '', rc_fmt($totals['potential']), ''],
+            ];
+        }
+
+        case 'manufacturing-cost': {
+            if (!table_exists('manufacturing_orders')) {
+                return ['subtitle' => 'Manufacturing module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $stmt = db()->prepare("
+                SELECT mo.id, mo.order_no, mo.quantity, mo.completed_on, fi.sku, fi.name AS item_name, fi.unit
+                FROM manufacturing_orders mo
+                INNER JOIN inventory_items fi ON fi.id = mo.finished_item_id
+                WHERE mo.company_id = :company_id AND mo.status = 'completed'
+                  AND COALESCE(mo.completed_on, mo.started_on, DATE(mo.created_at)) BETWEEN :f AND :t
+                ORDER BY mo.completed_on DESC, mo.id DESC LIMIT 200
+            ");
+            $stmt->execute(['company_id' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+            $rows = [];
+            $grandCost = 0.0;
+            $inputStmt = db()->prepare('SELECT mi.quantity, mi.rate, ri.sku, ri.name, ri.unit FROM manufacturing_order_inputs mi INNER JOIN inventory_items ri ON ri.id = mi.item_id WHERE mi.manufacturing_order_id = :mo ORDER BY ri.sku ASC');
+            foreach ($stmt->fetchAll() as $mo) {
+                $rows[] = rc_row([
+                    $mo['order_no'] . ' — ' . $mo['sku'] . ' ' . $mo['item_name']
+                        . ' (output ' . number_format((float) $mo['quantity'], 2) . ' ' . $mo['unit'] . ')'
+                        . ($mo['completed_on'] ? ', completed ' . date('d M Y', strtotime((string) $mo['completed_on'])) : ''),
+                    '', '', '',
+                ], 'section');
+                $inputStmt->execute(['mo' => (int) $mo['id']]);
+                $orderCost = 0.0;
+                foreach ($inputStmt->fetchAll() as $input) {
+                    $cost = (float) $input['quantity'] * (float) $input['rate'];
+                    $orderCost += $cost;
+                    $rows[] = [
+                        $input['sku'] . ' — ' . $input['name'] . ' (' . $input['unit'] . ')',
+                        number_format((float) $input['quantity'], 2), rc_fmt((float) $input['rate']), rc_fmt($cost),
+                    ];
+                }
+                $unitCost = (float) $mo['quantity'] > 0 ? $orderCost / (float) $mo['quantity'] : 0.0;
+                $rows[] = rc_row(['Total input cost — unit cost ' . $sym . number_format($unitCost, 2), '', '', rc_fmt($orderCost)], 'bold');
+                $grandCost += $orderCost;
+            }
+            return [
+                'title' => 'Manufacturing Cost Report',
+                'subtitle' => 'Completed production orders with per-material cost breakdown, ' . date('d M Y', strtotime($from)) . ' to ' . date('d M Y', strtotime($to)) . '.',
+                'columns' => [['Particulars', 'left', ''], ['Qty', 'right', ''], ['Rate (' . $sym . ')', 'right', ''], ['Amount (' . $sym . ')', 'right', '']],
+                'rows' => $rows,
+                'totals' => ['Total production cost', '', '', rc_fmt($grandCost)],
+            ];
+        }
+
+        case 'manufacturing-wip': {
+            if (!table_exists('manufacturing_orders')) {
+                return ['subtitle' => 'Manufacturing module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $stmt = db()->prepare("
+                SELECT mo.id, mo.order_no, mo.status, mo.quantity, mo.started_on, mo.created_at, fi.sku, fi.name AS item_name, fi.unit
+                FROM manufacturing_orders mo
+                INNER JOIN inventory_items fi ON fi.id = mo.finished_item_id
+                WHERE mo.company_id = :company_id AND mo.status IN ('draft', 'in_progress')
+                  AND COALESCE(mo.started_on, DATE(mo.created_at)) <= :t
+                ORDER BY mo.started_on ASC, mo.id ASC LIMIT 200
+            ");
+            $stmt->execute(['company_id' => $scopeCompanyId, 't' => $to]);
+            $rows = [];
+            $wipTotal = 0.0;
+            $inputStmt = db()->prepare('SELECT mi.quantity, mi.rate, ri.sku, ri.name, ri.unit FROM manufacturing_order_inputs mi INNER JOIN inventory_items ri ON ri.id = mi.item_id WHERE mi.manufacturing_order_id = :mo ORDER BY ri.sku ASC');
+            foreach ($stmt->fetchAll() as $mo) {
+                $startedOn = (string) ($mo['started_on'] ?? '') !== '' ? (string) $mo['started_on'] : date('Y-m-d', strtotime((string) $mo['created_at']));
+                $daysInWip = max(0, (int) ((min(strtotime($to), time()) - strtotime($startedOn)) / 86400));
+                $rows[] = rc_row([
+                    $mo['order_no'] . ' — ' . $mo['sku'] . ' ' . $mo['item_name']
+                        . ' (planned ' . number_format((float) $mo['quantity'], 2) . ' ' . $mo['unit'] . ') — '
+                        . ucfirst(str_replace('_', ' ', (string) $mo['status']))
+                        . ', started ' . date('d M Y', strtotime($startedOn)) . ' (' . $daysInWip . ' days in WIP)',
+                    '', '', '',
+                ], 'section');
+                $inputStmt->execute(['mo' => (int) $mo['id']]);
+                $orderWip = 0.0;
+                $inputRows = $inputStmt->fetchAll();
+                if ($inputRows === []) {
+                    $rows[] = ['No materials issued yet', '–', '–', '–'];
+                }
+                foreach ($inputRows as $input) {
+                    $cost = (float) $input['quantity'] * (float) $input['rate'];
+                    $orderWip += $cost;
+                    $rows[] = [
+                        $input['sku'] . ' — ' . $input['name'] . ' (' . $input['unit'] . ')',
+                        number_format((float) $input['quantity'], 2), rc_fmt((float) $input['rate']), rc_fmt($cost),
+                    ];
+                }
+                $rows[] = rc_row(['Value locked in this order', '', '', rc_fmt($orderWip)], 'bold');
+                $wipTotal += $orderWip;
+            }
+            return [
+                'title' => 'Work in Progress (WIP) Report',
+                'as_at' => true,
+                'subtitle' => 'Open production orders and materials issued, as at ' . date('d M Y', strtotime($to)) . '.',
+                'columns' => [['Particulars', 'left', ''], ['Qty', 'right', ''], ['Rate (' . $sym . ')', 'right', ''], ['Amount (' . $sym . ')', 'right', '']],
+                'rows' => $rows,
+                'totals' => ['Total work in progress', '', '', rc_fmt($wipTotal)],
             ];
         }
 
