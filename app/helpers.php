@@ -4939,6 +4939,45 @@ function team_member_initials(string $name): string
     return $initials !== '' ? $initials : '?';
 }
 
+/** Categories of the public Insights section (key = subpage slug). */
+function insight_categories(): array
+{
+    return [
+        'articles' => 'Articles',
+        'tax-updates' => 'Tax Updates',
+        'audit-insights' => 'Audit Insights',
+        'accounting-updates' => 'Accounting Updates',
+        'business-advisory' => 'Business Advisory',
+        'publications' => 'Publications',
+        'news-events' => 'News and Events',
+        'downloads' => 'Downloads',
+    ];
+}
+
+/** Published insight posts, newest first; all categories when null. */
+function insight_posts_published(?string $category = null, ?int $limit = null): array
+{
+    if (!table_exists('insight_posts')) {
+        return [];
+    }
+    $sql = "SELECT p.*, u.name AS author_name FROM insight_posts p
+        LEFT JOIN users u ON u.id = p.created_by
+        WHERE p.status = 'published'";
+    $params = [];
+    if ($category !== null && isset(insight_categories()[$category])) {
+        $sql .= ' AND p.category = :category';
+        $params['category'] = $category;
+    }
+    $sql .= ' ORDER BY p.published_at DESC, p.id DESC';
+    if ($limit !== null && $limit > 0) {
+        $sql .= ' LIMIT ' . (int) $limit;
+    }
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+
+    return $stmt->fetchAll() ?: [];
+}
+
 function handle_staff_photo_upload(array $file): array
 {
     $errorCode = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);

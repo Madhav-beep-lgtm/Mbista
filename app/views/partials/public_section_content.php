@@ -89,6 +89,48 @@ $renderIntroGrid = static function (array $items, string $currentPage): void {
             <div class="card"><strong>Email</strong><span class="muted"><?= e(setting('support_email', '')) ?></span></div>
         </div>
         <p><a class="button" href="<?= e(url('contact/general-enquiry.php')) ?>"><?= icon('contact') ?>Send enquiry</a></p>
+    <?php elseif ($sectionKey === 'insights'): ?>
+        <?php
+        $insightCategoryLabels = function_exists('insight_categories') ? insight_categories() : [];
+        $insightCategory = $currentPage !== 'overview' && isset($insightCategoryLabels[$currentPage]) ? $currentPage : null;
+        $insightPosts = function_exists('insight_posts_published')
+            ? insight_posts_published($insightCategory, $insightCategory === null ? 8 : 50)
+            : [];
+        ?>
+        <?php if ($currentPage === 'overview'): ?>
+            <?php $renderIntroGrid($items, $currentPage); ?>
+            <?php if ($insightPosts !== []): ?><h2>Latest updates</h2><?php endif; ?>
+        <?php endif; ?>
+        <?php if ($insightPosts === []): ?>
+            <p>No <?= $insightCategory !== null ? strtolower($insightCategoryLabels[$insightCategory]) . ' have' : 'updates have' ?> been published yet. Please check back soon.</p>
+        <?php else: ?>
+            <div class="insight-post-list">
+                <?php foreach ($insightPosts as $insightPost): ?>
+                    <article class="card insight-post">
+                        <p class="insight-post-meta">
+                            <?= e($insightCategoryLabels[$insightPost['category']] ?? $insightPost['category']) ?>
+                            <?= $insightPost['published_at'] ? ' &middot; ' . e(date('d M Y', strtotime((string) $insightPost['published_at']))) : '' ?>
+                        </p>
+                        <h3><?= e($insightPost['title']) ?></h3>
+                        <?php if (!empty($insightPost['summary'])): ?><p class="insight-post-summary"><?= e($insightPost['summary']) ?></p><?php endif; ?>
+                        <?php if ($insightCategory !== null && trim((string) ($insightPost['body'] ?? '')) !== ''): ?>
+                            <div class="insight-post-body">
+                                <?php foreach (preg_split('/\R{2,}/', trim((string) $insightPost['body'])) ?: [] as $insightParagraph): ?>
+                                    <p><?= nl2br(e($insightParagraph)) ?></p>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                        <?php if (!empty($insightPost['attachment_path'])): ?>
+                            <p><a class="button secondary" href="<?= e(url((string) $insightPost['attachment_path'])) ?>" target="_blank" rel="noopener">
+                                <?= icon('documents') ?>Download<?= !empty($insightPost['attachment_name']) ? ' — ' . e($insightPost['attachment_name']) : '' ?></a></p>
+                        <?php endif; ?>
+                        <?php if ($insightCategory === null): ?>
+                            <p><a href="<?= e(url('insights/' . $insightPost['category'] . '.php')) ?>">Read in <?= e($insightCategoryLabels[$insightPost['category']] ?? 'section') ?> &#8594;</a></p>
+                        <?php endif; ?>
+                    </article>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
     <?php else: ?>
         <h2><?= e($pageTitle) ?></h2>
         <p>This page provides a focused overview for <?= e($pageTitle) ?> within the group website. Use the section navigation to move through related pages without returning to the homepage.</p>
