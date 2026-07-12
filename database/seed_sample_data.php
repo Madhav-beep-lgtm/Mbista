@@ -462,6 +462,43 @@ if (function_exists('provision_client_books')) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 12. Budgets, notes to accounts, voucher dimensions (reporting demos)
+// ---------------------------------------------------------------------------
+if (table_exists('budgets')) {
+    $plLedgerStmt = db()->prepare("SELECT l.id, lg.master_key FROM ledgers l
+        JOIN ledger_groups lg ON lg.id = l.group_id
+        WHERE l.company_id = :cid AND l.status = 'active'
+          AND lg.master_key IN ('direct_income', 'indirect_income', 'direct_expense', 'indirect_expense')
+        ORDER BY l.id ASC");
+    $plLedgerStmt->execute(['cid' => $cid]);
+    $budgetSeeded = 0;
+    $budgetUpsert = db()->prepare('INSERT INTO budgets (company_id, fiscal_year_id, ledger_id, amount, created_by)
+        VALUES (:cid, :fy, :lid, :amount, :by) ON DUPLICATE KEY UPDATE amount = VALUES(amount)');
+    foreach ($plLedgerStmt->fetchAll() as $plLedger) {
+        $isIncome = in_array((string) $plLedger['master_key'], ['direct_income', 'indirect_income'], true);
+        $budgetUpsert->execute(['cid' => $cid, 'fy' => $fyId, 'lid' => (int) $plLedger['id'], 'amount' => $isIncome ? 100000.00 : 30000.00, 'by' => $adminId]);
+        $budgetSeeded++;
+        if ($budgetSeeded >= 4) {
+            break;
+        }
+    }
+    say("Budgets: {$budgetSeeded} ledger budgets for the fiscal year (see Accounting > Budgets, then the ledger-wise Profit or Loss).");
+}
+if (table_exists('report_notes')) {
+    $noteUpsert = db()->prepare('INSERT INTO report_notes (company_id, fiscal_year_id, report_key, note_no, body, updated_by)
+        VALUES (:cid, :fy, :rk, :no, :body, :by) ON DUPLICATE KEY UPDATE body = VALUES(body)');
+    $noteUpsert->execute(['cid' => $cid, 'fy' => $fyId, 'rk' => 'profit-loss', 'no' => '1', 'body' => 'Revenue is recognised when services are rendered and billed. (Sample note)', 'by' => $adminId]);
+    $noteUpsert->execute(['cid' => $cid, 'fy' => $fyId, 'rk' => 'balance-sheet', 'no' => '1', 'body' => 'Trade receivables are stated per party ledger; see the Trade Receivables group for the party-wise break-up. (Sample note)', 'by' => $adminId]);
+    say('Notes to Accounts: 1 note each on Profit or Loss and Balance Sheet.');
+}
+if (column_exists('vouchers', 'location')) {
+    db()->prepare("UPDATE vouchers SET location = 'Kathmandu HQ', department = 'Audit & Assurance'
+        WHERE company_id = :cid AND voucher_type = 'sales' AND (location IS NULL OR location = '')")
+        ->execute(['cid' => $cid]);
+    say('Voucher dimensions: sales vouchers tagged Kathmandu HQ / Audit & Assurance (powers the Branch and Department report filters).');
+}
+
 say('');
 say('DONE. Sample logins (all password Sample@123):');
 say('  Admin:  sample.admin@mbista.local');

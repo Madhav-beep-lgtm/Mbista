@@ -41,6 +41,7 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Purchases', 'admin/accounting-parties.php?tab=purchases', 'cart', $headerScript === 'accounting-parties.php' && $headerTab === 'purchases'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
+    ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
 ]);
 $headerAccountingActive = false;
 foreach ($headerAccountingChildren as $headerChild) {
@@ -66,13 +67,13 @@ $headerPageIcons = [
     'workspace.php' => 'portal', 'companies.php' => 'companies', 'users.php' => 'users',
     'settings.php' => 'settings', 'tickets.php' => 'tickets', 'messages.php' => 'messages',
     'hr.php' => 'attendance', 'manage-clients.php' => 'clients', 'client-books.php' => 'accounting',
-    'search.php' => 'search', 'export-ledger.php' => 'reports',
+    'search.php' => 'search', 'export-ledger.php' => 'reports', 'budgets.php' => 'pie',
 ];
 if ($pageBreadcrumb === null) {
     $headerTrailHome = [['Home', 'admin/index.php']];
     $headerTrailReports = [['Home', 'admin/index.php'], ['Reports', 'admin/reports-center.php']];
     $headerTrailAccounting = [['Home', 'admin/index.php'], ['Accounting', 'admin/accounting-dashboard.php']];
-    $headerAccountingScripts = ['accounting.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'accounting-inventory.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php'];
+    $headerAccountingScripts = ['accounting.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'accounting-inventory.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
     if (in_array($headerScript, ['report-schedules.php', 'consolidated-report.php'], true)) {
         $pageBreadcrumb = $headerTrailReports;
     } elseif (in_array($headerScript, $headerAccountingScripts, true)) {
@@ -104,7 +105,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <meta name="theme-color" content="#0b1c36">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260711-portal">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712c">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712d">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">

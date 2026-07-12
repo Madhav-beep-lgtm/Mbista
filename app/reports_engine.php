@@ -225,13 +225,22 @@ function rc_cash_flow_figures(int $scopeCompanyId, string $from, string $to): ar
 /**
  * Per-ledger opening/transaction/closing figures for a company and period.
  */
-function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, string $voucherType = '', int $groupId = 0, int $ledgerId = 0): array
+function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, string $voucherType = '', int $groupId = 0, int $ledgerId = 0, array $dims = []): array
 {
     $voucherWhere = "company_id = :company_id AND status = 'posted'";
     $subParams = ['company_id' => $scopeCompanyId];
     if ($voucherType !== '') {
         $voucherWhere .= ' AND voucher_type = :voucher_type';
         $subParams['voucher_type'] = $voucherType;
+    }
+    // Optional voucher dimensions: branch = location, project = department,
+    // cost centre = cost_centre (captured on the voucher form).
+    foreach (['location', 'department', 'cost_centre'] as $dimColumn) {
+        $dimValue = trim((string) ($dims[$dimColumn] ?? ''));
+        if ($dimValue !== '' && column_exists('vouchers', $dimColumn)) {
+            $voucherWhere .= " AND {$dimColumn} = :dim_{$dimColumn}";
+            $subParams['dim_' . $dimColumn] = $dimValue;
+        }
     }
 
     $sql = "
@@ -332,9 +341,10 @@ function rc_entry_lines(int $scopeCompanyId, array $ledgerIds, string $from, str
 function rc_generate(string $reportId, int $scopeCompanyId, string $from, string $to, array $ctx): array
 {
     $sym = $ctx['currency'];
+    $ctx += ['vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => 'all', 'dims' => []];
     switch ($reportId) {
         case 'trial-balance': {
-            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, $ctx['vtype'], $ctx['group_id'], $ctx['ledger_id']);
+            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, (string) $ctx['vtype'], (int) $ctx['group_id'], (int) $ctx['ledger_id'], (array) ($ctx['dims'] ?? []));
             // Master -> Group -> Ledger hierarchy in natural chart order.
             $tbValue = static fn (array $b): array => [
                 (float) $b['op_side_dr'], (float) $b['op_side_cr'],
@@ -415,8 +425,8 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
 
                 // Master -> Group -> Ledger hierarchy from period movements,
                 // with the classic profit checkpoints between sections.
-                $balancesCur = rc_ledger_balances($scopeCompanyId, $from, $to);
-                $balancesPrev = rc_ledger_balances($scopeCompanyId, $prevFrom, $prevTo);
+                $balancesCur = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0, (array) ($ctx['dims'] ?? []));
+                $balancesPrev = rc_ledger_balances($scopeCompanyId, $prevFrom, $prevTo, '', 0, 0, (array) ($ctx['dims'] ?? []));
                 $prevMovement = [];
                 foreach ($balancesPrev as $pb) {
                     $nature = rc_ledger_nature($pb);
@@ -424,9 +434,37 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                         ? (float) $pb['tx_cr'] - (float) $pb['tx_dr']
                         : (float) $pb['tx_dr'] - (float) $pb['tx_cr'];
                 }
-                $plCells = static function (string $label, string $note, float $c, float $p): array {
+                // Budgets (annual, per ledger) add Budget / Budget Variance
+                // columns whenever any budget exists for this period's FY.
+                $budgetById = [];
+                if (table_exists('budgets')) {
+                    try {
+                        $budgetFyStmt = db()->prepare('SELECT id FROM fiscal_years WHERE company_id = :cid AND start_date <= :f AND end_date >= :t ORDER BY is_default DESC, id DESC LIMIT 1');
+                        $budgetFyStmt->execute(['cid' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+                        $budgetFyId = (int) ($budgetFyStmt->fetchColumn() ?: 0);
+                        if ($budgetFyId > 0) {
+                            $budgetStmt = db()->prepare('SELECT ledger_id, amount FROM budgets WHERE company_id = :cid AND fiscal_year_id = :fy AND amount <> 0');
+                            $budgetStmt->execute(['cid' => $scopeCompanyId, 'fy' => $budgetFyId]);
+                            $budgetById = array_map('floatval', $budgetStmt->fetchAll(PDO::FETCH_KEY_PAIR));
+                        }
+                    } catch (Throwable $exception) {
+                        $budgetById = [];
+                    }
+                }
+                $hasBudgets = $budgetById !== [];
+                if ($hasBudgets) {
+                    $columns[] = ['Budget (' . $sym . ')', 'right', ''];
+                    $columns[] = ['Budget Var (' . $sym . ')', 'right', ''];
+                }
+
+                $plCells = static function (string $label, string $note, float $c, float $p, float $budget = 0.0) use ($hasBudgets): array {
                     [$var, $pct] = rc_variance_cells($c, $p);
-                    return [$label, $note, rc_fmt($c), rc_fmt($p), $var, $pct];
+                    $cells = [$label, $note, rc_fmt($c), rc_fmt($p), $var, $pct];
+                    if ($hasBudgets) {
+                        $cells[] = rc_fmt($budget);
+                        $cells[] = abs($budget) > 0.004 ? rc_fmt($c - $budget) : '–';
+                    }
+                    return $cells;
                 };
                 $plSections = [
                     ['no' => '1', 'label' => 'Revenue', 'masters' => ['direct_income', 'indirect_income'], 'revenue' => true],
@@ -437,37 +475,40 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 $sectionRows = [];
                 foreach ($plSections as $def) {
                     $isRevenue = (bool) $def['revenue'];
-                    $section = rc_group_balances($balancesCur, $def['masters'], static function (array $b) use ($isRevenue, $prevMovement): array {
+                    $section = rc_group_balances($balancesCur, $def['masters'], static function (array $b) use ($isRevenue, $prevMovement, $budgetById): array {
                         $curMove = $isRevenue
                             ? (float) $b['tx_cr'] - (float) $b['tx_dr']
                             : (float) $b['tx_dr'] - (float) $b['tx_cr'];
-                        return [$curMove, (float) ($prevMovement[(int) $b['id']] ?? 0.0)];
+                        return [$curMove, (float) ($prevMovement[(int) $b['id']] ?? 0.0), (float) ($budgetById[(int) $b['id']] ?? 0.0)];
                     });
-                    $sum = $section['sum'] + [0.0, 0.0];
+                    $sum = $section['sum'] + [0.0, 0.0, 0.0];
                     $node = 'p' . $def['no'];
-                    $secRows = [rc_row($plCells($def['no'] . '. ' . $def['label'], $def['no'], (float) $sum[0], (float) $sum[1]), 'bold', ['level' => 0, 'node' => $node])];
+                    $secRows = [rc_row($plCells($def['no'] . '. ' . $def['label'], $def['no'], (float) $sum[0], (float) $sum[1], (float) $sum[2]), 'bold', ['level' => 0, 'node' => $node])];
                     $gi = 0;
                     foreach ($section['groups'] as $groupName => $groupData) {
                         $gi++;
                         $gnode = $node . '.' . $gi;
-                        $gsum = $groupData['sum'] + [0.0, 0.0];
-                        $secRows[] = rc_row($plCells($def['no'] . '.' . $gi . ' ' . $groupName, '', (float) $gsum[0], (float) $gsum[1]), 'bold', ['level' => 1, 'node' => $gnode, 'parent' => $node]);
+                        $gsum = $groupData['sum'] + [0.0, 0.0, 0.0];
+                        $secRows[] = rc_row($plCells($def['no'] . '.' . $gi . ' ' . $groupName, '', (float) $gsum[0], (float) $gsum[1], (float) $gsum[2]), 'bold', ['level' => 1, 'node' => $gnode, 'parent' => $node]);
                         foreach ($groupData['ledgers'] as $ledgerLine) {
-                            $secRows[] = rc_row($plCells((string) $ledgerLine['b']['name'], '', (float) $ledgerLine['vals'][0], (float) $ledgerLine['vals'][1]), '', ['level' => 2, 'parent' => $gnode, 'ledger_id' => (int) $ledgerLine['b']['id']]);
+                            $ledgerVals = $ledgerLine['vals'] + [0.0, 0.0, 0.0];
+                            $secRows[] = rc_row($plCells((string) $ledgerLine['b']['name'], '', (float) $ledgerVals[0], (float) $ledgerVals[1], (float) $ledgerVals[2]), '', ['level' => 2, 'parent' => $gnode, 'ledger_id' => (int) $ledgerLine['b']['id']]);
                         }
                     }
-                    $sectionTotals[$def['no']] = [(float) $sum[0], (float) $sum[1]];
+                    $sectionTotals[$def['no']] = [(float) $sum[0], (float) $sum[1], (float) $sum[2]];
                     $sectionRows[$def['no']] = $secRows;
                 }
 
                 $rows = array_merge($sectionRows['1'], $sectionRows['2']);
                 $grossCur = $sectionTotals['1'][0] - $sectionTotals['2'][0];
                 $grossPrev = $sectionTotals['1'][1] - $sectionTotals['2'][1];
-                $rows[] = rc_row($plCells('GROSS PROFIT', '', $grossCur, $grossPrev), 'total');
+                $grossBudget = $sectionTotals['1'][2] - $sectionTotals['2'][2];
+                $rows[] = rc_row($plCells('GROSS PROFIT', '', $grossCur, $grossPrev, $grossBudget), 'total');
                 $rows = array_merge($rows, $sectionRows['3']);
                 $netCur = $grossCur - $sectionTotals['3'][0];
                 $netPrev = $grossPrev - $sectionTotals['3'][1];
-                $rows[] = rc_row($plCells('NET PROFIT FOR THE PERIOD', '', $netCur, $netPrev), 'total');
+                $netBudget = $grossBudget - $sectionTotals['3'][2];
+                $rows[] = rc_row($plCells('NET PROFIT FOR THE PERIOD', '', $netCur, $netPrev, $netBudget), 'total');
             } else {
                 $number = $orgType === 'manufacturing' ? '2A' : '2B';
                 $titleSuffix = ucfirst($orgType);
@@ -499,7 +540,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         }
 
         case 'balance-sheet': {
-            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0);
+            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0, (array) ($ctx['dims'] ?? []));
             $asAtCur = date('d M Y', strtotime($to));
             $asAtPrev = date('d M Y', strtotime($from . ' -1 day'));
 
@@ -1551,6 +1592,28 @@ function rc_render_letterhead(array $report, array $meta): void
 }
 
 /** Generated-on/by strip with export actions, shown under every statement. */
+/**
+ * Notes to Accounts block rendered below a statement (screen and print).
+ * $notes rows carry note_no + body; numbers match the statement's NOTE column.
+ */
+function rc_render_notes(array $notes): void
+{
+    if ($notes === []) {
+        return;
+    }
+    ?>
+    <div class="rpt-notes" aria-label="Notes to accounts">
+        <div class="rpt-notes-title">Notes to Accounts</div>
+        <?php foreach ($notes as $note): ?>
+            <div class="rpt-note">
+                <span class="rpt-note-no"><?= e((string) $note['note_no']) ?>.</span>
+                <div class="rpt-note-body"><?= nl2br(e((string) $note['body'])) ?></div>
+            </div>
+        <?php endforeach; ?>
+    </div>
+    <?php
+}
+
 function rc_render_report_foot(array $meta): void
 {
     ?>

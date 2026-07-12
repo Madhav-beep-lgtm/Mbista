@@ -2961,6 +2961,141 @@ body.admin-layout .rc2-mini:hover {
   box-shadow: none;
 }
 
+/* Notes to Accounts — rendered block + editor */
+
+body.admin-layout .rpt-notes {
+  border: 1px solid var(--mbw-border);
+  border-top: 0;
+  padding: 12px 16px;
+  background: var(--mbw-card);
+}
+
+body.admin-layout .rpt-notes-title {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--mbw-heading);
+  letter-spacing: 0.03em;
+  margin-bottom: 8px;
+}
+
+body.admin-layout .rpt-note {
+  display: flex;
+  gap: 9px;
+  font-size: 12.5px;
+  color: var(--mbw-text);
+  margin-bottom: 6px;
+}
+
+body.admin-layout .rpt-note-no {
+  font-weight: 700;
+  color: var(--mbw-primary);
+  min-width: 26px;
+}
+
+body.admin-layout .rc2-notes-editor {
+  margin-top: 14px;
+}
+
+body.admin-layout .rc2-notes-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+}
+
+body.admin-layout .rc2-notes-summary::-webkit-details-marker {
+  display: none;
+}
+
+body.admin-layout .rc2-notes-summary svg {
+  width: 17px;
+  height: 17px;
+  color: var(--mbw-primary);
+  flex-shrink: 0;
+}
+
+body.admin-layout .rc2-notes-summary span:nth-child(2) {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+}
+
+body.admin-layout .rc2-notes-summary strong {
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .rc2-notes-summary small {
+  color: var(--mbw-muted);
+  font-size: 11.5px;
+}
+
+body.admin-layout .rc2-notes-editor form {
+  margin-top: 12px;
+}
+
+body.admin-layout .rc2-note-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+body.admin-layout .rc2-note-row input {
+  width: 70px;
+  min-height: 38px;
+  text-align: center;
+}
+
+body.admin-layout .rc2-note-row textarea {
+  flex: 1;
+  min-height: 38px;
+  resize: vertical;
+}
+
+body.admin-layout .rc2-note-remove {
+  min-height: 38px;
+  min-width: 38px;
+  padding: 0;
+  border: 1px solid var(--mbw-border);
+  border-radius: 8px;
+  background: var(--mbw-card);
+  color: var(--mbw-muted);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+body.admin-layout .rc2-note-remove:hover {
+  border-color: #d64545;
+  color: #d64545;
+  background: var(--mbw-card);
+  transform: none;
+  box-shadow: none;
+}
+
+body.admin-layout .rc2-notes-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+body.admin-layout .mbw-btn-ghost {
+  background: var(--mbw-card);
+  color: var(--mbw-primary);
+  border: 1px solid var(--mbw-border);
+  box-shadow: none;
+}
+
+body.admin-layout .mbw-btn-ghost:hover {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-primary-soft);
+  transform: none;
+  box-shadow: none;
+}
+
 /* Compact density + fullscreen preview */
 
 body.admin-layout .rpt-statement.is-compact .rc-table th,

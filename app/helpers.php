@@ -394,6 +394,10 @@ function icon(string $name): string
             'viewBox' => '0 0 24 24',
             'paths' => ['M22 3H2l8 9.46V19l4 2v-8.54z'],
         ],
+        'plus' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M12 5v14', 'M5 12h14'],
+        ],
         'star' => [
             'viewBox' => '0 0 24 24',
             'paths' => ['M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z'],

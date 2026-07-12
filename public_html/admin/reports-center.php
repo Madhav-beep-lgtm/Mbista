@@ -92,6 +92,81 @@ if (!in_array($scopeCompanyId, $allowedScopeIds, true)) {
     $scopeCompanyId = $companyId;
 }
 
+// Reporting dimensions (Branch / Department / Cost centre) captured on
+// vouchers. Options are the distinct values actually used, so the filters
+// only appear once dimension data exists for the scoped company.
+$dimensionLabels = ['location' => 'Branch / Location', 'department' => 'Department / Project', 'cost_centre' => 'Cost Centre'];
+$dimensionOptions = [];
+$dimensionFilters = [];
+foreach ($dimensionLabels as $dimColumn => $dimLabel) {
+    try {
+        $dimStmt = db()->prepare("SELECT DISTINCT {$dimColumn} FROM vouchers WHERE company_id = :cid AND {$dimColumn} IS NOT NULL AND {$dimColumn} <> '' ORDER BY {$dimColumn} ASC");
+        $dimStmt->execute(['cid' => $scopeCompanyId]);
+        $values = array_map('strval', $dimStmt->fetchAll(PDO::FETCH_COLUMN));
+    } catch (Throwable $exception) {
+        $values = [];
+    }
+    if ($values === []) {
+        continue;
+    }
+    $dimensionOptions[$dimColumn] = $values;
+    $selected = trim((string) ($_GET['dim_' . $dimColumn] ?? ''));
+    if ($selected !== '' && in_array($selected, $values, true)) {
+        $dimensionFilters[$dimColumn] = $selected;
+    }
+}
+
+// Notes to Accounts: numbered narrative notes stored per company + fiscal
+// year + report, shown under the statement on screen and in print.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'save_report_notes') {
+    verify_csrf();
+    $noteNos = array_values((array) ($_POST['note_no'] ?? []));
+    $noteBodies = array_values((array) ($_POST['note_body'] ?? []));
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('DELETE FROM report_notes WHERE company_id = :cid AND fiscal_year_id = :fy AND report_key = :rk')
+            ->execute(['cid' => $scopeCompanyId, 'fy' => $fiscalYearId, 'rk' => $reportId]);
+        $insertNote = $pdo->prepare('INSERT INTO report_notes (company_id, fiscal_year_id, report_key, note_no, body, updated_by)
+            VALUES (:cid, :fy, :rk, :no, :body, :by)
+            ON DUPLICATE KEY UPDATE body = VALUES(body), updated_by = VALUES(updated_by)');
+        $savedNotes = 0;
+        foreach ($noteBodies as $index => $rawBody) {
+            $body = trim((string) $rawBody);
+            if ($body === '') {
+                continue;
+            }
+            $noteNo = trim((string) ($noteNos[$index] ?? ''));
+            if ($noteNo === '') {
+                $noteNo = (string) ($savedNotes + 1);
+            }
+            $insertNote->execute([
+                'cid' => $scopeCompanyId,
+                'fy' => $fiscalYearId,
+                'rk' => $reportId,
+                'no' => mb_substr($noteNo, 0, 10),
+                'body' => $body,
+                'by' => $userId,
+            ]);
+            $savedNotes++;
+        }
+        $pdo->commit();
+        flash('success', $savedNotes > 0 ? 'Notes to Accounts saved (' . $savedNotes . ').' : 'Notes to Accounts cleared.');
+    } catch (Throwable $exception) {
+        $pdo->rollBack();
+        flash('error', 'Could not save notes: ' . $exception->getMessage());
+    }
+    $queryString = http_build_query($_GET);
+    redirect('admin/reports-center.php' . ($queryString !== '' ? '?' . $queryString : ''));
+}
+
+$reportNotes = [];
+if (table_exists('report_notes')) {
+    $notesStmt = db()->prepare('SELECT note_no, body FROM report_notes WHERE company_id = :cid AND fiscal_year_id = :fy AND report_key = :rk ORDER BY LENGTH(note_no) ASC, note_no ASC');
+    $notesStmt->execute(['cid' => $scopeCompanyId, 'fy' => $fiscalYearId, 'rk' => $reportId]);
+    $reportNotes = $notesStmt->fetchAll();
+}
+
 $compareEnabled = (string) ($_GET['compare'] ?? '') === '1';
 $compareFrom = trim((string) ($_GET['cfrom'] ?? ''));
 $compareTo = trim((string) ($_GET['cto'] ?? ''));
@@ -122,6 +197,7 @@ $generatorContext = [
     'item_id' => $itemFilterId,
     'biz' => $businessType,
     'company_id' => $scopeCompanyId,
+    'dims' => $dimensionFilters,
     'company_name' => $scopeCompanyId === $companyId ? (string) ($company['name'] ?? '') : '',
     'subsidiaries' => $scopeCompanyId === $companyId ? array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'name' => (string) $row['name']], $subsidiaries) : [],
 ];
@@ -167,7 +243,9 @@ $reportMeta = [
     'from' => $fromDate,
     'to' => $toDate,
     'fiscal_label' => (string) ($selectedFiscalYear['label'] ?? ''),
-    'branch' => 'Head Office',
+    'branch' => (string) ($dimensionFilters['location'] ?? 'Head Office')
+        . (isset($dimensionFilters['department']) ? ' / ' . $dimensionFilters['department'] : '')
+        . (isset($dimensionFilters['cost_centre']) ? ' / ' . $dimensionFilters['cost_centre'] : ''),
     'currency_code' => trim($currencySymbol, ' .') !== '' ? rtrim(trim($currencySymbol), '. ') : 'NPR',
     'generated_by' => (string) ($currentUser['name'] ?? 'System'),
     'pdf_url' => rc_url(['view' => 'print']),
@@ -200,6 +278,10 @@ if (isset($_GET['view']) && $_GET['view'] === 'print') {
             .rpt-row-section td { font-weight: 700; background: #f6f8fc; letter-spacing: 0.04em; }
             tr[data-level="1"] td.rpt-cell-main { padding-left: 24px; }
             tr[data-level="2"] td.rpt-cell-main { padding-left: 44px; }
+            .rpt-notes { border: 1px solid #d7dfeb; border-top: 0; padding: 12px 14px; }
+            .rpt-notes-title { font-weight: 700; font-size: 12.5px; color: #16325d; letter-spacing: 0.03em; margin-bottom: 7px; }
+            .rpt-note { display: flex; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+            .rpt-note-no { font-weight: 700; color: #16325d; min-width: 26px; }
             .rpt-foot { display: flex; gap: 18px; padding: 9px 12px; border: 1px solid #d7dfeb; border-top: 0; color: #55657e; font-size: 11px; }
             .print-button { margin-top: 20px; padding: 10px 18px; background: #16325d; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
             @media print { .print-button { display: none; } body { margin: 8mm; } }
@@ -209,6 +291,7 @@ if (isset($_GET['view']) && $_GET['view'] === 'print') {
         <div class="rpt-bar"><?= e($reportNumberedTitle) ?></div>
         <?php rc_render_letterhead($report, $reportMeta); ?>
         <?php rc_render_table($report, $hasGroups); ?>
+        <?php rc_render_notes($reportNotes); ?>
         <?php rc_render_report_foot(['generated_by' => $reportMeta['generated_by']]); ?>
         <button class="print-button" onclick="window.print()">Print / Save as PDF</button>
     </body>
@@ -295,7 +378,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </label>
         <label>From Date<input type="date" name="from" value="<?= e($fromDate) ?>"></label>
         <label>To Date<input type="date" name="to" value="<?= e($toDate) ?>"></label>
-        <label>Branch<select name="branch" title="Branch accounting is not enabled; all data is head office."><option>All Branches</option></select></label>
+        <label>Branch
+            <?php if (isset($dimensionOptions['location'])): ?>
+                <select name="dim_location">
+                    <option value="">All Branches</option>
+                    <?php foreach ($dimensionOptions['location'] as $dimValue): ?>
+                        <option value="<?= e($dimValue) ?>" <?= ($dimensionFilters['location'] ?? '') === $dimValue ? 'selected' : '' ?>><?= e($dimValue) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            <?php else: ?>
+                <select disabled title="No branch/location has been recorded on vouchers yet. Set it in the voucher form's Location field."><option>All Branches</option></select>
+            <?php endif; ?>
+        </label>
         <label>Company
             <select name="scope_company">
                 <option value="<?= e($companyId) ?>" <?= $scopeCompanyId === $companyId ? 'selected' : '' ?>><?= e($company['name'] ?? 'Current company') ?></option>
@@ -304,8 +398,30 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </select>
         </label>
-        <label>Project<select name="project" title="Project dimension is not enabled yet."><option>All Projects</option></select></label>
-        <label>Cost Center<select name="cost_center" title="Cost centers are not enabled yet."><option>All Cost Centers</option></select></label>
+        <label>Department / Project
+            <?php if (isset($dimensionOptions['department'])): ?>
+                <select name="dim_department">
+                    <option value="">All Departments</option>
+                    <?php foreach ($dimensionOptions['department'] as $dimValue): ?>
+                        <option value="<?= e($dimValue) ?>" <?= ($dimensionFilters['department'] ?? '') === $dimValue ? 'selected' : '' ?>><?= e($dimValue) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            <?php else: ?>
+                <select disabled title="No department/project has been recorded on vouchers yet. Set it in the voucher form's Department field."><option>All Departments</option></select>
+            <?php endif; ?>
+        </label>
+        <label>Cost Center
+            <?php if (isset($dimensionOptions['cost_centre'])): ?>
+                <select name="dim_cost_centre">
+                    <option value="">All Cost Centers</option>
+                    <?php foreach ($dimensionOptions['cost_centre'] as $dimValue): ?>
+                        <option value="<?= e($dimValue) ?>" <?= ($dimensionFilters['cost_centre'] ?? '') === $dimValue ? 'selected' : '' ?>><?= e($dimValue) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            <?php else: ?>
+                <select disabled title="No cost centre has been recorded on vouchers yet. Set it in the voucher form's Cost Centre field."><option>All Cost Centers</option></select>
+            <?php endif; ?>
+        </label>
         <label>Voucher Type
             <select name="vtype">
                 <option value="">All Voucher Types</option>
@@ -408,6 +524,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php rc_render_table($compareReport, $hasGroups); ?>
             </div>
         <?php endif; ?>
+        <?php rc_render_notes($reportNotes); ?>
         <?php rc_render_report_foot(['generated_by' => $reportMeta['generated_by']]); ?>
 
         <div class="rc-report-foot">
@@ -417,6 +534,62 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </main>
 </div>
 </section>
+
+<details class="mbw-card rc2-notes-editor" <?= $reportNotes !== [] ? 'open' : '' ?>>
+    <summary class="rc2-notes-summary">
+        <?= icon('documents') ?>
+        <span>
+            <strong>Notes to Accounts</strong>
+            <small>Numbered notes for this statement — match them to the NOTE column and they print below the report.</small>
+        </span>
+        <span class="mbw-pill <?= $reportNotes !== [] ? 'tone-green' : '' ?>"><?= count($reportNotes) ?> note<?= count($reportNotes) === 1 ? '' : 's' ?></span>
+    </summary>
+    <form method="post" action="<?= e(rc_url()) ?>" id="rc2NotesForm">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="save_report_notes">
+        <div id="rc2NotesRows">
+            <?php foreach ($reportNotes as $note): ?>
+                <div class="rc2-note-row">
+                    <input type="text" name="note_no[]" value="<?= e((string) $note['note_no']) ?>" maxlength="10" aria-label="Note number" placeholder="No.">
+                    <textarea name="note_body[]" rows="2" aria-label="Note text" placeholder="Note text..."><?= e((string) $note['body']) ?></textarea>
+                    <button type="button" class="rc2-note-remove" data-note-remove title="Remove this note" aria-label="Remove note">&times;</button>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <template id="rc2NoteTemplate">
+            <div class="rc2-note-row">
+                <input type="text" name="note_no[]" value="" maxlength="10" aria-label="Note number" placeholder="No.">
+                <textarea name="note_body[]" rows="2" aria-label="Note text" placeholder="Note text..."></textarea>
+                <button type="button" class="rc2-note-remove" data-note-remove title="Remove this note" aria-label="Remove note">&times;</button>
+            </div>
+        </template>
+        <div class="rc2-notes-actions">
+            <button type="button" class="mbw-btn-ghost" id="rc2NoteAdd"><?= icon('plus') ?>Add Note</button>
+            <button type="submit"><?= icon('tasks') ?>Save Notes</button>
+        </div>
+    </form>
+</details>
+
+<script>
+(function () {
+    var rowsHost = document.getElementById('rc2NotesRows');
+    var template = document.getElementById('rc2NoteTemplate');
+    var addBtn = document.getElementById('rc2NoteAdd');
+    if (!rowsHost || !template || !addBtn) { return; }
+    addBtn.addEventListener('click', function () {
+        rowsHost.appendChild(template.content.cloneNode(true));
+        var added = rowsHost.querySelector('.rc2-note-row:last-child input');
+        if (added) { added.focus(); }
+    });
+    rowsHost.addEventListener('click', function (event) {
+        var btn = event.target.closest('[data-note-remove]');
+        if (btn) { btn.closest('.rc2-note-row').remove(); }
+    });
+    if (!rowsHost.children.length) {
+        rowsHost.appendChild(template.content.cloneNode(true));
+    }
+})();
+</script>
 
 <script>
 (function () {
