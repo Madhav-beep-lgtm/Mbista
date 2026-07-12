@@ -198,6 +198,8 @@ if (isset($_GET['view']) && $_GET['view'] === 'print') {
             .rc-total-row td, .rpt-row-total td { font-weight: 700; background: #eef3fa; }
             .rpt-row-bold td { font-weight: 700; }
             .rpt-row-section td { font-weight: 700; background: #f6f8fc; letter-spacing: 0.04em; }
+            tr[data-level="1"] td.rpt-cell-main { padding-left: 24px; }
+            tr[data-level="2"] td.rpt-cell-main { padding-left: 44px; }
             .rpt-foot { display: flex; gap: 18px; padding: 9px 12px; border: 1px solid #d7dfeb; border-top: 0; color: #55657e; font-size: 11px; }
             .print-button { margin-top: 20px; padding: 10px 18px; background: #16325d; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
             @media print { .print-button { display: none; } body { margin: 8mm; } }
@@ -377,11 +379,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </span>
         </span>
         <div class="rc2-preview-tools">
-            <span>View</span>
+            <input type="search" id="rc2AcctSearch" class="rc2-acct-search rc2-hier-only" placeholder="Search account..." aria-label="Search accounts in this report">
+            <button type="button" class="rc2-mini rc2-hier-only" id="rc2ExpandAll">Expand all</button>
+            <button type="button" class="rc2-mini rc2-hier-only" id="rc2CollapseAll">Collapse all</button>
+            <span>Display Level</span>
             <label class="rc2-view-select">
-                <select id="rc2ViewMode" aria-label="Preview density">
-                    <option value="table">Table View</option>
-                    <option value="compact">Compact View</option>
+                <select id="rc2Level" aria-label="Display level">
+                    <option value="master">Summary — Masters</option>
+                    <option value="group" selected>Group Summary</option>
+                    <option value="ledger">Full Ledger Detail</option>
+                    <option value="compact">Compact Detail</option>
                 </select>
                 <span class="rc2-caret"><?= icon('chevron') ?></span>
             </label>
@@ -508,14 +515,93 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         document.addEventListener('click', function () { exportWrap.classList.remove('is-open'); });
     }
 
-    // Preview density + fullscreen expand.
-    var viewMode = document.getElementById('rc2ViewMode');
+    // --- Unified statement hierarchy: display level, expand/collapse,
+    //     account search, and ledger drill-down -----------------------------
     var statement = document.getElementById('rc2Statement');
-    if (viewMode && statement) {
-        viewMode.addEventListener('change', function () {
-            statement.classList.toggle('is-compact', viewMode.value === 'compact');
+    var hierRows = statement ? Array.prototype.slice.call(statement.querySelectorAll('tr[data-level]')) : [];
+    var levelSelect = document.getElementById('rc2Level');
+    var ledgerDrillBase = <?= json_encode(url('admin/reports-center.php?report=ledger-report&fy=' . $fiscalYearId . '&from=' . $fromDate . '&to=' . $toDate . '&ledger_id=')) ?>;
+
+    var parentOf = {};
+    hierRows.forEach(function (tr) {
+        if (tr.dataset.node) { parentOf[tr.dataset.node] = tr.dataset.parent || ''; }
+    });
+    var collapsedNodes = {};
+
+    function hierRefresh() {
+        hierRows.forEach(function (tr) {
+            var hidden = false;
+            var p = tr.dataset.parent || '';
+            while (p) {
+                if (collapsedNodes[p]) { hidden = true; break; }
+                p = parentOf[p] || '';
+            }
+            tr.classList.toggle('rpt-hidden', hidden);
+            if (tr.dataset.node) { tr.classList.toggle('is-collapsed', !!collapsedNodes[tr.dataset.node]); }
         });
     }
+
+    function setDisplayLevel(level) {
+        collapsedNodes = {};
+        if (level === 'master') {
+            hierRows.forEach(function (tr) { if (tr.dataset.node && tr.dataset.level === '0') { collapsedNodes[tr.dataset.node] = true; } });
+        } else if (level === 'group') {
+            hierRows.forEach(function (tr) { if (tr.dataset.node && tr.dataset.level === '1') { collapsedNodes[tr.dataset.node] = true; } });
+        }
+        if (statement) { statement.classList.toggle('is-compact', level === 'compact'); }
+        hierRefresh();
+    }
+
+    if (hierRows.length && statement) {
+        setDisplayLevel(levelSelect ? levelSelect.value : 'group');
+        if (levelSelect) {
+            levelSelect.addEventListener('change', function () { setDisplayLevel(levelSelect.value); });
+        }
+        statement.addEventListener('click', function (event) {
+            var tr = event.target.closest('tr');
+            if (!tr) { return; }
+            if (tr.dataset.node) {
+                collapsedNodes[tr.dataset.node] = !collapsedNodes[tr.dataset.node];
+                hierRefresh();
+            } else if (tr.dataset.ledgerId) {
+                window.location = ledgerDrillBase + tr.dataset.ledgerId;
+            }
+        });
+        var expandAll = document.getElementById('rc2ExpandAll');
+        var collapseAll = document.getElementById('rc2CollapseAll');
+        if (expandAll) { expandAll.addEventListener('click', function () { collapsedNodes = {}; hierRefresh(); }); }
+        if (collapseAll) { collapseAll.addEventListener('click', function () { setDisplayLevel('master'); if (levelSelect) { levelSelect.value = 'master'; } }); }
+        var acctSearch = document.getElementById('rc2AcctSearch');
+        if (acctSearch) {
+            acctSearch.addEventListener('input', function () {
+                var q = acctSearch.value.trim().toLowerCase();
+                if (!q) { hierRefresh(); return; }
+                var keepNodes = {};
+                hierRows.forEach(function (tr) {
+                    if (tr.textContent.toLowerCase().indexOf(q) !== -1) {
+                        var p = tr.dataset.parent || '';
+                        while (p) { keepNodes[p] = true; p = parentOf[p] || ''; }
+                        if (tr.dataset.node) { keepNodes[tr.dataset.node] = true; }
+                        tr._rc2Match = true;
+                    } else {
+                        tr._rc2Match = false;
+                    }
+                });
+                hierRows.forEach(function (tr) {
+                    var show = tr._rc2Match || (tr.dataset.node && keepNodes[tr.dataset.node]);
+                    tr.classList.toggle('rpt-hidden', !show);
+                });
+            });
+        }
+    } else {
+        document.querySelectorAll('.rc2-hier-only').forEach(function (el) { el.style.display = 'none'; });
+        if (levelSelect && statement) {
+            levelSelect.addEventListener('change', function () {
+                statement.classList.toggle('is-compact', levelSelect.value === 'compact');
+            });
+        }
+    }
+
     var expandBtn = document.getElementById('rc2Expand');
     var preview = document.getElementById('rc2Preview');
     if (expandBtn && preview) {

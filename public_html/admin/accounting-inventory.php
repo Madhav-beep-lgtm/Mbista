@@ -318,17 +318,6 @@ $pageSubtitle = $inventoryProfile['show_manufacturing']
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<div class="accounting-page-head">
-    <div>
-        <h2><?= $inventoryProfile['show_manufacturing'] ? 'Items, stock movements, and production' : 'Items and stock movements' ?></h2>
-        <p><?= e($company['name'] ?? 'Company') ?> / <?= e($fiscalYear['label'] ?? 'No fiscal year') ?></p>
-    </div>
-    <div class="accounting-actions">
-        <a class="button secondary" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('accounting') ?>Accounting</a>
-        <a class="button secondary" href="<?= e(url('admin/accounting-parties.php')) ?>"><?= icon('users') ?>Parties</a>
-    </div>
-</div>
-
 <nav class="accounting-tabs" aria-label="Accounting sections">
     <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Dashboard</a>
     <a href="<?= e(url('admin/accounting-parties.php')) ?>">Parties</a>
@@ -377,23 +366,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <?php if ($invView === 'inventory'): ?>
-<section class="mbw-card" aria-label="Inventory process click flow">
-    <div class="mbw-card-head"><h2>Inventory Process Flow</h2></div>
-    <div class="inventory-process-grid">
+<details class="mbw-card" aria-label="Help and workflow">
+    <summary class="mbw-card-head" style="cursor:pointer"><h2>Help &amp; Workflow</h2><span class="mbw-card-tools" style="color:var(--mbw-muted);font-size:12.5px">Process flow and item types — click to open</span></summary>
+    <div class="inventory-process-grid" style="margin-bottom:14px">
         <?php foreach ($inventoryProcessSteps as $index => $process): ?>
             <article><b><?= e((string) ($index + 1)) ?></b><span><?= icon($index === 0 ? 'services' : ($index === count($inventoryProcessSteps) - 1 ? 'reports' : 'documents')) ?></span><strong><?= e($process[0]) ?></strong><small><?= e($process[1]) ?></small></article>
         <?php endforeach; ?>
     </div>
-</section>
-
-<section class="mbw-card" aria-label="Inventory item types">
-    <div class="mbw-card-head"><h2>Item Types</h2></div>
     <div class="inventory-type-grid">
         <?php foreach ($inventoryTypeCards as [$typeLabel, $typeDescription]): ?>
             <article><strong><?= e($typeLabel) ?></strong><span><?= e($typeDescription) ?></span></article>
         <?php endforeach; ?>
     </div>
-</section>
+</details>
 
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 

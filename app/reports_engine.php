@@ -44,9 +44,50 @@ function rc_fmt(float $amount): string
  * Statement row with an optional emphasis style for the template renderer:
  * '' (plain), 'bold' (computed line), 'section' (section heading), 'total'.
  */
-function rc_row(array $cells, string $style = ''): array
+function rc_row(array $cells, string $style = '', array $meta = []): array
 {
-    return ['cells' => $cells, 'style' => $style];
+    return ['cells' => $cells, 'style' => $style, 'meta' => $meta];
+}
+
+function rc_row_meta(array $row): array
+{
+    return (array) ($row['meta'] ?? []);
+}
+
+/**
+ * Groups ledger balances for the unified Master -> Group -> Ledger
+ * statements: only ledgers whose $valueFn returns a non-zero vector are
+ * kept (zero-balance hiding). Returns
+ * ['groups' => [name => ['ledgers' => [['b' =>, 'vals' =>]], 'sum' => []]], 'sum' => []].
+ */
+function rc_group_balances(array $balances, array $masters, callable $valueFn): array
+{
+    $groups = [];
+    $sum = [];
+    foreach ($balances as $b) {
+        if (!in_array((string) ($b['master_key'] ?? ''), $masters, true)) {
+            continue;
+        }
+        $vals = $valueFn($b);
+        $nonZero = false;
+        foreach ($vals as $v) {
+            if (abs((float) $v) > 0.004) {
+                $nonZero = true;
+                break;
+            }
+        }
+        if (!$nonZero) {
+            continue;
+        }
+        $groupName = (string) (($b['group_name'] ?? '') !== '' ? $b['group_name'] : 'Ungrouped');
+        $groups[$groupName]['ledgers'][] = ['b' => $b, 'vals' => $vals];
+        foreach ($vals as $i => $v) {
+            $groups[$groupName]['sum'][$i] = ($groups[$groupName]['sum'][$i] ?? 0.0) + (float) $v;
+            $sum[$i] = ($sum[$i] ?? 0.0) + (float) $v;
+        }
+    }
+    ksort($groups);
+    return ['groups' => $groups, 'sum' => $sum];
 }
 
 function rc_row_cells(array $row): array
@@ -294,39 +335,52 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
     switch ($reportId) {
         case 'trial-balance': {
             $balances = rc_ledger_balances($scopeCompanyId, $from, $to, $ctx['vtype'], $ctx['group_id'], $ctx['ledger_id']);
+            // Master -> Group -> Ledger hierarchy in natural chart order.
+            $tbValue = static fn (array $b): array => [
+                (float) $b['op_side_dr'], (float) $b['op_side_cr'],
+                (float) $b['tx_dr'], (float) $b['tx_cr'],
+                (float) $b['cl_side_dr'], (float) $b['cl_side_cr'],
+            ];
+            $masterOrder = array_keys(LEDGER_MASTERS);
             $rows = [];
-            $totals = ['op_dr' => 0.0, 'op_cr' => 0.0, 'tx_dr' => 0.0, 'tx_cr' => 0.0, 'cl_dr' => 0.0, 'cl_cr' => 0.0];
-            $sn = 0;
-            foreach ($balances as $b) {
-                if ((float) $b['op_dr'] == 0.0 && (float) $b['op_cr'] == 0.0 && (float) $b['tx_dr'] == 0.0 && (float) $b['tx_cr'] == 0.0) {
+            $grand = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            $mi = 0;
+            foreach ($masterOrder as $masterKey) {
+                $section = rc_group_balances($balances, [$masterKey], $tbValue);
+                if ($section['groups'] === []) {
                     continue;
                 }
-                $sn++;
-                $rows[] = [
-                    (string) $sn, $b['code'], $b['name'], $b['group_name'] ?? '–',
-                    rc_fmt($b['op_side_dr']), rc_fmt($b['op_side_cr']),
-                    rc_fmt((float) $b['tx_dr']), rc_fmt((float) $b['tx_cr']),
-                    rc_fmt($b['cl_side_dr']), rc_fmt($b['cl_side_cr']),
-                ];
-                $totals['op_dr'] += $b['op_side_dr'];
-                $totals['op_cr'] += $b['op_side_cr'];
-                $totals['tx_dr'] += (float) $b['tx_dr'];
-                $totals['tx_cr'] += (float) $b['tx_cr'];
-                $totals['cl_dr'] += $b['cl_side_dr'];
-                $totals['cl_cr'] += $b['cl_side_cr'];
+                $mi++;
+                $node = 'm' . $mi;
+                $masterLabel = (string) (LEDGER_MASTERS[$masterKey]['label'] ?? ucwords(str_replace('_', ' ', $masterKey)));
+                $sum = $section['sum'] + [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+                $rows[] = rc_row(array_merge(['', $mi . '. ' . strtoupper($masterLabel)], array_map('rc_fmt', $sum)), 'bold', ['level' => 0, 'node' => $node, 'label_cell' => 1]);
+                $gi = 0;
+                foreach ($section['groups'] as $groupName => $groupData) {
+                    $gi++;
+                    $gnode = $node . '.' . $gi;
+                    $gsum = $groupData['sum'] + [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+                    $rows[] = rc_row(array_merge(['', $mi . '.' . $gi . ' ' . $groupName], array_map('rc_fmt', $gsum)), 'bold', ['level' => 1, 'node' => $gnode, 'parent' => $node, 'label_cell' => 1]);
+                    foreach ($groupData['ledgers'] as $ledgerLine) {
+                        $rows[] = rc_row(array_merge([(string) $ledgerLine['b']['code'], (string) $ledgerLine['b']['name']], array_map('rc_fmt', $ledgerLine['vals'])), '', ['level' => 2, 'parent' => $gnode, 'ledger_id' => (int) $ledgerLine['b']['id'], 'label_cell' => 1]);
+                    }
+                }
+                foreach ($sum as $i => $v) {
+                    $grand[$i] += (float) $v;
+                }
             }
             return [
                 'number' => '1',
                 'title' => 'Trial Balance',
-                'subtitle' => 'Summary of all ledger balances as on selected date range.',
+                'subtitle' => 'Ledger balances by master and group. Click a row to expand or drill into the ledger.',
                 'columns' => [
-                    ['SN', 'left', ''], ['Ledger Code', 'left', ''], ['Account Name', 'left', ''], ['Group', 'left', ''],
+                    ['Code', 'left', ''], ['Particulars', 'left', ''],
                     ['Dr.', 'right', 'Opening Balance'], ['Cr.', 'right', 'Opening Balance'],
                     ['Dr.', 'right', 'Period Activity'], ['Cr.', 'right', 'Period Activity'],
                     ['Dr.', 'right', 'Closing Balance'], ['Cr.', 'right', 'Closing Balance'],
                 ],
                 'rows' => $rows,
-                'totals' => ['', '', 'Total', '', rc_fmt($totals['op_dr']), rc_fmt($totals['op_cr']), rc_fmt($totals['tx_dr']), rc_fmt($totals['tx_cr']), rc_fmt($totals['cl_dr']), rc_fmt($totals['cl_cr'])],
+                'totals' => ['', 'Total', rc_fmt($grand[0]), rc_fmt($grand[1]), rc_fmt($grand[2]), rc_fmt($grand[3]), rc_fmt($grand[4]), rc_fmt($grand[5])],
             ];
         }
 
@@ -358,28 +412,62 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             if ($orgType === 'service') {
                 $number = '2C';
                 $titleSuffix = 'Service';
-                $revCur = $cur['revenue_lines'];
-                $revPrevByName = [];
-                foreach ($prev['revenue_lines'] as $rl) {
-                    $revPrevByName[$rl['name']] = (float) $rl['amount'];
+
+                // Master -> Group -> Ledger hierarchy from period movements,
+                // with the classic profit checkpoints between sections.
+                $balancesCur = rc_ledger_balances($scopeCompanyId, $from, $to);
+                $balancesPrev = rc_ledger_balances($scopeCompanyId, $prevFrom, $prevTo);
+                $prevMovement = [];
+                foreach ($balancesPrev as $pb) {
+                    $nature = rc_ledger_nature($pb);
+                    $prevMovement[(int) $pb['id']] = $nature === 'revenue'
+                        ? (float) $pb['tx_cr'] - (float) $pb['tx_dr']
+                        : (float) $pb['tx_dr'] - (float) $pb['tx_cr'];
                 }
-                foreach ($revCur as $rl) {
-                    $rows[] = $line((string) $rl['name'], (float) $rl['amount'], $revPrevByName[$rl['name']] ?? 0.0);
+                $plCells = static function (string $label, string $note, float $c, float $p): array {
+                    [$var, $pct] = rc_variance_cells($c, $p);
+                    return [$label, $note, rc_fmt($c), rc_fmt($p), $var, $pct];
+                };
+                $plSections = [
+                    ['no' => '1', 'label' => 'Revenue', 'masters' => ['direct_income', 'indirect_income'], 'revenue' => true],
+                    ['no' => '2', 'label' => 'Direct Costs', 'masters' => ['direct_expense'], 'revenue' => false],
+                    ['no' => '3', 'label' => 'Operating and Administrative Expenses', 'masters' => ['indirect_expense'], 'revenue' => false],
+                ];
+                $sectionTotals = [];
+                $sectionRows = [];
+                foreach ($plSections as $def) {
+                    $isRevenue = (bool) $def['revenue'];
+                    $section = rc_group_balances($balancesCur, $def['masters'], static function (array $b) use ($isRevenue, $prevMovement): array {
+                        $curMove = $isRevenue
+                            ? (float) $b['tx_cr'] - (float) $b['tx_dr']
+                            : (float) $b['tx_dr'] - (float) $b['tx_cr'];
+                        return [$curMove, (float) ($prevMovement[(int) $b['id']] ?? 0.0)];
+                    });
+                    $sum = $section['sum'] + [0.0, 0.0];
+                    $node = 'p' . $def['no'];
+                    $secRows = [rc_row($plCells($def['no'] . '. ' . $def['label'], $def['no'], (float) $sum[0], (float) $sum[1]), 'bold', ['level' => 0, 'node' => $node])];
+                    $gi = 0;
+                    foreach ($section['groups'] as $groupName => $groupData) {
+                        $gi++;
+                        $gnode = $node . '.' . $gi;
+                        $gsum = $groupData['sum'] + [0.0, 0.0];
+                        $secRows[] = rc_row($plCells($def['no'] . '.' . $gi . ' ' . $groupName, '', (float) $gsum[0], (float) $gsum[1]), 'bold', ['level' => 1, 'node' => $gnode, 'parent' => $node]);
+                        foreach ($groupData['ledgers'] as $ledgerLine) {
+                            $secRows[] = rc_row($plCells((string) $ledgerLine['b']['name'], '', (float) $ledgerLine['vals'][0], (float) $ledgerLine['vals'][1]), '', ['level' => 2, 'parent' => $gnode, 'ledger_id' => (int) $ledgerLine['b']['id']]);
+                        }
+                    }
+                    $sectionTotals[$def['no']] = [(float) $sum[0], (float) $sum[1]];
+                    $sectionRows[$def['no']] = $secRows;
                 }
-                $rows[] = $line('Total Operating Revenue', $cur['total_revenue'], $prev['total_revenue'], 'bold', false);
-                $adminCur = $cur['operating_expenses'] - $cur['employee_cost'] - $cur['depreciation'];
-                $adminPrev = $prev['operating_expenses'] - $prev['employee_cost'] - $prev['depreciation'];
-                $rows[] = $line('Direct Cost', $cur['cogs'], $prev['cogs']);
-                $rows[] = $line('Employee Cost', $cur['employee_cost'], $prev['employee_cost']);
-                $rows[] = $line('Administrative Expenses', $adminCur, $adminPrev);
-                $rows[] = $line('Depreciation', $cur['depreciation'], $prev['depreciation']);
-                $opCur = $cur['total_revenue'] - $cur['cogs'] - $cur['operating_expenses'];
-                $opPrev = $prev['total_revenue'] - $prev['cogs'] - $prev['operating_expenses'];
-                $rows[] = $line('Operating Profit', $opCur, $opPrev, 'bold', false);
-                $rows[] = $line('Finance Cost', $cur['finance_cost'], $prev['finance_cost']);
-                $rows[] = $line('Profit Before Tax', $opCur - $cur['finance_cost'], $opPrev - $prev['finance_cost'], 'bold', false);
-                $rows[] = $line('Income Tax Expense', $cur['income_tax'], $prev['income_tax']);
-                $rows[] = $line('Profit After Tax', $opCur - $cur['finance_cost'] - $cur['income_tax'], $opPrev - $prev['finance_cost'] - $prev['income_tax'], 'total', false);
+
+                $rows = array_merge($sectionRows['1'], $sectionRows['2']);
+                $grossCur = $sectionTotals['1'][0] - $sectionTotals['2'][0];
+                $grossPrev = $sectionTotals['1'][1] - $sectionTotals['2'][1];
+                $rows[] = rc_row($plCells('GROSS PROFIT', '', $grossCur, $grossPrev), 'total');
+                $rows = array_merge($rows, $sectionRows['3']);
+                $netCur = $grossCur - $sectionTotals['3'][0];
+                $netPrev = $grossPrev - $sectionTotals['3'][1];
+                $rows[] = rc_row($plCells('NET PROFIT FOR THE PERIOD', '', $netCur, $netPrev), 'total');
             } else {
                 $number = $orgType === 'manufacturing' ? '2A' : '2B';
                 $titleSuffix = ucfirst($orgType);
@@ -412,72 +500,87 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
 
         case 'balance-sheet': {
             $balances = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0);
-            $buckets = [
-                'nca' => ['cur' => 0.0, 'prev' => 0.0], 'ca' => ['cur' => 0.0, 'prev' => 0.0],
-                'equity' => ['cur' => 0.0, 'prev' => 0.0], 'ncl' => ['cur' => 0.0, 'prev' => 0.0],
-                'cl' => ['cur' => 0.0, 'prev' => 0.0], 'profit' => ['cur' => 0.0, 'prev' => 0.0],
-            ];
-            foreach ($balances as $b) {
-                $nature = rc_ledger_nature($b);
-                $master = (string) ($b['master_key'] ?? '');
-                $cur = (float) $b['closing_net'];
-                $prev = (float) $b['opening_net'];
-                if ($nature === 'asset') {
-                    $key = $master === 'non_current_asset' ? 'nca' : 'ca';
-                    $buckets[$key]['cur'] += $cur;
-                    $buckets[$key]['prev'] += $prev;
-                } elseif ($nature === 'liability') {
-                    $key = $master === 'non_current_liability' ? 'ncl' : 'cl';
-                    $buckets[$key]['cur'] += -$cur;
-                    $buckets[$key]['prev'] += -$prev;
-                } elseif ($nature === 'equity') {
-                    $buckets['equity']['cur'] += -$cur;
-                    $buckets['equity']['prev'] += -$prev;
-                } elseif ($nature === 'revenue') {
-                    $buckets['profit']['cur'] += -$cur;
-                    $buckets['profit']['prev'] += -$prev;
-                } elseif ($nature === 'expense') {
-                    $buckets['profit']['cur'] -= $cur;
-                    $buckets['profit']['prev'] -= $prev;
-                }
-            }
-            $equityCur = $buckets['equity']['cur'] + $buckets['profit']['cur'];
-            $equityPrev = $buckets['equity']['prev'] + $buckets['profit']['prev'];
-            $totalAssetsCur = $buckets['nca']['cur'] + $buckets['ca']['cur'];
-            $totalAssetsPrev = $buckets['nca']['prev'] + $buckets['ca']['prev'];
-            $totalEqLiabCur = $equityCur + $buckets['ncl']['cur'] + $buckets['cl']['cur'];
-            $totalEqLiabPrev = $equityPrev + $buckets['ncl']['prev'] + $buckets['cl']['prev'];
-
             $asAtCur = date('d M Y', strtotime($to));
             $asAtPrev = date('d M Y', strtotime($from . ' -1 day'));
-            $note = 0;
-            $bsLine = static function (string $label, float $c, float $p, string $style = '', bool $numbered = true) use (&$note): array {
-                if ($numbered) {
-                    $note++;
+
+            // Profit for the period folds into equity.
+            $profitCur = 0.0;
+            $profitPrev = 0.0;
+            foreach ($balances as $b) {
+                $nature = rc_ledger_nature($b);
+                if ($nature === 'revenue') {
+                    $profitCur += -(float) $b['closing_net'];
+                    $profitPrev += -(float) $b['opening_net'];
+                } elseif ($nature === 'expense') {
+                    $profitCur -= (float) $b['closing_net'];
+                    $profitPrev -= (float) $b['opening_net'];
                 }
-                return rc_row([$label, $numbered ? (string) $note : '', rc_fmt($c), rc_fmt($p), rc_fmt($c - $p)], $style);
-            };
-            $rows = [
-                rc_row(['ASSETS', '', '', '', ''], 'section'),
-                $bsLine('Non-Current Assets', $buckets['nca']['cur'], $buckets['nca']['prev']),
-                $bsLine('Current Assets', $buckets['ca']['cur'], $buckets['ca']['prev']),
-                $bsLine('Total Assets', $totalAssetsCur, $totalAssetsPrev, 'bold', false),
-                rc_row(['EQUITY AND LIABILITIES', '', '', '', ''], 'section'),
-                $bsLine('Equity (incl. profit for the period)', $equityCur, $equityPrev),
-                $bsLine('Non-Current Liabilities', $buckets['ncl']['cur'], $buckets['ncl']['prev']),
-                $bsLine('Current Liabilities', $buckets['cl']['cur'], $buckets['cl']['prev']),
-                $bsLine('Total Equity and Liabilities', $totalEqLiabCur, $totalEqLiabPrev, 'total', false),
+            }
+
+            // Master -> Group -> Ledger with current, previous, variance.
+            $sections = [
+                ['no' => '1', 'label' => 'Non-Current Assets', 'masters' => ['non_current_asset'], 'sign' => 1],
+                ['no' => '2', 'label' => 'Current Assets', 'masters' => ['current_asset'], 'sign' => 1],
+                ['no' => '3', 'label' => 'Equity', 'masters' => ['equity'], 'sign' => -1],
+                ['no' => '4', 'label' => 'Non-Current Liabilities', 'masters' => ['non_current_liability'], 'sign' => -1],
+                ['no' => '5', 'label' => 'Current Liabilities', 'masters' => ['current_liability'], 'sign' => -1],
             ];
+            $bsCells = static function (string $label, string $note, float $cur, float $prev): array {
+                [$var, $pct] = rc_variance_cells($cur, $prev);
+                return [$label, $note, rc_fmt($cur), rc_fmt($prev), $var, $pct];
+            };
+            $sectionTotals = [];
+            $sectionRows = [];
+            foreach ($sections as $def) {
+                $sign = (int) $def['sign'];
+                $section = rc_group_balances($balances, $def['masters'], static fn (array $b): array => [
+                    $sign * (float) $b['closing_net'],
+                    $sign * (float) $b['opening_net'],
+                ]);
+                $sum = $section['sum'] + [0.0, 0.0];
+                $node = 's' . $def['no'];
+                $rows = [];
+                $rows[] = rc_row($bsCells($def['no'] . '. ' . $def['label'], $def['no'], (float) $sum[0], (float) $sum[1]), 'bold', ['level' => 0, 'node' => $node]);
+                $gi = 0;
+                foreach ($section['groups'] as $groupName => $groupData) {
+                    $gi++;
+                    $gnode = $node . '.' . $gi;
+                    $gsum = $groupData['sum'] + [0.0, 0.0];
+                    $rows[] = rc_row($bsCells($def['no'] . '.' . $gi . ' ' . $groupName, '', (float) $gsum[0], (float) $gsum[1]), 'bold', ['level' => 1, 'node' => $gnode, 'parent' => $node]);
+                    foreach ($groupData['ledgers'] as $ledgerLine) {
+                        $rows[] = rc_row($bsCells((string) $ledgerLine['b']['name'], '', (float) $ledgerLine['vals'][0], (float) $ledgerLine['vals'][1]), '', ['level' => 2, 'parent' => $gnode, 'ledger_id' => (int) $ledgerLine['b']['id']]);
+                    }
+                }
+                $sectionTotals[$def['no']] = [(float) $sum[0], (float) $sum[1]];
+                $sectionRows[$def['no']] = $rows;
+            }
+
+            $rows = [rc_row(['ASSETS', '', '', '', '', ''], 'section')];
+            $rows = array_merge($rows, $sectionRows['1'], $sectionRows['2']);
+            $totalAssetsCur = $sectionTotals['1'][0] + $sectionTotals['2'][0];
+            $totalAssetsPrev = $sectionTotals['1'][1] + $sectionTotals['2'][1];
+            $rows[] = rc_row($bsCells('TOTAL ASSETS', '', $totalAssetsCur, $totalAssetsPrev), 'total');
+
+            $rows[] = rc_row(['EQUITY AND LIABILITIES', '', '', '', '', ''], 'section');
+            $rows = array_merge($rows, $sectionRows['3']);
+            $rows[] = rc_row($bsCells('Profit for the period', '', $profitCur, $profitPrev), 'bold', ['level' => 1, 'parent' => 's3']);
+            $rows = array_merge($rows, $sectionRows['4'], $sectionRows['5']);
+            $equityCur = $sectionTotals['3'][0] + $profitCur;
+            $equityPrev = $sectionTotals['3'][1] + $profitPrev;
+            $totalEqLiabCur = $equityCur + $sectionTotals['4'][0] + $sectionTotals['5'][0];
+            $totalEqLiabPrev = $equityPrev + $sectionTotals['4'][1] + $sectionTotals['5'][1];
+            $rows[] = rc_row($bsCells('TOTAL EQUITY AND LIABILITIES', '', $totalEqLiabCur, $totalEqLiabPrev), 'total');
+
             return [
                 'number' => '3',
                 'title' => 'Statement of Financial Position',
                 'as_at' => true,
-                'subtitle' => 'Statement of financial position as at ' . $asAtCur . '.',
+                'subtitle' => 'As at ' . $asAtCur . ' — master, group, and ledger detail. Click rows to expand or drill down.',
                 'columns' => [
                     ['Particulars', 'left', ''], ['Note', 'left', ''],
                     ['As at ' . $asAtCur . ' (' . $sym . ')', 'right', ''],
                     ['As at ' . $asAtPrev . ' (' . $sym . ')', 'right', ''],
-                    ['Change (' . $sym . ')', 'right', ''],
+                    ['Variance (' . $sym . ')', 'right', ''], ['Variance (%)', 'right', ''],
                 ],
                 'rows' => $rows,
                 'totals' => null,
@@ -1370,10 +1473,32 @@ function rc_render_table(array $report, bool $hasGroups): void
                 <tr><td colspan="<?= count($report['columns']) ?>">No data for the selected filters.</td></tr>
             <?php endif; ?>
             <?php foreach ($report['rows'] as $row): ?>
-                <?php $cells = rc_row_cells($row); $style = rc_row_style($row); ?>
-                <tr class="<?= $style !== '' ? 'rpt-row-' . e($style) : '' ?>">
+                <?php
+                $cells = rc_row_cells($row);
+                $style = rc_row_style($row);
+                $meta = rc_row_meta($row);
+                $classes = array_filter([
+                    $style !== '' ? 'rpt-row-' . $style : '',
+                    isset($meta['level']) ? 'rpt-lvl-' . (int) $meta['level'] : '',
+                ]);
+                $attrs = '';
+                if (isset($meta['level'])) {
+                    $attrs .= ' data-level="' . (int) $meta['level'] . '"';
+                }
+                if (!empty($meta['node'])) {
+                    $attrs .= ' data-node="' . e((string) $meta['node']) . '"';
+                }
+                if (!empty($meta['parent'])) {
+                    $attrs .= ' data-parent="' . e((string) $meta['parent']) . '"';
+                }
+                if (!empty($meta['ledger_id'])) {
+                    $attrs .= ' data-ledger-id="' . (int) $meta['ledger_id'] . '"';
+                }
+                ?>
+                <?php $labelCell = isset($meta['level']) ? (int) ($meta['label_cell'] ?? 0) : -1; ?>
+                <tr class="<?= e(implode(' ', $classes)) ?>"<?= $attrs ?>>
                     <?php foreach ($cells as $cellIndex => $cell): ?>
-                        <td class="align-<?= e($report['columns'][$cellIndex][1] ?? 'left') ?>"><?= e((string) $cell) ?></td>
+                        <td class="align-<?= e($report['columns'][$cellIndex][1] ?? 'left') ?><?= $cellIndex === $labelCell ? ' rpt-cell-main' : '' ?>"><?= e((string) $cell) ?></td>
                     <?php endforeach; ?>
                 </tr>
             <?php endforeach; ?>

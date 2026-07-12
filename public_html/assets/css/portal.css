@@ -2889,6 +2889,78 @@ body.admin-layout .rc2-preview .rc-report-view {
   margin: 0;
 }
 
+/* Unified statement hierarchy: Master -> Group -> Ledger */
+
+body.admin-layout .rpt-statement tr[data-level="1"] td.rpt-cell-main,
+body.admin-layout .rpt-statement tr[data-level="1"]:not(:has(td.rpt-cell-main)) td:first-child {
+  padding-left: 28px;
+}
+
+body.admin-layout .rpt-statement tr[data-level="2"] td.rpt-cell-main,
+body.admin-layout .rpt-statement tr[data-level="2"]:not(:has(td.rpt-cell-main)) td:first-child {
+  padding-left: 50px;
+}
+
+body.admin-layout .rpt-statement tr[data-node] {
+  cursor: pointer;
+}
+
+body.admin-layout .rpt-statement tr[data-node] td.rpt-cell-main::before,
+body.admin-layout .rpt-statement tr[data-node]:not(:has(td.rpt-cell-main)) td:first-child::before {
+  content: "\25BE  ";
+  color: var(--mbw-muted);
+  font-size: 10px;
+}
+
+body.admin-layout .rpt-statement tr[data-node].is-collapsed td.rpt-cell-main::before,
+body.admin-layout .rpt-statement tr[data-node].is-collapsed:not(:has(td.rpt-cell-main)) td:first-child::before {
+  content: "\25B8  ";
+}
+
+body.admin-layout .rpt-statement tr[data-ledger-id] {
+  cursor: pointer;
+}
+
+body.admin-layout .rpt-statement tr[data-ledger-id]:hover td {
+  background: var(--mbw-primary-soft);
+}
+
+body.admin-layout .rpt-statement tr.rpt-hidden {
+  display: none;
+}
+
+body.admin-layout .rc2-acct-search {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 8px;
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+  width: 170px;
+}
+
+body.admin-layout .rc2-mini {
+  min-height: 34px;
+  padding: 5px 11px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 8px;
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+body.admin-layout .rc2-mini:hover {
+  border-color: var(--mbw-primary);
+  color: var(--mbw-primary);
+  background: var(--mbw-card);
+  transform: none;
+  box-shadow: none;
+}
+
 /* Compact density + fullscreen preview */
 
 body.admin-layout .rpt-statement.is-compact .rc-table th,
