@@ -144,6 +144,20 @@ function accounting_module_repair_database(): array
         ");
     });
 
+    $run('Create payroll tables', static function (): void {
+        // Ten payroll tables; the migration is the single source of truth and
+        // every statement is CREATE TABLE IF NOT EXISTS, so re-running is safe.
+        $migrationFile = dirname(__DIR__) . '/database/migrations/031_payroll.sql';
+        if (!is_file($migrationFile)) {
+            throw new RuntimeException('031_payroll.sql not found beside the app.');
+        }
+        foreach (array_filter(array_map('trim', explode(';', (string) file_get_contents($migrationFile)))) as $statement) {
+            if (stripos($statement, 'CREATE TABLE') !== false) {
+                db()->exec($statement);
+            }
+        }
+    });
+
     $run('Upgrade voucher form metadata', static function (): void {
         accounting_repair_add_column('vouchers', 'priority', "`priority` ENUM('low', 'medium', 'high') NOT NULL DEFAULT 'medium' AFTER `narration`");
         accounting_repair_add_column('vouchers', 'department', '`department` VARCHAR(80) DEFAULT NULL AFTER `priority`');

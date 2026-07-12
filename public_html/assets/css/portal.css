@@ -3096,6 +3096,203 @@ body.admin-layout .mbw-btn-ghost:hover {
   box-shadow: none;
 }
 
+/* Payroll module */
+
+body.admin-layout .pr-runbar {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+body.admin-layout .pr-runpick,
+body.admin-layout .pr-newrun {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+body.admin-layout .pr-runpick label,
+body.admin-layout .pr-newrun label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--mbw-muted);
+  font-weight: 600;
+}
+
+body.admin-layout .pr-runpick select,
+body.admin-layout .pr-newrun select,
+body.admin-layout .pr-newrun input {
+  min-height: 38px;
+  min-width: 150px;
+}
+
+body.admin-layout .pr-flow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--mbw-border);
+}
+
+body.admin-layout .pr-flow-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px 5px 6px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mbw-muted);
+  background: var(--mbw-card);
+}
+
+body.admin-layout .pr-flow-step b {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--mbw-card-soft);
+  color: var(--mbw-muted);
+  font-size: 11px;
+}
+
+body.admin-layout .pr-flow-step.is-done {
+  border-color: var(--mbw-primary);
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .pr-flow-step.is-done b {
+  background: var(--mbw-primary);
+  color: #fff;
+}
+
+body.admin-layout .pr-flow-step.is-current {
+  background: var(--mbw-primary-soft);
+}
+
+body.admin-layout .pr-kpis {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+@media (max-width: 1200px) {
+  body.admin-layout .pr-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  body.admin-layout .pr-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+body.admin-layout .pr-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 1100px) {
+  body.admin-layout .pr-workspace { grid-template-columns: 1fr; }
+}
+
+body.admin-layout .pr-table td,
+body.admin-layout .pr-table th {
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 7px 9px;
+}
+
+body.admin-layout .pr-line { cursor: pointer; }
+
+body.admin-layout .pr-line:hover td,
+body.admin-layout .pr-line.is-selected td {
+  background: var(--mbw-primary-soft);
+}
+
+body.admin-layout .pr-line-warning td:first-child { box-shadow: inset 3px 0 0 #e0a63a; }
+body.admin-layout .pr-line-error td:first-child { box-shadow: inset 3px 0 0 #d64545; }
+
+body.admin-layout .pr-emp small {
+  display: block;
+  color: var(--mbw-muted);
+  font-size: 11px;
+}
+
+body.admin-layout .pr-inspector {
+  position: sticky;
+  top: 90px;
+}
+
+body.admin-layout .pr-ins-name {
+  font-weight: 700;
+  color: var(--mbw-heading);
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+body.admin-layout .pr-ins-sub {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .pr-ins-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--mbw-border);
+  font-size: 12px;
+  color: var(--mbw-text);
+}
+
+body.admin-layout .pr-ins-row b {
+  color: var(--mbw-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+body.admin-layout .pr-ins-note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .pr-comp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+body.admin-layout .pr-comp-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--mbw-heading);
+  font-weight: 600;
+}
+
+body.admin-layout .pr-comp-grid small { color: var(--mbw-muted); font-weight: 500; }
+
+body.admin-layout .pr-slab-grid { display: grid; gap: 6px; margin-top: 6px; }
+
+body.admin-layout .pr-slab-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 110px;
+  gap: 6px;
+}
+
+body.admin-layout .pr-slab-row input { min-height: 36px; }
+
 /* Compact density + fullscreen preview */
 
 body.admin-layout .rpt-statement.is-compact .rc-table th,

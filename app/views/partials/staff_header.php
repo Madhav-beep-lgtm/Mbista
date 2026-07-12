@@ -14,7 +14,7 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
     <meta name="theme-color" content="#0b1c36">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260712-inventory">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712d">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712e">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
@@ -49,6 +49,7 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
             <a href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>Attendance</a>
             <a href="<?= e(url('admin/hr.php?view=leave')) ?>"><?= icon('leave') ?>Leave</a>
             <a href="<?= e(url('admin/hr.php?view=timesheets')) ?>"><?= icon('timesheets') ?>Timesheets</a>
+            <a href="<?= e(url('my-payslips.php')) ?>"><?= icon('wallet') ?>My Payslips</a>
             <span class="admin-nav-group">System</span>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
         </nav>

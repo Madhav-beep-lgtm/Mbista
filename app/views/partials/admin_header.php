@@ -68,7 +68,10 @@ $headerPageIcons = [
     'settings.php' => 'settings', 'tickets.php' => 'tickets', 'messages.php' => 'messages',
     'hr.php' => 'attendance', 'manage-clients.php' => 'clients', 'client-books.php' => 'accounting',
     'search.php' => 'search', 'export-ledger.php' => 'reports', 'budgets.php' => 'pie',
+    'payroll.php' => 'wallet', 'payroll-employees.php' => 'users', 'payroll-settings.php' => 'settings',
 ];
+$headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php'];
+$headerPayrollActive = in_array($headerScript, $headerPayrollScripts, true);
 if ($pageBreadcrumb === null) {
     $headerTrailHome = [['Home', 'admin/index.php']];
     $headerTrailReports = [['Home', 'admin/index.php'], ['Reports', 'admin/reports-center.php']];
@@ -76,6 +79,8 @@ if ($pageBreadcrumb === null) {
     $headerAccountingScripts = ['accounting.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'accounting-inventory.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
     if (in_array($headerScript, ['report-schedules.php', 'consolidated-report.php'], true)) {
         $pageBreadcrumb = $headerTrailReports;
+    } elseif (in_array($headerScript, $headerPayrollScripts, true)) {
+        $pageBreadcrumb = [['Home', 'admin/index.php'], ['Payroll', 'admin/payroll.php']];
     } elseif (in_array($headerScript, $headerAccountingScripts, true)) {
         $pageBreadcrumb = $headerTrailAccounting;
     } elseif ($headerScript !== 'index.php') {
@@ -105,7 +110,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <meta name="theme-color" content="#0b1c36">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260712-inventory">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712d">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712e">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
@@ -207,6 +212,18 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
             <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
             <a class="<?= $headerScript === 'hr.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>HR &amp; Attendance</a>
+            <div class="mbw-nav-parent<?= $headerPayrollActive ? ' is-open' : '' ?>" data-nav-parent="payroll">
+                <a href="#" data-nav-toggle aria-expanded="<?= $headerPayrollActive ? 'true' : 'false' ?>" class="<?= $headerPayrollActive ? 'is-active' : '' ?>">
+                    <?= icon('wallet') ?>Payroll
+                    <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
+                </a>
+                <div class="mbw-subnav">
+                    <a class="<?= $headerScript === 'payroll.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll.php')) ?>"><?= icon('wallet') ?>Payroll Processing</a>
+                    <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('users') ?>Employees &amp; Advances</a>
+                    <a class="<?= $headerScript === 'payroll-settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-settings.php')) ?>"><?= icon('settings') ?>Payroll Settings</a>
+                    <a href="<?= e(url('admin/reports-center.php?report=salary-sheet')) ?>"><?= icon('reports') ?>Salary Sheet Report</a>
+                </div>
+            </div>
 
             <span class="admin-nav-group">Users &amp; System</span>
             <a class="<?= $headerScript === 'users.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?>Users</a>

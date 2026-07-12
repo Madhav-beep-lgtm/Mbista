@@ -531,6 +531,11 @@ if (column_exists('vouchers', 'location')) {
     say('Voucher dimensions: sales vouchers tagged Kathmandu HQ / Audit & Assurance (powers the Branch and Department report filters).');
 }
 
+// ---------------------------------------------------------------------------
+// 13. Payroll (settings, components, SAMPLE tax version, employees, run)
+// ---------------------------------------------------------------------------
+require __DIR__ . '/seed_payroll_sample.php';
+
 say('');
 say('DONE. Sample logins (all password Sample@123):');
 say('  Admin:  sample.admin@mbista.local');

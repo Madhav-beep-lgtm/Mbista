@@ -116,6 +116,22 @@ foreach ($dimensionLabels as $dimColumn => $dimLabel) {
     }
 }
 
+// Salary Sheet: pick a specific payroll run (dropdown shows only on that report).
+$payrollRunOptions = [];
+$payrollRunFilter = 0;
+if ($reportId === 'salary-sheet' && table_exists('payroll_runs')) {
+    $payrollRunsStmt = db()->prepare("SELECT id, period_label, status, pay_date FROM payroll_runs
+        WHERE company_id = :cid AND status <> 'cancelled' ORDER BY created_at DESC LIMIT 40");
+    $payrollRunsStmt->execute(['cid' => $scopeCompanyId]);
+    $payrollRunOptions = $payrollRunsStmt->fetchAll();
+    $requestedPayrollRun = (int) ($_GET['payroll_run'] ?? 0);
+    foreach ($payrollRunOptions as $payrollRunOption) {
+        if ((int) $payrollRunOption['id'] === $requestedPayrollRun) {
+            $payrollRunFilter = $requestedPayrollRun;
+        }
+    }
+}
+
 // Notes to Accounts: numbered narrative notes stored per company + fiscal
 // year + report, shown under the statement on screen and in print.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'save_report_notes') {
@@ -198,6 +214,7 @@ $generatorContext = [
     'biz' => $businessType,
     'company_id' => $scopeCompanyId,
     'dims' => $dimensionFilters,
+    'payroll_run' => $payrollRunFilter,
     'company_name' => $scopeCompanyId === $companyId ? (string) ($company['name'] ?? '') : '',
     'subsidiaries' => $scopeCompanyId === $companyId ? array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'name' => (string) $row['name']], $subsidiaries) : [],
 ];
@@ -422,6 +439,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <select disabled title="No cost centre has been recorded on vouchers yet. Set it in the voucher form's Cost Centre field."><option>All Cost Centers</option></select>
             <?php endif; ?>
         </label>
+        <?php if ($reportId === 'salary-sheet'): ?>
+            <label>Payroll Run
+                <select name="payroll_run">
+                    <option value="0">Latest run in period</option>
+                    <?php foreach ($payrollRunOptions as $payrollRunOption): ?>
+                        <option value="<?= e((int) $payrollRunOption['id']) ?>" <?= $payrollRunFilter === (int) $payrollRunOption['id'] ? 'selected' : '' ?>>
+                            <?= e($payrollRunOption['period_label'] . ' — ' . ucfirst((string) $payrollRunOption['status'])) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+        <?php endif; ?>
         <label>Voucher Type
             <select name="vtype">
                 <option value="">All Voucher Types</option>

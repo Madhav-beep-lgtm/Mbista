@@ -17,7 +17,7 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     <meta name="theme-color" content="#0b1c36">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260712-inventory">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712d">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712e">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">

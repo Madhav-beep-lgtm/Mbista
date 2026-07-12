@@ -27,6 +27,7 @@ function rc_report_registry(): array
         'manufacturing-statement' => ['Manufacturing Statement', 'Manufacturing performance', 'settings'],
         'manufacturing-cost' => ['Manufacturing Cost Report', 'Per-order material cost breakdown', 'layers'],
         'manufacturing-wip' => ['Work in Progress (WIP)', 'Open production orders and value locked in WIP', 'attendance'],
+        'salary-sheet' => ['Salary Sheet', 'Payroll register: earnings, deductions, tax and net pay per employee', 'wallet'],
         'financial-ratios' => ['Financial Ratios', 'Key financial ratios analysis', 'dashboard'],
     ];
 }
@@ -1408,6 +1409,75 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 'columns' => [['Particulars', 'left', ''], ['Qty', 'right', ''], ['Rate (' . $sym . ')', 'right', ''], ['Amount (' . $sym . ')', 'right', '']],
                 'rows' => $rows,
                 'totals' => ['Total work in progress', '', '', rc_fmt($wipTotal)],
+            ];
+        }
+
+        case 'salary-sheet': {
+            if (!table_exists('payroll_runs')) {
+                return ['subtitle' => 'Payroll module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            // Specific run when the Payroll Run filter picks one; otherwise the
+            // latest finalized (or calculated) run whose pay date falls in the
+            // report period.
+            $payrollRunId = (int) ($ctx['payroll_run'] ?? 0);
+            if ($payrollRunId > 0) {
+                $runStmt = db()->prepare('SELECT * FROM payroll_runs WHERE id = :id AND company_id = :cid LIMIT 1');
+                $runStmt->execute(['id' => $payrollRunId, 'cid' => $scopeCompanyId]);
+            } else {
+                $runStmt = db()->prepare("SELECT * FROM payroll_runs
+                    WHERE company_id = :cid AND status <> 'cancelled' AND (pay_date BETWEEN :f AND :t OR pay_date IS NULL)
+                    ORDER BY FIELD(status, 'paid', 'posted', 'approved', 'calculated', 'draft'), pay_date DESC, id DESC LIMIT 1");
+                $runStmt->execute(['cid' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+            }
+            $payrollRun = $runStmt->fetch();
+            if (!$payrollRun) {
+                return [
+                    'title' => 'Salary Sheet',
+                    'subtitle' => 'No payroll run found for this period. Create one under Payroll > Payroll Processing.',
+                    'columns' => [['Info', 'left', '']],
+                    'rows' => [['No payroll data for the selected period / run.']],
+                    'totals' => null,
+                ];
+            }
+            $lineStmt = db()->prepare('SELECT l.*, pe.employee_code, pe.department, pe.pan_no, u.name AS person_name
+                FROM payroll_run_lines l
+                INNER JOIN payroll_employees pe ON pe.id = l.payroll_employee_id
+                INNER JOIN users u ON u.id = pe.user_id
+                WHERE l.run_id = :run ORDER BY pe.employee_code ASC');
+            $lineStmt->execute(['run' => (int) $payrollRun['id']]);
+            $rows = [];
+            $totals = array_fill(0, 11, 0.0);
+            foreach ($lineStmt->fetchAll() as $payLine) {
+                $values = [
+                    (float) $payLine['basic'], (float) $payLine['allowances'], (float) $payLine['overtime'],
+                    (float) $payLine['benefits'], (float) $payLine['gross'],
+                    (float) $payLine['retirement_employee_month'], (float) $payLine['retirement_employer_month'],
+                    (float) $payLine['tax_month'], (float) $payLine['advance_deduction'],
+                    (float) $payLine['other_deduction'], (float) $payLine['net_pay'],
+                ];
+                foreach ($values as $index => $value) {
+                    $totals[$index] += $value;
+                }
+                $rows[] = array_merge(
+                    [$payLine['employee_code'], $payLine['person_name'] . ((string) ($payLine['department'] ?? '') !== '' ? ' (' . $payLine['department'] . ')' : '')],
+                    array_map('rc_fmt', $values)
+                );
+            }
+            return [
+                'title' => 'Salary Sheet — ' . $payrollRun['period_label'],
+                'subtitle' => 'Payroll register for ' . $payrollRun['period_label'] . ' — status ' . str_replace('_', ' ', ucfirst((string) $payrollRun['status']))
+                    . ($payrollRun['pay_date'] ? ', pay date ' . date('d M Y', strtotime((string) $payrollRun['pay_date'])) : '')
+                    . '. Employer retirement contribution is an employer expense and does not reduce net pay.',
+                'columns' => [
+                    ['Code', 'left', ''], ['Employee', 'left', ''],
+                    ['Basic (' . $sym . ')', 'right', ''], ['Allowances (' . $sym . ')', 'right', ''], ['Overtime (' . $sym . ')', 'right', ''],
+                    ['Benefits (' . $sym . ')', 'right', ''], ['Gross (' . $sym . ')', 'right', ''],
+                    ['Retirement Emp. (' . $sym . ')', 'right', ''], ['Retirement Emplr. (' . $sym . ')', 'right', ''],
+                    ['Income Tax (' . $sym . ')', 'right', ''], ['Advance (' . $sym . ')', 'right', ''],
+                    ['Other Ded. (' . $sym . ')', 'right', ''], ['Net Pay (' . $sym . ')', 'right', ''],
+                ],
+                'rows' => $rows,
+                'totals' => array_merge(['', 'Total (' . count($rows) . ' employees)'], array_map('rc_fmt', $totals)),
             ];
         }
 
