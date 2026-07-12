@@ -7743,7 +7743,8 @@ body.accounting-reference-layout .badge {
   background: #fff;
 }
 
-.mbw-flow-panel div {
+.mbw-flow-panel div,
+.mbw-flow-panel a {
   position: relative;
   display: grid;
   align-content: start;
@@ -7755,9 +7756,16 @@ body.accounting-reference-layout .badge {
   border-radius: 8px;
   background: linear-gradient(180deg, #fff, #f9fbff);
   text-align: center;
+  text-decoration: none;
 }
 
-.mbw-flow-panel div:not(:last-child)::after {
+.mbw-flow-panel a:hover {
+  border-color: #07255a;
+  background: linear-gradient(180deg, #fff, #eef4ff);
+}
+
+.mbw-flow-panel div:not(:last-child)::after,
+.mbw-flow-panel a:not(:last-child)::after {
   content: "→";
   position: absolute;
   top: 50%;
@@ -7997,6 +8005,7 @@ body.accounting-reference-layout .badge {
   .mbw-flow-panel,
   .manufacturing-flow { grid-template-columns: 1fr; }
   .mbw-flow-panel div::after,
+  .mbw-flow-panel a::after,
   .inventory-process-grid article::after { display: none; }
 }
 

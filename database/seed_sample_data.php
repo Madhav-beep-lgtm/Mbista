@@ -295,9 +295,30 @@ foreach ([$cid, (int) (company_by_code('MBTAS')['id'] ?? 0)] as $invCompanyId) {
     if ($invCompanyId <= 0 || !table_exists('inventory_items')) {
         continue;
     }
+    // Stock ledgers so completed production can auto-post its journal voucher
+    // (Dr finished goods / Cr raw materials).
+    $rawLedgerId = 0;
+    $fgLedgerId = 0;
+    $stockGroupStmt = db()->prepare("SELECT id FROM ledger_groups WHERE company_id = :cid AND (LOWER(name) LIKE '%inventor%' OR LOWER(name) LIKE '%stock%' OR master_key = 'current_asset') ORDER BY id ASC LIMIT 1");
+    $stockGroupStmt->execute(['cid' => $invCompanyId]);
+    $stockGroupId = (int) ($stockGroupStmt->fetchColumn() ?: 0);
+    if ($stockGroupId > 0) {
+        foreach ([['SMP-RAWMAT', 'Raw Materials Stock'], ['SMP-FINGOODS', 'Finished Goods Stock']] as [$stockCode, $stockName]) {
+            $existingLedger = db()->prepare('SELECT id FROM ledgers WHERE company_id = ? AND code = ?');
+            $existingLedger->execute([$invCompanyId, $stockCode]);
+            $stockLedgerId = (int) ($existingLedger->fetchColumn() ?: 0);
+            if ($stockLedgerId <= 0) {
+                $stockLedgerId = seed_insert('ledgers', ['company_id' => $invCompanyId, 'group_id' => $stockGroupId, 'code' => $stockCode, 'name' => $stockName, 'type' => 'asset', 'status' => 'active']);
+            }
+            if ($stockCode === 'SMP-RAWMAT') { $rawLedgerId = $stockLedgerId; } else { $fgLedgerId = $stockLedgerId; }
+        }
+    }
+
     $paper = seed_insert('inventory_items', ['company_id' => $invCompanyId, 'sku' => 'SMP-ITM1', 'name' => 'A4 Paper Ream', 'item_type' => 'stock', 'unit' => 'pcs', 'purchase_rate' => 450, 'sales_rate' => 600, 'opening_qty' => 20, 'reorder_level' => 10, 'status' => 'active']);
     $toner = seed_insert('inventory_items', ['company_id' => $invCompanyId, 'sku' => 'SMP-ITM2', 'name' => 'Printer Toner', 'item_type' => 'consumable', 'unit' => 'pcs', 'purchase_rate' => 6500, 'sales_rate' => 8000, 'opening_qty' => 4, 'status' => 'active']);
-    $binder = seed_insert('inventory_items', ['company_id' => $invCompanyId, 'sku' => 'SMP-ITM3', 'name' => 'Bound Report Set', 'item_type' => 'finished_good', 'unit' => 'set', 'purchase_rate' => 0, 'sales_rate' => 1500, 'status' => 'active']);
+    $binder = seed_insert('inventory_items', ['company_id' => $invCompanyId, 'sku' => 'SMP-ITM3', 'name' => 'Bound Report Set', 'item_type' => 'finished_good', 'unit' => 'set', 'purchase_rate' => 0, 'sales_rate' => 1500, 'ledger_id' => $fgLedgerId ?: null, 'status' => 'active']);
+    $pulp = seed_insert('inventory_items', ['company_id' => $invCompanyId, 'sku' => 'SMP-RM1', 'name' => 'Cover Card Stock', 'item_type' => 'raw_material', 'unit' => 'pcs', 'purchase_rate' => 120, 'sales_rate' => 0, 'opening_qty' => 100, 'reorder_level' => 20, 'ledger_id' => $rawLedgerId ?: null, 'status' => 'active']);
+    $spine = seed_insert('inventory_items', ['company_id' => $invCompanyId, 'sku' => 'SMP-RM2', 'name' => 'Binding Spine Coil', 'item_type' => 'raw_material', 'unit' => 'pcs', 'purchase_rate' => 35, 'sales_rate' => 0, 'opening_qty' => 200, 'reorder_level' => 50, 'ledger_id' => $rawLedgerId ?: null, 'status' => 'active']);
 
     if (table_exists('inventory_transactions')) {
         // Opening stock lives in inventory_items.opening_qty; transactions
@@ -315,9 +336,20 @@ foreach ([$cid, (int) (company_by_code('MBTAS')['id'] ?? 0)] as $invCompanyId) {
             seed_insert('inventory_transactions', ['company_id' => $invCompanyId, 'item_id' => $paper, 'transaction_type' => 'consume', 'transaction_date' => $d(16), 'qty_out' => 5, 'rate' => 455, 'amount' => 2275]);
             seed_insert('inventory_transactions', ['company_id' => $invCompanyId, 'item_id' => $binder, 'transaction_type' => 'produce', 'transaction_date' => $d(16), 'qty_in' => 10, 'rate' => 300, 'amount' => 3000]);
         }
+        // An open (in-progress) order so the Work in Progress report and the
+        // Complete/Cancel order actions have live data out of the box.
+        $wipOrder = seed_insert('manufacturing_orders', ['company_id' => $invCompanyId, 'order_no' => 'SMP-MO-002', 'finished_item_id' => $binder, 'quantity' => 20, 'status' => 'in_progress', 'started_on' => $d(3), 'notes' => 'Sample WIP order — complete or cancel it from the Manufacturing tab.']);
+        if ($wipOrder > 0 && table_exists('manufacturing_order_inputs')) {
+            seed_insert('manufacturing_order_inputs', ['manufacturing_order_id' => $wipOrder, 'item_id' => $pulp, 'quantity' => 40, 'rate' => 120]);
+            seed_insert('manufacturing_order_inputs', ['manufacturing_order_id' => $wipOrder, 'item_id' => $spine, 'quantity' => 20, 'rate' => 35]);
+        }
+        if ($wipOrder > 0 && table_exists('inventory_transactions')) {
+            seed_insert('inventory_transactions', ['company_id' => $invCompanyId, 'item_id' => $pulp, 'transaction_type' => 'consume', 'transaction_date' => $d(3), 'qty_out' => 40, 'rate' => 120, 'amount' => 4800, 'ref_no' => 'SMP-MO-002', 'notes' => 'Materials issued to SMP-MO-002']);
+            seed_insert('inventory_transactions', ['company_id' => $invCompanyId, 'item_id' => $spine, 'transaction_type' => 'consume', 'transaction_date' => $d(3), 'qty_out' => 20, 'rate' => 35, 'amount' => 700, 'ref_no' => 'SMP-MO-002', 'notes' => 'Materials issued to SMP-MO-002']);
+        }
     }
 }
-say('Inventory items, stock movements, and a completed manufacturing order.');
+say('Inventory items (incl. raw materials), stock ledgers, movements, 1 completed + 1 in-progress manufacturing order (WIP).');
 
 // ---------------------------------------------------------------------------
 // 7. Documents + document request, compliance deadlines
