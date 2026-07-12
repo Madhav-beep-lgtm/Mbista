@@ -128,6 +128,13 @@ server-side uploads or the live `.env` (same guarantees as `.cpanel.yml`).
 
 ## Notes
 
+- **Party ledgers (one-time, after deploying migration 029):** existing
+  receivable/payable balances can be moved from the generic AR/AP ledgers
+  onto each customer/supplier's own ledger with
+  `php database/reclassify_party_balances.php` (preview) followed by
+  `php database/reclassify_party_balances.php --apply`. It also posts
+  opening-balance journals for parties that have one. Safe to re-run —
+  each journal posts at most once per company.
 - **HTTPS:** enable AutoSSL (cPanel → SSL/TLS Status) so the app runs over
   HTTPS. Sessions and the login flow assume a normal single-domain setup.
 - **Scheduled reports:** if you use them, add a cPanel Cron Job that runs the

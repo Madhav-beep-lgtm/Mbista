@@ -1860,6 +1860,108 @@ function ensure_party_for_client(int $companyId, int $clientId): int
 }
 
 /**
+ * The equity ledger that absorbs opening-balance journals. Found by code,
+ * else created under the Reserve & Surplus (or any equity) group.
+ */
+function opening_balance_ledger_id(int $companyId): int
+{
+    if ($companyId <= 0 || !table_exists('ledgers')) {
+        return 0;
+    }
+    $stmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND code = 'OPENING_BAL' LIMIT 1");
+    $stmt->execute(['cid' => $companyId]);
+    $ledgerId = (int) ($stmt->fetchColumn() ?: 0);
+    if ($ledgerId > 0) {
+        return $ledgerId;
+    }
+
+    $groupStmt = db()->prepare("SELECT id FROM ledger_groups
+        WHERE company_id = :cid AND (code = 'RESERVE_SURPLUS' OR name LIKE 'Reserve%' OR master_key = 'equity')
+        ORDER BY (code = 'RESERVE_SURPLUS') DESC, id ASC LIMIT 1");
+    $groupStmt->execute(['cid' => $companyId]);
+    $groupId = (int) ($groupStmt->fetchColumn() ?: 0);
+    if ($groupId <= 0) {
+        db()->prepare("INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, 'Reserve & Surplus', 'equity', 0, 1)")
+            ->execute(['cid' => $companyId, 'code' => coa_next_group_code($companyId, 'equity')]);
+        $groupId = (int) db()->lastInsertId();
+    }
+
+    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:cid, :gid, 'OPENING_BAL', 'Opening Balance Adjustments', 'equity', 1, 'active')")
+        ->execute(['cid' => $companyId, 'gid' => $groupId]);
+    return (int) db()->lastInsertId();
+}
+
+/**
+ * Posts a party's opening balance as a journal voucher into its own
+ * receivable/payable ledger (contra: Opening Balance Adjustments).
+ * Posted at most ONCE per party (source party_opening/<party id>); later
+ * edits to the opening-balance field intentionally do not repost.
+ * Returns the voucher id, or 0 when nothing was posted.
+ */
+function post_party_opening_balance(int $companyId, int $partyId, ?int $actorId = null): int
+{
+    if ($companyId <= 0 || $partyId <= 0 || !table_exists('accounting_parties') || !table_exists('vouchers')) {
+        return 0;
+    }
+    try {
+        $existing = db()->prepare("SELECT id FROM vouchers WHERE source_type = 'party_opening' AND source_id = :pid LIMIT 1");
+        $existing->execute(['pid' => $partyId]);
+        if ($existing->fetchColumn()) {
+            return 0;
+        }
+
+        $partyStmt = db()->prepare('SELECT * FROM accounting_parties WHERE id = :id AND company_id = :cid LIMIT 1');
+        $partyStmt->execute(['id' => $partyId, 'cid' => $companyId]);
+        $party = $partyStmt->fetch();
+        $amount = $party ? round((float) ($party['opening_balance'] ?? 0), 2) : 0.0;
+        if (!$party || $amount <= 0) {
+            return 0;
+        }
+        $balanceType = (string) ($party['opening_balance_type'] ?? 'debit');
+
+        // Suppliers open on the payable side; customers (and "both") on the
+        // receivable side unless the balance is a credit we owe.
+        $side = (string) $party['party_type'] === 'supplier' ? 'payable'
+            : ((string) $party['party_type'] === 'both' && $balanceType === 'credit' ? 'payable' : 'receivable');
+        $partyLedgerId = ensure_party_ledger($companyId, $partyId, $side);
+        $contraLedgerId = opening_balance_ledger_id($companyId);
+        if ($partyLedgerId <= 0 || $contraLedgerId <= 0) {
+            return 0;
+        }
+
+        $fyStmt = db()->prepare('SELECT id, start_date FROM fiscal_years WHERE company_id = :cid ORDER BY is_default DESC, is_active DESC, id DESC LIMIT 1');
+        $fyStmt->execute(['cid' => $companyId]);
+        $fy = $fyStmt->fetch();
+        if (!$fy) {
+            return 0;
+        }
+
+        $partyEntryType = $balanceType === 'credit' ? 'credit' : 'debit';
+        $contraEntryType = $partyEntryType === 'debit' ? 'credit' : 'debit';
+
+        return create_voucher_with_entries([
+            'company_id' => $companyId,
+            'fiscal_year_id' => (int) $fy['id'],
+            'voucher_no' => 'OB-P' . str_pad((string) $partyId, 6, '0', STR_PAD_LEFT),
+            'voucher_type' => 'journal',
+            'source_type' => 'party_opening',
+            'source_id' => $partyId,
+            'party_id' => $partyId,
+            'voucher_date' => (string) ($fy['start_date'] ?? date('Y-m-d')),
+            'narration' => 'Opening balance for ' . (string) $party['name'],
+            'total_amount' => $amount,
+            'status' => 'posted',
+            'posted_by' => $actorId,
+        ], [
+            ['ledger_id' => $partyLedgerId, 'entry_type' => $partyEntryType, 'amount' => $amount, 'memo' => 'Opening balance'],
+            ['ledger_id' => $contraLedgerId, 'entry_type' => $contraEntryType, 'amount' => $amount, 'memo' => 'Opening balance contra'],
+        ]);
+    } catch (Throwable $exception) {
+        return 0;
+    }
+}
+
+/**
  * Resolves the party an invoice belongs to: its own party_id when set,
  * otherwise the work-portal client behind its task (creating the party
  * on the fly). Returns 0 when no party can be determined.

@@ -89,7 +89,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Every party gets its own ledger under Trade Receivables /
-            // Trade Payables so postings land on the party by name.
+            // Trade Payables so postings land on the party by name, and a
+            // non-zero opening balance is journalled once into that ledger.
             if ($savedPartyId > 0 && $status === 'active') {
                 if (in_array($partyType, ['customer', 'both'], true)) {
                     ensure_party_ledger($companyId, $savedPartyId, 'receivable');
@@ -97,6 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (in_array($partyType, ['supplier', 'both'], true)) {
                     ensure_party_ledger($companyId, $savedPartyId, 'payable');
                 }
+                post_party_opening_balance($companyId, $savedPartyId, $userId);
             }
         } catch (Throwable $exception) {
             flash('error', 'Could not save party. The code may already exist.');
