@@ -234,11 +234,11 @@ if ($navSection === '') {
 <main>
     <?php if ($message = flash('success')): ?>
         <div class="container">
-            <div class="notice success"><?= e($message) ?></div>
+            <div class="notice success flash-notice"><?= e($message) ?></div>
         </div>
     <?php endif; ?>
     <?php if ($message = flash('error')): ?>
         <div class="container">
-            <div class="notice error"><?= e($message) ?></div>
+            <div class="notice error flash-notice"><?= e($message) ?></div>
         </div>
     <?php endif; ?>

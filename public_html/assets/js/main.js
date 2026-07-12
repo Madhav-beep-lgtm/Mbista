@@ -546,8 +546,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- Toast notifications -------------------------------------------------
   // Server-rendered flash notices slide in as toasts instead of pushing the
-  // page down. Errors stay longer; both can be dismissed.
-  const flashNotices = document.querySelectorAll('main .notice.success, main .notice.error, .admin-content > .notice');
+  // page down. Errors stay longer; both can be dismissed. Only one-shot flash
+  // messages (tagged .flash-notice by the header partials) float; contextual
+  // in-page notices stay where the page rendered them.
+  const flashNotices = document.querySelectorAll('.notice.flash-notice');
   if (flashNotices.length) {
     const toastRoot = document.createElement('div');
     toastRoot.id = 'toast-root';

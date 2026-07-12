@@ -136,7 +136,7 @@
       // 'both': keep the native AD input, add a live BS hint underneath.
       var hint = document.createElement('small');
       hint.className = 'bs-date-hint';
-      hint.style.cssText = 'display:block;margin-top:2px;font-size:11px;font-weight:600;color:var(--mbw-amber)';
+      hint.style.cssText = 'display:block;margin-top:3px;font-size:10.5px;font-weight:500;letter-spacing:0.02em;color:var(--mbw-muted,#64748b)';
       input.insertAdjacentElement('afterend', hint);
       var update = function () {
         var bs = input.value ? adToBs(input.value) : null;

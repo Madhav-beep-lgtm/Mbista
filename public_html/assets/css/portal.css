@@ -59,7 +59,7 @@ body.admin-layout {
   --radius-sm: var(--mbw-radius-sm);
   --radius-md: var(--mbw-radius);
   --shadow-sm: var(--mbw-shadow);
-  --admin-topbar-sticky-height: 72px;
+  --admin-topbar-sticky-height: 58px;
 
   font-family: var(--mbw-font);
   background: var(--mbw-canvas);
@@ -93,6 +93,12 @@ body.admin-layout.admin-dark {
   --mbw-sidebar: #0a1728;
   --mbw-sidebar-deep: #081221;
   --mbw-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
+  /* Legacy reference-layout tokens (style.css hardcodes light values on
+     body.accounting-reference-layout, which every admin page carries) */
+  --ref-text: var(--mbw-text);
+  --ref-muted: var(--mbw-muted);
+  --ref-line: var(--mbw-border);
+  --ref-soft: var(--mbw-card-soft);
   background: var(--mbw-canvas);
   color: var(--mbw-text);
 }
@@ -301,17 +307,46 @@ body.admin-layout .admin-topbar {
   z-index: 40;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
-  min-height: 64px;
-  margin: -20px -24px 18px;
-  padding: 12px 24px;
+  min-height: 56px;
+  margin: -20px -24px 16px;
+  padding: 9px 24px;
   border: 0;
   border-bottom: 1px solid var(--mbw-border);
   border-radius: 0;
   background: color-mix(in srgb, var(--mbw-canvas) 88%, transparent);
   backdrop-filter: blur(10px);
   box-shadow: none;
+}
+
+/* Breadcrumb inside the slim topbar (pages whose title lives in the hero). */
+body.admin-layout .admin-topbar-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+body.admin-layout .admin-topbar-crumbs a {
+  color: var(--mbw-muted);
+  text-decoration: none;
+}
+
+body.admin-layout .admin-topbar-crumbs a:hover {
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .admin-topbar-crumbs strong {
+  color: var(--mbw-heading);
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @supports not (background: color-mix(in srgb, red 50%, blue)) {
@@ -321,36 +356,37 @@ body.admin-layout .admin-topbar {
 body.admin-layout .admin-topbar-title h1 {
   margin: 0;
   color: var(--mbw-heading);
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
 body.admin-layout .admin-topbar-title p {
-  margin: 2px 0 0;
+  margin: 1px 0 0;
   color: var(--mbw-muted);
-  font-size: 12.5px;
+  font-size: 11.5px;
 }
 
 body.admin-layout .admin-topbar-search {
   display: flex;
   align-items: center;
   gap: 0;
-  flex: 0 1 300px;
+  flex: 0 1 250px;
+  min-width: 150px;
   margin-left: auto;
   position: relative;
 }
 
 body.admin-layout .admin-topbar-search input {
   width: 100%;
-  min-height: 40px;
-  padding: 8px 12px 8px 36px;
+  min-height: 36px;
+  padding: 6px 12px 6px 34px;
   border: 1px solid var(--mbw-border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--mbw-card);
   color: var(--mbw-text);
-  font-size: 13px;
-  box-shadow: var(--mbw-shadow);
+  font-size: 12.5px;
+  box-shadow: none;
 }
 
 body.admin-layout .admin-topbar-search input:focus {
@@ -408,14 +444,14 @@ body.admin-layout .admin-icon-button,
 body.admin-layout .admin-topbar-actions .admin-icon-button {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border: 1px solid var(--mbw-border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--mbw-card);
   color: var(--mbw-text);
-  box-shadow: var(--mbw-shadow);
+  box-shadow: none;
   cursor: pointer;
 }
 
@@ -426,30 +462,32 @@ body.admin-layout .admin-icon-button:hover {
 }
 
 body.admin-layout .admin-icon-button .ui-icon {
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
 }
 
 /* Company selector chip — replaces 3 legacy hardcoded navy chips */
 body.admin-layout .admin-context-chip {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 6px 12px;
+  gap: 8px;
+  min-height: 36px;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 4px 10px;
   border: 1px solid var(--mbw-border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--mbw-card);
   color: var(--mbw-heading);
-  box-shadow: var(--mbw-shadow);
+  box-shadow: none;
 }
 
 body.admin-layout .admin-context-chip .admin-context-icon {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
   background: var(--mbw-amber-soft);
   color: var(--mbw-amber);
 }
@@ -462,11 +500,11 @@ body.admin-layout .admin-context-chip .admin-context-icon .ui-icon {
 body.admin-layout .admin-context-chip strong {
   display: block;
   color: var(--mbw-heading);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
-  max-width: 220px;
+  max-width: 190px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -474,7 +512,7 @@ body.admin-layout .admin-context-chip strong {
 body.admin-layout .admin-context-chip small,
 body.admin-layout .admin-context-chip span:not(.admin-context-icon) {
   color: var(--mbw-muted);
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 body.admin-layout .topbar-company-form {
@@ -485,15 +523,15 @@ body.admin-layout .topbar-company-form {
 
 body.admin-layout .topbar-company-select,
 body.admin-layout .admin-topbar select {
-  min-height: 40px;
-  padding: 8px 10px;
+  min-height: 36px;
+  padding: 6px 8px;
   border: 1px solid var(--mbw-border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--mbw-card);
   color: var(--mbw-heading);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
-  box-shadow: var(--mbw-shadow);
+  box-shadow: none;
 }
 
 /* Hierarchy strip + breadcrumb */
@@ -530,7 +568,7 @@ body.admin-layout .admin-breadcrumb a {
 
 body.admin-layout .admin-content {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 /* ==========================================================================
@@ -700,6 +738,13 @@ body.admin-layout .mbw-kpi-label {
   font-weight: 600;
 }
 
+/* The text column must be allowed to shrink (min-width: 0), else a long
+   nowrap value runs underneath the icon chip beside it. */
+body.admin-layout .mbw-kpi > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 body.admin-layout .mbw-kpi-value {
   margin: 4px 0 6px;
   color: var(--mbw-heading);
@@ -707,6 +752,8 @@ body.admin-layout .mbw-kpi-value {
   font-weight: 700;
   letter-spacing: -0.01em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 body.admin-layout .mbw-kpi-delta {
@@ -996,21 +1043,17 @@ body.admin-layout .btn:hover {
   box-shadow: none;
 }
 
-body.admin-layout.theme-dark .button:hover,
-body.admin-layout.theme-dark button:hover,
-body.admin-layout.admin-dark .button:hover,
-body.admin-layout.admin-dark button:hover {
+/* Dark primary buttons keep --mbw-primary (light blue), so their text flips
+   dark. :where() zeroes the button part's specificity so any button that
+   styles itself (rc2 toolbar, icon buttons, .secondary, ...) wins instead of
+   getting unreadable dark-on-dark text. */
+body.admin-layout.theme-dark :where(.button, button, .btn):hover,
+body.admin-layout.admin-dark :where(.button, button, .btn):hover {
   background: #99c0f8;
 }
 
-body.admin-layout.theme-dark .button,
-body.admin-layout.theme-dark button,
-body.admin-layout.theme-dark input[type="submit"],
-body.admin-layout.theme-dark .btn,
-body.admin-layout.admin-dark .button,
-body.admin-layout.admin-dark button,
-body.admin-layout.admin-dark input[type="submit"],
-body.admin-layout.admin-dark .btn {
+body.admin-layout.theme-dark :where(.button, button, input[type="submit"], .btn),
+body.admin-layout.admin-dark :where(.button, button, input[type="submit"], .btn) {
   color: #0b1420;
 }
 
@@ -1491,6 +1534,15 @@ body.admin-layout .rpt-statement .rc-table td {
 body.admin-layout .rpt-statement .rc-table thead th {
   background: var(--mbw-card-soft);
   color: var(--mbw-muted);
+}
+
+/* style.css hardcodes these two light backgrounds — re-point to tokens */
+body.admin-layout .rc-table thead th.rc-group-head {
+  background: var(--mbw-card-soft);
+}
+
+body.admin-layout .rc-table tbody tr:hover td {
+  background: var(--mbw-card-soft);
 }
 
 body.admin-layout .rpt-row-bold td {
@@ -2435,9 +2487,9 @@ body.admin-layout .rc2-toolbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 14px 16px;
-  margin-bottom: 16px;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 0;
 }
 
 body.admin-layout .rc2-report-view,
@@ -2448,10 +2500,10 @@ body.admin-layout .rc2-view-select {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 42px;
+  min-height: 38px;
   padding: 0 12px;
   border: 1px solid var(--mbw-border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--mbw-card);
   cursor: pointer;
 }
@@ -2470,13 +2522,13 @@ body.admin-layout .rc2-saved select,
 body.admin-layout .rc2-view-select select {
   appearance: none;
   -webkit-appearance: none;
-  min-height: 40px;
-  padding: 0 24px 0 2px;
+  min-height: 36px;
+  padding: 0 22px 0 2px;
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
   outline: none;
@@ -2499,6 +2551,11 @@ body.admin-layout .rc2-report-view {
   border-color: var(--mbw-primary);
   background: var(--mbw-primary);
   color: #fff;
+  box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--mbw-primary) 55%, transparent);
+}
+
+body.admin-layout .rc2-report-view select {
+  font-weight: 700;
 }
 
 body.admin-layout.theme-dark .rc2-report-view,
@@ -2533,14 +2590,14 @@ body.admin-layout .rc2-saved select {
 body.admin-layout .rc2-save-btn {
   display: inline-flex;
   align-items: center;
-  min-height: 42px;
+  min-height: 38px;
   margin-left: auto;
-  padding: 0 16px;
+  padding: 0 14px;
   border: 1px solid var(--mbw-border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--mbw-card);
   color: var(--mbw-heading);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
   box-shadow: none;
@@ -2563,15 +2620,15 @@ body.admin-layout .rc2-save-btn .ui-icon {
 /* Filter card */
 
 body.admin-layout .rc2-filters {
-  padding: 14px 18px 16px;
-  margin-bottom: 16px;
+  padding: 12px 16px 14px;
+  margin-bottom: 0;
 }
 
 body.admin-layout .rc2-filters-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding-bottom: 12px;
+  padding-bottom: 10px;
 }
 
 body.admin-layout .rc2-filters-title {
@@ -2636,25 +2693,50 @@ body.admin-layout .rc2-collapse.is-collapsed .ui-icon {
 
 body.admin-layout .rc2-filters .rc-filter-grid {
   align-items: start;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 16px;
 }
 
 body.admin-layout .rc2-filters .rc-filter-grid label {
-  color: var(--mbw-heading);
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0;
+  color: var(--mbw-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  gap: 6px;
   justify-content: start;
 }
 
 body.admin-layout .rc2-filters .rc-filter-grid select,
 body.admin-layout .rc2-filters .rc-filter-grid input[type="date"] {
-  min-height: 42px;
+  min-height: 36px;
+  padding: 0 10px;
   border: 1px solid var(--mbw-border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--mbw-card);
   color: var(--mbw-heading);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+@media (max-width: 1280px) {
+  body.admin-layout .rc2-filters .rc-filter-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  body.admin-layout .rc2-filters .rc-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  body.admin-layout .rc2-filters .rc-filter-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Filter action row: Apply + Reset left, Export right */
@@ -2664,24 +2746,25 @@ body.admin-layout .rc2-filter-actions {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 16px;
-  padding: 12px 14px;
-  border-radius: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
   background: var(--mbw-card-soft);
 }
 
 body.admin-layout .rc2-apply {
   display: inline-flex;
   align-items: center;
-  min-height: 42px;
+  min-height: 38px;
   padding: 0 18px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--mbw-primary);
   color: #fff;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--mbw-primary) 55%, transparent);
 }
 
 body.admin-layout.theme-dark .rc2-apply,
@@ -2697,13 +2780,13 @@ body.admin-layout .rc2-apply .ui-icon {
 body.admin-layout .rc2-reset {
   display: inline-flex;
   align-items: center;
-  min-height: 42px;
-  padding: 0 16px;
+  min-height: 38px;
+  padding: 0 14px;
   border: 1px solid var(--mbw-border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--mbw-card);
   color: var(--mbw-heading);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   text-decoration: none;
 }
@@ -2727,14 +2810,14 @@ body.admin-layout .rc2-export-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 42px;
-  padding: 0 34px 0 16px;
+  min-height: 38px;
+  padding: 0 32px 0 14px;
   position: relative;
   border: 1px solid var(--mbw-border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--mbw-card);
   color: var(--mbw-heading);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
   box-shadow: none;
@@ -3332,9 +3415,10 @@ body.rc2-noscroll {
    ========================================================================== */
 
 body.admin-dashboard .admin-topbar-title h1 {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 25px;
-  letter-spacing: 0;
+  font-family: var(--mbw-font);
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  font-weight: 800;
 }
 
 body.admin-layout .ov-kpis {
@@ -3526,37 +3610,42 @@ body.admin-layout .admin-foot {
 body.admin-layout .cr-head {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 body.admin-layout .cr-head-icon {
   display: grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
   background: var(--mbw-sidebar);
+  background: linear-gradient(135deg, var(--mbw-sidebar) 0%, color-mix(in srgb, var(--mbw-sidebar) 72%, var(--mbw-primary)) 100%);
   color: #fff;
   flex: 0 0 auto;
+  box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--mbw-sidebar) 45%, transparent);
 }
 
 body.admin-layout .cr-head-icon .ui-icon {
-  width: 24px;
-  height: 24px;
+  width: 19px;
+  height: 19px;
   margin-right: 0;
 }
 
 body.admin-layout .cr-head h2 {
   margin: 0;
   color: var(--mbw-heading);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 24px;
+  font-family: var(--mbw-font);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 
 body.admin-layout .cr-head p {
-  margin: 2px 0 0;
+  margin: 1px 0 0;
   color: var(--mbw-muted);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 body.admin-layout .cr-toolbar {
@@ -3830,4 +3919,82 @@ body.admin-layout .admin-topbar {
 body.admin-layout .admin-hero {
   margin-bottom: 12px;
   padding: 16px 18px;
+}
+
+/* ==========================================================================
+   Legacy reference-layout light surfaces -> tokens (dark-safe)
+   style.css hardcodes white/near-white on body.accounting-reference-layout
+   selectors that outrank the card mega-list; mirror them here with tokens.
+   ========================================================================== */
+
+body.admin-layout .admin-content .card {
+  border-color: var(--mbw-border);
+  background: var(--mbw-card);
+  box-shadow: var(--mbw-shadow);
+}
+
+body.admin-layout .admin-content table:not(.reference-table):not(.party-ledger-table) thead th {
+  background: var(--mbw-card-soft);
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .admin-content .button:not(.secondary):not(.outline) {
+  background: var(--mbw-primary);
+  border-color: var(--mbw-primary);
+}
+
+body.admin-layout .admin-content .button.secondary,
+body.admin-layout .admin-content .button.outline {
+  border-color: var(--mbw-border);
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .rc-table thead th {
+  background: var(--mbw-card-soft);
+}
+
+body.admin-layout .rc-table .rc-total-row td {
+  background: var(--mbw-card-soft);
+  border-top-color: var(--mbw-primary);
+}
+
+body.admin-layout .rc-report-view {
+  border-color: var(--mbw-border);
+  background: var(--mbw-card);
+}
+
+body.admin-layout .rc-report-list {
+  border-color: var(--mbw-border);
+  background: var(--mbw-card);
+}
+
+body.admin-layout .rc-biz-toggle button {
+  border-color: var(--mbw-border);
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .rc-filter-grid select,
+body.admin-layout .rc-filter-grid input[type="date"] {
+  border-color: var(--mbw-border);
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .reference-panel-card,
+body.admin-layout .reference-filter-group select {
+  border-color: var(--mbw-border);
+  background: var(--mbw-card);
+  color: var(--mbw-text);
+}
+
+body.admin-layout .rc-report-card.is-active {
+  border-color: var(--mbw-gold);
+  background: var(--mbw-amber-soft);
+}
+
+body.admin-layout .rc-apply-comparison {
+  background: var(--mbw-amber-soft) !important;
+  color: var(--mbw-amber);
 }

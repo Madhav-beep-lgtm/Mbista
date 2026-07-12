@@ -478,7 +478,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php if (($companyBusinessProfile['show_inventory'] ?? false) && $allItems !== []): ?>
             <label>Inventory Item
                 <select name="item_id">
-                    <option value="0">First item</option>
+                    <option value="0">First item by SKU (default)</option>
                     <?php foreach ($allItems as $item): ?>
                         <option value="<?= e((int) $item['id']) ?>" <?= $itemFilterId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option>
                     <?php endforeach; ?>

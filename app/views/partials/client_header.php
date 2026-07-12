@@ -17,7 +17,7 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     <meta name="theme-color" content="#0b1c36">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260712-inventory">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712e">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713d">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
@@ -92,8 +92,8 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
         </header>
         <div class="admin-content">
             <?php if ($message = flash('success')): ?>
-                <div class="notice success"><?= e($message) ?></div>
+                <div class="notice success flash-notice"><?= e($message) ?></div>
             <?php endif; ?>
             <?php if ($message = flash('error')): ?>
-                <div class="notice error"><?= e($message) ?></div>
+                <div class="notice error flash-notice"><?= e($message) ?></div>
             <?php endif; ?>

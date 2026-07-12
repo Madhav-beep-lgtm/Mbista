@@ -69,6 +69,7 @@ $headerPageIcons = [
     'hr.php' => 'attendance', 'manage-clients.php' => 'clients', 'client-books.php' => 'accounting',
     'search.php' => 'search', 'export-ledger.php' => 'reports', 'budgets.php' => 'pie',
     'payroll.php' => 'wallet', 'payroll-employees.php' => 'users', 'payroll-settings.php' => 'settings',
+    'insights.php' => 'documents',
 ];
 $headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php'];
 $headerPayrollActive = in_array($headerScript, $headerPayrollScripts, true);
@@ -110,7 +111,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <meta name="theme-color" content="#0b1c36">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260712-inventory">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260712e">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713d">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
@@ -227,16 +228,38 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
 
             <span class="admin-nav-group">Users &amp; System</span>
             <a class="<?= $headerScript === 'users.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?>Users</a>
+            <?php if ($headerCompanyCode === 'MBAACA'): ?>
+                <a class="<?= $headerScript === 'insights.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/insights.php')) ?>"><?= icon('documents') ?>Website Insights</a>
+            <?php endif; ?>
             <a class="<?= $headerScript === 'settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
             <a href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?>Logout</a>
         </nav>
     </aside>
     <section class="admin-main">
+        <?php
+        // Breadcrumb trail, rendered once. Pages with a hero show it in the
+        // slim topbar (the hero already carries the title); pages without a
+        // hero keep the title in the topbar and the trail above the content.
+        ob_start();
+        if (!empty($pageBreadcrumb) && is_array($pageBreadcrumb)) {
+            foreach ($pageBreadcrumb as $breadcrumbStep) {
+                echo '<a href="' . e(url((string) $breadcrumbStep[1])) . '">' . e((string) $breadcrumbStep[0]) . '</a> <span aria-hidden="true">&#8250;</span> ';
+            }
+            echo '<strong>' . e($pageTitle) . '</strong>';
+        } else {
+            echo '<a href="' . e(url('admin/index.php')) . '">Dashboard</a> <span aria-hidden="true">&#8250;</span> <strong>' . e($pageTitle) . '</strong>';
+        }
+        $headerBreadcrumbHtml = (string) ob_get_clean();
+        ?>
         <header class="admin-topbar">
-            <div class="admin-topbar-title">
-                <h1><?= e($pageTitle) ?></h1>
-                <p><?= $pageSubtitle !== '' ? e($pageSubtitle) : 'Signed in as ' . e($currentUser['name'] ?? 'Admin') ?></p>
-            </div>
+            <?php if ($pageHero !== false): ?>
+                <nav class="admin-topbar-crumbs" aria-label="Breadcrumb"><?= $headerBreadcrumbHtml ?></nav>
+            <?php else: ?>
+                <div class="admin-topbar-title">
+                    <h1><?= e($pageTitle) ?></h1>
+                    <p><?= $pageSubtitle !== '' ? e($pageSubtitle) : 'Signed in as ' . e($currentUser['name'] ?? 'Admin') ?></p>
+                </div>
+            <?php endif; ?>
             <form method="get" action="<?= e(url('search.php')) ?>" class="admin-topbar-search" role="search">
                 <span class="mbw-search-glyph"><?= icon('search') ?></span>
                 <label class="sr-only" for="admin-global-search">Search</label>
@@ -258,7 +281,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <form method="post" action="<?= e(url('set-date-mode.php')) ?>" style="align-self:center;margin:0">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="return" value="<?= e($_SERVER['REQUEST_URI'] ?? '') ?>">
-                    <select name="date_mode" onchange="this.form.submit()" title="Date display: English / Nepali" style="min-height:40px;border:1px solid var(--mbw-border);border-radius:10px;background:var(--mbw-card);color:var(--mbw-heading);font-size:12px;font-weight:700;padding:4px 8px;cursor:pointer">
+                    <select name="date_mode" onchange="this.form.submit()" title="Date display: English / Nepali" style="cursor:pointer">
                         <option value="ad" <?= date_mode() === 'ad' ? 'selected' : '' ?>>AD</option>
                         <option value="bs" <?= date_mode() === 'bs' ? 'selected' : '' ?>>BS</option>
                         <option value="both" <?= date_mode() === 'both' ? 'selected' : '' ?>>AD+BS</option>
@@ -312,16 +335,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             </div>
         </header>
         <div class="admin-content">
-            <nav class="admin-breadcrumb" aria-label="Breadcrumb">
-                <?php if (!empty($pageBreadcrumb) && is_array($pageBreadcrumb)): ?>
-                    <?php foreach ($pageBreadcrumb as $breadcrumbStep): ?>
-                        <a href="<?= e(url((string) $breadcrumbStep[1])) ?>"><?= e((string) $breadcrumbStep[0]) ?></a> &#8250;
-                    <?php endforeach; ?>
-                    <strong><?= e($pageTitle) ?></strong>
-                <?php else: ?>
-                    <a href="<?= e(url('admin/index.php')) ?>">Dashboard</a> &#8250; <strong><?= e($pageTitle) ?></strong>
-                <?php endif; ?>
-            </nav>
+            <?php if ($pageHero === false): ?>
+                <nav class="admin-breadcrumb" aria-label="Breadcrumb"><?= $headerBreadcrumbHtml ?></nav>
+            <?php endif; ?>
             <?php if ($pageHero !== false): ?>
                 <div class="cr-head">
                     <span class="cr-head-icon"><?= icon((string) (is_array($pageHero) && !empty($pageHero['icon']) ? $pageHero['icon'] : ($headerPageIcons[$headerScript] ?? 'dashboard'))) ?></span>
@@ -333,8 +349,8 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </div>
             <?php endif; ?>
             <?php if ($message = flash('success')): ?>
-                <div class="notice success"><?= e($message) ?></div>
+                <div class="notice success flash-notice"><?= e($message) ?></div>
             <?php endif; ?>
             <?php if ($message = flash('error')): ?>
-                <div class="notice error"><?= e($message) ?></div>
+                <div class="notice error flash-notice"><?= e($message) ?></div>
             <?php endif; ?>
