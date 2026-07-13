@@ -42,6 +42,10 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
+    // Available to every company/context, including client books, so client
+    // accounting gets Inventory, Manufacturing and Fixed Assets too.
+    ['Inventory & Manufacturing', 'admin/accounting-inventory.php', 'layers', $headerScript === 'accounting-inventory.php'],
+    ['Fixed Assets', 'admin/fixed-assets.php', 'companies', $headerScript === 'fixed-assets.php'],
 ]);
 $headerAccountingActive = false;
 foreach ($headerAccountingChildren as $headerChild) {
@@ -167,14 +171,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <?php endforeach; ?>
                 </div>
             </div>
-            <?php if (($headerBusinessProfile['show_inventory'] ?? false) || ($headerBusinessProfile['show_manufacturing'] ?? false)): ?>
-                <?php if ($headerBusinessProfile['show_inventory'] ?? false): ?>
-                    <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('layers') ?>Inventory &amp; Manufacturing</a>
-                <?php elseif ($headerBusinessProfile['show_manufacturing'] ?? false): ?>
-                    <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('layers') ?>Manufacturing</a>
-                <?php endif; ?>
-            <?php endif; ?>
-            <a class="<?= $headerScript === 'fixed-assets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?>Fixed Assets</a>
             <?php endif; ?>
 
             <span class="admin-nav-group">Manage Clients</span>
