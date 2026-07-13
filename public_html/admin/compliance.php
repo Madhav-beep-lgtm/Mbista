@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 
 require_staff_or_admin();
+require_permission('compliance', 'view');
 
 $pageTitle = 'Compliance Calendar';
 $user = current_user();

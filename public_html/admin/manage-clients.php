@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_staff_or_admin();
+require_permission('clients', 'view');
 if ((string) (current_user()['role'] ?? '') === 'admin') {
     require_company_context();
 }

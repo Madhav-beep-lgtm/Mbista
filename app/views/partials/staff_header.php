@@ -40,14 +40,28 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
             <a href="<?= e(url('staff/index.php?view=home')) ?>"><?= icon('dashboard') ?>Dashboard</a>
             <a href="<?= e(url('staff/index.php?view=clients')) ?>"><?= icon('clients') ?>My Clients</a>
             <a href="<?= e(url('staff/index.php?view=tasks')) ?>"><?= icon('tasks') ?>Client Tasks</a>
-            <span class="admin-nav-group">Manage Clients</span>
-            <a href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('clients') ?>Client Accounting</a>
-            <span class="admin-nav-group">Documents &amp; Compliance</span>
-            <a href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
-            <a href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>
-            <span class="admin-nav-group">Communication</span>
-            <a href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
-            <a href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
+            <?php if (user_can_do('clients', 'view')): ?>
+                <span class="admin-nav-group">Manage Clients</span>
+                <a href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('clients') ?>Client Accounting</a>
+            <?php endif; ?>
+            <?php if (user_can_do('documents', 'view') || user_can_do('compliance', 'view')): ?>
+                <span class="admin-nav-group">Documents &amp; Compliance</span>
+                <?php if (user_can_do('documents', 'view')): ?>
+                    <a href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
+                <?php endif; ?>
+                <?php if (user_can_do('compliance', 'view')): ?>
+                    <a href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>
+                <?php endif; ?>
+            <?php endif; ?>
+            <?php if (user_can_do('messages', 'view') || user_can_do('tickets', 'view')): ?>
+                <span class="admin-nav-group">Communication</span>
+                <?php if (user_can_do('messages', 'view')): ?>
+                    <a href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
+                <?php endif; ?>
+                <?php if (user_can_do('tickets', 'view')): ?>
+                    <a href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
+                <?php endif; ?>
+            <?php endif; ?>
             <span class="admin-nav-group">HR &amp; Time</span>
             <a href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>Attendance</a>
             <a href="<?= e(url('admin/hr.php?view=leave')) ?>"><?= icon('leave') ?>Leave</a>

@@ -1800,3 +1800,21 @@ CREATE TABLE IF NOT EXISTS `security_events` (
   KEY `idx_security_events_outcome_time` (`outcome`, `created_at`),
   CONSTRAINT `fk_security_events_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- Granular per-staff permissions (migration 034)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `staff_permissions` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` INT UNSIGNED NOT NULL,
+  `module_key` VARCHAR(40) NOT NULL,
+  `action_key` VARCHAR(40) NOT NULL,
+  `granted_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_staff_permission` (`user_id`, `module_key`, `action_key`),
+  KEY `idx_staff_permissions_user` (`user_id`),
+  CONSTRAINT `fk_staff_permissions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_staff_permissions_granted_by` FOREIGN KEY (`granted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

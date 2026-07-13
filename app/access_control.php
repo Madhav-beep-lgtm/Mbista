@@ -82,6 +82,22 @@ function access_control_ensure_schema(): void
         if (table_exists('users') && !column_exists('users', 'sessions_valid_from')) {
             db()->exec('ALTER TABLE users ADD COLUMN sessions_valid_from DATETIME DEFAULT NULL');
         }
+
+        if (!table_exists('staff_permissions') && table_exists('users')) {
+            db()->exec(
+                'CREATE TABLE IF NOT EXISTS staff_permissions (
+                    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    user_id INT UNSIGNED NOT NULL,
+                    module_key VARCHAR(40) NOT NULL,
+                    action_key VARCHAR(40) NOT NULL,
+                    granted_by INT UNSIGNED DEFAULT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uniq_staff_permission (user_id, module_key, action_key),
+                    KEY idx_staff_permissions_user (user_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+            );
+        }
     } catch (Throwable $exception) {
         // Never take the site down over the repair path; the degradation rule
         // below keeps authorization closed rather than open.
@@ -510,4 +526,158 @@ function recent_failed_attempts(string $eventType, ?string $email = null, ?strin
 function login_is_throttled(?string $email = null, string $eventType = 'login_failed'): bool
 {
     return recent_failed_attempts($eventType, $email) >= LOGIN_MAX_ATTEMPTS;
+}
+
+// ---------------------------------------------------------------------------
+// Granular per-staff RBAC (migration 034)
+//
+// The access_level matrix (user_can) is a coarse capability tier. This layer
+// lets an admin grant a specific staff member exactly which actions they may
+// take in each module. Model:
+//   - Admins (and super admins) always pass — they hold full rights within the
+//     companies they are authorized for.
+//   - A staff user with NO grants keeps full LEGACY access (so nothing breaks
+//     on upgrade); once ANY grant exists the user is in STRICT mode and may do
+//     only what is ticked.
+//   - Customers never pass admin-module checks (they use their own portal).
+// ---------------------------------------------------------------------------
+
+/**
+ * The module → actions catalogue that the grant matrix and enforcement share.
+ * Keep module keys stable; they are stored in staff_permissions.module_key.
+ */
+function rbac_modules(): array
+{
+    return [
+        'accounting' => ['label' => 'Accounting & Vouchers', 'actions' => ['view', 'create', 'edit', 'approve', 'post', 'export']],
+        'sales'      => ['label' => 'Sales & Invoices',      'actions' => ['view', 'create', 'edit', 'export']],
+        'purchases'  => ['label' => 'Purchases',             'actions' => ['view', 'create', 'edit', 'export']],
+        'receipts'   => ['label' => 'Receipts & Payments',   'actions' => ['view', 'create', 'edit', 'export']],
+        'inventory'  => ['label' => 'Inventory',             'actions' => ['view', 'create', 'edit', 'export']],
+        'payroll'    => ['label' => 'Payroll',               'actions' => ['view', 'create', 'post', 'export']],
+        'reports'    => ['label' => 'Reports',               'actions' => ['view', 'export']],
+        'documents'  => ['label' => 'Documents',             'actions' => ['view', 'create', 'edit']],
+        'compliance' => ['label' => 'Compliance',            'actions' => ['view', 'edit']],
+        'clients'    => ['label' => 'Clients',               'actions' => ['view', 'create', 'edit']],
+        'messages'   => ['label' => 'Messages',              'actions' => ['view', 'create']],
+        'tickets'    => ['label' => 'Support Tickets',       'actions' => ['view', 'create', 'edit']],
+    ];
+}
+
+function rbac_action_labels(): array
+{
+    return [
+        'view' => 'View', 'create' => 'Create', 'edit' => 'Edit',
+        'approve' => 'Approve', 'post' => 'Post', 'export' => 'Export',
+    ];
+}
+
+/**
+ * All granted "module.action" keys for a user (empty array = unconfigured).
+ */
+function staff_permission_keys(int $userId): array
+{
+    if ($userId <= 0 || !table_exists('staff_permissions')) {
+        return [];
+    }
+
+    static $cache = [];
+    if (isset($cache[$userId])) {
+        return $cache[$userId];
+    }
+
+    $stmt = db()->prepare('SELECT module_key, action_key FROM staff_permissions WHERE user_id = :uid');
+    $stmt->execute(['uid' => $userId]);
+    $keys = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $keys[$row['module_key'] . '.' . $row['action_key']] = true;
+    }
+
+    $cache[$userId] = $keys;
+
+    return $keys;
+}
+
+/**
+ * True once an admin has assigned at least one explicit permission to the user
+ * (i.e. the user is in STRICT mode rather than legacy full-access).
+ */
+function staff_permissions_configured(int $userId): bool
+{
+    return staff_permission_keys($userId) !== [];
+}
+
+/**
+ * The core check: may this user take $action in $module?
+ */
+function user_can_do(string $module, string $action, ?array $user = null): bool
+{
+    $user = $user ?? current_user();
+    if (!$user) {
+        return false;
+    }
+
+    $role = (string) ($user['role'] ?? '');
+
+    // Admins and super admins hold full rights inside their authorized scope.
+    if ($role === 'admin') {
+        return true;
+    }
+    // Customers use their own portal, never admin modules.
+    if ($role !== 'staff') {
+        return false;
+    }
+
+    $userId = (int) $user['id'];
+    // Unconfigured staff keep legacy full access; configured staff are strict.
+    if (!staff_permissions_configured($userId)) {
+        return true;
+    }
+
+    return isset(staff_permission_keys($userId)[$module . '.' . $action]);
+}
+
+/**
+ * Page/endpoint gate. Admins pass; a configured staff member without the grant
+ * gets a 403 (and the attempt is logged). Because admins always pass, adding
+ * this to a shared admin page only ever constrains staff.
+ */
+function require_permission(string $module, string $action): void
+{
+    if (!user_can_do($module, $action)) {
+        deny_access('Missing permission ' . $module . '.' . $action . '.');
+    }
+}
+
+/**
+ * Replace a staff user's entire grant set (used by the admin matrix editor).
+ * $grants is a list of "module.action" strings. Validates against rbac_modules
+ * so a tampered POST cannot invent permissions.
+ */
+function set_staff_permissions(int $userId, array $grants, ?int $grantedBy = null): void
+{
+    if ($userId <= 0 || !table_exists('staff_permissions')) {
+        return;
+    }
+
+    $valid = [];
+    $modules = rbac_modules();
+    foreach ($grants as $grant) {
+        $parts = explode('.', (string) $grant, 2);
+        if (count($parts) !== 2) {
+            continue;
+        }
+        [$module, $action] = $parts;
+        if (isset($modules[$module]) && in_array($action, $modules[$module]['actions'], true)) {
+            $valid[$module . '.' . $action] = [$module, $action];
+        }
+    }
+
+    db()->prepare('DELETE FROM staff_permissions WHERE user_id = :uid')->execute(['uid' => $userId]);
+    if ($valid !== []) {
+        $ins = db()->prepare('INSERT INTO staff_permissions (user_id, module_key, action_key, granted_by) VALUES (:uid, :m, :a, :by)');
+        foreach ($valid as [$module, $action]) {
+            $ins->execute(['uid' => $userId, 'm' => $module, 'a' => $action, 'by' => $grantedBy]);
+        }
+    }
 }

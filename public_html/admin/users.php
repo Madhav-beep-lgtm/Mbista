@@ -20,7 +20,7 @@ $allowedSort = [
     'email_desc' => 'u.email DESC, u.created_at DESC',
 ];
 $perPageOptions = [10, 20, 50, 100];
-$staffWorkflowActions = ['save_staff_profile', 'upload_kyc_document', 'review_kyc_document'];
+$staffWorkflowActions = ['save_staff_profile', 'upload_kyc_document', 'review_kyc_document', 'save_permissions'];
 $hasAccessLevels = column_exists('users', 'access_level');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'] ?? ''), $staffWorkflowActions, true)) {
@@ -270,6 +270,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string) ($_POST['action']
     if (!$targetStaff) {
         flash('error', 'Staff member not found in this company portal.');
         redirect('admin/users.php');
+    }
+
+    if ($action === 'save_permissions') {
+        // Only an admin who can manage users may set granular staff permissions,
+        // and only for a staff member in this company portal. Admins are never
+        // constrained by staff_permissions, so we only persist for staff rows.
+        if ((string) ($targetStaff['role'] ?? '') !== 'staff') {
+            flash('error', 'Granular permissions apply to staff accounts only.');
+            redirect('admin/users.php?view=' . $targetUserId);
+        }
+        $grants = array_values(array_filter((array) ($_POST['perm'] ?? []), 'is_string'));
+        set_staff_permissions($targetUserId, $grants, (int) ($currentAdmin['id'] ?? 0));
+        // New permissions take effect immediately: force a re-login so an open
+        // session cannot keep the old scope.
+        revoke_user_sessions($targetUserId);
+        security_event('permission_change', 'success', 'Set ' . count($grants) . ' grants for staff #' . $targetUserId . '.', $companyId, (int) ($currentAdmin['id'] ?? 0));
+        log_activity('user', $targetUserId, 'permission_change', 'Granular permissions updated (' . count($grants) . ' grants).', (int) ($currentAdmin['id'] ?? 0));
+        flash('success', 'Permissions updated. The staff member will sign in again to pick up the new access.');
+        redirect('admin/users.php?view=' . $targetUserId);
     }
 
     if ($action === 'save_staff_profile' && table_exists('staff_profiles')) {
@@ -631,7 +650,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </tbody>
         </table>
     </div>
-    <p class="muted">Assign a role to each user via New user / Edit. Capabilities are enforced on voucher approval and posting; broader per-module enforcement rolls out as modules adopt <code>user_can()</code>.</p>
+    <p class="muted">The role sets a user's baseline capability tier. For staff you can go further: open any staff member (View) and tick exact <strong>module permissions</strong>. Staff with no ticks keep full legacy access; once you tick anything they can only do what is checked. Admins always hold full rights within the companies they are authorized for.</p>
 </details>
 <section class="mbw-kpi-grid">
     <a class="mbw-kpi" href="<?= e(url('admin/users.php')) ?>">
@@ -877,7 +896,65 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </div>
             </div>
 
-
+            <?php if (($viewUser['role'] ?? '') === 'staff'): ?>
+                <?php
+                $viewUserPermKeys = staff_permission_keys((int) $viewUser['id']);
+                $viewUserConfigured = $viewUserPermKeys !== [];
+                ?>
+                <div class="form-card">
+                    <h3>Module permissions</h3>
+                    <p class="muted">
+                        Tick the exact actions this staff member may perform. While nothing is ticked the account keeps
+                        <strong>full legacy access</strong>; saving any selection switches it to <strong>strict mode</strong>
+                        — it can then do only what is checked. Admins are never restricted here.
+                        <?php if ($viewUserConfigured): ?>
+                            <span class="mbw-pill tone-amber">Strict mode — <?= e((string) count($viewUserPermKeys)) ?> grants</span>
+                        <?php else: ?>
+                            <span class="mbw-pill tone-gray">Unconfigured — full access</span>
+                        <?php endif; ?>
+                    </p>
+                    <form method="post">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                        <input type="hidden" name="action" value="save_permissions">
+                        <input type="hidden" name="user_id" value="<?= e((int) $viewUser['id']) ?>">
+                        <div class="rc-table-scroll">
+                            <table class="rc-table role-matrix-table perm-matrix-table">
+                                <thead>
+                                    <tr>
+                                        <th>Module</th>
+                                        <?php foreach (rbac_action_labels() as $actLabel): ?>
+                                            <th class="align-center"><?= e($actLabel) ?></th>
+                                        <?php endforeach; ?>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach (rbac_modules() as $modKey => $mod): ?>
+                                        <tr>
+                                            <td><strong><?= e($mod['label']) ?></strong></td>
+                                            <?php foreach (array_keys(rbac_action_labels()) as $actKey): ?>
+                                                <td class="align-center">
+                                                    <?php if (in_array($actKey, $mod['actions'], true)): ?>
+                                                        <?php $pk = $modKey . '.' . $actKey; ?>
+                                                        <input type="checkbox" name="perm[]" value="<?= e($pk) ?>" aria-label="<?= e($mod['label'] . ' ' . $actKey) ?>" <?= isset($viewUserPermKeys[$pk]) ? 'checked' : '' ?>>
+                                                    <?php else: ?>
+                                                        <span class="matrix-no">–</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                            <?php endforeach; ?>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="actions" style="margin-top:12px;">
+                            <button type="submit" class="button">Save permissions</button>
+                            <?php if ($viewUserConfigured): ?>
+                                <span class="muted">Uncheck everything and save to return this account to full legacy access.</span>
+                            <?php endif; ?>
+                        </div>
+                    </form>
+                </div>
+            <?php endif; ?>
 
             <?php if (in_array(($viewUser['role'] ?? ''), ['staff', 'admin'], true)): ?>
                 <div class="form-card">

@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 
 require_staff_or_admin();
+require_permission('tickets', 'view');
 
 $pageTitle = 'Support Tickets';
 $pageSubtitle = 'Track, assign and resolve client support requests with SLA visibility';
