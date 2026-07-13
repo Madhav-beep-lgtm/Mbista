@@ -225,6 +225,93 @@ function fa_impairment_reversal(float $currentCarrying, float $recoverableAmount
     ];
 }
 
+// ---------------------------------------------------------------------------
+// Scoped ledger mapping (asset -> category -> global) + posting helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * The asset posting purposes shown on the mapping editor, with the account
+ * type each should point at.
+ */
+function fa_mapping_purposes(): array
+{
+    return [
+        'ppe_cost'                 => ['label' => 'PPE / Asset Cost', 'expect' => 'asset'],
+        'acquisition_clearing'     => ['label' => 'Acquisition Clearing / Payable', 'expect' => 'liability'],
+        'depreciation_expense'     => ['label' => 'Depreciation Expense', 'expect' => 'expense'],
+        'accumulated_depreciation' => ['label' => 'Accumulated Depreciation', 'expect' => 'asset'],
+        'amortization_expense'     => ['label' => 'Amortization Expense', 'expect' => 'expense'],
+        'accumulated_amortization' => ['label' => 'Accumulated Amortization', 'expect' => 'asset'],
+        'impairment_loss'          => ['label' => 'Impairment Loss', 'expect' => 'expense'],
+        'accumulated_impairment'   => ['label' => 'Accumulated Impairment', 'expect' => 'asset'],
+        'disposal_clearing'        => ['label' => 'Disposal Clearing', 'expect' => 'asset'],
+    ];
+}
+
+/**
+ * Resolve the ledger mapped to a purpose for an asset: asset -> its category ->
+ * global. Returns the ledgers row or null when unmapped.
+ */
+function fa_resolve_mapping(int $companyId, string $purpose, ?int $assetId = null, ?int $categoryId = null): ?array
+{
+    if (!table_exists('asset_ledger_mappings')) {
+        return null;
+    }
+    $ledger = static function (int $ledgerId) use ($companyId): ?array {
+        if ($ledgerId <= 0) {
+            return null;
+        }
+        $s = db()->prepare('SELECT * FROM ledgers WHERE id = :id AND company_id = :cid LIMIT 1');
+        $s->execute(['id' => $ledgerId, 'cid' => $companyId]);
+        return $s->fetch(PDO::FETCH_ASSOC) ?: null;
+    };
+    if ($assetId) {
+        $s = db()->prepare('SELECT ledger_id FROM asset_ledger_mappings WHERE company_id = :cid AND scope = \'asset\' AND asset_id = :aid AND purpose = :p LIMIT 1');
+        $s->execute(['cid' => $companyId, 'aid' => $assetId, 'p' => $purpose]);
+        $row = $ledger((int) ($s->fetchColumn() ?: 0));
+        if ($row) { return $row; }
+    }
+    if ($categoryId) {
+        $s = db()->prepare('SELECT ledger_id FROM asset_ledger_mappings WHERE company_id = :cid AND scope = \'category\' AND category_id = :cat AND purpose = :p LIMIT 1');
+        $s->execute(['cid' => $companyId, 'cat' => $categoryId, 'p' => $purpose]);
+        $row = $ledger((int) ($s->fetchColumn() ?: 0));
+        if ($row) { return $row; }
+    }
+    $s = db()->prepare('SELECT ledger_id FROM asset_ledger_mappings WHERE company_id = :cid AND scope = \'global\' AND purpose = :p LIMIT 1');
+    $s->execute(['cid' => $companyId, 'p' => $purpose]);
+    return $ledger((int) ($s->fetchColumn() ?: 0));
+}
+
+function fa_missing_mappings(int $companyId, array $purposes, ?int $assetId = null, ?int $categoryId = null): array
+{
+    $missing = [];
+    foreach ($purposes as $p) {
+        if (fa_resolve_mapping($companyId, $p, $assetId, $categoryId) === null) {
+            $missing[] = $p;
+        }
+    }
+    return $missing;
+}
+
+/**
+ * The straight-line monthly charge for an asset row for one period, capped so
+ * carrying never drops below residual.
+ */
+function fa_asset_monthly_charge(array $asset): float
+{
+    $cost = (float) ($asset['cost'] ?? 0) + (float) ($asset['directly_attributable_cost'] ?? 0) + (float) ($asset['restoration_provision'] ?? 0);
+    $residual = (float) ($asset['residual_value'] ?? 0);
+    $life = (int) ($asset['useful_life_months'] ?? 0);
+    $accumulated = (float) ($asset['accumulated_depreciation'] ?? 0);
+    if ($life <= 0) {
+        return 0.0;
+    }
+    $depreciable = max(0.0, $cost - $residual);
+    $perMonth = fa_round($depreciable / $life);
+    $remaining = max(0.0, $depreciable - $accumulated);
+    return fa_round(min($perMonth, $remaining));
+}
+
 /**
  * The purposes each fixed-asset event needs mapped before it can post
  * (mirrors inv_transaction_purposes for the asset module).
