@@ -57,11 +57,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT INTO fixed_assets
                     (company_id, asset_code, name, asset_class, cost, residual_value, useful_life_months,
                      depreciation_method, available_for_use_date, depreciation_start_date, carrying_amount, status, created_by)
-                VALUES (:cid, :code, :name, :class, :cost, :residual, :life, :method, :avail, :avail, :cost2, :status, :uid)
+                VALUES (:cid, :code, :name, :class, :cost, :residual, :life, :method, :avail, :dep_start, :cost2, :status, :uid)
             ')->execute([
                 'cid' => $companyId, 'code' => $code, 'name' => $name, 'class' => $class,
                 'cost' => $cost, 'residual' => $residual, 'life' => $lifeMonths, 'method' => $method,
-                'avail' => $availableDate, 'cost2' => $cost, 'status' => $availableDate ? 'active' : 'draft', 'uid' => $userId,
+                'avail' => $availableDate, 'dep_start' => $availableDate, 'cost2' => $cost,
+                'status' => $availableDate ? 'active' : 'draft', 'uid' => $userId,
             ]);
             $assetId = (int) db()->lastInsertId();
             log_activity('fixed_asset', $assetId, 'created', 'Fixed asset registered.', $userId);
@@ -348,8 +349,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->beginTransaction();
             // Create the ROU asset record (depreciated straight-line over the term).
             db()->prepare('INSERT INTO fixed_assets (company_id, asset_code, name, asset_class, cost, residual_value, useful_life_months, depreciation_method, available_for_use_date, depreciation_start_date, carrying_amount, status, created_by)
-                VALUES (:cid, :code, :name, \'rou\', :cost, 0, :life, \'straight_line\', :d, :d, :cost2, \'active\', :uid)')
-                ->execute(['cid' => $companyId, 'code' => 'ROU-' . $ref, 'name' => $name, 'cost' => $rou, 'life' => $term, 'd' => $commence, 'cost2' => $rou, 'uid' => $userId]);
+                VALUES (:cid, :code, :name, \'rou\', :cost, 0, :life, \'straight_line\', :d, :dep_start, :cost2, \'active\', :uid)')
+                ->execute(['cid' => $companyId, 'code' => 'ROU-' . $ref, 'name' => $name, 'cost' => $rou, 'life' => $term, 'd' => $commence, 'dep_start' => $commence, 'cost2' => $rou, 'uid' => $userId]);
             $rouAssetId = (int) db()->lastInsertId();
             db()->prepare('INSERT INTO lease_liabilities (company_id, asset_id, contract_ref, commencement_date, term_months, payment, payment_timing, discount_rate_annual, initial_liability, initial_direct_costs, prepayments, incentives, restoration, rou_initial, status, created_by)
                 VALUES (:cid,:aid,:ref,:d,:term,:pay,:timing,:rate,:liab,:idc,:prep,:inc,:rest,:rou,\'active\',:uid)')
