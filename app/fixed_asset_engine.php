@@ -237,6 +237,7 @@ function fa_mapping_purposes(): array
 {
     return [
         'ppe_cost'                 => ['label' => 'PPE / Asset Cost', 'expect' => 'asset'],
+        'cwip'                     => ['label' => 'Capital Work-in-Progress', 'expect' => 'asset'],
         'acquisition_clearing'     => ['label' => 'Acquisition Clearing / Payable', 'expect' => 'liability'],
         'depreciation_expense'     => ['label' => 'Depreciation Expense', 'expect' => 'expense'],
         'accumulated_depreciation' => ['label' => 'Accumulated Depreciation', 'expect' => 'asset'],
