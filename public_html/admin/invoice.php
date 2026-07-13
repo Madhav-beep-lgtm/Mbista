@@ -290,8 +290,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
 
+                    $stockPostingNotes = [];
                     if ($invoiceSourceType === 'inventory' && in_array($status, ['issued', 'paid'], true) && table_exists('inventory_transactions')) {
-                        $stockStmt = db()->prepare('
+                        $invFiscalYearId = current_fiscal_year_id() ?: null;
+                        $stockItemStmt = db()->prepare('SELECT id, category, sku, name, valuation_method FROM inventory_items WHERE id = :id AND company_id = :company_id LIMIT 1');
+                        $stockInsertStmt = db()->prepare('
                             INSERT INTO inventory_transactions (
                                 company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date,
                                 qty_in, qty_out, rate, amount, notes
@@ -304,17 +307,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             if (empty($line['item_id'])) {
                                 continue;
                             }
-                            $stockStmt->execute([
-                                'company_id' => (int) $currentCompany['id'],
-                                'fiscal_year_id' => current_fiscal_year_id() ?: null,
-                                'item_id' => (int) $line['item_id'],
-                                'ref_no' => $invoiceNo,
-                                'transaction_date' => $issuedOn,
-                                'qty_out' => $line['quantity'],
-                                'rate' => $line['rate'],
-                                'amount' => $line['taxable_amount'],
-                                'notes' => 'Auto stock issue from invoice ' . $invoiceNo,
-                            ]);
+                            $stockItemStmt->execute(['id' => (int) $line['item_id'], 'company_id' => (int) $currentCompany['id']]);
+                            $stockItem = $stockItemStmt->fetch();
+                            if (!$stockItem) {
+                                continue;
+                            }
+                            // Mirror accounting-inventory.php's record_movement: insert the
+                            // movement, draw down FIFO/weighted-average/specific cost layers
+                            // for the real issue cost, then post the balanced Dr COGS / Cr
+                            // Inventory GL voucher — so an inventory-sourced invoice posts
+                            // both legs (revenue below, COGS here) instead of a raw stock
+                            // row with no cost-layer or GL impact.
+                            try {
+                                db()->beginTransaction();
+                                $stockInsertStmt->execute([
+                                    'company_id' => (int) $currentCompany['id'],
+                                    'fiscal_year_id' => $invFiscalYearId,
+                                    'item_id' => (int) $line['item_id'],
+                                    'ref_no' => $invoiceNo,
+                                    'transaction_date' => $issuedOn,
+                                    'qty_out' => $line['quantity'],
+                                    'rate' => $line['rate'],
+                                    'amount' => $line['taxable_amount'],
+                                    'notes' => 'Auto stock issue from invoice ' . $invoiceNo,
+                                ]);
+                                $stockTxnId = (int) db()->lastInsertId();
+                                $stockMethod = (string) ($stockItem['valuation_method'] ?? 'weighted_average');
+                                $issueValue = inv_apply_movement(
+                                    (int) $currentCompany['id'],
+                                    (int) $line['item_id'],
+                                    0.0,
+                                    (float) $line['quantity'],
+                                    (float) $line['rate'],
+                                    $issuedOn,
+                                    $stockMethod,
+                                    $stockTxnId
+                                );
+                                $stockVoucherId = 0;
+                                try {
+                                    $stockVoucherId = inv_post_movement_voucher(
+                                        (int) $currentCompany['id'],
+                                        $invFiscalYearId,
+                                        $stockTxnId,
+                                        'sale',
+                                        $stockItem,
+                                        'out',
+                                        $issueValue,
+                                        $issuedOn,
+                                        $adminId,
+                                        $partyId > 0 ? $partyId : null
+                                    );
+                                } catch (RuntimeException $mapEx) {
+                                    if (!str_starts_with($mapEx->getMessage(), 'MAP_MISSING:')) {
+                                        throw $mapEx;
+                                    }
+                                    $stockPostingNotes[] = $stockItem['sku'] . ' stock recorded — map its inventory ledgers to auto-post COGS.';
+                                }
+                                if ($stockVoucherId > 0) {
+                                    db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
+                                        ->execute(['vid' => $stockVoucherId, 'id' => $stockTxnId, 'cid' => (int) $currentCompany['id']]);
+                                }
+                                db()->commit();
+                            } catch (Throwable $stockException) {
+                                if (db()->inTransaction()) {
+                                    db()->rollBack();
+                                }
+                                $stockPostingNotes[] = $stockItem['sku'] . ' stock movement failed: ' . $stockException->getMessage();
+                            }
                         }
                     }
 
@@ -352,7 +411,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             auto_post_invoice_payment_voucher((int) $requestId, $adminId);
                         }
                     }
-                    $message = 'Invoice created successfully.';
+                    $message = 'Invoice created successfully.' . ($stockPostingNotes !== [] ? ' ' . implode(' ', $stockPostingNotes) : '');
                 }
             }
         }
