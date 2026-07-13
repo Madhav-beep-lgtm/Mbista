@@ -244,7 +244,16 @@ function fa_mapping_purposes(): array
         'accumulated_amortization' => ['label' => 'Accumulated Amortization', 'expect' => 'asset'],
         'impairment_loss'          => ['label' => 'Impairment Loss', 'expect' => 'expense'],
         'accumulated_impairment'   => ['label' => 'Accumulated Impairment', 'expect' => 'asset'],
-        'disposal_clearing'        => ['label' => 'Disposal Clearing', 'expect' => 'asset'],
+        'impairment_reversal_income' => ['label' => 'Impairment Reversal Income', 'expect' => 'revenue'],
+        'revaluation_surplus'      => ['label' => 'Revaluation Surplus (OCI)', 'expect' => 'equity'],
+        'revaluation_loss'         => ['label' => 'Revaluation Loss', 'expect' => 'expense'],
+        'disposal_clearing'        => ['label' => 'Disposal Clearing / Cash', 'expect' => 'asset'],
+        'gain_on_disposal'         => ['label' => 'Gain on Disposal', 'expect' => 'revenue'],
+        'loss_on_disposal'         => ['label' => 'Loss on Disposal', 'expect' => 'expense'],
+        'asset_held_for_sale'      => ['label' => 'Asset Held for Sale', 'expect' => 'asset'],
+        'rou_asset'                => ['label' => 'Right-of-Use Asset', 'expect' => 'asset'],
+        'lease_liability'          => ['label' => 'Lease Liability', 'expect' => 'liability'],
+        'lease_interest_expense'   => ['label' => 'Lease Interest Expense', 'expect' => 'expense'],
     ];
 }
 
