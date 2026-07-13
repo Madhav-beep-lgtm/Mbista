@@ -150,6 +150,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
             redirect('admin/users.php');
         }
 
+        $duplicateEmailStmt = db()->prepare(
+            'SELECT id
+             FROM users
+             WHERE email = :email
+               AND id <> :id
+             LIMIT 1'
+        );
+
+        $duplicateEmailStmt->execute([
+            'email' => $email,
+            'id' => $userId,
+        ]);
+
+        if ($duplicateEmailStmt->fetch()) {
+            flash(
+                'error',
+                'This email address is already assigned to another user.'
+            );
+
+            redirect('admin/users.php?edit=' . $userId);
+        }
         try {
             $params = [
                 'id' => $userId,
@@ -162,7 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
                 'company_id' => $companyId,
             ];
 
-            $sql = 'UPDATE users SET name = :name, email = :email, role = :role, status = :status, phone = :phone, company = :company, company_id = :company_id';
+            $sql = 'UPDATE users SET name = :name, email = :email, role = :role, status = :status, phone = :phone, company = :company';
             if ($hasAccessLevels) {
                 $sql .= ', access_level = :access_level';
                 $params['access_level'] = $accessLevel;
@@ -204,7 +225,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
 
             flash('success', 'User updated successfully.');
         } catch (Throwable $exception) {
-            flash('error', 'Could not update user. The email may already exist.');
+            error_log(
+                'User update failed for user #' .
+                $userId .
+                ': ' .
+                $exception->getMessage()
+            );
+
+            flash(
+                'error',
+                'Could not update the user. Please check the entered details and try again.'
+            );
+
+            redirect('admin/users.php?edit=' . $userId);
         }
 
         redirect('admin/users.php?view=' . $userId);
