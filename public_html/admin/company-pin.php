@@ -15,8 +15,22 @@ if (!$company || (int) ($company['is_active'] ?? 0) !== 1) {
     redirect('portal.php');
 }
 
+// Membership gate: the PIN is a second factor, not the only barrier. An admin
+// with no authorization for this company never reaches the PIN prompt.
+require_company_access($companyId);
+
+$pinThrottleKey = 'company_pin:' . $companyId;
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
+
+    // A 4-digit PIN has only 10k combinations; throttle by IP + company so it
+    // cannot be brute forced.
+    if (recent_failed_attempts($pinThrottleKey) >= LOGIN_MAX_ATTEMPTS) {
+        security_event($pinThrottleKey, 'denied', 'Too many PIN attempts.', $companyId);
+        flash('error', 'Too many incorrect PIN attempts. Please wait a few minutes and try again.');
+        redirect('admin/company-pin.php?company_id=' . $companyId);
+    }
 
     $pin = trim((string) ($_POST['pin'] ?? ''));
     if (!preg_match('/^[0-9]{4}$/', $pin)) {
@@ -25,9 +39,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (!verify_company_pin($companyId, $pin)) {
+        security_event($pinThrottleKey, 'failure', 'Incorrect company PIN.', $companyId);
         flash('error', 'Invalid company PIN.');
         redirect('admin/company-pin.php?company_id=' . $companyId);
     }
+    security_event('company_pin_verified', 'success', 'Company portal unlocked.', $companyId);
 
     set_selected_company($companyId);
     mark_company_pin_verified($companyId);

@@ -36,27 +36,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim((string) ($_POST['email'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
 
+    if (login_is_throttled($email)) {
+        security_event('login_throttled', 'denied', 'Too many failed admin attempts.', null, null, $email);
+        flash('error', 'Too many failed attempts. Please wait a few minutes and try again.');
+        redirect('admin/login.php');
+    }
+
     if (!login_user($email, $password)) {
         flash('error', 'Invalid admin credentials.');
         redirect('admin/login.php');
     }
 
     $user = current_user();
+    // Only admins belong in the admin portal; a staff/customer who authenticates
+    // here is sent to their own home rather than into an admin context.
+    if (($user['role'] ?? '') !== 'admin') {
+        redirect(role_home_path($user));
+    }
+
     flash('success', 'Welcome back, ' . ($user['name'] ?? 'user') . '.');
-    if (($user['role'] ?? '') === 'admin') {
-        // For super admin (company_id 0 or 1), set context to Altiora
-        $userCompanyId = (int) ($user['company_id'] ?? 0);
-        if ($userCompanyId === 0 || $userCompanyId === 1) {
-            // Super admin - set to Altiora
-            $companyToUse = 1;
-        } else {
-            // Company admin - use their company
-            $companyToUse = $userCompanyId;
-        }
-        
-        if (activate_company_context($companyToUse, true)) {
-            redirect('admin/index.php');
-        }
+    // For super admin (company_id 0 or 1), set context to Altiora
+    $userCompanyId = (int) ($user['company_id'] ?? 0);
+    if ($userCompanyId === 0 || $userCompanyId === 1) {
+        // Super admin - set to Altiora
+        $companyToUse = 1;
+    } else {
+        // Company admin - use their company
+        $companyToUse = $userCompanyId;
+    }
+
+    // Never auto-open a company the user is not authorized for.
+    if (user_can_access_company($companyToUse) && activate_company_context($companyToUse, true)) {
+        redirect('admin/index.php');
     }
 
     redirect(role_home_path($user));

@@ -150,8 +150,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
             }
             log_activity('user', $userId, 'updated', 'User profile details updated.', (int) ($currentAdmin['id'] ?? 0));
             log_field_changes('user', $userId, $existingUser, $auditAfter, $companyId, (int) ($currentAdmin['id'] ?? 0));
-            if (($existingUser['status'] ?? '') !== $status) {
+            $statusChanged = ($existingUser['status'] ?? '') !== $status;
+            $accessChanged = $hasAccessLevels && (string) ($existingUser['access_level'] ?? '') !== (string) ($auditAfter['access_level'] ?? '');
+            if ($statusChanged) {
                 log_activity('user', $userId, 'status_changed', 'User status changed to ' . $status . '.', (int) ($currentAdmin['id'] ?? 0));
+            }
+            // Revoke sessions on any security-sensitive change: a status move
+            // away from active, or a permission/role change (so the old scope
+            // cannot outlive the change on an open session).
+            if (($statusChanged && $status !== 'active') || $accessChanged) {
+                revoke_user_sessions($userId);
+                security_event('user_permission_change', 'success', 'Status/permission change forced re-login for user #' . $userId . '.', $companyId, (int) ($currentAdmin['id'] ?? 0));
             }
 
             flash('success', 'User updated successfully.');
@@ -200,6 +209,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
             'company_id' => $companyId,
         ]);
 
+        // Kill any live session immediately so a suspended user cannot keep
+        // working from an already-open browser.
+        revoke_user_sessions($userId);
+        security_event('user_suspended', 'success', 'User #' . $userId . ' suspended.', $companyId, (int) ($currentAdmin['id'] ?? 0));
         log_activity('user', $userId, 'status_changed', 'User suspended and marked inactive.', (int) ($currentAdmin['id'] ?? 0));
         flash('success', 'User suspended.');
         redirect('admin/users.php?view=' . $userId);

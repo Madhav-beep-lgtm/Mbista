@@ -21,6 +21,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('login.php');
     }
 
+    // Throttle brute force by email + IP over a rolling window.
+    if (login_is_throttled($email)) {
+        security_event('login_throttled', 'denied', 'Too many failed attempts.', null, null, $email);
+        flash('error', 'Too many failed attempts. Please wait a few minutes and try again.');
+        redirect('login.php');
+    }
+
     if (!login_user($email, $password)) {
         flash('error', 'Invalid login credentials.');
         redirect('login.php');

@@ -16,11 +16,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     handle_company_switch($companyId, 'portal.php');
 }
 
-$companies = table_exists('companies')
-    ? db()->query('SELECT c.*, p.name AS parent_company_name FROM companies c LEFT JOIN companies p ON p.id = c.parent_company_id WHERE c.is_active = 1 ORDER BY c.parent_company_id IS NULL DESC, c.name ASC')->fetchAll()
-    : [];
+// Only ever show organizations THIS admin is authorized to open. Previously
+// every active company was listed to every admin, exposing the full tenant
+// roster and inviting unauthorized PIN entry.
+$authorizedCompanies = authorized_companies();
+$authorizedById = [];
+foreach ($authorizedCompanies as $authorizedCompany) {
+    $authorizedById[(int) $authorizedCompany['id']] = $authorizedCompany;
+}
+$canOpen = static fn (?array $company): bool => $company !== null && isset($authorizedById[(int) $company['id']]);
+
+// Non-client-books organizations only in the main selector; client books are
+// opened from the admin sidebar switcher, not this roster.
+$companies = array_values(array_filter($authorizedCompanies, static fn (array $c): bool => (int) ($c['is_client_company'] ?? 0) === 0));
+
 $mbistaCompany = company_by_code('MBAACA');
 $altioraCompany = company_by_code('AGHPL');
+if (!$canOpen($mbistaCompany)) {
+    $mbistaCompany = null;
+}
+if (!$canOpen($altioraCompany)) {
+    $altioraCompany = null;
+}
+
+// If the admin has exactly one authorized organization, skip the selector.
+if (count($companies) === 1 && $_SERVER['REQUEST_METHOD'] !== 'POST') {
+    $only = $companies[0];
+    if ((string) ($only['code'] ?? '') === 'MBAACA' || company_pin_is_set((int) $only['id'])) {
+        // Fall through to render; a one-click card is friendlier than an
+        // auto-POST, but avoid a dead end when no PIN is set yet.
+    }
+}
 
 include __DIR__ . '/../app/views/partials/header.php';
 ?>
@@ -64,7 +90,13 @@ include __DIR__ . '/../app/views/partials/header.php';
         <?php endif; ?>
 
         <div class="admin-grid" style="margin-top: 24px;">
-            <?php foreach ($companies as $company): ?>
+            <?php
+            $featuredIds = array_filter([(int) ($mbistaCompany['id'] ?? 0), (int) ($altioraCompany['id'] ?? 0)]);
+            foreach ($companies as $company):
+                if (in_array((int) $company['id'], $featuredIds, true)) {
+                    continue; // already shown as a featured card above
+                }
+                ?>
                 <form method="post" class="card">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="company_id" value="<?= e((int) $company['id']) ?>">
@@ -82,6 +114,14 @@ include __DIR__ . '/../app/views/partials/header.php';
                 </form>
             <?php endforeach; ?>
         </div>
+
+        <?php if (!$mbistaCompany && !$altioraCompany && $companies === []): ?>
+            <div class="card" style="margin-top: 24px; text-align: center;">
+                <h3>No organizations assigned yet</h3>
+                <p>Your account is not linked to any company portal. Ask your administrator to grant you access.</p>
+                <p><a class="button secondary" href="<?= e(url('logout.php')) ?>">Log out</a></p>
+            </div>
+        <?php endif; ?>
     </div>
 </section>
 <?php include __DIR__ . '/../app/views/partials/footer.php'; ?>
