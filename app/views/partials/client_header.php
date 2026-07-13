@@ -19,21 +19,21 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
     <link rel="manifest" href="/site.webmanifest">
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260713f">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713e">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713f">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
     <aside class="admin-sidebar">
         <a class="brand brand-admin" href="<?= e(url('dashboard.php')) ?>">
-            <span class="brand-mark">MB</span>
-            <span>
-                <strong>MB World</strong>
-                <small>Client Portal</small>
-            </span>
+            <?= brand_logo('light', 'mbw-logo mbw-logo-sidebar') ?>
+            <span class="brand-admin-sub">Client Portal</span>
         </a>
         <?php if ($headerClientProfile): ?>
             <div class="admin-sidebar-context">
+                <?php if (!empty($headerClientProfile['company_logo_path'])): ?>
+                    <img class="admin-portal-logo" src="<?= e(url((string) $headerClientProfile['company_logo_path'])) ?>" alt="<?= e($headerClientProfile['organization_name']) ?> logo" loading="lazy">
+                <?php endif; ?>
                 <span>Your organization</span>
                 <strong><?= e($headerClientProfile['organization_name']) ?></strong>
                 <small><?= e($headerClientProfile['client_code'] ?? 'No client code') ?></small>

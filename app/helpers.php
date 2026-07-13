@@ -474,10 +474,29 @@ function platform_brand_name(): string
  */
 function brand_logo(string $variant = 'dark', string $class = 'mbw-logo', ?string $alt = null): string
 {
-    $file = $variant === 'light' ? 'assets/img/mbworld-logo-light.svg' : 'assets/img/mbworld-logo.svg';
     $alt = $alt ?? platform_brand_name();
 
-    return '<img src="' . e(url($file)) . '" alt="' . e($alt) . '" class="' . e($class) . '" width="200" height="40" loading="lazy">';
+    // Prefer an admin-uploaded platform logo (Settings → Branding); the light
+    // variant falls back to the general upload, then to the built-in SVG.
+    $uploaded = '';
+    if (function_exists('setting')) {
+        if ($variant === 'light') {
+            $uploaded = (string) setting('platform_logo_light_path', '');
+            if ($uploaded === '') {
+                $uploaded = (string) setting('platform_logo_path', '');
+            }
+        } else {
+            $uploaded = (string) setting('platform_logo_path', '');
+        }
+    }
+
+    if ($uploaded !== '') {
+        $file = $uploaded;
+    } else {
+        $file = $variant === 'light' ? 'assets/img/mbworld-logo-light.svg' : 'assets/img/mbworld-logo.svg';
+    }
+
+    return '<img src="' . e(url($file)) . '" alt="' . e($alt) . '" class="' . e($class) . '" loading="lazy">';
 }
 
 /**

@@ -251,6 +251,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $companySignaturePath = settings_upload_image('company_signature', $currentSettings);
     $companyStampPath = settings_upload_image('company_stamp', $currentSettings);
     $companyQrPath = settings_upload_image('company_qr', $currentSettings);
+    // Platform (M.B. World) brand logo — used across portal/login chrome via
+    // brand_logo(); light variant is for dark surfaces (sidebar). Empty keeps
+    // the built-in SVG lockup.
+    $platformLogoPath = settings_upload_image('platform_logo', $currentSettings);
+    $platformLogoLightPath = settings_upload_image('platform_logo_light', $currentSettings);
 
     update_settings([
         'site_name' => trim((string) ($_POST['site_name'] ?? APP_NAME)),
@@ -269,6 +274,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'company_signature_path' => $companySignaturePath,
         'company_stamp_path' => $companyStampPath,
         'company_qr_path' => $companyQrPath,
+        'platform_logo_path' => $platformLogoPath,
+        'platform_logo_light_path' => $platformLogoLightPath,
 
         'payment_mode' => $paymentMode,
         'payment_label' => trim((string) ($_POST['payment_label'] ?? 'Manual payment / bank transfer')),
@@ -312,6 +319,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         'settings_draft' => '',
     ]);
+
+    // Per-company portal logo (companies.logo_path) — this organization's own
+    // logo, shown inside its own portal. Uploaded to the current company only.
+    if ($settingsCompanyId > 0 && column_exists('companies', 'logo_path')) {
+        $companyOwnLogo = settings_upload_image('company_portal_logo', ['company_portal_logo_path' => (string) ($settingsCompany['logo_path'] ?? '')]);
+        if ($companyOwnLogo !== '') {
+            db()->prepare('UPDATE companies SET logo_path = :p WHERE id = :id')
+                ->execute(['p' => $companyOwnLogo, 'id' => $settingsCompanyId]);
+        }
+    }
 
     log_activity('settings', $settingsCompanyId, $saveMode === 'publish' ? 'settings_published' : 'settings_saved', $saveMode === 'publish' ? 'Settings published to all portals.' : 'Settings updated.', $settingsUserId);
     flash('success', $saveMode === 'publish' ? 'Settings published to the admin portal, client portal, and home page.' : 'Settings updated.');
@@ -505,6 +522,9 @@ if (table_exists('company_shareholdings')) {
             <label>Authorized signature<input type="file" name="company_signature" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['company_signature_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '' ?></label>
             <label>Company stamp<input type="file" name="company_stamp" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['company_stamp_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '' ?></label>
             <label>Payment QR code<input type="file" name="company_qr" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['company_qr_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '' ?></label>
+            <label>M.B. World platform logo <small style="color:var(--mbw-muted)">(shown on login, portal &amp; footers)</small><input type="file" name="platform_logo" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['platform_logo_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '<small style="color:var(--mbw-muted)">Using built-in logo</small>' ?></label>
+            <label>Platform logo — light/inverse <small style="color:var(--mbw-muted)">(for dark sidebars)</small><input type="file" name="platform_logo_light" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['platform_logo_light_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '<small style="color:var(--mbw-muted)">Falls back to built-in</small>' ?></label>
+            <label>This company's portal logo <small style="color:var(--mbw-muted)">(shown inside <?= e($settingsCompany['name'] ?? 'this company') ?>'s own portal)</small><input type="file" name="company_portal_logo" accept="image/png,image/jpeg,image/webp,image/gif"><?= (($settingsCompany['logo_path'] ?? '') !== '') ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '<small style="color:var(--mbw-muted)">Optional</small>' ?></label>
         </div>
     </details>
 

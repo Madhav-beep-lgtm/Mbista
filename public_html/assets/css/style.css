@@ -9911,8 +9911,8 @@ td.empty-cell::before {
    (added 2026-07-13). Single source: assets/img/mbworld-logo*.svg.
    --------------------------------------------------------------------------- */
 .mbw-logo { display: block; height: auto; max-width: 100%; }
-.mbw-logo-auth { width: 150px; height: 30px; }
-.mbw-logo-portal { width: 220px; height: 44px; margin-bottom: 16px; }
+.mbw-logo-auth { height: 30px; width: auto; max-width: 170px; }
+.mbw-logo-portal { height: 44px; width: auto; max-width: 240px; margin-bottom: 16px; }
 .mbw-poweredby { font-size: 12px; color: #5a6b82; letter-spacing: 0.2px; }
 .mbw-poweredby strong { color: #b5832b; font-weight: 700; }
 body.theme-dark .mbw-poweredby { color: #9fb2cc; }

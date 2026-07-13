@@ -16,18 +16,15 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
     <link rel="manifest" href="/site.webmanifest">
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260713f">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713e">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713f">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
     <aside class="admin-sidebar">
         <a class="brand brand-admin" href="<?= e(url('staff/index.php')) ?>">
-            <span class="brand-mark">MB</span>
-            <span>
-                <strong>MB World</strong>
-                <small>Staff Portal</small>
-            </span>
+            <?= brand_logo('light', 'mbw-logo mbw-logo-sidebar') ?>
+            <span class="brand-admin-sub">Staff Portal</span>
         </a>
         <?php if ($headerStaffCompany): ?>
             <div class="admin-sidebar-context">

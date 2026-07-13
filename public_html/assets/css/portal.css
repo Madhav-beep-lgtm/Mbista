@@ -4004,7 +4004,7 @@ body.admin-layout .rc-apply-comparison {
    Single source of truth: assets/img/mbworld-logo*.svg via brand_logo().
    --------------------------------------------------------------------------- */
 .mbw-logo { display: block; height: auto; max-width: 100%; }
-.mbw-logo-sidebar { width: 172px; height: 34px; }
+.mbw-logo-sidebar { height: 34px; width: auto; max-width: 180px; }
 body.admin-layout .brand.brand-admin { flex-direction: column; align-items: flex-start; gap: 4px; }
 body.admin-layout .brand.brand-admin .brand-admin-sub {
   font-size: 10.5px; letter-spacing: 2px; text-transform: uppercase;
@@ -4015,3 +4015,9 @@ body.admin-layout .brand.brand-admin .brand-admin-sub {
 }
 .mbw-poweredby strong { color: var(--mbw-amber, #d9a33a); font-weight: 700; }
 body.admin-layout .admin-foot .mbw-poweredby { margin: 0 auto; }
+
+/* Per-company portal logo in the sidebar context box (migration 035) */
+body.admin-layout .admin-sidebar-context .admin-portal-logo {
+  display: block; max-width: 148px; max-height: 40px; width: auto; height: auto;
+  margin-bottom: 8px; border-radius: 6px; background: #fff; padding: 4px;
+}

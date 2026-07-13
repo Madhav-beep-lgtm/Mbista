@@ -45,7 +45,7 @@ if ($navSection === '') {
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
     <link rel="manifest" href="/site.webmanifest">
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260713f">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
 </head>
 <body class="<?= e($bodyClass) ?>">
 <?php if ($headerSupportPhone !== '' || $headerSupportEmail !== ''): ?>

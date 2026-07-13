@@ -113,8 +113,8 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
     <link rel="manifest" href="/site.webmanifest">
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260713f">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713e">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713f">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
@@ -125,6 +125,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
         </a>
         <?php if ($headerCompany): ?>
             <div class="admin-sidebar-context">
+                <?php if (!empty($headerCompany['logo_path'])): ?>
+                    <img class="admin-portal-logo" src="<?= e(url((string) $headerCompany['logo_path'])) ?>" alt="<?= e($headerCompany['name'] ?? 'Company') ?> logo" loading="lazy">
+                <?php endif; ?>
                 <span>Current portal</span>
                 <strong><?= e($headerCompany['name'] ?? 'Company') ?></strong>
                 <?php if ($headerShowFiscalYear): ?>
