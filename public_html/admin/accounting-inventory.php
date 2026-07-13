@@ -219,6 +219,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
 
         try {
+            // One transaction: inv_rebuild_layers() below DELETEs the item's cost
+            // layers before replaying them, so a failure part-way through an
+            // untransacted rebuild would leave the item with no layers at all and
+            // a valuation of zero.
+            db()->beginTransaction();
             if ($itemId > 0) {
                 $params['id'] = $itemId;
                 db()->prepare('
@@ -252,7 +257,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 log_activity('inventory_item', $newItemId, 'created', 'Inventory item created.', $userId);
                 flash('success', 'Item created.');
             }
+            db()->commit();
         } catch (Throwable $exception) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
             flash('error', (string) $exception->getCode() === '23000'
                 ? 'Could not save item: SKU "' . $sku . '" already exists in this company.'
                 : 'Could not save item: ' . $exception->getMessage());
@@ -321,19 +330,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $method = (string) ($item['valuation_method'] ?? 'weighted_average');
 
-        // Warehouse / departmental transfers are a quantity-only relocation:
-        // two linked rows (out of source, in to destination) at the SAME
-        // carrying cost drawn from the real layers — never re-priced, never
-        // posted to the GL (inv_movement_posting_plan returns null for these).
-        if (in_array($type, ['warehouse_transfer', 'departmental_transfer'], true)) {
+        // Warehouse / departmental transfers relocate stock inside the entity:
+        // two linked rows (out of the source, in to the destination) and nothing
+        // else. The company still owns the same units at the same cost, so the
+        // cost layers are deliberately NOT touched (consuming them on the way out
+        // and re-adding on the way in would re-order the FIFO queue and mis-state
+        // later COGS) and no GL voucher is posted. Cost here is informational
+        // only, stamped from the item's current carrying cost.
+        if (inv_movement_is_location_only($type)) {
             if ($warehouseId === null || $toWarehouseId === null || $warehouseId === $toWarehouseId) {
                 flash('error', 'Select two different warehouses for a transfer (from and to).');
                 redirect('admin/accounting-inventory.php');
             }
-            if ($qty > (float) $item['on_hand'] + 0.0005) {
-                flash('error', 'Insufficient stock: only ' . number_format((float) $item['on_hand'], 3) . ' ' . $item['unit'] . ' of ' . $item['sku'] . ' on hand.');
+            // Availability must be checked at the SOURCE warehouse, not company-
+            // wide: the company can hold plenty of an item while the warehouse
+            // being transferred out of holds none, which would otherwise drive
+            // that location negative and invent stock at the destination.
+            $sourceQty = inv_item_warehouse_qty($companyId, $itemId, $warehouseId);
+            if ($qty > $sourceQty + 0.0005) {
+                flash('error', 'Insufficient stock at the source warehouse: it holds ' . number_format($sourceQty, 3) . ' ' . $item['unit'] . ' of ' . $item['sku'] . ' (company-wide on hand is ' . number_format((float) $item['on_hand'], 3) . ', but stock can only move out of the location that actually holds it).');
                 redirect('admin/accounting-inventory.php');
             }
+            // Informational unit cost: the item's current carrying cost per unit.
+            // The layers are not consumed, so nothing is actually drawn down here.
+            $balance = inv_layer_balance($companyId, $itemId);
+            $unitCostAtIssue = $balance['qty'] > 0.00005 ? round($balance['value'] / $balance['qty'], 6) : 0.0;
+            $transferValue = round($qty * $unitCostAtIssue, 2);
             try {
                 db()->beginTransaction();
                 $insertTxn = db()->prepare('
@@ -357,18 +379,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'to_warehouse_id' => $toWarehouseId,
                     'qty_in' => 0,
                     'qty_out' => $qty,
-                    'rate' => 0,
-                    'amount' => 0,
+                    'rate' => $unitCostAtIssue,
+                    'amount' => $transferValue,
                     'notes' => $notes,
                 ]);
                 $outTxnId = (int) db()->lastInsertId();
-                // Real cost-flow cost drawn from the layers (not re-priced).
-                $issueValue = inv_apply_movement($companyId, $itemId, 0.0, $qty, 0.0, $date, $method, $outTxnId, $warehouseId);
-                $unitCostAtIssue = $qty > 0 ? round($issueValue / $qty, 6) : 0.0;
-                db()->prepare('UPDATE inventory_transactions SET rate = :rate, amount = :amount WHERE id = :id AND company_id = :cid')
-                    ->execute(['rate' => $unitCostAtIssue, 'amount' => round($issueValue, 2), 'id' => $outTxnId, 'cid' => $companyId]);
 
-                // IN leg at the destination, re-added at the SAME carrying cost.
+                // IN leg at the destination, at the same carrying cost.
                 $insertTxn->execute([
                     'company_id' => $companyId,
                     'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
@@ -381,12 +398,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'qty_in' => $qty,
                     'qty_out' => 0,
                     'rate' => $unitCostAtIssue,
-                    'amount' => round($issueValue, 2),
+                    'amount' => round($transferValue, 2),
                     'notes' => 'Transfer in — paired with movement #' . $outTxnId,
                 ]);
                 $inTxnId = (int) db()->lastInsertId();
-                inv_apply_movement($companyId, $itemId, $qty, 0.0, $unitCostAtIssue, $date, $method, $inTxnId, $toWarehouseId);
-
                 db()->commit();
                 security_event('inventory_movement_posted', 'success', 'Transfer #' . $outTxnId . '/' . $inTxnId . ' (' . $type . ') posted for item #' . $itemId . '.', $companyId, $userId);
                 flash('success', 'Transfer recorded: ' . number_format($qty, 3) . ' ' . $item['unit'] . ' ' . $item['sku'] . ' moved. No GL entry — quantity relocated only (IAS 2 recognition unaffected).');
@@ -623,6 +638,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Movement not found, or it belongs to a manufacturing order (cancel the order instead).');
             redirect('admin/accounting-inventory.php');
         }
+        // A transfer is a PAIR of rows (out of the source, in to the destination).
+        // Deleting or reversing one leg on its own would leave the other standing,
+        // inventing stock at one location and destroying it at the other. Move it
+        // back with a transfer in the opposite direction instead.
+        if (inv_movement_is_location_only((string) $movement['transaction_type'])) {
+            flash('error', 'This is one leg of a transfer. Deleting a single leg would leave stock stranded at the other location — record a transfer in the opposite direction instead.');
+            redirect('admin/accounting-inventory.php');
+        }
         // A movement that posted a GL voucher must not be silently deleted —
         // that would orphan a posted voucher. Reverse it instead (spec E).
         if ((int) ($movement['voucher_id'] ?? 0) > 0) {
@@ -655,6 +678,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $movement = $mvStmt->fetch(PDO::FETCH_ASSOC);
         if (!$movement) {
             flash('error', 'Movement not found (production rows are reversed by cancelling the order).');
+            redirect('admin/accounting-inventory.php');
+        }
+        if (inv_movement_is_location_only((string) $movement['transaction_type'])) {
+            flash('error', 'This is one leg of a transfer. Reversing a single leg would leave stock stranded at the other location — record a transfer in the opposite direction instead.');
             redirect('admin/accounting-inventory.php');
         }
         $revItem = inventory_company_item((int) $movement['item_id'], $companyId);
@@ -1184,6 +1211,24 @@ foreach ($warehouseStockStmt->fetchAll() as $whRow) {
     } else {
         $warehouseOnHand[(int) $whRow['warehouse_id']] = (float) $whRow['on_hand'];
         $anyWarehouseTaggedTxn = true;
+    }
+}
+// Opening quantity lives on the item master, not in inventory_transactions, so
+// the aggregate above misses it. Every other on-hand figure on this page counts
+// it (opening_qty + SUM(qty_in - qty_out)); without this the card would quietly
+// contradict the on-hand column beside it. Opening stock sits at the item's
+// default warehouse, or in the unassigned bucket when it has none.
+foreach ($items as $stockItem) {
+    $openingQty = (float) ($stockItem['opening_qty'] ?? 0);
+    if (abs($openingQty) <= 0.00005) {
+        continue;
+    }
+    $defaultWarehouseId = (int) ($stockItem['default_warehouse_id'] ?? 0);
+    if ($defaultWarehouseId > 0) {
+        $warehouseOnHand[$defaultWarehouseId] = ($warehouseOnHand[$defaultWarehouseId] ?? 0.0) + $openingQty;
+        $anyWarehouseTaggedTxn = true;
+    } else {
+        $unassignedOnHand += $openingQty;
     }
 }
 $showWarehouseStockCard = $allWarehouses !== [] || $anyWarehouseTaggedTxn;

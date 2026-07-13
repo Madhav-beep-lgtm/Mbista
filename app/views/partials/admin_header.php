@@ -354,3 +354,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <?php if ($message = flash('error')): ?>
                 <div class="notice error flash-notice"><?= e($message) ?></div>
             <?php endif; ?>
+            <?php if ($message = flash('info')): ?>
+                <div class="notice flash-notice"><?= e($message) ?></div>
+            <?php endif; ?>

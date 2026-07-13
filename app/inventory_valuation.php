@@ -493,10 +493,16 @@ function inv_rebuild_layers(int $companyId, int $itemId, string $method, float $
         inv_add_layer($companyId, $itemId, $openingQty, $openingRate, '2000-01-01');
     }
 
+    // Location-only movements are excluded: the stock never left the entity, so
+    // the company-level cost layers must not be touched. Replaying them would
+    // consume the oldest layers on the out leg and re-add the stock as the
+    // NEWEST layer on the in leg, silently re-ordering the FIFO queue and
+    // mis-stating every subsequent COGS. See inv_movement_is_location_only().
     $stmt = db()->prepare(
         'SELECT id, transaction_type, qty_in, qty_out, rate, transaction_date
          FROM inventory_transactions
          WHERE company_id = :cid AND item_id = :iid AND transaction_type <> :opening
+           AND transaction_type NOT IN (\'warehouse_transfer\', \'departmental_transfer\')
          ORDER BY transaction_date ASC, id ASC'
     );
     $stmt->execute(['cid' => $companyId, 'iid' => $itemId, 'opening' => 'opening']);
@@ -637,6 +643,37 @@ function inv_company_valuation(int $companyId, array $items): array
 // level (not split per warehouse) — a deliberate scope limit so the tested
 // FIFO/weighted-average/specific engine above is untouched by this dimension.
 // ---------------------------------------------------------------------------
+
+/**
+ * True for movements that only relocate stock inside the entity. These change
+ * WHERE stock sits, never how much the company owns or what it cost, so they
+ * must not touch the (company+item level) cost layers and never post to the GL.
+ */
+function inv_movement_is_location_only(string $type): bool
+{
+    return in_array($type, ['warehouse_transfer', 'departmental_transfer'], true);
+}
+
+/**
+ * On-hand quantity of one item at ONE warehouse (null = the unassigned bucket).
+ * Quantity only — cost stays company+item level.
+ */
+function inv_item_warehouse_qty(int $companyId, int $itemId, ?int $warehouseId): float
+{
+    if (!table_exists('inventory_transactions')) {
+        return 0.0;
+    }
+    $sql = 'SELECT COALESCE(SUM(qty_in - qty_out), 0) FROM inventory_transactions
+            WHERE company_id = :cid AND item_id = :iid AND ' . ($warehouseId === null ? 'warehouse_id IS NULL' : 'warehouse_id = :wid');
+    $stmt = db()->prepare($sql);
+    $params = ['cid' => $companyId, 'iid' => $itemId];
+    if ($warehouseId !== null) {
+        $params['wid'] = $warehouseId;
+    }
+    $stmt->execute($params);
+
+    return inv_round_qty((float) $stmt->fetchColumn());
+}
 
 /**
  * Active warehouses for a company, for select dropdowns.

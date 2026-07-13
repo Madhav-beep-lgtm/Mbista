@@ -91,7 +91,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             log_activity('fixed_asset', $assetId, 'created', 'Fixed asset registered.', $userId);
 
             // Optional acquisition voucher when both legs are mapped.
-            $costLedger = fa_resolve_mapping($companyId, 'ppe_cost', $assetId);
+            // Work under construction accumulates in the CWIP ledger, not PPE —
+            // it only lands in PPE when capitalize_cwip reclassifies it. Debiting
+            // ppe_cost here would double-debit PPE at capitalization and drive
+            // the CWIP ledger negative (it would be credited having never been
+            // debited).
+            $costPurpose = $class === 'cwip' ? 'cwip' : 'ppe_cost';
+            $costLedger = fa_resolve_mapping($companyId, $costPurpose, $assetId);
             $clearingLedger = fa_resolve_mapping($companyId, 'acquisition_clearing', $assetId);
             if ($cost > 0 && $costLedger && $clearingLedger) {
                 create_voucher_with_entries([
@@ -107,7 +113,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 flash('success', 'Asset ' . $code . ' registered and acquisition voucher FA-ACQ-' . $code . ' posted.');
             } else {
-                flash('success', 'Asset ' . $code . ' registered.' . (($costLedger && $clearingLedger) ? '' : ' Map PPE Cost + Acquisition Clearing to auto-post the acquisition voucher.'));
+                $costLabel = fa_mapping_purposes()[$costPurpose]['label'] ?? $costPurpose;
+                flash('success', 'Asset ' . $code . ' registered.' . (($costLedger && $clearingLedger) ? '' : ' Map ' . $costLabel . ' + Acquisition Clearing to auto-post the acquisition voucher.'));
             }
         } catch (Throwable $e) {
             flash('error', (string) $e->getCode() === '23000' ? 'Asset code ' . $code . ' already exists.' : 'Could not register asset: ' . $e->getMessage());
@@ -236,12 +243,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $viu = max(0.0, round((float) ($_POST['value_in_use'] ?? 0), 2));
         $recoverable = max($fvlcd, $viu);
         $carrying = (float) $asset['carrying_amount'];
-        $carryingHadNoImpairment = (float) $asset['cost'] + (float) $asset['directly_attributable_cost'] + (float) $asset['restoration_provision'] - (float) $asset['accumulated_depreciation'];
-        $rev = fa_impairment_reversal($carrying, $recoverable, $carryingHadNoImpairment);
-        if ($rev['reversal'] <= 0) {
-            flash('info', 'No reversal available — recoverable amount does not exceed current carrying.');
+        $accumulatedImpairment = (float) $asset['accumulated_impairment'];
+        // You can only reverse an impairment that was actually recognised. Without
+        // this guard any asset whose carrying sits below its depreciated cost for
+        // some OTHER reason — a revaluation decrease, for instance, which lowers
+        // carrying_amount but never touches accumulated_impairment — would produce
+        // a positive "reversal", crediting reversal income out of thin air and
+        // driving the accumulated-impairment contra-asset into a debit balance.
+        if ($accumulatedImpairment <= 0) {
+            flash('error', 'This asset carries no recognised impairment, so there is nothing to reverse (IAS 36.114).');
             redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
         }
+        $carryingHadNoImpairment = (float) $asset['cost'] + (float) $asset['directly_attributable_cost'] + (float) $asset['restoration_provision'] - (float) $asset['accumulated_depreciation'];
+        $rev = fa_impairment_reversal($carrying, $recoverable, $carryingHadNoImpairment);
+        // A reversal can never exceed the impairment actually recognised, on top of
+        // the IAS 36.117 depreciated-cost ceiling the engine already applies.
+        $reversalAmount = round(min($rev['reversal'], $accumulatedImpairment), 2);
+        if ($reversalAmount <= 0) {
+            flash('error', 'No reversal available — the recoverable amount does not exceed the current carrying amount.');
+            redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
+        }
+        $revisedCarrying = round($carrying + $reversalAmount, 2);
         $accL = fa_resolve_mapping($companyId, 'accumulated_impairment', (int) $asset['id']);
         $incomeL = fa_resolve_mapping($companyId, 'impairment_reversal_income', (int) $asset['id']);
         if (!$accL || !$incomeL) {
@@ -255,25 +277,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // voucher cannot be keyed on the asset id.
             db()->prepare('INSERT INTO asset_impairments (company_id, asset_id, test_date, kind, carrying_amount, fair_value_less_costs, value_in_use, recoverable_amount, reversal, created_by)
                 VALUES (:cid,:aid,:d,\'reversal\',:carry,:fv,:viu,:rec,:rev,:uid)')
-                ->execute(['cid' => $companyId, 'aid' => (int) $asset['id'], 'd' => date('Y-m-d'), 'carry' => $carrying, 'fv' => $fvlcd, 'viu' => $viu, 'rec' => $recoverable, 'rev' => $rev['reversal'], 'uid' => $userId]);
+                ->execute(['cid' => $companyId, 'aid' => (int) $asset['id'], 'd' => date('Y-m-d'), 'carry' => $carrying, 'fv' => $fvlcd, 'viu' => $viu, 'rec' => $recoverable, 'rev' => $reversalAmount, 'uid' => $userId]);
             $eventId = (int) db()->lastInsertId();
             $vid = create_voucher_with_entries([
                 'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
                 'voucher_no' => 'FA-IMPR-' . $asset['asset_code'] . '-' . $eventId, 'voucher_type' => 'journal', 'voucher_date' => date('Y-m-d'),
-                'source_type' => 'asset_impairment_reversal', 'source_id' => $eventId, 'total_amount' => $rev['reversal'],
+                'source_type' => 'asset_impairment_reversal', 'source_id' => $eventId, 'total_amount' => $reversalAmount,
                 'narration' => 'Impairment reversal on ' . $asset['name'] . ' (IAS 36.117).', 'status' => 'posted', 'posted_by' => $userId,
             ], [
-                ['ledger_id' => (int) $accL['id'], 'entry_type' => 'debit', 'amount' => $rev['reversal']],
-                ['ledger_id' => (int) $incomeL['id'], 'entry_type' => 'credit', 'amount' => $rev['reversal']],
+                ['ledger_id' => (int) $accL['id'], 'entry_type' => 'debit', 'amount' => $reversalAmount],
+                ['ledger_id' => (int) $incomeL['id'], 'entry_type' => 'credit', 'amount' => $reversalAmount],
             ]);
             db()->prepare('UPDATE asset_impairments SET voucher_id = :vid WHERE id = :id')
                 ->execute(['vid' => $vid ?: null, 'id' => $eventId]);
-            db()->prepare('UPDATE fixed_assets SET accumulated_impairment = GREATEST(0, accumulated_impairment - :rev), carrying_amount = :carry WHERE id = :id AND company_id = :cid')
-                ->execute(['rev' => $rev['reversal'], 'carry' => $rev['revised_carrying'], 'id' => (int) $asset['id'], 'cid' => $companyId]);
+            db()->prepare('UPDATE fixed_assets SET accumulated_impairment = accumulated_impairment - :rev, carrying_amount = :carry WHERE id = :id AND company_id = :cid')
+                ->execute(['rev' => $reversalAmount, 'carry' => $revisedCarrying, 'id' => (int) $asset['id'], 'cid' => $companyId]);
             db()->commit();
-            security_event('asset_impairment_reversed', 'success', 'Impairment reversal ' . number_format($rev['reversal'], 2) . ' posted for asset #' . (int) $asset['id'] . '.', $companyId, $userId);
-            log_activity('fixed_asset', (int) $asset['id'], 'impairment_reversed', 'Impairment reversal ' . number_format($rev['reversal'], 2) . ' posted.', $userId);
-            flash('success', 'Impairment reversal posted: ' . site_currency_symbol() . number_format($rev['reversal'], 2) . ' (Dr Accumulated impairment / Cr Impairment reversal income). Carrying amount now ' . site_currency_symbol() . number_format($rev['revised_carrying'], 2) . '.');
+            security_event('asset_impairment_reversed', 'success', 'Impairment reversal ' . number_format($reversalAmount, 2) . ' posted for asset #' . (int) $asset['id'] . '.', $companyId, $userId);
+            log_activity('fixed_asset', (int) $asset['id'], 'impairment_reversed', 'Impairment reversal ' . number_format($reversalAmount, 2) . ' posted.', $userId);
+            flash('success', 'Impairment reversal posted: ' . site_currency_symbol() . number_format($reversalAmount, 2) . ' (Dr Accumulated impairment / Cr Impairment reversal income). Carrying amount now ' . site_currency_symbol() . number_format($revisedCarrying, 2) . '.');
         } catch (Throwable $e) { if (db()->inTransaction()) { db()->rollBack(); } flash('error', 'Could not reverse impairment: ' . $e->getMessage()); }
         redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
     }
@@ -452,6 +474,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cwipPurposes = fa_event_purposes('cwip_capitalize'); // ['ppe_cost', 'cwip']
         $ppeL = fa_resolve_mapping($companyId, $cwipPurposes[0], (int) $asset['id']);
         $cwipL = fa_resolve_mapping($companyId, $cwipPurposes[1], (int) $asset['id']);
+        // Block rather than degrade: capitalization is a one-way reclassification
+        // guarded by `asset_class = 'cwip'`, so if we flipped the class without
+        // posting, the asset would no longer be CWIP and the voucher could never
+        // be posted afterwards — the cost would be stranded in the CWIP ledger
+        // forever. Other actions may record-only, but this one must not.
+        if ($cost > 0 && (!$ppeL || !$cwipL)) {
+            flash('error', 'Map PPE / Asset Cost and Capital Work-in-Progress before capitalizing — the reclassification cannot be posted without both.');
+            redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
+        }
         try {
             db()->beginTransaction();
             $stmt = db()->prepare("UPDATE fixed_assets SET asset_class = :new_class, depreciation_method = :method, useful_life_months = :life, residual_value = :residual, status = 'active', depreciation_start_date = COALESCE(depreciation_start_date, CURDATE()), available_for_use_date = COALESCE(available_for_use_date, CURDATE()) WHERE id = :id AND company_id = :cid AND asset_class = 'cwip'");
@@ -588,7 +619,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $vid = create_voucher_with_entries([
                 'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
-                'voucher_no' => 'FA-LSE-' . $line['contract_ref'] . '-' . str_pad((string) $line['period_no'], 3, '0', STR_PAD_LEFT),
+                // contract_ref is VARCHAR(120) but voucher_no is VARCHAR(80) and
+                // UNIQUE per company — key on the lease id + period, which is
+                // both short and unique, instead of the free-text contract ref.
+                'voucher_no' => 'FA-LSE-' . (int) $line['lease_id'] . '-' . str_pad((string) $line['period_no'], 3, '0', STR_PAD_LEFT),
                 'voucher_type' => 'journal', 'voucher_date' => date('Y-m-d'),
                 // Keyed on the schedule LINE id, not the lease id: vouchers has
                 // UNIQUE(source_type, source_id), so a lease-scoped key would let
