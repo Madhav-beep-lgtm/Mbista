@@ -654,20 +654,55 @@ if ($editUserId > 0) {
 
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<section class="mbw-card">
-    <div class="mbw-card-head">
-        <h2>Manage user lifecycle, approvals, and account activity</h2>
-        <div class="mbw-card-tools">
-            <button type="button" class="button" data-modal-open="user-create-modal">New user</button>
-            <a class="button secondary" href="<?= e($buildUsersUrl(['export' => 'csv', 'page' => null])) ?>">Export CSV</a>
-            <button type="button" class="button secondary" onclick="window.print()">Print</button>
+<!-- USERS WORKFLOW REDESIGN START -->
+<div class="users-workflow-page">
+<section class="uw-page-actions" aria-label="Users Workflow actions">
+    <div class="uw-action-copy">
+        <span class="uw-action-icon"><?= icon('users') ?></span>
+        <div>
+            <strong>User Access Management</strong>
+            <small>Manage accounts, access levels, approvals, and KYC records.</small>
         </div>
     </div>
-    <p style="color:var(--mbw-muted);margin:0;">Create and maintain customer or admin accounts, control active status, and review related order and activity records.</p>
+
+    <div class="uw-action-buttons">
+        <button
+            type="button"
+            class="button uw-primary-button"
+            data-modal-open="user-create-modal"
+        >
+            <span aria-hidden="true">+</span>
+            New User
+        </button>
+
+        <a
+            class="button secondary uw-secondary-button"
+            href="<?= e($buildUsersUrl([
+                'export' => 'csv',
+                'page' => null,
+            ])) ?>"
+        >
+            Export CSV
+        </a>
+
+        <button
+            type="button"
+            class="button secondary uw-secondary-button"
+            onclick="window.print()"
+        >
+            Print
+        </button>
+    </div>
 </section>
 
-<details class="role-matrix-panel" id="role-matrix" open>
-    <summary><?= icon('users') ?>Role Matrix: who can do what</summary>
+<details class="role-matrix-panel uw-role-matrix" id="role-matrix" open>
+    <summary>
+    <span class="uw-section-title">
+        <span class="uw-section-icon"><?= icon('users') ?></span>
+        <span>Role Matrix</span>
+    </span>
+    <small>Who can do what</small>
+</summary>
 
     <?php $roleCapabilityMatrix = access_level_capabilities($companyId); ?>
 
@@ -701,7 +736,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <td>
                                 <strong><?= e(ACCESS_LEVELS[$levelKey] ?? $levelKey) ?></strong>
                                 <?php if ($levelKey === 'super_admin'): ?>
-                                    <small class="muted" style="display:block;">Protected</small>
+                                    <span class="uw-protected-badge">Protected</span>
                                 <?php endif; ?>
                             </td>
 
@@ -730,7 +765,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </table>
         </div>
 
-        <div class="actions" style="margin-top:14px;">
+        <div class="actions uw-role-save-bar">
             <button type="submit" class="button">
                 <?= icon('settings') ?>Save Role Permissions
             </button>
@@ -742,7 +777,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </form>
 </details>
-<section class="mbw-kpi-grid">
+<section class="mbw-kpi-grid uw-summary-grid">
     <a class="mbw-kpi" href="<?= e(url('admin/users.php')) ?>">
         <div>
             <span class="mbw-kpi-label">Total Users</span>
@@ -785,7 +820,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </a>
 </section>
 
-<section class="mbw-card users-filters-card">
+<section
+    class="mbw-card users-filters-card uw-filter-panel"
+    id="users-filters-panel"
+    <?= (
+        $search === ''
+        && $roleFilter === 'all'
+        && $statusFilter === 'all'
+        && $sort === 'created_desc'
+        && $perPage === 10
+    ) ? 'hidden' : '' ?>
+>
     <div class="mbw-card-head">
         <h2>Search &amp; Filters</h2>
         <div class="mbw-card-tools">
@@ -835,20 +880,46 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
 </section>
 
-<section class="mbw-card">
+<section class="mbw-card uw-directory-card">
     <div class="mbw-card-head">
-        <h2>Users Directory</h2>
+        <h2>
+    <span class="uw-section-icon"><?= icon('users') ?></span>
+    Users Directory
+</h2>
         <div class="mbw-card-tools">
-            <span style="color:var(--mbw-muted);font-size:0.85rem;">Showing <?= e((string) count($users)) ?> of <?= e((string) $totalUsers) ?> user(s)</span>
+            <button
+    type="button"
+    class="button secondary uw-filter-toggle"
+    aria-controls="users-filters-panel"
+    aria-expanded="<?= (
+        $search !== ''
+        || $roleFilter !== 'all'
+        || $statusFilter !== 'all'
+        || $sort !== 'created_desc'
+        || $perPage !== 10
+    ) ? 'true' : 'false' ?>"
+    onclick="
+        const panel = document.getElementById('users-filters-panel');
+        panel.hidden = !panel.hidden;
+        this.setAttribute('aria-expanded', String(!panel.hidden));
+    "
+>
+    Filters
+</button>
+
+<span class="uw-directory-count">
+    Showing <?= e((string) count($users)) ?>
+    of <?= e((string) $totalUsers) ?> user(s)
+</span>
         </div>
     </div>
     <div style="overflow-x:auto">
-    <table>
+    <table class="uw-users-table">
         <thead>
             <tr>
                 <th>ID</th>
-                <th>Name</th>
-                <th>Email</th>
+                <th>User</th>
+                <th class="uw-email-column">Email</th>
                 <th>Role</th>
                 <?php if ($hasAccessLevels): ?><th>Access</th><?php endif; ?>
                 <th>Status</th>
@@ -867,8 +938,37 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php foreach ($users as $user): ?>
                 <tr>
                     <td>#<?= e((int) $user['id']) ?></td>
-                    <td><?= e($user['name']) ?></td>
-                    <td><?= e($user['email']) ?></td>
+                    <?php
+    $uwNameParts = preg_split(
+        '/\s+/',
+        trim((string) $user['name'])
+    ) ?: [];
+
+    $uwInitials = '';
+
+    foreach (array_slice($uwNameParts, 0, 2) as $uwNamePart) {
+        $uwInitials .= strtoupper(substr($uwNamePart, 0, 1));
+    }
+
+    if ($uwInitials === '') {
+        $uwInitials = 'U';
+    }
+
+    $uwAvatarTone = ((int) $user['id']) % 3;
+?>
+<td class="uw-user-column">
+    <div class="uw-user-identity">
+        <span class="uw-avatar uw-avatar-tone-<?= e((string) $uwAvatarTone) ?>">
+            <?= e($uwInitials) ?>
+        </span>
+
+        <span class="uw-user-details">
+            <strong><?= e($user['name']) ?></strong>
+            <small><?= e($user['email']) ?></small>
+        </span>
+    </div>
+</td>
+                    <td class="uw-email-column"><?= e($user['email']) ?></td>
                     <td>
                         <?php $roleTone = ($user['role'] ?? '') === 'admin' ? 'tone-purple' : (($user['role'] ?? '') === 'staff' ? 'tone-blue' : 'tone-teal'); ?>
                         <span class="mbw-pill <?= $roleTone ?>"><?= e($user['role']) ?></span>
@@ -1304,5 +1404,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </div>
 </div>
+
+</div>
+<!-- USERS WORKFLOW REDESIGN END -->
 
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

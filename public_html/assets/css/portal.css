@@ -4180,3 +4180,697 @@ body.admin-layout.accounting-module-page .rc-table tbody tr:hover {
     padding: 15px;
   }
 }
+
+/* ==========================================================================
+   USERS WORKFLOW PREMIUM REDESIGN START
+   ========================================================================== */
+
+body.admin-layout .users-workflow-page {
+  --uw-blue: #2563eb;
+  --uw-blue-dark: #1d4ed8;
+  --uw-blue-soft: rgba(37, 99, 235, 0.09);
+  --uw-green: #059669;
+  --uw-green-soft: rgba(5, 150, 105, 0.11);
+  --uw-amber: #d97706;
+  --uw-amber-soft: rgba(217, 119, 6, 0.11);
+  --uw-red: #dc2626;
+  --uw-red-soft: rgba(220, 38, 38, 0.09);
+  display: block;
+  padding-bottom: 18px;
+}
+
+body.admin-layout .users-workflow-page > * {
+  margin-bottom: 16px;
+}
+
+body.admin-layout .uw-page-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 4px 2px 0;
+  background: transparent;
+}
+
+body.admin-layout .uw-action-copy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+body.admin-layout .uw-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 13px;
+  background: linear-gradient(145deg, var(--uw-blue), var(--uw-blue-dark));
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
+}
+
+body.admin-layout .uw-action-icon .ui-icon {
+  width: 21px;
+  height: 21px;
+}
+
+body.admin-layout .uw-action-copy strong {
+  display: block;
+  color: var(--mbw-heading);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+body.admin-layout .uw-action-copy small {
+  display: block;
+  margin-top: 3px;
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+}
+
+body.admin-layout .uw-action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+body.admin-layout .uw-action-buttons .button {
+  min-height: 42px;
+  padding: 10px 17px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+body.admin-layout .uw-primary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(145deg, var(--uw-blue), var(--uw-blue-dark));
+  border-color: var(--uw-blue);
+  color: #fff;
+  box-shadow: 0 7px 15px rgba(37, 99, 235, 0.19);
+}
+
+body.admin-layout .uw-primary-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 19px rgba(37, 99, 235, 0.24);
+}
+
+body.admin-layout .uw-primary-button > span {
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+body.admin-layout .uw-secondary-button {
+  background: var(--mbw-card);
+  border-color: var(--mbw-border);
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .uw-role-matrix,
+body.admin-layout .uw-directory-card,
+body.admin-layout .uw-filter-panel {
+  overflow: hidden;
+  border: 1px solid var(--mbw-border);
+  border-radius: 15px;
+  background: var(--mbw-card);
+  box-shadow: 0 5px 18px rgba(15, 23, 42, 0.055);
+}
+
+body.admin-layout .uw-role-matrix {
+  margin: 0 0 16px;
+}
+
+body.admin-layout .uw-role-matrix > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 17px 18px;
+  color: var(--mbw-heading);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+  border-bottom: 1px solid transparent;
+}
+
+body.admin-layout .uw-role-matrix[open] > summary {
+  border-bottom-color: var(--mbw-border-soft);
+}
+
+body.admin-layout .uw-role-matrix > summary::-webkit-details-marker {
+  display: none;
+}
+
+body.admin-layout .uw-role-matrix > summary::after {
+  content: "⌄";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  border-radius: 8px;
+  background: var(--mbw-card-soft);
+  color: var(--mbw-muted);
+  font-size: 16px;
+  transition: transform 0.18s ease;
+}
+
+body.admin-layout .uw-role-matrix[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+body.admin-layout .uw-role-matrix > summary > small {
+  margin-left: 4px;
+  margin-right: auto;
+  color: var(--mbw-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+body.admin-layout .uw-section-title,
+body.admin-layout .uw-directory-card h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+body.admin-layout .uw-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--uw-blue-soft);
+  color: var(--uw-blue);
+}
+
+body.admin-layout .uw-section-icon .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+body.admin-layout .uw-role-matrix form {
+  padding: 14px 16px 16px;
+}
+
+body.admin-layout .uw-role-matrix .rc-table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--mbw-border-soft);
+  border-radius: 12px;
+}
+
+body.admin-layout .uw-role-matrix .role-matrix-table {
+  width: 100%;
+  min-width: 900px;
+  margin: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+body.admin-layout .uw-role-matrix .role-matrix-table th {
+  height: 44px;
+  padding: 10px 14px;
+  background: var(--mbw-card-soft);
+  color: var(--mbw-heading);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+body.admin-layout .uw-role-matrix .role-matrix-table td {
+  height: 51px;
+  padding: 9px 14px;
+  background: var(--mbw-card);
+  border-bottom: 1px solid var(--mbw-border-soft);
+  color: var(--mbw-text);
+  font-size: 12.5px;
+}
+
+body.admin-layout .uw-role-matrix .role-matrix-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+body.admin-layout .uw-role-matrix .role-matrix-table tbody tr:hover td {
+  background: var(--uw-blue-soft);
+}
+
+body.admin-layout .uw-role-matrix .role-matrix-table td:first-child {
+  min-width: 230px;
+  font-weight: 700;
+}
+
+body.admin-layout .uw-protected-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--uw-blue-soft);
+  color: var(--uw-blue);
+  font-size: 10px;
+  font-weight: 750;
+  vertical-align: middle;
+}
+
+body.admin-layout .uw-role-matrix input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 1.5px solid #aab5c5;
+  border-radius: 4px;
+  background: var(--mbw-card);
+  cursor: pointer;
+  vertical-align: middle;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+body.admin-layout .uw-role-matrix input[type="checkbox"]:hover {
+  border-color: var(--uw-blue);
+  box-shadow: 0 0 0 3px var(--uw-blue-soft);
+}
+
+body.admin-layout .uw-role-matrix input[type="checkbox"]:checked {
+  border-color: var(--uw-blue);
+  background: var(--uw-blue);
+}
+
+body.admin-layout .uw-role-matrix input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+body.admin-layout .uw-role-matrix input[type="checkbox"]:disabled {
+  border-color: #c8d0dc;
+  background: var(--mbw-gray-soft);
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+body.admin-layout .uw-role-matrix input[type="checkbox"]:disabled:checked {
+  background: #aeb8c7;
+}
+
+body.admin-layout .uw-role-save-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--mbw-border-soft);
+}
+
+body.admin-layout .uw-role-save-bar .button {
+  min-height: 39px;
+  padding: 9px 15px;
+  border-radius: 9px;
+  background: var(--uw-blue);
+  border-color: var(--uw-blue);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 750;
+}
+
+body.admin-layout .uw-role-save-bar .muted {
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+body.admin-layout .uw-summary-grid {
+  display: none;
+}
+
+body.admin-layout .uw-filter-panel {
+  padding: 16px;
+}
+
+body.admin-layout .uw-filter-panel[hidden] {
+  display: none !important;
+}
+
+body.admin-layout .uw-filter-panel .mbw-card-head {
+  margin-bottom: 12px;
+}
+
+body.admin-layout .uw-filter-panel .users-filter-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 2fr)
+    repeat(4, minmax(130px, 1fr))
+    auto;
+  gap: 10px;
+  align-items: end;
+}
+
+body.admin-layout .uw-filter-panel label {
+  color: var(--mbw-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+body.admin-layout .uw-filter-panel input,
+body.admin-layout .uw-filter-panel select {
+  min-height: 39px;
+  margin-top: 5px;
+  border-radius: 9px;
+  font-size: 12.5px;
+}
+
+body.admin-layout .uw-directory-card {
+  padding: 0;
+}
+
+body.admin-layout .uw-directory-card .mbw-card-head {
+  min-height: 61px;
+  margin: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--mbw-border-soft);
+}
+
+body.admin-layout .uw-directory-card h2 {
+  margin: 0;
+  color: var(--mbw-heading);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+body.admin-layout .uw-directory-card .mbw-card-tools {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+body.admin-layout .uw-filter-toggle {
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: var(--mbw-card);
+  border-color: var(--mbw-border);
+  color: var(--mbw-heading);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+body.admin-layout .uw-filter-toggle[aria-expanded="true"] {
+  border-color: var(--uw-blue);
+  background: var(--uw-blue-soft);
+  color: var(--uw-blue);
+}
+
+body.admin-layout .uw-directory-count {
+  color: var(--mbw-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+body.admin-layout .uw-directory-card > div[style*="overflow-x"] {
+  padding: 0 14px 14px;
+}
+
+body.admin-layout .uw-users-table {
+  width: 100%;
+  min-width: 1180px;
+  margin: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+body.admin-layout .uw-users-table thead th {
+  height: 43px;
+  padding: 10px 12px;
+  background: var(--mbw-card-soft);
+  color: var(--mbw-heading);
+  border-bottom: 1px solid var(--mbw-border);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+body.admin-layout .uw-users-table tbody td {
+  padding: 12px;
+  border-bottom: 1px solid var(--mbw-border-soft);
+  color: var(--mbw-text);
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+body.admin-layout .uw-users-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+body.admin-layout .uw-users-table tbody tr {
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+body.admin-layout .uw-users-table tbody tr:hover td {
+  background: var(--uw-blue-soft);
+}
+
+body.admin-layout .uw-user-column {
+  min-width: 245px;
+}
+
+body.admin-layout .uw-user-identity {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+body.admin-layout .uw-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+body.admin-layout .uw-avatar-tone-0 {
+  background: rgba(13, 148, 136, 0.13);
+  color: #0f766e;
+}
+
+body.admin-layout .uw-avatar-tone-1 {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+body.admin-layout .uw-avatar-tone-2 {
+  background: rgba(139, 92, 246, 0.13);
+  color: #7c3aed;
+}
+
+body.admin-layout .uw-user-details {
+  display: block;
+  min-width: 0;
+}
+
+body.admin-layout .uw-user-details strong {
+  display: block;
+  overflow: hidden;
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+  font-weight: 750;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.admin-layout .uw-user-details small {
+  display: block;
+  overflow: hidden;
+  max-width: 225px;
+  margin-top: 3px;
+  color: var(--mbw-muted);
+  font-size: 10.5px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.admin-layout .uw-email-column {
+  display: none;
+}
+
+body.admin-layout .uw-users-table .mbw-pill {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+body.admin-layout .uw-users-table .actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 225px;
+}
+
+body.admin-layout .uw-users-table .actions .button,
+body.admin-layout .uw-users-table .actions button {
+  min-height: 34px;
+  padding: 7px 11px;
+  border-radius: 8px;
+  background: var(--mbw-card);
+  border: 1px solid var(--mbw-border);
+  color: var(--mbw-heading);
+  font-size: 10.5px;
+  font-weight: 750;
+  box-shadow: none;
+}
+
+body.admin-layout .uw-users-table .actions .button:hover,
+body.admin-layout .uw-users-table .actions button:hover {
+  border-color: var(--uw-blue);
+  background: var(--uw-blue-soft);
+  color: var(--uw-blue);
+  transform: translateY(-1px);
+}
+
+body.admin-layout .uw-users-table .actions form:nth-last-child(2) button,
+body.admin-layout .uw-users-table .actions form:nth-last-child(2) .button {
+  border-color: rgba(217, 119, 6, 0.3);
+  color: var(--uw-amber);
+}
+
+body.admin-layout .uw-users-table .actions form:last-child button,
+body.admin-layout .uw-users-table .actions form:last-child .button {
+  border-color: rgba(220, 38, 38, 0.27);
+  color: var(--uw-red);
+}
+
+body.admin-layout .uw-users-table .actions form:last-child button:hover,
+body.admin-layout .uw-users-table .actions form:last-child .button:hover {
+  background: var(--uw-red-soft);
+  border-color: var(--uw-red);
+}
+
+body.admin-layout .uw-directory-card .pagination,
+body.admin-layout .uw-directory-card nav {
+  padding: 12px 14px;
+}
+
+@media (max-width: 1080px) {
+  body.admin-layout .uw-page-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  body.admin-layout .uw-action-buttons {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  body.admin-layout .uw-filter-panel .users-filter-grid {
+    grid-template-columns: repeat(2, minmax(170px, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  body.admin-layout .users-workflow-page > * {
+    margin-bottom: 12px;
+  }
+
+  body.admin-layout .uw-action-copy {
+    align-items: flex-start;
+  }
+
+  body.admin-layout .uw-action-copy small {
+    max-width: 280px;
+  }
+
+  body.admin-layout .uw-action-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  body.admin-layout .uw-action-buttons .uw-primary-button {
+    grid-column: 1 / -1;
+  }
+
+  body.admin-layout .uw-action-buttons .button {
+    justify-content: center;
+    width: 100%;
+  }
+
+  body.admin-layout .uw-role-matrix > summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  body.admin-layout .uw-role-matrix > summary > small {
+    width: calc(100% - 52px);
+    margin-left: 38px;
+  }
+
+  body.admin-layout .uw-role-save-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  body.admin-layout .uw-filter-panel .users-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body.admin-layout .uw-directory-card .mbw-card-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  body.admin-layout .uw-directory-card .mbw-card-tools {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media print {
+  body.admin-layout .uw-page-actions,
+  body.admin-layout .uw-filter-panel,
+  body.admin-layout .uw-role-save-bar,
+  body.admin-layout .uw-filter-toggle,
+  body.admin-layout .uw-users-table .actions {
+    display: none !important;
+  }
+
+  body.admin-layout .uw-role-matrix,
+  body.admin-layout .uw-directory-card {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+}
+
+/* USERS WORKFLOW PREMIUM REDESIGN END */
