@@ -15,6 +15,11 @@ if (!$company) {
     redirect('portal.php');
 }
 
+// A PIN reset is a portal-opening credential: only an admin authorized for the
+// target company (its own tree or an explicit membership) may reset it. Without
+// this, any admin could reset any company's PIN with their own password.
+require_company_access($companyId);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
 

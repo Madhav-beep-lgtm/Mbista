@@ -2,6 +2,20 @@
 declare(strict_types=1);
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
+    // Enforce HttpOnly + SameSite on the session cookie regardless of php.ini,
+    // and Secure whenever the request arrived over HTTPS.
+    $cookieSecure = (
+        (($_SERVER['HTTPS'] ?? '') !== '' && strtolower((string) $_SERVER['HTTPS']) !== 'off')
+        || (int) ($_SERVER['SERVER_PORT'] ?? 0) === 443
+        || strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
+    );
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'httponly' => true,
+        'secure' => $cookieSecure,
+        'samesite' => 'Lax',
+    ]);
     session_start();
 }
 
@@ -1152,6 +1166,16 @@ function handle_company_switch(int $companyId, string $failureUrl): never
         redirect($failureUrl);
     }
 
+    // Authorization gate: the only thing that used to stand between an admin
+    // and an arbitrary company was the 4-digit PIN (and if none was set, they
+    // were invited to set it). Now membership/hierarchy is checked first, so a
+    // service-provider admin cannot open M.Bista's or a rival provider's books.
+    if (!user_can_access_company($companyId)) {
+        security_event('company_switch', 'denied', 'Attempted to open company #' . $companyId . ' without membership.', $companyId);
+        flash('error', 'You are not authorized to open that organization.');
+        redirect($failureUrl);
+    }
+
     // Client books companies open PIN-free for admins with direct access.
     if ((int) ($company['is_client_company'] ?? 0) === 1) {
         $bookProfileStmt = db()->prepare('SELECT * FROM client_profiles WHERE books_company_id = :cid LIMIT 1');
@@ -1378,13 +1402,24 @@ function current_user(): ?array
 
     $passwordChangeSelect = column_exists('users', 'must_change_password') ? ', must_change_password' : '';
     $accessLevelSelect = column_exists('users', 'access_level') ? ', access_level' : '';
-    $stmt = db()->prepare('SELECT id, name, email, role, status, company_id, phone, company, created_at' . $passwordChangeSelect . $accessLevelSelect . ' FROM users WHERE id = :id LIMIT 1');
+    $sessionsValidSelect = column_exists('users', 'sessions_valid_from') ? ', sessions_valid_from' : '';
+    $stmt = db()->prepare('SELECT id, name, email, role, status, company_id, phone, company, created_at' . $passwordChangeSelect . $accessLevelSelect . $sessionsValidSelect . ' FROM users WHERE id = :id LIMIT 1');
     $stmt->execute(['id' => (int) $_SESSION['user_id']]);
 
     $user = $stmt->fetch();
 
     if (!$user) {
         unset($_SESSION['user_id']);
+        return null;
+    }
+
+    // Enforce lifecycle + session revocation on EVERY request, not just at
+    // login: a user suspended/deactivated mid-session, or whose sessions were
+    // revoked after a permission change, loses access immediately.
+    if (!user_status_allows_login($user) || session_is_revoked($user)) {
+        $reason = !user_status_allows_login($user) ? 'status:' . ($user['status'] ?? '?') : 'session revoked';
+        security_event('session_terminated', 'denied', 'Session ended mid-request (' . $reason . ').', null, (int) $user['id']);
+        destroy_session();
         return null;
     }
 
@@ -1406,11 +1441,22 @@ function login_user(string $email, string $password): bool
 {
     $user = user_by_email($email);
 
-    if (!$user || $user['status'] !== 'active' || !password_verify($password, $user['password_hash'])) {
+    if (!$user || !user_status_allows_login($user) || !password_verify($password, $user['password_hash'])) {
+        // Record the failure for throttling + the security log, but do not
+        // reveal which of the two conditions failed to the caller.
+        security_event('login_failed', 'failure', 'Invalid credentials or inactive account.', null, $user['id'] ?? null, $email);
         return false;
     }
 
+    // Prevent session fixation: issue a fresh id the moment identity changes.
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_regenerate_id(true);
+    }
+
     $_SESSION['user_id'] = (int) $user['id'];
+    $_SESSION['auth_issued_at'] = time();
+
+    security_event('login', 'success', 'User authenticated.', (int) ($user['company_id'] ?? 0) ?: null, (int) $user['id'], $email);
 
     return true;
 }
@@ -1467,7 +1513,36 @@ function create_user(array $data): int
 
 function logout_user(): void
 {
-    unset($_SESSION['user_id']);
+    if (!empty($_SESSION['user_id'])) {
+        security_event('logout', 'success', 'User logged out.', current_company_id() ?: null, (int) $_SESSION['user_id']);
+    }
+    destroy_session();
+}
+
+/**
+ * Fully tears down the session: clears all context (company, PIN verification,
+ * fiscal year, CSRF, flash), regenerates the id, and drops the cookie. Used by
+ * logout and by mid-request termination of suspended/revoked sessions.
+ */
+function destroy_session(): void
+{
+    $_SESSION = [];
+
+    if (ini_get('session.use_cookies') && !headers_sent()) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', [
+            'expires' => time() - 42000,
+            'path' => $params['path'] ?: '/',
+            'domain' => $params['domain'] ?? '',
+            'secure' => (bool) ($params['secure'] ?? false),
+            'httponly' => (bool) ($params['httponly'] ?? true),
+            'samesite' => $params['samesite'] ?? 'Lax',
+        ]);
+    }
+
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_destroy();
+    }
 }
 
 function request_password_reset(string $email, ?string $requestIp = null): ?string
@@ -1997,6 +2072,50 @@ function create_voucher_with_entries(array $voucher, array $entries): int
 {
     if (!table_exists('vouchers') || !table_exists('voucher_entries')) {
         return 0;
+    }
+
+    // Tenant-integrity guard: every ledger posted to must belong to the same
+    // company as the voucher, and the fiscal year must too. This is the single
+    // choke point for all double-entry posting, so a caller bug (or a tampered
+    // ledger_id) can never move money between companies' books.
+    $voucherCompanyId = (int) ($voucher['company_id'] ?? 0);
+    if ($voucherCompanyId <= 0) {
+        throw new RuntimeException('Refusing to post a voucher without a company.');
+    }
+    $ledgerIds = [];
+    foreach ($entries as $entry) {
+        $ledgerId = (int) ($entry['ledger_id'] ?? 0);
+        if ($ledgerId > 0) {
+            $ledgerIds[$ledgerId] = true;
+        }
+    }
+    if ($ledgerIds !== [] && table_exists('ledgers')) {
+        $ids = array_keys($ledgerIds);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $check = db()->prepare('SELECT id FROM ledgers WHERE company_id = ? AND id IN (' . $placeholders . ')');
+        $check->execute(array_merge([$voucherCompanyId], $ids));
+        $valid = array_map('intval', $check->fetchAll(PDO::FETCH_COLUMN));
+        $foreign = array_diff($ids, $valid);
+        if ($foreign !== []) {
+            throw new RuntimeException('Refusing to post voucher: ledger(s) ' . implode(',', $foreign) . ' do not belong to company #' . $voucherCompanyId . '.');
+        }
+    }
+    if (!empty($voucher['fiscal_year_id']) && table_exists('fiscal_years')) {
+        $fyCheck = db()->prepare('SELECT COUNT(*) FROM fiscal_years WHERE id = ? AND company_id = ?');
+        $fyCheck->execute([(int) $voucher['fiscal_year_id'], $voucherCompanyId]);
+        if ((int) $fyCheck->fetchColumn() === 0) {
+            throw new RuntimeException('Refusing to post voucher: fiscal year #' . (int) $voucher['fiscal_year_id'] . ' does not belong to company #' . $voucherCompanyId . '.');
+        }
+    }
+    // A tampered party_id must not attach another tenant's party to this
+    // voucher (its name would then surface via party joins). Drop it rather
+    // than fail the whole posting when it is foreign.
+    if (!empty($voucher['party_id']) && table_exists('accounting_parties')) {
+        $partyCheck = db()->prepare('SELECT COUNT(*) FROM accounting_parties WHERE id = ? AND company_id = ?');
+        $partyCheck->execute([(int) $voucher['party_id'], $voucherCompanyId]);
+        if ((int) $partyCheck->fetchColumn() === 0) {
+            $voucher['party_id'] = null;
+        }
     }
 
     $extraColumns = '';
@@ -4031,12 +4150,21 @@ function client_books_access_level(array $clientProfile): string
     $portal = current_company() ?: (!empty($user['company_id']) ? company_by_id((int) $user['company_id']) : null);
     $portalCode = (string) ($portal['code'] ?? '');
     $servesFromPortal = (int) ($clientProfile['company_id'] ?? 0) === (int) ($portal['id'] ?? 0);
+    $servingCompanyId = (int) ($clientProfile['company_id'] ?? 0);
 
     if ($role === 'admin') {
-        // Admins keep direct access while inside any client-books portal,
-        // so the sidebar client switcher can hop between clients.
-        $inClientBooks = (int) ($portal['is_client_company'] ?? 0) === 1;
-        return ($portalCode === 'MBAACA' || $servesFromPortal || $inClientBooks) ? 'direct' : '';
+        // Super admins (M.Bista) reach every client's books directly.
+        if (user_is_super_admin($user) || $portalCode === 'MBAACA') {
+            return 'direct';
+        }
+        // Otherwise direct access only to clients SERVED BY a company this admin
+        // controls (its own company tree + explicit memberships). The old rule
+        // granted access to *any* client while inside *any* client-books portal,
+        // which let one provider's admin hop into another provider's clients.
+        if ($servesFromPortal) {
+            return 'direct';
+        }
+        return ($servingCompanyId > 0 && user_can_access_company($servingCompanyId)) ? 'direct' : '';
     }
     if ($role === 'staff') {
         $assigned = (int) ($clientProfile['assigned_staff_user_id'] ?? 0) === (int) ($user['id'] ?? 0);

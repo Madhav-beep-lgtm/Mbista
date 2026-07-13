@@ -108,10 +108,27 @@ if ($query !== '' && mb_strlen($query) >= 2) {
                 }
             }
             if (table_exists('client_profiles')) {
-                $stmt = db()->prepare('SELECT id, organization_name, client_code FROM client_profiles WHERE organization_name LIKE :q OR client_code LIKE :q2 ORDER BY organization_name ASC LIMIT 5');
-                $stmt->execute(['q' => $like, 'q2' => $like]);
-                foreach ($stmt->fetchAll() as $row) {
-                    $recordResults[] = ['kind' => 'Client', 'label' => $row['organization_name'] . ($row['client_code'] ? ' (' . $row['client_code'] . ')' : ''), 'url' => 'admin/manage-clients.php'];
+                // Scope client search to clients served by a company the user
+                // may access; staff are further narrowed to their own
+                // assignments. Previously this ran unscoped and leaked every
+                // tenant's client names/codes to any admin or staff member.
+                $authCompanyIds = authorized_company_ids($currentUser);
+                if ($authCompanyIds !== []) {
+                    $ph = implode(',', array_fill(0, count($authCompanyIds), '?'));
+                    $sql = 'SELECT id, organization_name, client_code FROM client_profiles
+                            WHERE (organization_name LIKE ? OR client_code LIKE ?)
+                              AND company_id IN (' . $ph . ')';
+                    $params = array_merge([$like, $like], array_values($authCompanyIds));
+                    if ($scope === 'staff') {
+                        $sql .= ' AND assigned_staff_user_id = ?';
+                        $params[] = (int) ($currentUser['id'] ?? 0);
+                    }
+                    $sql .= ' ORDER BY organization_name ASC LIMIT 5';
+                    $stmt = db()->prepare($sql);
+                    $stmt->execute($params);
+                    foreach ($stmt->fetchAll() as $row) {
+                        $recordResults[] = ['kind' => 'Client', 'label' => $row['organization_name'] . ($row['client_code'] ? ' (' . $row['client_code'] . ')' : ''), 'url' => 'admin/manage-clients.php'];
+                    }
                 }
             }
         } elseif ($scope === 'customer') {

@@ -99,6 +99,24 @@ $logSql = '
     WHERE 1 = 1
 ';
 $logParams = [];
+// activity_logs has no company_id column, so the feed is scoped by the actor's
+// company: a non-super-admin only sees activity by users of a company they may
+// access. Previously every admin AND staff member saw the platform-wide feed,
+// including other tenants' financial descriptions embedded in `details`.
+if (!user_is_super_admin()) {
+    $auditCompanyIds = authorized_company_ids();
+    if ($auditCompanyIds === []) {
+        $logSql .= ' AND 1 = 0';
+    } else {
+        $ph = [];
+        foreach ($auditCompanyIds as $i => $cid) {
+            $key = 'ac' . $i;
+            $ph[] = ':' . $key;
+            $logParams[$key] = $cid;
+        }
+        $logSql .= ' AND u.company_id IN (' . implode(',', $ph) . ')';
+    }
+}
 if ($moduleFilter !== '') {
     $logSql .= ' AND al.entity_type = :module';
     $logParams['module'] = $moduleFilter;

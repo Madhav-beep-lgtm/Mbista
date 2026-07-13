@@ -1,0 +1,513 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Platform access control (migration 033).
+ *
+ * Answers one question everywhere in the app: *which companies may this user
+ * touch?* Before this module the only thing between an admin and any company's
+ * books was a 4-digit PIN, so a service-provider admin could open M.Bista's or
+ * a rival provider's portal. Authorization is now derived from explicit
+ * memberships plus the corporate hierarchy, and it is checked server-side on
+ * every company switch, every page load with company context, and every
+ * company-scoped record fetch that routes through require_record_company().
+ *
+ * Degradation rule: if company_memberships is missing (DB not migrated yet) the
+ * scope falls back to *derived* rules (home company + its subsidiaries), never
+ * to open access.
+ */
+
+// ---------------------------------------------------------------------------
+// Schema self-healing (mirrors the app's existing repair-on-load convention)
+// ---------------------------------------------------------------------------
+
+function access_control_ensure_schema(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+
+    try {
+        if (!table_exists('company_memberships') && table_exists('users') && table_exists('companies')) {
+            db()->exec(
+                'CREATE TABLE IF NOT EXISTS company_memberships (
+                    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    user_id INT UNSIGNED NOT NULL,
+                    company_id INT UNSIGNED NOT NULL,
+                    access_level ENUM(\'super_admin\',\'parent_admin\',\'subsidiary_admin\',\'accountant\',\'approver\',\'viewer\',\'support\') NOT NULL DEFAULT \'accountant\',
+                    is_primary TINYINT(1) NOT NULL DEFAULT 0,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    granted_by INT UNSIGNED DEFAULT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uniq_company_membership (user_id, company_id),
+                    KEY idx_company_memberships_company (company_id, is_active),
+                    KEY idx_company_memberships_user (user_id, is_active)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+            );
+            db()->exec(
+                'INSERT IGNORE INTO company_memberships (user_id, company_id, access_level, is_primary, is_active)
+                 SELECT u.id, u.company_id, u.access_level, 1, 1
+                 FROM users u JOIN companies c ON c.id = u.company_id
+                 WHERE u.company_id IS NOT NULL'
+            );
+        }
+
+        if (!table_exists('security_events')) {
+            db()->exec(
+                'CREATE TABLE IF NOT EXISTS security_events (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    user_id INT UNSIGNED DEFAULT NULL,
+                    email VARCHAR(190) DEFAULT NULL,
+                    event_type VARCHAR(60) NOT NULL,
+                    company_id INT UNSIGNED DEFAULT NULL,
+                    outcome ENUM(\'success\',\'denied\',\'failure\') NOT NULL DEFAULT \'success\',
+                    details VARCHAR(500) DEFAULT NULL,
+                    request_path VARCHAR(255) DEFAULT NULL,
+                    ip_address VARCHAR(60) DEFAULT NULL,
+                    user_agent VARCHAR(255) DEFAULT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    KEY idx_security_events_type_time (event_type, created_at),
+                    KEY idx_security_events_user_time (user_id, created_at),
+                    KEY idx_security_events_ip_time (ip_address, created_at),
+                    KEY idx_security_events_outcome_time (outcome, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+            );
+        }
+
+        if (table_exists('users') && !column_exists('users', 'sessions_valid_from')) {
+            db()->exec('ALTER TABLE users ADD COLUMN sessions_valid_from DATETIME DEFAULT NULL');
+        }
+    } catch (Throwable $exception) {
+        // Never take the site down over the repair path; the degradation rule
+        // below keeps authorization closed rather than open.
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Security event log
+// ---------------------------------------------------------------------------
+
+/**
+ * Records a security-relevant event: login, failed login, logout, org switch,
+ * role/permission change, activation/suspension, password reset, posting,
+ * reversal, export, and every restricted-access attempt.
+ */
+function security_event(string $eventType, string $outcome = 'success', ?string $details = null, ?int $companyId = null, ?int $userId = null, ?string $email = null): void
+{
+    access_control_ensure_schema();
+    if (!table_exists('security_events')) {
+        return;
+    }
+
+    if ($userId === null && !empty($_SESSION['user_id'])) {
+        $userId = (int) $_SESSION['user_id'];
+    }
+
+    try {
+        $stmt = db()->prepare(
+            'INSERT INTO security_events (user_id, email, event_type, company_id, outcome, details, request_path, ip_address, user_agent)
+             VALUES (:user_id, :email, :event_type, :company_id, :outcome, :details, :request_path, :ip_address, :user_agent)'
+        );
+        $stmt->execute([
+            'user_id' => $userId ?: null,
+            'email' => $email !== null ? substr($email, 0, 190) : null,
+            'event_type' => substr($eventType, 0, 60),
+            'company_id' => $companyId ?: null,
+            'outcome' => in_array($outcome, ['success', 'denied', 'failure'], true) ? $outcome : 'success',
+            'details' => $details !== null ? substr($details, 0, 500) : null,
+            'request_path' => substr((string) ($_SERVER['REQUEST_URI'] ?? ''), 0, 255),
+            'ip_address' => substr(client_ip_address(), 0, 60),
+            'user_agent' => substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
+        ]);
+    } catch (Throwable $exception) {
+        // Logging must never break the request it is auditing.
+    }
+}
+
+function client_ip_address(): string
+{
+    return (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+}
+
+// ---------------------------------------------------------------------------
+// Company scope
+// ---------------------------------------------------------------------------
+
+/**
+ * A super admin is a platform operator (M. Bista & Associates). Only they see
+ * across tenant boundaries.
+ */
+function user_is_super_admin(?array $user = null): bool
+{
+    $user = $user ?? current_user();
+    if (!$user || ($user['role'] ?? '') !== 'admin') {
+        return false;
+    }
+
+    return current_access_level_for($user) === 'super_admin';
+}
+
+/**
+ * access_level of a specific user row, applying the legacy inference that
+ * current_access_level() uses (admins of company 0/1 with no explicit level).
+ */
+function current_access_level_for(array $user): string
+{
+    $level = (string) ($user['access_level'] ?? '');
+    if (($user['role'] ?? '') === 'admin' && ($level === '' || $level === 'accountant')) {
+        $companyId = (int) ($user['company_id'] ?? 0);
+        return in_array($companyId, [0, 1], true) ? 'super_admin' : 'parent_admin';
+    }
+
+    return $level !== '' ? $level : 'viewer';
+}
+
+/**
+ * Every company below $companyId in the parent_company_id tree, inclusive.
+ */
+function company_descendant_ids(int $companyId): array
+{
+    static $cache = [];
+    if ($companyId <= 0 || !table_exists('companies')) {
+        return [];
+    }
+    if (isset($cache[$companyId])) {
+        return $cache[$companyId];
+    }
+
+    $ids = [$companyId];
+    $frontier = [$companyId];
+    $guard = 0;
+
+    while ($frontier !== [] && $guard++ < 20) {
+        $placeholders = implode(',', array_fill(0, count($frontier), '?'));
+        $stmt = db()->prepare('SELECT id FROM companies WHERE parent_company_id IN (' . $placeholders . ')');
+        $stmt->execute($frontier);
+        $children = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        $children = array_values(array_diff($children, $ids));
+        if ($children === []) {
+            break;
+        }
+        $ids = array_merge($ids, $children);
+        $frontier = $children;
+    }
+
+    $cache[$companyId] = $ids;
+
+    return $ids;
+}
+
+/**
+ * The client-books companies belonging to clients served by any of $companyIds.
+ */
+function client_books_company_ids_for_servers(array $companyIds): array
+{
+    if ($companyIds === [] || !table_exists('client_profiles') || !column_exists('client_profiles', 'books_company_id')) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($companyIds), '?'));
+    $stmt = db()->prepare('SELECT books_company_id FROM client_profiles WHERE books_company_id IS NOT NULL AND is_active = 1 AND company_id IN (' . $placeholders . ')');
+    $stmt->execute(array_values($companyIds));
+
+    return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+}
+
+/**
+ * The complete set of company ids the user may open, read or report on.
+ *
+ *  - Super Admin (M. Bista & Associates): every active company.
+ *  - Admin (service provider / client admin): home company + its subsidiaries
+ *    + explicit memberships + the books of clients those companies serve.
+ *  - Staff: home company + explicit memberships + books of clients assigned
+ *    to them personally.
+ *  - Customer (client login): the books company of their own client profile.
+ */
+function authorized_company_ids(?array $user = null): array
+{
+    $user = $user ?? current_user();
+    if (!$user) {
+        return [];
+    }
+
+    static $cache = [];
+    $cacheKey = (int) $user['id'];
+    if (isset($cache[$cacheKey])) {
+        return $cache[$cacheKey];
+    }
+
+    access_control_ensure_schema();
+
+    $role = (string) ($user['role'] ?? '');
+    $userId = (int) $user['id'];
+
+    // Super admins are unrestricted by design.
+    if (user_is_super_admin($user)) {
+        $ids = table_exists('companies')
+            ? array_map('intval', db()->query('SELECT id FROM companies WHERE is_active = 1')->fetchAll(PDO::FETCH_COLUMN))
+            : [];
+        $cache[$cacheKey] = $ids;
+
+        return $ids;
+    }
+
+    $ids = [];
+
+    // Home company and, for admins, everything beneath it in the group tree.
+    $homeCompanyId = (int) ($user['company_id'] ?? 0);
+    if ($homeCompanyId > 0) {
+        $ids = $role === 'admin' ? company_descendant_ids($homeCompanyId) : [$homeCompanyId];
+    }
+
+    // Explicit memberships (granted by a super admin or a company's own admin).
+    if (table_exists('company_memberships')) {
+        $stmt = db()->prepare('SELECT company_id FROM company_memberships WHERE user_id = :uid AND is_active = 1');
+        $stmt->execute(['uid' => $userId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $membershipCompanyId) {
+            $membershipCompanyId = (int) $membershipCompanyId;
+            // An admin's membership carries its subsidiaries with it.
+            $ids = array_merge($ids, $role === 'admin' ? company_descendant_ids($membershipCompanyId) : [$membershipCompanyId]);
+        }
+    }
+
+    if ($role === 'admin') {
+        // Books of every client served by a company this admin controls.
+        $ids = array_merge($ids, client_books_company_ids_for_servers($ids));
+    } elseif ($role === 'staff' && table_exists('client_profiles') && column_exists('client_profiles', 'books_company_id')) {
+        // Staff reach only the clients assigned to them.
+        $stmt = db()->prepare('SELECT books_company_id FROM client_profiles WHERE assigned_staff_user_id = :uid AND books_company_id IS NOT NULL AND is_active = 1');
+        $stmt->execute(['uid' => $userId]);
+        $ids = array_merge($ids, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+    } elseif ($role === 'customer' && table_exists('client_profiles') && column_exists('client_profiles', 'books_company_id')) {
+        // A client login reaches only its own books.
+        $stmt = db()->prepare('SELECT books_company_id FROM client_profiles WHERE user_id = :uid AND books_company_id IS NOT NULL AND is_active = 1');
+        $stmt->execute(['uid' => $userId]);
+        $ids = array_merge($ids, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
+
+    // Never hand back a suspended/archived company.
+    if ($ids !== [] && table_exists('companies')) {
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = db()->prepare('SELECT id FROM companies WHERE is_active = 1 AND id IN (' . $placeholders . ')');
+        $stmt->execute($ids);
+        $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    $cache[$cacheKey] = $ids;
+
+    return $ids;
+}
+
+function user_can_access_company(int $companyId, ?array $user = null): bool
+{
+    if ($companyId <= 0) {
+        return false;
+    }
+
+    return in_array($companyId, authorized_company_ids($user), true);
+}
+
+/**
+ * The authorized companies as full rows, for portal selectors and switchers.
+ */
+function authorized_companies(?array $user = null): array
+{
+    $ids = authorized_company_ids($user);
+    if ($ids === [] || !table_exists('companies')) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = db()->prepare(
+        'SELECT c.*, p.name AS parent_company_name
+         FROM companies c
+         LEFT JOIN companies p ON p.id = c.parent_company_id
+         WHERE c.is_active = 1 AND c.id IN (' . $placeholders . ')
+         ORDER BY c.is_client_company ASC, c.parent_company_id IS NULL DESC, c.name ASC'
+    );
+    $stmt->execute($ids);
+
+    return $stmt->fetchAll();
+}
+
+// ---------------------------------------------------------------------------
+// Denial
+// ---------------------------------------------------------------------------
+
+/**
+ * Hard stop for an unauthorized request: audit it, then 403. Used for IDOR
+ * attempts (tampered ids in URLs/APIs) rather than a friendly redirect, so the
+ * attempt is unmistakable in the log and in tests.
+ */
+function deny_access(string $reason, ?int $companyId = null): never
+{
+    security_event('access_denied', 'denied', $reason, $companyId);
+
+    if (!headers_sent()) {
+        header('HTTP/1.1 403 Forbidden', true, 403);
+        header('Content-Type: text/html; charset=utf-8');
+    }
+
+    $isJson = str_contains((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json')
+        || strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+
+    if ($isJson) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['error' => 'forbidden', 'message' => 'You are not authorized to access this record.']);
+        exit;
+    }
+
+    $home = function_exists('role_home_path') ? role_home_path() : 'login.php';
+    echo '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        . '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        . '<title>403 — Access denied</title>'
+        . '<link rel="icon" type="image/svg+xml" href="' . e(url('assets/img/favicon.svg')) . '">'
+        . '<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;'
+        . 'font-family:Inter,-apple-system,"Segoe UI",sans-serif;background:#0b1c36;color:#eaf1ff;padding:24px}'
+        . '.box{max-width:460px;text-align:center}.mark{width:56px;height:56px;border-radius:14px;background:#0b1c36;'
+        . 'border:3px solid #d9a33a;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;'
+        . 'font-family:Georgia,serif;font-weight:700;font-size:22px}h1{font-size:20px;margin:0 0 10px}'
+        . 'p{color:#9fb2cc;line-height:1.6;margin:0 0 22px;font-size:14px}'
+        . 'a{display:inline-block;background:#d9a33a;color:#0b1c36;text-decoration:none;font-weight:700;'
+        . 'padding:11px 20px;border-radius:9px;font-size:14px}</style></head><body><div class="box">'
+        . '<div class="mark">MB</div><h1>Access denied</h1>'
+        . '<p>You are not authorized to view this record or organization. This attempt has been logged.</p>'
+        . '<a href="' . e(url($home)) . '">Return to your portal</a></div></body></html>';
+    exit;
+}
+
+/**
+ * Gate for any page that acts on an explicit company id from the request.
+ */
+function require_company_access(int $companyId): void
+{
+    if (!user_can_access_company($companyId)) {
+        deny_access('Attempted to access company #' . $companyId . ' without authorization.', $companyId);
+    }
+}
+
+/**
+ * Gate for a fetched record: proves the row belongs to a company the user may
+ * touch. Pass the row (or null) and the column holding its company id.
+ */
+function require_record_company(?array $record, string $companyColumn = 'company_id'): array
+{
+    if (!$record) {
+        deny_access('Record not found or not visible in the active scope.');
+    }
+
+    $companyId = (int) ($record[$companyColumn] ?? 0);
+    if ($companyId <= 0 || !user_can_access_company($companyId)) {
+        deny_access('Record belongs to company #' . $companyId . ', outside the caller\'s scope.', $companyId);
+    }
+
+    return $record;
+}
+
+// ---------------------------------------------------------------------------
+// Session lifecycle
+// ---------------------------------------------------------------------------
+
+/**
+ * Invalidates every existing session of a user. Called on suspension,
+ * deactivation, role/permission change and password reset.
+ */
+function revoke_user_sessions(int $userId): void
+{
+    access_control_ensure_schema();
+    if ($userId <= 0 || !column_exists('users', 'sessions_valid_from')) {
+        return;
+    }
+
+    try {
+        db()->prepare('UPDATE users SET sessions_valid_from = NOW() WHERE id = :id')->execute(['id' => $userId]);
+        security_event('sessions_revoked', 'success', 'All active sessions revoked for user #' . $userId, null, $userId);
+    } catch (Throwable $exception) {
+        // ignore
+    }
+}
+
+/**
+ * True when the *current session* predates the user's session-revocation
+ * epoch, i.e. the session must be killed.
+ */
+function session_is_revoked(array $user): bool
+{
+    $validFrom = (string) ($user['sessions_valid_from'] ?? '');
+    if ($validFrom === '') {
+        return false;
+    }
+
+    $issuedAt = (int) ($_SESSION['auth_issued_at'] ?? 0);
+    if ($issuedAt <= 0) {
+        return true;
+    }
+
+    return $issuedAt < strtotime($validFrom);
+}
+
+/**
+ * Statuses that may hold a live session. 'invited' users must accept and set a
+ * password first; 'suspended', 'locked' and 'inactive' are shut out.
+ */
+function user_status_allows_login(array $user): bool
+{
+    return (string) ($user['status'] ?? '') === 'active';
+}
+
+// ---------------------------------------------------------------------------
+// Login throttling
+// ---------------------------------------------------------------------------
+
+const LOGIN_MAX_ATTEMPTS = 8;
+const LOGIN_LOCKOUT_WINDOW_MINUTES = 15;
+
+/**
+ * Counts recent failed logins for an email/IP pair. Used to throttle both the
+ * login form and the 4-digit company PIN (10k combinations, previously
+ * unlimited tries).
+ */
+function recent_failed_attempts(string $eventType, ?string $email = null, ?string $ip = null): int
+{
+    access_control_ensure_schema();
+    if (!table_exists('security_events')) {
+        return 0;
+    }
+
+    $ip = $ip ?? client_ip_address();
+    $sql = 'SELECT COUNT(*) FROM security_events
+            WHERE event_type = :event_type AND outcome IN (\'failure\', \'denied\')
+              AND created_at > (NOW() - INTERVAL :minutes MINUTE)
+              AND (ip_address = :ip';
+    $params = [
+        'event_type' => $eventType,
+        'minutes' => LOGIN_LOCKOUT_WINDOW_MINUTES,
+        'ip' => $ip,
+    ];
+    if ($email !== null && $email !== '') {
+        $sql .= ' OR email = :email';
+        $params['email'] = $email;
+    }
+    $sql .= ')';
+
+    try {
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
+
+        return (int) $stmt->fetchColumn();
+    } catch (Throwable $exception) {
+        return 0;
+    }
+}
+
+function login_is_throttled(?string $email = null, string $eventType = 'login_failed'): bool
+{
+    return recent_failed_attempts($eventType, $email) >= LOGIN_MAX_ATTEMPTS;
+}
