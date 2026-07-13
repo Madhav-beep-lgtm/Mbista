@@ -62,3 +62,6 @@ output.pdf
 
 # Runtime output (logged emails, caches)
 /storage/
+
+NRV-Final-Verification.txt
+NRV-Implementation-Audit.txt
