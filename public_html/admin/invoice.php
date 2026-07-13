@@ -293,7 +293,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stockPostingNotes = [];
                     if ($invoiceSourceType === 'inventory' && in_array($status, ['issued', 'paid'], true) && table_exists('inventory_transactions')) {
                         $invFiscalYearId = current_fiscal_year_id() ?: null;
-                        $stockItemStmt = db()->prepare('SELECT id, category, sku, name, valuation_method FROM inventory_items WHERE id = :id AND company_id = :company_id LIMIT 1');
+                        $stockItemStmt = db()->prepare('
+                            SELECT i.id, i.category, i.sku, i.name, i.valuation_method,
+                                   i.opening_qty + COALESCE((SELECT SUM(t.qty_in - t.qty_out) FROM inventory_transactions t WHERE t.item_id = i.id), 0) AS on_hand
+                            FROM inventory_items i WHERE i.id = :id AND i.company_id = :company_id LIMIT 1
+                        ');
                         $stockInsertStmt = db()->prepare('
                             INSERT INTO inventory_transactions (
                                 company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date,
@@ -366,6 +370,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 if ($stockVoucherId > 0) {
                                     db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
                                         ->execute(['vid' => $stockVoucherId, 'id' => $stockTxnId, 'cid' => (int) $currentCompany['id']]);
+                                }
+                                // Written-down stock sold through an invoice must release its
+                                // share of the NRV allowance exactly as a manually recorded
+                                // sale does, or the two sale paths disagree and the allowance
+                                // strands on the balance sheet (IAS 2.34).
+                                [$invAllowanceReleased, ] = inv_post_allowance_release(
+                                    (int) $currentCompany['id'],
+                                    $invFiscalYearId,
+                                    $stockTxnId,
+                                    $stockItem,
+                                    'sale',
+                                    'out',
+                                    (float) $line['quantity'],
+                                    (float) ($stockItem['on_hand'] ?? 0),
+                                    $issuedOn,
+                                    $adminId
+                                );
+                                if ($invAllowanceReleased > 0) {
+                                    $stockPostingNotes[] = $stockItem['sku'] . ' NRV allowance released: ' . site_currency_symbol() . number_format($invAllowanceReleased, 2) . '.';
                                 }
                                 db()->commit();
                             } catch (Throwable $stockException) {

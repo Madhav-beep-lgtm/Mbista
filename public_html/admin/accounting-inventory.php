@@ -481,6 +481,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
                     ->execute(['vid' => $movementVoucherId, 'id' => $txnId, 'cid' => $companyId]);
             }
+            // Written-down stock leaving must carry its share of the allowance out
+            // with it, or COGS is struck at full cost while the allowance strands
+            // on the balance sheet forever (IAS 2.34).
+            [$allowanceReleased, ] = inv_post_allowance_release(
+                $companyId, $fiscalYearId, $txnId, $item, $type, $direction,
+                $qtyOut, (float) $item['on_hand'], $date, $userId
+            );
             db()->commit();
             $costNote = $qtyOut > 0 ? ' Issue cost (' . strtoupper(str_replace('_', ' ', $method)) . '): ' . site_currency_symbol() . number_format($issueValue, 2) . '.' : '';
             $glNote = '';
@@ -490,8 +497,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $labels = array_map(static fn (string $p): string => inventory_mapping_purposes()[$p]['label'] ?? $p, $mapMissing);
                 $glNote = ' Stock recorded — map ' . implode(' & ', $labels) . ' on the Ledger Mapping tab to auto-post the accounting voucher.';
             }
+            $relNote = $allowanceReleased > 0
+                ? ' NRV allowance released: ' . site_currency_symbol() . number_format($allowanceReleased, 2) . ' (expense reduced to the written-down carrying amount, IAS 2.34).'
+                : '';
             security_event('inventory_movement_posted', 'success', 'Movement #' . $txnId . ' (' . $type . ') posted for item #' . $itemId . '.', $companyId, $userId);
-            flash('success', 'Inventory movement recorded: ' . ($direction === 'in' ? '+' : '−') . number_format($qty, 3) . ' ' . $item['unit'] . ' ' . $item['sku'] . '.' . $costNote . $glNote);
+            flash('success', 'Inventory movement recorded: ' . ($direction === 'in' ? '+' : '−') . number_format($qty, 3) . ' ' . $item['unit'] . ' ' . $item['sku'] . '.' . $costNote . $glNote . $relNote);
         } catch (Throwable $exception) {
             if (db()->inTransaction()) {
                 db()->rollBack();
@@ -517,9 +527,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qty = (float) $valuation['qty'];
         $unitCost = (float) $valuation['unit_cost'];
 
-        $priorStmt = db()->prepare('SELECT COALESCE(SUM(write_down), 0) - COALESCE(SUM(reversal), 0) FROM inventory_nrv_assessments WHERE company_id = :company_id AND item_id = :item_id');
-        $priorStmt->execute(['company_id' => $companyId, 'item_id' => $itemId]);
-        $priorWriteDown = max(0.0, (float) $priorStmt->fetchColumn());
+        // The allowance STANDING against the item — net of what has already been
+        // reversed (NRV recovered) and released (the stock left), and ignoring
+        // assessments whose movement was reversed. Summing write_down - reversal
+        // alone would keep counting allowance that is no longer on the books, and
+        // would silently block every later write-down on this item.
+        $priorWriteDown = inv_standing_allowance($companyId, $itemId);
 
         $nrv = inv_nrv($qty, $unitCost, $sellingPrice, $completionCost, $sellingCost, $priorWriteDown);
 
@@ -587,6 +600,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'notes' => ($isWriteDown ? 'NRV write-down' : 'NRV reversal') . ' — ' . $item['sku'] . ' ' . $item['name'],
             ]);
             $txnId = (int) db()->lastInsertId();
+            // Link the assessment to the movement it posted, so reversing that
+            // movement can void the allowance it raised.
+            db()->prepare('UPDATE inventory_nrv_assessments SET source_txn_id = :txn WHERE id = :id AND company_id = :cid')
+                ->execute(['txn' => $txnId, 'id' => $assessmentId, 'cid' => $companyId]);
 
             $movementVoucherId = 0;
             $mapMissing = [];
@@ -654,6 +671,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         try {
             db()->beginTransaction();
+            // Void any allowance this movement raised or released. A deleted NRV
+            // write-down whose assessment row survived would keep counting toward
+            // the standing allowance and silently block every later write-down.
+            inv_void_allowance_rows_for_txn($companyId, $movementId, $fiscalYearId, date('Y-m-d'), $userId);
             db()->prepare('DELETE FROM inventory_transactions WHERE id = :id AND company_id = :cid')->execute(['id' => $movementId, 'cid' => $companyId]);
             inv_rebuild_item($companyId, (int) $movement['item_id']); // recompute cost layers
             db()->commit();
@@ -687,6 +708,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $revItem = inventory_company_item((int) $movement['item_id'], $companyId);
         try {
             db()->beginTransaction();
+            // Void the allowance rows this movement raised or released, so a
+            // reversed NRV write-down stops standing against the item (otherwise
+            // prior_write_down stays overstated forever and future write-downs
+            // are silently blocked) and a reversed sale gives its released
+            // allowance back.
+            [$voidedAllowanceRows, $voidedAllowanceNet] = inv_void_allowance_rows_for_txn($companyId, $movementId, $fiscalYearId, date('Y-m-d'), $userId);
             // Post a mirror stock movement (opposite direction, same qty/rate).
             $revIn = (float) $movement['qty_out'];
             $revOut = (float) $movement['qty_in'];

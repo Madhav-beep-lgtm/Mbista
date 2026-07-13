@@ -595,7 +595,16 @@ function inv_item_valuation(int $companyId, array $item): array
     $completion = 0.0;
     $selling = 0.0;
     if (table_exists('inventory_nrv_assessments')) {
-        $a = db()->prepare('SELECT selling_price, completion_cost, selling_cost FROM inventory_nrv_assessments WHERE company_id = :cid AND item_id = :iid ORDER BY assessment_date DESC, id DESC LIMIT 1');
+        // Only real assessments carry NRV inputs. Allowance-RELEASE rows (written
+        // when stock leaves, release_amount > 0) have no selling price, and a
+        // reversed assessment no longer holds — either one, picked up as "the
+        // latest assessment", would silently reset the item's NRV to cost.
+        $a = db()->prepare(inv_nrv_assessment_columns_ready()
+            ? 'SELECT selling_price, completion_cost, selling_cost FROM inventory_nrv_assessments
+               WHERE company_id = :cid AND item_id = :iid AND status = \'active\' AND release_amount = 0
+               ORDER BY assessment_date DESC, id DESC LIMIT 1'
+            : 'SELECT selling_price, completion_cost, selling_cost FROM inventory_nrv_assessments
+               WHERE company_id = :cid AND item_id = :iid ORDER BY assessment_date DESC, id DESC LIMIT 1');
         $a->execute(['cid' => $companyId, 'iid' => $itemId]);
         $row = $a->fetch(PDO::FETCH_ASSOC);
         if ($row) {
@@ -717,6 +726,249 @@ function inv_item_warehouse_stock(int $companyId, int $itemId): array
         ];
     }
     return $rows;
+}
+
+// ---------------------------------------------------------------------------
+// NRV allowance lifecycle (IAS 2.28-34), migration 041.
+//
+// A write-down raises an ALLOWANCE (a contra-asset) and never touches the cost
+// layers. inventory_nrv_assessments is therefore the ledger of allowance
+// movements for an item:
+//     write_down     (+) raised because NRV fell below cost
+//     reversal       (-) released because NRV recovered      (IAS 2.33)
+//     release_amount (-) consumed because the stock left     (IAS 2.34)
+// The standing allowance is the net of those over status = 'active' rows.
+// ---------------------------------------------------------------------------
+
+/** True once migration 041's allowance columns exist (deploy-safe guard). */
+function inv_nrv_assessment_columns_ready(): bool
+{
+    static $ready = null;
+    if ($ready === null) {
+        $ready = table_exists('inventory_nrv_assessments')
+            && column_exists('inventory_nrv_assessments', 'release_amount')
+            && column_exists('inventory_nrv_assessments', 'status');
+    }
+
+    return $ready;
+}
+
+/**
+ * The allowance currently standing against an item: everything written down,
+ * less what has been reversed (NRV recovered) and released (stock left).
+ * Floored at zero — a negative standing allowance is meaningless.
+ */
+function inv_standing_allowance(int $companyId, int $itemId): float
+{
+    if (!table_exists('inventory_nrv_assessments')) {
+        return 0.0;
+    }
+    $sql = inv_nrv_assessment_columns_ready()
+        ? 'SELECT COALESCE(SUM(write_down), 0) - COALESCE(SUM(reversal), 0) - COALESCE(SUM(release_amount), 0)
+           FROM inventory_nrv_assessments
+           WHERE company_id = :cid AND item_id = :iid AND status = \'active\''
+        : 'SELECT COALESCE(SUM(write_down), 0) - COALESCE(SUM(reversal), 0)
+           FROM inventory_nrv_assessments WHERE company_id = :cid AND item_id = :iid';
+    $stmt = db()->prepare($sql);
+    $stmt->execute(['cid' => $companyId, 'iid' => $itemId]);
+
+    return max(0.0, inv_round_money((float) $stmt->fetchColumn()));
+}
+
+/**
+ * The slice of the standing allowance that belongs to units leaving stock.
+ *
+ * The allowance was raised against the whole on-hand quantity, so when part of
+ * that quantity is issued its share of the allowance goes with it, pro rata:
+ *     release = standing_allowance * (qty_issued / qty_on_hand_before_issue)
+ * Capped at the standing allowance, and the whole of it once the last unit
+ * leaves (so nothing can be stranded by rounding).
+ */
+function inv_allowance_release_for_issue(float $standingAllowance, float $qtyIssued, float $qtyOnHandBefore): float
+{
+    if ($standingAllowance <= INV_EPSILON || $qtyIssued <= INV_EPSILON || $qtyOnHandBefore <= INV_EPSILON) {
+        return 0.0;
+    }
+    if ($qtyIssued >= $qtyOnHandBefore - INV_EPSILON) {
+        return inv_round_money($standingAllowance); // last of the stock: release it all
+    }
+
+    return inv_round_money(min($standingAllowance, $standingAllowance * ($qtyIssued / $qtyOnHandBefore)));
+}
+
+/**
+ * Post the allowance release for an outward movement and record it against the
+ * item's allowance ledger, so the expense recognised for the sold stock is its
+ * WRITTEN-DOWN carrying amount rather than full cost (IAS 2.34).
+ *
+ * Dr write-down allowance / Cr <whatever expense the movement itself debited>
+ * — for a sale that credits COGS back down; for a write-off, the loss account.
+ * Idempotent via vouchers UNIQUE(source_type, source_id) on the release row id.
+ * Runs inside the caller's transaction. Returns [releaseAmount, voucherId];
+ * a missing mapping releases nothing rather than blocking the movement.
+ */
+function inv_post_allowance_release(
+    int $companyId,
+    ?int $fiscalYearId,
+    int $txnId,
+    array $item,
+    string $type,
+    string $direction,
+    float $qtyIssued,
+    float $qtyOnHandBefore,
+    string $date,
+    int $userId
+): array {
+    if (!inv_nrv_assessment_columns_ready() || inv_movement_is_location_only($type)) {
+        return [0.0, 0];
+    }
+    // NRV postings are themselves allowance movements — they must not trigger one.
+    if (in_array($type, ['nrv_write_down', 'nrv_reversal'], true) || $direction !== 'out') {
+        return [0.0, 0];
+    }
+    $plan = inv_movement_posting_plan($type, $direction);
+    if ($plan === null) {
+        return [0.0, 0];
+    }
+
+    $itemId = (int) $item['id'];
+    $standing = inv_standing_allowance($companyId, $itemId);
+    $release = inv_allowance_release_for_issue($standing, $qtyIssued, $qtyOnHandBefore);
+    if ($release <= 0) {
+        return [0.0, 0];
+    }
+
+    $category = $item['category'] ?? null;
+    $allowance = inv_resolve_mapping($companyId, 'write_down_allowance', $itemId, $category);
+    $expense = inv_resolve_mapping($companyId, $plan['debit'], $itemId, $category);
+    if (!$allowance || !$expense) {
+        // Nothing mapped to release into — leave the allowance standing rather
+        // than blocking the sale. The Valuation tab still shows it.
+        return [0.0, 0];
+    }
+
+    $releaseRow = db()->prepare(
+        'INSERT INTO inventory_nrv_assessments
+            (company_id, fiscal_year_id, item_id, assessment_date, quantity, release_amount, source_txn_id, evidence, created_by)
+         VALUES (:cid, :fy, :iid, :d, :qty, :rel, :txn, :ev, :uid)'
+    );
+    $releaseRow->execute([
+        'cid' => $companyId,
+        'fy' => $fiscalYearId ?: null,
+        'iid' => $itemId,
+        'd' => $date,
+        'qty' => inv_round_qty($qtyIssued),
+        'rel' => $release,
+        'txn' => $txnId,
+        'ev' => 'Allowance released on ' . str_replace('_', ' ', $type) . ' of ' . inv_round_qty($qtyIssued) . ' unit(s) (IAS 2.34).',
+        'uid' => $userId,
+    ]);
+    $releaseId = (int) db()->lastInsertId();
+
+    $voucherId = (int) create_voucher_with_entries([
+        'company_id' => $companyId,
+        'fiscal_year_id' => $fiscalYearId ?: null,
+        'voucher_no' => 'INV-NRVREL-' . str_pad((string) $releaseId, 6, '0', STR_PAD_LEFT),
+        'voucher_type' => 'journal',
+        'voucher_date' => $date,
+        'source_type' => 'inventory_nrv_release',
+        'source_id' => $releaseId,
+        'total_amount' => $release,
+        'narration' => 'Release of NRV write-down allowance on ' . ($item['sku'] ?? '') . ' (IAS 2.34).',
+        'status' => 'posted',
+        'posted_by' => $userId,
+    ], [
+        ['ledger_id' => (int) $allowance['id'], 'entry_type' => 'debit', 'amount' => $release],
+        ['ledger_id' => (int) $expense['id'], 'entry_type' => 'credit', 'amount' => $release],
+    ]);
+
+    db()->prepare('UPDATE inventory_nrv_assessments SET voucher_id = :vid WHERE id = :id')
+        ->execute(['vid' => $voucherId ?: null, 'id' => $releaseId]);
+
+    return [$release, $voucherId];
+}
+
+/**
+ * Void the allowance rows a movement created, so a reversed/deleted movement
+ * stops counting toward the standing allowance. Without this a reversed
+ * write-down would leave its allowance standing forever, overstating
+ * prior_write_down and silently blocking every later write-down on the item.
+ *
+ * Any GL voucher those rows posted is reversed too (mirror entries, original
+ * preserved) — marking the row dead while leaving its voucher on the books
+ * would put the allowance ledger permanently out of step with the subledger.
+ * Runs inside the caller's transaction. Returns [rowsVoided, netAllowanceUndone].
+ */
+function inv_void_allowance_rows_for_txn(int $companyId, int $txnId, ?int $fiscalYearId = null, ?string $date = null, int $userId = 0): array
+{
+    if (!inv_nrv_assessment_columns_ready() || $txnId <= 0) {
+        return [0, 0.0];
+    }
+    $date = $date ?? date('Y-m-d');
+
+    $rows = db()->prepare(
+        'SELECT id, voucher_id, write_down, reversal, release_amount
+         FROM inventory_nrv_assessments
+         WHERE company_id = :cid AND source_txn_id = :txn AND status = \'active\''
+    );
+    $rows->execute(['cid' => $companyId, 'txn' => $txnId]);
+    $rows = $rows->fetchAll(PDO::FETCH_ASSOC);
+    if ($rows === []) {
+        return [0, 0.0];
+    }
+
+    $net = 0.0;
+    foreach ($rows as $row) {
+        $rowId = (int) $row['id'];
+        $net += (float) $row['write_down'] - (float) $row['reversal'] - (float) $row['release_amount'];
+
+        // Only a RELEASE row owns a voucher of its own. A write-down / NRV-reversal
+        // assessment shares the voucher_id of the movement that posted it, and the
+        // caller (reverse_movement) already reverses that one — mirroring it here
+        // too would reverse the same voucher twice and leave the allowance ledger
+        // carrying a spurious balance.
+        $ownsVoucher = (float) $row['release_amount'] > INV_EPSILON;
+        $voucherId = (int) ($row['voucher_id'] ?? 0);
+        if ($ownsVoucher && $voucherId > 0) {
+            $entries = db()->prepare('SELECT ledger_id, entry_type, amount FROM voucher_entries WHERE voucher_id = :vid');
+            $entries->execute(['vid' => $voucherId]);
+            $mirror = [];
+            $total = 0.0;
+            foreach ($entries->fetchAll(PDO::FETCH_ASSOC) as $entry) {
+                $amount = (float) $entry['amount'];
+                $mirror[] = [
+                    'ledger_id' => (int) $entry['ledger_id'],
+                    'entry_type' => $entry['entry_type'] === 'debit' ? 'credit' : 'debit',
+                    'amount' => $amount,
+                ];
+                if ($entry['entry_type'] === 'debit') {
+                    $total += $amount;
+                }
+            }
+            if ($mirror !== [] && $total > 0) {
+                create_voucher_with_entries([
+                    'company_id' => $companyId,
+                    'fiscal_year_id' => $fiscalYearId ?: null,
+                    'voucher_no' => 'INV-NRVREV-' . str_pad((string) $rowId, 6, '0', STR_PAD_LEFT),
+                    'voucher_type' => 'journal',
+                    'voucher_date' => $date,
+                    'source_type' => 'inventory_nrv_void',
+                    'source_id' => $rowId,
+                    'total_amount' => inv_round_money($total),
+                    'narration' => 'Reversal of NRV allowance entry #' . $rowId . ' (source movement reversed).',
+                    'status' => 'posted',
+                    'posted_by' => $userId,
+                ], $mirror);
+            }
+        }
+    }
+
+    db()->prepare(
+        'UPDATE inventory_nrv_assessments SET status = \'reversed\'
+         WHERE company_id = :cid AND source_txn_id = :txn AND status = \'active\''
+    )->execute(['cid' => $companyId, 'txn' => $txnId]);
+
+    return [count($rows), inv_round_money($net)];
 }
 
 /**

@@ -571,6 +571,14 @@ function accounting_module_repair_database(): array
         accounting_repair_add_column('inventory_transactions', 'to_warehouse_id', '`to_warehouse_id` INT UNSIGNED DEFAULT NULL AFTER `warehouse_id`');
     });
 
+    $run('Add NRV allowance lifecycle (migration 041)', static function (): void {
+        accounting_repair_add_column('inventory_nrv_assessments', 'release_amount', '`release_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `reversal`');
+        accounting_repair_add_column('inventory_nrv_assessments', 'source_txn_id', '`source_txn_id` INT UNSIGNED DEFAULT NULL AFTER `voucher_id`');
+        accounting_repair_add_column('inventory_nrv_assessments', 'status', "`status` ENUM('active', 'reversed') NOT NULL DEFAULT 'active' AFTER `source_txn_id`");
+        accounting_repair_add_index('inventory_nrv_assessments', 'idx_inv_nrv_source_txn', 'KEY `idx_inv_nrv_source_txn` (`source_txn_id`)');
+        accounting_repair_add_index('inventory_nrv_assessments', 'idx_inv_nrv_item_status', 'KEY `idx_inv_nrv_item_status` (`company_id`, `item_id`, `status`)');
+    });
+
     $run('Widen inventory transaction types (migration 040)', static function (): void {
         if (!accounting_repair_table_exists('inventory_transactions')) {
             return;
