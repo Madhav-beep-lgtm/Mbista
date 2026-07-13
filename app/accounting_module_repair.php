@@ -289,6 +289,98 @@ function accounting_module_repair_database(): array
         ");
     });
 
+    $run('Provision IAS 2 valuation schema (migration 036)', static function (): void {
+        // Item master: valuation method, classification, stock-control fields.
+        try {
+            db()->exec("ALTER TABLE inventory_items MODIFY COLUMN item_type ENUM('stock','service','raw_material','work_in_progress','finished_good','trading_good','consumable','packing_material','spare_part','by_product','scrap') NOT NULL DEFAULT 'stock'");
+        } catch (Throwable $e) { /* already widened */ }
+        accounting_repair_add_column('inventory_items', 'valuation_method', "`valuation_method` ENUM('fifo','weighted_average','specific') NOT NULL DEFAULT 'weighted_average' AFTER `item_type`");
+        accounting_repair_add_column('inventory_items', 'category', '`category` VARCHAR(120) DEFAULT NULL AFTER `name`');
+        accounting_repair_add_column('inventory_items', 'sub_category', '`sub_category` VARCHAR(120) DEFAULT NULL AFTER `category`');
+        accounting_repair_add_column('inventory_items', 'short_name', '`short_name` VARCHAR(120) DEFAULT NULL AFTER `name`');
+        accounting_repair_add_column('inventory_items', 'barcode', '`barcode` VARCHAR(120) DEFAULT NULL AFTER `hs_code`');
+        accounting_repair_add_column('inventory_items', 'country_of_origin', '`country_of_origin` VARCHAR(80) DEFAULT NULL AFTER `barcode`');
+        accounting_repair_add_column('inventory_items', 'min_stock', '`min_stock` DECIMAL(14,3) NOT NULL DEFAULT 0.000 AFTER `reorder_level`');
+        accounting_repair_add_column('inventory_items', 'max_stock', '`max_stock` DECIMAL(14,3) NOT NULL DEFAULT 0.000 AFTER `min_stock`');
+        accounting_repair_add_column('inventory_items', 'safety_stock', '`safety_stock` DECIMAL(14,3) NOT NULL DEFAULT 0.000 AFTER `max_stock`');
+        accounting_repair_add_column('inventory_items', 'allow_negative_stock', '`allow_negative_stock` TINYINT(1) NOT NULL DEFAULT 0 AFTER `safety_stock`');
+
+        db()->exec("CREATE TABLE IF NOT EXISTS `inventory_cost_layers` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `company_id` INT UNSIGNED NOT NULL,
+            `item_id` INT UNSIGNED NOT NULL,
+            `warehouse_id` INT UNSIGNED DEFAULT NULL,
+            `batch_no` VARCHAR(80) DEFAULT NULL,
+            `identity` VARCHAR(120) DEFAULT NULL,
+            `is_specific` TINYINT(1) NOT NULL DEFAULT 0,
+            `layer_date` DATE NOT NULL,
+            `layer_seq` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `source_txn_id` INT UNSIGNED DEFAULT NULL,
+            `unit_cost` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+            `qty_in` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `qty_remaining` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_inv_layers_item_open` (`company_id`, `item_id`, `qty_remaining`),
+            KEY `idx_inv_layers_seq` (`company_id`, `item_id`, `layer_seq`),
+            KEY `idx_inv_layers_identity` (`company_id`, `item_id`, `identity`),
+            CONSTRAINT `fk_inv_layers_company` FOREIGN KEY (`company_id`) REFERENCES `companies`(`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_inv_layers_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        db()->exec("CREATE TABLE IF NOT EXISTS `inventory_nrv_assessments` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `company_id` INT UNSIGNED NOT NULL,
+            `fiscal_year_id` INT UNSIGNED DEFAULT NULL,
+            `item_id` INT UNSIGNED NOT NULL,
+            `assessment_date` DATE NOT NULL,
+            `quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `cost_per_unit` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+            `selling_price` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+            `completion_cost` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+            `selling_cost` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+            `nrv_per_unit` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+            `lower_per_unit` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+            `carrying_cost` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `prior_write_down` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `write_down` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `reversal` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `final_carrying` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `evidence` VARCHAR(255) DEFAULT NULL,
+            `voucher_id` INT UNSIGNED DEFAULT NULL,
+            `approved_by` INT UNSIGNED DEFAULT NULL,
+            `created_by` INT UNSIGNED DEFAULT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_inv_nrv_item_date` (`company_id`, `item_id`, `assessment_date`),
+            KEY `idx_inv_nrv_voucher` (`voucher_id`),
+            CONSTRAINT `fk_inv_nrv_company` FOREIGN KEY (`company_id`) REFERENCES `companies`(`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_inv_nrv_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items`(`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_inv_nrv_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers`(`id`) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        db()->exec("CREATE TABLE IF NOT EXISTS `inventory_ledger_mappings` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `company_id` INT UNSIGNED NOT NULL,
+            `scope` ENUM('global','category','item') NOT NULL DEFAULT 'global',
+            `category` VARCHAR(120) DEFAULT NULL,
+            `item_id` INT UNSIGNED DEFAULT NULL,
+            `purpose` VARCHAR(60) NOT NULL,
+            `ledger_id` INT UNSIGNED NOT NULL,
+            `effective_date` DATE DEFAULT NULL,
+            `created_by` INT UNSIGNED DEFAULT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_inv_mapping_scope` (`company_id`, `scope`, `category`, `item_id`, `purpose`),
+            KEY `idx_inv_mapping_lookup` (`company_id`, `purpose`, `scope`),
+            KEY `idx_inv_mapping_ledger` (`ledger_id`),
+            CONSTRAINT `fk_inv_mapping_company` FOREIGN KEY (`company_id`) REFERENCES `companies`(`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_inv_mapping_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items`(`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_inv_mapping_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    });
+
     $run('Create inventory transactions', static function (): void {
         db()->exec("
             CREATE TABLE IF NOT EXISTS `inventory_transactions` (
