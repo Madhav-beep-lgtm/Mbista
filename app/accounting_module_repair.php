@@ -92,6 +92,19 @@ function accounting_module_repair_database(): array
         accounting_repair_add_index('vouchers', 'idx_vouchers_party', 'KEY `idx_vouchers_party` (`party_id`)');
     });
 
+    $run('Provision access-control schema (migration 033)', static function (): void {
+        // company_memberships (+ backfill), security_events, users.sessions_valid_from.
+        if (function_exists('access_control_ensure_schema')) {
+            access_control_ensure_schema();
+        }
+        // Widen the user status ENUM to the full lifecycle (idempotent).
+        try {
+            db()->exec("ALTER TABLE users MODIFY COLUMN status ENUM('active','inactive','invited','suspended','locked') NOT NULL DEFAULT 'active'");
+        } catch (Throwable $e) {
+            // ignore if already widened or table absent
+        }
+    });
+
     $run('Upgrade client accounting books metadata', static function (): void {
         accounting_repair_add_column('companies', 'is_client_company', '`is_client_company` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_active`');
         accounting_repair_add_column('client_profiles', 'books_company_id', '`books_company_id` INT UNSIGNED DEFAULT NULL AFTER `company_id`');

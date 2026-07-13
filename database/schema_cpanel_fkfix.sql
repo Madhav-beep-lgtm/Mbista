@@ -10,8 +10,9 @@ CREATE TABLE IF NOT EXISTS `users` (
   `password_hash` VARCHAR(255) NOT NULL,
   `role` ENUM('admin', 'staff', 'customer') NOT NULL DEFAULT 'customer',
   `access_level` ENUM('super_admin', 'parent_admin', 'subsidiary_admin', 'accountant', 'approver', 'viewer', 'support') NOT NULL DEFAULT 'accountant',
-  `status` ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+  `status` ENUM('active', 'inactive', 'invited', 'suspended', 'locked') NOT NULL DEFAULT 'active',
   `must_change_password` TINYINT(1) NOT NULL DEFAULT 0,
+  `sessions_valid_from` DATETIME DEFAULT NULL,
   `company_id` INT UNSIGNED DEFAULT NULL,
   `phone` VARCHAR(30) DEFAULT NULL,
   `company` VARCHAR(120) DEFAULT NULL,
@@ -1756,3 +1757,46 @@ CREATE TABLE IF NOT EXISTS `insight_posts` (
   CONSTRAINT `fk_insight_posts_author` FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
+-- ---------------------------------------------------------------------------
+-- Access control (migration 033): explicit memberships + security event log
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `company_memberships` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` INT UNSIGNED NOT NULL,
+  `company_id` INT UNSIGNED NOT NULL,
+  `access_level` ENUM('super_admin', 'parent_admin', 'subsidiary_admin', 'accountant', 'approver', 'viewer', 'support') NOT NULL DEFAULT 'accountant',
+  `is_primary` TINYINT(1) NOT NULL DEFAULT 0,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `granted_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_company_membership` (`user_id`, `company_id`),
+  KEY `idx_company_memberships_company` (`company_id`, `is_active`),
+  KEY `idx_company_memberships_user` (`user_id`, `is_active`),
+  CONSTRAINT `fk_company_memberships_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_company_memberships_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_company_memberships_granted_by` FOREIGN KEY (`granted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `security_events` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` INT UNSIGNED DEFAULT NULL,
+  `email` VARCHAR(190) DEFAULT NULL,
+  `event_type` VARCHAR(60) NOT NULL,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `outcome` ENUM('success', 'denied', 'failure') NOT NULL DEFAULT 'success',
+  `details` VARCHAR(500) DEFAULT NULL,
+  `request_path` VARCHAR(255) DEFAULT NULL,
+  `ip_address` VARCHAR(60) DEFAULT NULL,
+  `user_agent` VARCHAR(255) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_security_events_type_time` (`event_type`, `created_at`),
+  KEY `idx_security_events_user_time` (`user_id`, `created_at`),
+  KEY `idx_security_events_ip_time` (`ip_address`, `created_at`),
+  KEY `idx_security_events_outcome_time` (`outcome`, `created_at`),
+  CONSTRAINT `fk_security_events_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
