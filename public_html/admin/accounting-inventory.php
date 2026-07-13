@@ -60,6 +60,8 @@ function inventory_mapping_purposes(): array
         'write_down_allowance' => ['label' => 'Allowance for Write-down', 'expect' => 'liability'],
         'write_down_reversal'  => ['label' => 'Reversal of Write-down', 'expect' => 'revenue'],
         'scrap_inventory'      => ['label' => 'Scrap / By-product Inventory', 'expect' => 'asset'],
+        'labour_clearing'      => ['label' => 'Direct Labour Clearing / Wages Payable', 'expect' => 'liability'],
+        'overhead_absorbed'    => ['label' => 'Production Overhead Absorbed', 'expect' => 'expense'],
         'tax_input'            => ['label' => 'Recoverable Input Tax', 'expect' => 'asset'],
         'tax_output'           => ['label' => 'Output Tax Payable', 'expect' => 'liability'],
     ];
@@ -85,16 +87,47 @@ function inventory_company_item(int $itemId, int $companyId): ?array
  * Idempotent via the vouchers UNIQUE(source_type, source_id) key.
  * Returns the voucher id, or 0 when ledger links are missing (stock-only).
  */
-function inventory_post_production_voucher(int $companyId, int $fiscalYearId, int $orderId, string $orderNo, string $date, int $finishedLedgerId, array $inputCostByLedger, int $userId): int
+function inventory_post_production_voucher(int $companyId, int $fiscalYearId, int $orderId, string $orderNo, string $date, int $finishedLedgerId, array $inputCostByLedger, int $userId, array $conversion = []): int
 {
-    $total = round(array_sum($inputCostByLedger), 2);
-    if ($finishedLedgerId <= 0 || $total <= 0 || $inputCostByLedger === [] || in_array(0, array_map('intval', array_keys($inputCostByLedger)), true)) {
+    $materialTotal = round(array_sum($inputCostByLedger), 2);
+    if ($finishedLedgerId <= 0 || $materialTotal <= 0 || $inputCostByLedger === [] || in_array(0, array_map('intval', array_keys($inputCostByLedger)), true)) {
         return 0;
     }
-    $entries = [['ledger_id' => $finishedLedgerId, 'entry_type' => 'debit', 'amount' => $total]];
+    $labour = round((float) ($conversion['labour'] ?? 0), 2);
+    $overhead = round((float) ($conversion['overhead'] ?? 0), 2);
+    $byproduct = round((float) ($conversion['byproduct'] ?? 0), 2);
+    $abnormal = round((float) ($conversion['abnormal'] ?? 0), 2);
+
+    // IAS 2 cost accumulation: FG carries materials (net of abnormal waste)
+    // + labour + absorbed overhead - by-product value. Abnormal waste is a
+    // period expense; the by-product goes to scrap inventory at its value.
+    // Dr FG + Dr scrap + Dr loss = Cr materials + Cr labour + Cr overhead.
+    $fgDebit = round($materialTotal - $abnormal + $labour + $overhead - $byproduct, 2);
+    $entries = [['ledger_id' => $finishedLedgerId, 'entry_type' => 'debit', 'amount' => $fgDebit]];
+    if ($byproduct > 0) {
+        $scrapL = inv_resolve_mapping($companyId, 'scrap_inventory');
+        if (!$scrapL) { throw new RuntimeException('Map Scrap / By-product Inventory before recording a by-product value.'); }
+        $entries[] = ['ledger_id' => (int) $scrapL['id'], 'entry_type' => 'debit', 'amount' => $byproduct];
+    }
+    if ($abnormal > 0) {
+        $lossL = inv_resolve_mapping($companyId, 'inventory_loss');
+        if (!$lossL) { throw new RuntimeException('Map Inventory Loss before recording abnormal waste.'); }
+        $entries[] = ['ledger_id' => (int) $lossL['id'], 'entry_type' => 'debit', 'amount' => $abnormal];
+    }
     foreach ($inputCostByLedger as $ledgerId => $amount) {
         $entries[] = ['ledger_id' => (int) $ledgerId, 'entry_type' => 'credit', 'amount' => round((float) $amount, 2)];
     }
+    if ($labour > 0) {
+        $labL = inv_resolve_mapping($companyId, 'labour_clearing');
+        if (!$labL) { throw new RuntimeException('Map Direct Labour Clearing before adding labour cost.'); }
+        $entries[] = ['ledger_id' => (int) $labL['id'], 'entry_type' => 'credit', 'amount' => $labour];
+    }
+    if ($overhead > 0) {
+        $ohL = inv_resolve_mapping($companyId, 'overhead_absorbed');
+        if (!$ohL) { throw new RuntimeException('Map Production Overhead Absorbed before absorbing overhead.'); }
+        $entries[] = ['ledger_id' => (int) $ohL['id'], 'entry_type' => 'credit', 'amount' => $overhead];
+    }
+    $total = round($materialTotal + $labour + $overhead, 2);
     return (int) create_voucher_with_entries([
         'company_id' => $companyId,
         'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
@@ -434,6 +467,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/accounting-inventory.php?view=mapping');
     }
 
+    if ($action === 'save_bom') {
+        if (!($inventoryProfile['show_manufacturing'] ?? false)) {
+            flash('error', 'BOMs are available only for manufacturing companies.');
+            redirect('admin/accounting-inventory.php');
+        }
+        $bomNo = strtoupper(trim((string) ($_POST['bom_no'] ?? ''))) ?: ('BOM-' . date('ymdHis'));
+        $finishedItemId = (int) ($_POST['finished_item_id'] ?? 0);
+        $outputQty = max(0.001, round((float) ($_POST['output_qty'] ?? 1), 3));
+        $stdLabour = max(0.0, round((float) ($_POST['std_labour_cost'] ?? 0), 2));
+        $stdOverhead = max(0.0, round((float) ($_POST['std_overhead_cost'] ?? 0), 2));
+        $finishedItem = inventory_company_item($finishedItemId, $companyId);
+        if (!$finishedItem) {
+            flash('error', 'Select the finished product for this BOM.');
+            redirect('admin/accounting-inventory.php?view=manufacturing');
+        }
+        $lineItems = $_POST['bom_item_id'] ?? [];
+        $lineQtys = $_POST['bom_qty'] ?? [];
+        $lineWastes = $_POST['bom_waste'] ?? [];
+        $lineRates = $_POST['bom_rate'] ?? [];
+        $lines = [];
+        foreach ($lineItems as $i => $raw) {
+            $lid = (int) $raw;
+            $lqty = round((float) ($lineQtys[$i] ?? 0), 4);
+            if ($lid <= 0 || $lqty <= 0 || $lid === $finishedItemId) {
+                continue;
+            }
+            $component = inventory_company_item($lid, $companyId);
+            if (!$component) {
+                continue; // never accept a foreign company's item id
+            }
+            $lrate = round((float) ($lineRates[$i] ?? 0), 6);
+            $lines[] = ['item_id' => $lid, 'qty' => $lqty, 'waste' => max(0.0, round((float) ($lineWastes[$i] ?? 0), 3)), 'rate' => $lrate > 0 ? $lrate : (float) $component['purchase_rate']];
+        }
+        if ($lines === []) {
+            flash('error', 'Add at least one component line to the BOM.');
+            redirect('admin/accounting-inventory.php?view=manufacturing');
+        }
+        try {
+            db()->beginTransaction();
+            db()->prepare('INSERT INTO bom_headers (company_id, bom_no, version, finished_item_id, output_qty, std_labour_cost, std_overhead_cost, status, created_by)
+                VALUES (:cid, :no, 1, :fid, :out, :lab, :oh, \'active\', :uid)')
+                ->execute(['cid' => $companyId, 'no' => $bomNo, 'fid' => $finishedItemId, 'out' => $outputQty, 'lab' => $stdLabour, 'oh' => $stdOverhead, 'uid' => $userId]);
+            $newBomId = (int) db()->lastInsertId();
+            $lineStmt = db()->prepare('INSERT INTO bom_lines (bom_id, item_id, std_qty, waste_pct, std_rate) VALUES (:bid, :iid, :q, :w, :r)');
+            foreach ($lines as $l) {
+                $lineStmt->execute(['bid' => $newBomId, 'iid' => $l['item_id'], 'q' => $l['qty'], 'w' => $l['waste'], 'r' => $l['rate']]);
+            }
+            db()->commit();
+            log_activity('bom', $newBomId, 'created', 'BOM ' . $bomNo . ' created (' . count($lines) . ' lines).', $userId);
+            flash('success', 'BOM ' . $bomNo . ' saved for ' . $finishedItem['sku'] . ' (' . count($lines) . ' component lines). Pick it on the production order form to prefill materials and get variance reporting.');
+        } catch (Throwable $e) {
+            if (db()->inTransaction()) { db()->rollBack(); }
+            flash('error', (string) $e->getCode() === '23000' ? 'BOM number ' . $bomNo . ' already exists.' : 'Could not save BOM: ' . $e->getMessage());
+        }
+        redirect('admin/accounting-inventory.php?view=manufacturing');
+    }
+
     if ($action === 'create_manufacturing_order') {
         if (!($inventoryProfile['show_manufacturing'] ?? false)) {
             flash('error', 'Manufacturing orders are available only for manufacturing companies.');
@@ -443,6 +533,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $finishedItemId = (int) ($_POST['finished_item_id'] ?? 0);
         $quantity = round((float) ($_POST['quantity'] ?? 0), 3);
         $mode = (string) ($_POST['production_mode'] ?? 'complete') === 'start' ? 'start' : 'complete';
+        // Conversion costs (IAS 2 cost accumulation) + optional BOM link.
+        $labourCost = max(0.0, round((float) ($_POST['labour_cost'] ?? 0), 2));
+        $overheadAbsorbed = max(0.0, round((float) ($_POST['overhead_absorbed'] ?? 0), 2));
+        $byproductValue = max(0.0, round((float) ($_POST['byproduct_value'] ?? 0), 2));
+        $abnormalWaste = max(0.0, round((float) ($_POST['abnormal_waste_cost'] ?? 0), 2));
+        $bomId = (int) ($_POST['bom_id'] ?? 0);
+        $bom = $bomId > 0 ? mfg_load_bom($companyId, $bomId) : null;
         $inputItemIds = $_POST['input_item_id'] ?? [];
         $inputQuantities = $_POST['input_quantity'] ?? [];
         $inputRates = $_POST['input_rate'] ?? [];
@@ -494,15 +591,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             db()->beginTransaction();
             $stmt = db()->prepare('
-                INSERT INTO manufacturing_orders (company_id, fiscal_year_id, order_no, finished_item_id, quantity, status, started_on, completed_on, notes)
-                VALUES (:company_id, :fiscal_year_id, :order_no, :finished_item_id, :quantity, :status, :started_on, :completed_on, :notes)
+                INSERT INTO manufacturing_orders (company_id, fiscal_year_id, order_no, finished_item_id, bom_id, quantity, labour_cost, overhead_absorbed, byproduct_value, abnormal_waste_cost, status, started_on, completed_on, notes)
+                VALUES (:company_id, :fiscal_year_id, :order_no, :finished_item_id, :bom_id, :quantity, :labour_cost, :overhead_absorbed, :byproduct_value, :abnormal_waste_cost, :status, :started_on, :completed_on, :notes)
             ');
             $stmt->execute([
                 'company_id' => $companyId,
                 'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
                 'order_no' => $orderNo,
                 'finished_item_id' => $finishedItemId,
+                'bom_id' => $bom ? $bomId : null,
                 'quantity' => $quantity,
+                'labour_cost' => $labourCost,
+                'overhead_absorbed' => $overheadAbsorbed,
+                'byproduct_value' => $byproductValue,
+                'abnormal_waste_cost' => $abnormalWaste,
                 'status' => $mode === 'start' ? 'in_progress' : 'completed',
                 'started_on' => $startedOn,
                 'completed_on' => $mode === 'start' ? null : $completedOn,
@@ -548,7 +650,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect('admin/accounting-inventory.php?view=manufacturing');
             }
 
-            $finishedRate = $quantity > 0 ? round($totalInputCost / $quantity, 2) : 0.0;
+            // IAS 2 absorbed cost: materials (net of abnormal waste) + labour +
+            // overhead - by-product value. Abnormal waste never enters FG cost.
+            $orderCost = mfg_order_cost($totalInputCost, $labourCost, $overheadAbsorbed, $byproductValue, $abnormalWaste, $quantity);
+            $finishedRate = $orderCost['unit_cost'];
             $movementStmt->execute([
                 'company_id' => $companyId,
                 'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
@@ -559,10 +664,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'qty_in' => $quantity,
                 'qty_out' => 0,
                 'rate' => $finishedRate,
-                'amount' => round($quantity * $finishedRate, 2),
-                'notes' => 'Finished goods from ' . $orderNo,
+                'amount' => $orderCost['inventoriable'],
+                'notes' => 'Finished goods from ' . $orderNo . ' at absorbed cost',
             ]);
-            $voucherId = inventory_post_production_voucher($companyId, $fiscalYearId, $orderId, $orderNo, $completedOn, (int) ($finishedItem['ledger_id'] ?? 0), $inputCostByLedger, $userId);
+            $voucherId = inventory_post_production_voucher($companyId, $fiscalYearId, $orderId, $orderNo, $completedOn, (int) ($finishedItem['ledger_id'] ?? 0), $inputCostByLedger, $userId, [
+                'labour' => $labourCost, 'overhead' => $overheadAbsorbed,
+                'byproduct' => $byproductValue, 'abnormal' => $abnormalWaste,
+            ]);
+            // Variances vs the BOM standard, when this order was built from one.
+            if ($bom) {
+                $actualLines = array_map(static fn (array $in): array => ['item_id' => (int) $in['item']['id'], 'qty' => $in['qty'], 'rate' => $in['rate']], $inputs);
+                $mv = mfg_material_variances($actualLines, $bom['lines'], (float) $bom['output_qty'], $quantity);
+                $cv = mfg_conversion_variances($labourCost, $overheadAbsorbed, (float) $bom['std_labour_cost'], (float) $bom['std_overhead_cost'], (float) $bom['output_qty'], $quantity);
+                $stdMat = mfg_standard_material_cost($bom['lines'], (float) $bom['output_qty'], $quantity);
+                mfg_record_variances($companyId, $orderId, [
+                    'material_price' => ['standard' => $stdMat, 'actual' => $totalInputCost, 'variance' => $mv['price']],
+                    'material_usage' => ['standard' => $stdMat, 'actual' => $totalInputCost, 'variance' => $mv['usage']],
+                    'labour' => ['standard' => (float) $bom['std_labour_cost'] * ($quantity / max(0.001, (float) $bom['output_qty'])), 'actual' => $labourCost, 'variance' => $cv['labour']],
+                    'overhead' => ['standard' => (float) $bom['std_overhead_cost'] * ($quantity / max(0.001, (float) $bom['output_qty'])), 'actual' => $overheadAbsorbed, 'variance' => $cv['overhead']],
+                ]);
+            }
             if ($voucherId > 0) {
                 db()->prepare("UPDATE inventory_transactions SET voucher_id = :vid WHERE company_id = :cid AND ref_no = :ref AND transaction_type IN ('consume', 'produce')")
                     ->execute(['vid' => $voucherId, 'cid' => $companyId, 'ref' => $orderNo]);
@@ -646,7 +767,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ledgerId = (int) ($inputRow['ledger_id'] ?? 0);
                 $inputCostByLedger[$ledgerId] = ($inputCostByLedger[$ledgerId] ?? 0.0) + $amount;
             }
-            $finishedRate = $quantity > 0 ? round($totalInputCost / $quantity, 2) : 0.0;
+            // Absorb the conversion costs stored on the order (IAS 2).
+            $ordLabour = (float) ($order['labour_cost'] ?? 0);
+            $ordOverhead = (float) ($order['overhead_absorbed'] ?? 0);
+            $ordByproduct = (float) ($order['byproduct_value'] ?? 0);
+            $ordAbnormal = (float) ($order['abnormal_waste_cost'] ?? 0);
+            $orderCost = mfg_order_cost($totalInputCost, $ordLabour, $ordOverhead, $ordByproduct, $ordAbnormal, $quantity);
+            $finishedRate = $orderCost['unit_cost'];
             $movementStmt->execute([
                 'company_id' => $companyId,
                 'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
@@ -657,14 +784,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'qty_in' => $quantity,
                 'qty_out' => 0,
                 'rate' => $finishedRate,
-                'amount' => round($quantity * $finishedRate, 2),
-                'notes' => 'Finished goods from ' . $orderNo,
+                'amount' => $orderCost['inventoriable'],
+                'notes' => 'Finished goods from ' . $orderNo . ' at absorbed cost',
             ]);
             db()->prepare("UPDATE manufacturing_orders SET status = 'completed', completed_on = :done WHERE id = :id")
                 ->execute(['done' => $today, 'id' => $orderId]);
             $finishedLedgerStmt = db()->prepare('SELECT ledger_id FROM inventory_items WHERE id = :id');
             $finishedLedgerStmt->execute(['id' => (int) $order['finished_item_id']]);
-            $voucherId = inventory_post_production_voucher($companyId, $fiscalYearId, $orderId, $orderNo, $today, (int) ($finishedLedgerStmt->fetchColumn() ?: 0), $inputCostByLedger, $userId);
+            $voucherId = inventory_post_production_voucher($companyId, $fiscalYearId, $orderId, $orderNo, $today, (int) ($finishedLedgerStmt->fetchColumn() ?: 0), $inputCostByLedger, $userId, [
+                'labour' => $ordLabour, 'overhead' => $ordOverhead,
+                'byproduct' => $ordByproduct, 'abnormal' => $ordAbnormal,
+            ]);
             if ($voucherId > 0) {
                 db()->prepare("UPDATE inventory_transactions SET voucher_id = :vid WHERE company_id = :cid AND ref_no = :ref AND transaction_type IN ('consume', 'produce')")
                     ->execute(['vid' => $voucherId, 'cid' => $companyId, 'ref' => $orderNo]);
@@ -1082,6 +1212,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <label>Quantity produced<input type="number" step="0.001" min="0.001" name="quantity" required></label>
                 <label>Started on<input type="date" name="started_on" value="<?= e(date('Y-m-d')) ?>"></label>
                 <label>Completed on<input type="date" name="completed_on" value="<?= e(date('Y-m-d')) ?>"></label>
+                <?php
+                $bomOptions = table_exists('bom_headers')
+                    ? db()->query("SELECT bh.id, bh.bom_no, bh.output_qty, i.sku FROM bom_headers bh JOIN inventory_items i ON i.id = bh.finished_item_id WHERE bh.company_id = " . $companyId . " AND bh.status = 'active' ORDER BY bh.bom_no")->fetchAll(PDO::FETCH_ASSOC)
+                    : [];
+                ?>
+                <label>Bill of materials (optional)<select name="bom_id"><option value="0">No BOM — free-form inputs</option><?php foreach ($bomOptions as $b): ?><option value="<?= e((int) $b['id']) ?>"><?= e($b['bom_no'] . ' → ' . $b['sku'] . ' (batch ' . number_format((float) $b['output_qty'], 3) . ')') ?></option><?php endforeach; ?></select></label>
+                <label>Direct labour cost<input type="number" step="0.01" min="0" name="labour_cost" value="0.00"></label>
+                <label>Overhead absorbed (normal capacity)<input type="number" step="0.01" min="0" name="overhead_absorbed" value="0.00"></label>
+                <label>By-product / scrap value<input type="number" step="0.01" min="0" name="byproduct_value" value="0.00"></label>
+                <label>Abnormal waste cost <small style="color:var(--mbw-muted)">(expensed, never inventoried)</small><input type="number" step="0.01" min="0" name="abnormal_waste_cost" value="0.00"></label>
                 <?php for ($i = 0; $i < 4; $i++): ?>
                     <div class="workspace-span-2 workspace-form-grid">
                         <label>Input item<select name="input_item_id[]"><option value="">Select input</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name'] . ' (on hand ' . number_format((float) $item['on_hand'], 3) . ')') ?></option><?php endforeach; ?></select></label>
@@ -1091,6 +1231,28 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endfor; ?>
                 <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
                 <button type="submit"><?= icon('settings') ?>Save production order</button>
+            </form>
+        </details>
+
+        <details class="feature-disclosure" id="bom">
+            <summary><span><strong><?= icon('documents') ?>Bill of Materials</strong><small>Define the standard recipe (components, expected waste, standard costs) for variance reporting.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+            <form method="post" class="workspace-form-grid">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="save_bom">
+                <label>BOM no<input type="text" name="bom_no" placeholder="Leave blank for auto"></label>
+                <label>Finished product<select name="finished_item_id" required><option value="">Select finished item</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+                <label>Output qty per batch<input type="number" step="0.001" min="0.001" name="output_qty" value="1.000" required></label>
+                <label>Std labour cost / batch<input type="number" step="0.01" min="0" name="std_labour_cost" value="0.00"></label>
+                <label>Std overhead / batch<input type="number" step="0.01" min="0" name="std_overhead_cost" value="0.00"></label>
+                <?php for ($i = 0; $i < 4; $i++): ?>
+                    <div class="workspace-span-2 workspace-form-grid">
+                        <label>Component<select name="bom_item_id[]"><option value="">Select component</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+                        <label>Std qty / batch<input type="number" step="0.0001" min="0" name="bom_qty[]"></label>
+                        <label>Expected waste %<input type="number" step="0.001" min="0" name="bom_waste[]" value="0"></label>
+                        <label>Std rate<input type="number" step="0.000001" min="0" name="bom_rate[]" placeholder="Auto: purchase rate"></label>
+                    </div>
+                <?php endfor; ?>
+                <button type="submit"><?= icon('documents') ?>Save BOM</button>
             </form>
         </details>
     <?php endif; ?>
@@ -1245,5 +1407,30 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </table>
         </div>
     </section>
+
+    <?php
+    $varianceRows = table_exists('production_variances')
+        ? db()->query("SELECT pv.*, mo.order_no FROM production_variances pv JOIN manufacturing_orders mo ON mo.id = pv.manufacturing_order_id WHERE pv.company_id = " . $companyId . " ORDER BY pv.id DESC LIMIT 40")->fetchAll(PDO::FETCH_ASSOC)
+        : [];
+    ?>
+    <?php if ($varianceRows !== []): ?>
+    <section class="mbw-card" id="production-variances">
+        <div class="mbw-card-head"><h2>Production Variances</h2><div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Actual vs BOM standard. Positive = unfavourable.</span></div></div>
+        <div class="rc-table-scroll"><table class="rc-table">
+            <thead><tr><th>Order</th><th>Variance</th><th class="align-right">Standard</th><th class="align-right">Actual</th><th class="align-right">Variance</th></tr></thead>
+            <tbody>
+                <?php foreach ($varianceRows as $vr): $unfav = (float) $vr['variance'] > 0; ?>
+                    <tr>
+                        <td><?= e($vr['order_no']) ?></td>
+                        <td><?= e(str_replace('_', ' ', ucfirst((string) $vr['variance_type']))) ?></td>
+                        <td class="align-right"><?= e(number_format((float) $vr['standard_amount'], 2)) ?></td>
+                        <td class="align-right"><?= e(number_format((float) $vr['actual_amount'], 2)) ?></td>
+                        <td class="align-right" style="font-weight:700;color:var(<?= $unfav ? '--mbw-amber' : '--mbw-green' ?>)"><?= e(number_format((float) $vr['variance'], 2)) ?> <?= $unfav ? '(U)' : '(F)' ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+    </section>
+    <?php endif; ?>
 <?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

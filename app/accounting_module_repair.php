@@ -178,6 +178,26 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Provision manufacturing costing (migration 038)', static function (): void {
+        $migrationFile = dirname(__DIR__) . '/database/migrations/038_manufacturing_costing.sql';
+        if (is_file($migrationFile)) {
+            $sqlLines = array_filter(
+                preg_split('/\R/', (string) file_get_contents($migrationFile)) ?: [],
+                static fn (string $line): bool => !str_starts_with(ltrim($line), '--')
+            );
+            foreach (array_filter(array_map('trim', explode(';', implode("\n", $sqlLines)))) as $statement) {
+                if (stripos($statement, 'CREATE TABLE') === 0) {
+                    db()->exec($statement);
+                }
+            }
+        }
+        accounting_repair_add_column('manufacturing_orders', 'bom_id', '`bom_id` INT UNSIGNED DEFAULT NULL AFTER `finished_item_id`');
+        accounting_repair_add_column('manufacturing_orders', 'labour_cost', '`labour_cost` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `quantity`');
+        accounting_repair_add_column('manufacturing_orders', 'overhead_absorbed', '`overhead_absorbed` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `labour_cost`');
+        accounting_repair_add_column('manufacturing_orders', 'byproduct_value', '`byproduct_value` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `overhead_absorbed`');
+        accounting_repair_add_column('manufacturing_orders', 'abnormal_waste_cost', '`abnormal_waste_cost` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `byproduct_value`');
+    });
+
     $run('Create fixed-asset register (migration 037)', static function (): void {
         // Seven asset tables; every statement is CREATE TABLE IF NOT EXISTS so
         // re-running is safe. Replayed from the migration (single source).

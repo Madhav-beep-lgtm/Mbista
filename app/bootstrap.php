@@ -7,3 +7,4 @@ require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/access_control.php';
 require_once __DIR__ . '/inventory_valuation.php';
 require_once __DIR__ . '/fixed_asset_engine.php';
+require_once __DIR__ . '/manufacturing_engine.php';
