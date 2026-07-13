@@ -2704,19 +2704,168 @@ const ACCESS_LEVELS = [
  * Capability matrix: level => [capability => true]. Capabilities:
  * view, create, edit, approve, post, delete, report, admin.
  */
-function access_level_capabilities(): array
+function ensure_role_capability_schema(): void
+{
+    static $ready = false;
+
+    if ($ready) {
+        return;
+    }
+
+    db()->exec("
+        CREATE TABLE IF NOT EXISTS role_capability_overrides (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            company_id INT UNSIGNED NOT NULL,
+            access_level VARCHAR(40) NOT NULL,
+            capability VARCHAR(40) NOT NULL,
+            is_allowed TINYINT(1) NOT NULL DEFAULT 0,
+            updated_by INT UNSIGNED DEFAULT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_role_capability_company_level_action
+                (company_id, access_level, capability),
+            KEY idx_role_capability_company (company_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+          COLLATE=utf8mb4_unicode_ci
+    ");
+
+    $ready = true;
+}
+
+function default_access_level_capabilities(): array
 {
     return [
-        'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'approve' => true, 'post' => true, 'delete' => true, 'report' => true, 'admin' => true],
-        'parent_admin' => ['view' => true, 'create' => true, 'edit' => true, 'approve' => true, 'post' => true, 'delete' => false, 'report' => true, 'admin' => true],
-        'subsidiary_admin' => ['view' => true, 'create' => true, 'edit' => true, 'approve' => true, 'post' => true, 'delete' => false, 'report' => true, 'admin' => false],
-        'accountant' => ['view' => true, 'create' => true, 'edit' => true, 'approve' => false, 'post' => false, 'delete' => false, 'report' => true, 'admin' => false],
-        'approver' => ['view' => true, 'create' => false, 'edit' => false, 'approve' => true, 'post' => true, 'delete' => false, 'report' => true, 'admin' => false],
-        'viewer' => ['view' => true, 'create' => false, 'edit' => false, 'approve' => false, 'post' => false, 'delete' => false, 'report' => true, 'admin' => false],
-        'support' => ['view' => true, 'create' => false, 'edit' => false, 'approve' => false, 'post' => false, 'delete' => false, 'report' => false, 'admin' => false],
+        'super_admin' => [
+            'view' => true, 'create' => true, 'edit' => true,
+            'approve' => true, 'post' => true, 'delete' => true,
+            'report' => true, 'admin' => true,
+        ],
+        'parent_admin' => [
+            'view' => true, 'create' => true, 'edit' => true,
+            'approve' => true, 'post' => true, 'delete' => false,
+            'report' => true, 'admin' => true,
+        ],
+        'subsidiary_admin' => [
+            'view' => true, 'create' => true, 'edit' => true,
+            'approve' => true, 'post' => true, 'delete' => false,
+            'report' => true, 'admin' => false,
+        ],
+        'accountant' => [
+            'view' => true, 'create' => true, 'edit' => true,
+            'approve' => false, 'post' => false, 'delete' => false,
+            'report' => true, 'admin' => false,
+        ],
+        'approver' => [
+            'view' => true, 'create' => false, 'edit' => false,
+            'approve' => true, 'post' => true, 'delete' => false,
+            'report' => true, 'admin' => false,
+        ],
+        'viewer' => [
+            'view' => true, 'create' => false, 'edit' => false,
+            'approve' => false, 'post' => false, 'delete' => false,
+            'report' => true, 'admin' => false,
+        ],
+        'support' => [
+            'view' => true, 'create' => false, 'edit' => false,
+            'approve' => false, 'post' => false, 'delete' => false,
+            'report' => false, 'admin' => false,
+        ],
     ];
 }
 
+function access_level_capabilities(?int $companyId = null): array
+{
+    $matrix = default_access_level_capabilities();
+    $companyId = $companyId ?? current_company_id();
+
+    if ($companyId <= 0) {
+        return $matrix;
+    }
+
+    ensure_role_capability_schema();
+
+    $stmt = db()->prepare(
+        'SELECT access_level, capability, is_allowed
+         FROM role_capability_overrides
+         WHERE company_id = :company_id'
+    );
+    $stmt->execute(['company_id' => $companyId]);
+
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $level = (string) ($row['access_level'] ?? '');
+        $capability = (string) ($row['capability'] ?? '');
+
+        if (
+            isset($matrix[$level])
+            && array_key_exists($capability, $matrix[$level])
+            && $level !== 'super_admin'
+        ) {
+            $matrix[$level][$capability] = (int) $row['is_allowed'] === 1;
+        }
+    }
+
+    return $matrix;
+}
+
+function save_access_level_capabilities(
+    int $companyId,
+    array $submitted,
+    int $updatedBy
+): void {
+    if ($companyId <= 0) {
+        throw new InvalidArgumentException('A valid company is required.');
+    }
+
+    ensure_role_capability_schema();
+
+    $levels = array_keys(ACCESS_LEVELS);
+    $capabilities = [
+        'view', 'create', 'edit', 'approve',
+        'post', 'delete', 'report', 'admin',
+    ];
+
+    db()->beginTransaction();
+
+    try {
+        $delete = db()->prepare(
+            'DELETE FROM role_capability_overrides
+             WHERE company_id = :company_id'
+        );
+        $delete->execute(['company_id' => $companyId]);
+
+        $insert = db()->prepare(
+            'INSERT INTO role_capability_overrides
+                (company_id, access_level, capability, is_allowed, updated_by)
+             VALUES
+                (:company_id, :access_level, :capability, :is_allowed, :updated_by)'
+        );
+
+        foreach ($levels as $level) {
+            foreach ($capabilities as $capability) {
+                $allowed = $level === 'super_admin'
+                    ? 1
+                    : (!empty($submitted[$level][$capability]) ? 1 : 0);
+
+                $insert->execute([
+                    'company_id' => $companyId,
+                    'access_level' => $level,
+                    'capability' => $capability,
+                    'is_allowed' => $allowed,
+                    'updated_by' => $updatedBy > 0 ? $updatedBy : null,
+                ]);
+            }
+        }
+
+        db()->commit();
+    } catch (Throwable $exception) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+
+        throw $exception;
+    }
+}
 function current_access_level(): string
 {
     $user = current_user();

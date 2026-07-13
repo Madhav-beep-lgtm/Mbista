@@ -44,8 +44,7 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
     // Available to every company/context, including client books, so client
     // accounting gets Inventory, Manufacturing and Fixed Assets too.
-    ['Inventory & Manufacturing', 'admin/accounting-inventory.php', 'layers', $headerScript === 'accounting-inventory.php'],
-    ['Fixed Assets', 'admin/fixed-assets.php', 'companies', $headerScript === 'fixed-assets.php'],
+    ['Inventory, Manufacturing & Assets', 'admin/accounting-inventory.php', 'layers', in_array($headerScript, ['accounting-inventory.php', 'fixed-assets.php'], true)],
 ]);
 $headerAccountingActive = false;
 foreach ($headerAccountingChildren as $headerChild) {

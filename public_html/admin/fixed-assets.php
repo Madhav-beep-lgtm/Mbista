@@ -16,6 +16,9 @@ $companyId = (int) ($company['id'] ?? 0);
 $fiscalYearId = (int) ($fiscalYear['id'] ?? 0);
 $userId = (int) ($currentUser['id'] ?? 0);
 
+$inventoryBusinessType = company_accounting_business_type($companyId);
+$inventoryProfile = accounting_business_profile($inventoryBusinessType);
+
 $assetClasses = ['ppe' => 'Property, Plant & Equipment', 'intangible' => 'Intangible (IAS 38)', 'rou' => 'Right-of-Use (IFRS 16)', 'investment_property' => 'Investment Property', 'cwip' => 'Capital WIP'];
 $methods = ['straight_line' => 'Straight-line', 'diminishing_balance' => 'Diminishing balance', 'units' => 'Units of production'];
 
@@ -744,13 +747,12 @@ $pageSubtitle = 'Asset register, depreciation, and IFRS accounting integration';
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<nav class="accounting-tabs" aria-label="Accounting sections">
-    <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Dashboard</a>
-    <a href="<?= e(url('admin/accounting.php')) ?>">Vouchers</a>
-    <a href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory</a>
-    <a class="is-active" href="<?= e(url('admin/fixed-assets.php')) ?>">Fixed Assets</a>
-    <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a>
-    <a href="<?= e(url('admin/reports-center.php')) ?>">Reports</a>
+<nav class="mbw-tabbar inventory-module-tabs" aria-label="Inventory and asset modules">
+    <a class="mbw-tab" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('layers') ?> Inventory</a>
+    <?php if (($inventoryProfile['show_manufacturing'] ?? false)): ?>
+        <a class="mbw-tab" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('services') ?> Manufacturing</a>
+    <?php endif; ?>
+    <a class="mbw-tab is-active" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?> Fixed Assets</a>
 </nav>
 
 <section class="mbw-kpi-grid" aria-label="Fixed asset overview">

@@ -1309,14 +1309,12 @@ $pageSubtitle = $inventoryProfile['show_manufacturing']
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<nav class="accounting-tabs" aria-label="Accounting sections">
-    <a href="<?= e(url('admin/accounting-dashboard.php')) ?>">Dashboard</a>
-    <a href="<?= e(url('admin/accounting-parties.php')) ?>">Parties</a>
-    <a href="<?= e(url('admin/accounting.php')) ?>">Vouchers</a>
-    <a class="<?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory</a>
-    <?php if ($inventoryProfile['show_manufacturing']): ?><a class="<?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>">Manufacturing</a><?php endif; ?>
-    <a href="<?= e(url('admin/chart-of-accounts.php')) ?>">Chart of Accounts</a>
-    <a href="<?= e(url('admin/reports-center.php')) ?>">Reports</a>
+<nav class="mbw-tabbar inventory-module-tabs" aria-label="Inventory modules">
+    <a class="mbw-tab <?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('layers') ?> Inventory</a>
+    <?php if (($inventoryProfile['show_manufacturing'] ?? false)): ?>
+        <a class="mbw-tab <?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('services') ?> Manufacturing</a>
+    <?php endif; ?>
+    <a class="mbw-tab" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?> Fixed Assets</a>
 </nav>
 
 <section class="mbw-kpi-grid" aria-label="Inventory overview">
@@ -1372,11 +1370,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 </section>
 
-<nav class="mbw-tabbar" aria-label="Inventory workspace" style="margin:6px 0 16px">
-    <a class="<?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('cart') ?>Items &amp; Transactions</a>
-    <a class="<?= $invView === 'valuation' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=valuation')) ?>"><?= icon('reports') ?>Valuation &amp; NRV</a>
-    <a class="<?= $invView === 'mapping' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=mapping')) ?>"><?= icon('accounting') ?>Ledger Mapping</a>
-    <?php if ($inventoryProfile['show_manufacturing']): ?><a class="<?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('layers') ?>Manufacturing</a><?php endif; ?>
+<nav class="mbw-tabbar inventory-workspace-tabs" aria-label="Inventory workspace">
+    <a class="mbw-tab <?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('cart') ?>Items &amp; Transactions</a>
+    <a class="mbw-tab <?= $invView === 'valuation' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=valuation')) ?>"><?= icon('reports') ?>Valuation &amp; NRV</a>
+    <a class="mbw-tab <?= $invView === 'mapping' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=mapping')) ?>"><?= icon('accounting') ?>Ledger Mapping</a>
+    <?php if ($inventoryProfile['show_manufacturing']): ?><a class="mbw-tab <?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('layers') ?>Manufacturing</a><?php endif; ?>
 </nav>
 
 <?php if ($invView === 'valuation'): ?>
@@ -1492,7 +1490,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <td><span class="mbw-pill tone-gray"><?= e(ucfirst($meta['expect'])) ?></span></td>
                                 <td>
                                     <select name="map[<?= e($purposeKey) ?>]" style="min-width:230px">
-                                        <option value="0">— not mapped —</option>
+                                        <option value="0">Not mapped</option>
                                         <?php foreach ($ledgers as $ledger): ?>
                                             <option value="<?= e((int) $ledger['id']) ?>" <?= $curId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
                                         <?php endforeach; ?>
@@ -1534,7 +1532,26 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php if (in_array($invView, ['inventory', 'manufacturing'], true)): ?>
 <section class="mbw-card" aria-label="Inventory workbench">
-    <div class="mbw-card-head"><h2>Create &amp; Record</h2></div>
+    <div class="mbw-card-head inventory-workbench-head">
+    <div>
+        <h2><?= $invView === 'manufacturing' ? 'Manufacturing Workspace' : 'Inventory Workspace' ?></h2>
+        <p>Select one task below. Only the selected form will be shown.</p>
+    </div>
+</div>
+
+<nav class="inventory-action-tabs" aria-label="Inventory tasks">
+    <?php if ($invView === 'inventory'): ?>
+        <button type="button" class="inventory-action-tab is-active" data-workspace-target="create-item"><?= icon('services') ?><span>Item Master</span></button>
+        <button type="button" class="inventory-action-tab" data-workspace-target="warehouses"><?= icon('companies') ?><span>Warehouses</span></button>
+        <button type="button" class="inventory-action-tab" data-workspace-target="movement-purchase"><?= icon('cart') ?><span>Purchase Stock</span></button>
+        <button type="button" class="inventory-action-tab" data-workspace-target="movement-sale"><?= icon('invoices') ?><span>Sales & Returns</span></button>
+        <button type="button" class="inventory-action-tab" data-workspace-target="movement-adjust"><?= icon('settings') ?><span>Adjustments</span></button>
+        <button type="button" class="inventory-action-tab" data-workspace-target="movement-transfer"><?= icon('services') ?><span>Transfers</span></button>
+    <?php else: ?>
+        <button type="button" class="inventory-action-tab is-active" data-workspace-target="manufacturing"><?= icon('settings') ?><span>Production Order</span></button>
+        <button type="button" class="inventory-action-tab" data-workspace-target="bom"><?= icon('documents') ?><span>Bill of Materials</span></button>
+    <?php endif; ?>
+</nav>
 <div class="workspace-feature-stack">
     <?php if ($invView === 'inventory'): ?>
     <details class="feature-disclosure" id="create-item" open>
@@ -1995,4 +2012,56 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
     <?php endif; ?>
 <?php endif; ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const tabs = Array.from(document.querySelectorAll('.inventory-action-tab'));
+    const panels = Array.from(document.querySelectorAll('.workspace-feature-stack .feature-disclosure'));
+
+    if (!tabs.length || !panels.length) {
+        return;
+    }
+
+    function activateWorkspace(targetId, updateUrl) {
+        const selectedPanel = document.getElementById(targetId);
+
+        if (!selectedPanel) {
+            return;
+        }
+
+        tabs.forEach(function (tab) {
+            const active = tab.dataset.workspaceTarget === targetId;
+            tab.classList.toggle('is-active', active);
+            tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+
+        panels.forEach(function (panel) {
+            const active = panel.id === targetId;
+            panel.hidden = !active;
+            panel.open = active;
+        });
+
+        if (updateUrl) {
+            history.replaceState(null, '', window.location.pathname + window.location.search + '#' + targetId);
+        }
+    }
+
+    tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () {
+            activateWorkspace(tab.dataset.workspaceTarget, true);
+        });
+    });
+
+    const parameters = new URLSearchParams(window.location.search);
+    const hashTarget = window.location.hash.replace('#', '');
+    let initialTarget = tabs[0].dataset.workspaceTarget;
+
+    if (parameters.has('move_item') && document.getElementById('movement-purchase')) {
+        initialTarget = 'movement-purchase';
+    } else if (hashTarget && document.getElementById(hashTarget)) {
+        initialTarget = hashTarget;
+    }
+
+    activateWorkspace(initialTarget, false);
+});
+</script>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

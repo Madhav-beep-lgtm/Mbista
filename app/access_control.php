@@ -620,24 +620,46 @@ function user_can_do(string $module, string $action, ?array $user = null): bool
 
     $role = (string) ($user['role'] ?? '');
 
-    // Admins and super admins hold full rights inside their authorized scope.
+    // Admins keep full rights only inside companies already authorized to them.
     if ($role === 'admin') {
         return true;
     }
-    // Customers use their own portal, never admin modules.
+
+    // Clients may perform full accounting work only inside their own linked
+    // books company. This does not grant access to admin, client-management,
+    // company-switching, user-management, HR, settings, or system modules.
+    if ($role === 'customer') {
+        $companyId = current_company_id();
+        if ($companyId <= 0 || !user_can_access_company($companyId, $user)) {
+            return false;
+        }
+
+        $clientAccountingPermissions = [
+            'accounting' => ['view', 'create', 'edit', 'approve', 'post', 'export'],
+            'sales' => ['view', 'create', 'edit', 'export'],
+            'purchases' => ['view', 'create', 'edit', 'export'],
+            'receipts' => ['view', 'create', 'edit', 'export'],
+            'inventory' => ['view', 'create', 'edit', 'export'],
+            'payroll' => ['view', 'create', 'post', 'export'],
+            'reports' => ['view', 'export'],
+        ];
+
+        return in_array($action, $clientAccountingPermissions[$module] ?? [], true);
+    }
+
     if ($role !== 'staff') {
         return false;
     }
 
     $userId = (int) $user['id'];
-    // Unconfigured staff keep legacy full access; configured staff are strict.
+
+    // Staff permissions remain exactly as configured by the administrator.
     if (!staff_permissions_configured($userId)) {
         return true;
     }
 
     return isset(staff_permission_keys($userId)[$module . '.' . $action]);
 }
-
 /**
  * Page/endpoint gate. Admins pass; a configured staff member without the grant
  * gets a 403 (and the attempt is logged). Because admins always pass, adding

@@ -1372,15 +1372,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="mbw-card-head">
             <h2>Clients</h2>
         </div>
-        <details class="feature-disclosure">
-            <summary>
-                <span class="stat-icon"><?= icon('clients') ?></span>
-                <span>
-                    <strong>New Client</strong>
-                    <small>Create profile, portal credentials, industry, branding, and service-provider relationships.</small>
-                </span>
-                <span class="feature-disclosure-action"><?= icon('clients') ?>New Client</span>
-            </summary>
+        
             <div class="form-card">
                 <h3>New Client</h3>
                 <form method="post" class="workspace-form-grid" enctype="multipart/form-data">
@@ -1414,7 +1406,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <label>Website<input type="url" name="website" placeholder="https://example.com"></label>
                     <label class="workspace-span-2">Address<textarea name="address"></textarea></label>
                     <label class="workspace-span-2">Service Provider Entity
-                        <select name="service_provider_entity_ids[]" multiple size="5">
+                        <select name="service_provider_entity_ids[]" class="mbw-select">
+                            <option value="">Select service provider</option>
                             <?php foreach ($serviceProviderEntities as $entity): ?>
                                 <option value="<?= e((int) $entity['id']) ?>"><?= e($entity['name']) ?></option>
                             <?php endforeach; ?>
@@ -1427,7 +1420,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </div>
                 </form>
             </div>
-        </details>
+        
 
         <?php if ($selectedClient && $clientMode === 'view'): ?>
             <section class="mbw-card">
@@ -1509,7 +1502,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <label>Website<input type="url" name="website" value="<?= e($selectedClient['website'] ?? '') ?>"></label>
                     <label class="workspace-span-2">Address<textarea name="address"><?= e($selectedClient['address'] ?? '') ?></textarea></label>
                     <label class="workspace-span-2">Service Provider Entity
-                        <select name="service_provider_entity_ids[]" multiple size="5">
+                        <select name="service_provider_entity_ids[]" class="mbw-select">
+                            <option value="">Select service provider</option>
                             <?php foreach ($serviceProviderEntities as $entity): ?>
                                 <option value="<?= e((int) $entity['id']) ?>" <?= in_array((int) $entity['id'], $selectedClientServiceProviderIds, true) ? 'selected' : '' ?>><?= e($entity['name']) ?></option>
                             <?php endforeach; ?>
@@ -1583,15 +1577,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="mbw-card-head">
             <h2>Industry Management</h2>
         </div>
-        <details class="feature-disclosure" open>
-            <summary>
-                <span class="stat-icon"><?= icon('settings') ?></span>
-                <span>
-                    <strong>Add industry</strong>
-                    <small>Only active industries appear in the New Client form.</small>
-                </span>
-                <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-            </summary>
+        
             <form method="post" class="workspace-form-grid">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="save_industry">
@@ -1599,7 +1585,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <label class="checkbox-line"><input type="checkbox" name="is_active" value="1" checked> Active</label>
                 <button type="submit"><?= icon('settings') ?>Save industry</button>
             </form>
-        </details>
+        
         <div style="overflow-x:auto">
         <table>
             <thead><tr><th>Industry</th><th>Status</th><th>Action</th></tr></thead>
@@ -1639,15 +1625,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="mbw-card-head">
             <h2>Service Provider Entity Management</h2>
         </div>
-        <details class="feature-disclosure" open>
-            <summary>
-                <span class="stat-icon"><?= icon('companies') ?></span>
-                <span>
-                    <strong>Add service provider entity</strong>
-                    <small>Entities selected here can be connected to clients.</small>
-                </span>
-                <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-            </summary>
+        
             <form method="post" class="workspace-form-grid" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="save_service_provider_entity">
@@ -1662,7 +1640,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <label class="checkbox-line"><input type="checkbox" name="is_active" value="1" checked> Active</label>
                 <button type="submit"><?= icon('companies') ?>Save entity</button>
             </form>
-        </details>
+        
 
         <div style="overflow-x:auto">
         <table>
@@ -1689,15 +1667,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="mbw-card-head">
             <h2>Teams</h2>
         </div>
-        <details class="feature-disclosure">
-            <summary>
-                <span class="stat-icon"><?= icon('teams') ?></span>
-                <span>
-                    <strong>Add team</strong>
-                    <small>Create a team and assign a staff leader with optional members.</small>
-                </span>
-                <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-            </summary>
+        
             <div class="form-card">
                 <h3>Create team</h3>
                 <form method="post" class="workspace-form-grid">
@@ -1725,7 +1695,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </div>
                 </form>
             </div>
-        </details>
+        
 
         <section class="mbw-card">
             <div class="mbw-card-head">
@@ -1792,15 +1762,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </div>
             </div>
         <?php endif; ?>
-        <details class="feature-disclosure">
-            <summary>
-                <span class="stat-icon"><?= icon('contracts') ?></span>
-                <span>
-                    <strong>Add contract</strong>
-                    <small>Create a service contract for an existing client.</small>
-                </span>
-                <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-            </summary>
+        
             <div class="form-card">
                 <h3>Create service contract</h3>
                 <form method="post" class="workspace-form-grid">
@@ -1834,7 +1796,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </div>
                 </form>
             </div>
-        </details>
+        
 
         <section class="mbw-card">
             <div class="mbw-card-head">
@@ -1893,15 +1855,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <h2>Tasks</h2>
         </div>
         <div class="workspace-feature-stack">
-            <details class="feature-disclosure">
-                <summary>
-                    <span class="stat-icon"><?= icon('tasks') ?></span>
-                    <span>
-                        <strong>Add task</strong>
-                        <small>Create a client task with contract, team, fee, priority, and due date.</small>
-                    </span>
-                    <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-                </summary>
+            
                 <div class="form-card">
                 <h3>Create task</h3>
                 <form method="post" class="workspace-form-grid">
@@ -1976,7 +1930,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </div>
                 </form>
                 </div>
-            </details>
+            
 
             <details class="feature-disclosure">
                 <summary>
@@ -2204,15 +2158,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
          <div class="mbw-card-head">
              <h2>Invoices</h2>
          </div>
-         <details class="feature-disclosure">
-             <summary>
-                 <span class="stat-icon"><?= icon('invoices') ?></span>
-                 <span>
-                     <strong>Issue invoice</strong>
-                     <small>Create an invoice for a completed stage or completed task.</small>
-                 </span>
-                 <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-             </summary>
+         
              <div class="form-card">
                  <h3>Issue invoice</h3>
                  <form method="post" class="workspace-form-grid">
@@ -2257,7 +2203,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                      </div>
                  </form>
              </div>
-         </details>
+         
 
              <section class="mbw-card">
                  <div class="mbw-card-head">

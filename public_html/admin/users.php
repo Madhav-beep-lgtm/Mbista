@@ -23,6 +23,45 @@ $perPageOptions = [10, 20, 50, 100];
 $staffWorkflowActions = ['save_staff_profile', 'upload_kyc_document', 'review_kyc_document', 'save_permissions'];
 $hasAccessLevels = column_exists('users', 'access_level');
 
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST'
+    && (string) ($_POST['action'] ?? '') === 'save_role_matrix'
+) {
+    verify_csrf();
+
+    try {
+        $submittedMatrix = (array) ($_POST['cap'] ?? []);
+
+        save_access_level_capabilities(
+            $companyId,
+            $submittedMatrix,
+            (int) ($currentAdmin['id'] ?? 0)
+        );
+
+        security_event(
+            'role_matrix_updated',
+            'success',
+            'Access-level capability matrix updated.',
+            $companyId,
+            (int) ($currentAdmin['id'] ?? 0)
+        );
+
+        log_activity(
+            'company',
+            $companyId,
+            'role_matrix_updated',
+            'Role and responsibility matrix updated.',
+            (int) ($currentAdmin['id'] ?? 0)
+        );
+
+        flash('success', 'Role permissions updated successfully.');
+    } catch (Throwable $exception) {
+        flash('error', 'Could not update role permissions: ' . $exception->getMessage());
+    }
+
+    redirect('admin/users.php#role-matrix');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'] ?? ''), $staffWorkflowActions, true)) {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
@@ -627,31 +666,81 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <p style="color:var(--mbw-muted);margin:0;">Create and maintain customer or admin accounts, control active status, and review related order and activity records.</p>
 </section>
 
-<details class="role-matrix-panel">
-    <summary><?= icon('users') ?>Role Matrix — who can do what</summary>
-    <div class="rc-table-scroll">
-        <table class="rc-table role-matrix-table">
-            <thead>
-                <tr>
-                    <th>Role</th>
-                    <?php foreach (['view' => 'View', 'create' => 'Create', 'edit' => 'Edit', 'approve' => 'Approve', 'post' => 'Post', 'delete' => 'Delete', 'report' => 'Report', 'admin' => 'Admin'] as $capLabel): ?>
-                        <th class="align-center"><?= e($capLabel) ?></th>
-                    <?php endforeach; ?>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach (access_level_capabilities() as $levelKey => $caps): ?>
+<details class="role-matrix-panel" id="role-matrix" open>
+    <summary><?= icon('users') ?>Role Matrix: who can do what</summary>
+
+    <?php $roleCapabilityMatrix = access_level_capabilities($companyId); ?>
+
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="save_role_matrix">
+
+        <div class="rc-table-scroll">
+            <table class="rc-table role-matrix-table">
+                <thead>
                     <tr>
-                        <td><strong><?= e(ACCESS_LEVELS[$levelKey] ?? $levelKey) ?></strong></td>
-                        <?php foreach (['view', 'create', 'edit', 'approve', 'post', 'delete', 'report', 'admin'] as $cap): ?>
-                            <td class="align-center"><?= !empty($caps[$cap]) ? '<span class="matrix-yes">✔</span>' : '<span class="matrix-no">✕</span>' ?></td>
+                        <th>Role</th>
+                        <?php foreach ([
+                            'view' => 'View',
+                            'create' => 'Create',
+                            'edit' => 'Edit',
+                            'approve' => 'Approve',
+                            'post' => 'Post',
+                            'delete' => 'Delete',
+                            'report' => 'Report',
+                            'admin' => 'Admin',
+                        ] as $capLabel): ?>
+                            <th class="align-center"><?= e($capLabel) ?></th>
                         <?php endforeach; ?>
                     </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-    <p class="muted">The role sets a user's baseline capability tier. For staff you can go further: open any staff member (View) and tick exact <strong>module permissions</strong>. Staff with no ticks keep full legacy access; once you tick anything they can only do what is checked. Admins always hold full rights within the companies they are authorized for.</p>
+                </thead>
+
+                <tbody>
+                    <?php foreach ($roleCapabilityMatrix as $levelKey => $caps): ?>
+                        <tr>
+                            <td>
+                                <strong><?= e(ACCESS_LEVELS[$levelKey] ?? $levelKey) ?></strong>
+                                <?php if ($levelKey === 'super_admin'): ?>
+                                    <small class="muted" style="display:block;">Protected</small>
+                                <?php endif; ?>
+                            </td>
+
+                            <?php foreach ([
+                                'view', 'create', 'edit', 'approve',
+                                'post', 'delete', 'report', 'admin',
+                            ] as $cap): ?>
+                                <td class="align-center">
+                                    <input
+                                        type="checkbox"
+                                        name="cap[<?= e($levelKey) ?>][<?= e($cap) ?>]"
+                                        value="1"
+                                        aria-label="<?= e(
+                                            (ACCESS_LEVELS[$levelKey] ?? $levelKey)
+                                            . ' '
+                                            . $cap
+                                        ) ?>"
+                                        <?= !empty($caps[$cap]) ? 'checked' : '' ?>
+                                        <?= $levelKey === 'super_admin' ? 'disabled' : '' ?>
+                                    >
+                                </td>
+                            <?php endforeach; ?>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="actions" style="margin-top:14px;">
+            <button type="submit" class="button">
+                <?= icon('settings') ?>Save Role Permissions
+            </button>
+
+            <span class="muted">
+                Super Admin remains protected. Other role permissions apply
+                to users assigned that access level in this company.
+            </span>
+        </div>
+    </form>
 </details>
 <section class="mbw-kpi-grid">
     <a class="mbw-kpi" href="<?= e(url('admin/users.php')) ?>">
