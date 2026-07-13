@@ -1163,22 +1163,21 @@ function accounting_business_profile(?string $businessType = null): array
     $isTrading = $businessType === 'trading';
     $isManufacturing = $businessType === 'manufacturing';
 
+    // Every entity gets the full accounting toolkit — Inventory, Manufacturing
+    // and Fixed Assets are always available, so no one has to pick a "business
+    // type" just to unlock features. The type is now only a reporting hint: it
+    // sets the default invoice source and the friendly label; a company that
+    // does not want to track inventory simply ignores the module.
     return [
         'business_type' => $businessType,
         'label' => $isManufacturing ? 'Manufacturing' : ($isTrading ? 'Trading' : 'Service'),
-        'show_inventory' => !$isService,
-        'show_manufacturing' => $isManufacturing,
-        'show_excise' => $isManufacturing,
-        'show_quantity_rate' => !$isService,
-        'allowed_invoice_sources' => $isService
-            ? ['task', 'other']
-            : ($isTrading
-                ? ['task', 'inventory', 'other']
-                : ['task', 'inventory', 'manufacturing', 'other']),
+        'show_inventory' => true,
+        'show_manufacturing' => true,
+        'show_excise' => true,
+        'show_quantity_rate' => true,
+        'allowed_invoice_sources' => ['task', 'inventory', 'manufacturing', 'other'],
         'default_invoice_source' => $isService ? 'task' : ($isTrading ? 'inventory' : 'manufacturing'),
-        'report_business_slices' => $isManufacturing
-            ? ['all', 'service', 'trading', 'manufacturing']
-            : ($isTrading ? ['all', 'service', 'trading'] : ['all', 'service']),
+        'report_business_slices' => ['all', 'service', 'trading', 'manufacturing'],
     ];
 }
 
