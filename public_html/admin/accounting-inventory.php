@@ -47,6 +47,7 @@ function inventory_mapping_purposes(): array
 {
     return [
         'inventory_asset'      => ['label' => 'Inventory Asset', 'expect' => 'asset'],
+        'opening_equity'       => ['label' => 'Opening Balance Equity', 'expect' => 'equity'],
         'raw_material'         => ['label' => 'Raw Material Inventory', 'expect' => 'asset'],
         'wip'                  => ['label' => 'Work in Progress', 'expect' => 'asset'],
         'finished_goods'       => ['label' => 'Finished Goods Inventory', 'expect' => 'asset'],
@@ -266,9 +267,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // cost (FIFO / moving average / specific), not a rate estimate. An
             // outward issue draws down layers at the item's cost-flow cost.
             $issueValue = inv_apply_movement($companyId, $itemId, $qtyIn, $qtyOut, $rate, $date, $method, $txnId);
+            // Post the balanced GL voucher per the section-E matrix. Inward legs
+            // are valued at cost put in (qty*rate); outward legs at the cost-flow
+            // COGS drawn from the layers. Missing mappings record stock-only.
+            $postingValue = $direction === 'in' ? round($qty * $rate, 2) : $issueValue;
+            $movementVoucherId = 0;
+            $mapMissing = [];
+            try {
+                $movementVoucherId = inv_post_movement_voucher($companyId, $fiscalYearId, $txnId, $type, $item, $direction, $postingValue, $date, $userId);
+            } catch (RuntimeException $mapEx) {
+                if (str_starts_with($mapEx->getMessage(), 'MAP_MISSING:')) {
+                    $mapMissing = explode(',', substr($mapEx->getMessage(), 12));
+                } else {
+                    throw $mapEx;
+                }
+            }
+            if ($movementVoucherId > 0) {
+                db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
+                    ->execute(['vid' => $movementVoucherId, 'id' => $txnId, 'cid' => $companyId]);
+            }
             db()->commit();
             $costNote = $qtyOut > 0 ? ' Issue cost (' . strtoupper(str_replace('_', ' ', $method)) . '): ' . site_currency_symbol() . number_format($issueValue, 2) . '.' : '';
-            flash('success', 'Inventory movement recorded: ' . ($direction === 'in' ? '+' : '−') . number_format($qty, 3) . ' ' . $item['unit'] . ' ' . $item['sku'] . '.' . $costNote);
+            $glNote = '';
+            if ($movementVoucherId > 0) {
+                $glNote = ' GL voucher posted (' . site_currency_symbol() . number_format($postingValue, 2) . ').';
+            } elseif ($mapMissing !== []) {
+                $labels = array_map(static fn (string $p): string => inventory_mapping_purposes()[$p]['label'] ?? $p, $mapMissing);
+                $glNote = ' Stock recorded — map ' . implode(' & ', $labels) . ' on the Ledger Mapping tab to auto-post the accounting voucher.';
+            }
+            flash('success', 'Inventory movement recorded: ' . ($direction === 'in' ? '+' : '−') . number_format($qty, 3) . ' ' . $item['unit'] . ' ' . $item['sku'] . '.' . $costNote . $glNote);
         } catch (Throwable $exception) {
             if (db()->inTransaction()) {
                 db()->rollBack();
@@ -284,18 +311,96 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/accounting-inventory.php');
         }
         $movementId = (int) ($_POST['movement_id'] ?? 0);
-        // Production rows (consume/produce) belong to manufacturing orders —
-        // cancel the order instead of deleting its stock trail.
-        $deleted = db()->prepare("
-            DELETE FROM inventory_transactions
-            WHERE id = :id AND company_id = :company_id AND transaction_type NOT IN ('consume', 'produce')
-        ");
-        $deleted->execute(['id' => $movementId, 'company_id' => $companyId]);
-        if ($deleted->rowCount() > 0) {
-            log_activity('inventory_transaction', $movementId, 'deleted', 'Stock movement deleted.', $userId);
-            flash('success', 'Stock movement deleted and quantities recalculated.');
-        } else {
+        $mvStmt = db()->prepare("SELECT * FROM inventory_transactions WHERE id = :id AND company_id = :cid AND transaction_type NOT IN ('consume', 'produce') LIMIT 1");
+        $mvStmt->execute(['id' => $movementId, 'cid' => $companyId]);
+        $movement = $mvStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$movement) {
             flash('error', 'Movement not found, or it belongs to a manufacturing order (cancel the order instead).');
+            redirect('admin/accounting-inventory.php');
+        }
+        // A movement that posted a GL voucher must not be silently deleted —
+        // that would orphan a posted voucher. Reverse it instead (spec E).
+        if ((int) ($movement['voucher_id'] ?? 0) > 0) {
+            flash('error', 'This movement posted an accounting voucher — use "Reverse" instead of delete, so both the stock and the voucher are reversed and the audit trail is preserved.');
+            redirect('admin/accounting-inventory.php');
+        }
+        try {
+            db()->beginTransaction();
+            db()->prepare('DELETE FROM inventory_transactions WHERE id = :id AND company_id = :cid')->execute(['id' => $movementId, 'cid' => $companyId]);
+            inv_rebuild_item($companyId, (int) $movement['item_id']); // recompute cost layers
+            db()->commit();
+            log_activity('inventory_transaction', $movementId, 'deleted', 'Stock-only movement deleted.', $userId);
+            flash('success', 'Stock movement deleted and cost layers recalculated.');
+        } catch (Throwable $e) {
+            if (db()->inTransaction()) { db()->rollBack(); }
+            flash('error', 'Could not delete movement: ' . $e->getMessage());
+        }
+        redirect('admin/accounting-inventory.php');
+    }
+
+    if ($action === 'reverse_movement') {
+        if ((string) ($currentUser['role'] ?? '') !== 'admin') {
+            flash('error', 'Only an administrator can reverse stock movements.');
+            redirect('admin/accounting-inventory.php');
+        }
+        $movementId = (int) ($_POST['movement_id'] ?? 0);
+        $mvStmt = db()->prepare("SELECT * FROM inventory_transactions WHERE id = :id AND company_id = :cid AND transaction_type NOT IN ('consume', 'produce') LIMIT 1");
+        $mvStmt->execute(['id' => $movementId, 'cid' => $companyId]);
+        $movement = $mvStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$movement) {
+            flash('error', 'Movement not found (production rows are reversed by cancelling the order).');
+            redirect('admin/accounting-inventory.php');
+        }
+        $revItem = inventory_company_item((int) $movement['item_id'], $companyId);
+        try {
+            db()->beginTransaction();
+            // Post a mirror stock movement (opposite direction, same qty/rate).
+            $revIn = (float) $movement['qty_out'];
+            $revOut = (float) $movement['qty_in'];
+            $today = date('Y-m-d');
+            db()->prepare('INSERT INTO inventory_transactions (company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date, qty_in, qty_out, rate, amount, notes)
+                VALUES (:cid, :fy, :iid, :type, :ref, :d, :qin, :qout, :rate, :amt, :notes)')
+                ->execute([
+                    'cid' => $companyId, 'fy' => $fiscalYearId > 0 ? $fiscalYearId : null, 'iid' => (int) $movement['item_id'],
+                    'type' => (string) $movement['transaction_type'], 'ref' => 'REV-' . $movementId,
+                    'd' => $today, 'qin' => $revIn, 'qout' => $revOut, 'rate' => (float) $movement['rate'],
+                    'amt' => round(($revIn + $revOut) * (float) $movement['rate'], 2),
+                    'notes' => 'Reversal of movement #' . $movementId,
+                ]);
+            $revTxnId = (int) db()->lastInsertId();
+            inv_rebuild_item($companyId, (int) $movement['item_id']); // net the layers
+
+            // Reverse the original voucher by swapping its Dr/Cr, never deleting it.
+            $reversalVoucherId = 0;
+            $origVoucherId = (int) ($movement['voucher_id'] ?? 0);
+            if ($origVoucherId > 0) {
+                $entries = db()->prepare('SELECT ledger_id, entry_type, amount FROM voucher_entries WHERE voucher_id = :vid');
+                $entries->execute(['vid' => $origVoucherId]);
+                $reversed = [];
+                $total = 0.0;
+                foreach ($entries->fetchAll(PDO::FETCH_ASSOC) as $en) {
+                    $reversed[] = ['ledger_id' => (int) $en['ledger_id'], 'entry_type' => $en['entry_type'] === 'debit' ? 'credit' : 'debit', 'amount' => (float) $en['amount']];
+                    if ($en['entry_type'] === 'debit') { $total += (float) $en['amount']; }
+                }
+                if ($reversed !== []) {
+                    $reversalVoucherId = (int) create_voucher_with_entries([
+                        'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
+                        'voucher_no' => 'INV-REV-' . str_pad((string) $revTxnId, 6, '0', STR_PAD_LEFT),
+                        'voucher_type' => 'journal', 'voucher_date' => $today,
+                        'source_type' => 'inventory_movement', 'source_id' => $revTxnId,
+                        'total_amount' => round($total, 2),
+                        'narration' => 'Reversal of voucher #' . $origVoucherId . ' (movement #' . $movementId . ').',
+                        'status' => 'posted', 'posted_by' => $userId,
+                    ], $reversed);
+                    db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id')->execute(['vid' => $reversalVoucherId, 'id' => $revTxnId]);
+                }
+            }
+            db()->commit();
+            log_activity('inventory_transaction', $movementId, 'reversed', 'Movement reversed (stock + voucher).', $userId);
+            flash('success', 'Movement #' . $movementId . ' reversed: a mirror stock entry was posted' . ($reversalVoucherId > 0 ? ' and the accounting voucher was reversed (Dr/Cr swapped).' : '.') . ' The original records are preserved for audit.');
+        } catch (Throwable $e) {
+            if (db()->inTransaction()) { db()->rollBack(); }
+            flash('error', 'Could not reverse movement: ' . $e->getMessage());
         }
         redirect('admin/accounting-inventory.php');
     }
@@ -1066,14 +1171,23 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td><span class="mbw-pill <?= $movementIn ? 'tone-blue' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', ucfirst($movement['transaction_type']))) ?><?= $movement['transaction_type'] === 'adjustment' ? ($movementIn ? ' +' : ' −') : '' ?></span></td>
                     <td class="is-numeric"><?= e(number_format((float) $movement['qty_in'], 3)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['qty_out'], 3)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['rate'], 2)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['amount'], 2)) ?></td><td><?= e($movement['ref_no'] ?? '-') ?></td>
                     <?php if (($currentUser['role'] ?? '') === 'admin'): ?>
-                        <td>
+                        <td style="white-space:nowrap">
                             <?php if (!in_array((string) $movement['transaction_type'], ['consume', 'produce'], true)): ?>
-                                <form method="post" style="display:inline" data-confirm="Delete this <?= e(str_replace('_', ' ', $movement['transaction_type'])) ?> movement of <?= e($movement['sku']) ?> dated <?= e($movement['transaction_date']) ?>? Stock on hand recalculates immediately.">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="delete_movement">
-                                    <input type="hidden" name="movement_id" value="<?= e((int) $movement['id']) ?>">
-                                    <button type="submit" class="button secondary" title="Delete this movement">&times;</button>
-                                </form>
+                                <?php if ((int) ($movement['voucher_id'] ?? 0) > 0): ?>
+                                    <form method="post" style="display:inline" data-confirm="Reverse this <?= e(str_replace('_', ' ', $movement['transaction_type'])) ?> of <?= e($movement['sku']) ?>? A mirror stock entry and a reversing voucher (Dr/Cr swapped) are posted; the originals are kept for audit.">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="reverse_movement">
+                                        <input type="hidden" name="movement_id" value="<?= e((int) $movement['id']) ?>">
+                                        <button type="submit" class="button secondary" title="Reverse this posted movement">Reverse</button>
+                                    </form>
+                                <?php else: ?>
+                                    <form method="post" style="display:inline" data-confirm="Delete this <?= e(str_replace('_', ' ', $movement['transaction_type'])) ?> movement of <?= e($movement['sku']) ?> dated <?= e($movement['transaction_date']) ?>? Stock on hand recalculates immediately.">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="delete_movement">
+                                        <input type="hidden" name="movement_id" value="<?= e((int) $movement['id']) ?>">
+                                        <button type="submit" class="button secondary" title="Delete this stock-only movement">&times;</button>
+                                    </form>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </td>
                     <?php endif; ?>

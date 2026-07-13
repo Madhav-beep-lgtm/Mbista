@@ -632,6 +632,104 @@ function inv_company_valuation(int $companyId, array $items): array
 }
 
 /**
+ * The Dr/Cr posting plan for a stock movement (section E posting matrix).
+ * Direction is system-derived; $direction 'in'|'out' only matters for
+ * adjustments (which can go either way). Returns
+ *   ['debit' => purpose, 'credit' => purpose]
+ * or null when the movement has NO general-ledger impact (departmental /
+ * warehouse transfer within the same entity and ownership).
+ */
+function inv_movement_posting_plan(string $type, string $direction): ?array
+{
+    switch ($type) {
+        case 'opening':
+            return ['debit' => 'inventory_asset', 'credit' => 'opening_equity'];
+        case 'purchase':
+        case 'purchase_receipt':
+            return ['debit' => 'inventory_asset', 'credit' => 'purchase_clearing'];
+        case 'purchase_return':
+            return ['debit' => 'purchase_clearing', 'credit' => 'inventory_asset'];
+        case 'sale':
+        case 'sales_delivery':
+            // COGS/inventory leg only; the revenue leg is the invoice module's.
+            return ['debit' => 'cogs', 'credit' => 'inventory_asset'];
+        case 'sales_return':
+            return ['debit' => 'inventory_asset', 'credit' => 'cogs'];
+        case 'write_off':
+        case 'damage':
+        case 'expiry':
+            return ['debit' => 'inventory_loss', 'credit' => 'inventory_asset'];
+        case 'adjustment':
+            return $direction === 'in'
+                ? ['debit' => 'inventory_asset', 'credit' => 'inventory_gain']
+                : ['debit' => 'inventory_loss', 'credit' => 'inventory_asset'];
+        case 'warehouse_transfer':
+        case 'departmental_transfer':
+            return null; // no GL voucher (spec section E exception)
+        default:
+            return null;
+    }
+}
+
+/**
+ * Post the balanced GL voucher for one stock movement, per the posting matrix.
+ * Returns the voucher id, 0 when the movement has no GL impact, or throws when a
+ * required mapping is missing (so the caller can record stock-only + surface the
+ * gap, satisfying "no voucher posts without complete mapping").
+ *
+ * Idempotent via vouchers UNIQUE(source_type, source_id) = ('inventory_movement',
+ * $txnId). Runs inside the caller's DB transaction.
+ *
+ * @throws RuntimeException listing the missing purposes.
+ */
+function inv_post_movement_voucher(int $companyId, ?int $fiscalYearId, int $txnId, string $type, array $item, string $direction, float $value, string $date, int $userId, ?int $partyId = null): int
+{
+    $plan = inv_movement_posting_plan($type, $direction);
+    if ($plan === null) {
+        return 0; // departmental/warehouse transfer — stock only
+    }
+    $value = inv_round_money($value);
+    if ($value <= 0) {
+        return 0;
+    }
+
+    $itemId = (int) $item['id'];
+    $category = $item['category'] ?? null;
+    $debit = inv_resolve_mapping($companyId, $plan['debit'], $itemId, $category);
+    $credit = inv_resolve_mapping($companyId, $plan['credit'], $itemId, $category);
+
+    $missing = [];
+    if (!$debit) {
+        $missing[] = $plan['debit'];
+    }
+    if (!$credit) {
+        $missing[] = $plan['credit'];
+    }
+    if ($missing !== []) {
+        throw new RuntimeException('MAP_MISSING:' . implode(',', $missing));
+    }
+
+    $voucherNo = 'INV-' . strtoupper($type) . '-' . str_pad((string) $txnId, 6, '0', STR_PAD_LEFT);
+    return (int) create_voucher_with_entries([
+        'company_id' => $companyId,
+        'fiscal_year_id' => $fiscalYearId ?: null,
+        'voucher_no' => $voucherNo,
+        'voucher_type' => 'journal',
+        'voucher_date' => $date,
+        'source_type' => 'inventory_movement',
+        'source_id' => $txnId,
+        'party_id' => $partyId,
+        'total_amount' => $value,
+        'narration' => ucfirst(str_replace('_', ' ', $type)) . ' — ' . ($item['sku'] ?? '') . ' ' . ($item['name'] ?? ''),
+        'status' => 'posted',
+        'posted_by' => $userId,
+    ], [
+        ['ledger_id' => (int) $debit['id'], 'entry_type' => 'debit', 'amount' => $value],
+        ['ledger_id' => (int) $credit['id'], 'entry_type' => 'credit', 'amount' => $value],
+    ]);
+}
+
+/**
  * The purposes each transaction type needs mapped before it can post.
  * Direction is derived by the engine; this table also documents the posting
  * matrix (Dr/Cr) used by the posting layer.
