@@ -25,7 +25,10 @@ if (!($inventoryProfile['show_inventory'] ?? false)) {
 $itemTypes = $inventoryProfile['show_manufacturing']
     ? ['stock', 'service', 'raw_material', 'finished_good', 'consumable']
     : ['stock', 'service', 'consumable'];
-$movementTypes = ['opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment'];
+$movementTypes = [
+    'opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment',
+    'write_off', 'damage', 'expiry', 'warehouse_transfer', 'departmental_transfer',
+];
 
 function inventory_direction(string $type): string
 {
@@ -79,6 +82,23 @@ function inventory_company_item(int $itemId, int $companyId): ?array
     ');
     $stmt->execute(['id' => $itemId, 'company_id' => $companyId]);
     return $stmt->fetch() ?: null;
+}
+
+/**
+ * A POSTed warehouse id, but only if it belongs to this company — otherwise
+ * null. The warehouse FKs reference warehouses(id) with no company predicate,
+ * so a tampered id from another tenant would otherwise insert cleanly and tag
+ * this company's stock with a foreign location.
+ */
+function inventory_company_warehouse_id(int $warehouseId, int $companyId): ?int
+{
+    if ($warehouseId <= 0) {
+        return null;
+    }
+    $stmt = db()->prepare('SELECT id FROM warehouses WHERE id = :id AND company_id = :company_id LIMIT 1');
+    $stmt->execute(['id' => $warehouseId, 'company_id' => $companyId]);
+
+    return ($stmt->fetchColumn() !== false) ? $warehouseId : null;
 }
 
 /**
@@ -193,6 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'purchase_rate' => max(0.0, round((float) ($_POST['purchase_rate'] ?? 0), 2)),
             'opening_qty' => max(0.0, round((float) ($_POST['opening_qty'] ?? 0), 3)),
             'reorder_level' => max(0.0, round((float) ($_POST['reorder_level'] ?? 0), 3)),
+            'default_warehouse_id' => inventory_company_warehouse_id((int) ($_POST['default_warehouse_id'] ?? 0), $companyId),
             'status' => $status,
             'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
         ];
@@ -205,7 +226,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     SET ledger_id = :ledger_id, sku = :sku, name = :name, category = :category, item_type = :item_type,
                         valuation_method = :valuation_method, unit = :unit,
                         hs_code = :hs_code, tax_rate = :tax_rate, sales_rate = :sales_rate, purchase_rate = :purchase_rate,
-                        opening_qty = :opening_qty, reorder_level = :reorder_level, status = :status, notes = :notes
+                        opening_qty = :opening_qty, reorder_level = :reorder_level, default_warehouse_id = :default_warehouse_id,
+                        status = :status, notes = :notes
                     WHERE id = :id AND company_id = :company_id
                 ')->execute($params);
                 // Opening qty/rate or method may have changed — rebuild layers.
@@ -216,10 +238,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 db()->prepare('
                     INSERT INTO inventory_items (
                         company_id, ledger_id, sku, name, category, item_type, valuation_method, unit, hs_code, tax_rate,
-                        sales_rate, purchase_rate, opening_qty, reorder_level, status, notes
+                        sales_rate, purchase_rate, opening_qty, reorder_level, default_warehouse_id, status, notes
                     ) VALUES (
                         :company_id, :ledger_id, :sku, :name, :category, :item_type, :valuation_method, :unit, :hs_code, :tax_rate,
-                        :sales_rate, :purchase_rate, :opening_qty, :reorder_level, :status, :notes
+                        :sales_rate, :purchase_rate, :opening_qty, :reorder_level, :default_warehouse_id, :status, :notes
                     )
                 ')->execute($params);
                 $newItemId = (int) db()->lastInsertId();
@@ -238,6 +260,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/accounting-inventory.php');
     }
 
+    if ($action === 'save_warehouse') {
+        require_permission('inventory', 'create');
+        $warehouseName = trim((string) ($_POST['name'] ?? ''));
+        $warehouseCode = trim((string) ($_POST['code'] ?? '')) ?: null;
+        if ($warehouseName === '') {
+            flash('error', 'Warehouse name is required.');
+            redirect('admin/accounting-inventory.php');
+        }
+        try {
+            db()->prepare('INSERT INTO warehouses (company_id, name, code, is_active) VALUES (:company_id, :name, :code, 1)')
+                ->execute(['company_id' => $companyId, 'name' => $warehouseName, 'code' => $warehouseCode]);
+            security_event('warehouse_created', 'success', 'Warehouse "' . $warehouseName . '" created.', $companyId, $userId);
+            flash('success', 'Warehouse "' . $warehouseName . '" created.');
+        } catch (Throwable $exception) {
+            flash('error', (string) $exception->getCode() === '23000'
+                ? 'Could not save warehouse: a warehouse named "' . $warehouseName . '" already exists in this company.'
+                : 'Could not save warehouse: ' . $exception->getMessage());
+        }
+        redirect('admin/accounting-inventory.php');
+    }
+
+    if ($action === 'toggle_warehouse') {
+        require_permission('inventory', 'edit');
+        $warehouseId = (int) ($_POST['warehouse_id'] ?? 0);
+        $warehouseStmt = db()->prepare('SELECT * FROM warehouses WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $warehouseStmt->execute(['id' => $warehouseId, 'company_id' => $companyId]);
+        $warehouse = $warehouseStmt->fetch();
+        if (!$warehouse) {
+            flash('error', 'Warehouse not found for this company.');
+            redirect('admin/accounting-inventory.php');
+        }
+        $newActive = (int) $warehouse['is_active'] === 1 ? 0 : 1;
+        db()->prepare('UPDATE warehouses SET is_active = :is_active WHERE id = :id AND company_id = :company_id')
+            ->execute(['is_active' => $newActive, 'id' => $warehouseId, 'company_id' => $companyId]);
+        security_event('warehouse_toggled', 'success', 'Warehouse #' . $warehouseId . ' ' . ($newActive ? 'activated' : 'deactivated') . '.', $companyId, $userId);
+        flash('success', 'Warehouse "' . $warehouse['name'] . '" ' . ($newActive ? 'activated' : 'deactivated') . '.');
+        redirect('admin/accounting-inventory.php');
+    }
+
     if ($action === 'record_movement') {
         require_permission('inventory', 'create');
         $itemId = (int) ($_POST['item_id'] ?? 0);
@@ -245,6 +306,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qty = round(abs((float) ($_POST['quantity'] ?? 0)), 3);
         $rate = round((float) ($_POST['rate'] ?? 0), 2);
         $date = inventory_valid_date((string) ($_POST['transaction_date'] ?? '')) ?? date('Y-m-d');
+        $warehouseId = inventory_company_warehouse_id((int) ($_POST['warehouse_id'] ?? 0), $companyId);
+        $toWarehouseId = inventory_company_warehouse_id((int) ($_POST['to_warehouse_id'] ?? 0), $companyId);
+        $refNo = trim((string) ($_POST['ref_no'] ?? '')) ?: null;
+        $notes = trim((string) ($_POST['notes'] ?? '')) ?: null;
         if ($qty <= 0 || !in_array($type, $movementTypes, true)) {
             flash('error', 'Select an item, movement type, and positive quantity.');
             redirect('admin/accounting-inventory.php');
@@ -254,6 +319,86 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Item not found for this company.');
             redirect('admin/accounting-inventory.php');
         }
+        $method = (string) ($item['valuation_method'] ?? 'weighted_average');
+
+        // Warehouse / departmental transfers are a quantity-only relocation:
+        // two linked rows (out of source, in to destination) at the SAME
+        // carrying cost drawn from the real layers — never re-priced, never
+        // posted to the GL (inv_movement_posting_plan returns null for these).
+        if (in_array($type, ['warehouse_transfer', 'departmental_transfer'], true)) {
+            if ($warehouseId === null || $toWarehouseId === null || $warehouseId === $toWarehouseId) {
+                flash('error', 'Select two different warehouses for a transfer (from and to).');
+                redirect('admin/accounting-inventory.php');
+            }
+            if ($qty > (float) $item['on_hand'] + 0.0005) {
+                flash('error', 'Insufficient stock: only ' . number_format((float) $item['on_hand'], 3) . ' ' . $item['unit'] . ' of ' . $item['sku'] . ' on hand.');
+                redirect('admin/accounting-inventory.php');
+            }
+            try {
+                db()->beginTransaction();
+                $insertTxn = db()->prepare('
+                    INSERT INTO inventory_transactions (
+                        company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date,
+                        warehouse_id, to_warehouse_id, qty_in, qty_out, rate, amount, notes
+                    ) VALUES (
+                        :company_id, :fiscal_year_id, :item_id, :transaction_type, :ref_no, :transaction_date,
+                        :warehouse_id, :to_warehouse_id, :qty_in, :qty_out, :rate, :amount, :notes
+                    )
+                ');
+                // OUT leg from the source warehouse.
+                $insertTxn->execute([
+                    'company_id' => $companyId,
+                    'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
+                    'item_id' => $itemId,
+                    'transaction_type' => $type,
+                    'ref_no' => $refNo,
+                    'transaction_date' => $date,
+                    'warehouse_id' => $warehouseId,
+                    'to_warehouse_id' => $toWarehouseId,
+                    'qty_in' => 0,
+                    'qty_out' => $qty,
+                    'rate' => 0,
+                    'amount' => 0,
+                    'notes' => $notes,
+                ]);
+                $outTxnId = (int) db()->lastInsertId();
+                // Real cost-flow cost drawn from the layers (not re-priced).
+                $issueValue = inv_apply_movement($companyId, $itemId, 0.0, $qty, 0.0, $date, $method, $outTxnId, $warehouseId);
+                $unitCostAtIssue = $qty > 0 ? round($issueValue / $qty, 6) : 0.0;
+                db()->prepare('UPDATE inventory_transactions SET rate = :rate, amount = :amount WHERE id = :id AND company_id = :cid')
+                    ->execute(['rate' => $unitCostAtIssue, 'amount' => round($issueValue, 2), 'id' => $outTxnId, 'cid' => $companyId]);
+
+                // IN leg at the destination, re-added at the SAME carrying cost.
+                $insertTxn->execute([
+                    'company_id' => $companyId,
+                    'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
+                    'item_id' => $itemId,
+                    'transaction_type' => $type,
+                    'ref_no' => $refNo,
+                    'transaction_date' => $date,
+                    'warehouse_id' => $toWarehouseId,
+                    'to_warehouse_id' => $warehouseId,
+                    'qty_in' => $qty,
+                    'qty_out' => 0,
+                    'rate' => $unitCostAtIssue,
+                    'amount' => round($issueValue, 2),
+                    'notes' => 'Transfer in — paired with movement #' . $outTxnId,
+                ]);
+                $inTxnId = (int) db()->lastInsertId();
+                inv_apply_movement($companyId, $itemId, $qty, 0.0, $unitCostAtIssue, $date, $method, $inTxnId, $toWarehouseId);
+
+                db()->commit();
+                security_event('inventory_movement_posted', 'success', 'Transfer #' . $outTxnId . '/' . $inTxnId . ' (' . $type . ') posted for item #' . $itemId . '.', $companyId, $userId);
+                flash('success', 'Transfer recorded: ' . number_format($qty, 3) . ' ' . $item['unit'] . ' ' . $item['sku'] . ' moved. No GL entry — quantity relocated only (IAS 2 recognition unaffected).');
+            } catch (Throwable $exception) {
+                if (db()->inTransaction()) {
+                    db()->rollBack();
+                }
+                flash('error', 'Could not record transfer: ' . $exception->getMessage());
+            }
+            redirect('admin/accounting-inventory.php');
+        }
+
         // Adjustments choose their own direction (stock count corrections go
         // both ways); every other type has a fixed one.
         $direction = $type === 'adjustment' && in_array((string) ($_POST['direction'] ?? ''), ['in', 'out'], true)
@@ -272,16 +417,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $qtyIn = $direction === 'in' ? $qty : 0.0;
         $qtyOut = $direction === 'out' ? $qty : 0.0;
-        $method = (string) ($item['valuation_method'] ?? 'weighted_average');
         try {
             db()->beginTransaction();
             $insertTxn = db()->prepare('
                 INSERT INTO inventory_transactions (
                     company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date,
-                    qty_in, qty_out, rate, amount, notes
+                    warehouse_id, qty_in, qty_out, rate, amount, notes
                 ) VALUES (
                     :company_id, :fiscal_year_id, :item_id, :transaction_type, :ref_no, :transaction_date,
-                    :qty_in, :qty_out, :rate, :amount, :notes
+                    :warehouse_id, :qty_in, :qty_out, :rate, :amount, :notes
                 )
             ');
             $insertTxn->execute([
@@ -289,19 +433,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
                 'item_id' => $itemId,
                 'transaction_type' => $type,
-                'ref_no' => trim((string) ($_POST['ref_no'] ?? '')) ?: null,
+                'ref_no' => $refNo,
                 'transaction_date' => $date,
+                'warehouse_id' => $warehouseId,
                 'qty_in' => $qtyIn,
                 'qty_out' => $qtyOut,
                 'rate' => $rate,
                 'amount' => round($qty * $rate, 2),
-                'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
+                'notes' => $notes,
             ]);
             $txnId = (int) db()->lastInsertId();
             // Maintain the perpetual cost layers so on-hand VALUE is real IAS 2
             // cost (FIFO / moving average / specific), not a rate estimate. An
             // outward issue draws down layers at the item's cost-flow cost.
-            $issueValue = inv_apply_movement($companyId, $itemId, $qtyIn, $qtyOut, $rate, $date, $method, $txnId);
+            $issueValue = inv_apply_movement($companyId, $itemId, $qtyIn, $qtyOut, $rate, $date, $method, $txnId, $warehouseId);
             // Post the balanced GL voucher per the section-E matrix. Inward legs
             // are valued at cost put in (qty*rate); outward legs at the cost-flow
             // COGS drawn from the layers. Missing mappings record stock-only.
@@ -339,6 +484,130 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Could not record movement: ' . $exception->getMessage());
         }
         redirect('admin/accounting-inventory.php');
+    }
+
+    if ($action === 'post_nrv_assessment') {
+        require_permission('inventory', 'edit');
+        $itemId = (int) ($_POST['item_id'] ?? 0);
+        $item = inventory_company_item($itemId, $companyId);
+        if (!$item) {
+            flash('error', 'Item not found for this company.');
+            redirect('admin/accounting-inventory.php?view=valuation');
+        }
+        $sellingPrice = round((float) ($_POST['selling_price'] ?? 0), 2);
+        $completionCost = round((float) ($_POST['completion_cost'] ?? 0), 2);
+        $sellingCost = round((float) ($_POST['selling_cost'] ?? 0), 2);
+
+        $valuation = inv_item_valuation($companyId, $item);
+        $qty = (float) $valuation['qty'];
+        $unitCost = (float) $valuation['unit_cost'];
+
+        $priorStmt = db()->prepare('SELECT COALESCE(SUM(write_down), 0) - COALESCE(SUM(reversal), 0) FROM inventory_nrv_assessments WHERE company_id = :company_id AND item_id = :item_id');
+        $priorStmt->execute(['company_id' => $companyId, 'item_id' => $itemId]);
+        $priorWriteDown = max(0.0, (float) $priorStmt->fetchColumn());
+
+        $nrv = inv_nrv($qty, $unitCost, $sellingPrice, $completionCost, $sellingCost, $priorWriteDown);
+
+        if ($nrv['write_down'] <= 0 && $nrv['reversal'] <= 0) {
+            flash('info', 'No write-down or reversal needed — carrying value already at lower of cost and NRV.');
+            redirect('admin/accounting-inventory.php?view=valuation');
+        }
+
+        $today = date('Y-m-d');
+        $isWriteDown = $nrv['write_down'] > 0;
+        $movementType = $isWriteDown ? 'nrv_write_down' : 'nrv_reversal';
+        $postedValue = $isWriteDown ? $nrv['write_down'] : $nrv['reversal'];
+
+        try {
+            db()->beginTransaction();
+            $assessStmt = db()->prepare('
+                INSERT INTO inventory_nrv_assessments (
+                    company_id, fiscal_year_id, item_id, assessment_date, quantity, cost_per_unit,
+                    selling_price, completion_cost, selling_cost, nrv_per_unit, lower_per_unit,
+                    carrying_cost, prior_write_down, write_down, reversal, final_carrying, created_by
+                ) VALUES (
+                    :company_id, :fiscal_year_id, :item_id, :assessment_date, :quantity, :cost_per_unit,
+                    :selling_price, :completion_cost, :selling_cost, :nrv_per_unit, :lower_per_unit,
+                    :carrying_cost, :prior_write_down, :write_down, :reversal, :final_carrying, :created_by
+                )
+            ');
+            $assessStmt->execute([
+                'company_id' => $companyId,
+                'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
+                'item_id' => $itemId,
+                'assessment_date' => $today,
+                'quantity' => $qty,
+                'cost_per_unit' => $unitCost,
+                'selling_price' => $sellingPrice,
+                'completion_cost' => $completionCost,
+                'selling_cost' => $sellingCost,
+                'nrv_per_unit' => $nrv['nrv_per_unit'],
+                'lower_per_unit' => $nrv['lower_per_unit'],
+                'carrying_cost' => $nrv['carrying_cost'],
+                'prior_write_down' => $nrv['prior_write_down'],
+                'write_down' => $nrv['write_down'],
+                'reversal' => $nrv['reversal'],
+                'final_carrying' => $nrv['final_carrying'],
+                'created_by' => $userId,
+            ]);
+            $assessmentId = (int) db()->lastInsertId();
+
+            $movementStmt = db()->prepare('
+                INSERT INTO inventory_transactions (
+                    company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date,
+                    qty_in, qty_out, rate, amount, notes
+                ) VALUES (
+                    :company_id, :fiscal_year_id, :item_id, :transaction_type, :ref_no, :transaction_date,
+                    0, 0, 0, :amount, :notes
+                )
+            ');
+            $movementStmt->execute([
+                'company_id' => $companyId,
+                'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
+                'item_id' => $itemId,
+                'transaction_type' => $movementType,
+                'ref_no' => 'NRV-' . date('Ymd'),
+                'transaction_date' => $today,
+                'amount' => $postedValue,
+                'notes' => ($isWriteDown ? 'NRV write-down' : 'NRV reversal') . ' — ' . $item['sku'] . ' ' . $item['name'],
+            ]);
+            $txnId = (int) db()->lastInsertId();
+
+            $movementVoucherId = 0;
+            $mapMissing = [];
+            try {
+                $movementVoucherId = inv_post_movement_voucher($companyId, $fiscalYearId, $txnId, $movementType, $item, 'out', $postedValue, $today, $userId);
+            } catch (RuntimeException $mapEx) {
+                if (str_starts_with($mapEx->getMessage(), 'MAP_MISSING:')) {
+                    $mapMissing = explode(',', substr($mapEx->getMessage(), 12));
+                } else {
+                    throw $mapEx;
+                }
+            }
+            if ($movementVoucherId > 0) {
+                db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
+                    ->execute(['vid' => $movementVoucherId, 'id' => $txnId, 'cid' => $companyId]);
+                db()->prepare('UPDATE inventory_nrv_assessments SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
+                    ->execute(['vid' => $movementVoucherId, 'id' => $assessmentId, 'cid' => $companyId]);
+            }
+            db()->commit();
+
+            $glNote = '';
+            if ($movementVoucherId > 0) {
+                $glNote = ' GL voucher posted (' . site_currency_symbol() . number_format($postedValue, 2) . ').';
+            } elseif ($mapMissing !== []) {
+                $labels = array_map(static fn (string $p): string => inventory_mapping_purposes()[$p]['label'] ?? $p, $mapMissing);
+                $glNote = ' Stock-only recorded — map ' . implode(' & ', $labels) . ' on the Ledger Mapping tab to auto-post the accounting voucher.';
+            }
+            security_event('inventory_nrv_posted', 'success', ($isWriteDown ? 'NRV write-down ' : 'NRV reversal ') . number_format($postedValue, 2) . ' posted for item #' . $itemId . '.', $companyId, $userId);
+            flash('success', ($isWriteDown ? 'NRV write-down of ' : 'NRV reversal of ') . site_currency_symbol() . number_format($postedValue, 2) . ' posted for ' . $item['sku'] . '.' . $glNote);
+        } catch (Throwable $exception) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            flash('error', 'Could not post NRV assessment: ' . $exception->getMessage());
+        }
+        redirect('admin/accounting-inventory.php?view=valuation');
     }
 
     if ($action === 'delete_movement') {
@@ -838,6 +1107,13 @@ $ledgerStmt = db()->prepare("SELECT id, code, name FROM ledgers WHERE company_id
 $ledgerStmt->execute(['company_id' => $companyId]);
 $ledgers = $ledgerStmt->fetchAll();
 
+// Active warehouses (for select dropdowns) and the full list (for the
+// warehouse management table, which also needs to show inactive ones).
+$warehouses = inv_company_warehouses($companyId);
+$allWarehousesStmt = db()->prepare('SELECT * FROM warehouses WHERE company_id = :company_id ORDER BY name ASC');
+$allWarehousesStmt->execute(['company_id' => $companyId]);
+$allWarehouses = $allWarehousesStmt->fetchAll();
+
 $itemStmt = db()->prepare('
     SELECT i.*, l.code AS ledger_code,
            i.opening_qty + COALESCE(SUM(t.qty_in - t.qty_out), 0) AS on_hand,
@@ -887,6 +1163,30 @@ $stockLowerOfCostNrv = $inventoryValuation['lower'];
 $stockNrvWriteDown = $inventoryValuation['write_down'];
 $stockOnHandUnits = array_sum(array_map(static fn (array $item): float => (float) $item['on_hand'], $items));
 $stockValue = $stockValueAtCost; // legacy alias retained for any downstream use
+
+// Stock-by-warehouse aggregate (one query, company-wide — page-specific
+// reporting, not reusable valuation logic, so it stays inline here rather
+// than in the engine). Cost stays company+item level; this is quantity-only.
+$warehouseStockStmt = db()->prepare('
+    SELECT t.warehouse_id, w.name AS warehouse_name, SUM(t.qty_in - t.qty_out) AS on_hand
+    FROM inventory_transactions t
+    LEFT JOIN warehouses w ON w.id = t.warehouse_id
+    WHERE t.company_id = :company_id
+    GROUP BY t.warehouse_id, w.name
+');
+$warehouseStockStmt->execute(['company_id' => $companyId]);
+$warehouseOnHand = [];
+$unassignedOnHand = 0.0;
+$anyWarehouseTaggedTxn = false;
+foreach ($warehouseStockStmt->fetchAll() as $whRow) {
+    if ($whRow['warehouse_id'] === null) {
+        $unassignedOnHand = (float) $whRow['on_hand'];
+    } else {
+        $warehouseOnHand[(int) $whRow['warehouse_id']] = (float) $whRow['on_hand'];
+        $anyWarehouseTaggedTxn = true;
+    }
+}
+$showWarehouseStockCard = $allWarehouses !== [] || $anyWarehouseTaggedTxn;
 $lowStockCount = count(array_filter($items, static fn (array $item): bool => (float) $item['reorder_level'] > 0 && (float) $item['on_hand'] <= (float) $item['reorder_level']));
 $inventoryProcessSteps = $inventoryProfile['show_manufacturing']
     ? [
@@ -1054,6 +1354,39 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </table>
         </div>
     </section>
+
+    <section class="mbw-card" aria-label="Post NRV assessment">
+        <div class="mbw-card-head">
+            <h2>Post NRV Assessment</h2>
+            <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Computes lower of cost and net realisable value (IAS 2.28-33) and posts a write-down or a capped reversal.</span></div>
+        </div>
+        <form method="post" class="workspace-form-grid">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="post_nrv_assessment">
+            <label>Item<select name="item_id" id="nrvItem" required>
+                <option value="">Select item</option>
+                <?php foreach ($items as $item): ?>
+                    <option value="<?= e((int) $item['id']) ?>" data-sales-rate="<?= e(number_format((float) $item['sales_rate'], 2, '.', '')) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option>
+                <?php endforeach; ?>
+            </select></label>
+            <label>Selling price<input type="number" step="0.01" min="0" name="selling_price" id="nrvSellingPrice" required></label>
+            <label>Est. cost to complete<input type="number" step="0.01" min="0" name="completion_cost" value="0.00"></label>
+            <label>Est. cost to sell<input type="number" step="0.01" min="0" name="selling_cost" value="0.00"></label>
+            <div class="workspace-span-2"><button type="submit"><?= icon('reports') ?>Post assessment</button></div>
+        </form>
+        <script>
+        (function () {
+            var item = document.getElementById('nrvItem');
+            var price = document.getElementById('nrvSellingPrice');
+            item.addEventListener('change', function () {
+                var opt = item.options[item.selectedIndex];
+                if (opt && opt.value && !price.value) {
+                    price.value = opt.getAttribute('data-sales-rate');
+                }
+            });
+        })();
+        </script>
+    </section>
 <?php elseif ($invView === 'mapping'): ?>
     <?php
     // Current global mappings + wrong-type detection.
@@ -1165,47 +1498,169 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Opening qty<input type="number" step="0.001" name="opening_qty" value="<?= e($editItem['opening_qty'] ?? '0.000') ?>"></label>
             <label>Reorder level<input type="number" step="0.001" name="reorder_level" value="<?= e($editItem['reorder_level'] ?? '0.000') ?>"></label>
             <label>Linked ledger<select name="ledger_id"><option value="0">No linked ledger</option><?php foreach ($ledgers as $ledger): ?><option value="<?= e((int) $ledger['id']) ?>" <?= (int) ($editItem['ledger_id'] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Default warehouse<select name="default_warehouse_id"><option value="0">— none —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>" <?= (int) ($editItem['default_warehouse_id'] ?? 0) === (int) $warehouse['id'] ? 'selected' : '' ?>><?= e($warehouse['name'] . ($warehouse['code'] ? ' (' . $warehouse['code'] . ')' : '')) ?></option><?php endforeach; ?></select></label>
             <label class="workspace-span-2">Notes<textarea name="notes"><?= e($editItem['notes'] ?? '') ?></textarea></label>
             <div class="workspace-span-2"><button type="submit"><?= icon('services') ?>Save item</button><?php if ($editItem): ?> <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php')) ?>">Cancel edit</a><?php endif; ?></div>
         </form>
     </details>
 
-    <details class="feature-disclosure" id="stock-movement" <?= $moveItemId > 0 ? 'open' : '' ?>>
-        <summary><span><strong><?= icon('tasks') ?>Inventory Transaction / Stock Movement</strong><small>Post opening, purchase, sale, return, or adjustment quantities.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
-        <form method="post" class="workspace-form-grid" id="movementForm">
+    <details class="feature-disclosure" id="warehouses">
+        <summary><span><strong><?= icon('services') ?>Warehouses / Locations</strong><small>Stock locations for this company — used to track where inventory physically sits.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <div class="rc-table-scroll">
+            <table class="rc-table">
+                <thead><tr><th>Name</th><th>Code</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                    <?php if ($allWarehouses === []): ?><tr><td colspan="4" style="text-align:center;color:var(--mbw-muted)">No warehouses yet — add one below.</td></tr><?php endif; ?>
+                    <?php foreach ($allWarehouses as $warehouse): ?>
+                        <?php $whActive = (int) $warehouse['is_active'] === 1; ?>
+                        <tr>
+                            <td><?= e($warehouse['name']) ?></td>
+                            <td><?= e($warehouse['code'] ?? '-') ?></td>
+                            <td><span class="mbw-pill <?= $whActive ? 'tone-green' : 'tone-red' ?>"><?= $whActive ? 'Active' : 'Inactive' ?></span></td>
+                            <td>
+                                <form method="post" style="display:inline">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="toggle_warehouse">
+                                    <input type="hidden" name="warehouse_id" value="<?= e((int) $warehouse['id']) ?>">
+                                    <button type="submit" class="button secondary"><?= $whActive ? 'Deactivate' : 'Activate' ?></button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <form method="post" class="workspace-form-grid" style="margin-top:12px">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_warehouse">
+            <label>Name<input type="text" name="name" maxlength="120" required></label>
+            <label>Code<input type="text" name="code" maxlength="40" placeholder="Optional"></label>
+            <div class="workspace-span-2"><button type="submit"><?= icon('services') ?>Add warehouse</button></div>
+        </form>
+    </details>
+
+    <details class="feature-disclosure" id="movement-purchase" <?= $moveItemId > 0 ? 'open' : '' ?>>
+        <summary><span><strong><?= icon('tasks') ?>Record Purchase / Opening Stock</strong><small>Post opening balances, purchases, and purchase returns.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <form method="post" class="workspace-form-grid" id="purchaseMovementForm">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="record_movement">
-            <label>Item<select name="item_id" id="movItem" required><option value="">Select item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>" data-purchase-rate="<?= e(number_format((float) $item['purchase_rate'], 2, '.', '')) ?>" data-sales-rate="<?= e(number_format((float) $item['sales_rate'], 2, '.', '')) ?>" data-on-hand="<?= e(number_format((float) $item['on_hand'], 3, '.', '')) ?>" <?= $moveItemId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
-            <label>Movement<select name="transaction_type" id="movType"><?php foreach ($movementTypes as $type): ?><option value="<?= e($type) ?>"><?= e(str_replace('_', ' ', ucfirst($type))) ?></option><?php endforeach; ?></select></label>
-            <label id="movDirectionWrap" hidden>Direction<select name="direction"><option value="in">Stock in (+)</option><option value="out">Stock out (&#8722;)</option></select></label>
+            <label>Item<select name="item_id" id="purMovItem" required><option value="">Select item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>" data-purchase-rate="<?= e(number_format((float) $item['purchase_rate'], 2, '.', '')) ?>" <?= $moveItemId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Movement<select name="transaction_type">
+                <option value="opening">Opening</option>
+                <option value="purchase">Purchase</option>
+                <option value="purchase_return">Purchase return</option>
+            </select></label>
+            <label>Warehouse<select name="warehouse_id"><option value="0">— unassigned —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>"><?= e($warehouse['name']) ?></option><?php endforeach; ?></select></label>
             <label>Date<input type="date" name="transaction_date" value="<?= e(date('Y-m-d')) ?>" required></label>
             <label>Reference<input type="text" name="ref_no" maxlength="120"></label>
-            <label>Quantity<input type="number" step="0.001" min="0.001" name="quantity" required><small id="movOnHand" style="color:var(--mbw-muted)"></small></label>
-            <label>Rate<input type="number" step="0.01" min="0" name="rate" id="movRate" placeholder="Auto from item"></label>
+            <label>Quantity<input type="number" step="0.001" min="0.001" name="quantity" required></label>
+            <label>Rate<input type="number" step="0.01" min="0" name="rate" id="purMovRate" placeholder="Auto from item"></label>
             <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
-            <button type="submit"><?= icon('tasks') ?>Record movement</button>
+            <button type="submit"><?= icon('tasks') ?>Record</button>
         </form>
         <script>
         (function () {
-            var item = document.getElementById('movItem');
-            var type = document.getElementById('movType');
-            var rate = document.getElementById('movRate');
-            var onHand = document.getElementById('movOnHand');
-            var directionWrap = document.getElementById('movDirectionWrap');
-            function sync() {
+            var item = document.getElementById('purMovItem');
+            var rate = document.getElementById('purMovRate');
+            item.addEventListener('change', function () {
                 var opt = item.options[item.selectedIndex];
+                if (opt && opt.value) { rate.value = opt.getAttribute('data-purchase-rate'); }
+            });
+        })();
+        </script>
+    </details>
+
+    <details class="feature-disclosure" id="movement-sale">
+        <summary><span><strong><?= icon('tasks') ?>Record Sale / Sales Return</strong><small>Manual, non-invoiced stock-outs — inventory-sourced invoices auto-post their own sale movement via invoice.php.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <form method="post" class="workspace-form-grid" id="saleMovementForm">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="record_movement">
+            <label>Item<select name="item_id" id="saleMovItem" required><option value="">Select item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>" data-sales-rate="<?= e(number_format((float) $item['sales_rate'], 2, '.', '')) ?>" <?= $moveItemId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Movement<select name="transaction_type">
+                <option value="sale">Sale</option>
+                <option value="sales_return">Sales return</option>
+            </select></label>
+            <label>Warehouse<select name="warehouse_id"><option value="0">— unassigned —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>"><?= e($warehouse['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Date<input type="date" name="transaction_date" value="<?= e(date('Y-m-d')) ?>" required></label>
+            <label>Reference<input type="text" name="ref_no" maxlength="120"></label>
+            <label>Quantity<input type="number" step="0.001" min="0.001" name="quantity" required></label>
+            <label>Rate<input type="number" step="0.01" min="0" name="rate" id="saleMovRate" placeholder="Auto from item"></label>
+            <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
+            <button type="submit"><?= icon('tasks') ?>Record</button>
+        </form>
+        <script>
+        (function () {
+            var item = document.getElementById('saleMovItem');
+            var rate = document.getElementById('saleMovRate');
+            item.addEventListener('change', function () {
+                var opt = item.options[item.selectedIndex];
+                if (opt && opt.value) { rate.value = opt.getAttribute('data-sales-rate'); }
+            });
+        })();
+        </script>
+    </details>
+
+    <details class="feature-disclosure" id="movement-adjust">
+        <summary><span><strong><?= icon('tasks') ?>Adjustments &amp; Write-offs</strong><small>Stock count corrections, write-offs, damage, and expiry.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <form method="post" class="workspace-form-grid" id="adjustForm">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="record_movement">
+            <label>Item<select name="item_id" id="adjItem" required><option value="">Select item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>" data-purchase-rate="<?= e(number_format((float) $item['purchase_rate'], 2, '.', '')) ?>" <?= $moveItemId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Movement<select name="transaction_type" id="adjType">
+                <option value="adjustment">Adjustment</option>
+                <option value="write_off">Write-off</option>
+                <option value="damage">Damage</option>
+                <option value="expiry">Expiry</option>
+            </select></label>
+            <label id="adjDirectionWrap" hidden>Direction<select name="direction"><option value="in">Stock in (+)</option><option value="out">Stock out (&#8722;)</option></select></label>
+            <label>Warehouse<select name="warehouse_id"><option value="0">— unassigned —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>"><?= e($warehouse['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Date<input type="date" name="transaction_date" value="<?= e(date('Y-m-d')) ?>" required></label>
+            <label>Reference<input type="text" name="ref_no" maxlength="120"></label>
+            <label>Quantity<input type="number" step="0.001" min="0.001" name="quantity" required></label>
+            <label>Rate<input type="number" step="0.01" min="0" name="rate" id="adjRate" placeholder="Auto: purchase rate"></label>
+            <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
+            <button type="submit"><?= icon('tasks') ?>Record</button>
+        </form>
+        <script>
+        (function () {
+            var item = document.getElementById('adjItem');
+            var type = document.getElementById('adjType');
+            var rate = document.getElementById('adjRate');
+            var directionWrap = document.getElementById('adjDirectionWrap');
+            function sync() {
                 directionWrap.hidden = type.value !== 'adjustment';
-                if (!opt || !opt.value) { onHand.textContent = ''; return; }
-                onHand.textContent = 'On hand: ' + (opt.getAttribute('data-on-hand') || '0');
+                var opt = item.options[item.selectedIndex];
+                if (!opt || !opt.value) { return; }
                 if (!rate.value || parseFloat(rate.value) === 0) {
-                    rate.value = type.value === 'sale' ? opt.getAttribute('data-sales-rate') : opt.getAttribute('data-purchase-rate');
+                    rate.value = opt.getAttribute('data-purchase-rate');
                 }
             }
             item.addEventListener('change', function () { rate.value = ''; sync(); });
-            type.addEventListener('change', function () { rate.value = ''; sync(); });
+            type.addEventListener('change', sync);
             sync();
         })();
         </script>
+    </details>
+
+    <details class="feature-disclosure" id="movement-transfer">
+        <summary><span><strong><?= icon('tasks') ?>Warehouse / Departmental Transfer</strong><small>Move stock between locations — quantity only, no GL impact.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <form method="post" class="workspace-form-grid">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="record_movement">
+            <label>Item<select name="item_id" required><option value="">Select item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>" <?= $moveItemId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Movement<select name="transaction_type">
+                <option value="warehouse_transfer">Warehouse transfer</option>
+                <option value="departmental_transfer">Departmental transfer</option>
+            </select></label>
+            <label>From warehouse<select name="warehouse_id" required><option value="">Select source</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>"><?= e($warehouse['name']) ?></option><?php endforeach; ?></select></label>
+            <label>To warehouse<select name="to_warehouse_id" required><option value="">Select destination</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>"><?= e($warehouse['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Date<input type="date" name="transaction_date" value="<?= e(date('Y-m-d')) ?>" required></label>
+            <label>Reference<input type="text" name="ref_no" maxlength="120"></label>
+            <label>Quantity<input type="number" step="0.001" min="0.001" name="quantity" required></label>
+            <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
+            <div class="workspace-span-2"><small style="color:var(--mbw-muted)">No GL entry — quantity moves between locations only (IAS 2 recognition unaffected).</small></div>
+            <button type="submit"><?= icon('tasks') ?>Record transfer</button>
+        </form>
     </details>
 
     <?php endif; ?>
@@ -1318,7 +1773,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td><span class="mbw-pill <?= $item['status'] === 'active' ? 'tone-green' : 'tone-red' ?>"><?= e(ucfirst($item['status'])) ?></span></td>
                     <td style="white-space:nowrap">
                         <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php?edit_id=' . (int) $item['id'] . '#create-item')) ?>">Edit</a>
-                        <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php?move_item=' . (int) $item['id'] . '#stock-movement')) ?>" title="Record a stock movement for this item">Move</a>
+                        <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php?move_item=' . (int) $item['id'] . '#movement-purchase')) ?>" title="Record a stock movement for this item">Move</a>
                         <a class="button secondary" href="<?= e(url('admin/reports-center.php?report=stock-ledger&item_id=' . (int) $item['id'])) ?>" title="Open this item's stock ledger (running balance)">Ledger</a>
                     </td>
                 </tr>
@@ -1327,6 +1782,29 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </table>
     </div>
 </section>
+
+<?php if ($showWarehouseStockCard): ?>
+<section class="mbw-card" aria-label="Stock by warehouse">
+    <div class="mbw-card-head"><h2>Stock by Warehouse</h2></div>
+    <div class="rc-table-scroll">
+        <table class="rc-table">
+            <thead><tr><th>Warehouse</th><th class="align-right">On hand</th></tr></thead>
+            <tbody>
+                <?php foreach ($warehouses as $warehouse): ?>
+                    <tr>
+                        <td><?= e($warehouse['name']) ?></td>
+                        <td class="align-right"><?= e(number_format($warehouseOnHand[(int) $warehouse['id']] ?? 0.0, 3)) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                <tr>
+                    <td>Unassigned</td>
+                    <td class="align-right"><?= e(number_format($unassignedOnHand, 3)) ?></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+<?php endif; ?>
 
 <section class="mbw-card">
     <div class="mbw-card-head">
