@@ -659,6 +659,14 @@ function inv_movement_posting_plan(string $type, string $direction): ?array
         case 'damage':
         case 'expiry':
             return ['debit' => 'inventory_loss', 'credit' => 'inventory_asset'];
+        case 'material_issue':
+            return ['debit' => 'wip', 'credit' => 'raw_material'];
+        case 'material_return':
+            return ['debit' => 'raw_material', 'credit' => 'wip'];
+        case 'production_receipt':
+            return ['debit' => 'finished_goods', 'credit' => 'wip'];
+        case 'scrap_receipt':
+            return ['debit' => 'scrap_inventory', 'credit' => 'wip'];
         case 'adjustment':
             return $direction === 'in'
                 ? ['debit' => 'inventory_asset', 'credit' => 'inventory_gain']
