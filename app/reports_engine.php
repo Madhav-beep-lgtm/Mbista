@@ -27,6 +27,12 @@ function rc_report_registry(): array
         'manufacturing-statement' => ['Manufacturing Statement', 'Manufacturing performance', 'settings'],
         'manufacturing-cost' => ['Manufacturing Cost Report', 'Per-order material cost breakdown', 'layers'],
         'manufacturing-wip' => ['Work in Progress (WIP)', 'Open production orders and value locked in WIP', 'attendance'],
+        'production-variance' => ['Production Variance Report', 'Material, labour and overhead variances vs BOM standard', 'reconcile'],
+        'nrv-report' => ['Lower of Cost & NRV', 'IAS 2 net realisable value assessment per item', 'reports'],
+        'inventory-gl-reconciliation' => ['Inventory-to-GL Reconciliation', 'Perpetual stock subledger vs general-ledger inventory balance', 'reconcile'],
+        'fixed-asset-register' => ['Fixed Asset Register', 'Detailed register with cost, depreciation and carrying amount', 'companies'],
+        'depreciation-schedule' => ['Depreciation Schedule', 'Posted depreciation by asset and period', 'download'],
+        'asset-gl-reconciliation' => ['Asset-to-GL Reconciliation', 'Fixed-asset register carrying amount vs general ledger', 'reconcile'],
         'salary-sheet' => ['Salary Sheet', 'Payroll register: earnings, deductions, tax and net pay per employee', 'wallet'],
         'financial-ratios' => ['Financial Ratios', 'Key financial ratios analysis', 'dashboard'],
     ];
@@ -1527,6 +1533,213 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             return [
                 'subtitle' => 'Key financial ratios computed from live balances.',
                 'columns' => [['Ratio', 'left', ''], ['Value', 'right', ''], ['Basis', 'left', '']],
+                'rows' => $rows,
+                'totals' => null,
+            ];
+        }
+
+        case 'nrv-report': {
+            if (!table_exists('inventory_items') || !function_exists('inv_item_valuation')) {
+                return ['subtitle' => 'Inventory module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $stmt = db()->prepare("SELECT * FROM inventory_items WHERE company_id = :cid AND status = 'active' ORDER BY sku ASC");
+            $stmt->execute(['cid' => $scopeCompanyId]);
+            $rows = [];
+            $tCost = 0.0; $tLower = 0.0; $tWd = 0.0;
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+                $item['on_hand'] = (float) $item['opening_qty'];
+                $v = inv_item_valuation($scopeCompanyId, $item);
+                if ($v['qty'] <= 0.00005 && $v['cost_value'] <= 0.004) { continue; }
+                $rows[] = [
+                    (string) $item['sku'], (string) $item['name'],
+                    strtoupper(str_replace('_', ' ', (string) ($item['valuation_method'] ?? 'weighted_average'))),
+                    number_format($v['qty'], 3), rc_fmt($v['unit_cost']), rc_fmt($v['cost_value']),
+                    rc_fmt($v['nrv_per_unit']), rc_fmt($v['lower_value']), rc_fmt($v['write_down']),
+                ];
+                $tCost += $v['cost_value']; $tLower += $v['lower_value']; $tWd += $v['write_down'];
+            }
+            return [
+                'title' => 'Lower of Cost & NRV (IAS 2)', 'as_at' => true,
+                'subtitle' => 'Each item measured at the lower of cost and net realisable value as at ' . date('d M Y', strtotime($to)) . '.',
+                'columns' => [
+                    ['Item Code', 'left', ''], ['Item Name', 'left', ''], ['Method', 'left', ''], ['Qty', 'right', ''],
+                    ['Unit Cost (' . $sym . ')', 'right', ''], ['Cost Value (' . $sym . ')', 'right', ''],
+                    ['NRV/Unit (' . $sym . ')', 'right', ''], ['Lower of C&NRV (' . $sym . ')', 'right', ''], ['Write-down (' . $sym . ')', 'right', ''],
+                ],
+                'rows' => $rows,
+                'totals' => ['', 'Total', '', '', '', rc_fmt($tCost), '', rc_fmt($tLower), rc_fmt($tWd)],
+            ];
+        }
+
+        case 'production-variance': {
+            if (!table_exists('production_variances')) {
+                return ['subtitle' => 'No production variances recorded.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $stmt = db()->prepare('SELECT pv.*, mo.order_no, i.sku FROM production_variances pv JOIN manufacturing_orders mo ON mo.id = pv.manufacturing_order_id LEFT JOIN inventory_items i ON i.id = mo.finished_item_id WHERE pv.company_id = :cid ORDER BY pv.id DESC');
+            $stmt->execute(['cid' => $scopeCompanyId]);
+            $rows = []; $tVar = 0.0;
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $var = (float) $r['variance'];
+                $rows[] = [
+                    (string) $r['order_no'], (string) ($r['sku'] ?? ''), ucwords(str_replace('_', ' ', (string) $r['variance_type'])),
+                    rc_fmt((float) $r['standard_amount']), rc_fmt((float) $r['actual_amount']),
+                    rc_fmt($var) . ' ' . ($var > 0 ? '(U)' : ($var < 0 ? '(F)' : '')),
+                ];
+                $tVar += $var;
+            }
+            return [
+                'title' => 'Production Variance Report',
+                'subtitle' => 'Actual vs BOM standard; (U) unfavourable, (F) favourable.',
+                'columns' => [['Order', 'left', ''], ['Finished Item', 'left', ''], ['Variance Type', 'left', ''], ['Standard (' . $sym . ')', 'right', ''], ['Actual (' . $sym . ')', 'right', ''], ['Variance (' . $sym . ')', 'right', '']],
+                'rows' => $rows,
+                'totals' => ['', '', 'Net variance', '', '', rc_fmt($tVar)],
+            ];
+        }
+
+        case 'inventory-gl-reconciliation': {
+            if (!table_exists('inventory_items') || !function_exists('inv_company_valuation')) {
+                return ['subtitle' => 'Inventory module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            // Subledger: perpetual cost-layer value of all items.
+            $items = db()->prepare('SELECT *, opening_qty AS on_hand FROM inventory_items WHERE company_id = :cid');
+            $items->execute(['cid' => $scopeCompanyId]);
+            $itemRows = $items->fetchAll(PDO::FETCH_ASSOC);
+            $subledger = inv_company_valuation($scopeCompanyId, $itemRows)['cost'];
+            // GL: closing balance of every ledger designated as inventory (item
+            // links + global inventory mappings) from posted vouchers up to $to.
+            $ledgerIds = [];
+            foreach ($itemRows as $it) { if ((int) ($it['ledger_id'] ?? 0) > 0) { $ledgerIds[(int) $it['ledger_id']] = true; } }
+            if (table_exists('inventory_ledger_mappings')) {
+                $mp = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND scope='global' AND purpose IN ('inventory_asset','raw_material','wip','finished_goods','scrap_inventory')");
+                $mp->execute(['cid' => $scopeCompanyId]);
+                foreach ($mp->fetchAll(PDO::FETCH_COLUMN) as $lid) { $ledgerIds[(int) $lid] = true; }
+            }
+            $rows = [];
+            $glTotal = 0.0;
+            if ($ledgerIds !== []) {
+                $ph = implode(',', array_fill(0, count($ledgerIds), '?'));
+                $q = db()->prepare("SELECT l.code, l.name, l.id,
+                        COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0) AS bal
+                    FROM ledgers l
+                    LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
+                    LEFT JOIN vouchers v ON v.id = ve.voucher_id AND v.status='posted' AND v.company_id = l.company_id AND (v.voucher_date IS NULL OR v.voucher_date <= ?)
+                    WHERE l.id IN ($ph) GROUP BY l.id ORDER BY l.code");
+                $q->execute(array_merge([$to], array_keys($ledgerIds)));
+                foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $lr) {
+                    $rows[] = [(string) $lr['code'], (string) $lr['name'], 'GL ledger balance', rc_fmt((float) $lr['bal'])];
+                    $glTotal += (float) $lr['bal'];
+                }
+            }
+            $diff = round($subledger - $glTotal, 2);
+            $rows[] = ['', 'Perpetual stock subledger (cost layers)', 'Subledger', rc_fmt($subledger)];
+            $rows[] = ['', 'General-ledger inventory balance', 'GL', rc_fmt($glTotal)];
+            $rows[] = ['', 'DIFFERENCE (subledger − GL)', abs($diff) < 0.005 ? 'Reconciled' : 'Investigate', rc_fmt($diff)];
+            return [
+                'title' => 'Inventory-to-GL Reconciliation', 'as_at' => true,
+                'subtitle' => 'Perpetual cost-layer subledger vs general-ledger inventory as at ' . date('d M Y', strtotime($to)) . '. Any difference is shown, never hidden.',
+                'columns' => [['Ledger', 'left', ''], ['Description', 'left', ''], ['Source', 'left', ''], ['Amount (' . $sym . ')', 'right', '']],
+                'rows' => $rows,
+                'totals' => null,
+            ];
+        }
+
+        case 'fixed-asset-register': {
+            if (!table_exists('fixed_assets')) {
+                return ['subtitle' => 'Fixed-asset module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $stmt = db()->prepare('SELECT * FROM fixed_assets WHERE company_id = :cid ORDER BY asset_class, asset_code');
+            $stmt->execute(['cid' => $scopeCompanyId]);
+            $rows = []; $tCost = 0.0; $tDep = 0.0; $tImp = 0.0; $tCarry = 0.0;
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $a) {
+                $rows[] = [
+                    (string) $a['asset_code'], (string) $a['name'], strtoupper((string) $a['asset_class']),
+                    str_replace('_', ' ', (string) $a['depreciation_method']),
+                    rc_fmt((float) $a['cost']), rc_fmt((float) $a['accumulated_depreciation']),
+                    rc_fmt((float) $a['accumulated_impairment']), rc_fmt((float) $a['carrying_amount']),
+                    str_replace('_', ' ', (string) $a['status']),
+                ];
+                $tCost += (float) $a['cost']; $tDep += (float) $a['accumulated_depreciation'];
+                $tImp += (float) $a['accumulated_impairment']; $tCarry += (float) $a['carrying_amount'];
+            }
+            return [
+                'title' => 'Fixed Asset Register', 'as_at' => true,
+                'subtitle' => 'Cost, accumulated depreciation/impairment and carrying amount as at ' . date('d M Y', strtotime($to)) . '.',
+                'columns' => [
+                    ['Code', 'left', ''], ['Asset', 'left', ''], ['Class', 'left', ''], ['Method', 'left', ''],
+                    ['Cost (' . $sym . ')', 'right', ''], ['Accum. Dep. (' . $sym . ')', 'right', ''],
+                    ['Accum. Imp. (' . $sym . ')', 'right', ''], ['Carrying (' . $sym . ')', 'right', ''], ['Status', 'left', ''],
+                ],
+                'rows' => $rows,
+                'totals' => ['', 'Total', '', '', rc_fmt($tCost), rc_fmt($tDep), rc_fmt($tImp), rc_fmt($tCarry), ''],
+            ];
+        }
+
+        case 'depreciation-schedule': {
+            if (!table_exists('asset_depreciation_schedule')) {
+                return ['subtitle' => 'No depreciation posted.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $stmt = db()->prepare('SELECT ads.*, fa.asset_code, fa.name FROM asset_depreciation_schedule ads JOIN fixed_assets fa ON fa.id = ads.asset_id WHERE ads.company_id = :cid AND ads.period_date BETWEEN :f AND :t ORDER BY fa.asset_code, ads.period_no');
+            $stmt->execute(['cid' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+            $rows = []; $tDep = 0.0;
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $s) {
+                $rows[] = [
+                    (string) $s['asset_code'], (string) $s['name'], (string) $s['period_no'], (string) $s['period_date'],
+                    rc_fmt((float) $s['depreciation']), rc_fmt((float) $s['accumulated']), rc_fmt((float) $s['carrying']),
+                    $s['voucher_id'] ? '#' . (int) $s['voucher_id'] : '–',
+                ];
+                $tDep += (float) $s['depreciation'];
+            }
+            return [
+                'title' => 'Depreciation Schedule',
+                'subtitle' => 'Depreciation posted between ' . date('d M Y', strtotime($from)) . ' and ' . date('d M Y', strtotime($to)) . '.',
+                'columns' => [['Code', 'left', ''], ['Asset', 'left', ''], ['Period', 'right', ''], ['Date', 'left', ''], ['Depreciation (' . $sym . ')', 'right', ''], ['Accumulated (' . $sym . ')', 'right', ''], ['Carrying (' . $sym . ')', 'right', ''], ['Voucher', 'left', '']],
+                'rows' => $rows,
+                'totals' => ['', '', '', 'Total', rc_fmt($tDep), '', '', ''],
+            ];
+        }
+
+        case 'asset-gl-reconciliation': {
+            if (!table_exists('fixed_assets')) {
+                return ['subtitle' => 'Fixed-asset module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            // Register side: net carrying amount from the asset register.
+            $reg = db()->prepare('SELECT COALESCE(SUM(carrying_amount),0) AS carry, COALESCE(SUM(cost),0) AS cost, COALESCE(SUM(accumulated_depreciation),0) AS dep, COALESCE(SUM(accumulated_impairment),0) AS imp FROM fixed_assets WHERE company_id = :cid AND status <> \'disposed\'');
+            $reg->execute(['cid' => $scopeCompanyId]);
+            $r = $reg->fetch(PDO::FETCH_ASSOC);
+            $registerCarry = round((float) $r['carry'], 2);
+            // GL side: net of mapped PPE cost ledgers less accumulated dep/impairment ledgers.
+            $glNet = 0.0;
+            $rows = [];
+            if (table_exists('asset_ledger_mappings')) {
+                $costLedgers = []; $contraLedgers = [];
+                $mp = db()->prepare("SELECT purpose, ledger_id FROM asset_ledger_mappings WHERE company_id = :cid AND scope='global' AND purpose IN ('ppe_cost','rou_asset','accumulated_depreciation','accumulated_amortization','accumulated_impairment')");
+                $mp->execute(['cid' => $scopeCompanyId]);
+                foreach ($mp->fetchAll(PDO::FETCH_ASSOC) as $m) {
+                    if (in_array($m['purpose'], ['ppe_cost', 'rou_asset'], true)) { $costLedgers[(int) $m['ledger_id']] = true; }
+                    else { $contraLedgers[(int) $m['ledger_id']] = true; }
+                }
+                $balOf = static function (int $lid, int $cid, string $to): float {
+                    $q = db()->prepare("SELECT COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0)
+                        FROM voucher_entries ve JOIN vouchers v ON v.id = ve.voucher_id
+                        WHERE ve.ledger_id = ? AND v.company_id = ? AND v.status='posted' AND (v.voucher_date IS NULL OR v.voucher_date <= ?)");
+                    $q->execute([$lid, $cid, $to]);
+                    return (float) $q->fetchColumn();
+                };
+                foreach (array_keys($costLedgers) as $lid) { $b = $balOf($lid, $scopeCompanyId, $to); $glNet += $b; }
+                foreach (array_keys($contraLedgers) as $lid) { $b = $balOf($lid, $scopeCompanyId, $to); $glNet += $b; }
+            }
+            $glNet = round($glNet, 2);
+            $diff = round($registerCarry - $glNet, 2);
+            $rows[] = ['Register gross cost', rc_fmt((float) $r['cost'])];
+            $rows[] = ['Register accumulated depreciation', rc_fmt(-(float) $r['dep'])];
+            $rows[] = ['Register accumulated impairment', rc_fmt(-(float) $r['imp'])];
+            $rows[] = ['Register net carrying amount', rc_fmt($registerCarry)];
+            $rows[] = ['General-ledger net (cost − accumulated)', rc_fmt($glNet)];
+            $rows[] = ['DIFFERENCE (register − GL)', rc_fmt($diff) . (abs($diff) < 0.005 ? '  ✓ reconciled' : '  ⚠ investigate')];
+            return [
+                'title' => 'Asset-to-GL Reconciliation', 'as_at' => true,
+                'subtitle' => 'Fixed-asset register carrying amount vs the general ledger as at ' . date('d M Y', strtotime($to)) . '.',
+                'columns' => [['Description', 'left', ''], ['Amount (' . $sym . ')', 'right', '']],
                 'rows' => $rows,
                 'totals' => null,
             ];

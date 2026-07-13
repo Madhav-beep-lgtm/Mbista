@@ -25,11 +25,13 @@ $currencySymbol = site_currency_symbol();
 $reportRegistry = rc_report_registry();
 $allowedReportKeys = array_keys($reportRegistry);
 if (!($companyBusinessProfile['show_inventory'] ?? false)) {
-    $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['inventory-summary', 'stock-ledger', 'stock-movement', 'stock-valuation']));
+    $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['inventory-summary', 'stock-ledger', 'stock-movement', 'stock-valuation', 'nrv-report', 'inventory-gl-reconciliation']));
 }
 if (!($companyBusinessProfile['show_manufacturing'] ?? false)) {
-    $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['manufacturing-statement', 'manufacturing-cost', 'manufacturing-wip']));
+    $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['manufacturing-statement', 'manufacturing-cost', 'manufacturing-wip', 'production-variance']));
 }
+// Fixed-asset reports (register / depreciation / asset-GL reconciliation) apply
+// to every company, so they are not gated by the trading/manufacturing profile.
 $allowedReportRegistry = array_intersect_key($reportRegistry, array_flip($allowedReportKeys));
 
 // ---------------------------------------------------------------------------
