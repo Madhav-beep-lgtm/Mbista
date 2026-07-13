@@ -38,6 +38,32 @@ function inventory_valid_date(string $value): ?string
     return ($parsed && $parsed->format('Y-m-d') === $value) ? $value : null;
 }
 
+/**
+ * The inventory posting purposes shown on the Ledger Mapping tab, with a
+ * human label and the account type each SHOULD point at (used for the
+ * "wrong-type" warning so an asset is not mapped to income, etc.).
+ */
+function inventory_mapping_purposes(): array
+{
+    return [
+        'inventory_asset'      => ['label' => 'Inventory Asset', 'expect' => 'asset'],
+        'raw_material'         => ['label' => 'Raw Material Inventory', 'expect' => 'asset'],
+        'wip'                  => ['label' => 'Work in Progress', 'expect' => 'asset'],
+        'finished_goods'       => ['label' => 'Finished Goods Inventory', 'expect' => 'asset'],
+        'cogs'                 => ['label' => 'Cost of Goods Sold', 'expect' => 'expense'],
+        'purchase_clearing'    => ['label' => 'Purchase / GRNI Clearing', 'expect' => 'liability'],
+        'sales_revenue'        => ['label' => 'Sales Revenue', 'expect' => 'revenue'],
+        'inventory_gain'       => ['label' => 'Inventory Gain / Adjustment', 'expect' => 'revenue'],
+        'inventory_loss'       => ['label' => 'Inventory Loss / Damage / Expiry', 'expect' => 'expense'],
+        'write_down_expense'   => ['label' => 'Inventory Write-down Expense', 'expect' => 'expense'],
+        'write_down_allowance' => ['label' => 'Allowance for Write-down', 'expect' => 'liability'],
+        'write_down_reversal'  => ['label' => 'Reversal of Write-down', 'expect' => 'revenue'],
+        'scrap_inventory'      => ['label' => 'Scrap / By-product Inventory', 'expect' => 'asset'],
+        'tax_input'            => ['label' => 'Recoverable Input Tax', 'expect' => 'asset'],
+        'tax_output'           => ['label' => 'Output Tax Payable', 'expect' => 'liability'],
+    ];
+}
+
 /** Item scoped to the current company, or null — never trust a POSTed item id. */
 function inventory_company_item(int $itemId, int $companyId): ?array
 {
@@ -112,12 +138,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/accounting-inventory.php');
         }
 
+        $validMethods = ['fifo', 'weighted_average', 'specific'];
+        $valuationMethod = (string) ($_POST['valuation_method'] ?? 'weighted_average');
+        if (!in_array($valuationMethod, $validMethods, true)) {
+            $valuationMethod = 'weighted_average';
+        }
         $params = [
             'company_id' => $companyId,
             'ledger_id' => (int) ($_POST['ledger_id'] ?? 0) ?: null,
             'sku' => $sku,
             'name' => $name,
+            'category' => trim((string) ($_POST['category'] ?? '')) ?: null,
             'item_type' => $itemType,
+            'valuation_method' => $valuationMethod,
             'unit' => trim((string) ($_POST['unit'] ?? 'pcs')) ?: 'pcs',
             'hs_code' => trim((string) ($_POST['hs_code'] ?? '')) ?: null,
             'tax_rate' => max(0.0, round((float) ($_POST['tax_rate'] ?? 13), 2)),
@@ -134,24 +167,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $params['id'] = $itemId;
                 db()->prepare('
                     UPDATE inventory_items
-                    SET ledger_id = :ledger_id, sku = :sku, name = :name, item_type = :item_type, unit = :unit,
+                    SET ledger_id = :ledger_id, sku = :sku, name = :name, category = :category, item_type = :item_type,
+                        valuation_method = :valuation_method, unit = :unit,
                         hs_code = :hs_code, tax_rate = :tax_rate, sales_rate = :sales_rate, purchase_rate = :purchase_rate,
                         opening_qty = :opening_qty, reorder_level = :reorder_level, status = :status, notes = :notes
                     WHERE id = :id AND company_id = :company_id
                 ')->execute($params);
+                // Opening qty/rate or method may have changed — rebuild layers.
+                inv_rebuild_layers($companyId, $itemId, $valuationMethod, (float) $params['opening_qty'], (float) $params['purchase_rate']);
                 log_activity('inventory_item', $itemId, 'updated', 'Inventory item updated.', $userId);
                 flash('success', 'Item updated.');
             } else {
                 db()->prepare('
                     INSERT INTO inventory_items (
-                        company_id, ledger_id, sku, name, item_type, unit, hs_code, tax_rate,
+                        company_id, ledger_id, sku, name, category, item_type, valuation_method, unit, hs_code, tax_rate,
                         sales_rate, purchase_rate, opening_qty, reorder_level, status, notes
                     ) VALUES (
-                        :company_id, :ledger_id, :sku, :name, :item_type, :unit, :hs_code, :tax_rate,
+                        :company_id, :ledger_id, :sku, :name, :category, :item_type, :valuation_method, :unit, :hs_code, :tax_rate,
                         :sales_rate, :purchase_rate, :opening_qty, :reorder_level, :status, :notes
                     )
                 ')->execute($params);
-                log_activity('inventory_item', (int) db()->lastInsertId(), 'created', 'Inventory item created.', $userId);
+                $newItemId = (int) db()->lastInsertId();
+                // Seed the opening cost layer so valuation is correct from day one.
+                if ((float) $params['opening_qty'] > 0) {
+                    inv_add_layer($companyId, $newItemId, (float) $params['opening_qty'], (float) $params['purchase_rate'], '2000-01-01');
+                }
+                log_activity('inventory_item', $newItemId, 'created', 'Inventory item created.', $userId);
                 flash('success', 'Item created.');
             }
         } catch (Throwable $exception) {
@@ -193,28 +234,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($rate <= 0) {
             $rate = $type === 'sale' ? (float) $item['sales_rate'] : (float) $item['purchase_rate'];
         }
-        db()->prepare('
-            INSERT INTO inventory_transactions (
-                company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date,
-                qty_in, qty_out, rate, amount, notes
-            ) VALUES (
-                :company_id, :fiscal_year_id, :item_id, :transaction_type, :ref_no, :transaction_date,
-                :qty_in, :qty_out, :rate, :amount, :notes
-            )
-        ')->execute([
-            'company_id' => $companyId,
-            'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
-            'item_id' => $itemId,
-            'transaction_type' => $type,
-            'ref_no' => trim((string) ($_POST['ref_no'] ?? '')) ?: null,
-            'transaction_date' => $date,
-            'qty_in' => $direction === 'in' ? $qty : 0,
-            'qty_out' => $direction === 'out' ? $qty : 0,
-            'rate' => $rate,
-            'amount' => round($qty * $rate, 2),
-            'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
-        ]);
-        flash('success', 'Inventory movement recorded: ' . ($direction === 'in' ? '+' : '−') . number_format($qty, 3) . ' ' . $item['unit'] . ' ' . $item['sku'] . '.');
+        $qtyIn = $direction === 'in' ? $qty : 0.0;
+        $qtyOut = $direction === 'out' ? $qty : 0.0;
+        $method = (string) ($item['valuation_method'] ?? 'weighted_average');
+        try {
+            db()->beginTransaction();
+            $insertTxn = db()->prepare('
+                INSERT INTO inventory_transactions (
+                    company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date,
+                    qty_in, qty_out, rate, amount, notes
+                ) VALUES (
+                    :company_id, :fiscal_year_id, :item_id, :transaction_type, :ref_no, :transaction_date,
+                    :qty_in, :qty_out, :rate, :amount, :notes
+                )
+            ');
+            $insertTxn->execute([
+                'company_id' => $companyId,
+                'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
+                'item_id' => $itemId,
+                'transaction_type' => $type,
+                'ref_no' => trim((string) ($_POST['ref_no'] ?? '')) ?: null,
+                'transaction_date' => $date,
+                'qty_in' => $qtyIn,
+                'qty_out' => $qtyOut,
+                'rate' => $rate,
+                'amount' => round($qty * $rate, 2),
+                'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
+            ]);
+            $txnId = (int) db()->lastInsertId();
+            // Maintain the perpetual cost layers so on-hand VALUE is real IAS 2
+            // cost (FIFO / moving average / specific), not a rate estimate. An
+            // outward issue draws down layers at the item's cost-flow cost.
+            $issueValue = inv_apply_movement($companyId, $itemId, $qtyIn, $qtyOut, $rate, $date, $method, $txnId);
+            db()->commit();
+            $costNote = $qtyOut > 0 ? ' Issue cost (' . strtoupper(str_replace('_', ' ', $method)) . '): ' . site_currency_symbol() . number_format($issueValue, 2) . '.' : '';
+            flash('success', 'Inventory movement recorded: ' . ($direction === 'in' ? '+' : '−') . number_format($qty, 3) . ' ' . $item['unit'] . ' ' . $item['sku'] . '.' . $costNote);
+        } catch (Throwable $exception) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            flash('error', 'Could not record movement: ' . $exception->getMessage());
+        }
         redirect('admin/accounting-inventory.php');
     }
 
@@ -238,6 +298,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Movement not found, or it belongs to a manufacturing order (cancel the order instead).');
         }
         redirect('admin/accounting-inventory.php');
+    }
+
+    if ($action === 'save_inventory_mappings') {
+        // Global-default ledger mappings for inventory posting purposes. Each
+        // ledger is validated to belong to this company before it is stored.
+        $purposes = array_keys(inventory_mapping_purposes());
+        $saved = 0;
+        foreach ($purposes as $purpose) {
+            $ledgerId = (int) ($_POST['map'][$purpose] ?? 0);
+            if ($ledgerId <= 0) {
+                db()->prepare('DELETE FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = \'global\' AND category IS NULL AND item_id IS NULL AND purpose = :p')
+                    ->execute(['cid' => $companyId, 'p' => $purpose]);
+                continue;
+            }
+            $own = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE id = :id AND company_id = :cid');
+            $own->execute(['id' => $ledgerId, 'cid' => $companyId]);
+            if ((int) $own->fetchColumn() === 0) {
+                continue; // never map a foreign company's ledger
+            }
+            db()->prepare('
+                INSERT INTO inventory_ledger_mappings (company_id, scope, category, item_id, purpose, ledger_id, created_by)
+                VALUES (:cid, \'global\', NULL, NULL, :p, :lid, :uid)
+                ON DUPLICATE KEY UPDATE ledger_id = VALUES(ledger_id), created_by = VALUES(created_by)
+            ')->execute(['cid' => $companyId, 'p' => $purpose, 'lid' => $ledgerId, 'uid' => $userId]);
+            $saved++;
+        }
+        log_activity('inventory_mapping', $companyId, 'updated', 'Inventory ledger mappings updated (' . $saved . ' set).', $userId);
+        flash('success', 'Inventory ledger mappings saved (' . $saved . ' purpose' . ($saved === 1 ? '' : 's') . ' mapped).');
+        redirect('admin/accounting-inventory.php?view=mapping');
     }
 
     if ($action === 'create_manufacturing_order') {
@@ -345,6 +434,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($mode === 'start') {
+                foreach ($inputs as $input) {
+                    inv_rebuild_item($companyId, (int) $input['item']['id']);
+                }
                 db()->commit();
                 log_activity('manufacturing_order', $orderId, 'started', 'Production started (WIP).', $userId);
                 flash('success', 'Production order ' . $orderNo . ' started: materials issued, value now sits in Work in Progress. Complete it from the orders table below.');
@@ -370,6 +462,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 db()->prepare("UPDATE inventory_transactions SET voucher_id = :vid WHERE company_id = :cid AND ref_no = :ref AND transaction_type IN ('consume', 'produce')")
                     ->execute(['vid' => $voucherId, 'cid' => $companyId, 'ref' => $orderNo]);
             }
+            foreach ($inputs as $input) {
+                inv_rebuild_item($companyId, (int) $input['item']['id']);
+            }
+            inv_rebuild_item($companyId, $finishedItemId);
             db()->commit();
             log_activity('manufacturing_order', $orderId, 'completed', 'Manufacturing order completed.', $userId);
             flash('success', 'Manufacturing order ' . $orderNo . ' completed and stock updated.'
@@ -427,6 +523,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                 }
                 db()->prepare("UPDATE manufacturing_orders SET status = 'cancelled' WHERE id = :id")->execute(['id' => $orderId]);
+                foreach ($inputRows as $inputRow) {
+                    inv_rebuild_item($companyId, (int) $inputRow['item_id']);
+                }
                 db()->commit();
                 log_activity('manufacturing_order', $orderId, 'cancelled', 'Production order cancelled, materials returned.', $userId);
                 flash('success', 'Order ' . $orderNo . ' cancelled and issued materials returned to stock.');
@@ -465,6 +564,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 db()->prepare("UPDATE inventory_transactions SET voucher_id = :vid WHERE company_id = :cid AND ref_no = :ref AND transaction_type IN ('consume', 'produce')")
                     ->execute(['vid' => $voucherId, 'cid' => $companyId, 'ref' => $orderNo]);
             }
+            inv_rebuild_item($companyId, (int) $order['finished_item_id']);
             db()->commit();
             log_activity('manufacturing_order', $orderId, 'completed', 'Production completed from WIP.', $userId);
             flash('success', 'Order ' . $orderNo . ' completed: ' . number_format($quantity, 3) . ' finished goods received into stock at ' . number_format($finishedRate, 2) . ' each.'
@@ -533,7 +633,13 @@ $orderStmt->execute(['company_id' => $companyId]);
 $manufacturingOrders = $orderStmt->fetchAll();
 $openOrderCount = count(array_filter($manufacturingOrders, static fn (array $order): bool => in_array((string) $order['status'], ['draft', 'in_progress'], true)));
 
-$stockValue = array_sum(array_map(static fn (array $item): float => (float) $item['on_hand'] * (float) $item['purchase_rate'], $items));
+// Real IAS 2 valuation from the perpetual cost layers (backfills legacy items).
+$inventoryValuation = inv_company_valuation($companyId, $items);
+$stockValueAtCost = $inventoryValuation['cost'];
+$stockLowerOfCostNrv = $inventoryValuation['lower'];
+$stockNrvWriteDown = $inventoryValuation['write_down'];
+$stockOnHandUnits = array_sum(array_map(static fn (array $item): float => (float) $item['on_hand'], $items));
+$stockValue = $stockValueAtCost; // legacy alias retained for any downstream use
 $lowStockCount = count(array_filter($items, static fn (array $item): bool => (float) $item['reorder_level'] > 0 && (float) $item['on_hand'] <= (float) $item['reorder_level']));
 $inventoryProcessSteps = $inventoryProfile['show_manufacturing']
     ? [
@@ -566,7 +672,11 @@ $inventoryTypeCards = $inventoryProfile['show_manufacturing']
         ['Consumable', 'Low-value operational items tracked for stock control.'],
 ];
 $invView = (string) ($_GET['view'] ?? 'inventory');
-if ($invView !== 'manufacturing' || !($inventoryProfile['show_manufacturing'] ?? false)) {
+$allowedViews = ['inventory', 'valuation', 'mapping'];
+if ($inventoryProfile['show_manufacturing'] ?? false) {
+    $allowedViews[] = 'manufacturing';
+}
+if (!in_array($invView, $allowedViews, true)) {
     $invView = 'inventory';
 }
 $lowOnly = (string) ($_GET['low'] ?? '') === '1';
@@ -593,39 +703,163 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-kpi-grid" aria-label="Inventory overview">
     <a class="mbw-kpi" href="<?= e(url('admin/accounting-inventory.php#item-stock-summary')) ?>" title="Jump to the item stock summary">
         <div>
-            <span class="mbw-kpi-label">Items</span>
-            <div class="mbw-kpi-value"><?= e((string) count($items)) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e(implode(', ', array_map(static fn (array $card): string => $card[0], $inventoryTypeCards))) ?></span></span>
+            <span class="mbw-kpi-label">Stock on Hand</span>
+            <div class="mbw-kpi-value"><?= e(number_format($stockOnHandUnits, 0)) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e((string) count($items)) ?> items</span></span>
         </div>
         <span class="mbw-chip tone-blue"><?= icon('cart') ?></span>
     </a>
-    <a class="mbw-kpi" href="<?= e(url('admin/reports-center.php?report=stock-valuation')) ?>" title="Open the Stock Valuation report">
+    <a class="mbw-kpi" href="<?= e(url('admin/reports-center.php?report=stock-valuation')) ?>" title="Inventory value at cost from the perpetual cost layers">
         <div>
-            <span class="mbw-kpi-label">Estimated Stock Value</span>
-            <div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($stockValue, 2)) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Based on purchase rates &#8594; valuation report</span></span>
+            <span class="mbw-kpi-label">Inventory Value at Cost</span>
+            <div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($stockValueAtCost, 2)) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">FIFO / weighted avg / specific</span></span>
         </div>
         <span class="mbw-chip tone-green"><?= icon('wallet') ?></span>
+    </a>
+    <a class="mbw-kpi" href="<?= e(url('admin/accounting-inventory.php?view=valuation')) ?>" title="Lower of cost and net realisable value (IAS 2)">
+        <div>
+            <span class="mbw-kpi-label">Lower of Cost &amp; NRV</span>
+            <div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($stockLowerOfCostNrv, 2)) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">IAS 2 measurement</span></span>
+        </div>
+        <span class="mbw-chip tone-teal"><?= icon('reports') ?></span>
+    </a>
+    <a class="mbw-kpi" href="<?= e(url('admin/accounting-inventory.php?view=valuation')) ?>" title="Cumulative NRV write-down (cost above NRV)">
+        <div>
+            <span class="mbw-kpi-label">NRV Write-down</span>
+            <div class="mbw-kpi-value" style="<?= $stockNrvWriteDown > 0 ? 'color:var(--mbw-amber)' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format($stockNrvWriteDown, 2)) ?></div>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= $stockNrvWriteDown > 0 ? 'Cost exceeds NRV' : 'None' ?></span></span>
+        </div>
+        <span class="mbw-chip tone-amber"><?= icon('download') ?></span>
     </a>
     <a class="mbw-kpi" href="<?= e(url('admin/accounting-inventory.php?low=1#item-stock-summary')) ?>" title="Show only items at or below their reorder level">
         <div>
             <span class="mbw-kpi-label">Low Stock</span>
             <div class="mbw-kpi-value"><?= e((string) $lowStockCount) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">At or below reorder level<?= $lowStockCount > 0 ? ' — click to filter' : '' ?></span></span>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">At or below reorder level</span></span>
         </div>
         <span class="mbw-chip tone-amber"><?= icon('tag') ?></span>
     </a>
     <?php if ($inventoryProfile['show_manufacturing']): ?>
         <a class="mbw-kpi" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing#manufacturing-orders')) ?>" title="Open the manufacturing workspace">
             <div>
-                <span class="mbw-kpi-label">Manufacturing Orders</span>
-                <div class="mbw-kpi-value"><?= e((string) count($manufacturingOrders)) ?></div>
-                <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= $openOrderCount > 0 ? e($openOrderCount . ' in progress (WIP)') : 'Recent production records' ?></span></span>
+                <span class="mbw-kpi-label">Open Production Orders</span>
+                <div class="mbw-kpi-value"><?= e((string) $openOrderCount) ?></div>
+                <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= $openOrderCount > 0 ? 'In progress (WIP)' : 'None open' ?></span></span>
             </div>
             <span class="mbw-chip tone-purple"><?= icon('layers') ?></span>
         </a>
     <?php endif; ?>
 </section>
+
+<nav class="mbw-tabbar" aria-label="Inventory workspace" style="margin:6px 0 16px">
+    <a class="<?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('cart') ?>Items &amp; Transactions</a>
+    <a class="<?= $invView === 'valuation' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=valuation')) ?>"><?= icon('reports') ?>Valuation &amp; NRV</a>
+    <a class="<?= $invView === 'mapping' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=mapping')) ?>"><?= icon('accounting') ?>Ledger Mapping</a>
+    <?php if ($inventoryProfile['show_manufacturing']): ?><a class="<?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('layers') ?>Manufacturing</a><?php endif; ?>
+</nav>
+
+<?php if ($invView === 'valuation'): ?>
+    <?php
+    // Per-item IAS 2 valuation: cost from layers vs lower of cost and NRV.
+    $valuationRows = array_map(static function (array $item) use ($companyId): array {
+        $v = inv_item_valuation($companyId, $item);
+        return $item + ['val' => $v];
+    }, $items);
+    ?>
+    <section class="mbw-card" aria-label="Valuation and NRV">
+        <div class="mbw-card-head">
+            <h2>Valuation &amp; NRV (IAS 2)</h2>
+            <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Cost from perpetual layers; NRV uses each item's assessment or its sales rate as the selling price.</span></div>
+        </div>
+        <div class="rc-table-scroll">
+            <table class="rc-table">
+                <thead><tr>
+                    <th>SKU</th><th>Item</th><th>Method</th><th class="align-right">On hand</th>
+                    <th class="align-right">Unit cost</th><th class="align-right">Cost value</th>
+                    <th class="align-right">NRV / unit</th><th class="align-right">Lower of cost &amp; NRV</th>
+                    <th class="align-right">Write-down</th>
+                </tr></thead>
+                <tbody>
+                    <?php foreach ($valuationRows as $row): $v = $row['val']; ?>
+                        <tr>
+                            <td><?= e($row['sku']) ?></td>
+                            <td><?= e($row['name']) ?></td>
+                            <td><span class="mbw-pill tone-gray"><?= e(strtoupper(str_replace('_', ' ', (string) ($row['valuation_method'] ?? 'weighted_average')))) ?></span></td>
+                            <td class="align-right"><?= e(number_format($v['qty'], 3)) ?></td>
+                            <td class="align-right"><?= e(number_format($v['unit_cost'], 2)) ?></td>
+                            <td class="align-right"><?= e(number_format($v['cost_value'], 2)) ?></td>
+                            <td class="align-right"><?= e(number_format($v['nrv_per_unit'], 2)) ?></td>
+                            <td class="align-right"><?= e(number_format($v['lower_value'], 2)) ?></td>
+                            <td class="align-right" style="<?= $v['write_down'] > 0 ? 'color:var(--mbw-amber);font-weight:700' : '' ?>"><?= e(number_format($v['write_down'], 2)) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if ($valuationRows === []): ?><tr><td colspan="9" style="text-align:center;color:var(--mbw-muted)">No items yet.</td></tr><?php endif; ?>
+                </tbody>
+                <tfoot><tr>
+                    <th colspan="5" class="align-right">Totals</th>
+                    <th class="align-right"><?= e(site_currency_symbol()) ?><?= e(number_format($stockValueAtCost, 2)) ?></th>
+                    <th></th>
+                    <th class="align-right"><?= e(site_currency_symbol()) ?><?= e(number_format($stockLowerOfCostNrv, 2)) ?></th>
+                    <th class="align-right" style="<?= $stockNrvWriteDown > 0 ? 'color:var(--mbw-amber)' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format($stockNrvWriteDown, 2)) ?></th>
+                </tr></tfoot>
+            </table>
+        </div>
+    </section>
+<?php elseif ($invView === 'mapping'): ?>
+    <?php
+    // Current global mappings + wrong-type detection.
+    $currentMappings = [];
+    $mapStmt = db()->prepare('SELECT m.purpose, m.ledger_id, l.type AS ledger_type, l.code, l.name FROM inventory_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = \'global\'');
+    $mapStmt->execute(['cid' => $companyId]);
+    foreach ($mapStmt->fetchAll(PDO::FETCH_ASSOC) as $mr) {
+        $currentMappings[$mr['purpose']] = $mr;
+    }
+    ?>
+    <section class="mbw-card" aria-label="Ledger mapping">
+        <div class="mbw-card-head">
+            <h2>Ledger Mapping (global defaults)</h2>
+            <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Precedence: item &rarr; category &rarr; global. Postings are blocked until every required purpose resolves to a ledger.</span></div>
+        </div>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_inventory_mappings">
+            <div class="rc-table-scroll">
+                <table class="rc-table">
+                    <thead><tr><th>Purpose</th><th>Expected type</th><th>Mapped ledger</th><th>Status</th></tr></thead>
+                    <tbody>
+                        <?php foreach (inventory_mapping_purposes() as $purposeKey => $meta): ?>
+                            <?php
+                            $cur = $currentMappings[$purposeKey] ?? null;
+                            $curId = (int) ($cur['ledger_id'] ?? 0);
+                            $typeMismatch = $cur && (string) $cur['ledger_type'] !== $meta['expect'];
+                            ?>
+                            <tr>
+                                <td><strong><?= e($meta['label']) ?></strong></td>
+                                <td><span class="mbw-pill tone-gray"><?= e(ucfirst($meta['expect'])) ?></span></td>
+                                <td>
+                                    <select name="map[<?= e($purposeKey) ?>]" style="min-width:230px">
+                                        <option value="0">— not mapped —</option>
+                                        <?php foreach ($ledgers as $ledger): ?>
+                                            <option value="<?= e((int) $ledger['id']) ?>" <?= $curId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
+                                <td>
+                                    <?php if (!$cur): ?><span class="mbw-pill tone-amber">Incomplete</span>
+                                    <?php elseif ($typeMismatch): ?><span class="mbw-pill tone-amber" title="Mapped ledger type is <?= e((string) $cur['ledger_type']) ?>, expected <?= e($meta['expect']) ?>">Type warning</span>
+                                    <?php else: ?><span class="mbw-pill tone-green">Complete</span><?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top:12px"><button type="submit"><?= icon('accounting') ?>Save mappings</button></div>
+        </form>
+    </section>
+<?php endif; ?>
 
 <?php if ($invView === 'inventory'): ?>
 <details class="mbw-card" aria-label="Help and workflow">
@@ -646,6 +880,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php endif; ?>
 
+<?php if (in_array($invView, ['inventory', 'manufacturing'], true)): ?>
 <section class="mbw-card" aria-label="Inventory workbench">
     <div class="mbw-card-head"><h2>Create &amp; Record</h2></div>
 <div class="workspace-feature-stack">
@@ -665,6 +900,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             }
             ?>
             <label>Type<select name="item_type"><?php foreach ($formItemTypes as $type): ?><option value="<?= e($type) ?>" <?= ($editItem['item_type'] ?? 'stock') === $type ? 'selected' : '' ?>><?= e(str_replace('_', ' ', ucfirst($type))) ?></option><?php endforeach; ?></select></label>
+            <label>Valuation method
+                <select name="valuation_method">
+                    <?php $vm = (string) ($editItem['valuation_method'] ?? 'weighted_average'); ?>
+                    <option value="weighted_average" <?= $vm === 'weighted_average' ? 'selected' : '' ?>>Weighted Average (perpetual)</option>
+                    <option value="fifo" <?= $vm === 'fifo' ? 'selected' : '' ?>>FIFO</option>
+                    <option value="specific" <?= $vm === 'specific' ? 'selected' : '' ?>>Specific Identification</option>
+                </select>
+            </label>
+            <label>Category<input type="text" name="category" maxlength="120" value="<?= e($editItem['category'] ?? '') ?>" placeholder="e.g. Raw Materials"></label>
             <label>Status<select name="status"><option value="active" <?= ($editItem['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>Active</option><option value="inactive" <?= ($editItem['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>Inactive</option></select></label>
             <label>Unit<input type="text" name="unit" value="<?= e($editItem['unit'] ?? 'pcs') ?>" required></label>
             <label>HS code<input type="text" name="hs_code" value="<?= e($editItem['hs_code'] ?? '') ?>"></label>
@@ -747,6 +991,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 </div>
 </section>
+<?php endif; ?>
 
 <?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing'): ?>
     <?php
@@ -778,16 +1023,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
     <div style="overflow-x:auto">
     <table>
-        <thead><tr><th>SKU</th><th>Name</th><th>Type</th><th>Unit</th><th>HS</th><th class="is-numeric">On hand</th><th class="is-numeric">Reorder</th><th class="is-numeric">Sales rate</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>SKU</th><th>Name</th><th>Type</th><th>Method</th><th>Unit</th><th class="is-numeric">On hand</th><th class="is-numeric">Unit cost</th><th class="is-numeric">Value at cost</th><th class="is-numeric">Reorder</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
-            <?php if ($visibleItems === []): ?><tr><td colspan="10"><?= $lowOnly ? 'No items are at or below their reorder level.' : 'No items yet.' ?></td></tr><?php endif; ?>
+            <?php if ($visibleItems === []): ?><tr><td colspan="11"><?= $lowOnly ? 'No items are at or below their reorder level.' : 'No items yet.' ?></td></tr><?php endif; ?>
             <?php foreach ($visibleItems as $item): ?>
-                <?php $low = $isLowStock($item); ?>
+                <?php $low = $isLowStock($item); $iv = inv_item_valuation($companyId, $item); ?>
                 <tr>
-                    <td><?= e($item['sku']) ?></td><td><?= e($item['name']) ?></td><td><?= e(str_replace('_', ' ', $item['item_type'])) ?></td><td><?= e($item['unit']) ?></td><td><?= e($item['hs_code'] ?? '-') ?></td>
+                    <td><?= e($item['sku']) ?></td><td><?= e($item['name']) ?></td><td><?= e(str_replace('_', ' ', $item['item_type'])) ?></td>
+                    <td><span class="mbw-pill tone-gray"><?= e(strtoupper(str_replace('_', ' ', (string) ($item['valuation_method'] ?? 'weighted_average')))) ?></span></td>
+                    <td><?= e($item['unit']) ?></td>
                     <td class="is-numeric"><?= e(number_format((float) $item['on_hand'], 3)) ?><?php if ($low): ?> <span class="mbw-pill tone-amber">Low</span><?php endif; ?></td>
+                    <td class="is-numeric"><?= e(number_format($iv['unit_cost'], 2)) ?></td>
+                    <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format($iv['cost_value'], 2)) ?></td>
                     <td class="is-numeric"><?= (float) $item['reorder_level'] > 0 ? e(number_format((float) $item['reorder_level'], 3)) : '–' ?></td>
-                    <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $item['sales_rate'], 2)) ?></td>
                     <td><span class="mbw-pill <?= $item['status'] === 'active' ? 'tone-green' : 'tone-red' ?>"><?= e(ucfirst($item['status'])) ?></span></td>
                     <td style="white-space:nowrap">
                         <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php?edit_id=' . (int) $item['id'] . '#create-item')) ?>">Edit</a>

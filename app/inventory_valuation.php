@@ -453,6 +453,184 @@ function inv_missing_mappings(int $companyId, array $purposes, ?int $itemId = nu
     return $missing;
 }
 
+// ---------------------------------------------------------------------------
+// Movement application + backfill (bridges the legacy inventory_transactions
+// table to the perpetual cost-layer store so on-hand VALUE is real IAS 2 cost)
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply one stock movement to the cost layers. Inward movements add a layer at
+ * the given unit cost; outward movements consume layers by the item's method
+ * and return the issue value (COGS). Runs inside the caller's transaction.
+ */
+function inv_apply_movement(int $companyId, int $itemId, float $qtyIn, float $qtyOut, float $unitCost, string $date, string $method, ?int $sourceTxnId = null): float
+{
+    if ($qtyIn > INV_EPSILON) {
+        inv_add_layer($companyId, $itemId, $qtyIn, $unitCost, $date, $sourceTxnId);
+        return inv_round_money($qtyIn * $unitCost);
+    }
+    if ($qtyOut > INV_EPSILON) {
+        return inv_consume_layers($companyId, $itemId, $qtyOut, $method);
+    }
+    return 0.0;
+}
+
+/**
+ * Rebuild an item's cost layers from scratch by replaying its
+ * inventory_transactions in chronological order (opening first). Idempotent —
+ * deletes existing layers then re-derives them. Lets legacy items and any
+ * backdated edits recompute a correct perpetual valuation.
+ */
+function inv_rebuild_layers(int $companyId, int $itemId, string $method, float $openingQty, float $openingRate): void
+{
+    if (!table_exists('inventory_cost_layers')) {
+        return;
+    }
+    db()->prepare('DELETE FROM inventory_cost_layers WHERE company_id = :cid AND item_id = :iid')
+        ->execute(['cid' => $companyId, 'iid' => $itemId]);
+
+    if ($openingQty > INV_EPSILON) {
+        inv_add_layer($companyId, $itemId, $openingQty, $openingRate, '2000-01-01');
+    }
+
+    $stmt = db()->prepare(
+        'SELECT id, transaction_type, qty_in, qty_out, rate, transaction_date
+         FROM inventory_transactions
+         WHERE company_id = :cid AND item_id = :iid AND transaction_type <> :opening
+         ORDER BY transaction_date ASC, id ASC'
+    );
+    $stmt->execute(['cid' => $companyId, 'iid' => $itemId, 'opening' => 'opening']);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
+        $qin = (float) $t['qty_in'];
+        $qout = (float) $t['qty_out'];
+        $rate = (float) $t['rate'];
+        try {
+            inv_apply_movement($companyId, $itemId, $qin, $qout, $rate, (string) $t['transaction_date'], $method, (int) $t['id']);
+        } catch (Throwable $e) {
+            // Skip a movement that would drive negative (legacy data); the
+            // remaining layers still give the best available valuation.
+        }
+    }
+    // Replay the opening-type transaction rows too (some items record opening
+    // as a transaction rather than on the master).
+    $openStmt = db()->prepare('SELECT id, qty_in, rate, transaction_date FROM inventory_transactions WHERE company_id = :cid AND item_id = :iid AND transaction_type = :opening ORDER BY id ASC');
+    $openStmt->execute(['cid' => $companyId, 'iid' => $itemId, 'opening' => 'opening']);
+    foreach ($openStmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
+        if ((float) $t['qty_in'] > INV_EPSILON) {
+            inv_add_layer($companyId, $itemId, (float) $t['qty_in'], (float) $t['rate'], (string) $t['transaction_date'], (int) $t['id']);
+        }
+    }
+}
+
+/**
+ * Rebuild one item's layers by id (loads its method/opening then replays).
+ * Used after manufacturing operations and as a lazy backfill for legacy items.
+ */
+function inv_rebuild_item(int $companyId, int $itemId): void
+{
+    $stmt = db()->prepare('SELECT valuation_method, opening_qty, purchase_rate FROM inventory_items WHERE id = :id AND company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $itemId, 'cid' => $companyId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return;
+    }
+    inv_rebuild_layers($companyId, $itemId, (string) ($row['valuation_method'] ?? 'weighted_average'), (float) ($row['opening_qty'] ?? 0), (float) ($row['purchase_rate'] ?? 0));
+}
+
+/**
+ * Lazily backfill an item's cost layers the first time it is valued: if it has
+ * inventory_transactions but no cost layers yet (legacy data), rebuild once.
+ */
+function inv_ensure_layers(int $companyId, array $item): void
+{
+    if (!table_exists('inventory_cost_layers')) {
+        return;
+    }
+    $itemId = (int) $item['id'];
+    $cnt = db()->prepare('SELECT COUNT(*) FROM inventory_cost_layers WHERE company_id = :cid AND item_id = :iid');
+    $cnt->execute(['cid' => $companyId, 'iid' => $itemId]);
+    if ((int) $cnt->fetchColumn() > 0) {
+        return; // already has layers
+    }
+    $hasOpening = (float) ($item['opening_qty'] ?? 0) > INV_EPSILON;
+    $txn = db()->prepare('SELECT COUNT(*) FROM inventory_transactions WHERE company_id = :cid AND item_id = :iid');
+    $txn->execute(['cid' => $companyId, 'iid' => $itemId]);
+    if ($hasOpening || (int) $txn->fetchColumn() > 0) {
+        inv_rebuild_layers($companyId, $itemId, (string) ($item['valuation_method'] ?? 'weighted_average'), (float) ($item['opening_qty'] ?? 0), (float) ($item['purchase_rate'] ?? 0));
+    }
+}
+
+/**
+ * Valuation snapshot for one item using its cost layers + an NRV proxy.
+ * Cost value comes from the perpetual layers; NRV per unit uses an explicit
+ * assessment if present, otherwise the item's sales_rate as selling price.
+ *
+ * @return array{qty: float, cost_value: float, unit_cost: float,
+ *               nrv_per_unit: float, lower_value: float, write_down: float}
+ */
+function inv_item_valuation(int $companyId, array $item): array
+{
+    $itemId = (int) $item['id'];
+    inv_ensure_layers($companyId, $item); // backfill legacy items once
+    $bal = inv_layer_balance($companyId, $itemId);
+    $qty = $bal['qty'];
+    $costValue = $bal['value'];
+
+    // Fallback: if no layers exist yet (legacy), value at purchase_rate * on_hand.
+    if ($qty <= INV_EPSILON && isset($item['on_hand'])) {
+        $qty = inv_round_qty((float) $item['on_hand']);
+        $costValue = inv_round_money($qty * (float) ($item['purchase_rate'] ?? 0));
+    }
+
+    $unitCost = $qty > INV_EPSILON ? $costValue / $qty : 0.0;
+
+    // Latest NRV assessment overrides; else use sales_rate as selling price.
+    $sellingPrice = (float) ($item['sales_rate'] ?? 0);
+    $completion = 0.0;
+    $selling = 0.0;
+    if (table_exists('inventory_nrv_assessments')) {
+        $a = db()->prepare('SELECT selling_price, completion_cost, selling_cost FROM inventory_nrv_assessments WHERE company_id = :cid AND item_id = :iid ORDER BY assessment_date DESC, id DESC LIMIT 1');
+        $a->execute(['cid' => $companyId, 'iid' => $itemId]);
+        $row = $a->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $sellingPrice = (float) $row['selling_price'];
+            $completion = (float) $row['completion_cost'];
+            $selling = (float) $row['selling_cost'];
+        }
+    }
+    $nrvPerUnit = $sellingPrice > 0 ? ($sellingPrice - $completion - $selling) : $unitCost;
+    $lowerPerUnit = min($unitCost, $nrvPerUnit);
+    $lowerValue = inv_round_money($qty * $lowerPerUnit);
+    $writeDown = inv_round_money(max(0.0, $costValue - $lowerValue));
+
+    return [
+        'qty' => $qty,
+        'cost_value' => inv_round_money($costValue),
+        'unit_cost' => inv_round_cost($unitCost),
+        'nrv_per_unit' => inv_round_cost($nrvPerUnit),
+        'lower_value' => $lowerValue,
+        'write_down' => $writeDown,
+    ];
+}
+
+/**
+ * Company-wide valuation totals across all active items (drives the KPI cards).
+ * @return array{cost: float, lower: float, write_down: float}
+ */
+function inv_company_valuation(int $companyId, array $items): array
+{
+    $cost = 0.0;
+    $lower = 0.0;
+    $writeDown = 0.0;
+    foreach ($items as $item) {
+        $v = inv_item_valuation($companyId, $item);
+        $cost += $v['cost_value'];
+        $lower += $v['lower_value'];
+        $writeDown += $v['write_down'];
+    }
+    return ['cost' => inv_round_money($cost), 'lower' => inv_round_money($lower), 'write_down' => inv_round_money($writeDown)];
+}
+
 /**
  * The purposes each transaction type needs mapped before it can post.
  * Direction is derived by the engine; this table also documents the posting
