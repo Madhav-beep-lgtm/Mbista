@@ -1,0 +1,13 @@
+{
+  "name": "M.B. World — Accounting Platform",
+  "short_name": "M.B. World",
+  "description": "M.B. World multi-tenant accounting and professional-services platform by M. Bista & Associates, Chartered Accountants.",
+  "icons": [
+    { "src": "/assets/img/favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "/assets/img/favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "maskable" }
+  ],
+  "theme_color": "#0b1c36",
+  "background_color": "#0b1c36",
+  "display": "standalone",
+  "start_url": "/"
+}

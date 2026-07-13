@@ -16,8 +16,11 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
     <meta name="theme-color" content="#0b1c36">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260712-inventory">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713d">
+    <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
+    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260713f">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713e">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">

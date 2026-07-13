@@ -1,4 +1,8 @@
         </div>
+        <footer class="admin-foot">
+            <span>&copy; <?= e(date('Y')) ?> <?= e(setting('brand_name', 'M. Bista & Associates')) ?>. All rights reserved.</span>
+            <?= powered_by_mbworld() ?>
+        </footer>
     </section>
 </div>
 <script src="/assets/js/mbw-charts.js?v=20260712"></script>

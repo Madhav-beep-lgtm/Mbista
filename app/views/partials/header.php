@@ -42,7 +42,10 @@ if ($navSection === '') {
     <meta property="og:description" content="<?= e(setting('site_meta_description', 'Audit, taxation, accounting, and advisory services with a secure client portal.')) ?>">
     <meta property="og:type" content="website">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260711e">
+    <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
+    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260713f">
 </head>
 <body class="<?= e($bodyClass) ?>">
 <?php if ($headerSupportPhone !== '' || $headerSupportEmail !== ''): ?>

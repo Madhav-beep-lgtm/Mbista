@@ -457,6 +457,37 @@ function app_name(): string
     return setting('site_name', (string) APP_NAME);
 }
 
+/**
+ * The platform brand name shown in portals and "Powered by" chrome.
+ */
+function platform_brand_name(): string
+{
+    return setting('platform_brand', 'M.B. World');
+}
+
+/**
+ * Renders the M.B. World logo lockup as an <img>. Single source of truth: to
+ * drop in official artwork, replace public_html/assets/img/mbworld-logo.svg
+ * (and the -light.svg inverse for dark surfaces) — every surface updates.
+ *
+ * @param string $variant 'dark' text on light surfaces, 'light' for dark ones.
+ */
+function brand_logo(string $variant = 'dark', string $class = 'mbw-logo', ?string $alt = null): string
+{
+    $file = $variant === 'light' ? 'assets/img/mbworld-logo-light.svg' : 'assets/img/mbworld-logo.svg';
+    $alt = $alt ?? platform_brand_name();
+
+    return '<img src="' . e(url($file)) . '" alt="' . e($alt) . '" class="' . e($class) . '" width="200" height="40" loading="lazy">';
+}
+
+/**
+ * Discreet "Powered by M.B. World" line for tenant portals.
+ */
+function powered_by_mbworld(string $class = 'mbw-poweredby'): string
+{
+    return '<span class="' . e($class) . '">Powered by <strong>' . e(platform_brand_name()) . '</strong></span>';
+}
+
 function app_env(): string
 {
     return strtolower((string) APP_ENV);

@@ -146,8 +146,8 @@ include __DIR__ . '/../app/views/partials/header.php';
     </div>
 
     <div class="auth2-foot">
-        <span><?= icon('admin') ?>Secure. Compliant. Confidential.</span>
-        <span>&copy; <?= e(date('Y')) ?> <?= e(setting('brand_name', 'M. Bista & Associates')) ?>. All rights reserved.</span>
+        <span><?= brand_logo('light', 'mbw-logo mbw-logo-auth') ?></span>
+        <span>&copy; <?= e(date('Y')) ?> <?= e(setting('brand_name', 'M. Bista & Associates')) ?>. All rights reserved. &nbsp;<?= powered_by_mbworld() ?></span>
         <span><?= icon('headset') ?>Need help? Contact <a href="mailto:<?= e($authSupportEmail) ?>"><?= e($authSupportEmail) ?></a></span>
         <span><?= icon('lock') ?>This is a secure login page.</span>
     </div>

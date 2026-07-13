@@ -110,18 +110,18 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
     <meta name="theme-color" content="#0b1c36">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260712-inventory">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713d">
+    <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
+    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260713f">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260713e">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
     <aside class="admin-sidebar">
         <a class="brand brand-admin" href="<?= e(url('admin/accounting-dashboard.php')) ?>">
-            <span class="brand-mark">MB</span>
-            <span>
-                <strong>MB World</strong>
-                <small>Admin Portal</small>
-            </span>
+            <?= brand_logo('light', 'mbw-logo mbw-logo-sidebar') ?>
+            <span class="brand-admin-sub">Admin Portal</span>
         </a>
         <?php if ($headerCompany): ?>
             <div class="admin-sidebar-context">

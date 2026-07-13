@@ -55,6 +55,7 @@ include __DIR__ . '/../app/views/partials/header.php';
         <div class="hero-panel">
             <div class="hero-grid">
                 <div>
+                    <?= brand_logo('dark', 'mbw-logo mbw-logo-portal') ?>
                     <div class="kicker">Superadmin workflow</div>
                     <h1>Open the M.Bista superadmin portal, then manage Altiora and its subsidiaries.</h1>
                     <p>After selecting a company, you will enter a 4-digit admin PIN before opening that company’s management portal.</p>

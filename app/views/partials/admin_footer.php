@@ -1,5 +1,6 @@
             <footer class="admin-foot">
                 <span>&copy; <?= e(date('Y')) ?> <?= e(setting('brand_name', 'M. Bista & Associates')) ?>. All rights reserved.</span>
+                <?= powered_by_mbworld() ?>
                 <span>v<?= e(setting('app_version', '2.0.0')) ?></span>
             </footer>
         </div>
