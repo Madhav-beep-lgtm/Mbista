@@ -1351,6 +1351,19 @@ CREATE TABLE IF NOT EXISTS `payroll_run_lines` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
+CREATE TABLE IF NOT EXISTS `warehouses` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `name` VARCHAR(120) NOT NULL,
+  `code` VARCHAR(40) DEFAULT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_warehouse_company_name` (`company_id`, `name`),
+  KEY `idx_warehouse_company_active` (`company_id`, `is_active`),
+  CONSTRAINT `fk_warehouse_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `inventory_items` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `company_id` INT UNSIGNED NOT NULL,
@@ -1375,6 +1388,7 @@ CREATE TABLE IF NOT EXISTS `inventory_items` (
   `max_stock` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
   `safety_stock` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
   `allow_negative_stock` TINYINT(1) NOT NULL DEFAULT 0,
+  `default_warehouse_id` INT UNSIGNED DEFAULT NULL,
   `status` ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
   `notes` TEXT DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1383,8 +1397,10 @@ CREATE TABLE IF NOT EXISTS `inventory_items` (
   UNIQUE KEY `uniq_inventory_items_company_sku` (`company_id`, `sku`),
   KEY `idx_inventory_items_company_type` (`company_id`, `item_type`),
   KEY `idx_inventory_items_ledger` (`ledger_id`),
+  KEY `idx_inventory_items_warehouse` (`default_warehouse_id`),
   CONSTRAINT `fk_inventory_items_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_inventory_items_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_inventory_items_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_inventory_items_warehouse` FOREIGN KEY (`default_warehouse_id`) REFERENCES `warehouses` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `inventory_transactions` (
@@ -1392,6 +1408,8 @@ CREATE TABLE IF NOT EXISTS `inventory_transactions` (
   `company_id` INT UNSIGNED NOT NULL,
   `fiscal_year_id` INT UNSIGNED DEFAULT NULL,
   `item_id` INT UNSIGNED NOT NULL,
+  `warehouse_id` INT UNSIGNED DEFAULT NULL,
+  `to_warehouse_id` INT UNSIGNED DEFAULT NULL,
   `voucher_id` INT UNSIGNED DEFAULT NULL,
   `transaction_type` ENUM('opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment', 'consume', 'produce') NOT NULL DEFAULT 'adjustment',
   `ref_no` VARCHAR(120) DEFAULT NULL,
@@ -1406,10 +1424,13 @@ CREATE TABLE IF NOT EXISTS `inventory_transactions` (
   KEY `idx_inventory_transactions_company_date` (`company_id`, `transaction_date`),
   KEY `idx_inventory_transactions_item` (`item_id`),
   KEY `idx_inventory_transactions_voucher` (`voucher_id`),
+  KEY `idx_inventory_transactions_warehouse` (`warehouse_id`),
   CONSTRAINT `fk_inventory_transactions_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_inventory_transactions_fiscal_year` FOREIGN KEY (`fiscal_year_id`) REFERENCES `fiscal_years` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_inventory_transactions_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_inventory_transactions_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_inventory_transactions_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_inventory_transactions_warehouse` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_inventory_transactions_to_warehouse` FOREIGN KEY (`to_warehouse_id`) REFERENCES `warehouses` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `manufacturing_orders` (

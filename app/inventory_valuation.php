@@ -313,7 +313,7 @@ function inv_layer_balance(int $companyId, int $itemId): array
 /**
  * Record an inward cost layer (receipt/opening/production/return-in).
  */
-function inv_add_layer(int $companyId, int $itemId, float $qty, float $unitCost, string $date, ?int $sourceTxnId = null, ?string $batchNo = null, ?string $identity = null): int
+function inv_add_layer(int $companyId, int $itemId, float $qty, float $unitCost, string $date, ?int $sourceTxnId = null, ?string $batchNo = null, ?string $identity = null, ?int $warehouseId = null): int
 {
     if (!table_exists('inventory_cost_layers') || $qty <= INV_EPSILON) {
         return 0;
@@ -324,11 +324,11 @@ function inv_add_layer(int $companyId, int $itemId, float $qty, float $unitCost,
 
     $stmt = db()->prepare(
         'INSERT INTO inventory_cost_layers
-            (company_id, item_id, batch_no, identity, is_specific, layer_date, layer_seq, source_txn_id, unit_cost, qty_in, qty_remaining)
-         VALUES (:cid, :iid, :batch, :identity, :is_specific, :ldate, :seq, :src, :cost, :qin, :qrem)'
+            (company_id, item_id, warehouse_id, batch_no, identity, is_specific, layer_date, layer_seq, source_txn_id, unit_cost, qty_in, qty_remaining)
+         VALUES (:cid, :iid, :wid, :batch, :identity, :is_specific, :ldate, :seq, :src, :cost, :qin, :qrem)'
     );
     $stmt->execute([
-        'cid' => $companyId, 'iid' => $itemId, 'batch' => $batchNo, 'identity' => $identity,
+        'cid' => $companyId, 'iid' => $itemId, 'wid' => $warehouseId, 'batch' => $batchNo, 'identity' => $identity,
         'is_specific' => $identity !== null ? 1 : 0, 'ldate' => $date, 'seq' => $seq,
         'src' => $sourceTxnId, 'cost' => inv_round_cost($unitCost), 'qin' => inv_round_qty($qty), 'qrem' => inv_round_qty($qty),
     ]);
@@ -463,10 +463,10 @@ function inv_missing_mappings(int $companyId, array $purposes, ?int $itemId = nu
  * the given unit cost; outward movements consume layers by the item's method
  * and return the issue value (COGS). Runs inside the caller's transaction.
  */
-function inv_apply_movement(int $companyId, int $itemId, float $qtyIn, float $qtyOut, float $unitCost, string $date, string $method, ?int $sourceTxnId = null): float
+function inv_apply_movement(int $companyId, int $itemId, float $qtyIn, float $qtyOut, float $unitCost, string $date, string $method, ?int $sourceTxnId = null, ?int $warehouseId = null): float
 {
     if ($qtyIn > INV_EPSILON) {
-        inv_add_layer($companyId, $itemId, $qtyIn, $unitCost, $date, $sourceTxnId);
+        inv_add_layer($companyId, $itemId, $qtyIn, $unitCost, $date, $sourceTxnId, null, null, $warehouseId);
         return inv_round_money($qtyIn * $unitCost);
     }
     if ($qtyOut > INV_EPSILON) {
@@ -629,6 +629,57 @@ function inv_company_valuation(int $companyId, array $items): array
         $writeDown += $v['write_down'];
     }
     return ['cost' => inv_round_money($cost), 'lower' => inv_round_money($lower), 'write_down' => inv_round_money($writeDown)];
+}
+
+// ---------------------------------------------------------------------------
+// Warehouse dimension (migration 039). Quantity is tracked per warehouse via
+// inventory_transactions.warehouse_id; cost layers stay valued at company+item
+// level (not split per warehouse) — a deliberate scope limit so the tested
+// FIFO/weighted-average/specific engine above is untouched by this dimension.
+// ---------------------------------------------------------------------------
+
+/**
+ * Active warehouses for a company, for select dropdowns.
+ */
+function inv_company_warehouses(int $companyId): array
+{
+    if (!table_exists('warehouses')) {
+        return [];
+    }
+    $stmt = db()->prepare('SELECT * FROM warehouses WHERE company_id = :cid AND is_active = 1 ORDER BY name ASC');
+    $stmt->execute(['cid' => $companyId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * On-hand quantity for one item, grouped by warehouse (plus an "unassigned"
+ * bucket for movements with no warehouse_id). Quantity-only — not a cost
+ * split, since cost layers remain company+item level.
+ */
+function inv_item_warehouse_stock(int $companyId, int $itemId): array
+{
+    if (!table_exists('inventory_transactions') || !table_exists('warehouses')) {
+        return [];
+    }
+    $stmt = db()->prepare(
+        'SELECT t.warehouse_id, w.name AS warehouse_name,
+                SUM(t.qty_in - t.qty_out) AS on_hand
+         FROM inventory_transactions t
+         LEFT JOIN warehouses w ON w.id = t.warehouse_id
+         WHERE t.company_id = :cid AND t.item_id = :iid
+         GROUP BY t.warehouse_id, w.name
+         ORDER BY (t.warehouse_id IS NULL) ASC, w.name ASC'
+    );
+    $stmt->execute(['cid' => $companyId, 'iid' => $itemId]);
+    $rows = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $rows[] = [
+            'warehouse_id' => $row['warehouse_id'] !== null ? (int) $row['warehouse_id'] : null,
+            'warehouse_name' => $row['warehouse_name'] ?? 'Unassigned',
+            'on_hand' => inv_round_qty((float) $row['on_hand']),
+        ];
+    }
+    return $rows;
 }
 
 /**
