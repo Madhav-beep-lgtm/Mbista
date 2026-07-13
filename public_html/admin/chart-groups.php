@@ -17,6 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
     if ($action === 'save_group') {
+        require_permission('accounting', 'edit');
         $groupId = (int) ($_POST['group_id'] ?? 0);
         $name = trim((string) ($_POST['name'] ?? ''));
         $masterKey = (string) ($_POST['master_key'] ?? '');
@@ -62,10 +63,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/chart-groups.php');
     }
     if ($action === 'delete_group') {
+        require_permission('accounting', 'edit');
         $groupId = (int) ($_POST['group_id'] ?? 0);
         if ($groupId > 0) {
             try {
                 db()->prepare('DELETE FROM ledger_groups WHERE id = :id AND company_id = :company_id')->execute(['id' => $groupId, 'company_id' => $companyId]);
+                security_event('group_deleted', 'success', 'Group #' . $groupId . ' deleted.', $companyId, (int) (current_user()['id'] ?? 0) ?: null);
                 flash('success', 'Group deleted.');
             } catch (Throwable $e) {
                 flash('error', 'This group cannot be deleted while ledgers or child groups still use it.');

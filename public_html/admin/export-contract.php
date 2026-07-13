@@ -26,9 +26,12 @@ if ($format !== 'pdf') {
     $format = 'pdf';
 }
 
+require_permission('reports', 'export');
+
 $safeContractNo = preg_replace('/[^A-Za-z0-9\-_]/', '_', (string) ($contract['contract_no'] ?? $contractId));
 header('Content-Type: text/html; charset=utf-8');
 header('Content-Disposition: inline; filename="Contract-' . ($safeContractNo ?: (string) $contractId) . '.html"');
 
+security_event('report_exported', 'success', 'Contract #' . $contractId . ' exported.', (int) ($currentCompany['id'] ?? 0), (int) (current_user()['id'] ?? 0));
 echo export_contract_to_pdf_html($contractId);
 exit;

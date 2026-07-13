@@ -96,6 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'create_attendance_manual' && $role === 'admin') {
+        require_permission('hr', 'edit');
         $staffUserId = (int) ($_POST['staff_user_id'] ?? 0);
         $attendanceDate = trim((string) ($_POST['attendance_date'] ?? ''));
         $checkInTime = trim((string) ($_POST['check_in_time'] ?? ''));
@@ -159,6 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'review_attendance_correction' && $role === 'admin') {
+        require_permission('hr', 'approve');
         $requestId = (int) ($_POST['request_id'] ?? 0);
         $decision = (string) ($_POST['decision'] ?? '');
         $reviewerRemarks = trim((string) ($_POST['reviewer_remarks'] ?? ''));
@@ -278,6 +280,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'review_leave_request' && $role === 'admin') {
+        require_permission('hr', 'approve');
         $requestId = (int) ($_POST['request_id'] ?? 0);
         $decision = (string) ($_POST['decision'] ?? '');
         $reviewerRemarks = trim((string) ($_POST['reviewer_remarks'] ?? ''));
@@ -368,6 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'review_timesheet_entry' && $role === 'admin') {
+        require_permission('hr', 'approve');
         $entryId = (int) ($_POST['entry_id'] ?? 0);
         $decision = (string) ($_POST['decision'] ?? '');
         $reviewerRemarks = trim((string) ($_POST['reviewer_remarks'] ?? ''));
@@ -415,6 +419,7 @@ $taskOptions = [];
 
 if ($view === 'attendance') {
     if ($role === 'admin') {
+        require_permission('hr', 'view');
         $stmt = db()->prepare('SELECT a.*, u.name AS staff_name FROM attendance a INNER JOIN users u ON u.id = a.staff_user_id WHERE a.company_id = :company_id ORDER BY a.attendance_date DESC LIMIT 100');
         $stmt->execute(['company_id' => $companyId]);
         $companyAttendance = $stmt->fetchAll();
@@ -439,6 +444,7 @@ if ($view === 'leave') {
     $leaveTypes = $typeStmt->fetchAll();
 
     if ($role === 'admin') {
+        require_permission('hr', 'view');
         $allStmt = db()->prepare('SELECT lr.*, u.name AS staff_name, lt.name AS leave_type_name
             FROM leave_requests lr
             INNER JOIN users u ON u.id = lr.staff_user_id
@@ -469,6 +475,7 @@ if ($view === 'timesheets') {
     }
 
     if ($role === 'admin') {
+        require_permission('hr', 'view');
         $subStmt = db()->prepare("SELECT te.*, u.name AS staff_name, cp.organization_name, t.title AS task_title
             FROM timesheet_entries te
             INNER JOIN users u ON u.id = te.staff_user_id

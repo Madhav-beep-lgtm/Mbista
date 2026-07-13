@@ -130,6 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
     if ($action === 'set_business_type') {
+        require_permission('accounting', 'edit');
         $businessType = (string) ($_POST['business_type'] ?? 'service');
         if (!in_array($businessType, $allowedBusinessTypes, true) || !table_exists('company_accounting_preferences')) {
             flash('error', 'Could not save the selected business type.');
@@ -145,6 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/accounting-dashboard.php?fiscal_year_id=' . $fiscalYearId);
     }
     if ($action === 'set_excise_rate') {
+        require_permission('accounting', 'edit');
         if (!table_exists('company_accounting_preferences')) {
             flash('error', 'Could not save the excise rate.');
             redirect('admin/accounting-dashboard.php?fiscal_year_id=' . $fiscalYearId);

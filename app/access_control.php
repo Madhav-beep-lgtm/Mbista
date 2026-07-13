@@ -561,6 +561,7 @@ function rbac_modules(): array
         'clients'    => ['label' => 'Clients',               'actions' => ['view', 'create', 'edit']],
         'messages'   => ['label' => 'Messages',              'actions' => ['view', 'create']],
         'tickets'    => ['label' => 'Support Tickets',       'actions' => ['view', 'create', 'edit']],
+        'hr'         => ['label' => 'HR & Attendance',       'actions' => ['view', 'edit', 'approve']],
     ];
 }
 

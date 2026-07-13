@@ -94,6 +94,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash('error', 'You do not have permission to create vouchers.');
         redirect('admin/voucher-import.php');
     }
+
+    require_permission('accounting', 'create');
+
     $stage = (string) ($_POST['stage'] ?? 'upload');
 
     if ($stage === 'upload') {
@@ -233,6 +236,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/voucher-import.php?token=' . (string) $_POST['token']);
         }
         @unlink($stored['path']);
+        security_event('voucher_posted', 'success', $imported . ' voucher(s) imported.', $companyId, $userId);
         flash('success', $imported . ' voucher(s) imported' . ($needsApproval ? ' and submitted for approval' : ' and posted') . ($invalidCount > 0 ? '; ' . $invalidCount . ' with errors were skipped' : '') . '.');
         redirect('admin/accounting.php');
     }

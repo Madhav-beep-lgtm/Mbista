@@ -25,9 +25,11 @@ if (!$invoice || (int) ($invoice['company_id'] ?? 0) !== (int) $currentCompany['
 
 if ($format === 'excel') {
     // Export as Excel/CSV
+    require_permission('reports', 'export');
     $export = export_invoice_to_excel($invoiceId);
     $filename = $export['filename'] ?? 'invoice.csv';
     $data = $export['rows'] ?? ($export['data'] ?? []);
+    security_event('report_exported', 'success', 'Invoice #' . $invoiceId . ' exported.', (int) $currentCompany['id'], (int) (current_user()['id'] ?? 0));
     export_csv($filename, $data);
 } else {
     // Export as printable PDF (HTML that can be printed to PDF)

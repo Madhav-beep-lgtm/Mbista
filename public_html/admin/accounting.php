@@ -28,6 +28,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $postAction = (string) ($_POST['action'] ?? '');
 
     if ($postAction === 'save_period_lock' && user_can('admin')) {
+        require_permission('accounting', 'edit');
+
         $lockedThroughInput = trim((string) ($_POST['locked_through'] ?? ''));
         if ($companyId <= 0 || $fiscalYearId <= 0 || $lockedThroughInput === '' || !table_exists('fiscal_period_locks')) {
             flash('error', 'Select a valid fiscal period lock date.');
@@ -56,6 +58,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/accounting.php');
         }
 
+        require_permission('accounting', 'approve');
+
         $voucherId = (int) ($_POST['voucher_id'] ?? 0);
         $rejectionReason = trim((string) ($_POST['rejection_reason'] ?? ''));
         $voucherStmt = db()->prepare("SELECT id, approval_state FROM vouchers WHERE id = :id AND company_id = :company_id AND fiscal_year_id = :fiscal_year_id LIMIT 1");
@@ -73,11 +77,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($postAction === 'approve_voucher') {
             db()->prepare("UPDATE vouchers SET approval_state = 'approved', status = 'posted', approved_by = :approved_by, approved_at = NOW(), posted_by = :posted_by, posted_at = NOW(), rejection_reason = NULL WHERE id = :id AND company_id = :company_id")
                 ->execute(['approved_by' => $userId, 'posted_by' => $userId, 'id' => $voucherId, 'company_id' => $companyId]);
+            security_event('voucher_approved', 'success', 'Voucher #' . $voucherId . ' approved.', $companyId, $userId);
             log_activity('voucher', $voucherId, 'approved', 'Voucher approved and posted.', $userId);
             flash('success', 'Voucher approved and posted.');
         } else {
             db()->prepare("UPDATE vouchers SET approval_state = 'rejected', status = 'cancelled', approved_by = :approved_by, approved_at = NOW(), rejection_reason = :rejection_reason WHERE id = :id AND company_id = :company_id")
                 ->execute(['approved_by' => $userId, 'rejection_reason' => $rejectionReason, 'id' => $voucherId, 'company_id' => $companyId]);
+            security_event('voucher_rejected', 'success', 'Voucher #' . $voucherId . ' rejected.', $companyId, $userId);
             log_activity('voucher', $voucherId, 'rejected', 'Voucher rejected: ' . $rejectionReason, $userId);
             flash('success', 'Voucher rejected.');
         }
@@ -90,6 +96,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'You do not have permission to create vouchers.');
             redirect('admin/accounting.php');
         }
+
+        require_permission('accounting', 'create');
+
         $voucherType = (string) ($_POST['voucher_type'] ?? 'journal');
         $voucherNo = trim((string) ($_POST['voucher_no'] ?? ''));
         $voucherDate = (string) ($_POST['voucher_date'] ?? date('Y-m-d'));
@@ -177,7 +186,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         try {
             $needsApproval = $hasVoucherApprovals && approvals_enabled() && !user_can('approve');
-            create_voucher_with_entries([
+            $voucherId = create_voucher_with_entries([
                 'company_id' => $companyId,
                 'fiscal_year_id' => $fiscalYearId,
                 'voucher_no' => $voucherNo,
@@ -197,6 +206,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'posted_by' => $needsApproval ? null : $userId,
                 'posted_at' => $needsApproval ? null : date('Y-m-d H:i:s'),
             ], $entries);
+            if ($voucherId > 0) {
+                security_event('voucher_posted', 'success', 'Voucher #' . $voucherId . ' posted.', $companyId, $userId);
+            }
             flash('success', $needsApproval ? 'Voucher submitted for approval.' : 'Voucher posted.');
         } catch (Throwable $exception) {
             flash('error', 'Could not post voucher. Check voucher number uniqueness.');

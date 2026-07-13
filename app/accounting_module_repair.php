@@ -550,5 +550,26 @@ function accounting_module_repair_database(): array
         ");
     });
 
+    $run('Add inventory warehouse dimension (migration 039)', static function (): void {
+        db()->exec("
+            CREATE TABLE IF NOT EXISTS `warehouses` (
+              `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+              `company_id` INT UNSIGNED NOT NULL,
+              `name` VARCHAR(120) NOT NULL,
+              `code` VARCHAR(40) DEFAULT NULL,
+              `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+              `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              UNIQUE KEY `uniq_warehouse_company_name` (`company_id`, `name`),
+              KEY `idx_warehouse_company_active` (`company_id`, `is_active`),
+              CONSTRAINT `fk_warehouse_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+
+        accounting_repair_add_column('inventory_items', 'default_warehouse_id', '`default_warehouse_id` INT UNSIGNED DEFAULT NULL AFTER `allow_negative_stock`');
+        accounting_repair_add_column('inventory_transactions', 'warehouse_id', '`warehouse_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`');
+        accounting_repair_add_column('inventory_transactions', 'to_warehouse_id', '`to_warehouse_id` INT UNSIGNED DEFAULT NULL AFTER `warehouse_id`');
+    });
+
     return $errors;
 }

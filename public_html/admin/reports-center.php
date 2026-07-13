@@ -236,6 +236,7 @@ $compareReport = $compareEnabled ? rc_generate($reportId, $scopeCompanyId, $comp
 // CSV export.
 // ---------------------------------------------------------------------------
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    require_permission('reports', 'export');
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $reportId . '-' . $fromDate . '-to-' . $toDate . '.csv"');
     $out = fopen('php://output', 'w');
@@ -247,6 +248,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     if ($report['totals'] !== null) {
         fputcsv($out, $report['totals']);
     }
+    security_event('report_exported', 'success', 'Report exported: ' . $reportLabel . ' (CSV).', $companyId, $userId);
     fclose($out);
     exit;
 }

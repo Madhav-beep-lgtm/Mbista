@@ -148,6 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
 
     if ($action === 'save_item') {
+        require_permission('inventory', 'create');
         $itemId = (int) ($_POST['item_id'] ?? 0);
         $sku = strtoupper(trim((string) ($_POST['sku'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
@@ -238,6 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'record_movement') {
+        require_permission('inventory', 'create');
         $itemId = (int) ($_POST['item_id'] ?? 0);
         $type = (string) ($_POST['transaction_type'] ?? 'adjustment');
         $qty = round(abs((float) ($_POST['quantity'] ?? 0)), 3);
@@ -328,6 +330,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $labels = array_map(static fn (string $p): string => inventory_mapping_purposes()[$p]['label'] ?? $p, $mapMissing);
                 $glNote = ' Stock recorded — map ' . implode(' & ', $labels) . ' on the Ledger Mapping tab to auto-post the accounting voucher.';
             }
+            security_event('inventory_movement_posted', 'success', 'Movement #' . $txnId . ' (' . $type . ') posted for item #' . $itemId . '.', $companyId, $userId);
             flash('success', 'Inventory movement recorded: ' . ($direction === 'in' ? '+' : '−') . number_format($qty, 3) . ' ' . $item['unit'] . ' ' . $item['sku'] . '.' . $costNote . $glNote);
         } catch (Throwable $exception) {
             if (db()->inTransaction()) {
@@ -362,6 +365,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->prepare('DELETE FROM inventory_transactions WHERE id = :id AND company_id = :cid')->execute(['id' => $movementId, 'cid' => $companyId]);
             inv_rebuild_item($companyId, (int) $movement['item_id']); // recompute cost layers
             db()->commit();
+            security_event('inventory_movement_deleted', 'success', 'Movement #' . $movementId . ' deleted.', $companyId, $userId);
             log_activity('inventory_transaction', $movementId, 'deleted', 'Stock-only movement deleted.', $userId);
             flash('success', 'Stock movement deleted and cost layers recalculated.');
         } catch (Throwable $e) {
@@ -429,6 +433,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             db()->commit();
+            security_event('inventory_movement_reversed', 'success', 'Movement #' . $movementId . ' reversed.', $companyId, $userId);
             log_activity('inventory_transaction', $movementId, 'reversed', 'Movement reversed (stock + voucher).', $userId);
             flash('success', 'Movement #' . $movementId . ' reversed: a mirror stock entry was posted' . ($reversalVoucherId > 0 ? ' and the accounting voucher was reversed (Dr/Cr swapped).' : '.') . ' The original records are preserved for audit.');
         } catch (Throwable $e) {
@@ -439,6 +444,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'save_inventory_mappings') {
+        require_permission('inventory', 'edit');
         // Global-default ledger mappings for inventory posting purposes. Each
         // ledger is validated to belong to this company before it is stored.
         $purposes = array_keys(inventory_mapping_purposes());
@@ -468,6 +474,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'save_bom') {
+        require_permission('inventory', 'create');
         if (!($inventoryProfile['show_manufacturing'] ?? false)) {
             flash('error', 'BOMs are available only for manufacturing companies.');
             redirect('admin/accounting-inventory.php');
@@ -525,6 +532,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'create_manufacturing_order') {
+        require_permission('inventory', 'create');
         if (!($inventoryProfile['show_manufacturing'] ?? false)) {
             flash('error', 'Manufacturing orders are available only for manufacturing companies.');
             redirect('admin/accounting-inventory.php');
@@ -693,6 +701,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             inv_rebuild_item($companyId, $finishedItemId);
             db()->commit();
+            security_event('inventory_movement_posted', 'success', 'Manufacturing order #' . $orderId . ' created.', $companyId, $userId);
             log_activity('manufacturing_order', $orderId, 'completed', 'Manufacturing order completed.', $userId);
             flash('success', 'Manufacturing order ' . $orderNo . ' completed and stock updated.'
                 . ($voucherId > 0 ? ' Journal voucher MFG-' . $orderNo . ' posted (finished goods Dr / materials Cr).' : ' Link ledgers to the items involved to auto-post the production journal voucher.'));
@@ -708,6 +717,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'complete_manufacturing_order' || $action === 'cancel_manufacturing_order') {
+        require_permission('inventory', 'edit');
         $orderId = (int) ($_POST['order_id'] ?? 0);
         $orderStmt = db()->prepare("SELECT * FROM manufacturing_orders WHERE id = :id AND company_id = :company_id AND status IN ('draft', 'in_progress') LIMIT 1");
         $orderStmt->execute(['id' => $orderId, 'company_id' => $companyId]);
@@ -753,6 +763,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     inv_rebuild_item($companyId, (int) $inputRow['item_id']);
                 }
                 db()->commit();
+                security_event('inventory_movement_reversed', 'success', 'Manufacturing order #' . $orderId . ' cancelled.', $companyId, $userId);
                 log_activity('manufacturing_order', $orderId, 'cancelled', 'Production order cancelled, materials returned.', $userId);
                 flash('success', 'Order ' . $orderNo . ' cancelled and issued materials returned to stock.');
                 redirect('admin/accounting-inventory.php?view=manufacturing');
@@ -801,6 +812,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             inv_rebuild_item($companyId, (int) $order['finished_item_id']);
             db()->commit();
+            security_event('inventory_movement_posted', 'success', 'Manufacturing order #' . $orderId . ' completed.', $companyId, $userId);
             log_activity('manufacturing_order', $orderId, 'completed', 'Production completed from WIP.', $userId);
             flash('success', 'Order ' . $orderNo . ' completed: ' . number_format($quantity, 3) . ' finished goods received into stock at ' . number_format($finishedRate, 2) . ' each.'
                 . ($voucherId > 0 ? ' Journal voucher MFG-' . $orderNo . ' posted.' : ''));

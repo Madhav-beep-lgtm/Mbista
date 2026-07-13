@@ -17,9 +17,11 @@ if (!$currentCompany || !$fiscalYear) {
 
 if ($format === 'excel') {
     // Export as Excel/CSV
+    require_permission('reports', 'export');
     $export = export_ledger_to_excel((int) $currentCompany['id'], (int) $fiscalYear['id']);
     $filename = $export['filename'] ?? 'ledger.csv';
     $data = $export['data'] ?? [];
+    security_event('report_exported', 'success', 'Ledger export: ' . ($currentCompany['name'] ?? 'ledger') . '.', (int) $currentCompany['id'], (int) (current_user()['id'] ?? 0));
     export_csv($filename, $data);
 } else {
     // Export as printable PDF (HTML that can be printed to PDF)

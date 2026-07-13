@@ -42,6 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasReconColumns) {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
     if ($action === 'reconcile_entries') {
+        require_permission('accounting', 'edit');
         $entryIds = array_values(array_filter(array_map('intval', (array) ($_POST['entry_ids'] ?? []))));
         $statementDate = (string) ($_POST['statement_date'] ?? '');
         $statementDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', $statementDate) ? $statementDate : date('Y-m-d');
@@ -58,11 +59,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasReconColumns) {
         ');
         $updateStmt->execute(array_merge([$companyId, $userId ?: null, $statementDate], $entryIds, [$selectedLedgerId]));
         $count = $updateStmt->rowCount();
+        security_event('entries_reconciled', 'success', $count . ' entr(ies) reconciled.', $companyId, $userId ?: null);
         log_activity('company', $companyId, 'bank_reconciliation', $count . ' entries reconciled against statement ' . $statementDate . ' for ledger #' . $selectedLedgerId . '.', $userId ?: null);
         flash('success', $count . ' ' . ($count === 1 ? 'entry' : 'entries') . ' marked as reconciled.');
         redirect('admin/reconciliation.php?ledger_id=' . $selectedLedgerId);
     }
     if ($action === 'unreconcile_entry') {
+        require_permission('accounting', 'edit');
         $entryId = (int) ($_POST['entry_id'] ?? 0);
         $updateStmt = db()->prepare('
             UPDATE voucher_entries ve
@@ -71,6 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasReconColumns) {
             WHERE ve.id = ? AND ve.ledger_id = ?
         ');
         $updateStmt->execute([$companyId, $entryId, $selectedLedgerId]);
+        security_event('entry_unreconciled', 'success', 'Entry #' . $entryId . ' unreconciled.', $companyId, $userId ?: null);
         log_activity('company', $companyId, 'bank_reconciliation', 'Entry #' . $entryId . ' reopened for reconciliation.', $userId ?: null);
         flash('success', 'Entry reopened for reconciliation.');
         redirect('admin/reconciliation.php?ledger_id=' . $selectedLedgerId);

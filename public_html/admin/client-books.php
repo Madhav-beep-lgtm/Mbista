@@ -40,6 +40,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
     if ($action === 'post_client_voucher' && $booksFyId > 0) {
+        require_permission('accounting', 'post');
+
         $voucherType = in_array((string) ($_POST['voucher_type'] ?? ''), ['journal', 'payment', 'receipt', 'sales', 'purchase', 'contra'], true) ? (string) $_POST['voucher_type'] : 'journal';
         $narration = trim((string) ($_POST['narration'] ?? ''));
         $voucherDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($_POST['voucher_date'] ?? '')) ? (string) $_POST['voucher_date'] : date('Y-m-d');
@@ -92,11 +94,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($voucherId > 0 && $needsClientApproval && column_exists('vouchers', 'requires_client_approval')) {
             db()->prepare('UPDATE vouchers SET requires_client_approval = 1 WHERE id = :id')->execute(['id' => $voucherId]);
         }
+        if ($voucherId > 0) {
+            security_event('client_voucher_posted', 'success', 'Client voucher #' . $voucherId . ' posted for company #' . $booksCompanyId . '.', $booksCompanyId, $userId);
+        }
         log_activity('client_books', $clientId, 'client_voucher', ($needsClientApproval ? 'Submitted for client approval' : 'Posted') . ' in client books #' . $booksCompanyId . '.', $userId ?: null);
         flash('success', $needsClientApproval ? 'Entry submitted — waiting for the client\'s approval.' : 'Entry posted to the client\'s books.');
         redirect($booksUrl('vouchers'));
     }
     if ($action === 'set_client_business_type' && table_exists('company_accounting_preferences')) {
+        require_permission('clients', 'edit');
+
         $bt = in_array((string) ($_POST['business_type'] ?? ''), ['service', 'trading', 'manufacturing'], true) ? (string) $_POST['business_type'] : 'service';
         db()->prepare('INSERT INTO company_accounting_preferences (company_id, business_type, updated_by) VALUES (:cid, :bt, :uid)
             ON DUPLICATE KEY UPDATE business_type = VALUES(business_type), updated_by = VALUES(updated_by)')
@@ -105,9 +112,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($booksUrl('overview'));
     }
     if ($action === 'cancel_client_voucher') {
+        require_permission('accounting', 'edit');
+
         $vid = (int) ($_POST['voucher_id'] ?? 0);
         $where = $access === 'direct' ? '' : " AND approval_state = 'pending_approval' AND submitted_by = " . $userId;
         db()->exec("UPDATE vouchers SET status = 'cancelled', approval_state = 'rejected' WHERE id = " . $vid . ' AND company_id = ' . $booksCompanyId . $where);
+        security_event('client_voucher_cancelled', 'success', 'Client voucher #' . $vid . ' cancelled.', $booksCompanyId, $userId);
+        log_activity('client_books', $clientId, 'client_voucher_cancelled', 'Voucher #' . $vid . ' cancelled in client books #' . $booksCompanyId . '.', $userId ?: null);
         flash('success', 'Voucher cancelled.');
         redirect($booksUrl('vouchers'));
     }

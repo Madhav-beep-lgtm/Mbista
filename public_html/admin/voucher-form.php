@@ -43,6 +43,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash('error', 'You do not have permission to create vouchers.');
         redirect('admin/voucher-form.php');
     }
+
+    require_permission('accounting', 'create');
+
     $saveMode = (string) ($_POST['save_mode'] ?? 'submit');
     $voucherType = (string) ($_POST['voucher_type'] ?? 'journal');
     $voucherDate = (string) ($_POST['voucher_date'] ?? date('Y-m-d'));
@@ -166,6 +169,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'amount' => $entry['amount'],
             'memo' => $entry['memo'],
         ], $entries));
+
+        if ($voucherId > 0) {
+            security_event('voucher_posted', 'success', 'Voucher #' . $voucherId . ' posted via guided form.', $companyId, $userId);
+        }
 
         if ($voucherId > 0 && $hasFormMeta) {
             db()->prepare('UPDATE vouchers SET priority = :priority, department = :department, location = :location,

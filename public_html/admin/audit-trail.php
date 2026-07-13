@@ -29,6 +29,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/audit-trail.php');
     }
 
+    require_permission('accounting', 'approve');
+
     $voucherStmt = db()->prepare("SELECT * FROM vouchers WHERE id = :id AND company_id = :company_id AND approval_state = 'pending_approval' LIMIT 1");
     $voucherStmt->execute(['id' => $voucherId, 'company_id' => $companyId]);
     $voucher = $voucherStmt->fetch();
@@ -41,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'approve_voucher') {
         db()->prepare("UPDATE vouchers SET approval_state = 'approved', status = 'posted', approved_by = :uid, approved_at = NOW() WHERE id = :id")
             ->execute(['uid' => $userId, 'id' => $voucherId]);
+        security_event('voucher_approved', 'success', 'Voucher #' . $voucherId . ' approved.', $companyId, $userId);
         log_field_changes('voucher', $voucherId, ['approval_state' => 'pending_approval'], ['approval_state' => 'approved'], $companyId, $userId);
         log_activity('voucher', $voucherId, 'approved', 'Voucher ' . $voucher['voucher_no'] . ' approved and posted.', $userId);
         flash('success', 'Voucher ' . $voucher['voucher_no'] . ' approved and posted.');
@@ -51,6 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $reason = trim((string) ($_POST['reason'] ?? ''));
         db()->prepare("UPDATE vouchers SET approval_state = 'rejected', status = 'cancelled', approved_by = :uid, approved_at = NOW(), rejection_reason = :reason WHERE id = :id")
             ->execute(['uid' => $userId, 'reason' => $reason !== '' ? $reason : 'Rejected', 'id' => $voucherId]);
+        security_event('voucher_rejected', 'success', 'Voucher #' . $voucherId . ' rejected.', $companyId, $userId);
         log_field_changes('voucher', $voucherId, ['approval_state' => 'pending_approval'], ['approval_state' => 'rejected'], $companyId, $userId);
         log_activity('voucher', $voucherId, 'rejected', 'Voucher ' . $voucher['voucher_no'] . ' rejected: ' . $reason, $userId);
         flash('success', 'Voucher ' . $voucher['voucher_no'] . ' rejected.');

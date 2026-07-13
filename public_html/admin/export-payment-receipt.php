@@ -27,9 +27,12 @@ if (!$receipt) {
     exit;
 }
 
+require_permission('reports', 'export');
+
 $safeNo = preg_replace('/[^A-Za-z0-9\-_]/', '_', (string) ($receipt['receipt_no'] ?? $requestId));
 header('Content-Type: text/html; charset=utf-8');
 header('Content-Disposition: inline; filename="Receipt-' . ($safeNo ?: (string) $requestId) . '.html"');
 
+security_event('report_exported', 'success', 'Payment receipt #' . ($receipt['receipt_no'] ?? $requestId) . ' exported.', (int) ($currentCompany['id'] ?? 0), (int) (current_user()['id'] ?? 0));
 echo export_payment_receipt_html($receipt);
 exit;

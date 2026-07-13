@@ -25,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
     if ($action === 'create_schedule') {
+        require_permission('reports', 'export');
         $recipient = trim((string) ($_POST['recipient_email'] ?? ''));
         $frequency = (string) ($_POST['frequency'] ?? 'monthly');
         $format = (string) ($_POST['export_format'] ?? 'both');
@@ -62,15 +63,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'next_run_on' => $nextRun,
                 'created_by' => $userId ?: null,
             ]);
+            security_event('report_schedule_created', 'success', 'Report schedule created for ' . ($reportRegistry[$selectedReportKey][0] ?? $selectedReportKey) . ' (recipient: ' . $recipient . ').', $companyId, $userId);
             flash('success', 'Schedule created.');
         }
         redirect('admin/report-schedules.php?report_key=' . urlencode($selectedReportKey));
     }
     if ($action === 'delete_schedule') {
+        require_permission('reports', 'export');
         $scheduleId = (int) ($_POST['schedule_id'] ?? 0);
         if ($scheduleId > 0) {
             db()->prepare('DELETE FROM report_schedules WHERE id = :id AND company_id = :company_id')
                 ->execute(['id' => $scheduleId, 'company_id' => $companyId]);
+            security_event('report_schedule_deleted', 'success', 'Report schedule #' . $scheduleId . ' deleted.', $companyId, $userId);
             flash('success', 'Schedule removed.');
         }
         redirect('admin/report-schedules.php?report_key=' . urlencode($reportKey));

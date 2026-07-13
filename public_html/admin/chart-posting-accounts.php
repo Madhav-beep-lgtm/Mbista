@@ -27,6 +27,7 @@ $mappingRoles = [
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
+    require_permission('accounting', 'edit');
     if (!table_exists('company_ledger_mappings')) {
         flash('error', 'Run the ledger-mapping migration before configuring automated posting accounts.');
         redirect('admin/chart-posting-accounts.php');

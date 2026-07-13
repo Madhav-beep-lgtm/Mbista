@@ -489,6 +489,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $exportStmt->execute();
     $rows = $exportStmt->fetchAll();
 
+    security_event('report_exported', 'success', 'User list exported to CSV.', $companyId, (int) ($currentAdmin['id'] ?? 0));
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="users-export-' . date('Ymd-His') . '.csv"');
 

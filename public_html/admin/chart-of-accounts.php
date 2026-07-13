@@ -30,6 +30,8 @@ $ledgers = $ledgersStmt->fetchAll();
 // Export COA as CSV.
 // ---------------------------------------------------------------------------
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    require_permission('reports', 'export');
+    security_event('report_exported', 'success', 'Chart of accounts exported to CSV.', $companyId, $userId ?: null);
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="chart-of-accounts-' . preg_replace('/[^A-Za-z0-9]+/', '-', (string) ($company['name'] ?? 'company')) . '.csv"');
     $out = fopen('php://output', 'w');
@@ -57,6 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
         flash('error', 'You do not have permission to import ledgers.');
         redirect('admin/chart-of-accounts.php');
     }
+    require_permission('accounting', 'create');
     $tmp = (string) ($_FILES['import_file']['tmp_name'] ?? '');
     if ($tmp === '' || !is_uploaded_file($tmp)) {
         flash('error', 'Choose a CSV file to import.');
@@ -92,6 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
         $created++;
     }
     fclose($handle);
+    security_event('coa_bulk_import', 'success', $created . ' account(s) imported.', $companyId, $userId ?: null);
     log_activity('company', $companyId, 'coa_bulk_import', $created . ' ledgers imported, ' . $skipped . ' rows skipped.', $userId ?: null);
     flash($created > 0 ? 'success' : 'error', $created . ' ledgers imported' . ($skipped > 0 ? ', ' . $skipped . ' rows skipped (bad group/type, duplicate, or header)' : '') . '.');
     redirect('admin/chart-masters.php');

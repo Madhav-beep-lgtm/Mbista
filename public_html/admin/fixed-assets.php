@@ -36,10 +36,10 @@ function fa_company_asset(int $assetId, int $companyId): ?array
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
-    require_permission('accounting', 'edit');
     $action = (string) ($_POST['action'] ?? '');
 
     if ($action === 'add_asset') {
+        require_permission('accounting', 'create');
         $code = strtoupper(trim((string) ($_POST['asset_code'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
         $class = (string) ($_POST['asset_class'] ?? 'ppe');
@@ -93,6 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'post_depreciation') {
+        require_permission('accounting', 'post');
         $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
         if (!$asset) {
             flash('error', 'Asset not found for this company.');
@@ -144,6 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->prepare('UPDATE fixed_assets SET accumulated_depreciation = :acc, carrying_amount = :carry, status = :st WHERE id = :id AND company_id = :cid')
                 ->execute(['acc' => $newAccum, 'carry' => $newCarrying, 'st' => $status, 'id' => (int) $asset['id'], 'cid' => $companyId]);
             db()->commit();
+            security_event('asset_depreciation_posted', 'success', 'Depreciation posted for asset #' . (int) $asset['id'] . '.', $companyId, $userId);
             log_activity('fixed_asset', (int) $asset['id'], 'depreciation_posted', 'Depreciation period ' . $periodNo . ' posted (' . number_format($charge, 2) . ').', $userId);
             flash('success', 'Depreciation posted for ' . $asset['asset_code'] . ': ' . site_currency_symbol() . number_format($charge, 2) . ' (Dr Depreciation expense / Cr Accumulated depreciation). Carrying amount now ' . site_currency_symbol() . number_format($newCarrying, 2) . '.');
         } catch (Throwable $e) {
@@ -154,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'post_impairment') {
+        require_permission('accounting', 'post');
         $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
         if (!$asset) { flash('error', 'Asset not found.'); redirect('admin/fixed-assets.php'); }
         $fvlcd = max(0.0, round((float) ($_POST['fvlcd'] ?? 0), 2));
@@ -187,6 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->prepare('UPDATE fixed_assets SET accumulated_impairment = accumulated_impairment + :imp, carrying_amount = :carry WHERE id = :id AND company_id = :cid')
                 ->execute(['imp' => $imp['impairment'], 'carry' => $imp['revised_carrying'], 'id' => (int) $asset['id'], 'cid' => $companyId]);
             db()->commit();
+            security_event('asset_impairment_posted', 'success', 'Impairment posted for asset #' . (int) $asset['id'] . '.', $companyId, $userId);
             log_activity('fixed_asset', (int) $asset['id'], 'impairment', 'Impairment ' . number_format($imp['impairment'], 2) . ' posted.', $userId);
             flash('success', 'Impairment posted: ' . site_currency_symbol() . number_format($imp['impairment'], 2) . ' (Dr Impairment loss / Cr Accumulated impairment). Carrying amount now ' . site_currency_symbol() . number_format($imp['revised_carrying'], 2) . '.');
         } catch (Throwable $e) { if (db()->inTransaction()) { db()->rollBack(); } flash('error', 'Could not post impairment: ' . $e->getMessage()); }
@@ -194,6 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'classify_held_for_sale') {
+        require_permission('accounting', 'edit');
         $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
         if (!$asset) { flash('error', 'Asset not found.'); redirect('admin/fixed-assets.php'); }
         $fv = max(0.0, round((float) ($_POST['fair_value'] ?? 0), 2));
@@ -223,6 +228,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->prepare('UPDATE fixed_assets SET status = \'held_for_sale\', carrying_amount = :carry, accumulated_impairment = accumulated_impairment + :imp WHERE id = :id AND company_id = :cid')
                 ->execute(['carry' => $hfs['measured'], 'imp' => $hfs['impairment'], 'id' => (int) $asset['id'], 'cid' => $companyId]);
             db()->commit();
+            security_event('asset_held_for_sale', 'success', 'Asset #' . (int) $asset['id'] . ' classified held-for-sale.', $companyId, $userId);
             log_activity('fixed_asset', (int) $asset['id'], 'held_for_sale', 'Classified held for sale.', $userId);
             flash('success', 'Classified as held for sale at ' . site_currency_symbol() . number_format($hfs['measured'], 2) . ' (lower of carrying and FV less costs to sell). Depreciation stops (IFRS 5).' . ($hfs['impairment'] > 0 ? ' Impairment ' . site_currency_symbol() . number_format($hfs['impairment'], 2) . ' posted.' : ''));
         } catch (Throwable $e) { if (db()->inTransaction()) { db()->rollBack(); } flash('error', 'Could not classify: ' . $e->getMessage()); }
@@ -230,6 +236,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'dispose_asset') {
+        require_permission('accounting', 'post');
         $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
         if (!$asset) { flash('error', 'Asset not found.'); redirect('admin/fixed-assets.php'); }
         $proceeds = max(0.0, round((float) ($_POST['proceeds'] ?? 0), 2));
@@ -271,6 +278,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->prepare('UPDATE fixed_assets SET status = \'disposed\', disposed_on = :d, carrying_amount = 0 WHERE id = :id AND company_id = :cid')
                 ->execute(['d' => date('Y-m-d'), 'id' => (int) $asset['id'], 'cid' => $companyId]);
             db()->commit();
+            security_event('asset_disposed', 'success', 'Asset #' . (int) $asset['id'] . ' disposed.', $companyId, $userId);
             log_activity('fixed_asset', (int) $asset['id'], 'disposed', 'Asset disposed (' . ($gainLoss >= 0 ? 'gain' : 'loss') . ' ' . number_format(abs($gainLoss), 2) . ').', $userId);
             flash('success', 'Asset disposed. Proceeds ' . site_currency_symbol() . number_format($proceeds, 2) . ', carrying ' . site_currency_symbol() . number_format($carrying, 2) . ', ' . ($gainLoss >= 0 ? 'gain ' : 'loss ') . site_currency_symbol() . number_format(abs($gainLoss), 2) . '.');
         } catch (Throwable $e) { if (db()->inTransaction()) { db()->rollBack(); } flash('error', 'Could not dispose: ' . $e->getMessage()); }
@@ -278,6 +286,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'revalue_asset') {
+        require_permission('accounting', 'post');
         $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
         if (!$asset) { flash('error', 'Asset not found.'); redirect('admin/fixed-assets.php'); }
         $newValue = max(0.0, round((float) ($_POST['new_fair_value'] ?? 0), 2));
@@ -318,6 +327,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ->execute(['v' => $newValue, 'id' => (int) $asset['id'], 'cid' => $companyId]);
             }
             db()->commit();
+            security_event('asset_revalued', 'success', 'Asset #' . (int) $asset['id'] . ' revalued.', $companyId, $userId);
             log_activity('fixed_asset', (int) $asset['id'], 'revalued', 'Revalued to ' . number_format($newValue, 2) . '.', $userId);
             flash('success', 'Asset revalued to ' . site_currency_symbol() . number_format($newValue, 2) . ' (' . ($delta > 0 ? 'surplus ' : 'decrease ') . site_currency_symbol() . number_format(abs($delta), 2) . ').');
         } catch (Throwable $e) { if (db()->inTransaction()) { db()->rollBack(); } flash('error', 'Could not revalue: ' . $e->getMessage()); }
@@ -325,6 +335,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'create_lease') {
+        require_permission('accounting', 'post');
         // IFRS 16: create a ROU asset + lease liability with a full amortization schedule.
         $ref = strtoupper(trim((string) ($_POST['contract_ref'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
@@ -384,6 +395,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ], $entries);
             }
             db()->commit();
+            security_event('lease_created', 'success', 'Lease created for asset/ROU #' . $rouAssetId . '.', $companyId, $userId);
             log_activity('lease', $leaseId, 'created', 'Lease ' . $ref . ' created (ROU ' . number_format($rou, 2) . ').', $userId);
             flash('success', 'Lease ' . $ref . ' created. ROU asset ROU-' . $ref . ' = ' . site_currency_symbol() . number_format($rou, 2) . ' with a ' . $term . '-month liability schedule.' . (($rouL && $liabL) ? ' Commencement voucher posted.' : ' Map ROU Asset + Lease Liability to auto-post.'));
         } catch (Throwable $e) { if (db()->inTransaction()) { db()->rollBack(); } flash('error', 'Could not create lease: ' . $e->getMessage()); }
@@ -391,6 +403,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'save_asset_mappings') {
+        require_permission('accounting', 'edit');
         $saved = 0;
         foreach (array_keys(fa_mapping_purposes()) as $purpose) {
             $ledgerId = (int) ($_POST['map'][$purpose] ?? 0);

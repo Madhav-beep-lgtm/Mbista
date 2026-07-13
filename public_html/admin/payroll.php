@@ -43,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'p' => $periodNo, 'label' => $periodLabel, 'pay' => $payDate, 'by' => $userId]);
         $newRunId = (int) db()->lastInsertId();
         log_activity('payroll_run', $newRunId, 'created', 'Payroll run ' . $periodLabel . ' created.', $userId);
+        security_event('payroll_run_created', 'success', 'Payroll run #' . $newRunId . ' created.', $companyId, $userId);
         $calc = payroll_calculate_run($newRunId);
         flash($calc['ok'] ? 'success' : 'error', $calc['ok']
             ? 'Payroll run created and calculated for ' . $calc['employees'] . ' employees.'
@@ -69,6 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result = payroll_approve_and_post($runId, $userId);
         if ($result['ok']) {
             log_activity('payroll_run', $runId, 'approved', 'Payroll approved' . (($result['voucher_id'] ?? 0) > 0 ? ' and posted (voucher #' . $result['voucher_id'] . ')' : '') . '.', $userId);
+            security_event('payroll_run_posted', 'success', 'Payroll run #' . $runId . ' approved and posted.', $companyId, $userId);
             flash('success', 'Payroll approved.' . (($result['voucher_id'] ?? 0) > 0 ? ' Accrual voucher posted automatically.' : ' Auto-post is off; post manually from settings.'));
         } else {
             flash('error', (string) $result['error']);
@@ -80,6 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result = payroll_record_payment($runId, $userId, (string) ($_POST['payment_date'] ?? ''));
         if ($result['ok']) {
             log_activity('payroll_run', $runId, 'paid', 'Salary payment voucher posted (' . number_format((float) $result['amount'], 2) . ').', $userId);
+            security_event('payroll_payment_recorded', 'success', 'Payment recorded for payroll run #' . $runId . '.', $companyId, $userId);
             flash('success', 'Salary payment recorded: ' . $sym . number_format((float) $result['amount'], 2) . ' paid from bank.');
         } else {
             flash('error', (string) $result['error']);
@@ -93,6 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             db()->prepare("UPDATE payroll_runs SET status = 'cancelled' WHERE id = :id")->execute(['id' => $runId]);
             log_activity('payroll_run', $runId, 'cancelled', 'Payroll run cancelled before approval.', $userId);
+            security_event('payroll_run_cancelled', 'success', 'Payroll run #' . $runId . ' cancelled.', $companyId, $userId);
             flash('success', 'Run cancelled.');
         }
         redirect('admin/payroll.php');

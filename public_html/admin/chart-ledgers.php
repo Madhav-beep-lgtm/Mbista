@@ -19,6 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
     if ($action === 'save_ledger') {
+        require_permission('accounting', 'edit');
         $ledgerId = (int) ($_POST['ledger_id'] ?? 0);
         $name = trim((string) ($_POST['name'] ?? ''));
         $groupId = (int) ($_POST['group_id'] ?? 0);
@@ -50,10 +51,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/chart-ledgers.php');
     }
     if ($action === 'delete_ledger') {
+        require_permission('accounting', 'edit');
         $ledgerId = (int) ($_POST['ledger_id'] ?? 0);
         if ($ledgerId > 0) {
             try {
                 db()->prepare('DELETE FROM ledgers WHERE id = :id AND company_id = :company_id')->execute(['id' => $ledgerId, 'company_id' => $companyId]);
+                security_event('ledger_deleted', 'success', 'Ledger #' . $ledgerId . ' deleted.', $companyId, (int) (current_user()['id'] ?? 0) ?: null);
                 flash('success', 'Ledger deleted.');
             } catch (Throwable $e) {
                 flash('error', 'This ledger cannot be deleted while transactions still reference it.');

@@ -71,6 +71,7 @@ $methodLabels = ['full' => 'Full consolidation', 'equity' => 'Equity method', 'p
 
 // CSV export of the matrix + consolidation.
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    require_permission('reports', 'export');
     $rows = [['Consolidated Report — ' . ($fiscalYear['label'] ?? '')]];
     $rows[] = [];
     $rows[] = ['Company Performance Matrix'];
@@ -96,6 +97,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         }
         $rows[] = ['Consolidated', '', '', '', (float) $consolidated['total_income'], (float) $consolidated['total_expenses'], (float) $consolidated['net_profit'], (float) $consolidated['nci_profit']];
     }
+    security_event('report_exported', 'success', 'Consolidated report exported.', $companyId, (int) (current_user()['id'] ?? 0));
     export_csv('consolidated-report-' . date('Ymd') . '.csv', $rows);
 }
 

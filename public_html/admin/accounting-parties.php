@@ -23,6 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
 
     if ($action === 'save_party') {
+        require_permission('sales', 'edit');
         $partyId = (int) ($_POST['party_id'] ?? 0);
         $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
@@ -108,6 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'toggle_party') {
+        require_permission('sales', 'edit');
         $partyId = (int) ($_POST['party_id'] ?? 0);
         if ($partyId > 0) {
             db()->prepare("UPDATE accounting_parties SET status = IF(status = 'active', 'inactive', 'active') WHERE id = :id AND company_id = :company_id")
@@ -119,6 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'save_note') {
+        require_permission('sales', 'edit');
         $partyId = (int) ($_POST['party_id'] ?? 0);
         $note = trim((string) ($_POST['notes'] ?? ''));
         if ($partyId > 0) {
@@ -131,6 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'record_payment') {
+        require_permission('receipts', 'create');
         $invoiceId = (int) ($_POST['invoice_id'] ?? 0);
         $amount = round((float) ($_POST['amount'] ?? 0), 2);
         $receivedOn = trim((string) ($_POST['received_on'] ?? date('Y-m-d')));
@@ -202,12 +206,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        security_event('voucher_posted', 'success', 'Receipt recorded for invoice ' . $invoice['invoice_no'] . '.', $companyId, $userId);
         log_activity('invoice_payment', $paymentRequestId, 'recorded', 'Payment recorded against invoice ' . $invoice['invoice_no'] . '.', $userId);
         flash('success', 'Payment of ' . site_currency_symbol() . number_format($amount, 2) . ' recorded against ' . $invoice['invoice_no'] . '.');
         redirect('admin/accounting-parties.php?tab=sales');
     }
 
     if ($action === 'record_purchase') {
+        require_permission('purchases', 'create');
         $partyId = (int) ($_POST['party_id'] ?? 0);
         $expenseLedgerId = (int) ($_POST['expense_ledger_id'] ?? 0);
         $amount = round((float) ($_POST['amount'] ?? 0), 2);
@@ -270,6 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ['ledger_id' => (int) $expenseLedger['id'], 'entry_type' => 'debit', 'amount' => $total, 'memo' => 'Purchase from ' . $party['name'] . ($vatAmount > 0 ? ' (incl. VAT ' . number_format($vatAmount, 2) . ')' : '')],
                 ['ledger_id' => $creditLedgerId, 'entry_type' => 'credit', 'amount' => $total, 'memo' => $paidVia === 'cash' ? 'Paid in cash' : 'Payable to ' . $party['name']],
             ]);
+            security_event('voucher_posted', 'success', 'Purchase bill recorded for party #' . $partyId . '.', $companyId, $userId);
             log_activity('purchase_bill', $voucherId, 'recorded', 'Purchase bill ' . $voucherNo . ' recorded for ' . $party['name'] . '.', $userId);
             flash('success', 'Purchase bill ' . $voucherNo . ' recorded for ' . $party['name'] . '.');
         } catch (Throwable $exception) {
@@ -280,6 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'record_supplier_payment') {
+        require_permission('purchases', 'create');
         $partyId = (int) ($_POST['party_id'] ?? 0);
         $amount = round((float) ($_POST['amount'] ?? 0), 2);
         $paidOn = trim((string) ($_POST['paid_on'] ?? date('Y-m-d')));
@@ -326,6 +334,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ['ledger_id' => $payableLedgerId, 'entry_type' => 'debit', 'amount' => $amount, 'memo' => 'Supplier balance settled'],
                 ['ledger_id' => (int) $cashLedger['id'], 'entry_type' => 'credit', 'amount' => $amount, 'memo' => 'Paid to ' . $party['name']],
             ]);
+            security_event('voucher_posted', 'success', 'Supplier payment recorded for party #' . $partyId . '.', $companyId, $userId);
             log_activity('supplier_payment', $voucherId, 'recorded', 'Payment ' . $voucherNo . ' made to ' . $party['name'] . '.', $userId);
             flash('success', 'Payment ' . $voucherNo . ' of ' . site_currency_symbol() . number_format($amount, 2) . ' recorded for ' . $party['name'] . '.');
         } catch (Throwable $exception) {

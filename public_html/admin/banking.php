@@ -23,6 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
     if ($action === 'save_bank_meta' && $hasBankMeta) {
+        require_permission('accounting', 'edit');
         $ledgerId = (int) ($_POST['ledger_id'] ?? 0);
         $bankName = trim((string) ($_POST['bank_name'] ?? ''));
         $accountNo = preg_replace('/[^0-9A-Za-z-]/', '', (string) ($_POST['bank_account_no'] ?? ''));
