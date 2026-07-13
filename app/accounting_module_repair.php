@@ -571,5 +571,16 @@ function accounting_module_repair_database(): array
         accounting_repair_add_column('inventory_transactions', 'to_warehouse_id', '`to_warehouse_id` INT UNSIGNED DEFAULT NULL AFTER `warehouse_id`');
     });
 
+    $run('Widen inventory transaction types (migration 040)', static function (): void {
+        if (!accounting_repair_table_exists('inventory_transactions')) {
+            return;
+        }
+        db()->exec("ALTER TABLE `inventory_transactions` MODIFY COLUMN `transaction_type` ENUM(
+            'opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment',
+            'consume', 'produce', 'write_off', 'damage', 'expiry',
+            'warehouse_transfer', 'departmental_transfer', 'nrv_write_down', 'nrv_reversal'
+        ) NOT NULL DEFAULT 'adjustment'");
+    });
+
     return $errors;
 }

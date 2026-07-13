@@ -722,6 +722,10 @@ function inv_movement_posting_plan(string $type, string $direction): ?array
             return $direction === 'in'
                 ? ['debit' => 'inventory_asset', 'credit' => 'inventory_gain']
                 : ['debit' => 'inventory_loss', 'credit' => 'inventory_asset'];
+        case 'nrv_write_down':
+            return ['debit' => 'write_down_expense', 'credit' => 'write_down_allowance'];
+        case 'nrv_reversal':
+            return ['debit' => 'write_down_allowance', 'credit' => 'write_down_reversal'];
         case 'warehouse_transfer':
         case 'departmental_transfer':
             return null; // no GL voucher (spec section E exception)
@@ -791,7 +795,10 @@ function inv_post_movement_voucher(int $companyId, ?int $fiscalYearId, int $txnI
 /**
  * The purposes each transaction type needs mapped before it can post.
  * Direction is derived by the engine; this table also documents the posting
- * matrix (Dr/Cr) used by the posting layer.
+ * matrix (Dr/Cr) used by the posting layer. Kept in exact sync with
+ * inv_movement_posting_plan() — 'adjustment' is a single type with a
+ * caller-supplied direction (matching the real form/handler), not separate
+ * adjustment_increase/adjustment_decrease types.
  */
 function inv_transaction_purposes(string $transactionType): array
 {
@@ -801,8 +808,8 @@ function inv_transaction_purposes(string $transactionType): array
         'purchase_return'         => ['inventory_asset', 'purchase_clearing'],
         'sale', 'sales_delivery'  => ['inventory_asset', 'cogs'],
         'sales_return'            => ['inventory_asset', 'cogs'],
-        'adjustment_increase'     => ['inventory_asset', 'inventory_gain'],
-        'adjustment_decrease', 'write_off', 'damage', 'expiry' => ['inventory_asset', 'inventory_loss'],
+        'adjustment'              => ['inventory_asset', 'inventory_gain', 'inventory_loss'],
+        'write_off', 'damage', 'expiry' => ['inventory_asset', 'inventory_loss'],
         'material_issue'          => ['wip', 'raw_material'],
         'material_return'         => ['raw_material', 'wip'],
         'production_receipt'      => ['finished_goods', 'wip'],

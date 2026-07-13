@@ -1411,7 +1411,7 @@ CREATE TABLE IF NOT EXISTS `inventory_transactions` (
   `warehouse_id` INT UNSIGNED DEFAULT NULL,
   `to_warehouse_id` INT UNSIGNED DEFAULT NULL,
   `voucher_id` INT UNSIGNED DEFAULT NULL,
-  `transaction_type` ENUM('opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment', 'consume', 'produce') NOT NULL DEFAULT 'adjustment',
+  `transaction_type` ENUM('opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment', 'consume', 'produce', 'write_off', 'damage', 'expiry', 'warehouse_transfer', 'departmental_transfer', 'nrv_write_down', 'nrv_reversal') NOT NULL DEFAULT 'adjustment',
   `ref_no` VARCHAR(120) DEFAULT NULL,
   `transaction_date` DATE NOT NULL,
   `qty_in` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
