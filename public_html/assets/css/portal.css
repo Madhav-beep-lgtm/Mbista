@@ -5573,26 +5573,28 @@ body.accounting-dashboard-page.theme-dark .mbw-view-all {
 
 /* AGGRESSIVE KPI NUMBER REDUCTION START */
 
-/* Force only the dashboard amount numbers to become much smaller */
-body.accounting-dashboard-page
+/*
+   Dashboard KPI amounts only.
+   Cards, labels, icons, spacing and sidebar remain unchanged.
+*/
+body.admin-layout.accounting-module-page.accounting-dashboard-page
 .mbw-kpi-grid
 .mbw-kpi
 .mbw-kpi-value {
-  font-size: 15px !important;
-  line-height: 1.15 !important;
+  font-size: 13px !important;
+  line-height: 1.2 !important;
+  font-weight: 750 !important;
   letter-spacing: 0 !important;
-  font-weight: 800 !important;
   font-variant-numeric: tabular-nums;
   white-space: nowrap !important;
 }
 
-/* Slightly smaller on narrow screens */
 @media (max-width: 760px) {
-  body.accounting-dashboard-page
+  body.admin-layout.accounting-module-page.accounting-dashboard-page
   .mbw-kpi-grid
   .mbw-kpi
   .mbw-kpi-value {
-    font-size: 14px !important;
+    font-size: 12px !important;
   }
 }
 
