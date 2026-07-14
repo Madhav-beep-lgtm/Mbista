@@ -295,6 +295,27 @@ $ledgerCreditTotal = array_sum(array_map(static fn (array $row): float => (float
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
+<!-- FISCAL YEAR TOP SECTION START -->
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Fiscal Year</h2></div>
+    <form method="GET" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+        <label for="fiscal_year" style="margin: 0; font-weight: 600; color: var(--mbw-heading);">Select Fiscal Year:</label>
+        <select name="fiscal_year_id" id="fiscal_year" onchange="document.location='<?= url("admin/accounting.php?fiscal_year_id=") ?>' + this.value;">
+            <?php foreach ($fiscalYears as $fy): ?>
+                <option value="<?= (int) $fy['id'] ?>" <?= ((int) ($fiscalYear['id'] ?? 0) === (int) $fy['id']) ? 'selected' : '' ?>>
+                    <?= e($fy['label']) ?> (<?= e($fy['start_date']) ?> - <?= e($fy['end_date']) ?>)
+                </option>
+            <?php endforeach; ?>
+        </select>
+        <?php if ((int) ($fiscalYear['is_active'] ?? 0) === 1): ?>
+            <span class="mbw-pill tone-green">Active</span>
+        <?php else: ?>
+            <span class="mbw-pill tone-red">Closed</span>
+        <?php endif; ?>
+    </form>
+</section>
+<!-- FISCAL YEAR TOP SECTION END -->
+
 <nav class="mbw-tabbar" aria-label="Voucher workspace">
     <a class="mbw-tab is-active" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('journal') ?>Voucher Register</a>
     <a class="mbw-tab" href="<?= e(url('admin/voucher-form.php')) ?>"><?= icon('receipt-voucher') ?>New Voucher</a>
@@ -317,24 +338,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 $fiscalYears = table_exists('fiscal_years') ? fiscal_years_for_company((int) $company['id']) : [];
 if ($fiscalYears):
 ?>
-<section class="mbw-card">
-    <div class="mbw-card-head"><h2>Fiscal Year</h2></div>
-    <form method="GET" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-        <label for="fiscal_year" style="margin: 0; font-weight: 600; color: var(--mbw-heading);">Select Fiscal Year:</label>
-        <select name="fiscal_year_id" id="fiscal_year" onchange="document.location='<?= url("admin/accounting.php?fiscal_year_id=") ?>' + this.value;">
-            <?php foreach ($fiscalYears as $fy): ?>
-                <option value="<?= (int) $fy['id'] ?>" <?= ((int) ($fiscalYear['id'] ?? 0) === (int) $fy['id']) ? 'selected' : '' ?>>
-                    <?= e($fy['label']) ?> (<?= e($fy['start_date']) ?> - <?= e($fy['end_date']) ?>)
-                </option>
-            <?php endforeach; ?>
-        </select>
-        <?php if ((int) ($fiscalYear['is_active'] ?? 0) === 1): ?>
-            <span class="mbw-pill tone-green">Active</span>
-        <?php else: ?>
-            <span class="mbw-pill tone-red">Closed</span>
-        <?php endif; ?>
-    </form>
-</section>
+
 <?php endif; ?>
 
 <section class="mbw-card">
