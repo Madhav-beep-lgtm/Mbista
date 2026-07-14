@@ -50,7 +50,7 @@ if (count($companies) === 1 && $_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 include __DIR__ . '/../app/views/partials/header.php';
 ?>
-<section class="section">
+<section class="section portal-selector-page">
     <div class="container">
         <div class="hero-panel">
             <div class="hero-grid">
