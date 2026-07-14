@@ -5570,3 +5570,28 @@ body.accounting-dashboard-page.theme-dark .mbw-view-all {
 }
 
 /* GROUP DASHBOARD CONTENT REDESIGN END */
+
+/* GROUP DASHBOARD KPI NUMBER SIZE START */
+
+body.accounting-dashboard-page .mbw-kpi-value {
+  font-size: clamp(16px, 1.12vw, 19px);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 1350px) {
+  body.accounting-dashboard-page .mbw-kpi-value {
+    font-size: 17px;
+  }
+}
+
+@media (max-width: 760px) {
+  body.accounting-dashboard-page .mbw-kpi-value {
+    font-size: 16px;
+  }
+}
+
+/* GROUP DASHBOARD KPI NUMBER SIZE END */
