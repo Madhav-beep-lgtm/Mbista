@@ -9649,62 +9649,11 @@ body.home-page .section-head {
   height: 17px;
 }
 
-.auth2-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 22px 0 14px;
-  color: rgba(232, 238, 247, 0.5);
-  font-size: 0.8rem;
-}
-
-.auth2-divider::before,
-.auth2-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: rgba(148, 178, 215, 0.18);
-}
-
-.auth2-portals {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.auth2-portals a {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  padding: 13px 8px;
-  border: 1px solid rgba(148, 178, 215, 0.16);
-  border-radius: 12px;
-  color: rgba(232, 238, 247, 0.85);
-  text-decoration: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.auth2-portals a:hover {
-  border-color: rgba(217, 163, 58, 0.6);
-  background: rgba(217, 163, 58, 0.08);
-}
-
-.auth2-portals .ui-icon {
-  width: 21px;
-  height: 21px;
-  color: var(--gold-bright, #f2c766);
-}
-
-.auth2-portals strong {
-  color: #fff;
-  font-size: 0.82rem;
-}
-
-.auth2-portals small {
+.auth2-note {
+  margin: 20px 0 0;
   color: rgba(232, 238, 247, 0.55);
-  font-size: 0.68rem;
-  line-height: 1.4;
-  text-align: center;
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 
 /* Footer strip */

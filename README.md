@@ -72,7 +72,7 @@ Fresh imports of `database/schema.sql`, `database/schema_cpanel.sql`, or `databa
 
 | Role | Login URL | Email | Password |
 | --- | --- | --- | --- |
-| Admin | `admin/login.php` | `admin@mbista.local` | `AdminPassword123!` |
+| Admin | `login.php` | `admin@mbista.local` | `AdminPassword123!` |
 | Client | `login.php` | `excelbusinessandtax@gmail.com` | `Temp@9472` |
 | Test customer | `login.php` | `testcustomer@example.com` | `TestPassword123!` |
 
@@ -186,7 +186,7 @@ php -l public_html/index.php
 
 - Public: `index.php`, `packages.php`, `order.php`, `invoice.php`, `checkout.php`, `contact.php`, `login.php`, `logout.php`, `dashboard.php`, `forgot-password.php`, `reset-password.php`, `portal.php`
 - Staff: `staff/index.php`
-- Admin: `admin/login.php`, `admin/logout.php`, `admin/index.php`, `admin/workspace.php`, `admin/invoice.php`, `admin/receipts.php`, `admin/export-invoice.php`, `admin/export-payment-receipt.php`, `admin/plans.php`, `admin/orders.php`, `admin/contacts.php`, `admin/users.php`, `admin/reports.php`, `admin/companies.php`, `admin/accounting.php`, `admin/chart-of-accounts.php`, `admin/compliance.php`, `admin/documents.php`, `admin/messages.php`, `admin/tickets.php`, `admin/hr.php`, `admin/settings.php`
+- Admin: `admin/logout.php`, `admin/index.php`, `admin/workspace.php`, `admin/invoice.php`, `admin/receipts.php`, `admin/export-invoice.php`, `admin/export-payment-receipt.php`, `admin/plans.php`, `admin/orders.php`, `admin/contacts.php`, `admin/users.php`, `admin/reports.php`, `admin/companies.php`, `admin/accounting.php`, `admin/chart-of-accounts.php`, `admin/compliance.php`, `admin/documents.php`, `admin/messages.php`, `admin/tickets.php`, `admin/hr.php`, `admin/settings.php`
 
 ## cPanel production settings
 

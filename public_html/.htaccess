@@ -21,7 +21,9 @@ DirectoryIndex index.php
     # RewriteCond %{HTTP_HOST} !^www\.mbca\.com\.np$ [NC]
     # RewriteRule ^ https://www.mbca.com.np%{REQUEST_URI} [R=301,L]
 
-    RewriteRule ^adminlogin/?$ admin/login.php [QSA,L]
+    # /login.php is the single sign-in page. The old admin entry points are kept
+    # as external 301s so bookmarks land on it visibly instead of dead-ending.
+    RewriteRule ^adminlogin/?$ /login.php [R=301,QSA,L]
 
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d

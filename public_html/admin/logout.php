@@ -4,4 +4,4 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 
 logout_user();
 flash('success', 'Admin session closed.');
-redirect('admin/login.php');
+redirect('login.php');

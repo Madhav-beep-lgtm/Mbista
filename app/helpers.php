@@ -1502,6 +1502,14 @@ function login_user(string $email, string $password): bool
         session_regenerate_id(true);
     }
 
+    // session_regenerate_id() rotates the id but keeps the session's data, so a
+    // company context left behind by a previous identity would survive into this
+    // one — enough to walk straight past portal.php's PIN gate into someone
+    // else's organization. A new identity always starts with no tenant context.
+    clear_company_pin_verification();
+    clear_selected_company();
+    unset($_SESSION['company_id'], $_SESSION['fiscal_year_id']);
+
     $_SESSION['user_id'] = (int) $user['id'];
     $_SESSION['auth_issued_at'] = time();
 
@@ -1690,7 +1698,7 @@ function require_admin(): void
 
     if (!$user || $user['role'] !== 'admin') {
         flash('error', 'Admin access required.');
-        redirect('admin/login.php');
+        redirect('login.php');
     }
 }
 

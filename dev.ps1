@@ -136,7 +136,8 @@ function Start-Development {
 
     Test-ApplicationUrl "$AppUrl/" @("200")
     Test-ApplicationUrl "$AppUrl/login.php" @("200")
-    Test-ApplicationUrl "$AppUrl/admin/login.php" @("200")
+    # Retired second login page: must now 301 to /login.php, never render a form.
+    Test-ApplicationUrl "$AppUrl/admin/login.php" @("301")
     Test-ApplicationUrl "$AppUrl/admin/accounting-inventory.php" @("200", "302")
     Test-ApplicationUrl "$AppUrl/admin/invoice.php" @("200", "302")
 
@@ -263,7 +264,8 @@ function Run-HttpSmokeTests {
 
     Test-ApplicationUrl "$AppUrl/" @("200")
     Test-ApplicationUrl "$AppUrl/login.php" @("200")
-    Test-ApplicationUrl "$AppUrl/admin/login.php" @("200")
+    # Retired second login page: must now 301 to /login.php, never render a form.
+    Test-ApplicationUrl "$AppUrl/admin/login.php" @("301")
     Test-ApplicationUrl "$AppUrl/admin/accounting-inventory.php" @("200", "302")
     Test-ApplicationUrl "$AppUrl/admin/invoice.php" @("200", "302")
     Test-ApplicationUrl "$AppUrl/admin/fixed-assets.php" @("200", "302")

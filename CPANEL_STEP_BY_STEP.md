@@ -96,7 +96,7 @@ Fresh imports create these starter accounts:
 
 | Role | Login URL | Email | Password |
 | --- | --- | --- | --- |
-| Admin | `https://yourdomain.com/admin/login.php` | `admin@mbista.local` | `AdminPassword123!` |
+| Admin | `https://yourdomain.com/login.php` | `admin@mbista.local` | `AdminPassword123!` |
 | Client | `https://yourdomain.com/login.php` | `excelbusinessandtax@gmail.com` | `Temp@9472` |
 | Test customer | `https://yourdomain.com/login.php` | `testcustomer@example.com` | `TestPassword123!` |
 
@@ -114,7 +114,7 @@ Login with the admin account first, then immediately change or remove all defaul
 ## 9) Production smoke test
 
 - Public pages load: `/`, `/login.php`, `/packages.php`
-- Admin login works: `/admin/login.php`
+- Admin signs in at the single login page: `/login.php` (the old `/admin/login.php` must 301 here)
 - Invoices module works: `/admin/invoice.php`
 - Receipts module works: `/admin/receipts.php`
 - Receipt print/PDF works from receipts page

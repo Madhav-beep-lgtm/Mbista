@@ -10,6 +10,13 @@ if ($currentUser) {
     redirect(role_home_path($currentUser));
 }
 
+// Single sign-in point for every role, so a fresh install has to bootstrap its
+// first admin from here. Guard on the table: before the schema is imported the
+// public login page must still render rather than fatal on a missing users table.
+if (table_exists('users') && admin_count() === 0) {
+    redirect('setup.php');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
 
@@ -124,24 +131,7 @@ include __DIR__ . '/../app/views/partials/header.php';
                 </div>
                 <button type="submit" class="auth2-submit"><?= icon('login') ?>Sign in</button>
             </form>
-            <div class="auth2-divider"><span>or access a different portal</span></div>
-            <div class="auth2-portals">
-                <a href="<?= e(url('admin/login.php')) ?>">
-                    <?= icon('users') ?>
-                    <strong>Admin Portal</strong>
-                    <small>System and user management</small>
-                </a>
-                <a href="<?= e(url('login.php')) ?>">
-                    <?= icon('teams') ?>
-                    <strong>Staff Portal</strong>
-                    <small>Tasks, clients, and engagement</small>
-                </a>
-                <a href="<?= e(url('login.php')) ?>">
-                    <?= icon('staff') ?>
-                    <strong>Client Portal</strong>
-                    <small>Documents, invoices, and reports</small>
-                </a>
-            </div>
+            <p class="auth2-note">Admin, staff, and client accounts all sign in here. You are taken to the right workspace automatically.</p>
         </div>
     </div>
 
