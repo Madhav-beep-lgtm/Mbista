@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 
-require_staff_or_admin();
+require_staff_admin_or_client_books();
 require_company_context();
 
 $pageTitle = 'Chart Groups';

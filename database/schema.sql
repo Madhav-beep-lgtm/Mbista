@@ -464,6 +464,25 @@ CREATE TABLE IF NOT EXISTS `client_profiles` (
   CONSTRAINT `fk_client_profiles_team` FOREIGN KEY (`assigned_team_id`) REFERENCES `teams` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Additional customer logins for one client organization. The owner login
+-- stays in client_profiles.user_id; members live here (see migration 045).
+CREATE TABLE IF NOT EXISTS `client_portal_users` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `client_id` INT UNSIGNED NOT NULL,
+  `user_id` INT UNSIGNED NOT NULL,
+  `member_role` ENUM('owner', 'approver', 'entry_maker') NOT NULL DEFAULT 'entry_maker',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_client_portal_user` (`user_id`),
+  KEY `idx_client_portal_users_client` (`client_id`),
+  CONSTRAINT `fk_client_portal_users_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_portal_users_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_portal_users_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `client_service_provider_entities` (
   `client_id` INT UNSIGNED NOT NULL,
   `service_provider_entity_id` INT UNSIGNED NOT NULL,
@@ -1079,6 +1098,7 @@ CREATE TABLE IF NOT EXISTS `accounting_parties` (
   `company_id` INT UNSIGNED NOT NULL,
   `ledger_id` INT UNSIGNED DEFAULT NULL,
   `payable_ledger_id` INT UNSIGNED DEFAULT NULL,
+  `client_profile_id` INT UNSIGNED DEFAULT NULL,
   `code` VARCHAR(60) NOT NULL,
   `name` VARCHAR(190) NOT NULL,
   `party_type` ENUM('customer', 'supplier', 'both', 'other') NOT NULL DEFAULT 'both',
@@ -1098,6 +1118,8 @@ CREATE TABLE IF NOT EXISTS `accounting_parties` (
   KEY `idx_accounting_parties_company_type` (`company_id`, `party_type`),
   KEY `idx_accounting_parties_ledger` (`ledger_id`),
   KEY `idx_accounting_parties_payable_ledger` (`payable_ledger_id`),
+  KEY `idx_accounting_parties_client_profile` (`client_profile_id`),
+  CONSTRAINT `fk_accounting_parties_client_profile` FOREIGN KEY (`client_profile_id`) REFERENCES `client_profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_accounting_parties_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_accounting_parties_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -2034,6 +2056,7 @@ CREATE TABLE IF NOT EXISTS `lease_liabilities` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `company_id` INT UNSIGNED NOT NULL,
   `asset_id` INT UNSIGNED DEFAULT NULL COMMENT 'linked ROU asset',
+  `lessor_party_id` INT UNSIGNED DEFAULT NULL COMMENT 'migration 047: payments credit this party''s payable ledger',
   `contract_ref` VARCHAR(120) NOT NULL,
   `commencement_date` DATE NOT NULL,
   `term_months` INT UNSIGNED NOT NULL DEFAULT 12,
@@ -2053,8 +2076,10 @@ CREATE TABLE IF NOT EXISTS `lease_liabilities` (
   PRIMARY KEY (`id`),
   KEY `idx_lease_company` (`company_id`, `status`),
   KEY `idx_lease_asset` (`asset_id`),
+  KEY `idx_lease_liabilities_lessor` (`lessor_party_id`),
   CONSTRAINT `fk_lease_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_lease_asset` FOREIGN KEY (`asset_id`) REFERENCES `fixed_assets` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_lease_asset` FOREIGN KEY (`asset_id`) REFERENCES `fixed_assets` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_lease_liabilities_lessor` FOREIGN KEY (`lessor_party_id`) REFERENCES `accounting_parties` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `lease_schedule_lines` (

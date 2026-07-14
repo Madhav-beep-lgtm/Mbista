@@ -44,6 +44,7 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
             <a href="<?= e(url('dashboard.php?view=home')) ?>"><?= icon('dashboard') ?>Dashboard</a>
             <a href="<?= e(url('dashboard.php?view=tasks')) ?>"><?= icon('tasks') ?>My Tasks</a>
             <span class="admin-nav-group">My Accounting</span>
+            <a href="<?= e(url('open-books.php')) ?>"><?= icon('accounting') ?>Open Accounting Books</a>
             <a href="<?= e(url('dashboard.php?view=accounting')) ?>"><?= icon('accounting') ?>Accounting &amp; Approvals</a>
             <span class="admin-nav-group">Engagements</span>
             <a href="<?= e(url('dashboard.php?view=contracts')) ?>"><?= icon('contracts') ?>My Contracts</a>
@@ -56,6 +57,8 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
             <a href="<?= e(url('dashboard.php?view=messages')) ?>"><?= icon('messages') ?>Messages</a>
             <a href="<?= e(url('dashboard.php?view=tickets')) ?>"><?= icon('tickets') ?>Support Tickets</a>
             <a href="<?= e(url('contact.php')) ?>"><?= icon('contact') ?>Contact Support</a>
+            <span class="admin-nav-group">Account</span>
+            <a href="<?= e(url('my-profile.php')) ?>"><?= icon('profile') ?>My Profile &amp; Users</a>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
         </nav>
     </aside>

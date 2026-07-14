@@ -35,9 +35,7 @@ if ($role === 'admin') {
         $authorized = in_array((int) $document['client_id'], $scopedClientIds, true);
     }
 } elseif ($role === 'customer') {
-    $profileStmt = db()->prepare('SELECT id FROM client_profiles WHERE user_id = :user_id LIMIT 1');
-    $profileStmt->execute(['user_id' => (int) $user['id']]);
-    $clientProfile = $profileStmt->fetch();
+    $clientProfile = client_profile_for_user((int) $user['id']);
     if ($clientProfile && (int) $clientProfile['id'] === (int) $document['client_id']) {
         $authorized = $document['visibility'] === 'client';
     }

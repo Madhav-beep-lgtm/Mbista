@@ -66,9 +66,7 @@ if ($type === 'message') {
             $authorized = (int) $row['company_id'] === $staffCompanyId
                 && in_array((int) $row['client_id'], staff_scoped_client_ids($userId, $staffCompanyId), true);
         } elseif ($role === 'customer') {
-            $profileStmt = db()->prepare('SELECT id FROM client_profiles WHERE user_id = :user_id LIMIT 1');
-            $profileStmt->execute(['user_id' => $userId]);
-            $clientProfile = $profileStmt->fetch();
+            $clientProfile = client_profile_for_user($userId);
             $authorized = $clientProfile && (int) $clientProfile['id'] === (int) $row['client_id'];
         }
 

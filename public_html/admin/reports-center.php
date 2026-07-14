@@ -5,7 +5,7 @@ require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_once __DIR__ . '/../../app/reports_engine.php';
 require_once __DIR__ . '/../../app/mailer.php';
-require_staff_or_admin();
+require_staff_admin_or_client_books();
 require_company_context();
 $repairErrors = accounting_module_repair_database();
 

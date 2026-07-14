@@ -3,7 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
-require_staff_or_admin();
+require_staff_admin_or_client_books();
 require_company_context();
 $repairErrors = accounting_module_repair_database();
 
@@ -140,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $voucherNo = strtoupper(substr($voucherType, 0, 2)) . '-' . date('Ymd-His');
-    $needsApproval = $hasVoucherApprovals && approvals_enabled() && !user_can('approve');
+    $needsApproval = $hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve');
     $fullNarration = $title . ($narration !== '' ? ' — ' . $narration : '');
 
     try {

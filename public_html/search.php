@@ -132,9 +132,8 @@ if ($query !== '' && mb_strlen($query) >= 2) {
                 }
             }
         } elseif ($scope === 'customer') {
-            $profileStmt = db()->prepare('SELECT id FROM client_profiles WHERE user_id = :uid LIMIT 1');
-            $profileStmt->execute(['uid' => (int) ($currentUser['id'] ?? 0)]);
-            $clientId = (int) ($profileStmt->fetchColumn() ?: 0);
+            $customerProfile = client_profile_for_user((int) ($currentUser['id'] ?? 0));
+            $clientId = (int) ($customerProfile['id'] ?? 0);
             if ($clientId > 0) {
                 if (table_exists('task_invoices')) {
                     $stmt = db()->prepare('SELECT ti.invoice_no, ti.total_amount, ti.status FROM task_invoices ti INNER JOIN client_tasks ct ON ct.id = ti.task_id WHERE ct.client_id = :client_id AND ti.invoice_no LIKE :q ORDER BY ti.id DESC LIMIT 5');

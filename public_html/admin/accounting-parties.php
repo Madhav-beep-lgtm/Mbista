@@ -3,7 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
-require_staff_or_admin();
+require_staff_admin_or_client_books();
 require_company_context();
 
 $repairErrors = accounting_module_repair_database();
@@ -32,6 +32,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ledgerId = (int) ($_POST['ledger_id'] ?? 0);
         $openingBalance = round((float) ($_POST['opening_balance'] ?? 0), 2);
         $openingBalanceType = (string) ($_POST['opening_balance_type'] ?? 'debit');
+        $clientProfileId = (int) ($_POST['client_profile_id'] ?? 0);
+        $hasPartyClientLink = column_exists('accounting_parties', 'client_profile_id');
 
         if ($code === '' || $name === '' || !in_array($partyType, $partyTypes, true) || !in_array($status, $statuses, true)) {
             flash('error', 'Party code, name, type, and status are required.');
@@ -39,6 +41,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (!in_array($openingBalanceType, ['debit', 'credit'], true)) {
             $openingBalanceType = 'debit';
+        }
+        if ($hasPartyClientLink && $clientProfileId > 0) {
+            // The linked client must be one this company serves — the link puts
+            // the party's invoices into that client's portal.
+            $clientLinkCheck = db()->prepare('SELECT id FROM client_profiles WHERE id = :id AND company_id = :company_id LIMIT 1');
+            $clientLinkCheck->execute(['id' => $clientProfileId, 'company_id' => $companyId]);
+            if (!$clientLinkCheck->fetch()) {
+                flash('error', 'Selected client portal link is not a client of this company.');
+                redirect('admin/accounting-parties.php');
+            }
         }
 
         $params = [
@@ -58,6 +70,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
         ];
 
+        if ($hasPartyClientLink) {
+            $params['client_profile_id'] = $clientProfileId > 0 ? $clientProfileId : null;
+        }
+        $clientLinkSet = $hasPartyClientLink ? ', client_profile_id = :client_profile_id' : '';
+        $clientLinkCol = $hasPartyClientLink ? ', client_profile_id' : '';
+        $clientLinkVal = $hasPartyClientLink ? ', :client_profile_id' : '';
+
         try {
             if ($partyId > 0) {
                 $params['id'] = $partyId;
@@ -66,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     SET ledger_id = :ledger_id, code = :code, name = :name, party_type = :party_type,
                         pan_no = :pan_no, email = :email, phone = :phone, billing_address = :billing_address,
                         opening_balance = :opening_balance, opening_balance_type = :opening_balance_type,
-                        credit_limit = :credit_limit, status = :status, notes = :notes
+                        credit_limit = :credit_limit, status = :status, notes = :notes' . $clientLinkSet . '
                     WHERE id = :id AND company_id = :company_id
                 ');
                 $stmt->execute($params);
@@ -77,10 +96,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = db()->prepare('
                     INSERT INTO accounting_parties (
                         company_id, ledger_id, code, name, party_type, pan_no, email, phone, billing_address,
-                        opening_balance, opening_balance_type, credit_limit, status, notes
+                        opening_balance, opening_balance_type, credit_limit, status, notes' . $clientLinkCol . '
                     ) VALUES (
                         :company_id, :ledger_id, :code, :name, :party_type, :pan_no, :email, :phone, :billing_address,
-                        :opening_balance, :opening_balance_type, :credit_limit, :status, :notes
+                        :opening_balance, :opening_balance_type, :credit_limit, :status, :notes' . $clientLinkVal . '
                     )
                 ');
                 $stmt->execute($params);
@@ -814,6 +833,19 @@ $showingTo = min($totalRows, $page * $perPage);
                 <label>Type<select name="party_type"><?php foreach ($partyTypes as $type): ?><option value="<?= e($type) ?>" <?= ($editParty['party_type'] ?? 'both') === $type ? 'selected' : '' ?>><?= e(ucfirst($type)) ?></option><?php endforeach; ?></select></label>
                 <label>Status<select name="status"><?php foreach ($statuses as $statusOption): ?><option value="<?= e($statusOption) ?>" <?= ($editParty['status'] ?? 'active') === $statusOption ? 'selected' : '' ?>><?= e(ucfirst($statusOption)) ?></option><?php endforeach; ?></select></label>
                 <label>Linked ledger<select name="ledger_id"><option value="0">No linked ledger</option><?php foreach ($ledgers as $ledger): ?><option value="<?= e((int) $ledger['id']) ?>" <?= (int) ($editParty['ledger_id'] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option><?php endforeach; ?></select></label>
+                <?php
+                // Optional party -> client portal link: invoices raised for this
+                // party then appear in that client's My Invoices.
+                $partyClientOptions = [];
+                if (column_exists('accounting_parties', 'client_profile_id') && table_exists('client_profiles')) {
+                    $partyClientStmt = db()->prepare('SELECT id, organization_name, client_code FROM client_profiles WHERE company_id = :cid AND is_active = 1 ORDER BY organization_name ASC');
+                    $partyClientStmt->execute(['cid' => $companyId]);
+                    $partyClientOptions = $partyClientStmt->fetchAll();
+                }
+                ?>
+                <?php if ($partyClientOptions !== []): ?>
+                    <label>Client portal link<select name="client_profile_id"><option value="0">Not a portal client</option><?php foreach ($partyClientOptions as $partyClientOption): ?><option value="<?= e((int) $partyClientOption['id']) ?>" <?= (int) ($editParty['client_profile_id'] ?? 0) === (int) $partyClientOption['id'] ? 'selected' : '' ?>><?= e($partyClientOption['organization_name'] . (!empty($partyClientOption['client_code']) ? ' (' . $partyClientOption['client_code'] . ')' : '')) ?></option><?php endforeach; ?></select></label>
+                <?php endif; ?>
                 <label>PAN / Tax No<input type="text" name="pan_no" maxlength="60" value="<?= e($editParty['pan_no'] ?? '') ?>"></label>
                 <label>Email<input type="email" name="email" maxlength="190" value="<?= e($editParty['email'] ?? '') ?>"></label>
                 <label>Phone<input type="text" name="phone" maxlength="80" value="<?= e($editParty['phone'] ?? '') ?>"></label>

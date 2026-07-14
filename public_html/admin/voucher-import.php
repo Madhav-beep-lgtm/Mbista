@@ -4,7 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/voucher_import.php';
 
-require_staff_or_admin();
+require_staff_admin_or_client_books();
 require_company_context();
 $repairErrors = accounting_module_repair_database();
 
@@ -159,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/voucher-import.php?token=' . (string) $_POST['token']);
         }
 
-        $needsApproval = $hasVoucherApprovals && approvals_enabled() && !user_can('approve');
+        $needsApproval = $hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve');
         $batch = strtoupper(bin2hex(random_bytes(2)));
         $now = date('Y-m-d H:i:s');
         $hasLineMeta = column_exists('voucher_entries', 'cost_centre');

@@ -36,14 +36,15 @@ $hasPaymentResponses = column_exists('invoice_payment_requests', 'client_declare
 $paymentRequestsByInvoice = [];
 $pendingPaymentResponseCount = 0;
 
-if (table_exists('client_profiles')) {
-    $stmt = db()->prepare('SELECT cp.*, i.name AS industry_name
-        FROM client_profiles cp
-        LEFT JOIN industries i ON i.id = cp.industry_id
-        WHERE cp.user_id = :user_id
-        LIMIT 1');
-    $stmt->execute(['user_id' => $userId]);
-    $clientProfile = $stmt->fetch() ?: null;
+// Owner login or portal member added by the owner — both land on the same org.
+$clientProfile = client_profile_for_user($userId);
+if ($clientProfile) {
+    $clientProfile['industry_name'] = null;
+    if (!empty($clientProfile['industry_id']) && table_exists('industries')) {
+        $industryStmt = db()->prepare('SELECT name FROM industries WHERE id = :id LIMIT 1');
+        $industryStmt->execute(['id' => (int) $clientProfile['industry_id']]);
+        $clientProfile['industry_name'] = $industryStmt->fetchColumn() ?: null;
+    }
 }
 
 if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -326,12 +327,19 @@ if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $declaredOn = trim((string) ($_POST['declared_on'] ?? ''));
         $declaredNote = trim((string) ($_POST['declared_note'] ?? ''));
 
+        $prPartyRoute = column_exists('accounting_parties', 'client_profile_id')
+            ? ' OR ti.party_id IN (SELECT ap.id FROM accounting_parties ap WHERE ap.client_profile_id = :party_client_id)'
+            : '';
         $prStmt = db()->prepare("SELECT ipr.* FROM invoice_payment_requests ipr
             INNER JOIN task_invoices ti ON ti.id = ipr.invoice_id
-            INNER JOIN client_tasks ct ON ct.id = ti.task_id
-            WHERE ipr.id = :id AND ct.client_id = :client_id AND ipr.status IN ('pending', 'partial')
+            LEFT JOIN client_tasks ct ON ct.id = ti.task_id
+            WHERE ipr.id = :id AND (ct.client_id = :client_id{$prPartyRoute}) AND ipr.status IN ('pending', 'partial')
             LIMIT 1");
-        $prStmt->execute(['id' => $paymentRequestId, 'client_id' => $clientId]);
+        $prParams = ['id' => $paymentRequestId, 'client_id' => $clientId];
+        if ($prPartyRoute !== '') {
+            $prParams['party_client_id'] = $clientId;
+        }
+        $prStmt->execute($prParams);
         $paymentRequest = $prStmt->fetch();
 
         if (!$paymentRequest) {
@@ -375,10 +383,17 @@ if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $requestedPercent = trim((string) ($_POST['requested_percent'] ?? ''));
         $reason = trim((string) ($_POST['reason'] ?? ''));
 
-        $invStmt = db()->prepare('SELECT ti.* FROM task_invoices ti
-            INNER JOIN client_tasks ct ON ct.id = ti.task_id
-            WHERE ti.id = :id AND ct.client_id = :client_id LIMIT 1');
-        $invStmt->execute(['id' => $targetInvoiceId, 'client_id' => $clientId]);
+        $invPartyRoute = column_exists('accounting_parties', 'client_profile_id')
+            ? ' OR ti.party_id IN (SELECT ap.id FROM accounting_parties ap WHERE ap.client_profile_id = :party_client_id)'
+            : '';
+        $invStmt = db()->prepare("SELECT ti.* FROM task_invoices ti
+            LEFT JOIN client_tasks ct ON ct.id = ti.task_id
+            WHERE ti.id = :id AND (ct.client_id = :client_id{$invPartyRoute}) LIMIT 1");
+        $invParams = ['id' => $targetInvoiceId, 'client_id' => $clientId];
+        if ($invPartyRoute !== '') {
+            $invParams['party_client_id'] = $clientId;
+        }
+        $invStmt->execute($invParams);
         $targetInvoice = $invStmt->fetch();
 
         $adjustmentTypeLabels = [
@@ -521,39 +536,53 @@ if ($clientProfile) {
         $stmt->execute(['client_id' => $clientId]);
         $tasks = $stmt->fetchAll();
 
-        if ($tasks !== []) {
+        if ($tasks !== [] && table_exists('task_stages')) {
             $taskIds = array_map('intval', array_column($tasks, 'id'));
             $placeholders = implode(',', array_fill(0, count($taskIds), '?'));
-
-            if (table_exists('task_stages')) {
-                $stmt = db()->prepare("SELECT * FROM task_stages WHERE task_id IN ($placeholders) ORDER BY task_id ASC, sequence_no ASC");
-                $stmt->execute($taskIds);
-                foreach ($stmt->fetchAll() as $stage) {
-                    $stagesByTask[(int) $stage['task_id']][] = $stage;
-                }
+            $stmt = db()->prepare("SELECT * FROM task_stages WHERE task_id IN ($placeholders) ORDER BY task_id ASC, sequence_no ASC");
+            $stmt->execute($taskIds);
+            foreach ($stmt->fetchAll() as $stage) {
+                $stagesByTask[(int) $stage['task_id']][] = $stage;
             }
+        }
+    }
 
-            if (table_exists('task_invoices')) {
-                $stmt = db()->prepare("SELECT ti.*, t.title AS task_title, ts.stage_name
-                    FROM task_invoices ti
-                    INNER JOIN client_tasks t ON t.id = ti.task_id
-                    LEFT JOIN task_stages ts ON ts.id = ti.stage_id
-                    WHERE ti.task_id IN ($placeholders)
-                    ORDER BY ti.created_at DESC");
-                $stmt->execute($taskIds);
-                $invoices = $stmt->fetchAll();
+    // Invoices reach the client two ways: through their tasks, and through an
+    // accounting party linked to their profile (inventory/manufacturing/other
+    // invoices carry no task). Fetch both — this must NOT depend on any task
+    // existing, or a client with only party invoices sees an empty list.
+    if (table_exists('task_invoices')) {
+        $invoiceConditions = [];
+        $invoiceParams = [];
+        if (table_exists('client_tasks')) {
+            $invoiceConditions[] = 't.client_id = ?';
+            $invoiceParams[] = $clientId;
+        }
+        if (column_exists('accounting_parties', 'client_profile_id')) {
+            $invoiceConditions[] = 'ti.party_id IN (SELECT ap.id FROM accounting_parties ap WHERE ap.client_profile_id = ?)';
+            $invoiceParams[] = $clientId;
+        }
 
-                if ($invoices !== [] && $hasPaymentResponses) {
-                    $invoiceIds = array_map('intval', array_column($invoices, 'id'));
-                    $invPlaceholders = implode(',', array_fill(0, count($invoiceIds), '?'));
-                    $stmt = db()->prepare("SELECT * FROM invoice_payment_requests WHERE invoice_id IN ($invPlaceholders) ORDER BY requested_on DESC");
-                    $stmt->execute($invoiceIds);
-                    foreach ($stmt->fetchAll() as $paymentRequestRow) {
-                        $paymentRequestsByInvoice[(int) $paymentRequestRow['invoice_id']][] = $paymentRequestRow;
-                        if (in_array((string) $paymentRequestRow['status'], ['pending', 'partial'], true)
-                            && (string) ($paymentRequestRow['client_declared_status'] ?? 'none') === 'none') {
-                            $pendingPaymentResponseCount++;
-                        }
+        if ($invoiceConditions !== []) {
+            $stmt = db()->prepare("SELECT ti.*, t.title AS task_title, ts.stage_name
+                FROM task_invoices ti
+                LEFT JOIN client_tasks t ON t.id = ti.task_id
+                LEFT JOIN task_stages ts ON ts.id = ti.stage_id
+                WHERE " . implode(' OR ', $invoiceConditions) . "
+                ORDER BY ti.created_at DESC");
+            $stmt->execute($invoiceParams);
+            $invoices = $stmt->fetchAll();
+
+            if ($invoices !== [] && $hasPaymentResponses) {
+                $invoiceIds = array_map('intval', array_column($invoices, 'id'));
+                $invPlaceholders = implode(',', array_fill(0, count($invoiceIds), '?'));
+                $stmt = db()->prepare("SELECT * FROM invoice_payment_requests WHERE invoice_id IN ($invPlaceholders) ORDER BY requested_on DESC");
+                $stmt->execute($invoiceIds);
+                foreach ($stmt->fetchAll() as $paymentRequestRow) {
+                    $paymentRequestsByInvoice[(int) $paymentRequestRow['invoice_id']][] = $paymentRequestRow;
+                    if (in_array((string) $paymentRequestRow['status'], ['pending', 'partial'], true)
+                        && (string) ($paymentRequestRow['client_declared_status'] ?? 'none') === 'none') {
+                        $pendingPaymentResponseCount++;
                     }
                 }
             }
@@ -1117,7 +1146,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                         <?php $invoicePaymentRequests = $paymentRequestsByInvoice[(int) $invoice['id']] ?? []; ?>
                         <tr>
                             <td><?= e($invoice['invoice_no']) ?><br><small><?= e($invoice['invoice_type']) ?> invoice · <?= e($invoice['invoice_category'] ?? 'proforma') ?></small></td>
-                            <td><?= e($invoice['task_title']) ?><br><small><?= e($invoice['stage_name'] ?? 'Full task invoice') ?></small></td>
+                            <td><?= e($invoice['task_title'] ?? ($invoice['description'] ?? 'General invoice')) ?><br><small><?= e($invoice['task_title'] !== null ? ($invoice['stage_name'] ?? 'Full task invoice') : ucfirst((string) ($invoice['invoice_source_type'] ?? 'general')) . ' invoice') ?></small></td>
                             <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $invoice['amount'], 2)) ?></td>
                             <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) ($invoice['total_amount'] ?? 0) > 0 ? (float) $invoice['total_amount'] : (float) $invoice['amount'], 2)) ?></td>
                             <td><?= $mbwPill($invoice['status']) ?></td>

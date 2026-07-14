@@ -3,7 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
-require_staff_or_admin();
+require_staff_admin_or_client_books();
 require_company_context();
 accounting_module_repair_database();
 
@@ -23,6 +23,16 @@ $mappingRoles = [
     'default_excise_payable' => ['label' => 'Excise payable', 'nature' => 'liability'],
     'default_service_revenue' => ['label' => 'Service revenue', 'nature' => 'revenue'],
     'default_hosting_revenue' => ['label' => 'Hosting revenue', 'nature' => 'revenue'],
+    // Mirror roles: where invoices FROM the service provider land in THESE
+    // books (used by the automatic client-books mirror postings). Each
+    // invoice source type can point at its own expense head.
+    'mirror_expense_task' => ['label' => 'Provider invoice expense — services', 'nature' => 'expense'],
+    'mirror_expense_inventory' => ['label' => 'Provider invoice expense — goods / stock', 'nature' => 'expense'],
+    'mirror_expense_manufacturing' => ['label' => 'Provider invoice expense — manufacturing', 'nature' => 'expense'],
+    'mirror_expense_other' => ['label' => 'Provider invoice expense — other', 'nature' => 'expense'],
+    'mirror_provider_payable' => ['label' => 'Service provider payable', 'nature' => 'liability'],
+    'mirror_discount_received' => ['label' => 'Discount received from provider', 'nature' => 'revenue'],
+    'mirror_tax_receivable' => ['label' => 'Input VAT / tax receivable (optional)', 'nature' => 'asset'],
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

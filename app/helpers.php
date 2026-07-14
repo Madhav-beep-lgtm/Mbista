@@ -2498,6 +2498,8 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
     ], $entries);
 
     log_activity('task_invoice', $invoiceId, 'voucher_posted', 'Auto-posted sales voucher #' . $voucherId . '.', $actorId);
+
+    auto_post_client_mirror_invoice($invoiceId, $actorId);
 }
 
 function auto_post_invoice_payment_voucher(int $paymentRequestId, ?int $actorId = null): void
@@ -2616,6 +2618,397 @@ function auto_post_invoice_payment_voucher(int $paymentRequestId, ?int $actorId 
     ]);
 
     log_activity('invoice_payment_request', $paymentRequestId, 'voucher_posted', 'Auto-posted receipt voucher #' . $voucherId . '.', $actorId);
+
+    auto_post_client_mirror_payment($paymentRequestId, $actorId);
+}
+
+// ---------------------------------------------------------------------------
+// Client-books mirror postings.
+//
+// Every firm-side invoice event has an equal-and-opposite meaning in the
+// client's own books: the firm's income is the client's expense, the firm's
+// receipt is the client's payment, the firm's discount given is the client's
+// discount received. These helpers post that mirror voucher into the client's
+// books company as DRAFT / PENDING APPROVAL flagged for the client, so the
+// books never move without the client's owner/approver confirming. All are
+// best-effort: a failure here must never break the firm-side posting.
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves where a mirror voucher for this invoice should go: the client
+ * profile (via the invoice's task, or its party's client_profile_id link),
+ * that client's books company, and the books' active fiscal year.
+ */
+function client_mirror_target(array $invoice): ?array
+{
+    if (!table_exists('client_profiles') || !column_exists('client_profiles', 'books_company_id')) {
+        return null;
+    }
+
+    $clientId = 0;
+    $taskId = (int) ($invoice['task_id'] ?? 0);
+    if ($taskId > 0 && table_exists('client_tasks')) {
+        $stmt = db()->prepare('SELECT client_id FROM client_tasks WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $taskId]);
+        $clientId = (int) ($stmt->fetchColumn() ?: 0);
+    }
+    $partyId = (int) ($invoice['party_id'] ?? 0);
+    if ($clientId <= 0 && $partyId > 0 && column_exists('accounting_parties', 'client_profile_id')) {
+        $stmt = db()->prepare('SELECT client_profile_id FROM accounting_parties WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $partyId]);
+        $clientId = (int) ($stmt->fetchColumn() ?: 0);
+    }
+    if ($clientId <= 0) {
+        return null;
+    }
+
+    $stmt = db()->prepare('SELECT * FROM client_profiles WHERE id = :id AND is_active = 1 LIMIT 1');
+    $stmt->execute(['id' => $clientId]);
+    $profile = $stmt->fetch();
+    $booksCompanyId = (int) ($profile['books_company_id'] ?? 0);
+    if (!$profile || $booksCompanyId <= 0) {
+        return null;
+    }
+
+    $booksCompany = company_by_id($booksCompanyId);
+    if (!$booksCompany || (int) ($booksCompany['is_active'] ?? 0) !== 1) {
+        return null;
+    }
+
+    $fyStmt = db()->prepare('SELECT id FROM fiscal_years WHERE company_id = :cid AND is_active = 1 ORDER BY is_default DESC, start_date DESC LIMIT 1');
+    $fyStmt->execute(['cid' => $booksCompanyId]);
+    $fiscalYearId = (int) ($fyStmt->fetchColumn() ?: 0);
+    if ($fiscalYearId <= 0) {
+        return null;
+    }
+
+    $provider = company_by_id((int) ($invoice['company_id'] ?? 0));
+
+    return [
+        'client_id' => $clientId,
+        'books_company_id' => $booksCompanyId,
+        'fiscal_year_id' => $fiscalYearId,
+        'provider_name' => (string) ($provider['name'] ?? 'Service provider'),
+    ];
+}
+
+/**
+ * Resolves (or creates) the ledger a mirror entry posts to in the client's
+ * books. The mapping keys are editable on Chart of Accounts → Posting
+ * Accounts — by the firm while inside the client's books, and by the client
+ * in their own accounting workspace. When nothing is mapped a sensible
+ * ledger is created once so the mirror works out of the box.
+ *
+ * $kind: expense_task | expense_inventory | expense_manufacturing |
+ *        expense_other | payable | discount_received | cash | tax_receivable
+ */
+function client_mirror_ledger(int $booksCompanyId, string $kind, ?string $providerName = null): ?array
+{
+    if ($booksCompanyId <= 0 || !table_exists('ledgers')) {
+        return null;
+    }
+
+    if ($kind === 'cash') {
+        return get_mapped_ledger($booksCompanyId, 'default_cash_bank');
+    }
+    if ($kind === 'tax_receivable') {
+        // Optional: when unmapped the VAT stays inside the expense figure.
+        return get_mapped_ledger($booksCompanyId, 'mirror_tax_receivable');
+    }
+
+    if (str_starts_with($kind, 'expense_')) {
+        $mapped = get_mapped_ledger($booksCompanyId, 'mirror_' . $kind)
+            ?: get_mapped_ledger($booksCompanyId, 'mirror_expense_other');
+        if ($mapped) {
+            return $mapped;
+        }
+    } elseif ($kind === 'payable') {
+        $mapped = get_mapped_ledger($booksCompanyId, 'mirror_provider_payable');
+        if ($mapped) {
+            return $mapped;
+        }
+    } elseif ($kind === 'discount_received') {
+        $mapped = get_mapped_ledger($booksCompanyId, 'mirror_discount_received');
+        if ($mapped) {
+            return $mapped;
+        }
+    } else {
+        return null;
+    }
+
+    // Nothing mapped — find or create the default ledger for this role.
+    try {
+        $findGroup = static function (string $masterKey, string $code, string $name) use ($booksCompanyId): int {
+            $stmt = db()->prepare('SELECT id FROM ledger_groups
+                WHERE company_id = :cid AND is_active = 1 AND is_cash_or_bank = 0
+                  AND (code = :code OR (name = :name AND master_key = :master_key))
+                ORDER BY (code = :code2) DESC, id ASC LIMIT 1');
+            $stmt->execute(['cid' => $booksCompanyId, 'code' => $code, 'name' => $name, 'master_key' => $masterKey, 'code2' => $code]);
+            $groupId = (int) ($stmt->fetchColumn() ?: 0);
+            if ($groupId > 0) {
+                return $groupId;
+            }
+            db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, :name, :master_key, 0, 0)')
+                ->execute(['cid' => $booksCompanyId, 'code' => $code, 'name' => $name, 'master_key' => $masterKey]);
+
+            return (int) db()->lastInsertId();
+        };
+
+        $ensureLedger = static function (int $groupId, string $name, string $type) use ($booksCompanyId): ?array {
+            $stmt = db()->prepare("SELECT * FROM ledgers WHERE company_id = :cid AND name = :name AND type = :type AND status = 'active' LIMIT 1");
+            $stmt->execute(['cid' => $booksCompanyId, 'name' => $name, 'type' => $type]);
+            $ledger = $stmt->fetch();
+            if ($ledger) {
+                return $ledger;
+            }
+            if ($groupId <= 0) {
+                return null;
+            }
+            db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status) VALUES (:cid, :gid, :code, :name, :type, 'active')")
+                ->execute(['cid' => $booksCompanyId, 'gid' => $groupId, 'code' => coa_next_ledger_code($booksCompanyId, $groupId), 'name' => $name, 'type' => $type]);
+            $stmt->execute(['cid' => $booksCompanyId, 'name' => $name, 'type' => $type]);
+
+            return $stmt->fetch() ?: null;
+        };
+
+        if (str_starts_with($kind, 'expense_')) {
+            $groupId = $findGroup('indirect_expense', 'ADMIN-EXP', 'Administrative Expenses');
+
+            return $ensureLedger($groupId, 'Professional & Consultancy Fees', 'expense');
+        }
+        if ($kind === 'payable') {
+            $groupId = receivable_payable_group_id($booksCompanyId, 'payable');
+
+            return $ensureLedger($groupId, ($providerName ?: 'Service Provider') . ' (Payable)', 'liability');
+        }
+        if ($kind === 'discount_received') {
+            $groupId = $findGroup('indirect_income', 'IND-INC', 'Indirect Incomes');
+
+            return $ensureLedger($groupId, 'Discount Received', 'revenue');
+        }
+    } catch (Throwable $exception) {
+        return null;
+    }
+
+    return null;
+}
+
+/** True when a mirror voucher with this source signature already exists. */
+function client_mirror_voucher_exists(string $sourceType, int $sourceId): bool
+{
+    $stmt = db()->prepare('SELECT id FROM vouchers WHERE source_type = :source_type AND source_id = :source_id LIMIT 1');
+    $stmt->execute(['source_type' => $sourceType, 'source_id' => $sourceId]);
+
+    return (bool) $stmt->fetch();
+}
+
+/** Inserts the mirror voucher as draft/pending, flagged for client approval. */
+function client_mirror_create_voucher(array $target, string $sourceType, int $sourceId, string $voucherType, string $voucherNo, string $voucherDate, string $narration, float $totalAmount, array $entries, ?int $actorId): void
+{
+    $voucherId = create_voucher_with_entries([
+        'company_id' => (int) $target['books_company_id'],
+        'fiscal_year_id' => (int) $target['fiscal_year_id'],
+        'voucher_no' => $voucherNo,
+        'voucher_type' => $voucherType,
+        'source_type' => $sourceType,
+        'source_id' => $sourceId,
+        'voucher_date' => $voucherDate,
+        'narration' => $narration,
+        'total_amount' => $totalAmount,
+        'status' => 'draft',
+        'approval_state' => 'pending_approval',
+        'submitted_by' => $actorId,
+    ], $entries);
+
+    if ($voucherId > 0 && column_exists('vouchers', 'requires_client_approval')) {
+        db()->prepare('UPDATE vouchers SET requires_client_approval = 1 WHERE id = :id')->execute(['id' => $voucherId]);
+    }
+    if ($voucherId > 0) {
+        security_event('client_mirror_posted', 'success', ucfirst($voucherType) . ' mirror voucher #' . $voucherId . ' submitted to client books for approval (' . $sourceType . ' #' . $sourceId . ').', (int) $target['books_company_id'], $actorId);
+    }
+}
+
+/**
+ * Firm invoice issued → client books expense entry (pending client approval):
+ *   Dr expense head (per invoice source type)   taxable (+ excise, + VAT when
+ *                                               no tax-receivable mapping)
+ *   Dr input VAT receivable (if mapped)         VAT
+ *   Cr service provider payable                 total
+ */
+function auto_post_client_mirror_invoice(int $invoiceId, ?int $actorId = null): void
+{
+    try {
+        if (!table_exists('vouchers') || !table_exists('voucher_entries') || !table_exists('task_invoices')) {
+            return;
+        }
+        if (client_mirror_voucher_exists('client_mirror_invoice', $invoiceId)) {
+            return;
+        }
+        $stmt = db()->prepare('SELECT * FROM task_invoices WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $invoiceId]);
+        $invoice = $stmt->fetch();
+        if (!$invoice) {
+            return;
+        }
+        $target = client_mirror_target($invoice);
+        if (!$target) {
+            return;
+        }
+
+        $taxableAmount = round((float) ($invoice['taxable_amount'] ?? $invoice['amount'] ?? 0), 2);
+        $exciseAmount = round((float) ($invoice['excise_amount'] ?? 0), 2);
+        $vatAmount = round((float) ($invoice['vat_amount'] ?? 0), 2);
+        $totalAmount = round((float) ($invoice['total_amount'] ?? ($taxableAmount + $exciseAmount + $vatAmount)), 2);
+        if ($totalAmount <= 0 || $taxableAmount <= 0) {
+            return;
+        }
+
+        $sourceType = in_array((string) ($invoice['invoice_source_type'] ?? ''), ['task', 'inventory', 'manufacturing'], true)
+            ? (string) $invoice['invoice_source_type']
+            : 'other';
+        $expenseLedger = client_mirror_ledger((int) $target['books_company_id'], 'expense_' . $sourceType, $target['provider_name']);
+        $payableLedger = client_mirror_ledger((int) $target['books_company_id'], 'payable', $target['provider_name']);
+        if (!$expenseLedger || !$payableLedger) {
+            return;
+        }
+        $taxLedger = $vatAmount > 0 ? client_mirror_ledger((int) $target['books_company_id'], 'tax_receivable') : null;
+
+        $expenseAmount = $taxLedger ? round($taxableAmount + $exciseAmount, 2) : $totalAmount;
+        $entries = [
+            ['ledger_id' => (int) $expenseLedger['id'], 'entry_type' => 'debit', 'amount' => $expenseAmount, 'memo' => 'Invoice ' . ($invoice['invoice_no'] ?? '#' . $invoiceId) . ' from ' . $target['provider_name']],
+        ];
+        if ($taxLedger) {
+            $entries[] = ['ledger_id' => (int) $taxLedger['id'], 'entry_type' => 'debit', 'amount' => $vatAmount, 'memo' => 'Input VAT on provider invoice'];
+        }
+        $entries[] = ['ledger_id' => (int) $payableLedger['id'], 'entry_type' => 'credit', 'amount' => $totalAmount, 'memo' => 'Payable to ' . $target['provider_name']];
+
+        client_mirror_create_voucher(
+            $target,
+            'client_mirror_invoice',
+            $invoiceId,
+            'purchase',
+            'PM-' . date('Ymd') . '-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT),
+            (string) ($invoice['issued_on'] ?? date('Y-m-d')),
+            'Provider invoice ' . ($invoice['invoice_no'] ?? '#' . $invoiceId) . ' — awaiting your approval',
+            $totalAmount,
+            $entries,
+            $actorId
+        );
+    } catch (Throwable $exception) {
+        // Mirror is best-effort; the firm-side posting must never fail on it.
+    }
+}
+
+/**
+ * Firm receipt recorded → client books payment entry (pending approval):
+ *   Dr service provider payable / Cr bank-cash.
+ */
+function auto_post_client_mirror_payment(int $paymentRequestId, ?int $actorId = null): void
+{
+    try {
+        if (!table_exists('vouchers') || !table_exists('invoice_payment_requests')) {
+            return;
+        }
+        if (client_mirror_voucher_exists('client_mirror_payment', $paymentRequestId)) {
+            return;
+        }
+        $stmt = db()->prepare('SELECT pr.*, ti.invoice_no, ti.company_id AS invoice_company_id, ti.party_id, ti.task_id
+            FROM invoice_payment_requests pr INNER JOIN task_invoices ti ON ti.id = pr.invoice_id
+            WHERE pr.id = :id LIMIT 1');
+        $stmt->execute(['id' => $paymentRequestId]);
+        $payment = $stmt->fetch();
+        if (!$payment || !in_array((string) ($payment['status'] ?? ''), ['paid', 'partial'], true)) {
+            return;
+        }
+        $amount = round((float) ($payment['payment_amount'] ?? 0), 2);
+        if ($amount <= 0) {
+            return;
+        }
+        $target = client_mirror_target([
+            'task_id' => $payment['task_id'],
+            'party_id' => $payment['party_id'],
+            'company_id' => $payment['invoice_company_id'],
+        ]);
+        if (!$target) {
+            return;
+        }
+
+        $payableLedger = client_mirror_ledger((int) $target['books_company_id'], 'payable', $target['provider_name']);
+        $cashLedger = client_mirror_ledger((int) $target['books_company_id'], 'cash');
+        if (!$payableLedger || !$cashLedger) {
+            return;
+        }
+
+        client_mirror_create_voucher(
+            $target,
+            'client_mirror_payment',
+            $paymentRequestId,
+            'payment',
+            'PP-' . date('Ymd') . '-' . str_pad((string) $paymentRequestId, 6, '0', STR_PAD_LEFT),
+            (string) ($payment['payment_received_on'] ?? date('Y-m-d')),
+            'Payment for provider invoice ' . ($payment['invoice_no'] ?? '#' . (int) $payment['invoice_id']) . ' — awaiting your approval',
+            $amount,
+            [
+                ['ledger_id' => (int) $payableLedger['id'], 'entry_type' => 'debit', 'amount' => $amount, 'memo' => 'Payable settled — ' . $target['provider_name']],
+                ['ledger_id' => (int) $cashLedger['id'], 'entry_type' => 'credit', 'amount' => $amount, 'memo' => 'Payment to ' . $target['provider_name']],
+            ],
+            $actorId
+        );
+    } catch (Throwable $exception) {
+        // best-effort
+    }
+}
+
+/**
+ * Firm discount approved → client books discount-received entry (pending
+ * approval): Dr provider payable / Cr Discount Received, for the drop in the
+ * invoice's total.
+ */
+function auto_post_client_mirror_discount(int $billingRequestId, int $invoiceId, float $totalDelta, ?int $actorId = null): void
+{
+    try {
+        $totalDelta = round($totalDelta, 2);
+        if ($totalDelta <= 0 || !table_exists('vouchers') || !table_exists('task_invoices')) {
+            return;
+        }
+        if (client_mirror_voucher_exists('client_mirror_discount', $billingRequestId)) {
+            return;
+        }
+        $stmt = db()->prepare('SELECT * FROM task_invoices WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $invoiceId]);
+        $invoice = $stmt->fetch();
+        if (!$invoice) {
+            return;
+        }
+        $target = client_mirror_target($invoice);
+        if (!$target) {
+            return;
+        }
+
+        $payableLedger = client_mirror_ledger((int) $target['books_company_id'], 'payable', $target['provider_name']);
+        $discountLedger = client_mirror_ledger((int) $target['books_company_id'], 'discount_received');
+        if (!$payableLedger || !$discountLedger) {
+            return;
+        }
+
+        client_mirror_create_voucher(
+            $target,
+            'client_mirror_discount',
+            $billingRequestId,
+            'journal',
+            'PD-' . date('Ymd') . '-' . str_pad((string) $billingRequestId, 6, '0', STR_PAD_LEFT),
+            date('Y-m-d'),
+            'Discount received on provider invoice ' . ($invoice['invoice_no'] ?? '#' . $invoiceId) . ' — awaiting your approval',
+            $totalDelta,
+            [
+                ['ledger_id' => (int) $payableLedger['id'], 'entry_type' => 'debit', 'amount' => $totalDelta, 'memo' => 'Payable reduced by discount'],
+                ['ledger_id' => (int) $discountLedger['id'], 'entry_type' => 'credit', 'amount' => $totalDelta, 'memo' => 'Discount received from ' . $target['provider_name']],
+            ],
+            $actorId
+        );
+    } catch (Throwable $exception) {
+        // best-effort
+    }
 }
 
 function save_contact(array $data): int
@@ -2890,6 +3283,13 @@ function current_access_level(): string
 
 function user_can(string $capability, ?string $level = null): bool
 {
+    // Client portal logins are governed by the role their organization's owner
+    // assigned (owner/approver/entry_maker), not by the staff access-level
+    // matrix — see client_portal_capability().
+    if ($level === null && (string) (current_user()['role'] ?? '') === 'customer') {
+        return client_portal_capability($capability);
+    }
+
     $level = $level ?? current_access_level();
     $matrix = access_level_capabilities();
     return (bool) ($matrix[$level][$capability] ?? false);
@@ -4376,6 +4776,13 @@ function client_books_access_level(array $clientProfile): string
         $assigned = (int) ($clientProfile['assigned_staff_user_id'] ?? 0) === (int) ($user['id'] ?? 0);
         return ($assigned && $servesFromPortal) ? 'approval' : ($assigned && $portalCode === 'MBAACA' ? 'approval' : '');
     }
+    if ($role === 'customer') {
+        // A client login works directly in its own books — owner or a portal
+        // member added by the owner (voucher rights are enforced separately by
+        // the portal member role in user_can()/user_can_do()).
+        $ownProfile = client_profile_for_user((int) ($user['id'] ?? 0));
+        return $ownProfile && (int) $ownProfile['id'] === (int) ($clientProfile['id'] ?? 0) ? 'direct' : '';
+    }
     return '';
 }
 
@@ -5541,9 +5948,7 @@ function attention_summary(): array
                 }
             }
         } elseif ($role === 'customer') {
-            $profileStmt = db()->prepare('SELECT id, books_company_id FROM client_profiles WHERE user_id = :uid LIMIT 1');
-            $profileStmt->execute(['uid' => (int) $user['id']]);
-            $profile = $profileStmt->fetch();
+            $profile = client_profile_for_user((int) $user['id']);
             if ($profile) {
                 $clientId = (int) $profile['id'];
                 $booksCompanyId = (int) ($profile['books_company_id'] ?? 0);
@@ -5558,11 +5963,19 @@ function attention_summary(): array
                     $items[] = ['label' => 'Counter-offers to review', 'count' => (int) $stmt->fetchColumn(), 'url' => url('dashboard.php?view=tickets')];
                 }
                 $declaredGuard = column_exists('invoice_payment_requests', 'client_declared_status') ? " AND ipr.client_declared_status = 'none'" : '';
+                // Task-linked invoices AND party-linked invoices (migration 046).
+                $partyRoute = column_exists('accounting_parties', 'client_profile_id')
+                    ? ' OR ti.party_id IN (SELECT ap.id FROM accounting_parties ap WHERE ap.client_profile_id = :party_client_id)'
+                    : '';
                 $stmt = db()->prepare("SELECT COUNT(*) FROM invoice_payment_requests ipr
                     INNER JOIN task_invoices ti ON ti.id = ipr.invoice_id
-                    INNER JOIN client_tasks ct ON ct.id = ti.task_id
-                    WHERE ct.client_id = :client_id AND ipr.status = 'pending'" . $declaredGuard);
-                $stmt->execute(['client_id' => $clientId]);
+                    LEFT JOIN client_tasks ct ON ct.id = ti.task_id
+                    WHERE (ct.client_id = :client_id{$partyRoute}) AND ipr.status = 'pending'" . $declaredGuard);
+                $bellParams = ['client_id' => $clientId];
+                if ($partyRoute !== '') {
+                    $bellParams['party_client_id'] = $clientId;
+                }
+                $stmt->execute($bellParams);
                 $items[] = ['label' => 'Payments requested from you', 'count' => (int) $stmt->fetchColumn(), 'url' => url('dashboard.php?view=invoices')];
             }
         }
@@ -5725,6 +6138,7 @@ function apply_ticket_request_decision(array $request, int $companyId, ?float $a
         $vatRate = (float) ($invoice['vat_rate'] ?? 13.00);
         $newVat = round($newTaxable * ($vatRate / 100), 2);
         $newTotal = round($newTaxable + $newVat, 2);
+        $oldTotal = round((float) ($invoice['total_amount'] ?? ($taxable + (float) ($invoice['vat_amount'] ?? 0))), 2);
         db()->prepare('UPDATE task_invoices SET taxable_amount = :taxable_amount, vat_amount = :vat_amount, total_amount = :total_amount, discount_type = :discount_type, discount_value = :discount_value, discount_amount = :discount_amount, adjusted_on = NOW(), adjusted_by = :adjusted_by WHERE id = :id AND company_id = :company_id')
             ->execute([
                 'taxable_amount' => $newTaxable,
@@ -5738,6 +6152,9 @@ function apply_ticket_request_decision(array $request, int $companyId, ?float $a
                 'company_id' => $companyId,
             ]);
         $appliedInvoiceId = $targetInvoiceId;
+
+        // Mirror the benefit into the client's books as discount received.
+        auto_post_client_mirror_discount((int) ($request['id'] ?? 0), $targetInvoiceId, $oldTotal - $newTotal, $actorId);
     }
 
     if ($requestType === 'credit_period_request') {

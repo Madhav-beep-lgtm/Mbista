@@ -3,7 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
-require_staff_or_admin();
+require_staff_admin_or_client_books();
 require_company_context();
 accounting_module_repair_database();
 
@@ -185,7 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         try {
-            $needsApproval = $hasVoucherApprovals && approvals_enabled() && !user_can('approve');
+            $needsApproval = $hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve');
             $voucherId = create_voucher_with_entries([
                 'company_id' => $companyId,
                 'fiscal_year_id' => $fiscalYearId,
@@ -292,6 +292,7 @@ if ($company && table_exists('company_shareholdings')) {
 $voucherTotal = array_sum(array_map(static fn (array $voucher): float => (float) $voucher['total_amount'], $vouchers));
 $ledgerDebitTotal = array_sum(array_map(static fn (array $row): float => (float) $row['debit_total'], $balances));
 $ledgerCreditTotal = array_sum(array_map(static fn (array $row): float => (float) $row['credit_total'], $balances));
+$fiscalYears = table_exists('fiscal_years') ? fiscal_years_for_company((int) $company['id']) : [];
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
@@ -331,14 +332,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php if ($lockedThrough !== null): ?>
     <div class="alert alert-info">Accounting entries dated on or before <?= e($lockedThrough) ?> are locked for this fiscal year.</div>
-<?php endif; ?>
-
-<!-- Fiscal Year Selector - Only in Accounting Module -->
-<?php 
-$fiscalYears = table_exists('fiscal_years') ? fiscal_years_for_company((int) $company['id']) : [];
-if ($fiscalYears):
-?>
-
 <?php endif; ?>
 
 <section class="mbw-card">

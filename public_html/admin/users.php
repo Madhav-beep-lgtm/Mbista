@@ -97,6 +97,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
             redirect('admin/users.php');
         }
 
+        // Confirmation catches a mistyped password before it locks the user out.
+        if ($password !== '' && $password !== (string) ($_POST['password_confirm'] ?? '')) {
+            flash('error', 'Password and confirmation do not match.');
+            redirect('admin/users.php' . ($action === 'update' && $userId > 0 ? '?edit=' . $userId : ''));
+        }
+
         if (!in_array($role, ['customer', 'staff', 'admin'], true)) {
             $role = 'customer';
         }
@@ -1353,7 +1359,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <label>Name<input type="text" name="name" value="<?= e($editUser['name']) ?>" required></label>
                         <label>Email<input type="email" name="email" value="<?= e($editUser['email']) ?>" required></label>
                         <label>Password (optional)
-                            <input type="password" name="password" minlength="8" placeholder="Leave blank to keep current password">
+                            <input type="password" name="password" minlength="8" placeholder="Leave blank to keep current password" data-confirm-source>
+                        </label>
+                        <label>Confirm password
+                            <input type="password" name="password_confirm" minlength="8" placeholder="Repeat the new password" data-confirm-target>
                         </label>
                         <label>Role
                             <select name="role" required>
@@ -1406,7 +1415,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <div class="users-edit-grid">
                     <label>Name<input type="text" name="name" required></label>
                     <label>Email<input type="email" name="email" required></label>
-                    <label>Password<input type="password" name="password" minlength="8" required data-strength></label>
+                    <label>Password<input type="password" name="password" minlength="8" required data-strength data-confirm-source></label>
+                    <label>Confirm password<input type="password" name="password_confirm" minlength="8" required data-confirm-target></label>
                     <input type="hidden" name="role" value="staff">
                     <label>Role<input type="text" value="Staff" readonly></label>
                     <label>Status

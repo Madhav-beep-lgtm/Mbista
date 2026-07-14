@@ -93,6 +93,10 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Password must be at least 8 characters.');
             redirect('admin/workspace.php?view=users');
         }
+        if ($password !== (string) ($_POST['password_confirm'] ?? '')) {
+            flash('error', 'Password and confirmation do not match.');
+            redirect('admin/workspace.php?view=users');
+        }
         if (!in_array($role, $allowedRoles, true)) {
             $role = 'customer';
         }
@@ -236,6 +240,10 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (!preg_match('/[A-Z]/', $password) || !preg_match('/[a-z]/', $password) || !preg_match('/[0-9]/', $password)) {
             flash('error', 'Temporary password must include uppercase, lowercase, and a number.');
+            redirect('admin/workspace.php?view=clients');
+        }
+        if ($password !== (string) ($_POST['password_confirm'] ?? '')) {
+            flash('error', 'Temporary password and confirmation do not match.');
             redirect('admin/workspace.php?view=clients');
         }
         if ($contactNumber !== '' && !preg_match('/^[0-9+\-\s().]{6,30}$/', $contactNumber)) {
@@ -1401,7 +1409,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <label>Position or Designation<input type="text" name="authorized_person_position"></label>
                     <label>Authorized Signatory Name<input type="text" name="authorized_signatory_name"></label>
                     <label>Client Login Email<input type="email" name="email" required></label>
-                    <label>Temporary Client Login Password<input type="password" name="password" minlength="8" required></label>
+                    <label>Temporary Client Login Password<input type="password" name="password" minlength="8" required data-confirm-source></label>
+                    <label>Confirm Temporary Password<input type="password" name="password_confirm" minlength="8" required data-confirm-target></label>
                     <label>Contact Number<input type="text" name="contact_number"></label>
                     <label>Website<input type="url" name="website" placeholder="https://example.com"></label>
                     <label class="workspace-span-2">Address<textarea name="address"></textarea></label>

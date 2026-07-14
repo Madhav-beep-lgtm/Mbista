@@ -119,6 +119,11 @@ function accounting_module_repair_database(): array
         // receivable side reuses accounting_parties.ledger_id.
         accounting_repair_add_column('accounting_parties', 'payable_ledger_id', '`payable_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `ledger_id`');
         accounting_repair_add_index('accounting_parties', 'idx_accounting_parties_payable_ledger', 'KEY `idx_accounting_parties_payable_ledger` (`payable_ledger_id`)');
+        // Migration 046: optional link party -> client portal profile, so
+        // party-based invoices (inventory/manufacturing/other) reach the
+        // client's My Invoices.
+        accounting_repair_add_column('accounting_parties', 'client_profile_id', '`client_profile_id` INT UNSIGNED DEFAULT NULL AFTER `payable_ledger_id`');
+        accounting_repair_add_index('accounting_parties', 'idx_accounting_parties_client_profile', 'KEY `idx_accounting_parties_client_profile` (`client_profile_id`)');
     });
 
     $run('Create budgets and report notes', static function (): void {
@@ -569,6 +574,29 @@ function accounting_module_repair_database(): array
         accounting_repair_add_column('inventory_items', 'default_warehouse_id', '`default_warehouse_id` INT UNSIGNED DEFAULT NULL AFTER `allow_negative_stock`');
         accounting_repair_add_column('inventory_transactions', 'warehouse_id', '`warehouse_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`');
         accounting_repair_add_column('inventory_transactions', 'to_warehouse_id', '`to_warehouse_id` INT UNSIGNED DEFAULT NULL AFTER `warehouse_id`');
+    });
+
+    $run('Add lease lessor party (migration 047)', static function (): void {
+        accounting_repair_add_column('lease_liabilities', 'lessor_party_id', '`lessor_party_id` INT UNSIGNED DEFAULT NULL AFTER `asset_id`');
+        accounting_repair_add_index('lease_liabilities', 'idx_lease_liabilities_lessor', 'KEY `idx_lease_liabilities_lessor` (`lessor_party_id`)');
+    });
+
+    $run('Dedupe ledger mapping rows', static function (): void {
+        // The unique keys on the mapping tables treat NULL scope columns as
+        // distinct, so the old save (INSERT .. ON DUPLICATE KEY) piled up a
+        // full duplicate set on every save. Resolution reads LIMIT 1 so it
+        // still worked, but the stale older rows shadowed newer choices.
+        // Keep only the NEWEST row per logical key.
+        foreach (['asset_ledger_mappings' => 'category_id', 'inventory_ledger_mappings' => 'category'] as $table => $categoryColumn) {
+            if (!accounting_repair_table_exists($table)) {
+                continue;
+            }
+            db()->exec("DELETE m1 FROM `$table` m1 JOIN `$table` m2
+                ON m2.company_id = m1.company_id AND m2.scope = m1.scope
+                AND COALESCE(m2.`$categoryColumn`, '') = COALESCE(m1.`$categoryColumn`, '')
+                AND COALESCE(m2." . ($table === 'asset_ledger_mappings' ? 'asset_id' : 'item_id') . ", 0) = COALESCE(m1." . ($table === 'asset_ledger_mappings' ? 'asset_id' : 'item_id') . ", 0)
+                AND m2.purpose = m1.purpose AND m2.id > m1.id");
+        }
     });
 
     $run('Add NRV allowance lifecycle (migration 041)', static function (): void {

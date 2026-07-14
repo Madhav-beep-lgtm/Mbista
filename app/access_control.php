@@ -98,10 +98,170 @@ function access_control_ensure_schema(): void
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
             );
         }
+
+        // Migration 045: extra customer logins per client organization.
+        if (!table_exists('client_portal_users') && table_exists('client_profiles')) {
+            db()->exec(
+                'CREATE TABLE IF NOT EXISTS client_portal_users (
+                    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    client_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    member_role ENUM(\'owner\',\'approver\',\'entry_maker\') NOT NULL DEFAULT \'entry_maker\',
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    created_by INT UNSIGNED DEFAULT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uniq_client_portal_user (user_id),
+                    KEY idx_client_portal_users_client (client_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+            );
+        }
     } catch (Throwable $exception) {
         // Never take the site down over the repair path; the degradation rule
         // below keeps authorization closed rather than open.
     }
+}
+
+// ---------------------------------------------------------------------------
+// Client portal membership
+// ---------------------------------------------------------------------------
+
+/**
+ * The client profile a customer login belongs to: either as the OWNER
+ * (client_profiles.user_id, the login the firm created with the profile) or
+ * as an additional MEMBER the owner added from the portal (client_portal_users,
+ * migration 045). A login belongs to at most one client organization.
+ *
+ * Every "which client is this customer?" lookup must go through here so that
+ * member logins see the same portal as the owner.
+ */
+function client_profile_for_user(?int $userId = null): ?array
+{
+    $userId = $userId ?? (int) (current_user()['id'] ?? 0);
+    if ($userId <= 0 || !table_exists('client_profiles')) {
+        return null;
+    }
+
+    static $cache = [];
+    if (array_key_exists($userId, $cache)) {
+        return $cache[$userId];
+    }
+
+    $stmt = db()->prepare('SELECT cp.*, \'owner\' AS portal_member_role FROM client_profiles cp WHERE cp.user_id = :uid LIMIT 1');
+    $stmt->execute(['uid' => $userId]);
+    $profile = $stmt->fetch() ?: null;
+
+    if (!$profile && table_exists('client_portal_users')) {
+        $stmt = db()->prepare(
+            'SELECT cp.*, cpu.member_role AS portal_member_role
+             FROM client_portal_users cpu
+             INNER JOIN client_profiles cp ON cp.id = cpu.client_id
+             WHERE cpu.user_id = :uid AND cpu.is_active = 1
+             LIMIT 1'
+        );
+        $stmt->execute(['uid' => $userId]);
+        $profile = $stmt->fetch() ?: null;
+    }
+
+    $cache[$userId] = $profile;
+
+    return $profile;
+}
+
+/** True when the customer login owns its client profile (may manage users). */
+function client_portal_user_is_owner(?array $user = null): bool
+{
+    $user = $user ?? current_user();
+    if (!$user || (string) ($user['role'] ?? '') !== 'customer') {
+        return false;
+    }
+    $profile = client_profile_for_user((int) $user['id']);
+
+    return $profile !== null && (string) ($profile['portal_member_role'] ?? '') === 'owner';
+}
+
+/**
+ * True while the current session is a customer login working INSIDE its own
+ * client books company. Every client accounting right hangs off this check.
+ */
+function client_portal_in_own_books(?array $user = null): bool
+{
+    $user = $user ?? current_user();
+    if (!$user || (string) ($user['role'] ?? '') !== 'customer') {
+        return false;
+    }
+    $profile = client_profile_for_user((int) $user['id']);
+    if (!$profile || empty($profile['is_active'])) {
+        return false;
+    }
+    $booksCompanyId = (int) ($profile['books_company_id'] ?? 0);
+
+    return $booksCompanyId > 0 && current_company_id() === $booksCompanyId;
+}
+
+/**
+ * Coarse voucher-lifecycle capability of a client portal login, by the role
+ * the organization's owner assigned:
+ *   owner / approver — view, create, edit, approve, post, report
+ *   entry_maker      — view, create, edit, report (never approve/post)
+ * delete and admin capabilities stay with the firm.
+ */
+function client_portal_capability(string $capability, ?array $user = null): bool
+{
+    if (!client_portal_in_own_books($user)) {
+        return false;
+    }
+    $user = $user ?? current_user();
+    $profile = client_profile_for_user((int) $user['id']);
+    $memberRole = (string) ($profile['portal_member_role'] ?? '');
+    $canApprove = in_array($memberRole, ['owner', 'approver'], true);
+
+    return match ($capability) {
+        'view', 'create', 'edit', 'report' => true,
+        'approve', 'post' => $canApprove,
+        default => false,
+    };
+}
+
+/**
+ * Client books always run the voucher approval workflow: an entry maker's
+ * voucher must wait for an owner/approver even when the firm-wide
+ * approvals_enabled setting is off. Owners/approvers self-approve as usual.
+ */
+function client_portal_forces_approval(?array $user = null): bool
+{
+    $user = $user ?? current_user();
+
+    return (string) ($user['role'] ?? '') === 'customer';
+}
+
+/**
+ * Page gate for the shared accounting workspace: admins and staff pass as
+ * before; a customer passes only while the active company context is their
+ * own books company (entered via open-books.php, which also verifies the
+ * PIN-equivalent). Anyone else is turned away.
+ */
+function require_staff_admin_or_client_books(): void
+{
+    require_login();
+    $user = current_user();
+    $role = (string) ($user['role'] ?? '');
+
+    if (in_array($role, ['admin', 'staff'], true)) {
+        return;
+    }
+
+    if ($role === 'customer') {
+        if (client_portal_in_own_books($user)) {
+            return;
+        }
+        flash('error', 'Open your accounting books from the dashboard first.');
+        redirect('dashboard.php');
+    }
+
+    flash('error', 'Staff or admin access required.');
+    redirect('login.php');
 }
 
 // ---------------------------------------------------------------------------
@@ -300,10 +460,11 @@ function authorized_company_ids(?array $user = null): array
         $stmt->execute(['uid' => $userId]);
         $ids = array_merge($ids, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
     } elseif ($role === 'customer' && table_exists('client_profiles') && column_exists('client_profiles', 'books_company_id')) {
-        // A client login reaches only its own books.
-        $stmt = db()->prepare('SELECT books_company_id FROM client_profiles WHERE user_id = :uid AND books_company_id IS NOT NULL AND is_active = 1');
-        $stmt->execute(['uid' => $userId]);
-        $ids = array_merge($ids, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        // A client login (owner or added portal member) reaches only its own books.
+        $profile = client_profile_for_user($userId);
+        if ($profile && !empty($profile['is_active']) && (int) ($profile['books_company_id'] ?? 0) > 0) {
+            $ids[] = (int) $profile['books_company_id'];
+        }
     }
 
     $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
@@ -443,7 +604,13 @@ function revoke_user_sessions(int $userId): void
     }
 
     try {
-        db()->prepare('UPDATE users SET sessions_valid_from = NOW() WHERE id = :id')->execute(['id' => $userId]);
+        // Stamp with PHP's clock, not MySQL NOW(): session_is_revoked() parses
+        // this value with strtotime() in PHP's timezone, and the two clocks can
+        // disagree (e.g. XAMPP ships date.timezone=Europe/Berlin while MySQL
+        // runs on system time). A NOW() written hours "ahead" of PHP's reading
+        // locked every re-login out until the skew elapsed.
+        db()->prepare('UPDATE users SET sessions_valid_from = :now WHERE id = :id')
+            ->execute(['now' => date('Y-m-d H:i:s'), 'id' => $userId]);
         security_event('sessions_revoked', 'success', 'All active sessions revoked for user #' . $userId, null, $userId);
     } catch (Throwable $exception) {
         // ignore
@@ -461,12 +628,32 @@ function session_is_revoked(array $user): bool
         return false;
     }
 
+    $validTs = strtotime($validFrom);
+    if ($validTs === false) {
+        return false;
+    }
+
+    // A revocation stamp in the future is impossible — it is a leftover from
+    // the pre-fix code that wrote MySQL NOW() while this reader parses in
+    // PHP's timezone (the clocks can sit hours apart). Left alone it locks the
+    // user out until the skew elapses; heal the row and let the session live.
+    if ($validTs > time() + 300) {
+        try {
+            db()->prepare('UPDATE users SET sessions_valid_from = NULL WHERE id = :id')
+                ->execute(['id' => (int) ($user['id'] ?? 0)]);
+        } catch (Throwable $exception) {
+            // ignore — worst case the stale stamp stays and is handled next time
+        }
+
+        return false;
+    }
+
     $issuedAt = (int) ($_SESSION['auth_issued_at'] ?? 0);
     if ($issuedAt <= 0) {
         return true;
     }
 
-    return $issuedAt < strtotime($validFrom);
+    return $issuedAt < $validTs;
 }
 
 /**
@@ -625,24 +812,34 @@ function user_can_do(string $module, string $action, ?array $user = null): bool
         return true;
     }
 
-    // Clients may perform full accounting work only inside their own linked
-    // books company. This does not grant access to admin, client-management,
-    // company-switching, user-management, HR, settings, or system modules.
+    // Clients may perform full accounting work only inside their OWN linked
+    // books company (not merely any authorized company). This does not grant
+    // access to admin, client-management, company-switching, user-management,
+    // HR, settings, or system modules. The portal role assigned by the
+    // organization's owner decides the voucher lifecycle rights: owners and
+    // approvers may approve/post; entry makers may only view, create and edit.
     if ($role === 'customer') {
-        $companyId = current_company_id();
-        if ($companyId <= 0 || !user_can_access_company($companyId, $user)) {
+        if (!client_portal_in_own_books($user)) {
             return false;
         }
+
+        $profile = client_profile_for_user((int) $user['id']);
+        $memberRole = (string) ($profile['portal_member_role'] ?? '');
+        $canApprove = in_array($memberRole, ['owner', 'approver'], true);
 
         $clientAccountingPermissions = [
             'accounting' => ['view', 'create', 'edit', 'approve', 'post', 'export'],
             'sales' => ['view', 'create', 'edit', 'export'],
             'purchases' => ['view', 'create', 'edit', 'export'],
             'receipts' => ['view', 'create', 'edit', 'export'],
-            'inventory' => ['view', 'create', 'edit', 'export'],
+            'inventory' => ['view', 'create', 'edit', 'post', 'export'],
             'payroll' => ['view', 'create', 'post', 'export'],
             'reports' => ['view', 'export'],
         ];
+
+        if (!$canApprove && in_array($action, ['approve', 'post'], true)) {
+            return false;
+        }
 
         return in_array($action, $clientAccountingPermissions[$module] ?? [], true);
     }

@@ -3,7 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
-require_staff_or_admin();
+require_staff_admin_or_client_books();
 require_company_context();
 
 $repairErrors = accounting_module_repair_database();
@@ -482,10 +482,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // are valued at cost put in (qty*rate); outward legs at the cost-flow
             // COGS drawn from the layers. Missing mappings record stock-only.
             $postingValue = $direction === 'in' ? round($qty * $rate, 2) : $issueValue;
+            // Optional supplier on purchase movements: the counterparty leg then
+            // hits that party's payable ledger instead of purchase clearing.
+            $movementPartyId = (int) ($_POST['supplier_party_id'] ?? 0);
+            if ($movementPartyId > 0) {
+                $partyChk = db()->prepare('SELECT COUNT(*) FROM accounting_parties WHERE id = :id AND company_id = :cid');
+                $partyChk->execute(['id' => $movementPartyId, 'cid' => $companyId]);
+                if ((int) $partyChk->fetchColumn() === 0 || !in_array($type, ['purchase', 'purchase_receipt', 'purchase_return'], true)) {
+                    $movementPartyId = 0;
+                }
+            }
             $movementVoucherId = 0;
             $mapMissing = [];
             try {
-                $movementVoucherId = inv_post_movement_voucher($companyId, $fiscalYearId, $txnId, $type, $item, $direction, $postingValue, $date, $userId);
+                $movementVoucherId = inv_post_movement_voucher($companyId, $fiscalYearId, $txnId, $type, $item, $direction, $postingValue, $date, $userId, $movementPartyId ?: null);
             } catch (RuntimeException $mapEx) {
                 if (str_starts_with($mapEx->getMessage(), 'MAP_MISSING:')) {
                     $mapMissing = explode(',', substr($mapEx->getMessage(), 12));
@@ -787,13 +797,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('inventory', 'edit');
         // Global-default ledger mappings for inventory posting purposes. Each
         // ledger is validated to belong to this company before it is stored.
+        // Scope: global defaults, per-category overrides (category is the
+        // items' free-text category), or per-item overrides. Resolution walks
+        // item -> category -> global (inv_resolve_mapping).
+        $mapScopeRaw = (string) ($_POST['map_scope'] ?? 'global');
+        $mapScope = in_array($mapScopeRaw, ['global', 'category', 'item'], true) ? $mapScopeRaw : 'global';
+        $mapCategory = $mapScope === 'category' ? trim((string) ($_POST['map_category'] ?? '')) : '';
+        $mapItemId = $mapScope === 'item' ? (int) ($_POST['map_item_id'] ?? 0) : 0;
+        if ($mapScope === 'category' && $mapCategory === '') {
+            flash('error', 'Select an item category for the override.');
+            redirect('admin/accounting-inventory.php?view=mapping');
+        }
+        if ($mapScope === 'item') {
+            $chk = db()->prepare('SELECT COUNT(*) FROM inventory_items WHERE id = :id AND company_id = :cid');
+            $chk->execute(['id' => $mapItemId, 'cid' => $companyId]);
+            if ($mapItemId <= 0 || (int) $chk->fetchColumn() === 0) {
+                flash('error', 'Select a valid inventory item for the override.');
+                redirect('admin/accounting-inventory.php?view=mapping');
+            }
+        }
+        $scopeWhere = 'company_id = :cid AND scope = :scope AND purpose = :p AND '
+            . ($mapScope === 'category' ? 'category = :sid AND item_id IS NULL' : ($mapScope === 'item' ? 'item_id = :sid AND category IS NULL' : 'category IS NULL AND item_id IS NULL'));
+        $backTo = 'admin/accounting-inventory.php?view=mapping&map_scope=' . $mapScope
+            . ($mapCategory !== '' ? '&map_category=' . urlencode($mapCategory) : '')
+            . ($mapItemId > 0 ? '&map_item_id=' . $mapItemId : '');
+
         $purposes = array_keys(inventory_mapping_purposes());
         $saved = 0;
         foreach ($purposes as $purpose) {
             $ledgerId = (int) ($_POST['map'][$purpose] ?? 0);
+            $deleteParams = ['cid' => $companyId, 'scope' => $mapScope, 'p' => $purpose];
+            if ($mapScope !== 'global') {
+                $deleteParams['sid'] = $mapScope === 'category' ? $mapCategory : $mapItemId;
+            }
+            // Delete-then-insert: the unique key treats NULL scope columns as
+            // distinct, so ON DUPLICATE KEY cannot dedupe override rows.
+            db()->prepare('DELETE FROM inventory_ledger_mappings WHERE ' . $scopeWhere)->execute($deleteParams);
             if ($ledgerId <= 0) {
-                db()->prepare('DELETE FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = \'global\' AND category IS NULL AND item_id IS NULL AND purpose = :p')
-                    ->execute(['cid' => $companyId, 'p' => $purpose]);
                 continue;
             }
             $own = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE id = :id AND company_id = :cid');
@@ -803,14 +843,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             db()->prepare('
                 INSERT INTO inventory_ledger_mappings (company_id, scope, category, item_id, purpose, ledger_id, created_by)
-                VALUES (:cid, \'global\', NULL, NULL, :p, :lid, :uid)
-                ON DUPLICATE KEY UPDATE ledger_id = VALUES(ledger_id), created_by = VALUES(created_by)
-            ')->execute(['cid' => $companyId, 'p' => $purpose, 'lid' => $ledgerId, 'uid' => $userId]);
+                VALUES (:cid, :scope, :cat, :iid, :p, :lid, :uid)
+            ')->execute([
+                'cid' => $companyId,
+                'scope' => $mapScope,
+                'cat' => $mapCategory !== '' ? $mapCategory : null,
+                'iid' => $mapItemId > 0 ? $mapItemId : null,
+                'p' => $purpose,
+                'lid' => $ledgerId,
+                'uid' => $userId,
+            ]);
             $saved++;
         }
-        log_activity('inventory_mapping', $companyId, 'updated', 'Inventory ledger mappings updated (' . $saved . ' set).', $userId);
-        flash('success', 'Inventory ledger mappings saved (' . $saved . ' purpose' . ($saved === 1 ? '' : 's') . ' mapped).');
-        redirect('admin/accounting-inventory.php?view=mapping');
+        log_activity('inventory_mapping', $companyId, 'updated', ucfirst($mapScope) . ' inventory ledger mappings updated (' . $saved . ' set).', $userId);
+        flash('success', ucfirst($mapScope) . ' inventory ledger mappings saved (' . $saved . ' purpose' . ($saved === 1 ? '' : 's') . ' mapped).');
+        redirect($backTo);
     }
 
     if ($action === 'save_bom') {
@@ -1476,22 +1523,69 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 <?php elseif ($invView === 'mapping'): ?>
     <?php
-    // Current global mappings + wrong-type detection.
+    $mapScopeRaw = (string) ($_GET['map_scope'] ?? 'global');
+    $mapScope = in_array($mapScopeRaw, ['global', 'category', 'item'], true) ? $mapScopeRaw : 'global';
+    $mapCategory = $mapScope === 'category' ? trim((string) ($_GET['map_category'] ?? '')) : '';
+    $mapItemId = $mapScope === 'item' ? (int) ($_GET['map_item_id'] ?? 0) : 0;
+    $mapCategoryOptions = db()->prepare("SELECT DISTINCT category FROM inventory_items WHERE company_id = :cid AND category IS NOT NULL AND category <> '' ORDER BY category ASC");
+    $mapCategoryOptions->execute(['cid' => $companyId]);
+    $mapCategoryOptions = $mapCategoryOptions->fetchAll(PDO::FETCH_COLUMN);
+    $mapItemOptions = db()->prepare('SELECT id, sku, name FROM inventory_items WHERE company_id = :cid ORDER BY name ASC');
+    $mapItemOptions->execute(['cid' => $companyId]);
+    $mapItemOptions = $mapItemOptions->fetchAll(PDO::FETCH_ASSOC);
+    if ($mapScope === 'category' && $mapCategory === '' && $mapCategoryOptions !== []) { $mapCategory = (string) $mapCategoryOptions[0]; }
+    if ($mapScope === 'item' && $mapItemId <= 0 && $mapItemOptions !== []) { $mapItemId = (int) $mapItemOptions[0]['id']; }
+
+    // Current mappings for the selected scope + wrong-type detection.
     $currentMappings = [];
-    $mapStmt = db()->prepare('SELECT m.purpose, m.ledger_id, l.type AS ledger_type, l.code, l.name FROM inventory_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = \'global\'');
-    $mapStmt->execute(['cid' => $companyId]);
+    if ($mapScope === 'category' && $mapCategory !== '') {
+        $mapStmt = db()->prepare("SELECT m.purpose, m.ledger_id, l.type AS ledger_type, l.code, l.name FROM inventory_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = 'category' AND m.category = :sid");
+        $mapStmt->execute(['cid' => $companyId, 'sid' => $mapCategory]);
+    } elseif ($mapScope === 'item' && $mapItemId > 0) {
+        $mapStmt = db()->prepare("SELECT m.purpose, m.ledger_id, l.type AS ledger_type, l.code, l.name FROM inventory_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = 'item' AND m.item_id = :sid");
+        $mapStmt->execute(['cid' => $companyId, 'sid' => $mapItemId]);
+    } else {
+        $mapStmt = db()->prepare("SELECT m.purpose, m.ledger_id, l.type AS ledger_type, l.code, l.name FROM inventory_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = 'global'");
+        $mapStmt->execute(['cid' => $companyId]);
+    }
     foreach ($mapStmt->fetchAll(PDO::FETCH_ASSOC) as $mr) {
         $currentMappings[$mr['purpose']] = $mr;
     }
     ?>
     <section class="mbw-card" aria-label="Ledger mapping">
         <div class="mbw-card-head">
-            <h2>Ledger Mapping (global defaults)</h2>
+            <h2>Ledger Mapping<?= $mapScope === 'global' ? ' (global defaults)' : ($mapScope === 'category' ? ' — category "' . e($mapCategory) . '"' : ' — per item') ?></h2>
             <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Precedence: item &rarr; category &rarr; global. Postings are blocked until every required purpose resolves to a ledger.</span></div>
         </div>
+        <form method="get" action="<?= e(url('admin/accounting-inventory.php')) ?>" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+            <input type="hidden" name="view" value="mapping">
+            <label style="margin:0">Mapping scope
+                <select name="map_scope" onchange="this.form.submit()">
+                    <option value="global" <?= $mapScope === 'global' ? 'selected' : '' ?>>Global defaults</option>
+                    <option value="category" <?= $mapScope === 'category' ? 'selected' : '' ?>>Per item category</option>
+                    <option value="item" <?= $mapScope === 'item' ? 'selected' : '' ?>>Per individual item</option>
+                </select>
+            </label>
+            <?php if ($mapScope === 'category'): ?>
+                <label style="margin:0">Category
+                    <select name="map_category" onchange="this.form.submit()">
+                        <?php foreach ($mapCategoryOptions as $mc): ?><option value="<?= e($mc) ?>" <?= $mapCategory === (string) $mc ? 'selected' : '' ?>><?= e($mc) ?></option><?php endforeach; ?>
+                    </select>
+                </label>
+            <?php elseif ($mapScope === 'item'): ?>
+                <label style="margin:0">Item
+                    <select name="map_item_id" onchange="this.form.submit()">
+                        <?php foreach ($mapItemOptions as $mi): ?><option value="<?= (int) $mi['id'] ?>" <?= $mapItemId === (int) $mi['id'] ? 'selected' : '' ?>><?= e(($mi['sku'] ? $mi['sku'] . ' — ' : '') . $mi['name']) ?></option><?php endforeach; ?>
+                    </select>
+                </label>
+            <?php endif; ?>
+        </form>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_inventory_mappings">
+            <input type="hidden" name="map_scope" value="<?= e($mapScope) ?>">
+            <?php if ($mapScope === 'category'): ?><input type="hidden" name="map_category" value="<?= e($mapCategory) ?>"><?php endif; ?>
+            <?php if ($mapScope === 'item'): ?><input type="hidden" name="map_item_id" value="<?= (int) $mapItemId ?>"><?php endif; ?>
             <div class="rc-table-scroll">
                 <table class="rc-table">
                     <thead><tr><th>Purpose</th><th>Expected type</th><th>Mapped ledger</th><th>Status</th></tr></thead>
@@ -1507,16 +1601,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <td><span class="mbw-pill tone-gray"><?= e(ucfirst($meta['expect'])) ?></span></td>
                                 <td>
                                     <select name="map[<?= e($purposeKey) ?>]" style="min-width:230px">
-                                        <option value="0">Not mapped</option>
+                                        <option value="0"><?= $mapScope === 'global' ? 'Not mapped' : '— inherit —' ?></option>
                                         <?php foreach ($ledgers as $ledger): ?>
                                             <option value="<?= e((int) $ledger['id']) ?>" <?= $curId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
                                         <?php endforeach; ?>
                                     </select>
                                 </td>
                                 <td>
-                                    <?php if (!$cur): ?><span class="mbw-pill tone-amber">Incomplete</span>
+                                    <?php if (!$cur): ?><span class="mbw-pill <?= $mapScope === 'global' ? 'tone-amber' : 'tone-gray' ?>"><?= $mapScope === 'global' ? 'Incomplete' : 'Inherits' ?></span>
                                     <?php elseif ($typeMismatch): ?><span class="mbw-pill tone-amber" title="Mapped ledger type is <?= e((string) $cur['ledger_type']) ?>, expected <?= e($meta['expect']) ?>">Type warning</span>
-                                    <?php else: ?><span class="mbw-pill tone-green">Complete</span><?php endif; ?>
+                                    <?php else: ?><span class="mbw-pill tone-green">Mapped</span><?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -1656,6 +1750,22 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <option value="purchase">Purchase</option>
                 <option value="purchase_return">Purchase return</option>
             </select></label>
+            <?php
+            $invSupplierOptions = [];
+            if (table_exists('accounting_parties')) {
+                $invSupplierStmt = db()->prepare("SELECT id, code, name FROM accounting_parties WHERE company_id = :cid AND status = 'active' AND party_type IN ('supplier', 'both') ORDER BY name ASC");
+                $invSupplierStmt->execute(['cid' => $companyId]);
+                $invSupplierOptions = $invSupplierStmt->fetchAll(PDO::FETCH_ASSOC);
+            }
+            ?>
+            <label>Supplier (purchases post to their payable ledger)
+                <select name="supplier_party_id">
+                    <option value="0">— none (purchase clearing) —</option>
+                    <?php foreach ($invSupplierOptions as $sp): ?>
+                        <option value="<?= (int) $sp['id'] ?>"><?= e($sp['name'] . ' (' . $sp['code'] . ')') ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <label>Warehouse<select name="warehouse_id"><option value="0">— unassigned —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>"><?= e($warehouse['name']) ?></option><?php endforeach; ?></select></label>
             <label>Date<input type="date" name="transaction_date" value="<?= e(date('Y-m-d')) ?>" required></label>
             <label>Reference<input type="text" name="ref_no" maxlength="120"></label>

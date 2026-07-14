@@ -65,6 +65,7 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
             <a href="<?= e(url('admin/hr.php?view=timesheets')) ?>"><?= icon('timesheets') ?>Timesheets</a>
             <a href="<?= e(url('my-payslips.php')) ?>"><?= icon('wallet') ?>My Payslips</a>
             <span class="admin-nav-group">System</span>
+            <a href="<?= e(url('staff/profile.php')) ?>"><?= icon('profile') ?>My Profile</a>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
         </nav>
     </aside>

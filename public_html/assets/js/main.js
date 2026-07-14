@@ -628,4 +628,18 @@ document.addEventListener('DOMContentLoaded', () => {
       label.textContent = value ? levels[score][1] : '';
     });
   });
+
+  // --- Password confirmation match -------------------------------------------
+  // Pair inside one form: [data-confirm-source] = the password being set,
+  // [data-confirm-target] = the repeat field. Blocks submit until they match.
+  document.querySelectorAll('input[type="password"][data-confirm-target]').forEach((confirm) => {
+    const form = confirm.closest('form');
+    const source = form ? form.querySelector('input[type="password"][data-confirm-source]') : null;
+    if (!source) return;
+    const validate = () => {
+      confirm.setCustomValidity(confirm.value && confirm.value !== source.value ? 'Passwords do not match.' : '');
+    };
+    confirm.addEventListener('input', validate);
+    source.addEventListener('input', validate);
+  });
 });

@@ -255,7 +255,50 @@ function fa_mapping_purposes(): array
         'rou_asset'                => ['label' => 'Right-of-Use Asset', 'expect' => 'asset'],
         'lease_liability'          => ['label' => 'Lease Liability', 'expect' => 'liability'],
         'lease_interest_expense'   => ['label' => 'Lease Interest Expense', 'expect' => 'expense'],
+        'opening_balance_equity'   => ['label' => 'Opening Balance Equity', 'expect' => 'equity'],
     ];
+}
+
+/**
+ * The counterparty (funding/proceeds) leg of an asset transaction. Clearing
+ * ledgers are only a default: every acquisition can owe a DIFFERENT supplier,
+ * every disposal can bill a DIFFERENT buyer, so the caller passes the mode
+ * the user picked on the form:
+ *   'supplier' — the chosen party's payable ledger (auto-created per party)
+ *   'buyer'    — the chosen party's receivable ledger
+ *   'cash'     — the mapped default cash/bank ledger
+ *   'opening'  — Opening Balance Equity (migrated balances, no counterparty)
+ *   'clearing' — the mapped clearing purpose (legacy default)
+ * Returns [ledger row, party id or null], or [null, null] when unresolvable.
+ */
+function fa_counterparty_ledger(int $companyId, string $mode, int $partyId, string $clearingPurpose, ?int $assetId = null): array
+{
+    if ($mode === 'supplier' || $mode === 'buyer') {
+        if ($partyId <= 0) {
+            return [null, null];
+        }
+        $chk = db()->prepare('SELECT COUNT(*) FROM accounting_parties WHERE id = :id AND company_id = :cid');
+        $chk->execute(['id' => $partyId, 'cid' => $companyId]);
+        if ((int) $chk->fetchColumn() === 0) {
+            return [null, null];
+        }
+        $ledgerId = ensure_party_ledger($companyId, $partyId, $mode === 'supplier' ? 'payable' : 'receivable');
+        if ($ledgerId <= 0) {
+            return [null, null];
+        }
+        $s = db()->prepare('SELECT * FROM ledgers WHERE id = :id AND company_id = :cid LIMIT 1');
+        $s->execute(['id' => $ledgerId, 'cid' => $companyId]);
+
+        return [$s->fetch(PDO::FETCH_ASSOC) ?: null, $partyId];
+    }
+    if ($mode === 'cash') {
+        return [get_mapped_ledger($companyId, 'default_cash_bank'), null];
+    }
+    if ($mode === 'opening') {
+        return [fa_resolve_mapping($companyId, 'opening_balance_equity', $assetId), null];
+    }
+
+    return [fa_resolve_mapping($companyId, $clearingPurpose, $assetId), null];
 }
 
 /**
@@ -280,6 +323,13 @@ function fa_resolve_mapping(int $companyId, string $purpose, ?int $assetId = nul
         $s->execute(['cid' => $companyId, 'aid' => $assetId, 'p' => $purpose]);
         $row = $ledger((int) ($s->fetchColumn() ?: 0));
         if ($row) { return $row; }
+        // Callers rarely know the category — derive it from the asset so
+        // per-category overrides apply to every asset event automatically.
+        if (!$categoryId && column_exists('fixed_assets', 'category_id')) {
+            $c = db()->prepare('SELECT category_id FROM fixed_assets WHERE id = :id AND company_id = :cid LIMIT 1');
+            $c->execute(['id' => $assetId, 'cid' => $companyId]);
+            $categoryId = (int) ($c->fetchColumn() ?: 0) ?: null;
+        }
     }
     if ($categoryId) {
         $s = db()->prepare('SELECT ledger_id FROM asset_ledger_mappings WHERE company_id = :cid AND scope = \'category\' AND category_id = :cat AND purpose = :p LIMIT 1');

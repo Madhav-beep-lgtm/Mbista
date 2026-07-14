@@ -1123,6 +1123,26 @@ function inv_post_movement_voucher(int $companyId, ?int $fiscalYearId, int $txnI
     $debit = inv_resolve_mapping($companyId, $plan['debit'], $itemId, $category);
     $credit = inv_resolve_mapping($companyId, $plan['credit'], $itemId, $category);
 
+    // Purchases with a supplier chosen post to THAT party's payable ledger,
+    // not the shared clearing account — every purchase can owe a different
+    // supplier. Whichever leg the plan routes through purchase_clearing is
+    // the counterparty leg (credit on receipt, debit on return).
+    if ($partyId && $partyId > 0) {
+        $partyLedgerId = ensure_party_ledger($companyId, $partyId, 'payable');
+        if ($partyLedgerId > 0) {
+            $partyLedgerStmt = db()->prepare('SELECT * FROM ledgers WHERE id = :id AND company_id = :cid LIMIT 1');
+            $partyLedgerStmt->execute(['id' => $partyLedgerId, 'cid' => $companyId]);
+            $partyLedger = $partyLedgerStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            if ($partyLedger) {
+                if ($plan['credit'] === 'purchase_clearing') {
+                    $credit = $partyLedger;
+                } elseif ($plan['debit'] === 'purchase_clearing') {
+                    $debit = $partyLedger;
+                }
+            }
+        }
+    }
+
     $missing = [];
     if (!$debit) {
         $missing[] = $plan['debit'];

@@ -107,6 +107,8 @@ if ($pageBreadcrumb === null) {
 // Client-books awareness: when the portal IS a client books space, the
 // Accounting Workspace points back home and the client submenu takes over.
 $headerIsClientBooks = (int) ($headerCompany['is_client_company'] ?? 0) === 1;
+// A customer login inside its own books gets a reduced, books-only nav.
+$headerIsCustomer = (string) ($currentUser['role'] ?? '') === 'customer';
 $headerClientBooksOptions = [];
 if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') && column_exists('client_profiles', 'books_company_id')) {
     $headerClientsStmt = db()->query('SELECT * FROM client_profiles WHERE is_active = 1 AND books_company_id IS NOT NULL ORDER BY organization_name ASC');
@@ -155,6 +157,29 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             </div>
         <?php endif; ?>
         <nav class="admin-nav">
+            <?php if ($headerIsCustomer): ?>
+            <?php // Client login: books-only navigation — no admin surfaces. ?>
+            <span class="admin-nav-group">My Portal</span>
+            <a href="<?= e(url('dashboard.php')) ?>"><?= icon('home') ?>Client Portal</a>
+            <a href="<?= e(url('my-profile.php')) ?>"><?= icon('profile') ?>My Profile &amp; Users</a>
+            <span class="admin-nav-group">Accounting Workspace</span>
+            <div class="mbw-nav-parent is-open" data-nav-parent="accounting">
+                <a href="#" data-nav-toggle aria-expanded="true" class="is-active">
+                    <?= icon('accounting') ?>Accounting
+                    <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
+                </a>
+                <div class="mbw-subnav">
+                    <?php foreach ($headerAccountingChildren as [$headerChildLabel, $headerChildUrl, $headerChildIcon, $headerChildActive]): ?>
+                        <?php if (str_starts_with($headerChildUrl, 'admin/budgets.php')) { continue; } // budgets stay firm-side ?>
+                        <a class="<?= $headerChildActive ? 'is-active' : '' ?>" href="<?= e(url($headerChildUrl)) ?>"><?= icon($headerChildIcon) ?><?= e($headerChildLabel) ?></a>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <span class="admin-nav-group">Reports</span>
+            <a class="<?= $headerScript === 'reports-center.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
+            <span class="admin-nav-group">System</span>
+            <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
+            <?php else: ?>
             <span class="admin-nav-group">Core Admin</span>
             <?php if ($headerCompanyCode === 'MBAACA'): ?>
                 <a class="<?= $headerScript === 'accounting-dashboard.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
@@ -248,6 +273,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <?php endif; ?>
             <a class="<?= $headerScript === 'settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
             <a href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?>Logout</a>
+            <?php endif; ?>
         </nav>
     </aside>
     <section class="admin-main">
@@ -303,6 +329,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     </select>
                 </form>
 
+                <?php if (!$headerIsCustomer): ?>
                 <?php if ($headerAltioraCompany): ?>
                     <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" class="topbar-icon-form">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -341,6 +368,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <?php endif; ?>
                 <?php if (!$headerIsClientBooks): ?>
                     <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
+                <?php endif; ?>
                 <?php endif; ?>
                 <?php include __DIR__ . '/attention_bell.php'; ?>
                 <button type="button" class="theme-toggle-link admin-icon-button" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
