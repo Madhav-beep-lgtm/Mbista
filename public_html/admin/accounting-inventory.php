@@ -85,6 +85,22 @@ function inventory_company_item(int $itemId, int $companyId): ?array
 }
 
 /**
+ * Turn the engine's ALLOWANCE_CONSUMED guard into something a human can act on,
+ * or null when the throwable is some other failure.
+ */
+function inventory_allowance_block_message(Throwable $e): ?string
+{
+    if (!str_starts_with($e->getMessage(), 'ALLOWANCE_CONSUMED:')) {
+        return null;
+    }
+    $consumed = (float) substr($e->getMessage(), 19);
+
+    return 'This NRV write-down can no longer be undone: ' . site_currency_symbol() . number_format($consumed, 2)
+        . ' of the allowance it raised has already been released as the written-down stock left (sold, written off or issued). '
+        . 'Reverse those outward movements first, then reverse the write-down.';
+}
+
+/**
  * A POSTed warehouse id, but only if it belongs to this company — otherwise
  * null. The warehouse FKs reference warehouses(id) with no company predicate,
  * so a tampered id from another tenant would otherwise insert cleanly and tag
@@ -486,7 +502,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // on the balance sheet forever (IAS 2.34).
             [$allowanceReleased, ] = inv_post_allowance_release(
                 $companyId, $fiscalYearId, $txnId, $item, $type, $direction,
-                $qtyOut, (float) $item['on_hand'], $date, $userId
+                $qtyOut, (float) $item['on_hand'], $date, $userId,
+                $movementVoucherId, $issueValue
             );
             db()->commit();
             $costNote = $qtyOut > 0 ? ' Issue cost (' . strtoupper(str_replace('_', ' ', $method)) . '): ' . site_currency_symbol() . number_format($issueValue, 2) . '.' : '';
@@ -683,7 +700,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', 'Stock movement deleted and cost layers recalculated.');
         } catch (Throwable $e) {
             if (db()->inTransaction()) { db()->rollBack(); }
-            flash('error', 'Could not delete movement: ' . $e->getMessage());
+            flash('error', inventory_allowance_block_message($e) ?? 'Could not delete movement: ' . $e->getMessage());
         }
         redirect('admin/accounting-inventory.php');
     }
@@ -761,7 +778,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', 'Movement #' . $movementId . ' reversed: a mirror stock entry was posted' . ($reversalVoucherId > 0 ? ' and the accounting voucher was reversed (Dr/Cr swapped).' : '.') . ' The original records are preserved for audit.');
         } catch (Throwable $e) {
             if (db()->inTransaction()) { db()->rollBack(); }
-            flash('error', 'Could not reverse movement: ' . $e->getMessage());
+            flash('error', inventory_allowance_block_message($e) ?? 'Could not reverse movement: ' . $e->getMessage());
         }
         redirect('admin/accounting-inventory.php');
     }

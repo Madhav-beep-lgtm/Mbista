@@ -385,7 +385,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     (float) $line['quantity'],
                                     (float) ($stockItem['on_hand'] ?? 0),
                                     $issuedOn,
-                                    $adminId
+                                    $adminId,
+                                    $stockVoucherId,
+                                    $issueValue
                                 );
                                 if ($invAllowanceReleased > 0) {
                                     $stockPostingNotes[] = $stockItem['sku'] . ' NRV allowance released: ' . site_currency_symbol() . number_format($invAllowanceReleased, 2) . '.';

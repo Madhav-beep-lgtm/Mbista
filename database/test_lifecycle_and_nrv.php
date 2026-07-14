@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * Acceptance sweep S21-S30 — the paths test_acceptance_suite.php does NOT cover,
+ * Acceptance sweep S21-S34 — the paths test_acceptance_suite.php does NOT cover,
  * every one of which hid a real bug at some point:
  *
  *   S21-S23  recurring lifecycle postings (vouchers has UNIQUE(source_type,
@@ -12,7 +12,7 @@ declare(strict_types=1);
  *            be "reversed" into fabricated income)
  *   S26-S27  warehouse transfers (must not touch the cost layers, must not be
  *            allowed out of a location that holds no stock)
- *   S28-S30  the NRV allowance lifecycle (raise -> release on sale -> void on
+ *   S28-S34  the NRV allowance lifecycle (raise -> release on sale -> void on
  *            reversal), IAS 2.28-34
  *
  * Runs against scratch rows in company 6 and cleans up after itself.
@@ -183,33 +183,100 @@ $standingBefore = inv_standing_allowance($co, $iid);
 $release = inv_allowance_release_for_issue($standingBefore, 10.0, 20.0);
 ok('S29a', 'Allowance release is pro-rata: 10 of 20 units -> 50 of 100', abs($release - 50.0) < 0.005, "release=$release");
 
+// FIFO issues the OLDEST layer, so 10 units draw 10@10 = 100 of cost.
 db()->prepare("INSERT INTO inventory_transactions (company_id,fiscal_year_id,item_id,transaction_type,transaction_date,qty_in,qty_out,rate,amount)
-               VALUES ($co,$fy,$iid,'sale',CURDATE(),0,10,50,500)")->execute();
+               VALUES ($co,$fy,$iid,'sale',CURDATE(),0,10,10,100)")->execute();
 $saleTxn = (int) db()->lastInsertId();
-[$released, $relVoucher] = inv_post_allowance_release($co, $fy, $saleTxn, $item, 'sale', 'out', 10.0, 20.0, date('Y-m-d'), $uid);
+$saleVoucher = inv_post_movement_voucher($co, $fy, $saleTxn, 'sale', $item, 'out', 100.0, date('Y-m-d'), $uid);
+$madeVouchers[] = $saleVoucher;
+[$released, $relVoucher] = inv_post_allowance_release(
+    $co, $fy, $saleTxn, $item, 'sale', 'out', 10.0, 20.0, date('Y-m-d'), $uid, $saleVoucher, 100.0
+);
 if ($relVoucher > 0) { $madeVouchers[] = $relVoucher; }
 ok('S29b', 'Selling written-down stock releases its allowance to the GL (Dr allowance / Cr COGS)',
    abs($released - 50.0) < 0.005 && $relVoucher > 0, "released=$released voucher=$relVoucher");
 ok('S29c', 'Standing allowance falls to the un-sold half (100 -> 50)',
    abs(inv_standing_allowance($co, $iid) - 50.0) < 0.005, 'standing=' . inv_standing_allowance($co, $iid));
 
-// S30: reverse the write-down movement -> its allowance is voided AND its voucher reversed,
-// so a later write-down is not silently blocked by a stale prior_write_down.
-[$voided, $net] = inv_void_allowance_rows_for_txn($co, $wdTxn, $fy, date('Y-m-d'), $uid);
+// S30: an allowance that has already been RELEASED cannot be handed back. The
+// release rows hang off the SALE, not off the write-down, so voiding the
+// write-down would leave them standing while its voucher was reversed in full --
+// the contra-asset would end up with a net DEBIT balance and the expense credited
+// by the release would never be re-recognised (profit overstated).
+$blocked = false; $blockAmt = 0.0;
+try {
+    inv_void_allowance_rows_for_txn($co, $wdTxn, $fy, date('Y-m-d'), $uid);
+} catch (RuntimeException $e) {
+    if (str_starts_with($e->getMessage(), 'ALLOWANCE_CONSUMED:')) {
+        $blocked = true;
+        $blockAmt = (float) substr($e->getMessage(), 19);
+    }
+}
+ok('S30a', 'Reversing a write-down whose allowance was already released is REFUSED',
+   $blocked && abs($blockAmt - 50.0) < 0.005, 'blocked=' . var_export($blocked, true) . " consumed=$blockAmt");
+
+// Reverse the SALE first -- that gives the released allowance back and mirrors the
+// release voucher in the GL (a release row owns its voucher, unlike a write-down).
+[$relVoided, ] = inv_void_allowance_rows_for_txn($co, $saleTxn, $fy, date('Y-m-d'), $uid);
+$standingAfterSaleVoid = inv_standing_allowance($co, $iid);
+$relMirrored = (int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$co AND source_type='inventory_nrv_void'")->fetchColumn();
+ok('S30b', 'Voiding the sale gives its released allowance back (50 -> 100) and reverses the release voucher',
+   $relVoided === 1 && abs($standingAfterSaleVoid - 100.0) < 0.005 && $relMirrored === 1,
+   "voided=$relVoided standing=$standingAfterSaleVoid mirrors=$relMirrored");
+
+// With nothing released against it, the write-down now voids cleanly.
+[$voided, ] = inv_void_allowance_rows_for_txn($co, $wdTxn, $fy, date('Y-m-d'), $uid);
 $standingAfterVoid = inv_standing_allowance($co, $iid);
-ok('S30a', 'Reversing an NRV movement voids its assessment row', $voided === 1, "voided=$voided");
-ok('S30b', 'Standing allowance drops the voided write-down (50 - 100 -> floored 0)',
-   abs($standingAfterVoid - 0.0) < 0.005, "standing=$standingAfterVoid");
+ok('S30c', 'With nothing released, the write-down voids cleanly (100 -> 0)',
+   $voided === 1 && abs($standingAfterVoid) < 0.005, "voided=$voided standing=$standingAfterVoid");
+
 // The write-down assessment SHARES its voucher with the movement row, and
 // reverse_movement reverses that voucher itself. Voiding must NOT mirror it a
 // second time, or the allowance ledger ends up carrying a spurious balance.
 $sharedVoucherMirrored = (int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$co AND source_type='inventory_nrv_void' AND source_id=$assessId")->fetchColumn();
-ok('S30c', 'A write-down assessment (shared voucher) is NOT reversed twice', $sharedVoucherMirrored === 0, "mirror vouchers=$sharedVoucherMirrored (must be 0)");
-// The RELEASE row owns its own voucher, so voiding that one MUST reverse it.
-[$relVoided, ] = inv_void_allowance_rows_for_txn($co, $saleTxn, $fy, date('Y-m-d'), $uid);
-$relMirrored = (int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$co AND source_type='inventory_nrv_void'")->fetchColumn();
-ok('S30d', 'A release row (own voucher) IS reversed in the GL when voided', $relVoided === 1 && $relMirrored === 1,
-   "voided=$relVoided mirrors=$relMirrored");
+ok('S30d', 'A write-down assessment (shared voucher) is NOT reversed twice', $sharedVoucherMirrored === 0, "mirror vouchers=$sharedVoucherMirrored (must be 0)");
+
+// ---------------------------------------------------------------------------
+echo "== S31-S34 allowance-release guards ==\n";
+// ---------------------------------------------------------------------------
+
+// S31: the release is capped at the cost ACTUALLY drawn from the layers. Under
+// FIFO, issuing the cheap layer draws little cost, but a quantity pro-rata share
+// of the allowance is average-priced -- uncapped it would credit the expense by
+// MORE than the movement debited it, turning the sale's net expense negative.
+$uncapped = inv_allowance_release_for_issue(100.0, 10.0, 20.0);         // pro-rata 50
+$capped   = inv_allowance_release_for_issue(100.0, 10.0, 20.0, 30.0);   // but only 30 of cost drawn
+ok('S31', 'Release is capped at the cost drawn from the layers (50 -> 30), so COGS can never go negative',
+   abs($uncapped - 50.0) < 0.005 && abs($capped - 30.0) < 0.005, "uncapped=$uncapped capped=$capped");
+
+// S32: the release credits back the expense the MOVEMENT debited. If the movement
+// posted no voucher (unmapped ledgers) there is no expense to credit back, so
+// releasing anyway would leave COGS with a credit balance.
+[$noMoveRel, $noMoveVou] = inv_post_allowance_release(
+    $co, $fy, $saleTxn, $item, 'sale', 'out', 10.0, 20.0, date('Y-m-d'), $uid, 0, 100.0
+);
+ok('S32', 'No release when the movement itself posted no voucher (would credit COGS for stock never debited to it)',
+   abs($noMoveRel) < 0.005 && $noMoveVou === 0, "released=$noMoveRel voucher=$noMoveVou");
+
+// S33: a write-down whose ledgers were unmapped is recorded in the subledger with
+// voucher_id NULL -- there is no credit in the allowance LEDGER to draw on, so the
+// release must not see it, or it would debit an allowance the GL never had.
+db()->prepare("INSERT INTO inventory_nrv_assessments (company_id,fiscal_year_id,item_id,assessment_date,quantity,write_down,created_by)
+               VALUES ($co,$fy,$iid,CURDATE(),20,777,$uid)")->execute();
+$subledgerAll = inv_standing_allowance($co, $iid);       // counts the unposted row
+$postedOnly   = inv_standing_allowance($co, $iid, true); // must not
+ok('S33', 'An unposted (unmapped) write-down counts in the subledger but is NOT drawable by the release',
+   abs($subledgerAll - 777.0) < 0.005 && abs($postedOnly) < 0.005,
+   "subledger=$subledgerAll postedOnly=$postedOnly");
+
+// S34: only ever release into a real EXPENSE. purchase_return debits
+// purchase_clearing (a liability) and material_issue debits WIP (an asset, where
+// the cost carries forward rather than being expensed) -- crediting those back
+// would understate the payable / the WIP cost instead of the expense.
+[$prRel, ] = inv_post_allowance_release($co, $fy, $saleTxn, $item, 'purchase_return', 'out', 10.0, 20.0, date('Y-m-d'), $uid, 999, 100.0);
+[$miRel, ] = inv_post_allowance_release($co, $fy, $saleTxn, $item, 'material_issue', 'out', 10.0, 20.0, date('Y-m-d'), $uid, 999, 100.0);
+ok('S34', 'No release into non-expense accounts (purchase_return -> clearing, material_issue -> WIP)',
+   abs($prRel) < 0.005 && abs($miRel) < 0.005, "purchase_return=$prRel material_issue=$miRel");
 
 // ---------------------------------------------------------------------------
 // cleanup

@@ -757,18 +757,33 @@ function inv_nrv_assessment_columns_ready(): bool
  * The allowance currently standing against an item: everything written down,
  * less what has been reversed (NRV recovered) and released (stock left).
  * Floored at zero — a negative standing allowance is meaningless.
+ *
+ * $postedOnly restricts the sum to rows that actually reached the GL (a
+ * voucher_id). A write-down whose ledgers were unmapped is still recorded in
+ * the subledger with voucher_id NULL, so it counts toward the SUBLEDGER
+ * allowance (and so toward prior_write_down on the next assessment) but there
+ * is no credit balance in the allowance ledger to draw on. Anything that POSTS
+ * against the allowance must therefore ask for the posted-only figure, or it
+ * would debit an allowance the GL never had.
  */
-function inv_standing_allowance(int $companyId, int $itemId): float
+function inv_standing_allowance(int $companyId, int $itemId, bool $postedOnly = false): float
 {
     if (!table_exists('inventory_nrv_assessments')) {
         return 0.0;
     }
-    $sql = inv_nrv_assessment_columns_ready()
-        ? 'SELECT COALESCE(SUM(write_down), 0) - COALESCE(SUM(reversal), 0) - COALESCE(SUM(release_amount), 0)
-           FROM inventory_nrv_assessments
-           WHERE company_id = :cid AND item_id = :iid AND status = \'active\''
-        : 'SELECT COALESCE(SUM(write_down), 0) - COALESCE(SUM(reversal), 0)
-           FROM inventory_nrv_assessments WHERE company_id = :cid AND item_id = :iid';
+    if (!inv_nrv_assessment_columns_ready()) {
+        $legacy = db()->prepare(
+            'SELECT COALESCE(SUM(write_down), 0) - COALESCE(SUM(reversal), 0)
+             FROM inventory_nrv_assessments WHERE company_id = :cid AND item_id = :iid'
+        );
+        $legacy->execute(['cid' => $companyId, 'iid' => $itemId]);
+
+        return max(0.0, inv_round_money((float) $legacy->fetchColumn()));
+    }
+    $sql = 'SELECT COALESCE(SUM(write_down), 0) - COALESCE(SUM(reversal), 0) - COALESCE(SUM(release_amount), 0)
+            FROM inventory_nrv_assessments
+            WHERE company_id = :cid AND item_id = :iid AND status = \'active\''
+        . ($postedOnly ? ' AND voucher_id IS NOT NULL' : '');
     $stmt = db()->prepare($sql);
     $stmt->execute(['cid' => $companyId, 'iid' => $itemId]);
 
@@ -783,17 +798,35 @@ function inv_standing_allowance(int $companyId, int $itemId): float
  *     release = standing_allowance * (qty_issued / qty_on_hand_before_issue)
  * Capped at the standing allowance, and the whole of it once the last unit
  * leaves (so nothing can be stranded by rounding).
+ *
+ * $issueValue is the cost ACTUALLY drawn from the cost layers for those units,
+ * and hard-caps the release. The pro-rata share above is a quantity average,
+ * but FIFO/specific issue real layers: selling the cheapest layer draws little
+ * cost while a quantity-proportional release would give back an average-priced
+ * slice of the allowance — crediting the expense by MORE than the movement
+ * debited it and turning the sale's net expense negative. IAS 2.34 makes the
+ * expense the written-down carrying amount of the units sold, which is floored
+ * at zero, so the release can never exceed the cost drawn. Pass 0.0/negative to
+ * skip the cap (callers that have no cost figure).
  */
-function inv_allowance_release_for_issue(float $standingAllowance, float $qtyIssued, float $qtyOnHandBefore): float
-{
+function inv_allowance_release_for_issue(
+    float $standingAllowance,
+    float $qtyIssued,
+    float $qtyOnHandBefore,
+    float $issueValue = -1.0
+): float {
     if ($standingAllowance <= INV_EPSILON || $qtyIssued <= INV_EPSILON || $qtyOnHandBefore <= INV_EPSILON) {
         return 0.0;
     }
-    if ($qtyIssued >= $qtyOnHandBefore - INV_EPSILON) {
-        return inv_round_money($standingAllowance); // last of the stock: release it all
+    $release = ($qtyIssued >= $qtyOnHandBefore - INV_EPSILON)
+        ? $standingAllowance // last of the stock: release it all, strand nothing
+        : min($standingAllowance, $standingAllowance * ($qtyIssued / $qtyOnHandBefore));
+
+    if ($issueValue >= 0.0) {
+        $release = min($release, $issueValue);
     }
 
-    return inv_round_money(min($standingAllowance, $standingAllowance * ($qtyIssued / $qtyOnHandBefore)));
+    return max(0.0, inv_round_money($release));
 }
 
 /**
@@ -817,7 +850,9 @@ function inv_post_allowance_release(
     float $qtyIssued,
     float $qtyOnHandBefore,
     string $date,
-    int $userId
+    int $userId,
+    int $movementVoucherId = 0,
+    float $issueValue = -1.0
 ): array {
     if (!inv_nrv_assessment_columns_ready() || inv_movement_is_location_only($type)) {
         return [0.0, 0];
@@ -826,14 +861,32 @@ function inv_post_allowance_release(
     if (in_array($type, ['nrv_write_down', 'nrv_reversal'], true) || $direction !== 'out') {
         return [0.0, 0];
     }
+    // The release exists to credit back the expense the MOVEMENT debited. If the
+    // movement posted no voucher (unmapped ledgers), there is no expense to credit
+    // back: releasing anyway would credit COGS for stock whose cost was never
+    // debited to it, leaving that expense with a credit balance.
+    if ($movementVoucherId <= 0) {
+        return [0.0, 0];
+    }
     $plan = inv_movement_posting_plan($type, $direction);
     if ($plan === null) {
         return [0.0, 0];
     }
+    // Only ever release into a genuine EXPENSE. Other outward movements debit a
+    // balance-sheet account — purchase_return debits purchase_clearing (a
+    // liability), material_issue debits WIP (an asset, where the cost carries
+    // forward rather than being expensed) — and crediting those back would
+    // understate the payable / the WIP cost instead of the expense. The allowance
+    // simply stays standing for those, which is conservative and self-correcting.
+    if (!in_array($plan['debit'], ['cogs', 'inventory_loss'], true)) {
+        return [0.0, 0];
+    }
 
     $itemId = (int) $item['id'];
-    $standing = inv_standing_allowance($companyId, $itemId);
-    $release = inv_allowance_release_for_issue($standing, $qtyIssued, $qtyOnHandBefore);
+    // Posted-only: we are about to DEBIT the allowance ledger, so we may only draw
+    // on allowance that was actually CREDITED to it (see inv_standing_allowance).
+    $standing = inv_standing_allowance($companyId, $itemId, true);
+    $release = inv_allowance_release_for_issue($standing, $qtyIssued, $qtyOnHandBefore, $issueValue);
     if ($release <= 0) {
         return [0.0, 0];
     }
@@ -907,7 +960,7 @@ function inv_void_allowance_rows_for_txn(int $companyId, int $txnId, ?int $fisca
     $date = $date ?? date('Y-m-d');
 
     $rows = db()->prepare(
-        'SELECT id, voucher_id, write_down, reversal, release_amount
+        'SELECT id, item_id, voucher_id, write_down, reversal, release_amount
          FROM inventory_nrv_assessments
          WHERE company_id = :cid AND source_txn_id = :txn AND status = \'active\''
     );
@@ -915,6 +968,26 @@ function inv_void_allowance_rows_for_txn(int $companyId, int $txnId, ?int $fisca
     $rows = $rows->fetchAll(PDO::FETCH_ASSOC);
     if ($rows === []) {
         return [0, 0.0];
+    }
+
+    // An allowance that has already been (partly) RELEASED cannot be unwound.
+    // Release rows hang off the SALE that consumed them, not off this write-down,
+    // so voiding this row would leave them standing while the caller reverses the
+    // write-down voucher in FULL — handing back allowance that was already spent.
+    // The contra-asset would end up with a net DEBIT balance (inventory carried
+    // ABOVE cost) and the expense credited by the release would never be
+    // re-recognised. Refuse instead, and let the user reverse the sale first.
+    foreach ($rows as $row) {
+        $raised = (float) $row['write_down'] - (float) $row['reversal'];
+        if ($raised <= INV_EPSILON) {
+            continue;
+        }
+        $stillStanding = inv_standing_allowance($companyId, (int) $row['item_id']);
+        if ($raised > $stillStanding + INV_EPSILON) {
+            throw new RuntimeException(
+                'ALLOWANCE_CONSUMED:' . inv_round_money($raised - $stillStanding)
+            );
+        }
     }
 
     $net = 0.0;
