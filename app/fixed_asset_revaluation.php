@@ -23,6 +23,28 @@ function fa_revaluation_repair_database(): void
         }
     }
 
+    // FIXED ASSET CLASS MEASUREMENT MODELS START
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS asset_class_measurement_models (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            company_id INT UNSIGNED NOT NULL,
+            asset_class VARCHAR(40) NOT NULL,
+            measurement_model VARCHAR(24) NOT NULL DEFAULT 'cost',
+            active_market_confirmed TINYINT(1) NOT NULL DEFAULT 0,
+            effective_date DATE NOT NULL,
+            policy_note TEXT DEFAULT NULL,
+            approved_by INT UNSIGNED DEFAULT NULL,
+            approved_at DATETIME DEFAULT NULL,
+            created_by INT UNSIGNED NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_asset_class_measurement_model (company_id, asset_class),
+            KEY idx_asset_class_measurement_model (company_id, measurement_model, asset_class)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+    // FIXED ASSET CLASS MEASUREMENT MODELS END
+
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS asset_revaluation_batches (
             id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -77,7 +99,227 @@ function fa_revaluation_repair_database(): void
             KEY idx_asset_revaluation_line_asset (asset_id, batch_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     ");
+
+    // Seed a cost model for every company/class, then retain approved historical revaluations.
+    $seedModel = $pdo->prepare("
+        INSERT IGNORE INTO asset_class_measurement_models
+            (company_id, asset_class, measurement_model, active_market_confirmed,
+             effective_date, policy_note, approved_by, approved_at, created_by)
+        SELECT id, :asset_class, 'cost', 0, CURDATE(),
+               'Default cost model created during system upgrade.', NULL, NULL, 0
+        FROM companies
+    ");
+    foreach (['ppe', 'intangible', 'rou', 'investment_property', 'cwip'] as $assetClass) {
+        $seedModel->execute(['asset_class' => $assetClass]);
+    }
+
+    $pdo->exec("
+        UPDATE asset_class_measurement_models m
+        SET m.measurement_model = 'revaluation',
+            m.active_market_confirmed = CASE WHEN m.asset_class = 'intangible' THEN 1 ELSE m.active_market_confirmed END,
+            m.policy_note = CASE
+                WHEN m.policy_note IS NULL OR m.policy_note = '' OR m.policy_note LIKE 'Default cost model%'
+                THEN 'Revaluation model retained from existing approved revaluation history.'
+                ELSE m.policy_note
+            END
+        WHERE m.asset_class IN ('ppe', 'intangible', 'investment_property')
+          AND (
+                EXISTS (
+                    SELECT 1 FROM asset_revaluation_batches b
+                    WHERE b.company_id = m.company_id
+                      AND b.asset_class = m.asset_class
+                      AND b.status = 'approved'
+                )
+                OR EXISTS (
+                    SELECT 1 FROM fixed_assets fa
+                    WHERE fa.company_id = m.company_id
+                      AND fa.asset_class = m.asset_class
+                      AND (fa.last_revaluation_date IS NOT NULL
+                           OR ABS(COALESCE(fa.revaluation_reserve, 0)) >= 0.005
+                           OR ABS(COALESCE(fa.revaluation_loss_balance, 0)) >= 0.005)
+                )
+          )
+    ");
 }
+
+// FIXED ASSET CLASS MEASUREMENT MODEL FUNCTIONS START
+function fa_measurement_model_classes(): array
+{
+    return [
+        'ppe' => 'Property, Plant & Equipment',
+        'intangible' => 'Intangible assets',
+        'rou' => 'Right-of-Use assets',
+        'investment_property' => 'Investment property',
+        'cwip' => 'Capital Work-in-Progress',
+    ];
+}
+
+function fa_measurement_model_options(): array
+{
+    return [
+        'cost' => 'Cost model',
+        'revaluation' => 'Revaluation model',
+    ];
+}
+
+function fa_measurement_model_policy(
+    string $assetClass,
+    string $measurementModel,
+    bool $activeMarketConfirmed = false
+): array {
+    if (!isset(fa_measurement_model_classes()[$assetClass])) {
+        return ['allowed' => false, 'message' => 'Unknown asset class.'];
+    }
+    if (!isset(fa_measurement_model_options()[$measurementModel])) {
+        return ['allowed' => false, 'message' => 'Choose the cost model or revaluation model.'];
+    }
+    if ($measurementModel === 'cost') {
+        return ['allowed' => true, 'message' => 'Assets remain at cost less accumulated depreciation and impairment.'];
+    }
+    if (!in_array($assetClass, ['ppe', 'intangible', 'investment_property'], true)) {
+        return [
+            'allowed' => false,
+            'message' => 'The revaluation model is not available for this asset class in this workflow.',
+        ];
+    }
+    if ($assetClass === 'intangible' && !$activeMarketConfirmed) {
+        return [
+            'allowed' => false,
+            'message' => 'An active market must be confirmed before intangible assets can use the revaluation model.',
+        ];
+    }
+
+    return [
+        'allowed' => true,
+        'message' => 'Every eligible asset in the class must be revalued consistently and kept sufficiently current.',
+    ];
+}
+
+function fa_measurement_model_label(array $row): string
+{
+    $model = (string) ($row['measurement_model'] ?? 'cost');
+    return fa_measurement_model_options()[$model] ?? ucfirst($model) . ' model';
+}
+
+function fa_class_measurement_model(int $companyId, string $assetClass): array
+{
+    $stmt = db()->prepare('SELECT * FROM asset_class_measurement_models WHERE company_id = :cid AND asset_class = :class LIMIT 1');
+    $stmt->execute(['cid' => $companyId, 'class' => $assetClass]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($row) {
+        return $row;
+    }
+
+    return [
+        'company_id' => $companyId,
+        'asset_class' => $assetClass,
+        'measurement_model' => 'cost',
+        'active_market_confirmed' => 0,
+        'effective_date' => date('Y-m-d'),
+        'policy_note' => 'Default cost model.',
+        'approved_by' => null,
+        'approved_at' => null,
+    ];
+}
+
+function fa_class_measurement_models(int $companyId): array
+{
+    $rows = [];
+    foreach (array_keys(fa_measurement_model_classes()) as $assetClass) {
+        $rows[$assetClass] = fa_class_measurement_model($companyId, $assetClass);
+    }
+    return $rows;
+}
+
+function fa_revaluation_model_classes(int $companyId): array
+{
+    $classes = [];
+    foreach (fa_class_measurement_models($companyId) as $assetClass => $row) {
+        $policy = fa_measurement_model_policy(
+            $assetClass,
+            (string) ($row['measurement_model'] ?? 'cost'),
+            (int) ($row['active_market_confirmed'] ?? 0) === 1
+        );
+        if ((string) ($row['measurement_model'] ?? 'cost') === 'revaluation' && $policy['allowed']) {
+            $classes[] = $assetClass;
+        }
+    }
+    return $classes;
+}
+
+function fa_assert_revaluation_model(int $companyId, string $assetClass): array
+{
+    $row = fa_class_measurement_model($companyId, $assetClass);
+    if ((string) ($row['measurement_model'] ?? 'cost') !== 'revaluation') {
+        throw new RuntimeException(
+            (fa_measurement_model_classes()[$assetClass] ?? $assetClass) .
+            ' currently uses the Cost model. Change the whole class to the Revaluation model first.'
+        );
+    }
+
+    $policy = fa_measurement_model_policy(
+        $assetClass,
+        'revaluation',
+        (int) ($row['active_market_confirmed'] ?? 0) === 1
+    );
+    if (!$policy['allowed']) {
+        throw new RuntimeException((string) $policy['message']);
+    }
+
+    return $row;
+}
+
+function fa_save_class_measurement_model(
+    int $companyId,
+    string $assetClass,
+    string $measurementModel,
+    bool $activeMarketConfirmed,
+    string $effectiveDate,
+    string $policyNote,
+    int $userId
+): void {
+    $policy = fa_measurement_model_policy($assetClass, $measurementModel, $activeMarketConfirmed);
+    if (!$policy['allowed']) {
+        throw new RuntimeException((string) $policy['message']);
+    }
+    if ($effectiveDate === '' || strtotime($effectiveDate) === false) {
+        throw new RuntimeException('A valid effective date is required.');
+    }
+    if (trim($policyNote) === '') {
+        throw new RuntimeException('A policy note or reason is required.');
+    }
+
+    $current = fa_class_measurement_model($companyId, $assetClass);
+    if ($measurementModel === 'cost' && (string) ($current['measurement_model'] ?? 'cost') === 'revaluation') {
+        $pending = db()->prepare("\n            SELECT COUNT(*)\n            FROM asset_revaluation_batches\n            WHERE company_id = :cid AND asset_class = :class AND status IN ('draft', 'submitted')\n        ");
+        $pending->execute(['cid' => $companyId, 'class' => $assetClass]);
+        if ((int) $pending->fetchColumn() > 0) {
+            throw new RuntimeException('Cancel or complete the open revaluation batches before changing this class to the cost model.');
+        }
+
+        $history = db()->prepare("\n            SELECT COUNT(*)\n            FROM fixed_assets\n            WHERE company_id = :cid AND asset_class = :class\n              AND (last_revaluation_date IS NOT NULL\n                   OR ABS(COALESCE(revaluation_reserve, 0)) >= 0.005\n                   OR ABS(COALESCE(revaluation_loss_balance, 0)) >= 0.005)\n        ");
+        $history->execute(['cid' => $companyId, 'class' => $assetClass]);
+        if ((int) $history->fetchColumn() > 0) {
+            throw new RuntimeException(
+                'This class already has approved revaluation history. A simple switch back to the cost model is blocked to protect historical values.'
+            );
+        }
+    }
+
+    $activeMarketValue = $assetClass === 'intangible' && $measurementModel === 'revaluation' && $activeMarketConfirmed ? 1 : 0;
+    db()->prepare("\n        INSERT INTO asset_class_measurement_models\n            (company_id, asset_class, measurement_model, active_market_confirmed,\n             effective_date, policy_note, approved_by, approved_at, created_by)\n        VALUES\n            (:cid, :class, :model, :active_market, :effective_date, :policy_note, :uid, NOW(), :created_by)\n        ON DUPLICATE KEY UPDATE\n            measurement_model = VALUES(measurement_model),\n            active_market_confirmed = VALUES(active_market_confirmed),\n            effective_date = VALUES(effective_date),\n            policy_note = VALUES(policy_note),\n            approved_by = VALUES(approved_by),\n            approved_at = NOW()\n    ")->execute([
+        'cid' => $companyId,
+        'class' => $assetClass,
+        'model' => $measurementModel,
+        'active_market' => $activeMarketValue,
+        'effective_date' => date('Y-m-d', strtotime($effectiveDate)),
+        'policy_note' => trim($policyNote),
+        'uid' => $userId,
+        'created_by' => $userId,
+    ]);
+}
+// FIXED ASSET CLASS MEASUREMENT MODEL FUNCTIONS END
 
 function fa_revaluation_methods(): array
 {
@@ -146,6 +388,12 @@ function fa_revaluation_eligible_assets(int $companyId, string $assetClass): arr
 {
     $allowed = ['ppe', 'intangible', 'investment_property'];
     if (!in_array($assetClass, $allowed, true)) {
+        return [];
+    }
+
+    try {
+        fa_assert_revaluation_model($companyId, $assetClass);
+    } catch (Throwable $e) {
         return [];
     }
 
@@ -255,6 +503,9 @@ function fa_approve_revaluation_batch(
         if ((string) $batch['status'] !== 'submitted') {
             throw new RuntimeException('Only a submitted batch can be approved.');
         }
+
+        // Re-check the class policy at the final posting point.
+        fa_assert_revaluation_model($companyId, (string) $batch['asset_class']);
 
         $lines = fa_revaluation_lines($batchId, $companyId);
         if ($lines === []) {

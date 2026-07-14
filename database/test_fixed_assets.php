@@ -8,6 +8,7 @@ declare(strict_types=1);
  */
 
 require __DIR__ . '/../app/fixed_asset_engine.php';
+require_once __DIR__ . '/../app/fixed_asset_revaluation.php';
 
 $pass = 0;
 $fail = 0;
@@ -94,6 +95,20 @@ $revaluedAsset = [
     'revaluation_life_months' => 60,
 ];
 check('Future depreciation uses approved revaluation base', 18000.0, fa_asset_monthly_charge($revaluedAsset));
+
+echo "== IAS 16/38 class measurement model controls ==\n";
+$ppeCostPolicy = fa_measurement_model_policy('ppe', 'cost', false);
+check('PPE cost model is allowed', true, $ppeCostPolicy['allowed']);
+$ppeRevaluationPolicy = fa_measurement_model_policy('ppe', 'revaluation', false);
+check('PPE revaluation model is allowed', true, $ppeRevaluationPolicy['allowed']);
+$intangibleNoMarket = fa_measurement_model_policy('intangible', 'revaluation', false);
+check('Intangible revaluation is blocked without active market', false, $intangibleNoMarket['allowed']);
+$intangibleWithMarket = fa_measurement_model_policy('intangible', 'revaluation', true);
+check('Intangible revaluation is allowed with active market', true, $intangibleWithMarket['allowed']);
+$rouRevaluationPolicy = fa_measurement_model_policy('rou', 'revaluation', false);
+check('ROU revaluation model is blocked', false, $rouRevaluationPolicy['allowed']);
+$cwipRevaluationPolicy = fa_measurement_model_policy('cwip', 'revaluation', false);
+check('CWIP revaluation model is blocked', false, $cwipRevaluationPolicy['allowed']);
 
 echo "== Extras: diminishing balance & units of production ==\n";
 check('Diminishing 20% on 100000', 20000.0, fa_diminishing_balance(100000, 0, 20));

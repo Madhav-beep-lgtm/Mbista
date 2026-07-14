@@ -46,7 +46,9 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     // These shared accounting links are identical for admin, staff and client books.
     ['Inventory & Manufacturing', 'admin/accounting-inventory.php', 'layers', $headerScript === 'accounting-inventory.php'],
     ['Fixed Asset Register', 'admin/fixed-assets.php', 'companies',
-        $headerScript === 'fixed-assets.php' && !in_array($headerView, ['revaluation', 'leases', 'mapping', 'categories'], true)],
+        $headerScript === 'fixed-assets.php' && !in_array($headerView, ['models', 'revaluation', 'leases', 'mapping', 'categories'], true)],
+    ['Asset Measurement Models', 'admin/fixed-assets.php?view=models', 'settings',
+        $headerScript === 'fixed-assets.php' && $headerView === 'models'],
     ['Asset Revaluation', 'admin/fixed-assets.php?view=revaluation', 'wallet',
         $headerScript === 'fixed-assets.php' && $headerView === 'revaluation'],
     ['IFRS 16 Leases', 'admin/fixed-assets.php?view=leases', 'contracts',
@@ -127,7 +129,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
     <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260714r1">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260714m1">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">

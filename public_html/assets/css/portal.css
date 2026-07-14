@@ -6020,3 +6020,95 @@ body.theme-dark.fixed-assets-page .fa-approval-card {
 }
 
 /* SHARED FIXED ASSET REVALUATION WORKFLOW END */
+
+
+/* FIXED ASSET MEASUREMENT MODELS START */
+.fa-model-hero,
+.fa-model-card-head,
+.fa-model-meta,
+.fa-revaluation-policy-summary .mbw-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+.fa-model-hero { margin-bottom: 18px; }
+.fa-model-hero h2,
+.fa-model-card h2 { margin: 4px 0 6px; }
+.fa-policy-callout {
+    min-width: 250px;
+    padding: 14px 16px;
+    border: 1px solid var(--mbw-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--mbw-accent) 9%, var(--mbw-surface));
+}
+.fa-policy-callout strong,
+.fa-policy-callout span { display: block; }
+.fa-policy-callout span { margin-top: 4px; color: var(--mbw-muted); font-size: 12px; }
+.fa-model-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+.fa-model-card { border-top: 3px solid var(--mbw-border); }
+.fa-model-card.is-revaluation { border-top-color: var(--mbw-accent); }
+.fa-model-card.is-cost { border-top-color: var(--mbw-muted); }
+.fa-checkbox-field {
+    display: flex !important;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--mbw-border);
+    border-radius: 10px;
+    background: var(--mbw-surface-soft);
+}
+.fa-checkbox-field input { width: auto; margin-top: 3px; }
+.fa-checkbox-field span,
+.fa-checkbox-field strong,
+.fa-checkbox-field small { display: block; }
+.fa-checkbox-field small { margin-top: 3px; color: var(--mbw-muted); }
+.fa-model-meta { border-top: 1px solid var(--mbw-border); padding-top: 12px; }
+.fa-model-meta span { color: var(--mbw-muted); font-size: 12px; }
+.fa-model-rules { margin-top: 18px; }
+.fa-rule-grid,
+.fa-policy-status-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+.fa-rule-grid > div,
+.fa-policy-status {
+    padding: 13px;
+    border: 1px solid var(--mbw-border);
+    border-radius: 10px;
+    background: var(--mbw-surface-soft);
+}
+.fa-rule-grid strong,
+.fa-rule-grid span,
+.fa-policy-status strong,
+.fa-policy-status span,
+.fa-policy-status small { display: block; }
+.fa-rule-grid span,
+.fa-policy-status span,
+.fa-policy-status small { margin-top: 4px; color: var(--mbw-muted); font-size: 12px; }
+.fa-policy-status.is-enabled { border-color: color-mix(in srgb, var(--mbw-accent) 48%, var(--mbw-border)); }
+.fa-policy-status.is-blocked { opacity: .8; }
+.fa-empty-policy {
+    display: grid;
+    gap: 8px;
+    justify-items: start;
+    padding: 16px;
+    border: 1px dashed var(--mbw-border);
+    border-radius: 12px;
+    background: var(--mbw-surface-soft);
+}
+@media (max-width: 900px) {
+    .fa-model-grid,
+    .fa-rule-grid,
+    .fa-policy-status-grid { grid-template-columns: 1fr; }
+    .fa-model-hero,
+    .fa-model-card-head,
+    .fa-model-meta { align-items: stretch; flex-direction: column; }
+    .fa-policy-callout { min-width: 0; }
+}
+/* FIXED ASSET MEASUREMENT MODELS END */

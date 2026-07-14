@@ -31,6 +31,7 @@ $ledgers = $ledgerStmt->fetchAll(PDO::FETCH_ASSOC);
 $activeCategoriesStmt = db()->prepare('SELECT * FROM asset_categories WHERE company_id = :cid AND is_active = 1 ORDER BY name ASC');
 $activeCategoriesStmt->execute(['cid' => $companyId]);
 $activeCategories = $activeCategoriesStmt->fetchAll(PDO::FETCH_ASSOC);
+$classMeasurementModels = fa_class_measurement_models($companyId);
 
 /** Asset scoped to the current company, or null. */
 function fa_company_asset(int $assetId, int $companyId): ?array
@@ -398,6 +399,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) ($_POST['asset_id'] ?? 0));
     }
 
+    if ($action === 'save_measurement_model') {
+        require_permission('accounting', 'edit');
+
+        $assetClass = (string) ($_POST['asset_class'] ?? '');
+        $measurementModel = (string) ($_POST['measurement_model'] ?? 'cost');
+        $activeMarketConfirmed = isset($_POST['active_market_confirmed']);
+        $effectiveDate = trim((string) ($_POST['effective_date'] ?? ''));
+        $policyNote = trim((string) ($_POST['policy_note'] ?? ''));
+
+        try {
+            fa_save_class_measurement_model(
+                $companyId,
+                $assetClass,
+                $measurementModel,
+                $activeMarketConfirmed,
+                $effectiveDate,
+                $policyNote,
+                $userId
+            );
+            security_event(
+                'asset_measurement_model_saved',
+                'success',
+                'Saved ' . $measurementModel . ' model for asset class ' . $assetClass . '.',
+                $companyId,
+                $userId
+            );
+            log_activity(
+                'asset_measurement_model',
+                $companyId,
+                'updated',
+                'Asset class ' . $assetClass . ' changed to ' . $measurementModel . ' model.',
+                $userId
+            );
+            flash('success', (fa_measurement_model_classes()[$assetClass] ?? $assetClass) . ' now uses the ' . fa_measurement_model_options()[$measurementModel] . '.');
+        } catch (Throwable $e) {
+            flash('error', 'Could not save measurement model: ' . $e->getMessage());
+        }
+        redirect('admin/fixed-assets.php?view=models');
+    }
+
     if ($action === 'create_revaluation_batch') {
         require_permission('accounting', 'create');
 
@@ -418,6 +459,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ) {
             flash('error', 'Asset class, date, valuer, valuation method and reason are required.');
             redirect('admin/fixed-assets.php?view=revaluation');
+        }
+
+        try {
+            fa_assert_revaluation_model($companyId, $assetClass);
+        } catch (Throwable $e) {
+            flash('error', $e->getMessage());
+            redirect('admin/fixed-assets.php?view=models');
         }
 
         $eligibleAssets = fa_revaluation_eligible_assets($companyId, $assetClass);
@@ -529,6 +577,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$batch || (string) $batch['status'] !== 'draft') {
             flash('error', 'Only a draft revaluation batch can be edited.');
             redirect('admin/fixed-assets.php?view=revaluation');
+        }
+        try {
+            fa_assert_revaluation_model($companyId, (string) $batch['asset_class']);
+        } catch (Throwable $e) {
+            flash('error', $e->getMessage());
+            redirect('admin/fixed-assets.php?view=models');
         }
 
         $revaluationDate = trim((string) ($_POST['revaluation_date'] ?? ''));
@@ -644,6 +698,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$batch || (string) $batch['status'] !== 'draft' || $lines === []) {
             flash('error', 'Only a complete draft batch can be submitted.');
             redirect('admin/fixed-assets.php?view=revaluation');
+        }
+        try {
+            fa_assert_revaluation_model($companyId, (string) $batch['asset_class']);
+        } catch (Throwable $e) {
+            flash('error', $e->getMessage());
+            redirect('admin/fixed-assets.php?view=models');
         }
 
         foreach ($lines as $line) {
@@ -1018,7 +1078,7 @@ $faView = (string) ($_GET['view'] ?? 'register');
 $detailAsset = ctype_digit($faView) ? fa_company_asset((int) $faView, $companyId) : null;
 if ($detailAsset) {
     $faView = 'detail';
-} elseif (!in_array($faView, ['register', 'mapping', 'leases', 'categories', 'revaluation'], true)) {
+} elseif (!in_array($faView, ['register', 'models', 'mapping', 'leases', 'categories', 'revaluation'], true)) {
     $faView = 'register';
 }
 
@@ -1044,13 +1104,100 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <nav class="mbw-tabbar" aria-label="Fixed asset workspace" style="margin:6px 0 16px">
     <a class="<?= in_array($faView, ['register', 'detail'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?>Register</a>
+    <a class="<?= $faView === 'models' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=models')) ?>"><?= icon('settings') ?>Measurement Models</a>
     <a class="<?= $faView === 'revaluation' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=revaluation')) ?>"><?= icon('wallet') ?>Revaluation</a>
     <a class="<?= $faView === 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=leases')) ?>"><?= icon('contracts') ?>Leases (IFRS 16)</a>
     <a class="<?= $faView === 'mapping' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=mapping')) ?>"><?= icon('accounting') ?>Ledger Mapping</a>
     <a class="<?= $faView === 'categories' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=categories')) ?>"><?= icon('layers') ?>Categories</a>
 </nav>
 
-<?php if ($faView === 'revaluation'): ?>
+<?php if ($faView === 'models'): ?>
+    <?php // FIXED ASSET MEASUREMENT MODEL PAGE START ?>
+    <section class="mbw-card fa-model-hero">
+        <div>
+            <span class="fa-eyebrow">IAS 16 and IAS 38 policy control</span>
+            <h2>Cost model or revaluation model</h2>
+            <p>Select one model for the complete asset class. The selection applies equally in admin, staff and client accounting because all portals use this shared page.</p>
+        </div>
+        <div class="fa-policy-callout">
+            <strong>Class-wide control</strong>
+            <span>Individual assets cannot use a different model from their class.</span>
+        </div>
+    </section>
+
+    <div class="fa-model-grid">
+        <?php foreach ($assetClasses as $classKey => $classLabel): ?>
+            <?php
+            $modelRow = $classMeasurementModels[$classKey] ?? fa_class_measurement_model($companyId, $classKey);
+            $currentModel = (string) ($modelRow['measurement_model'] ?? 'cost');
+            $activeMarket = (int) ($modelRow['active_market_confirmed'] ?? 0) === 1;
+            $revaluationAllowedForClass = in_array($classKey, ['ppe', 'intangible', 'investment_property'], true);
+            $lockedToCost = !$revaluationAllowedForClass;
+            ?>
+            <section class="mbw-card fa-model-card <?= $currentModel === 'revaluation' ? 'is-revaluation' : 'is-cost' ?>">
+                <div class="fa-model-card-head">
+                    <div>
+                        <span class="fa-eyebrow"><?= e($classKey) ?></span>
+                        <h2><?= e($classLabel) ?></h2>
+                    </div>
+                    <span class="mbw-pill <?= $currentModel === 'revaluation' ? 'tone-blue' : 'tone-gray' ?>">
+                        <?= e(fa_measurement_model_label($modelRow)) ?>
+                    </span>
+                </div>
+
+                <form method="post" class="workspace-form-grid">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="save_measurement_model">
+                    <input type="hidden" name="asset_class" value="<?= e($classKey) ?>">
+
+                    <label>Measurement model
+                        <select name="measurement_model" <?= $lockedToCost ? 'disabled' : '' ?>>
+                            <option value="cost" <?= $currentModel === 'cost' ? 'selected' : '' ?>>Cost model</option>
+                            <?php if (!$lockedToCost): ?>
+                                <option value="revaluation" <?= $currentModel === 'revaluation' ? 'selected' : '' ?>>Revaluation model</option>
+                            <?php endif; ?>
+                        </select>
+                        <?php if ($lockedToCost): ?>
+                            <input type="hidden" name="measurement_model" value="cost">
+                            <small>Revaluation is not available for this class in this workflow.</small>
+                        <?php endif; ?>
+                    </label>
+                    <label>Effective date
+                        <input type="date" name="effective_date" value="<?= e((string) ($modelRow['effective_date'] ?? date('Y-m-d'))) ?>" required>
+                    </label>
+
+                    <?php if ($classKey === 'intangible'): ?>
+                        <label class="fa-checkbox-field workspace-span-2">
+                            <input type="checkbox" name="active_market_confirmed" value="1" <?= $activeMarket ? 'checked' : '' ?>>
+                            <span><strong>Active market confirmed</strong><small>Required before the revaluation model can be selected for intangible assets.</small></span>
+                        </label>
+                    <?php endif; ?>
+
+                    <label class="workspace-span-2">Policy note or reason
+                        <textarea name="policy_note" rows="3" required><?= e((string) ($modelRow['policy_note'] ?? '')) ?></textarea>
+                    </label>
+
+                    <div class="workspace-span-2 fa-model-meta">
+                        <span>Last approved: <?= e((string) ($modelRow['approved_at'] ?? 'Not yet approved')) ?></span>
+                        <button type="submit"><?= icon('settings') ?> Save class model</button>
+                    </div>
+                </form>
+            </section>
+        <?php endforeach; ?>
+    </div>
+
+    <section class="mbw-card fa-model-rules">
+        <div class="mbw-card-head"><h2>Enforced rules</h2></div>
+        <div class="fa-rule-grid">
+            <div><strong>Cost model</strong><span>Cost less accumulated depreciation and impairment. Revaluation batches are blocked.</span></div>
+            <div><strong>Revaluation model</strong><span>All eligible assets in the selected class enter the same class-wide batch.</span></div>
+            <div><strong>Historical protection</strong><span>Approved revaluations are preserved. A simple switch back to cost is blocked.</span></div>
+            <div><strong>Future depreciation</strong><span>Approved fair value, revised residual value and revised useful life apply prospectively.</span></div>
+        </div>
+    </section>
+    <?php // FIXED ASSET MEASUREMENT MODEL PAGE END ?>
+
+<?php elseif ($faView === 'revaluation'): ?>
     <?php
     $revaluationBatchId = (int) ($_GET['batch_id'] ?? 0);
     $revaluationBatch = $revaluationBatchId > 0
@@ -1060,8 +1207,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         ? fa_revaluation_lines($revaluationBatchId, $companyId)
         : [];
     $revaluationBatches = fa_revaluation_batches($companyId);
+    $revaluationEnabledClasses = fa_revaluation_model_classes($companyId);
 
-    $preselectedClass = 'ppe';
+    $preselectedClass = $revaluationEnabledClasses[0] ?? 'ppe';
     $preselectedAssetId = (int) ($_GET['asset_id'] ?? 0);
     if ($preselectedAssetId > 0) {
         $preselectedAsset = fa_company_asset($preselectedAssetId, $companyId);
@@ -1362,6 +1510,23 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endif; ?>
 
             <?php else: ?>
+                <section class="mbw-card fa-revaluation-policy-summary">
+                    <div class="mbw-card-head">
+                        <div><span class="fa-eyebrow">Measurement model check</span><h2>Class policy status</h2></div>
+                        <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=models')) ?>">Manage models</a>
+                    </div>
+                    <div class="fa-policy-status-grid">
+                        <?php foreach (['ppe', 'intangible', 'investment_property'] as $classKey): ?>
+                            <?php $modelRow = $classMeasurementModels[$classKey]; ?>
+                            <div class="fa-policy-status <?= in_array($classKey, $revaluationEnabledClasses, true) ? 'is-enabled' : 'is-blocked' ?>">
+                                <strong><?= e($assetClasses[$classKey]) ?></strong>
+                                <span><?= e(fa_measurement_model_label($modelRow)) ?></span>
+                                <small><?= in_array($classKey, $revaluationEnabledClasses, true) ? 'Revaluation batches allowed' : 'Revaluation batches blocked' ?></small>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </section>
+
                 <section class="mbw-card fa-new-batch-card">
                     <div class="mbw-card-head">
                         <div>
@@ -1371,13 +1536,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         </div>
                     </div>
 
+                    <?php if ($revaluationEnabledClasses === []): ?>
+                        <div class="fa-empty-policy workspace-span-2">
+                            <strong>No class currently uses the Revaluation model.</strong>
+                            <span>Open Measurement Models and change the required complete asset class first.</span>
+                            <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=models')) ?>">Open Measurement Models</a>
+                        </div>
+                    <?php else: ?>
                     <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <input type="hidden" name="action" value="create_revaluation_batch">
 
                         <label>Asset class
                             <select name="asset_class" required>
-                                <?php foreach (['ppe', 'intangible', 'investment_property'] as $classKey): ?>
+                                <?php foreach ($revaluationEnabledClasses as $classKey): ?>
                                     <option value="<?= e($classKey) ?>" <?= $preselectedClass === $classKey ? 'selected' : '' ?>>
                                         <?= e($assetClasses[$classKey]) ?>
                                     </option>
@@ -1411,6 +1583,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <button type="submit"><?= icon('wallet') ?> Create batch and load class assets</button>
                         </div>
                     </form>
+                    <?php endif; ?>
                 </section>
 
                 <section class="mbw-card">
@@ -1635,6 +1808,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="users-view-grid">
             <div class="card">
                 <p><strong>Class:</strong> <?= e($assetClasses[$detailAsset['asset_class']] ?? $detailAsset['asset_class']) ?></p>
+                <?php $detailModel = $classMeasurementModels[(string) $detailAsset['asset_class']] ?? fa_class_measurement_model($companyId, (string) $detailAsset['asset_class']); ?>
+                <p><strong>Measurement model:</strong> <span class="mbw-pill <?= (string) $detailModel['measurement_model'] === 'revaluation' ? 'tone-blue' : 'tone-gray' ?>"><?= e(fa_measurement_model_label($detailModel)) ?></span></p>
                 <p><strong>Method:</strong> <?= e($methods[$detailAsset['depreciation_method']] ?? $detailAsset['depreciation_method']) ?></p>
                 <p><strong>Cost:</strong> <?= e(site_currency_symbol()) ?><?= e(number_format((float) $detailAsset['cost'], 2)) ?></p>
                 <p><strong>Residual:</strong> <?= e(site_currency_symbol()) ?><?= e(number_format((float) $detailAsset['residual_value'], 2)) ?></p>
@@ -1766,12 +1941,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <section class="mbw-card">
         <div class="mbw-card-head"><h2>Asset Categories</h2></div>
         <div class="rc-table-scroll"><table class="rc-table">
-            <thead><tr><th>Name</th><th>Class</th><th>Default method</th><th class="align-right">Default life</th><th class="align-right">Default rate</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Class</th><th>Measurement model</th><th>Default method</th><th class="align-right">Default life</th><th class="align-right">Default rate</th><th>Status</th><th></th></tr></thead>
             <tbody>
                 <?php foreach ($categories as $c): ?>
                     <tr>
                         <td><?= e($c['name']) ?></td>
                         <td><?= e($assetClasses[$c['asset_class']] ?? $c['asset_class']) ?></td>
+                        <?php $categoryModel = $classMeasurementModels[(string) $c['asset_class']] ?? fa_class_measurement_model($companyId, (string) $c['asset_class']); ?>
+                        <td><span class="mbw-pill <?= (string) $categoryModel['measurement_model'] === 'revaluation' ? 'tone-blue' : 'tone-gray' ?>"><?= e(fa_measurement_model_label($categoryModel)) ?></span></td>
                         <td><span class="mbw-pill tone-gray"><?= e(str_replace('_', ' ', (string) $c['default_method'])) ?></span></td>
                         <td class="align-right"><?= e((string) (int) $c['default_life_months']) ?> mo</td>
                         <td class="align-right"><?= e(number_format((float) $c['default_rate_pct'], 3)) ?>%</td>
@@ -1786,7 +1963,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         </td>
                     </tr>
                 <?php endforeach; ?>
-                <?php if ($categories === []): ?><tr><td colspan="7" style="text-align:center;color:var(--mbw-muted)">No categories yet — add one above.</td></tr><?php endif; ?>
+                <?php if ($categories === []): ?><tr><td colspan="8" style="text-align:center;color:var(--mbw-muted)">No categories yet — add one above.</td></tr><?php endif; ?>
             </tbody>
         </table></div>
     </section>
@@ -1836,13 +2013,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
         </div>
         <div class="rc-table-scroll"><table class="rc-table">
-            <thead><tr><th>Code</th><th>Name</th><th>Class</th><th>Method</th><th class="align-right">Cost</th><th class="align-right">Accum. dep.</th><th class="align-right">Carrying</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Code</th><th>Name</th><th>Class</th><th>Model</th><th>Method</th><th class="align-right">Cost</th><th class="align-right">Accum. dep.</th><th class="align-right">Carrying</th><th>Status</th><th></th></tr></thead>
             <tbody>
                 <?php foreach ($assets as $a): ?>
                     <tr>
                         <td><?= e($a['asset_code']) ?></td>
                         <td><?= e($a['name']) ?></td>
                         <td><?= e($assetClasses[$a['asset_class']] ?? $a['asset_class']) ?></td>
+                        <?php $assetModel = $classMeasurementModels[(string) $a['asset_class']] ?? fa_class_measurement_model($companyId, (string) $a['asset_class']); ?>
+                        <td><span class="mbw-pill <?= (string) $assetModel['measurement_model'] === 'revaluation' ? 'tone-blue' : 'tone-gray' ?>"><?= e(fa_measurement_model_label($assetModel)) ?></span></td>
                         <td><span class="mbw-pill tone-gray"><?= e(str_replace('_', ' ', (string) $a['depreciation_method'])) ?></span></td>
                         <td class="align-right"><?= e(number_format((float) $a['cost'], 2)) ?></td>
                         <td class="align-right"><?= e(number_format((float) $a['accumulated_depreciation'], 2)) ?></td>
@@ -1851,7 +2030,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <td><div class="fa-row-actions"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=' . (int) $a['id'])) ?>">Open</a><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $a['id'])) ?>">Revalue</a></div></td>
                     </tr>
                 <?php endforeach; ?>
-                <?php if ($assets === []): ?><tr><td colspan="9" style="text-align:center;color:var(--mbw-muted)">No assets registered yet — add one above.</td></tr><?php endif; ?>
+                <?php if ($assets === []): ?><tr><td colspan="10" style="text-align:center;color:var(--mbw-muted)">No assets registered yet — add one above.</td></tr><?php endif; ?>
             </tbody>
         </table></div>
     </section>
