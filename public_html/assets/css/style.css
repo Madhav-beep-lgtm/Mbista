@@ -10449,3 +10449,234 @@ body.theme-dark .portal-selector-page form.card button[type="submit"]:hover {
 }
 
 /* SUPERADMIN PORTAL REDESIGN END */
+
+/* SUPERADMIN PORTAL COMPACT OVERRIDES START */
+
+/* Reduce unnecessary page height */
+.portal-selector-page {
+  min-height: auto;
+  padding: 18px 0 44px;
+}
+
+.portal-selector-page > .container {
+  width: min(100% - 32px, 1380px);
+}
+
+/* Reduce decorative circles */
+.portal-selector-page::before {
+  top: 45px;
+  right: -90px;
+  width: 260px;
+  height: 260px;
+  opacity: 0.55;
+}
+
+.portal-selector-page::after {
+  bottom: 30px;
+  left: -75px;
+  width: 190px;
+  height: 190px;
+  opacity: 0.5;
+}
+
+/* Compact public header on this page */
+body:has(.portal-selector-page) .site-header .nav-wrap {
+  min-height: 76px;
+}
+
+/* Compact hero */
+.portal-selector-page .hero-panel {
+  margin-bottom: 14px;
+}
+
+.portal-selector-page .hero-grid > div {
+  min-height: 184px;
+  padding: 22px 30px 24px;
+  border-radius: 16px;
+  box-shadow: 0 14px 34px rgba(6, 21, 47, 0.14);
+}
+
+/* Smaller hero decorations */
+.portal-selector-page .hero-grid > div::before {
+  top: -135px;
+  right: -115px;
+  width: 285px;
+  height: 285px;
+}
+
+.portal-selector-page .hero-grid > div::after {
+  right: 55px;
+  bottom: -150px;
+  width: 235px;
+  height: 235px;
+  border-width: 38px;
+}
+
+/* Smaller M.B. World logo */
+.portal-selector-page .mbw-logo-portal {
+  max-width: 148px;
+  max-height: 42px;
+  margin-bottom: 13px;
+  padding: 6px 9px;
+  border-radius: 8px;
+}
+
+/* Compact workflow badge */
+.portal-selector-page .kicker {
+  margin-bottom: 9px;
+  padding: 5px 10px;
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+}
+
+/* Proper internal-page heading size */
+.portal-selector-page .hero-panel h1 {
+  max-width: 720px;
+  font-size: clamp(24px, 2.15vw, 31px);
+  line-height: 1.16;
+  letter-spacing: -0.018em;
+}
+
+/* Compact description */
+.portal-selector-page .hero-panel p {
+  max-width: 720px;
+  margin-top: 9px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* Keep company cards visible on the first screen */
+.portal-selector-page .admin-grid {
+  gap: 14px;
+  margin-top: 14px !important;
+}
+
+/* Compact company cards */
+.portal-selector-page form.card {
+  min-height: 205px;
+  padding: 19px;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(13, 50, 101, 0.07);
+}
+
+.portal-selector-page form.card::before {
+  left: 18px;
+  right: 18px;
+  height: 2px;
+}
+
+.portal-selector-page form.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 13px 30px rgba(13, 50, 101, 0.11);
+}
+
+/* Compact card badge */
+.portal-selector-page form.card .badge {
+  margin-bottom: 13px;
+  padding: 5px 9px;
+  font-size: 9.5px;
+}
+
+/* Compact card heading */
+.portal-selector-page form.card h3 {
+  margin-bottom: 7px;
+  font-size: 16.5px;
+  line-height: 1.3;
+}
+
+/* Compact card text */
+.portal-selector-page form.card p {
+  margin-bottom: 8px;
+  font-size: 12.25px;
+  line-height: 1.5;
+}
+
+/* Compact PIN status */
+.portal-selector-page form.card p:last-of-type {
+  margin-top: 1px;
+  padding: 5px 9px;
+  font-size: 9.75px;
+}
+
+/* Compact action button */
+.portal-selector-page form.card button[type="submit"] {
+  min-height: 40px;
+  padding: 9px 14px;
+  border-radius: 9px;
+  font-size: 11.5px;
+}
+
+/* Dark theme remains compact */
+body.theme-dark .portal-selector-page .hero-grid > div {
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.26);
+}
+
+body.theme-dark .portal-selector-page form.card {
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2);
+}
+
+/* Tablet */
+@media (max-width: 900px) {
+  .portal-selector-page {
+    padding-top: 15px;
+  }
+
+  .portal-selector-page .hero-grid > div {
+    min-height: 170px;
+    padding: 20px 24px 22px;
+  }
+
+  .portal-selector-page .hero-panel h1 {
+    font-size: clamp(23px, 4vw, 29px);
+  }
+
+  .portal-selector-page form.card {
+    min-height: 190px;
+  }
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  body:has(.portal-selector-page) .site-header .nav-wrap {
+    min-height: auto;
+  }
+
+  .portal-selector-page {
+    padding: 12px 0 34px;
+  }
+
+  .portal-selector-page > .container {
+    width: min(100% - 18px, 1380px);
+  }
+
+  .portal-selector-page .hero-grid > div {
+    min-height: 0;
+    padding: 18px;
+    border-radius: 13px;
+  }
+
+  .portal-selector-page .mbw-logo-portal {
+    max-width: 130px;
+    margin-bottom: 11px;
+  }
+
+  .portal-selector-page .hero-panel h1 {
+    font-size: 22px;
+  }
+
+  .portal-selector-page .hero-panel p {
+    font-size: 12px;
+  }
+
+  .portal-selector-page .admin-grid {
+    gap: 11px;
+    margin-top: 11px !important;
+  }
+
+  .portal-selector-page form.card {
+    min-height: 185px;
+    padding: 17px;
+  }
+}
+
+/* SUPERADMIN PORTAL COMPACT OVERRIDES END */
