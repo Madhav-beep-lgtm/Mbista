@@ -71,6 +71,30 @@ $rev = fa_impairment_reversal(680000, 900000, 760000);
 check('S17b reversal capped at ceiling', 80000.0, $rev['reversal']);
 check('S17b revised carrying <= ceiling', 760000.0, $rev['revised_carrying']);
 
+
+echo "== IAS 16 revaluation allocation ==\n";
+$upAllocation = fa_revaluation_allocation(100000, 0, 30000);
+check('Revaluation increase reverses prior P&L loss first', 30000.0, $upAllocation['pnl_reversal']);
+check('Remaining revaluation increase goes to OCI', 70000.0, $upAllocation['oci_increase']);
+
+$downAllocation = fa_revaluation_allocation(-100000, 60000, 0);
+check('Revaluation decrease uses OCI reserve first', 60000.0, $downAllocation['oci_decrease']);
+check('Excess revaluation decrease goes to P&L', 40000.0, $downAllocation['pnl_loss']);
+
+$revaluedAsset = [
+    'cost' => 1000000,
+    'directly_attributable_cost' => 0,
+    'restoration_provision' => 0,
+    'residual_value' => 120000,
+    'useful_life_months' => 60,
+    'accumulated_depreciation' => 218000,
+    'carrying_amount' => 1182000,
+    'depreciation_base' => 1200000,
+    'depreciation_base_accumulated' => 200000,
+    'revaluation_life_months' => 60,
+];
+check('Future depreciation uses approved revaluation base', 18000.0, fa_asset_monthly_charge($revaluedAsset));
+
 echo "== Extras: diminishing balance & units of production ==\n";
 check('Diminishing 20% on 100000', 20000.0, fa_diminishing_balance(100000, 0, 20));
 check('Diminishing floored at residual', 5000.0, fa_diminishing_balance(15000, 10000, 50));

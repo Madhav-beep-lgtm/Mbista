@@ -12,7 +12,8 @@ $headerCompany = current_company();
 $headerFiscalYear = current_fiscal_year();
 $headerScript = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
 $headerTab = (string) ($_GET['tab'] ?? '');
-$headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php'], true);
+$headerView = (string) ($_GET['view'] ?? '');
+$headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'fixed-assets.php'], true);
 $headerCompanyId = (int) ($headerCompany['id'] ?? 0);
 $headerCompanyCode = (string) ($headerCompany['code'] ?? '');
 $headerBusinessType = company_accounting_business_type($headerCompanyId);
@@ -42,9 +43,18 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
-    // Available to every company/context, including client books, so client
-    // accounting gets Inventory, Manufacturing and Fixed Assets too.
-    ['Inventory, Manufacturing & Assets', 'admin/accounting-inventory.php', 'layers', in_array($headerScript, ['accounting-inventory.php', 'fixed-assets.php'], true)],
+    // These shared accounting links are identical for admin, staff and client books.
+    ['Inventory & Manufacturing', 'admin/accounting-inventory.php', 'layers', $headerScript === 'accounting-inventory.php'],
+    ['Fixed Asset Register', 'admin/fixed-assets.php', 'companies',
+        $headerScript === 'fixed-assets.php' && !in_array($headerView, ['revaluation', 'leases', 'mapping', 'categories'], true)],
+    ['Asset Revaluation', 'admin/fixed-assets.php?view=revaluation', 'wallet',
+        $headerScript === 'fixed-assets.php' && $headerView === 'revaluation'],
+    ['IFRS 16 Leases', 'admin/fixed-assets.php?view=leases', 'contracts',
+        $headerScript === 'fixed-assets.php' && $headerView === 'leases'],
+    ['Asset Ledger Mapping', 'admin/fixed-assets.php?view=mapping', 'accounting',
+        $headerScript === 'fixed-assets.php' && $headerView === 'mapping'],
+    ['Asset Categories', 'admin/fixed-assets.php?view=categories', 'layers',
+        $headerScript === 'fixed-assets.php' && $headerView === 'categories'],
 ]);
 $headerAccountingActive = false;
 foreach ($headerAccountingChildren as $headerChild) {
@@ -62,7 +72,7 @@ $pageBreadcrumb = $pageBreadcrumb ?? null;
 $headerPageIcons = [
     'index.php' => 'home', 'accounting-dashboard.php' => 'dashboard', 'consolidated-report.php' => 'layers',
     'accounting.php' => 'journal', 'voucher-form.php' => 'journal', 'voucher-import.php' => 'upload',
-    'accounting-parties.php' => 'invoices', 'accounting-inventory.php' => 'layers', 'banking.php' => 'bank',
+    'accounting-parties.php' => 'invoices', 'accounting-inventory.php' => 'layers', 'fixed-assets.php' => 'companies', 'banking.php' => 'bank',
     'reconciliation.php' => 'reconcile', 'chart-of-accounts.php' => 'tree', 'chart-groups.php' => 'tree',
     'chart-ledgers.php' => 'tree', 'chart-posting-accounts.php' => 'tree', 'chart-masters.php' => 'tree',
     'invoice.php' => 'invoices', 'reports-center.php' => 'reports', 'report-schedules.php' => 'calendar',
@@ -117,14 +127,18 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
     <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260714092214">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260714r1">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
     <aside class="admin-sidebar">
         <a class="brand brand-admin" href="<?= e(url('admin/accounting-dashboard.php')) ?>">
             <?= brand_logo('light', 'mbw-logo mbw-logo-sidebar') ?>
-            <span class="brand-admin-sub">Admin Portal</span>
+            <span class="brand-admin-sub"><?= e(match ((string) ($currentUser['role'] ?? '')) {
+                'customer' => 'Client Accounting Portal',
+                'staff' => 'Staff Accounting Portal',
+                default => 'Admin Portal',
+            }) ?></span>
         </a>
         <?php if ($headerCompany): ?>
             <div class="admin-sidebar-context">

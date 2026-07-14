@@ -303,23 +303,81 @@ function fa_missing_mappings(int $companyId, array $purposes, ?int $assetId = nu
     return $missing;
 }
 
+
+/**
+ * Split a revaluation change between profit or loss and OCI.
+ * Positive delta = increase; negative delta = decrease.
+ */
+function fa_revaluation_allocation(
+    float $delta,
+    float $existingReserve,
+    float $priorLossBalance
+): array {
+    $delta = fa_round($delta);
+    $existingReserve = max(0.0, fa_round($existingReserve));
+    $priorLossBalance = max(0.0, fa_round($priorLossBalance));
+
+    $result = [
+        'pnl_reversal' => 0.0,
+        'oci_increase' => 0.0,
+        'oci_decrease' => 0.0,
+        'pnl_loss' => 0.0,
+    ];
+
+    if ($delta > 0) {
+        $result['pnl_reversal'] = fa_round(min($delta, $priorLossBalance));
+        $result['oci_increase'] = fa_round($delta - $result['pnl_reversal']);
+    } elseif ($delta < 0) {
+        $decrease = abs($delta);
+        $result['oci_decrease'] = fa_round(min($decrease, $existingReserve));
+        $result['pnl_loss'] = fa_round($decrease - $result['oci_decrease']);
+    }
+
+    return $result;
+}
+
 /**
  * The straight-line monthly charge for an asset row for one period, capped so
  * carrying never drops below residual.
  */
 function fa_asset_monthly_charge(array $asset): float
 {
-    $cost = (float) ($asset['cost'] ?? 0) + (float) ($asset['directly_attributable_cost'] ?? 0) + (float) ($asset['restoration_provision'] ?? 0);
     $residual = (float) ($asset['residual_value'] ?? 0);
     $life = (int) ($asset['useful_life_months'] ?? 0);
     $accumulated = (float) ($asset['accumulated_depreciation'] ?? 0);
+    $carryingCap = max(
+        0.0,
+        (float) ($asset['carrying_amount'] ?? 0) - $residual
+    );
+
+    $hasRevaluationBase = array_key_exists('depreciation_base', $asset)
+        && $asset['depreciation_base'] !== null;
+
+    if ($hasRevaluationBase) {
+        $base = max(0.0, (float) $asset['depreciation_base']);
+        $life = max(1, (int) ($asset['revaluation_life_months'] ?? $life));
+        $resetAccumulated = (float) ($asset['depreciation_base_accumulated'] ?? 0);
+        $usedSinceRevaluation = max(0.0, $accumulated - $resetAccumulated);
+        $depreciable = max(0.0, $base - $residual);
+        $perMonth = fa_round($depreciable / $life);
+        $remaining = max(0.0, $depreciable - $usedSinceRevaluation);
+
+        return fa_round(min($perMonth, $remaining, $carryingCap));
+    }
+
+    $cost = (float) ($asset['cost'] ?? 0)
+        + (float) ($asset['directly_attributable_cost'] ?? 0)
+        + (float) ($asset['restoration_provision'] ?? 0);
+
     if ($life <= 0) {
         return 0.0;
     }
+
     $depreciable = max(0.0, $cost - $residual);
     $perMonth = fa_round($depreciable / $life);
     $remaining = max(0.0, $depreciable - $accumulated);
-    return fa_round(min($perMonth, $remaining));
+
+    return fa_round(min($perMonth, $remaining, $carryingCap));
 }
 
 /**

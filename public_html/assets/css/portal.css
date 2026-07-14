@@ -5599,3 +5599,424 @@ body.admin-layout.accounting-module-page.accounting-dashboard-page
 }
 
 /* AGGRESSIVE KPI NUMBER REDUCTION END */
+
+/* SHARED FIXED ASSET REVALUATION WORKFLOW START */
+
+body.fixed-assets-page .fa-revaluation-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 248px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+body.fixed-assets-page .fa-revaluation-side {
+  position: sticky;
+  top: 82px;
+  padding: 14px;
+}
+
+body.fixed-assets-page .fa-revaluation-side .mbw-card-head,
+body.fixed-assets-page .fa-new-batch-card .mbw-card-head,
+body.fixed-assets-page .fa-batch-hero .mbw-card-head {
+  margin-bottom: 12px;
+}
+
+body.fixed-assets-page .fa-eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: #14804a;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+body.fixed-assets-page .fa-side-nav {
+  display: grid;
+  gap: 6px;
+}
+
+body.fixed-assets-page .fa-side-nav a {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--mbw-heading);
+  text-decoration: none;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+body.fixed-assets-page .fa-side-nav a:hover {
+  border-color: rgba(20, 128, 74, 0.22);
+  background: rgba(20, 128, 74, 0.06);
+  transform: translateY(-1px);
+}
+
+body.fixed-assets-page .fa-side-nav a.is-active {
+  border-color: rgba(20, 128, 74, 0.28);
+  background: linear-gradient(135deg, rgba(20, 128, 74, 0.13), rgba(43, 169, 105, 0.05));
+  color: #0b6338;
+}
+
+body.fixed-assets-page .fa-side-nav svg {
+  width: 19px;
+  height: 19px;
+}
+
+body.fixed-assets-page .fa-side-nav span,
+body.fixed-assets-page .fa-side-nav strong,
+body.fixed-assets-page .fa-side-nav small {
+  min-width: 0;
+}
+
+body.fixed-assets-page .fa-side-nav strong {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+
+body.fixed-assets-page .fa-side-nav small {
+  display: block;
+  margin-top: 2px;
+  color: var(--mbw-muted);
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+body.fixed-assets-page .fa-side-note {
+  margin-top: 12px;
+  padding: 11px;
+  border: 1px solid rgba(20, 128, 74, 0.18);
+  border-radius: 10px;
+  background: rgba(20, 128, 74, 0.05);
+}
+
+body.fixed-assets-page .fa-side-note strong {
+  color: #0b6338;
+  font-size: 11.5px;
+}
+
+body.fixed-assets-page .fa-side-note p {
+  margin: 4px 0 0;
+  color: var(--mbw-muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+body.fixed-assets-page .fa-revaluation-main {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+body.fixed-assets-page .fa-batch-hero {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-left: 4px solid #14804a;
+}
+
+body.fixed-assets-page .fa-batch-hero h2,
+body.fixed-assets-page .fa-approval-card h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+body.fixed-assets-page .fa-batch-hero p,
+body.fixed-assets-page .fa-approval-card p,
+body.fixed-assets-page .fa-new-batch-card .mbw-card-head p {
+  margin: 5px 0 0;
+  color: var(--mbw-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+body.fixed-assets-page .fa-back-link {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  margin-bottom: 8px;
+  color: var(--mbw-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+body.fixed-assets-page .fa-back-link svg {
+  width: 13px;
+  height: 13px;
+  transform: rotate(90deg);
+}
+
+body.fixed-assets-page .fa-batch-status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+body.fixed-assets-page .fa-batch-form {
+  display: grid;
+  gap: 14px;
+}
+
+body.fixed-assets-page .fa-batch-fields label,
+body.fixed-assets-page .fa-new-batch-card label {
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+body.fixed-assets-page .fa-batch-fields input,
+body.fixed-assets-page .fa-batch-fields select,
+body.fixed-assets-page .fa-batch-fields textarea,
+body.fixed-assets-page .fa-new-batch-card input,
+body.fixed-assets-page .fa-new-batch-card select,
+body.fixed-assets-page .fa-new-batch-card textarea {
+  margin-top: 5px;
+}
+
+body.fixed-assets-page .fa-batch-fields small,
+body.fixed-assets-page .fa-new-batch-card label small {
+  display: block;
+  margin-top: 4px;
+  color: var(--mbw-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+body.fixed-assets-page .fa-revaluation-table {
+  min-width: 1120px;
+}
+
+body.fixed-assets-page .fa-revaluation-table th {
+  font-size: 10px;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+body.fixed-assets-page .fa-revaluation-table td {
+  vertical-align: middle;
+  font-size: 11.5px;
+}
+
+body.fixed-assets-page .fa-revaluation-table td:first-child {
+  min-width: 170px;
+}
+
+body.fixed-assets-page .fa-revaluation-table td:first-child strong,
+body.fixed-assets-page .fa-revaluation-table td:first-child small {
+  display: block;
+}
+
+body.fixed-assets-page .fa-revaluation-table td:first-child small {
+  margin-top: 2px;
+  color: var(--mbw-muted);
+  font-size: 10.5px;
+}
+
+body.fixed-assets-page .fa-revaluation-table input {
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+}
+
+body.fixed-assets-page .fa-money-input {
+  width: 132px;
+  text-align: right;
+}
+
+body.fixed-assets-page .fa-small-input {
+  width: 76px;
+  text-align: right;
+}
+
+body.fixed-assets-page .fa-change {
+  display: inline-flex;
+  justify-content: flex-end;
+  min-width: 92px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+body.fixed-assets-page .fa-change.is-up {
+  color: #14804a;
+}
+
+body.fixed-assets-page .fa-change.is-down {
+  color: #b42318;
+}
+
+body.fixed-assets-page .fa-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+body.fixed-assets-page .fa-approval-card {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border: 1px solid rgba(20, 128, 74, 0.22);
+  background:
+    linear-gradient(135deg, rgba(20, 128, 74, 0.08), rgba(20, 128, 74, 0.015)),
+    var(--mbw-surface);
+}
+
+body.fixed-assets-page .fa-approval-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+body.fixed-assets-page .fa-reject-form {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+body.fixed-assets-page .fa-reject-form input {
+  min-width: 210px;
+  min-height: 36px;
+}
+
+body.fixed-assets-page .fa-alert-card {
+  padding: 13px 16px;
+}
+
+body.fixed-assets-page .fa-alert-card.is-rejected {
+  border-color: rgba(180, 35, 24, 0.28);
+  background: rgba(180, 35, 24, 0.05);
+}
+
+body.fixed-assets-page .fa-alert-card p {
+  margin: 4px 0 0;
+  color: var(--mbw-muted);
+  font-size: 11.5px;
+}
+
+body.fixed-assets-page .fa-revaluation-callout {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 14px;
+  border: 1px solid rgba(20, 128, 74, 0.2);
+  border-radius: 10px;
+  background: rgba(20, 128, 74, 0.045);
+}
+
+body.fixed-assets-page .fa-revaluation-callout strong,
+body.fixed-assets-page .fa-revaluation-callout small {
+  display: block;
+}
+
+body.fixed-assets-page .fa-revaluation-callout strong {
+  color: var(--mbw-heading);
+  font-size: 12.5px;
+}
+
+body.fixed-assets-page .fa-revaluation-callout small {
+  margin-top: 3px;
+  color: var(--mbw-muted);
+  font-size: 10.5px;
+}
+
+body.fixed-assets-page .fa-row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+body.theme-dark.fixed-assets-page .fa-eyebrow,
+body.theme-dark.fixed-assets-page .fa-side-nav a.is-active,
+body.theme-dark.fixed-assets-page .fa-side-note strong,
+body.theme-dark.fixed-assets-page .fa-change.is-up {
+  color: #69d99d;
+}
+
+body.theme-dark.fixed-assets-page .fa-side-nav a.is-active,
+body.theme-dark.fixed-assets-page .fa-side-note,
+body.theme-dark.fixed-assets-page .fa-revaluation-callout {
+  border-color: rgba(105, 217, 157, 0.23);
+  background: rgba(105, 217, 157, 0.075);
+}
+
+body.theme-dark.fixed-assets-page .fa-approval-card {
+  border-color: rgba(105, 217, 157, 0.24);
+  background:
+    linear-gradient(135deg, rgba(105, 217, 157, 0.09), rgba(105, 217, 157, 0.02)),
+    var(--mbw-surface);
+}
+
+@media (max-width: 1080px) {
+  body.fixed-assets-page .fa-revaluation-layout {
+    grid-template-columns: 1fr;
+  }
+
+  body.fixed-assets-page .fa-revaluation-side {
+    position: static;
+  }
+
+  body.fixed-assets-page .fa-side-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  body.fixed-assets-page .fa-side-note {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  body.fixed-assets-page .fa-side-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.fixed-assets-page .fa-batch-hero,
+  body.fixed-assets-page .fa-approval-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  body.fixed-assets-page .fa-batch-status,
+  body.fixed-assets-page .fa-approval-actions {
+    justify-content: flex-start;
+  }
+
+  body.fixed-assets-page .fa-reject-form {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  body.fixed-assets-page .fa-reject-form input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  body.fixed-assets-page .fa-row-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 480px) {
+  body.fixed-assets-page .fa-side-nav {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* SHARED FIXED ASSET REVALUATION WORKFLOW END */

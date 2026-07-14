@@ -2,12 +2,14 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/fixed_asset_revaluation.php';
 
-require_staff_or_admin();
+require_login();
 require_company_context();
 require_permission('accounting', 'view');
 
 accounting_module_repair_database();
+fa_revaluation_repair_database();
 
 $company = current_company();
 $fiscalYear = current_fiscal_year();
@@ -154,7 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $periodStmt->execute(['aid' => (int) $asset['id']]);
             $periodNo = (int) $periodStmt->fetchColumn();
             $newAccum = round((float) $asset['accumulated_depreciation'] + $charge, 2);
-            $newCarrying = round((float) $asset['cost'] - $newAccum - (float) $asset['accumulated_impairment'], 2);
+            $newCarrying = max((float) $asset['residual_value'], round((float) $asset['carrying_amount'] - $charge, 2));
             $today = date('Y-m-d');
 
             $voucherId = create_voucher_with_entries([
@@ -392,68 +394,346 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'revalue_asset') {
-        require_permission('accounting', 'post');
-        $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
-        if (!$asset) { flash('error', 'Asset not found.'); redirect('admin/fixed-assets.php'); }
-        $newValue = max(0.0, round((float) ($_POST['new_fair_value'] ?? 0), 2));
-        $carrying = (float) $asset['carrying_amount'];
-        $delta = round($newValue - $carrying, 2);
-        if (abs($delta) < 0.005) {
-            flash('error', 'New fair value equals carrying amount — nothing to revalue.');
-            redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
+        flash('error', 'Direct revaluation is disabled. Use a class-wide Revaluation Batch so the selected asset class is treated consistently.');
+        redirect('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) ($_POST['asset_id'] ?? 0));
+    }
+
+    if ($action === 'create_revaluation_batch') {
+        require_permission('accounting', 'create');
+
+        $assetClass = (string) ($_POST['asset_class'] ?? '');
+        $allowedRevaluationClasses = ['ppe', 'intangible', 'investment_property'];
+        $revaluationDate = trim((string) ($_POST['revaluation_date'] ?? ''));
+        $valuerName = trim((string) ($_POST['valuer_name'] ?? ''));
+        $valuerReference = trim((string) ($_POST['valuer_reference'] ?? ''));
+        $valuationMethod = (string) ($_POST['valuation_method'] ?? '');
+        $reason = trim((string) ($_POST['reason'] ?? ''));
+
+        if (
+            !in_array($assetClass, $allowedRevaluationClasses, true)
+            || $revaluationDate === ''
+            || $valuerName === ''
+            || !isset(fa_revaluation_methods()[$valuationMethod])
+            || $reason === ''
+        ) {
+            flash('error', 'Asset class, date, valuer, valuation method and reason are required.');
+            redirect('admin/fixed-assets.php?view=revaluation');
         }
-        $costL = fa_resolve_mapping($companyId, 'ppe_cost', (int) $asset['id']);
+
+        $eligibleAssets = fa_revaluation_eligible_assets($companyId, $assetClass);
+        if ($eligibleAssets === []) {
+            flash('error', 'No active assets were found in the selected class.');
+            redirect('admin/fixed-assets.php?view=revaluation');
+        }
+
+        try {
+            $reportPath = fa_store_revaluation_report($_FILES['valuation_report'] ?? [], $companyId);
+            if (!$reportPath) {
+                throw new RuntimeException('A valuation report is required.');
+            }
+
+            db()->beginTransaction();
+
+            $temporaryBatchNo = 'TMP-' . bin2hex(random_bytes(8));
+            db()->prepare('
+                INSERT INTO asset_revaluation_batches
+                    (company_id, batch_no, asset_class, revaluation_date,
+                     valuer_name, valuer_reference, valuation_method, reason,
+                     report_path, status, created_by)
+                VALUES
+                    (:cid, :batch_no, :asset_class, :revaluation_date,
+                     :valuer_name, :valuer_reference, :valuation_method, :reason,
+                     :report_path, \'draft\', :created_by)
+            ')->execute([
+                'cid' => $companyId,
+                'batch_no' => $temporaryBatchNo,
+                'asset_class' => $assetClass,
+                'revaluation_date' => $revaluationDate,
+                'valuer_name' => $valuerName,
+                'valuer_reference' => $valuerReference !== '' ? $valuerReference : null,
+                'valuation_method' => $valuationMethod,
+                'reason' => $reason,
+                'report_path' => $reportPath,
+                'created_by' => $userId,
+            ]);
+
+            $batchId = (int) db()->lastInsertId();
+            $batchNo = 'REV-' . date('Y', strtotime($revaluationDate)) .
+                '-C' . $companyId . '-' . str_pad((string) $batchId, 5, '0', STR_PAD_LEFT);
+
+            db()->prepare('
+                UPDATE asset_revaluation_batches
+                SET batch_no = :batch_no
+                WHERE id = :id AND company_id = :cid
+            ')->execute([
+                'batch_no' => $batchNo,
+                'id' => $batchId,
+                'cid' => $companyId,
+            ]);
+
+            $lineStmt = db()->prepare('
+                INSERT INTO asset_revaluation_lines
+                    (batch_id, company_id, asset_id, previous_carrying_value,
+                     new_fair_value, revised_useful_life_months,
+                     revised_residual_value, remarks)
+                VALUES
+                    (:batch_id, :company_id, :asset_id, :previous_carrying_value,
+                     :new_fair_value, :revised_useful_life_months,
+                     :revised_residual_value, NULL)
+            ');
+
+            foreach ($eligibleAssets as $assetRow) {
+                $lineStmt->execute([
+                    'batch_id' => $batchId,
+                    'company_id' => $companyId,
+                    'asset_id' => (int) $assetRow['id'],
+                    'previous_carrying_value' => (float) $assetRow['carrying_amount'],
+                    'new_fair_value' => (float) $assetRow['carrying_amount'],
+                    'revised_useful_life_months' => max(1, (int) $assetRow['useful_life_months']),
+                    'revised_residual_value' => max(0.0, (float) $assetRow['residual_value']),
+                ]);
+            }
+
+            db()->commit();
+
+            security_event(
+                'asset_revaluation_batch_created',
+                'success',
+                'Created revaluation batch ' . $batchNo . '.',
+                $companyId,
+                $userId
+            );
+            log_activity(
+                'asset_revaluation_batch',
+                $batchId,
+                'created',
+                'Created class-wide revaluation batch ' . $batchNo . '.',
+                $userId
+            );
+            flash('success', 'Revaluation batch ' . $batchNo . ' created with ' . count($eligibleAssets) . ' assets.');
+            redirect('admin/fixed-assets.php?view=revaluation&batch_id=' . $batchId);
+        } catch (Throwable $e) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            flash('error', 'Could not create revaluation batch: ' . $e->getMessage());
+            redirect('admin/fixed-assets.php?view=revaluation');
+        }
+    }
+
+    if ($action === 'save_revaluation_batch') {
+        require_permission('accounting', 'edit');
+
+        $batchId = (int) ($_POST['batch_id'] ?? 0);
+        $batch = fa_revaluation_batch($batchId, $companyId);
+        if (!$batch || (string) $batch['status'] !== 'draft') {
+            flash('error', 'Only a draft revaluation batch can be edited.');
+            redirect('admin/fixed-assets.php?view=revaluation');
+        }
+
+        $revaluationDate = trim((string) ($_POST['revaluation_date'] ?? ''));
+        $valuerName = trim((string) ($_POST['valuer_name'] ?? ''));
+        $valuerReference = trim((string) ($_POST['valuer_reference'] ?? ''));
+        $valuationMethod = (string) ($_POST['valuation_method'] ?? '');
+        $reason = trim((string) ($_POST['reason'] ?? ''));
+
+        if (
+            $revaluationDate === ''
+            || $valuerName === ''
+            || !isset(fa_revaluation_methods()[$valuationMethod])
+            || $reason === ''
+        ) {
+            flash('error', 'Date, valuer, valuation method and reason are required.');
+            redirect('admin/fixed-assets.php?view=revaluation&batch_id=' . $batchId);
+        }
+
         try {
             db()->beginTransaction();
-            // Revaluation event row first, voucher keyed on it. IAS 16.31 expects
-            // revaluations with sufficient regularity, so an asset gets many over
-            // its life — keying the voucher on the asset id (vouchers has
-            // UNIQUE(source_type, source_id)) would let only the first one post.
-            if ($delta > 0) {
-                $surplusL = fa_resolve_mapping($companyId, 'revaluation_surplus', (int) $asset['id']);
-                if (!$costL || !$surplusL) { throw new RuntimeException('Map PPE Cost and Revaluation Surplus.'); }
-                db()->prepare('INSERT INTO asset_impairments (company_id, asset_id, test_date, kind, carrying_amount, recoverable_amount, evidence, created_by)
-                    VALUES (:cid,:aid,:d,\'revaluation\',:carry,:rec,:ev,:uid)')
-                    ->execute(['cid' => $companyId, 'aid' => (int) $asset['id'], 'd' => date('Y-m-d'), 'carry' => $carrying, 'rec' => $newValue, 'ev' => 'Revaluation surplus ' . number_format($delta, 2) . '.', 'uid' => $userId]);
-                $eventId = (int) db()->lastInsertId();
-                $vid = create_voucher_with_entries([
-                    'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null, 'voucher_no' => 'FA-REV-' . $asset['asset_code'] . '-' . $eventId,
-                    'voucher_type' => 'journal', 'voucher_date' => date('Y-m-d'), 'source_type' => 'asset_revaluation', 'source_id' => $eventId,
-                    'total_amount' => $delta, 'narration' => 'Revaluation surplus on ' . $asset['name'] . '.', 'status' => 'posted', 'posted_by' => $userId,
-                ], [
-                    ['ledger_id' => (int) $costL['id'], 'entry_type' => 'debit', 'amount' => $delta],
-                    ['ledger_id' => (int) $surplusL['id'], 'entry_type' => 'credit', 'amount' => $delta],
-                ]);
-                db()->prepare('UPDATE asset_impairments SET voucher_id = :vid WHERE id = :id')
-                    ->execute(['vid' => $vid ?: null, 'id' => $eventId]);
-                db()->prepare('UPDATE fixed_assets SET carrying_amount = :v, revaluation_reserve = revaluation_reserve + :d WHERE id = :id AND company_id = :cid')
-                    ->execute(['v' => $newValue, 'd' => $delta, 'id' => (int) $asset['id'], 'cid' => $companyId]);
-            } else {
-                $lossL = fa_resolve_mapping($companyId, 'revaluation_loss', (int) $asset['id']);
-                if (!$costL || !$lossL) { throw new RuntimeException('Map PPE Cost and Revaluation Loss.'); }
-                db()->prepare('INSERT INTO asset_impairments (company_id, asset_id, test_date, kind, carrying_amount, recoverable_amount, impairment_loss, evidence, created_by)
-                    VALUES (:cid,:aid,:d,\'revaluation\',:carry,:rec,:loss,:ev,:uid)')
-                    ->execute(['cid' => $companyId, 'aid' => (int) $asset['id'], 'd' => date('Y-m-d'), 'carry' => $carrying, 'rec' => $newValue, 'loss' => -$delta, 'ev' => 'Revaluation decrease ' . number_format(-$delta, 2) . '.', 'uid' => $userId]);
-                $eventId = (int) db()->lastInsertId();
-                $vid = create_voucher_with_entries([
-                    'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null, 'voucher_no' => 'FA-REV-' . $asset['asset_code'] . '-' . $eventId,
-                    'voucher_type' => 'journal', 'voucher_date' => date('Y-m-d'), 'source_type' => 'asset_revaluation', 'source_id' => $eventId,
-                    'total_amount' => -$delta, 'narration' => 'Revaluation decrease on ' . $asset['name'] . '.', 'status' => 'posted', 'posted_by' => $userId,
-                ], [
-                    ['ledger_id' => (int) $lossL['id'], 'entry_type' => 'debit', 'amount' => -$delta],
-                    ['ledger_id' => (int) $costL['id'], 'entry_type' => 'credit', 'amount' => -$delta],
-                ]);
-                db()->prepare('UPDATE asset_impairments SET voucher_id = :vid WHERE id = :id')
-                    ->execute(['vid' => $vid ?: null, 'id' => $eventId]);
-                db()->prepare('UPDATE fixed_assets SET carrying_amount = :v WHERE id = :id AND company_id = :cid')
-                    ->execute(['v' => $newValue, 'id' => (int) $asset['id'], 'cid' => $companyId]);
+
+            $reportPath = (string) $batch['report_path'];
+            if ((int) (($_FILES['valuation_report']['error'] ?? UPLOAD_ERR_NO_FILE)) !== UPLOAD_ERR_NO_FILE) {
+                $newReportPath = fa_store_revaluation_report($_FILES['valuation_report'], $companyId);
+                if ($newReportPath) {
+                    $reportPath = $newReportPath;
+                }
             }
+
+            db()->prepare('
+                UPDATE asset_revaluation_batches
+                SET revaluation_date = :revaluation_date,
+                    valuer_name = :valuer_name,
+                    valuer_reference = :valuer_reference,
+                    valuation_method = :valuation_method,
+                    reason = :reason,
+                    report_path = :report_path
+                WHERE id = :id AND company_id = :cid AND status = \'draft\'
+            ')->execute([
+                'revaluation_date' => $revaluationDate,
+                'valuer_name' => $valuerName,
+                'valuer_reference' => $valuerReference !== '' ? $valuerReference : null,
+                'valuation_method' => $valuationMethod,
+                'reason' => $reason,
+                'report_path' => $reportPath,
+                'id' => $batchId,
+                'cid' => $companyId,
+            ]);
+
+            $lineInput = $_POST['line'] ?? [];
+            if (!is_array($lineInput)) {
+                $lineInput = [];
+            }
+
+            $lineStmt = db()->prepare('
+                UPDATE asset_revaluation_lines
+                SET new_fair_value = :new_fair_value,
+                    increase_decrease = :increase_decrease,
+                    revised_useful_life_months = :revised_useful_life_months,
+                    revised_residual_value = :revised_residual_value,
+                    remarks = :remarks
+                WHERE id = :id AND batch_id = :batch_id AND company_id = :cid
+            ');
+
+            foreach ($lineInput as $lineIdRaw => $values) {
+                $lineId = (int) $lineIdRaw;
+                if ($lineId <= 0 || !is_array($values)) {
+                    continue;
+                }
+
+                $newValue = max(0.0, round((float) ($values['new_fair_value'] ?? 0), 2));
+                $previousValue = round((float) ($values['previous_carrying_value'] ?? 0), 2);
+                $revisedLife = max(1, (int) ($values['revised_useful_life_months'] ?? 1));
+                $revisedResidual = max(0.0, round((float) ($values['revised_residual_value'] ?? 0), 2));
+                $remarks = trim((string) ($values['remarks'] ?? ''));
+
+                if ($revisedResidual > $newValue) {
+                    throw new RuntimeException('Residual value cannot exceed fair value.');
+                }
+
+                $lineStmt->execute([
+                    'new_fair_value' => $newValue,
+                    'increase_decrease' => round($newValue - $previousValue, 2),
+                    'revised_useful_life_months' => $revisedLife,
+                    'revised_residual_value' => $revisedResidual,
+                    'remarks' => $remarks !== '' ? $remarks : null,
+                    'id' => $lineId,
+                    'batch_id' => $batchId,
+                    'cid' => $companyId,
+                ]);
+            }
+
             db()->commit();
-            security_event('asset_revalued', 'success', 'Asset #' . (int) $asset['id'] . ' revalued.', $companyId, $userId);
-            log_activity('fixed_asset', (int) $asset['id'], 'revalued', 'Revalued to ' . number_format($newValue, 2) . '.', $userId);
-            flash('success', 'Asset revalued to ' . site_currency_symbol() . number_format($newValue, 2) . ' (' . ($delta > 0 ? 'surplus ' : 'decrease ') . site_currency_symbol() . number_format(abs($delta), 2) . ').');
-        } catch (Throwable $e) { if (db()->inTransaction()) { db()->rollBack(); } flash('error', 'Could not revalue: ' . $e->getMessage()); }
-        redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
+            log_activity('asset_revaluation_batch', $batchId, 'updated', 'Draft revaluation batch updated.', $userId);
+            flash('success', 'Revaluation batch saved.');
+        } catch (Throwable $e) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            flash('error', 'Could not save revaluation batch: ' . $e->getMessage());
+        }
+
+        redirect('admin/fixed-assets.php?view=revaluation&batch_id=' . $batchId);
+    }
+
+    if ($action === 'submit_revaluation_batch') {
+        require_permission('accounting', 'edit');
+
+        $batchId = (int) ($_POST['batch_id'] ?? 0);
+        $batch = fa_revaluation_batch($batchId, $companyId);
+        $lines = $batch ? fa_revaluation_lines($batchId, $companyId) : [];
+
+        if (!$batch || (string) $batch['status'] !== 'draft' || $lines === []) {
+            flash('error', 'Only a complete draft batch can be submitted.');
+            redirect('admin/fixed-assets.php?view=revaluation');
+        }
+
+        foreach ($lines as $line) {
+            if (
+                (float) $line['new_fair_value'] < 0
+                || (int) $line['revised_useful_life_months'] <= 0
+                || (float) $line['revised_residual_value'] > (float) $line['new_fair_value']
+            ) {
+                flash('error', 'Correct invalid asset values before submitting.');
+                redirect('admin/fixed-assets.php?view=revaluation&batch_id=' . $batchId);
+            }
+        }
+
+        db()->prepare('
+            UPDATE asset_revaluation_batches
+            SET status = \'submitted\',
+                submitted_by = :uid,
+                submitted_at = NOW()
+            WHERE id = :id AND company_id = :cid AND status = \'draft\'
+        ')->execute(['uid' => $userId, 'id' => $batchId, 'cid' => $companyId]);
+
+        security_event(
+            'asset_revaluation_batch_submitted',
+            'success',
+            'Submitted revaluation batch #' . $batchId . '.',
+            $companyId,
+            $userId
+        );
+        log_activity('asset_revaluation_batch', $batchId, 'submitted', 'Submitted for approval.', $userId);
+        flash('success', 'Revaluation batch submitted for approval.');
+        redirect('admin/fixed-assets.php?view=revaluation&batch_id=' . $batchId);
+    }
+
+    if ($action === 'approve_revaluation_batch') {
+        require_permission('accounting', 'approve');
+
+        $batchId = (int) ($_POST['batch_id'] ?? 0);
+        try {
+            $result = fa_approve_revaluation_batch(
+                $batchId,
+                $companyId,
+                $fiscalYearId,
+                $userId
+            );
+            flash(
+                'success',
+                'Revaluation approved for ' . $result['assets'] .
+                ' assets. ' . $result['vouchers'] . ' journal vouchers were posted.'
+            );
+        } catch (Throwable $e) {
+            flash('error', 'Could not approve revaluation: ' . $e->getMessage());
+        }
+
+        redirect('admin/fixed-assets.php?view=revaluation&batch_id=' . $batchId);
+    }
+
+    if ($action === 'reject_revaluation_batch') {
+        require_permission('accounting', 'approve');
+
+        $batchId = (int) ($_POST['batch_id'] ?? 0);
+        $reason = trim((string) ($_POST['rejection_reason'] ?? ''));
+        if ($reason === '') {
+            flash('error', 'A rejection reason is required.');
+            redirect('admin/fixed-assets.php?view=revaluation&batch_id=' . $batchId);
+        }
+
+        db()->prepare('
+            UPDATE asset_revaluation_batches
+            SET status = \'rejected\',
+                rejected_by = :uid,
+                rejected_at = NOW(),
+                rejection_reason = :reason
+            WHERE id = :id AND company_id = :cid AND status = \'submitted\'
+        ')->execute([
+            'uid' => $userId,
+            'reason' => $reason,
+            'id' => $batchId,
+            'cid' => $companyId,
+        ]);
+
+        security_event(
+            'asset_revaluation_batch_rejected',
+            'failure',
+            'Rejected revaluation batch #' . $batchId . '.',
+            $companyId,
+            $userId
+        );
+        log_activity('asset_revaluation_batch', $batchId, 'rejected', $reason, $userId);
+        flash('success', 'Revaluation batch rejected.');
+        redirect('admin/fixed-assets.php?view=revaluation&batch_id=' . $batchId);
     }
 
     if ($action === 'capitalize_cwip') {
@@ -738,13 +1018,13 @@ $faView = (string) ($_GET['view'] ?? 'register');
 $detailAsset = ctype_digit($faView) ? fa_company_asset((int) $faView, $companyId) : null;
 if ($detailAsset) {
     $faView = 'detail';
-} elseif (!in_array($faView, ['register', 'mapping', 'leases', 'categories'], true)) {
+} elseif (!in_array($faView, ['register', 'mapping', 'leases', 'categories', 'revaluation'], true)) {
     $faView = 'register';
 }
 
 $pageTitle = 'Fixed Assets';
 $pageSubtitle = 'Asset register, depreciation, and IFRS accounting integration';
-$bodyClass = 'admin-layout accounting-module-page';
+$bodyClass = 'admin-layout accounting-module-page fixed-assets-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <nav class="mbw-tabbar inventory-module-tabs" aria-label="Inventory and asset modules">
@@ -764,12 +1044,465 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <nav class="mbw-tabbar" aria-label="Fixed asset workspace" style="margin:6px 0 16px">
     <a class="<?= in_array($faView, ['register', 'detail'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?>Register</a>
+    <a class="<?= $faView === 'revaluation' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=revaluation')) ?>"><?= icon('wallet') ?>Revaluation</a>
     <a class="<?= $faView === 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=leases')) ?>"><?= icon('contracts') ?>Leases (IFRS 16)</a>
     <a class="<?= $faView === 'mapping' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=mapping')) ?>"><?= icon('accounting') ?>Ledger Mapping</a>
     <a class="<?= $faView === 'categories' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=categories')) ?>"><?= icon('layers') ?>Categories</a>
 </nav>
 
-<?php if ($faView === 'leases'): ?>
+<?php if ($faView === 'revaluation'): ?>
+    <?php
+    $revaluationBatchId = (int) ($_GET['batch_id'] ?? 0);
+    $revaluationBatch = $revaluationBatchId > 0
+        ? fa_revaluation_batch($revaluationBatchId, $companyId)
+        : null;
+    $revaluationLines = $revaluationBatch
+        ? fa_revaluation_lines($revaluationBatchId, $companyId)
+        : [];
+    $revaluationBatches = fa_revaluation_batches($companyId);
+
+    $preselectedClass = 'ppe';
+    $preselectedAssetId = (int) ($_GET['asset_id'] ?? 0);
+    if ($preselectedAssetId > 0) {
+        $preselectedAsset = fa_company_asset($preselectedAssetId, $companyId);
+        if (
+            $preselectedAsset
+            && in_array(
+                (string) $preselectedAsset['asset_class'],
+                ['ppe', 'intangible', 'investment_property'],
+                true
+            )
+        ) {
+            $preselectedClass = (string) $preselectedAsset['asset_class'];
+        }
+    }
+
+    $statusTone = static function (string $status): string {
+        return match ($status) {
+            'approved' => 'tone-green',
+            'submitted' => 'tone-amber',
+            'rejected' => 'tone-red',
+            default => 'tone-gray',
+        };
+    };
+    ?>
+
+    <div class="fa-revaluation-layout">
+        <aside class="mbw-card fa-revaluation-side">
+            <div class="mbw-card-head">
+                <div>
+                    <span class="fa-eyebrow">Valuation and closure</span>
+                    <h2>Revaluation</h2>
+                </div>
+            </div>
+
+            <nav class="fa-side-nav" aria-label="Fixed asset valuation navigation">
+                <a class="is-active" href="<?= e(url('admin/fixed-assets.php?view=revaluation')) ?>">
+                    <?= icon('wallet') ?><span><strong>Revaluation batches</strong><small>IAS 16 and IAS 38</small></span>
+                </a>
+                <a href="<?= e(url('admin/fixed-assets.php')) ?>">
+                    <?= icon('companies') ?><span><strong>Fixed asset register</strong><small>Assets and carrying values</small></span>
+                </a>
+                <a href="<?= e(url('admin/fixed-assets.php?view=mapping')) ?>">
+                    <?= icon('accounting') ?><span><strong>Ledger mapping</strong><small>OCI and P&amp;L accounts</small></span>
+                </a>
+                <a href="<?= e(url('admin/fixed-assets.php?view=categories')) ?>">
+                    <?= icon('layers') ?><span><strong>Asset categories</strong><small>Class and defaults</small></span>
+                </a>
+            </nav>
+
+            <div class="fa-side-note">
+                <strong>Class-wide control</strong>
+                <p>Each batch freezes every active asset in the selected class. Earlier values remain in history.</p>
+            </div>
+        </aside>
+
+        <main class="fa-revaluation-main">
+            <?php if ($revaluationBatch): ?>
+                <?php
+                $batchEditable = (string) $revaluationBatch['status'] === 'draft';
+                $batchSubmitted = (string) $revaluationBatch['status'] === 'submitted';
+                $batchApproved = (string) $revaluationBatch['status'] === 'approved';
+                ?>
+                <section class="mbw-card fa-batch-hero">
+                    <div>
+                        <a class="fa-back-link" href="<?= e(url('admin/fixed-assets.php?view=revaluation')) ?>">
+                            <?= icon('chevron') ?> All batches
+                        </a>
+                        <span class="fa-eyebrow"><?= e($revaluationBatch['batch_no']) ?></span>
+                        <h2><?= e($assetClasses[$revaluationBatch['asset_class']] ?? $revaluationBatch['asset_class']) ?></h2>
+                        <p>
+                            Revaluation date <?= e($revaluationBatch['revaluation_date']) ?>.
+                            Valuer <?= e($revaluationBatch['valuer_name']) ?>.
+                        </p>
+                    </div>
+                    <div class="fa-batch-status">
+                        <span class="mbw-pill <?= e($statusTone((string) $revaluationBatch['status'])) ?>">
+                            <?= e(ucfirst((string) $revaluationBatch['status'])) ?>
+                        </span>
+                        <a class="button secondary" target="_blank" rel="noopener"
+                           href="<?= e(url((string) $revaluationBatch['report_path'])) ?>">
+                            <?= icon('documents') ?> Valuation report
+                        </a>
+                    </div>
+                </section>
+
+                <?php if ((string) $revaluationBatch['status'] === 'rejected'): ?>
+                    <section class="mbw-card fa-alert-card is-rejected">
+                        <strong>Rejected</strong>
+                        <p><?= e((string) ($revaluationBatch['rejection_reason'] ?? 'No reason recorded.')) ?></p>
+                    </section>
+                <?php endif; ?>
+
+                <form method="post" enctype="multipart/form-data" class="fa-batch-form">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="save_revaluation_batch">
+                    <input type="hidden" name="batch_id" value="<?= e((int) $revaluationBatch['id']) ?>">
+
+                    <section class="mbw-card">
+                        <div class="mbw-card-head">
+                            <div>
+                                <span class="fa-eyebrow">Batch details</span>
+                                <h2>Valuation information</h2>
+                            </div>
+                        </div>
+
+                        <div class="workspace-form-grid fa-batch-fields">
+                            <label>Revaluation date
+                                <input type="date" name="revaluation_date"
+                                       value="<?= e((string) $revaluationBatch['revaluation_date']) ?>"
+                                       <?= $batchEditable ? '' : 'disabled' ?> required>
+                            </label>
+                            <label>Valuer name
+                                <input type="text" name="valuer_name" maxlength="190"
+                                       value="<?= e((string) $revaluationBatch['valuer_name']) ?>"
+                                       <?= $batchEditable ? '' : 'disabled' ?> required>
+                            </label>
+                            <label>Valuer registration / reference
+                                <input type="text" name="valuer_reference" maxlength="190"
+                                       value="<?= e((string) ($revaluationBatch['valuer_reference'] ?? '')) ?>"
+                                       <?= $batchEditable ? '' : 'disabled' ?>>
+                            </label>
+                            <label>Valuation method
+                                <select name="valuation_method" <?= $batchEditable ? '' : 'disabled' ?> required>
+                                    <?php foreach (fa_revaluation_methods() as $methodKey => $methodLabel): ?>
+                                        <option value="<?= e($methodKey) ?>"
+                                            <?= (string) $revaluationBatch['valuation_method'] === $methodKey ? 'selected' : '' ?>>
+                                            <?= e($methodLabel) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </label>
+                            <label class="workspace-span-2">Reason
+                                <textarea name="reason" rows="3" <?= $batchEditable ? '' : 'disabled' ?> required><?= e((string) $revaluationBatch['reason']) ?></textarea>
+                            </label>
+                            <?php if ($batchEditable): ?>
+                                <label class="workspace-span-2">Replace valuation report
+                                    <input type="file" name="valuation_report" accept=".pdf,.jpg,.jpeg,.png">
+                                    <small>Optional. PDF, JPG or PNG, maximum 10 MB.</small>
+                                </label>
+                            <?php endif; ?>
+                        </div>
+                    </section>
+
+                    <section class="mbw-card">
+                        <div class="mbw-card-head">
+                            <div>
+                                <span class="fa-eyebrow">Class-wide asset list</span>
+                                <h2><?= e((string) count($revaluationLines)) ?> assets in this batch</h2>
+                            </div>
+                            <div class="mbw-card-tools">
+                                <span class="mbw-pill tone-blue">Complete class frozen at creation</span>
+                            </div>
+                        </div>
+
+                        <div class="rc-table-scroll">
+                            <table class="rc-table fa-revaluation-table">
+                                <thead>
+                                    <tr>
+                                        <th>Asset</th>
+                                        <th class="align-right">Previous carrying</th>
+                                        <th class="align-right">New fair value</th>
+                                        <th class="align-right">Increase / decrease</th>
+                                        <th class="align-right">Revised life</th>
+                                        <th class="align-right">Residual value</th>
+                                        <th>Remarks</th>
+                                        <?php if ($batchApproved): ?>
+                                            <th class="align-right">P&amp;L</th>
+                                            <th class="align-right">OCI</th>
+                                            <th>Voucher</th>
+                                        <?php endif; ?>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($revaluationLines as $line): ?>
+                                        <?php
+                                        $lineChange = round(
+                                            (float) $line['new_fair_value']
+                                            - (float) $line['previous_carrying_value'],
+                                            2
+                                        );
+                                        ?>
+                                        <tr data-revaluation-line>
+                                            <td>
+                                                <strong><?= e($line['asset_code']) ?></strong>
+                                                <small><?= e($line['asset_name']) ?></small>
+                                            </td>
+                                            <td class="align-right">
+                                                <?= e(number_format((float) $line['previous_carrying_value'], 2)) ?>
+                                                <?php if ($batchEditable): ?>
+                                                    <input type="hidden"
+                                                        name="line[<?= e((int) $line['id']) ?>][previous_carrying_value]"
+                                                        value="<?= e(number_format((float) $line['previous_carrying_value'], 2, '.', '')) ?>">
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="align-right">
+                                                <?php if ($batchEditable): ?>
+                                                    <input class="fa-money-input" type="number" min="0" step="0.01"
+                                                        data-new-value
+                                                        name="line[<?= e((int) $line['id']) ?>][new_fair_value]"
+                                                        value="<?= e(number_format((float) $line['new_fair_value'], 2, '.', '')) ?>"
+                                                        required>
+                                                <?php else: ?>
+                                                    <?= e(number_format((float) $line['new_fair_value'], 2)) ?>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="align-right">
+                                                <span data-change
+                                                    class="fa-change <?= $lineChange >= 0 ? 'is-up' : 'is-down' ?>">
+                                                    <?= e(($lineChange >= 0 ? '+' : '') . number_format($lineChange, 2)) ?>
+                                                </span>
+                                            </td>
+                                            <td class="align-right">
+                                                <?php if ($batchEditable): ?>
+                                                    <input class="fa-small-input" type="number" min="1" step="1"
+                                                        name="line[<?= e((int) $line['id']) ?>][revised_useful_life_months]"
+                                                        value="<?= e((int) $line['revised_useful_life_months']) ?>" required>
+                                                <?php else: ?>
+                                                    <?= e((int) $line['revised_useful_life_months']) ?> mo
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="align-right">
+                                                <?php if ($batchEditable): ?>
+                                                    <input class="fa-money-input" type="number" min="0" step="0.01"
+                                                        name="line[<?= e((int) $line['id']) ?>][revised_residual_value]"
+                                                        value="<?= e(number_format((float) $line['revised_residual_value'], 2, '.', '')) ?>"
+                                                        required>
+                                                <?php else: ?>
+                                                    <?= e(number_format((float) $line['revised_residual_value'], 2)) ?>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <?php if ($batchEditable): ?>
+                                                    <input type="text" maxlength="500"
+                                                        name="line[<?= e((int) $line['id']) ?>][remarks]"
+                                                        value="<?= e((string) ($line['remarks'] ?? '')) ?>">
+                                                <?php else: ?>
+                                                    <?= e((string) ($line['remarks'] ?? '—')) ?>
+                                                <?php endif; ?>
+                                            </td>
+                                            <?php if ($batchApproved): ?>
+                                                <td class="align-right"><?= e(number_format((float) $line['pnl_effect'], 2)) ?></td>
+                                                <td class="align-right"><?= e(number_format((float) $line['oci_effect'], 2)) ?></td>
+                                                <td><?= $line['voucher_id'] ? '#' . e((int) $line['voucher_id']) : '—' ?></td>
+                                            <?php endif; ?>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <?php if ($batchEditable): ?>
+                            <div class="fa-form-actions">
+                                <button type="submit" class="button secondary">
+                                    <?= icon('accounting') ?> Save draft
+                                </button>
+                            </div>
+                        <?php endif; ?>
+                    </section>
+                </form>
+
+                <?php if ($batchEditable): ?>
+                    <section class="mbw-card fa-approval-card">
+                        <div>
+                            <span class="fa-eyebrow">Approval workflow</span>
+                            <h2>Submit completed batch</h2>
+                            <p>After submission, asset values are locked until the batch is approved or rejected.</p>
+                        </div>
+                        <form method="post">
+                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                            <input type="hidden" name="action" value="submit_revaluation_batch">
+                            <input type="hidden" name="batch_id" value="<?= e((int) $revaluationBatch['id']) ?>">
+                            <button type="submit"><?= icon('upload') ?> Submit for approval</button>
+                        </form>
+                    </section>
+                <?php elseif ($batchSubmitted && user_can_do('accounting', 'approve')): ?>
+                    <section class="mbw-card fa-approval-card">
+                        <div>
+                            <span class="fa-eyebrow">Approval required</span>
+                            <h2>Review accounting impact</h2>
+                            <p>Approval posts the journal entries, updates OCI and P&amp;L, and resets future depreciation prospectively.</p>
+                        </div>
+                        <div class="fa-approval-actions">
+                            <form method="post" data-confirm="Approve and post this class-wide revaluation batch?">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="approve_revaluation_batch">
+                                <input type="hidden" name="batch_id" value="<?= e((int) $revaluationBatch['id']) ?>">
+                                <button type="submit"><?= icon('accounting') ?> Approve and post</button>
+                            </form>
+                            <form method="post" class="fa-reject-form">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="reject_revaluation_batch">
+                                <input type="hidden" name="batch_id" value="<?= e((int) $revaluationBatch['id']) ?>">
+                                <input type="text" name="rejection_reason" placeholder="Reason for rejection" required>
+                                <button type="submit" class="button secondary">Reject</button>
+                            </form>
+                        </div>
+                    </section>
+                <?php endif; ?>
+
+            <?php else: ?>
+                <section class="mbw-card fa-new-batch-card">
+                    <div class="mbw-card-head">
+                        <div>
+                            <span class="fa-eyebrow">New class-wide batch</span>
+                            <h2>Create revaluation batch</h2>
+                            <p>Select one asset class. Every active asset in that class is included and frozen in the batch.</p>
+                        </div>
+                    </div>
+
+                    <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                        <input type="hidden" name="action" value="create_revaluation_batch">
+
+                        <label>Asset class
+                            <select name="asset_class" required>
+                                <?php foreach (['ppe', 'intangible', 'investment_property'] as $classKey): ?>
+                                    <option value="<?= e($classKey) ?>" <?= $preselectedClass === $classKey ? 'selected' : '' ?>>
+                                        <?= e($assetClasses[$classKey]) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+                        <label>Revaluation date
+                            <input type="date" name="revaluation_date" value="<?= e(date('Y-m-d')) ?>" required>
+                        </label>
+                        <label>Valuer name
+                            <input type="text" name="valuer_name" maxlength="190" required>
+                        </label>
+                        <label>Valuer registration / reference
+                            <input type="text" name="valuer_reference" maxlength="190">
+                        </label>
+                        <label>Valuation method
+                            <select name="valuation_method" required>
+                                <?php foreach (fa_revaluation_methods() as $methodKey => $methodLabel): ?>
+                                    <option value="<?= e($methodKey) ?>"><?= e($methodLabel) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+                        <label>Valuation report
+                            <input type="file" name="valuation_report" accept=".pdf,.jpg,.jpeg,.png" required>
+                            <small>PDF, JPG or PNG, maximum 10 MB.</small>
+                        </label>
+                        <label class="workspace-span-2">Reason
+                            <textarea name="reason" rows="3" required></textarea>
+                        </label>
+                        <div class="workspace-span-2">
+                            <button type="submit"><?= icon('wallet') ?> Create batch and load class assets</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section class="mbw-card">
+                    <div class="mbw-card-head">
+                        <div>
+                            <span class="fa-eyebrow">Complete history</span>
+                            <h2>Revaluation batches</h2>
+                        </div>
+                    </div>
+
+                    <div class="rc-table-scroll">
+                        <table class="rc-table">
+                            <thead>
+                                <tr>
+                                    <th>Batch</th>
+                                    <th>Date</th>
+                                    <th>Asset class</th>
+                                    <th class="align-right">Assets</th>
+                                    <th class="align-right">Previous value</th>
+                                    <th class="align-right">New value</th>
+                                    <th class="align-right">Net change</th>
+                                    <th>Status</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($revaluationBatches as $batchRow): ?>
+                                    <tr>
+                                        <td><strong><?= e($batchRow['batch_no']) ?></strong></td>
+                                        <td><?= e($batchRow['revaluation_date']) ?></td>
+                                        <td><?= e($assetClasses[$batchRow['asset_class']] ?? $batchRow['asset_class']) ?></td>
+                                        <td class="align-right"><?= e((int) $batchRow['asset_count']) ?></td>
+                                        <td class="align-right"><?= e(number_format((float) $batchRow['previous_total'], 2)) ?></td>
+                                        <td class="align-right"><?= e(number_format((float) $batchRow['fair_value_total'], 2)) ?></td>
+                                        <td class="align-right">
+                                            <?php $netChange = (float) $batchRow['fair_value_total'] - (float) $batchRow['previous_total']; ?>
+                                            <span class="fa-change <?= $netChange >= 0 ? 'is-up' : 'is-down' ?>">
+                                                <?= e(($netChange >= 0 ? '+' : '') . number_format($netChange, 2)) ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="mbw-pill <?= e($statusTone((string) $batchRow['status'])) ?>">
+                                                <?= e(ucfirst((string) $batchRow['status'])) ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <a class="button secondary"
+                                               href="<?= e(url('admin/fixed-assets.php?view=revaluation&batch_id=' . (int) $batchRow['id'])) ?>">
+                                                Open
+                                            </a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                                <?php if ($revaluationBatches === []): ?>
+                                    <tr>
+                                        <td colspan="9" style="text-align:center;color:var(--mbw-muted)">
+                                            No revaluation batches yet.
+                                        </td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            <?php endif; ?>
+        </main>
+    </div>
+
+    <script>
+    document.querySelectorAll('[data-revaluation-line]').forEach(function (row) {
+        var previousInput = row.querySelector('input[name*="[previous_carrying_value]"]');
+        var newInput = row.querySelector('[data-new-value]');
+        var changeOutput = row.querySelector('[data-change]');
+        if (!previousInput || !newInput || !changeOutput) {
+            return;
+        }
+
+        function updateChange() {
+            var previousValue = Number(previousInput.value || 0);
+            var newValue = Number(newInput.value || 0);
+            var change = newValue - previousValue;
+            changeOutput.textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
+            changeOutput.classList.toggle('is-up', change >= 0);
+            changeOutput.classList.toggle('is-down', change < 0);
+        }
+
+        newInput.addEventListener('input', updateChange);
+        updateChange();
+    });
+    </script>
+
+<?php elseif ($faView === 'leases'): ?>
     <?php
     $activeLeaseId = (int) ($_GET['lease_id'] ?? 0);
     $activeLease = $activeLeaseId > 0 ? fa_company_lease($activeLeaseId, $companyId) : null;
@@ -957,14 +1690,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <div class="workspace-span-2"><button type="submit"><?= icon('accounting') ?>Classify held for sale</button></div>
                 </form>
             </details>
-            <details class="feature-disclosure">
-                <summary><span><strong><?= icon('wallet') ?>Revalue (IAS 16 revaluation model)</strong><small>Restate to fair value; surplus to OCI, decrease to P&amp;L.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
-                <form method="post" class="workspace-form-grid">
-                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="revalue_asset"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
-                    <label>New fair value<input type="number" step="0.01" name="new_fair_value" value="<?= e(number_format((float) $detailAsset['carrying_amount'], 2, '.', '')) ?>"></label>
-                    <div class="workspace-span-2"><button type="submit"><?= icon('accounting') ?>Post revaluation</button></div>
-                </form>
-            </details>
+            <div class="feature-disclosure fa-revaluation-callout">
+                <div>
+                    <strong><?= icon('wallet') ?>Revaluation batch</strong>
+                    <small>Open the class-wide IAS 16 / IAS 38 workflow. Direct single-asset posting is disabled.</small>
+                </div>
+                <a class="button secondary"
+                   href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $detailAsset['id'])) ?>">
+                    Open revaluation
+                </a>
+            </div>
             <?php if ((string) $detailAsset['asset_class'] === 'cwip'): ?>
             <details class="feature-disclosure">
                 <summary><span><strong><?= icon('upload') ?>Capitalize from CWIP</strong><small>Reclassify Capital Work-in-Progress to an in-service asset and start depreciation.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
@@ -1113,7 +1848,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <td class="align-right"><?= e(number_format((float) $a['accumulated_depreciation'], 2)) ?></td>
                         <td class="align-right"><?= e(number_format((float) $a['carrying_amount'], 2)) ?></td>
                         <td><span class="mbw-pill <?= (string) $a['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', (string) $a['status'])) ?></span></td>
-                        <td><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=' . (int) $a['id'])) ?>">Open</a></td>
+                        <td><div class="fa-row-actions"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=' . (int) $a['id'])) ?>">Open</a><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $a['id'])) ?>">Revalue</a></div></td>
                     </tr>
                 <?php endforeach; ?>
                 <?php if ($assets === []): ?><tr><td colspan="9" style="text-align:center;color:var(--mbw-muted)">No assets registered yet — add one above.</td></tr><?php endif; ?>
