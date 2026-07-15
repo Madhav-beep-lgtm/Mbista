@@ -139,12 +139,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ['ledger_id' => (int) $creditLedger['id'], 'entry_type' => 'credit', 'amount' => $cost],
                 ]);
                 flash('success', 'Asset ' . $code . ' registered and acquisition voucher FA-ACQ-' . $code . ' posted' . $narrationBy . '.');
-            } else {
+            } elseif ($cost > 0) {
+                // A skipped acquisition voucher must be loud: the register and
+                // the ledger disagree until it is posted (see post_acquisition).
                 $costLabel = fa_mapping_purposes()[$costPurpose]['label'] ?? $costPurpose;
-                $fundingHint = $fundingMode === 'supplier' ? ' Select a valid supplier for on-credit acquisitions.'
-                    : ($fundingMode === 'opening' ? ' Map Opening Balance Equity to post opening balances.'
-                    : ' Map ' . $costLabel . ' + Acquisition Clearing to auto-post the acquisition voucher.');
-                flash('success', 'Asset ' . $code . ' registered.' . ($cost > 0 && (!$costLedger || !$creditLedger) ? $fundingHint : ''));
+                $fundingHint = $fundingMode === 'supplier' ? 'Select a valid supplier for on-credit acquisitions.'
+                    : ($fundingMode === 'opening' ? 'Map Opening Balance Equity on the Ledger Mapping tab.'
+                    : 'Map ' . $costLabel . ' + Acquisition Clearing on the Ledger Mapping tab.');
+                flash('error', 'Asset ' . $code . ' was registered but NOT posted to the ledger — the acquisition voucher was skipped. ' . $fundingHint . ' Then open the asset and use "Post acquisition to ledger".');
+            } else {
+                flash('success', 'Asset ' . $code . ' registered.');
             }
         } catch (Throwable $e) {
             flash('error', (string) $e->getCode() === '23000' ? 'Asset code ' . $code . ' already exists.' : 'Could not register asset: ' . $e->getMessage());
@@ -258,6 +262,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Could not delete the asset: ' . $e->getMessage());
         }
         redirect('admin/fixed-assets.php');
+    }
+
+    if ($action === 'post_acquisition') {
+        // Retroactively posts the acquisition voucher for an asset that was
+        // registered while the ledger mappings were missing (the register
+        // used to skip the voucher silently). Same posting as add_asset:
+        // Dr PPE/CWIP cost, Cr chosen funding leg.
+        require_permission('accounting', 'post');
+        $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
+        if (!$asset) {
+            flash('error', 'Asset not found for this company.');
+            redirect('admin/fixed-assets.php');
+        }
+        $assetId = (int) $asset['id'];
+        if ((string) $asset['asset_class'] === 'rou') {
+            flash('error', 'Right-of-use assets are posted through lease commencement, not an acquisition voucher.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        $existsStmt = db()->prepare("SELECT id FROM vouchers WHERE source_type = 'fixed_asset_acquisition' AND source_id = :aid LIMIT 1");
+        $existsStmt->execute(['aid' => $assetId]);
+        if ($existsStmt->fetch()) {
+            flash('error', 'The acquisition voucher for this asset is already posted.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        // Additions raise fixed_assets.cost and post their own vouchers, so
+        // the acquisition amount is the recorded cost minus posted additions.
+        $addedStmt = db()->prepare("SELECT COALESCE(SUM(total_amount), 0) FROM vouchers WHERE company_id = :cid AND source_type = 'fixed_asset_addition' AND voucher_no LIKE :pattern");
+        $addedStmt->execute(['cid' => $companyId, 'pattern' => 'FA-ADD-' . $asset['asset_code'] . '-%']);
+        $amount = round((float) $asset['cost'] - (float) $addedStmt->fetchColumn(), 2);
+        if ($amount <= 0) {
+            flash('error', 'Nothing to post — the asset cost is already covered by posted vouchers.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        $voucherDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($_POST['voucher_date'] ?? '')) ? (string) $_POST['voucher_date'] : ((string) ($asset['available_for_use_date'] ?? '') ?: date('Y-m-d'));
+        if (is_period_locked($companyId, $fiscalYearId, $voucherDate)) {
+            flash('error', 'The chosen voucher date is inside a locked accounting period.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        $costPurpose = (string) $asset['asset_class'] === 'cwip' ? 'cwip' : 'ppe_cost';
+        $costLedger = fa_resolve_mapping($companyId, $costPurpose, $assetId);
+        $fundingModeRaw = (string) ($_POST['funding_mode'] ?? 'clearing');
+        $fundingMode = in_array($fundingModeRaw, ['clearing', 'supplier', 'cash', 'opening'], true) ? $fundingModeRaw : 'clearing';
+        [$creditLedger, $voucherPartyId] = fa_counterparty_ledger($companyId, $fundingMode, (int) ($_POST['supplier_party_id'] ?? 0), 'acquisition_clearing', $assetId);
+        if (!$costLedger || !$creditLedger) {
+            $costLabel = fa_mapping_purposes()[$costPurpose]['label'] ?? $costPurpose;
+            flash('error', $fundingMode === 'supplier'
+                ? 'Select a valid supplier for on-credit acquisitions.'
+                : 'Map ' . $costLabel . ' and the funding ledger on the Ledger Mapping tab first.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        try {
+            $narrationBy = match ($fundingMode) {
+                'supplier' => ' (on credit — ' . ($creditLedger['name'] ?? 'supplier') . ')',
+                'cash' => ' (paid by cash/bank)',
+                'opening' => ' (opening balance)',
+                default => '',
+            };
+            create_voucher_with_entries([
+                'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
+                'voucher_no' => 'FA-ACQ-' . $asset['asset_code'], 'voucher_type' => 'journal',
+                'voucher_date' => $voucherDate,
+                'source_type' => 'fixed_asset_acquisition', 'source_id' => $assetId,
+                'party_id' => $voucherPartyId,
+                'total_amount' => $amount, 'narration' => 'Acquisition of ' . $asset['name'] . ' (' . $asset['asset_code'] . ')' . $narrationBy . ' — posted retrospectively.',
+                'status' => 'posted', 'posted_by' => $userId,
+            ], [
+                ['ledger_id' => (int) $costLedger['id'], 'entry_type' => 'debit', 'amount' => $amount],
+                ['ledger_id' => (int) $creditLedger['id'], 'entry_type' => 'credit', 'amount' => $amount],
+            ]);
+            security_event('asset_acquisition_posted', 'success', 'Acquisition voucher posted retrospectively for asset #' . $assetId . '.', $companyId, $userId);
+            log_activity('fixed_asset', $assetId, 'acquisition_posted', 'Acquisition voucher FA-ACQ-' . $asset['asset_code'] . ' (' . number_format($amount, 2) . ') posted retrospectively.', $userId);
+            flash('success', 'Acquisition voucher FA-ACQ-' . $asset['asset_code'] . ' posted: Dr ' . ($costLedger['name'] ?? 'Asset cost') . ' / Cr ' . ($creditLedger['name'] ?? 'funding') . ' ' . site_currency_symbol() . number_format($amount, 2) . '.');
+        } catch (Throwable $e) {
+            flash('error', 'Could not post the acquisition: ' . $e->getMessage());
+        }
+        redirect('admin/fixed-assets.php?view=' . $assetId);
     }
 
     if ($action === 'add_asset_cost') {
@@ -1332,6 +1412,15 @@ $assets = db()->prepare($assetsSql);
 $assets->execute($assetsParams);
 $assets = $assets->fetchAll(PDO::FETCH_ASSOC);
 
+// Assets whose acquisition never reached the ledger (registered while the
+// mappings were missing) — flagged in the register and fixable per asset.
+$unpostedAcquisitionIds = [];
+$unpostedStmt = db()->prepare("SELECT fa.id FROM fixed_assets fa
+    WHERE fa.company_id = :cid AND fa.cost > 0 AND fa.asset_class <> 'rou'
+      AND NOT EXISTS (SELECT 1 FROM vouchers v WHERE v.source_type = 'fixed_asset_acquisition' AND v.source_id = fa.id)");
+$unpostedStmt->execute(['cid' => $companyId]);
+$unpostedAcquisitionIds = array_map('intval', $unpostedStmt->fetchAll(PDO::FETCH_COLUMN));
+
 $totalCost = array_sum(array_map(static fn (array $a): float => (float) $a['cost'], $assets));
 $totalAccum = array_sum(array_map(static fn (array $a): float => (float) $a['accumulated_depreciation'], $assets));
 $totalImpair = array_sum(array_map(static fn (array $a): float => (float) $a['accumulated_impairment'], $assets));
@@ -2129,8 +2218,38 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     $schedStmt->execute(['aid' => (int) $detailAsset['id']]);
     $schedule = $schedStmt->fetchAll(PDO::FETCH_ASSOC);
     ?>
+    <?php $detailAcquisitionUnposted = in_array((int) $detailAsset['id'], $unpostedAcquisitionIds, true); ?>
+    <?php if ($detailAcquisitionUnposted): ?>
+        <section class="mbw-card" style="border-left:4px solid #c0392b">
+            <div class="mbw-card-head"><h2>Acquisition not posted to the ledger</h2></div>
+            <p style="margin:0 0 10px">This asset sits in the register, but its acquisition voucher was never posted — it was registered while the ledger mappings were missing, so the books do not yet show the asset cost. Choose how it was funded and post it now (Dr <?= e((string) $detailAsset['asset_class'] === 'cwip' ? 'Capital WIP' : 'PPE cost') ?> / Cr funding ledger).</p>
+            <form method="post" class="frm-grid frm-grid-4">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="post_acquisition">
+                <input type="hidden" name="asset_id" value="<?= (int) $detailAsset['id'] ?>">
+                <label>Funded by
+                    <select name="funding_mode">
+                        <option value="clearing">Acquisition clearing (default)</option>
+                        <option value="supplier">Supplier (on credit)</option>
+                        <option value="cash">Cash / bank</option>
+                        <option value="opening">Opening balance / transfer-in</option>
+                    </select>
+                </label>
+                <label>Supplier (when on credit)
+                    <select name="supplier_party_id">
+                        <option value="0">— select supplier —</option>
+                        <?php foreach ($faParties as $party): ?>
+                            <option value="<?= (int) $party['id'] ?>"><?= e($party['name']) ?> (<?= e($party['code']) ?>)</option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Voucher date<input type="date" name="voucher_date" value="<?= e((string) ($detailAsset['available_for_use_date'] ?? date('Y-m-d'))) ?>"></label>
+                <div style="align-self:end"><button type="submit"><?= icon('accounting') ?>Post acquisition to ledger</button></div>
+            </form>
+        </section>
+    <?php endif; ?>
     <section class="mbw-card">
-        <div class="mbw-card-head"><h2><?= e($detailAsset['name']) ?> <span class="mbw-pill tone-gray"><?= e($detailAsset['asset_code']) ?></span></h2>
+        <div class="mbw-card-head"><h2><?= e($detailAsset['name']) ?> <span class="mbw-pill tone-gray"><?= e($detailAsset['asset_code']) ?></span><?php if ($detailAcquisitionUnposted): ?> <span class="mbw-pill tone-red">GL not posted</span><?php endif; ?></h2>
             <div class="mbw-card-tools"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php')) ?>">Back to register</a></div></div>
         <div class="users-view-grid">
             <div class="card">
@@ -2337,7 +2456,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php else: ?>
     <section class="mbw-card">
-        <div class="mbw-card-head"><h2>Register a fixed asset</h2></div>
+        <div class="mbw-card-head"><h2>Register a fixed asset</h2><span class="frm-optional">Registering posts the acquisition voucher automatically: Dr asset cost / Cr the funding you choose below</span></div>
+        <?php $registerMissing = fa_missing_mappings($companyId, ['ppe_cost', 'acquisition_clearing']); ?>
+        <?php if ($registerMissing !== []): ?>
+            <div class="notice error" style="margin-bottom:12px">
+                The acquisition voucher CANNOT post yet — missing ledger mapping<?= count($registerMissing) > 1 ? 's' : '' ?>:
+                <strong><?= e(implode(', ', array_map(static fn (string $p): string => fa_mapping_purposes()[$p]['label'] ?? $p, $registerMissing))) ?></strong>.
+                Set <?= count($registerMissing) > 1 ? 'them' : 'it' ?> on the <a href="<?= e(url('admin/fixed-assets.php?view=mapping')) ?>">Ledger Mapping</a> tab first, or the asset will sit in the register without touching the books.
+            </div>
+        <?php endif; ?>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="add_asset">
@@ -2357,10 +2484,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Available for use date<input type="date" name="available_for_use_date"></label>
             <label>Funded by
                 <select name="funding_mode">
-                    <option value="clearing">Acquisition clearing (default)</option>
-                    <option value="supplier">Supplier — on credit (party payable)</option>
-                    <option value="cash">Cash / bank</option>
-                    <option value="opening">Opening balance (migrated asset)</option>
+                    <option value="clearing">Acquisition — clearing ledger (default)</option>
+                    <option value="supplier">Acquisition — on credit from supplier</option>
+                    <option value="cash">Acquisition — paid by cash/bank</option>
+                    <option value="opening">Opening balance / transfer-in (migrated asset)</option>
                 </select>
             </label>
             <label>Supplier (when on credit)
@@ -2409,7 +2536,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <td class="align-right"><?= e(number_format((float) $a['cost'], 2)) ?></td>
                         <td class="align-right"><?= e(number_format((float) $a['accumulated_depreciation'], 2)) ?></td>
                         <td class="align-right"><?= e(number_format((float) $a['carrying_amount'], 2)) ?></td>
-                        <td><span class="mbw-pill <?= (string) $a['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', (string) $a['status'])) ?></span></td>
+                        <td><span class="mbw-pill <?= (string) $a['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', (string) $a['status'])) ?></span><?php if (in_array((int) $a['id'], $unpostedAcquisitionIds, true)): ?> <span class="mbw-pill tone-red" title="The acquisition voucher was never posted — open the asset and use Post acquisition to ledger">GL not posted</span><?php endif; ?></td>
                         <td><div class="fa-row-actions"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=' . (int) $a['id'])) ?>">Open</a><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $a['id'])) ?>">Revalue</a><?php if (user_can('delete') && user_can_do('accounting', 'edit')): ?><form method="post" style="display:inline" onsubmit="return confirm('Permanently delete asset <?= e($a['asset_code']) ?> and every voucher it posted (acquisition, depreciation, impairment, disposal, lease)? Use Dispose for a real asset leaving the business — Delete is only for wrong entries and cannot be undone.')"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="delete_asset"><input type="hidden" name="asset_id" value="<?= (int) $a['id'] ?>"><button type="submit" class="button danger">Delete</button></form><?php endif; ?></div></td>
                     </tr>
                 <?php endforeach; ?>
