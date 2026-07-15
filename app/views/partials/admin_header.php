@@ -46,15 +46,13 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     // These shared accounting links are identical for admin, staff and client books.
     ['Inventory & Manufacturing', 'admin/accounting-inventory.php', 'layers', $headerScript === 'accounting-inventory.php'],
     ['Fixed Asset Register', 'admin/fixed-assets.php', 'companies',
-        $headerScript === 'fixed-assets.php' && !in_array($headerView, ['models', 'revaluation', 'leases', 'mapping', 'categories'], true)],
+        $headerScript === 'fixed-assets.php' && !in_array($headerView, ['models', 'revaluation', 'leases', 'categories'], true)],
     ['Asset Measurement Models', 'admin/fixed-assets.php?view=models', 'settings',
         $headerScript === 'fixed-assets.php' && $headerView === 'models'],
     ['Asset Revaluation', 'admin/fixed-assets.php?view=revaluation', 'wallet',
         $headerScript === 'fixed-assets.php' && $headerView === 'revaluation'],
     ['IFRS 16 Leases', 'admin/fixed-assets.php?view=leases', 'contracts',
         $headerScript === 'fixed-assets.php' && $headerView === 'leases'],
-    ['Asset Ledger Mapping', 'admin/fixed-assets.php?view=mapping', 'accounting',
-        $headerScript === 'fixed-assets.php' && $headerView === 'mapping'],
     ['Asset Categories', 'admin/fixed-assets.php?view=categories', 'layers',
         $headerScript === 'fixed-assets.php' && $headerView === 'categories'],
 ]);

@@ -64,6 +64,106 @@ function fa_company_lease(int $leaseId, int $companyId): ?array
     return $s->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
+/**
+ * Sets (or with ledger id 0 clears) ONE asset-scope ledger mapping. Ledgers
+ * are chosen per asset on the create forms and the asset page, so this is
+ * the only scope the UI writes; fa_resolve_mapping still reads asset →
+ * category → global, which keeps assets from before this arrangement working.
+ */
+function fa_set_asset_ledger(int $companyId, int $assetId, string $purpose, int $ledgerId, int $userId): void
+{
+    if ($assetId <= 0) {
+        return;
+    }
+    if ($ledgerId > 0) {
+        $own = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE id = :id AND company_id = :cid');
+        $own->execute(['id' => $ledgerId, 'cid' => $companyId]);
+        if ((int) $own->fetchColumn() === 0) {
+            return;
+        }
+    }
+    db()->prepare("DELETE FROM asset_ledger_mappings WHERE company_id = :cid AND scope = 'asset' AND asset_id = :aid AND purpose = :p AND category_id IS NULL")
+        ->execute(['cid' => $companyId, 'aid' => $assetId, 'p' => $purpose]);
+    if ($ledgerId > 0) {
+        db()->prepare("INSERT INTO asset_ledger_mappings (company_id, scope, category_id, asset_id, purpose, ledger_id, created_by) VALUES (:cid, 'asset', NULL, :aid, :p, :lid, :uid)")
+            ->execute(['cid' => $companyId, 'aid' => $assetId, 'p' => $purpose, 'lid' => $ledgerId, 'uid' => $userId]);
+    }
+}
+
+/**
+ * Resolves the single "Funded from" select: "L<id>" credits that ledger
+ * directly, "P<id>" credits the supplier's payable ledger (created on
+ * demand) and tags the voucher with the party. Returns [ledgerRow|null,
+ * partyId|null].
+ */
+function fa_funded_from_ledger(int $companyId, string $value): array
+{
+    $value = trim($value);
+    if (preg_match('/^P(\d+)$/', $value, $m)) {
+        $partyId = (int) $m[1];
+        $chk = db()->prepare('SELECT COUNT(*) FROM accounting_parties WHERE id = :id AND company_id = :cid');
+        $chk->execute(['id' => $partyId, 'cid' => $companyId]);
+        if ((int) $chk->fetchColumn() === 0) {
+            return [null, null];
+        }
+        $ledgerId = ensure_party_ledger($companyId, $partyId, 'payable');
+        if ($ledgerId <= 0) {
+            return [null, null];
+        }
+        $row = db()->prepare('SELECT * FROM ledgers WHERE id = :id LIMIT 1');
+        $row->execute(['id' => $ledgerId]);
+        $ledger = $row->fetch(PDO::FETCH_ASSOC) ?: null;
+        return [$ledger, $ledger ? $partyId : null];
+    }
+    if (preg_match('/^L(\d+)$/', $value, $m)) {
+        $row = db()->prepare('SELECT * FROM ledgers WHERE id = :id AND company_id = :cid LIMIT 1');
+        $row->execute(['id' => (int) $m[1], 'cid' => $companyId]);
+        return [$row->fetch(PDO::FETCH_ASSOC) ?: null, null];
+    }
+    return [null, null];
+}
+
+/** <select> of the company's ledgers; value = ledger id. */
+function fa_ledger_select(string $name, array $ledgers, int $selectedId = 0, string $placeholder = '— choose ledger —'): string
+{
+    $html = '<select name="' . e($name) . '"><option value="0">' . e($placeholder) . '</option>';
+    foreach ($ledgers as $l) {
+        $html .= '<option value="' . (int) $l['id'] . '"' . ((int) $l['id'] === $selectedId ? ' selected' : '') . '>' . e($l['code'] . ' - ' . $l['name']) . '</option>';
+    }
+    return $html . '</select>';
+}
+
+/**
+ * The single "Funded from" <select>: pick a ledger directly (cash/bank,
+ * clearing, opening equity, …) or a supplier for on-credit purchases —
+ * the supplier's payable ledger is created automatically. No separate
+ * funding-mode + supplier pair.
+ */
+function fa_funded_from_select(string $name, array $ledgers, array $parties, int $preselectLedgerId = 0): string
+{
+    $html = '<select name="' . e($name) . '"><option value="">— choose where the credit goes —</option>';
+    $html .= '<optgroup label="Ledgers (cash/bank, clearing, opening equity…)">';
+    foreach ($ledgers as $l) {
+        $html .= '<option value="L' . (int) $l['id'] . '"' . ((int) $l['id'] === $preselectLedgerId ? ' selected' : '') . '>' . e($l['code'] . ' - ' . $l['name']) . '</option>';
+    }
+    $html .= '</optgroup><optgroup label="Suppliers — on credit (payable ledger auto-created)">';
+    foreach ($parties as $p) {
+        $html .= '<option value="P' . (int) $p['id'] . '">' . e('Supplier: ' . $p['name'] . ' (' . $p['code'] . ')') . '</option>';
+    }
+    return $html . '</optgroup></select>';
+}
+
+/** The lifecycle ledger purposes that apply to ONE asset, by its class. */
+function fa_purposes_for_asset(array $asset): array
+{
+    $eventPurposes = ['impairment_loss', 'impairment_reversal_income', 'asset_held_for_sale', 'gain_on_disposal', 'loss_on_disposal', 'disposal_clearing', 'revaluation_surplus', 'revaluation_loss'];
+    return match ((string) ($asset['asset_class'] ?? 'ppe')) {
+        'cwip' => array_merge(['cwip', 'ppe_cost', 'acquisition_clearing'], $eventPurposes),
+        'rou' => array_merge(['rou_asset', 'lease_liability', 'lease_interest_expense', 'acquisition_clearing', 'depreciation_expense', 'accumulated_depreciation'], $eventPurposes),
+        default => array_merge(['ppe_cost', 'acquisition_clearing', 'depreciation_expense', 'accumulated_depreciation'], $eventPurposes),
+    };
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
@@ -105,27 +205,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $assetId = (int) db()->lastInsertId();
             log_activity('fixed_asset', $assetId, 'created', 'Fixed asset registered.', $userId);
 
-            // Optional acquisition voucher when both legs are mapped.
+            // The ledgers picked on the form belong to THIS asset only —
+            // stored as asset-scope mappings so depreciation, additions and
+            // every later event post to them without any separate mapping step.
             // Work under construction accumulates in the CWIP ledger, not PPE —
-            // it only lands in PPE when capitalize_cwip reclassifies it. Debiting
-            // ppe_cost here would double-debit PPE at capitalization and drive
-            // the CWIP ledger negative (it would be credited having never been
-            // debited).
+            // it only lands in PPE when capitalize_cwip reclassifies it.
             $costPurpose = $class === 'cwip' ? 'cwip' : 'ppe_cost';
+            fa_set_asset_ledger($companyId, $assetId, $costPurpose, (int) ($_POST['cost_ledger_id'] ?? 0), $userId);
+            fa_set_asset_ledger($companyId, $assetId, 'depreciation_expense', (int) ($_POST['dep_expense_ledger_id'] ?? 0), $userId);
+            fa_set_asset_ledger($companyId, $assetId, 'accumulated_depreciation', (int) ($_POST['accum_dep_ledger_id'] ?? 0), $userId);
             $costLedger = fa_resolve_mapping($companyId, $costPurpose, $assetId);
-            // The credit side is per-transaction: bought on credit from a
-            // specific supplier, paid cash, an opening balance carried in from
-            // old books, or the legacy clearing ledger.
-            $fundingModeRaw = (string) ($_POST['funding_mode'] ?? 'clearing');
-            $fundingMode = in_array($fundingModeRaw, ['clearing', 'supplier', 'cash', 'opening'], true) ? $fundingModeRaw : 'clearing';
-            [$creditLedger, $voucherPartyId] = fa_counterparty_ledger($companyId, $fundingMode, (int) ($_POST['supplier_party_id'] ?? 0), 'acquisition_clearing', $assetId);
+
+            // One "Funded from" choice: a ledger (cash/bank, clearing, opening
+            // equity, …) or a supplier bought on credit. The legacy
+            // funding_mode/supplier fields still work as a fallback.
+            [$creditLedger, $voucherPartyId] = fa_funded_from_ledger($companyId, (string) ($_POST['funded_from'] ?? ''));
+            if (!$creditLedger) {
+                $fundingModeRaw = (string) ($_POST['funding_mode'] ?? 'clearing');
+                $fundingMode = in_array($fundingModeRaw, ['clearing', 'supplier', 'cash', 'opening'], true) ? $fundingModeRaw : 'clearing';
+                [$creditLedger, $voucherPartyId] = fa_counterparty_ledger($companyId, $fundingMode, (int) ($_POST['supplier_party_id'] ?? 0), 'acquisition_clearing', $assetId);
+            }
+            if ($creditLedger) {
+                // Future additions and retro-posts default to the same funding.
+                fa_set_asset_ledger($companyId, $assetId, 'acquisition_clearing', (int) $creditLedger['id'], $userId);
+            }
+
             if ($cost > 0 && $costLedger && $creditLedger) {
-                $narrationBy = match ($fundingMode) {
-                    'supplier' => ' (on credit — ' . ($creditLedger['name'] ?? 'supplier') . ')',
-                    'cash' => ' (paid by cash/bank)',
-                    'opening' => ' (opening balance)',
-                    default => '',
-                };
+                $narrationBy = $voucherPartyId !== null
+                    ? ' (on credit — ' . ($creditLedger['name'] ?? 'supplier') . ')'
+                    : ' (funded from ' . ($creditLedger['name'] ?? 'ledger') . ')';
                 create_voucher_with_entries([
                     'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
                     'voucher_no' => 'FA-ACQ-' . $code, 'voucher_type' => 'journal',
@@ -138,15 +246,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ['ledger_id' => (int) $costLedger['id'], 'entry_type' => 'debit', 'amount' => $cost],
                     ['ledger_id' => (int) $creditLedger['id'], 'entry_type' => 'credit', 'amount' => $cost],
                 ]);
-                flash('success', 'Asset ' . $code . ' registered and acquisition voucher FA-ACQ-' . $code . ' posted' . $narrationBy . '.');
+                flash('success', 'Asset ' . $code . ' registered and acquisition voucher FA-ACQ-' . $code . ' posted: Dr ' . ($costLedger['name'] ?? 'asset cost') . ' / Cr ' . ($creditLedger['name'] ?? 'funding') . '.');
             } elseif ($cost > 0) {
                 // A skipped acquisition voucher must be loud: the register and
                 // the ledger disagree until it is posted (see post_acquisition).
-                $costLabel = fa_mapping_purposes()[$costPurpose]['label'] ?? $costPurpose;
-                $fundingHint = $fundingMode === 'supplier' ? 'Select a valid supplier for on-credit acquisitions.'
-                    : ($fundingMode === 'opening' ? 'Map Opening Balance Equity on the Ledger Mapping tab.'
-                    : 'Map ' . $costLabel . ' + Acquisition Clearing on the Ledger Mapping tab.');
-                flash('error', 'Asset ' . $code . ' was registered but NOT posted to the ledger — the acquisition voucher was skipped. ' . $fundingHint . ' Then open the asset and use "Post acquisition to ledger".');
+                flash('error', 'Asset ' . $code . ' was registered but NOT posted to the ledger — choose the asset cost ledger and the "Funded from" ledger on the form (they apply to this asset only). Open the asset and use "Post acquisition to ledger" to post it now.');
             } else {
                 flash('success', 'Asset ' . $code . ' registered.');
             }
@@ -301,24 +405,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/fixed-assets.php?view=' . $assetId);
         }
         $costPurpose = (string) $asset['asset_class'] === 'cwip' ? 'cwip' : 'ppe_cost';
+        // A cost ledger picked here sticks to this asset for all later posts.
+        fa_set_asset_ledger($companyId, $assetId, $costPurpose, (int) ($_POST['cost_ledger_id'] ?? 0), $userId);
         $costLedger = fa_resolve_mapping($companyId, $costPurpose, $assetId);
-        $fundingModeRaw = (string) ($_POST['funding_mode'] ?? 'clearing');
-        $fundingMode = in_array($fundingModeRaw, ['clearing', 'supplier', 'cash', 'opening'], true) ? $fundingModeRaw : 'clearing';
-        [$creditLedger, $voucherPartyId] = fa_counterparty_ledger($companyId, $fundingMode, (int) ($_POST['supplier_party_id'] ?? 0), 'acquisition_clearing', $assetId);
+        [$creditLedger, $voucherPartyId] = fa_funded_from_ledger($companyId, (string) ($_POST['funded_from'] ?? ''));
+        if (!$creditLedger) {
+            $fundingModeRaw = (string) ($_POST['funding_mode'] ?? 'clearing');
+            $fundingMode = in_array($fundingModeRaw, ['clearing', 'supplier', 'cash', 'opening'], true) ? $fundingModeRaw : 'clearing';
+            [$creditLedger, $voucherPartyId] = fa_counterparty_ledger($companyId, $fundingMode, (int) ($_POST['supplier_party_id'] ?? 0), 'acquisition_clearing', $assetId);
+        }
         if (!$costLedger || !$creditLedger) {
             $costLabel = fa_mapping_purposes()[$costPurpose]['label'] ?? $costPurpose;
-            flash('error', $fundingMode === 'supplier'
-                ? 'Select a valid supplier for on-credit acquisitions.'
-                : 'Map ' . $costLabel . ' and the funding ledger on the Ledger Mapping tab first.');
+            flash('error', 'Choose the ' . $costLabel . ' ledger and the "Funded from" ledger — both are needed to post the acquisition.');
             redirect('admin/fixed-assets.php?view=' . $assetId);
         }
+        fa_set_asset_ledger($companyId, $assetId, 'acquisition_clearing', (int) $creditLedger['id'], $userId);
         try {
-            $narrationBy = match ($fundingMode) {
-                'supplier' => ' (on credit — ' . ($creditLedger['name'] ?? 'supplier') . ')',
-                'cash' => ' (paid by cash/bank)',
-                'opening' => ' (opening balance)',
-                default => '',
-            };
+            $narrationBy = $voucherPartyId !== null
+                ? ' (on credit — ' . ($creditLedger['name'] ?? 'supplier') . ')'
+                : ' (funded from ' . ($creditLedger['name'] ?? 'ledger') . ')';
             create_voucher_with_entries([
                 'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
                 'voucher_no' => 'FA-ACQ-' . $asset['asset_code'], 'voucher_type' => 'journal',
@@ -361,13 +466,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $costPurpose = (string) $asset['asset_class'] === 'cwip' ? 'cwip' : 'ppe_cost';
         $costLedger = fa_resolve_mapping($companyId, $costPurpose, (int) $asset['id']);
-        $fundingModeRaw = (string) ($_POST['funding_mode'] ?? 'clearing');
+        // "Funded from" works like at registration: one choice, ledger or
+        // supplier; the asset's own funding ledger is the default fallback.
+        [$creditLedger, $voucherPartyId] = fa_funded_from_ledger($companyId, (string) ($_POST['funded_from'] ?? ''));
+        if (!$creditLedger) {
+            $fundingModeRaw = (string) ($_POST['funding_mode'] ?? 'clearing');
             $fundingMode = in_array($fundingModeRaw, ['clearing', 'supplier', 'cash', 'opening'], true) ? $fundingModeRaw : 'clearing';
-        [$creditLedger, $voucherPartyId] = fa_counterparty_ledger($companyId, $fundingMode, (int) ($_POST['supplier_party_id'] ?? 0), 'acquisition_clearing', (int) $asset['id']);
+            [$creditLedger, $voucherPartyId] = fa_counterparty_ledger($companyId, $fundingMode, (int) ($_POST['supplier_party_id'] ?? 0), 'acquisition_clearing', (int) $asset['id']);
+        }
         if (!$costLedger || !$creditLedger) {
-            flash('error', $fundingMode === 'supplier'
-                ? 'Select a valid supplier (its payable ledger is created automatically).'
-                : 'Map the asset cost purpose and the funding ledger before adding cost.');
+            flash('error', 'Choose the "Funded from" ledger (and set the asset cost ledger on the asset page) before adding cost.');
             redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
         }
         try {
@@ -415,7 +523,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $expLedger = fa_resolve_mapping($companyId, 'depreciation_expense', (int) $asset['id']);
         $accLedger = fa_resolve_mapping($companyId, 'accumulated_depreciation', (int) $asset['id']);
         if (!$expLedger || !$accLedger) {
-            flash('error', 'Cannot post depreciation: map Depreciation Expense and Accumulated Depreciation on the Ledger Mapping tab first.');
+            flash('error', 'Cannot post depreciation: set the Depreciation expense and Accumulated depreciation ledgers in "This asset posts to" on this asset\'s page first.');
             redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
         }
         try {
@@ -1097,7 +1205,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // be posted afterwards — the cost would be stranded in the CWIP ledger
         // forever. Other actions may record-only, but this one must not.
         if ($cost > 0 && (!$ppeL || !$cwipL)) {
-            flash('error', 'Map PPE / Asset Cost and Capital Work-in-Progress before capitalizing — the reclassification cannot be posted without both.');
+            flash('error', 'Set the PPE / Asset Cost and Capital Work-in-Progress ledgers in "This asset posts to" on this asset\'s page before capitalizing — the reclassification cannot be posted without both.');
             redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
         }
         try {
@@ -1147,8 +1255,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/fixed-assets.php?view=leases');
         }
         $rou = fa_rou_initial($liability, $prepay, $idc, $restoration, $incentive);
-        $rouL = fa_resolve_mapping($companyId, 'rou_asset');
-        $liabL = fa_resolve_mapping($companyId, 'lease_liability');
         // Optional lessor: period payments then credit that party's own
         // payable ledger instead of the shared clearing account.
         $lessorPartyId = (int) ($_POST['lessor_party_id'] ?? 0);
@@ -1167,6 +1273,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (:cid, :code, :name, \'rou\', :cost, 0, :life, \'straight_line\', :d, :dep_start, :cost2, \'active\', :uid)')
                 ->execute(['cid' => $companyId, 'code' => 'ROU-' . $ref, 'name' => $name, 'cost' => $rou, 'life' => $term, 'd' => $commence, 'dep_start' => $commence, 'cost2' => $rou, 'uid' => $userId]);
             $rouAssetId = (int) db()->lastInsertId();
+
+            // Ledgers chosen on the lease form belong to THIS lease's RoU
+            // asset only: commencement, interest, payments and the RoU
+            // depreciation all resolve from these asset-scope rows.
+            fa_set_asset_ledger($companyId, $rouAssetId, 'rou_asset', (int) ($_POST['rou_ledger_id'] ?? 0), $userId);
+            fa_set_asset_ledger($companyId, $rouAssetId, 'lease_liability', (int) ($_POST['liability_ledger_id'] ?? 0), $userId);
+            fa_set_asset_ledger($companyId, $rouAssetId, 'lease_interest_expense', (int) ($_POST['interest_ledger_id'] ?? 0), $userId);
+            fa_set_asset_ledger($companyId, $rouAssetId, 'acquisition_clearing', (int) ($_POST['payment_ledger_id'] ?? 0), $userId);
+            fa_set_asset_ledger($companyId, $rouAssetId, 'depreciation_expense', (int) ($_POST['dep_expense_ledger_id'] ?? 0), $userId);
+            fa_set_asset_ledger($companyId, $rouAssetId, 'accumulated_depreciation', (int) ($_POST['accum_dep_ledger_id'] ?? 0), $userId);
+            $rouL = fa_resolve_mapping($companyId, 'rou_asset', $rouAssetId);
+            $liabL = fa_resolve_mapping($companyId, 'lease_liability', $rouAssetId);
             db()->prepare('INSERT INTO lease_liabilities (company_id, asset_id, ' . ($hasLessorColumn ? 'lessor_party_id, ' : '') . 'contract_ref, commencement_date, term_months, payment, payment_timing, discount_rate_annual, initial_liability, initial_direct_costs, prepayments, incentives, restoration, rou_initial, status, created_by)
                 VALUES (:cid,:aid,' . ($hasLessorColumn ? ':lessor,' : '') . ':ref,:d,:term,:pay,:timing,:rate,:liab,:idc,:prep,:inc,:rest,:rou,\'active\',:uid)')
                 ->execute(array_merge(
@@ -1183,7 +1301,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Commencement voucher when both legs mapped. Dr ROU / Cr Lease
             // liability; the net of prepayments + IDC - incentives is the cash/
             // clearing leg that keeps the entry balanced (ROU = liability + net).
-            $cashL = fa_resolve_mapping($companyId, 'disposal_clearing') ?: $liabL;
+            $cashL = fa_resolve_mapping($companyId, 'acquisition_clearing', $rouAssetId)
+                ?: (fa_resolve_mapping($companyId, 'disposal_clearing') ?: $liabL);
             if ($rouL && $liabL) {
                 $net = round($rou - $liability, 2); // = prepay + idc - incentive
                 $entries = [
@@ -1204,7 +1323,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->commit();
             security_event('lease_created', 'success', 'Lease created for asset/ROU #' . $rouAssetId . '.', $companyId, $userId);
             log_activity('lease', $leaseId, 'created', 'Lease ' . $ref . ' created (ROU ' . number_format($rou, 2) . ').', $userId);
-            flash('success', 'Lease ' . $ref . ' created. ROU asset ROU-' . $ref . ' = ' . site_currency_symbol() . number_format($rou, 2) . ' with a ' . $term . '-month liability schedule.' . (($rouL && $liabL) ? ' Commencement voucher posted.' : ' Map ROU Asset + Lease Liability to auto-post.'));
+            flash('success', 'Lease ' . $ref . ' created. ROU asset ROU-' . $ref . ' = ' . site_currency_symbol() . number_format($rou, 2) . ' with a ' . $term . '-month liability schedule.' . (($rouL && $liabL) ? ' Commencement voucher posted (Dr ' . ($rouL['name'] ?? 'RoU') . ' / Cr ' . ($liabL['name'] ?? 'Lease liability') . ').' : ' NOT posted — set the RoU asset and Lease liability ledgers on the RoU asset\'s page, then re-create the lease.'));
         } catch (Throwable $e) { if (db()->inTransaction()) { db()->rollBack(); } flash('error', 'Could not create lease: ' . $e->getMessage()); }
         redirect('admin/fixed-assets.php?view=leases');
     }
@@ -1242,7 +1361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $clearingL = fa_resolve_mapping($companyId, $leasePaymentPurposes[1], $rouAssetId);
         }
         if (!$interestExpL || !$liabL || !$clearingL) {
-            flash('error', 'Map Lease Interest Expense, Lease Liability and Acquisition Clearing / Payable (or set a lessor on the lease) before posting lease periods.');
+            flash('error', 'Set the Interest expense, Lease liability and Payment ledgers on this lease\'s RoU asset page (or set a lessor on the lease) before posting lease periods.');
             redirect('admin/fixed-assets.php?view=leases&lease_id=' . (int) $line['lease_id']);
         }
         $interest = (float) $line['interest'];
@@ -1287,70 +1406,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/fixed-assets.php?view=leases&lease_id=' . (int) $line['lease_id']);
     }
 
-    if ($action === 'save_asset_mappings') {
+    if ($action === 'save_asset_ledgers') {
+        // "This asset posts to" panel on the asset page: every ledger here
+        // applies to this one asset only (asset-scope mappings). Replaces the
+        // old global/category/asset Ledger Mapping tab.
         require_permission('accounting', 'edit');
-
-        // Scope: global defaults, per-category overrides, or per-asset
-        // overrides (fa_resolve_mapping walks asset -> category -> global).
-        $mapScopeRaw = (string) ($_POST['map_scope'] ?? 'global');
-        $mapScope = in_array($mapScopeRaw, ['global', 'category', 'asset'], true) ? $mapScopeRaw : 'global';
-        $mapCategoryId = $mapScope === 'category' ? (int) ($_POST['map_category_id'] ?? 0) : 0;
-        $mapAssetId = $mapScope === 'asset' ? (int) ($_POST['map_asset_id'] ?? 0) : 0;
-        if ($mapScope === 'category') {
-            $chk = db()->prepare('SELECT COUNT(*) FROM asset_categories WHERE id = :id AND company_id = :cid');
-            $chk->execute(['id' => $mapCategoryId, 'cid' => $companyId]);
-            if ($mapCategoryId <= 0 || (int) $chk->fetchColumn() === 0) {
-                flash('error', 'Select a valid asset category for the override.');
-                redirect('admin/fixed-assets.php?view=mapping');
-            }
+        $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
+        if (!$asset) {
+            flash('error', 'Asset not found for this company.');
+            redirect('admin/fixed-assets.php');
         }
-        if ($mapScope === 'asset') {
-            $chk = db()->prepare('SELECT COUNT(*) FROM fixed_assets WHERE id = :id AND company_id = :cid');
-            $chk->execute(['id' => $mapAssetId, 'cid' => $companyId]);
-            if ($mapAssetId <= 0 || (int) $chk->fetchColumn() === 0) {
-                flash('error', 'Select a valid asset for the override.');
-                redirect('admin/fixed-assets.php?view=mapping');
-            }
-        }
-        $scopeWhere = 'company_id = :cid AND scope = :scope AND purpose = :p AND '
-            . ($mapScope === 'category' ? 'category_id = :sid AND asset_id IS NULL' : ($mapScope === 'asset' ? 'asset_id = :sid AND category_id IS NULL' : 'category_id IS NULL AND asset_id IS NULL'));
-        $backTo = 'admin/fixed-assets.php?view=mapping&map_scope=' . $mapScope
-            . ($mapCategoryId > 0 ? '&map_category_id=' . $mapCategoryId : '')
-            . ($mapAssetId > 0 ? '&map_asset_id=' . $mapAssetId : '');
-
         $saved = 0;
-        foreach (array_keys(fa_mapping_purposes()) as $purpose) {
-            $ledgerId = (int) ($_POST['map'][$purpose] ?? 0);
-            $deleteParams = ['cid' => $companyId, 'scope' => $mapScope, 'p' => $purpose];
-            if ($mapScope !== 'global') {
-                $deleteParams['sid'] = $mapScope === 'category' ? $mapCategoryId : $mapAssetId;
-            }
-            // Delete-then-insert: the unique key treats NULL scope ids as
-            // distinct, so ON DUPLICATE KEY alone cannot dedupe these rows.
-            db()->prepare('DELETE FROM asset_ledger_mappings WHERE ' . $scopeWhere)->execute($deleteParams);
-            if ($ledgerId <= 0) {
+        foreach (fa_purposes_for_asset($asset) as $purpose) {
+            if (!array_key_exists($purpose, (array) ($_POST['map'] ?? []))) {
                 continue;
             }
-            $own = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE id = :id AND company_id = :cid');
-            $own->execute(['id' => $ledgerId, 'cid' => $companyId]);
-            if ((int) $own->fetchColumn() === 0) {
-                continue;
-            }
-            db()->prepare('INSERT INTO asset_ledger_mappings (company_id, scope, category_id, asset_id, purpose, ledger_id, created_by)
-                VALUES (:cid, :scope, :catid, :aid, :p, :lid, :uid)')
-                ->execute([
-                    'cid' => $companyId,
-                    'scope' => $mapScope,
-                    'catid' => $mapCategoryId > 0 ? $mapCategoryId : null,
-                    'aid' => $mapAssetId > 0 ? $mapAssetId : null,
-                    'p' => $purpose,
-                    'lid' => $ledgerId,
-                    'uid' => $userId,
-                ]);
+            fa_set_asset_ledger($companyId, (int) $asset['id'], $purpose, (int) $_POST['map'][$purpose], $userId);
             $saved++;
         }
-        flash('success', ucfirst($mapScope) . ' asset ledger mappings saved (' . $saved . ' mapped).');
-        redirect($backTo);
+        flash('success', 'Ledgers for ' . $asset['asset_code'] . ' saved (' . $saved . ' purpose' . ($saved === 1 ? '' : 's') . ' reviewed). They apply to this asset only.');
+        redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
     }
 
     if ($action === 'save_category') {
@@ -1430,7 +1505,9 @@ $faView = (string) ($_GET['view'] ?? 'register');
 $detailAsset = ctype_digit($faView) ? fa_company_asset((int) $faView, $companyId) : null;
 if ($detailAsset) {
     $faView = 'detail';
-} elseif (!in_array($faView, ['register', 'models', 'mapping', 'leases', 'categories', 'revaluation'], true)) {
+} elseif (!in_array($faView, ['register', 'models', 'leases', 'categories', 'revaluation'], true)) {
+    // 'mapping' is gone on purpose: ledgers are chosen per asset on the
+    // create forms and each asset's "This asset posts to" panel.
     $faView = 'register';
 }
 
@@ -1459,7 +1536,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a class="<?= $faView === 'models' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=models')) ?>"><?= icon('settings') ?>Measurement Models</a>
     <a class="<?= $faView === 'revaluation' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=revaluation')) ?>"><?= icon('wallet') ?>Revaluation</a>
     <a class="<?= $faView === 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=leases')) ?>"><?= icon('contracts') ?>Leases (IFRS 16)</a>
-    <a class="<?= $faView === 'mapping' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=mapping')) ?>"><?= icon('accounting') ?>Ledger Mapping</a>
     <a class="<?= $faView === 'categories' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=categories')) ?>"><?= icon('layers') ?>Categories</a>
 </nav>
 
@@ -1602,9 +1678,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </a>
                 <a href="<?= e(url('admin/fixed-assets.php')) ?>">
                     <?= icon('companies') ?><span><strong>Fixed asset register</strong><small>Assets and carrying values</small></span>
-                </a>
-                <a href="<?= e(url('admin/fixed-assets.php?view=mapping')) ?>">
-                    <?= icon('accounting') ?><span><strong>Ledger mapping</strong><small>OCI and P&amp;L accounts</small></span>
                 </a>
                 <a href="<?= e(url('admin/fixed-assets.php?view=categories')) ?>">
                     <?= icon('layers') ?><span><strong>Asset categories</strong><small>Class and defaults</small></span>
@@ -2081,7 +2154,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     $leases = $leases->fetchAll(PDO::FETCH_ASSOC);
     ?>
     <section class="mbw-card">
-        <div class="mbw-card-head"><h2>New lease (IFRS 16)</h2><div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">ROU = liability + prepayments + initial direct costs + restoration − incentives.</span></div></div>
+        <div class="mbw-card-head"><h2>New lease (IFRS 16)</h2><div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">ROU = liability + prepayments + initial direct costs + restoration − incentives. The ledgers below belong to THIS lease only.</span></div></div>
+        <?php
+        $leaseDefRou = fa_resolve_mapping($companyId, 'rou_asset');
+        $leaseDefLiab = fa_resolve_mapping($companyId, 'lease_liability');
+        $leaseDefInterest = fa_resolve_mapping($companyId, 'lease_interest_expense');
+        $leaseDefPayment = fa_resolve_mapping($companyId, 'acquisition_clearing');
+        $leaseDefDepExp = fa_resolve_mapping($companyId, 'depreciation_expense');
+        $leaseDefAccum = fa_resolve_mapping($companyId, 'accumulated_depreciation');
+        ?>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="create_lease">
             <label>Contract ref<input type="text" name="contract_ref" required></label>
@@ -2098,11 +2179,29 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Restoration provision<input type="number" step="0.01" name="restoration" value="0.00"></label>
             <label>Lessor (party)
                 <select name="lessor_party_id">
-                    <option value="0">— none (use clearing ledger) —</option>
+                    <option value="0">— none (payments credit the payment ledger) —</option>
                     <?php foreach ($faParties as $fp): ?>
                         <option value="<?= (int) $fp['id'] ?>"><?= e($fp['name'] . ' (' . $fp['code'] . ')') ?></option>
                     <?php endforeach; ?>
                 </select>
+            </label>
+            <label>RoU asset ledger (debit)
+                <?= fa_ledger_select('rou_ledger_id', $ledgers, (int) ($leaseDefRou['id'] ?? 0)) ?>
+            </label>
+            <label>Lease liability ledger (credit)
+                <?= fa_ledger_select('liability_ledger_id', $ledgers, (int) ($leaseDefLiab['id'] ?? 0)) ?>
+            </label>
+            <label>Interest expense ledger
+                <?= fa_ledger_select('interest_ledger_id', $ledgers, (int) ($leaseDefInterest['id'] ?? 0)) ?>
+            </label>
+            <label>Payment ledger (cash/bank or clearing)
+                <?= fa_ledger_select('payment_ledger_id', $ledgers, (int) ($leaseDefPayment['id'] ?? 0)) ?>
+            </label>
+            <label>RoU depreciation expense ledger
+                <?= fa_ledger_select('dep_expense_ledger_id', $ledgers, (int) ($leaseDefDepExp['id'] ?? 0)) ?>
+            </label>
+            <label>Accumulated depreciation ledger
+                <?= fa_ledger_select('accum_dep_ledger_id', $ledgers, (int) ($leaseDefAccum['id'] ?? 0)) ?>
             </label>
             <div class="workspace-span-2"><button type="submit"><?= icon('contracts') ?>Create lease + ROU asset</button></div>
         </form>
@@ -2126,91 +2225,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
     <?php endif; ?>
 
-<?php elseif ($faView === 'mapping'): ?>
-    <?php
-    // Scope selector: global defaults, one category's overrides, or one
-    // asset's overrides. Postings resolve asset -> category -> global, so an
-    // override only needs the purposes that differ.
-    $mapScopeRaw = (string) ($_GET['map_scope'] ?? 'global');
-    $mapScope = in_array($mapScopeRaw, ['global', 'category', 'asset'], true) ? $mapScopeRaw : 'global';
-    $mapCategoryId = $mapScope === 'category' ? (int) ($_GET['map_category_id'] ?? 0) : 0;
-    $mapAssetId = $mapScope === 'asset' ? (int) ($_GET['map_asset_id'] ?? 0) : 0;
-    $mapCategories = db()->prepare('SELECT id, name FROM asset_categories WHERE company_id = :cid ORDER BY name ASC');
-    $mapCategories->execute(['cid' => $companyId]);
-    $mapCategories = $mapCategories->fetchAll(PDO::FETCH_ASSOC);
-    $mapAssets = db()->prepare("SELECT id, asset_code, name FROM fixed_assets WHERE company_id = :cid AND status <> 'disposed' ORDER BY name ASC");
-    $mapAssets->execute(['cid' => $companyId]);
-    $mapAssets = $mapAssets->fetchAll(PDO::FETCH_ASSOC);
-    if ($mapScope === 'category' && $mapCategoryId <= 0 && $mapCategories !== []) { $mapCategoryId = (int) $mapCategories[0]['id']; }
-    if ($mapScope === 'asset' && $mapAssetId <= 0 && $mapAssets !== []) { $mapAssetId = (int) $mapAssets[0]['id']; }
-
-    $cur = [];
-    if ($mapScope === 'category' && $mapCategoryId > 0) {
-        $ms = db()->prepare("SELECT m.purpose, m.ledger_id, l.type AS ledger_type FROM asset_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = 'category' AND m.category_id = :sid");
-        $ms->execute(['cid' => $companyId, 'sid' => $mapCategoryId]);
-    } elseif ($mapScope === 'asset' && $mapAssetId > 0) {
-        $ms = db()->prepare("SELECT m.purpose, m.ledger_id, l.type AS ledger_type FROM asset_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = 'asset' AND m.asset_id = :sid");
-        $ms->execute(['cid' => $companyId, 'sid' => $mapAssetId]);
-    } else {
-        $ms = db()->prepare("SELECT m.purpose, m.ledger_id, l.type AS ledger_type FROM asset_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = 'global'");
-        $ms->execute(['cid' => $companyId]);
-    }
-    foreach ($ms->fetchAll(PDO::FETCH_ASSOC) as $r) { $cur[$r['purpose']] = $r; }
-    ?>
-    <section class="mbw-card">
-        <div class="mbw-card-head"><h2>Fixed Asset Ledger Mapping</h2><div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Postings resolve asset &rarr; category &rarr; global, so overrides only need the purposes that differ.</span></div></div>
-        <form method="get" action="<?= e(url('admin/fixed-assets.php')) ?>" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
-            <input type="hidden" name="view" value="mapping">
-            <label style="margin:0">Mapping scope
-                <select name="map_scope" onchange="this.form.submit()">
-                    <option value="global" <?= $mapScope === 'global' ? 'selected' : '' ?>>Global defaults</option>
-                    <option value="category" <?= $mapScope === 'category' ? 'selected' : '' ?>>Per asset category</option>
-                    <option value="asset" <?= $mapScope === 'asset' ? 'selected' : '' ?>>Per individual asset / lease RoU</option>
-                </select>
-            </label>
-            <?php if ($mapScope === 'category'): ?>
-                <label style="margin:0">Category
-                    <select name="map_category_id" onchange="this.form.submit()">
-                        <?php foreach ($mapCategories as $mc): ?><option value="<?= (int) $mc['id'] ?>" <?= $mapCategoryId === (int) $mc['id'] ? 'selected' : '' ?>><?= e($mc['name']) ?></option><?php endforeach; ?>
-                    </select>
-                </label>
-            <?php elseif ($mapScope === 'asset'): ?>
-                <label style="margin:0">Asset
-                    <select name="map_asset_id" onchange="this.form.submit()">
-                        <?php foreach ($mapAssets as $ma): ?><option value="<?= (int) $ma['id'] ?>" <?= $mapAssetId === (int) $ma['id'] ? 'selected' : '' ?>><?= e(($ma['asset_code'] ? $ma['asset_code'] . ' — ' : '') . $ma['name']) ?></option><?php endforeach; ?>
-                    </select>
-                </label>
-            <?php endif; ?>
-        </form>
-        <?php if ($mapScope === 'category' && $mapCategoryId <= 0): ?>
-            <p style="color:var(--mbw-muted)">Create an asset category first to map per-category ledgers.</p>
-        <?php elseif ($mapScope === 'asset' && $mapAssetId <= 0): ?>
-            <p style="color:var(--mbw-muted)">Register an asset first to map per-asset ledgers.</p>
-        <?php else: ?>
-        <form method="post">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="save_asset_mappings">
-            <input type="hidden" name="map_scope" value="<?= e($mapScope) ?>">
-            <?php if ($mapScope === 'category'): ?><input type="hidden" name="map_category_id" value="<?= (int) $mapCategoryId ?>"><?php endif; ?>
-            <?php if ($mapScope === 'asset'): ?><input type="hidden" name="map_asset_id" value="<?= (int) $mapAssetId ?>"><?php endif; ?>
-            <div class="rc-table-scroll"><table class="rc-table">
-                <thead><tr><th>Purpose</th><th>Expected type</th><th>Mapped ledger</th><th>Status</th></tr></thead>
-                <tbody>
-                    <?php foreach (fa_mapping_purposes() as $key => $meta): $c = $cur[$key] ?? null; $cid2 = (int) ($c['ledger_id'] ?? 0); $mismatch = $c && (string) $c['ledger_type'] !== $meta['expect']; ?>
-                        <tr>
-                            <td><strong><?= e($meta['label']) ?></strong></td>
-                            <td><span class="mbw-pill tone-gray"><?= e(ucfirst($meta['expect'])) ?></span></td>
-                            <td><select name="map[<?= e($key) ?>]" style="min-width:230px"><option value="0"><?= $mapScope === 'global' ? '— not mapped —' : '— inherit —' ?></option><?php foreach ($ledgers as $l): ?><option value="<?= e((int) $l['id']) ?>" <?= $cid2 === (int) $l['id'] ? 'selected' : '' ?>><?= e($l['code'] . ' - ' . $l['name']) ?></option><?php endforeach; ?></select></td>
-                            <td><?php if (!$c): ?><span class="mbw-pill <?= $mapScope === 'global' ? 'tone-amber' : 'tone-gray' ?>"><?= $mapScope === 'global' ? 'Incomplete' : 'Inherits' ?></span><?php elseif ($mismatch): ?><span class="mbw-pill tone-amber">Type warning</span><?php else: ?><span class="mbw-pill tone-green">Mapped</span><?php endif; ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table></div>
-            <div style="margin-top:12px"><button type="submit"><?= icon('accounting') ?>Save <?= e($mapScope) ?> mappings</button></div>
-        </form>
-        <?php endif; ?>
-    </section>
-
 <?php elseif ($faView === 'detail' && $detailAsset): ?>
     <?php
     $charge = fa_asset_monthly_charge($detailAsset);
@@ -2222,26 +2236,21 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php if ($detailAcquisitionUnposted): ?>
         <section class="mbw-card" style="border-left:4px solid #c0392b">
             <div class="mbw-card-head"><h2>Acquisition not posted to the ledger</h2></div>
-            <p style="margin:0 0 10px">This asset sits in the register, but its acquisition voucher was never posted — it was registered while the ledger mappings were missing, so the books do not yet show the asset cost. Choose how it was funded and post it now (Dr <?= e((string) $detailAsset['asset_class'] === 'cwip' ? 'Capital WIP' : 'PPE cost') ?> / Cr funding ledger).</p>
+            <p style="margin:0 0 10px">This asset sits in the register, but its acquisition voucher was never posted, so the books do not yet show the asset cost. Choose the two ledgers and post it now (Dr asset cost / Cr funded-from). The choice sticks to this asset only.</p>
+            <?php
+            $panelCostPurpose = (string) $detailAsset['asset_class'] === 'cwip' ? 'cwip' : 'ppe_cost';
+            $panelCost = fa_resolve_mapping($companyId, $panelCostPurpose, (int) $detailAsset['id']);
+            $panelFunding = fa_resolve_mapping($companyId, 'acquisition_clearing', (int) $detailAsset['id']);
+            ?>
             <form method="post" class="frm-grid frm-grid-4">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="post_acquisition">
                 <input type="hidden" name="asset_id" value="<?= (int) $detailAsset['id'] ?>">
-                <label>Funded by
-                    <select name="funding_mode">
-                        <option value="clearing">Acquisition clearing (default)</option>
-                        <option value="supplier">Supplier (on credit)</option>
-                        <option value="cash">Cash / bank</option>
-                        <option value="opening">Opening balance / transfer-in</option>
-                    </select>
+                <label>Asset cost ledger (debit)
+                    <?= fa_ledger_select('cost_ledger_id', $ledgers, (int) ($panelCost['id'] ?? 0)) ?>
                 </label>
-                <label>Supplier (when on credit)
-                    <select name="supplier_party_id">
-                        <option value="0">— select supplier —</option>
-                        <?php foreach ($faParties as $party): ?>
-                            <option value="<?= (int) $party['id'] ?>"><?= e($party['name']) ?> (<?= e($party['code']) ?>)</option>
-                        <?php endforeach; ?>
-                    </select>
+                <label>Funded from (credit)
+                    <?= fa_funded_from_select('funded_from', $ledgers, $faParties, (int) ($panelFunding['id'] ?? 0)) ?>
                 </label>
                 <label>Voucher date<input type="date" name="voucher_date" value="<?= e((string) ($detailAsset['available_for_use_date'] ?? date('Y-m-d'))) ?>"></label>
                 <div style="align-self:end"><button type="submit"><?= icon('accounting') ?>Post acquisition to ledger</button></div>
@@ -2278,6 +2287,50 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endif; ?>
             </div>
         </div>
+
+        <?php
+        // "This asset posts to" — the asset's own ledger per purpose. This
+        // replaces the old Ledger Mapping tab: everything is per asset, set
+        // here or on the create forms. Blank rows inherit the old category/
+        // global rows so pre-existing assets keep posting unchanged.
+        $assetScopeMap = [];
+        $asmStmt = db()->prepare("SELECT purpose, ledger_id FROM asset_ledger_mappings WHERE company_id = :cid AND scope = 'asset' AND asset_id = :aid AND category_id IS NULL");
+        $asmStmt->execute(['cid' => $companyId, 'aid' => (int) $detailAsset['id']]);
+        foreach ($asmStmt->fetchAll(PDO::FETCH_ASSOC) as $asmRow) {
+            $assetScopeMap[(string) $asmRow['purpose']] = (int) $asmRow['ledger_id'];
+        }
+        $purposeMeta = fa_mapping_purposes();
+        ?>
+        <details class="feature-disclosure" style="margin-top:16px">
+            <summary><span><strong><?= icon('accounting') ?>This asset posts to (ledgers)</strong><small>Every ledger this asset uses — acquisition, depreciation, impairment, disposal. Applies to this asset only.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+            <form method="post">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="save_asset_ledgers">
+                <input type="hidden" name="asset_id" value="<?= (int) $detailAsset['id'] ?>">
+                <div class="rc-table-scroll"><table class="rc-table">
+                    <thead><tr><th>Used for</th><th>Ledger (this asset only)</th><th>Currently posting to</th></tr></thead>
+                    <tbody>
+                        <?php foreach (fa_purposes_for_asset($detailAsset) as $purpose): ?>
+                            <?php
+                            $ownLedgerId = $assetScopeMap[$purpose] ?? 0;
+                            $effective = fa_resolve_mapping($companyId, $purpose, (int) $detailAsset['id']);
+                            ?>
+                            <tr>
+                                <td><strong><?= e($purposeMeta[$purpose]['label'] ?? $purpose) ?></strong></td>
+                                <td><select name="map[<?= e($purpose) ?>]" style="min-width:230px">
+                                    <option value="0">— use inherited default —</option>
+                                    <?php foreach ($ledgers as $l): ?>
+                                        <option value="<?= (int) $l['id'] ?>" <?= $ownLedgerId === (int) $l['id'] ? 'selected' : '' ?>><?= e($l['code'] . ' - ' . $l['name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select></td>
+                                <td><?php if ($effective): ?><span class="mbw-pill <?= $ownLedgerId > 0 ? 'tone-green' : 'tone-gray' ?>"><?= e($effective['name']) ?><?= $ownLedgerId > 0 ? '' : ' (inherited)' ?></span><?php else: ?><span class="mbw-pill tone-red">Not set — posting will be skipped or blocked</span><?php endif; ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table></div>
+                <div style="margin-top:12px"><button type="submit"><?= icon('accounting') ?>Save this asset's ledgers</button></div>
+            </form>
+        </details>
 
         <?php if (!in_array((string) $detailAsset['status'], ['disposed'], true)): ?>
         <div class="workspace-feature-stack" style="margin-top:16px">
@@ -2367,20 +2420,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="add_asset_cost"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Additional cost<input type="number" step="0.01" name="amount" value="0.00" required></label>
                     <label>Date<input type="date" name="cost_date" value="<?= e(date('Y-m-d')) ?>"></label>
-                    <label>Funded by
-                        <select name="funding_mode">
-                            <option value="clearing">Acquisition clearing (default)</option>
-                            <option value="supplier">Supplier — on credit (party payable)</option>
-                            <option value="cash">Cash / bank</option>
-                        </select>
-                    </label>
-                    <label>Supplier (when on credit)
-                        <select name="supplier_party_id">
-                            <option value="0">— select supplier —</option>
-                            <?php foreach ($faParties as $fp): ?>
-                                <option value="<?= (int) $fp['id'] ?>"><?= e($fp['name'] . ' (' . $fp['code'] . ')') ?></option>
-                            <?php endforeach; ?>
-                        </select>
+                    <?php $addCostFunding = fa_resolve_mapping($companyId, 'acquisition_clearing', (int) $detailAsset['id']); ?>
+                    <label>Funded from (credit)
+                        <?= fa_funded_from_select('funded_from', $ledgers, $faParties, (int) ($addCostFunding['id'] ?? 0)) ?>
                     </label>
                     <label class="workspace-span-2">Memo<input type="text" name="memo" maxlength="190" placeholder="e.g. Engine overhaul, extension wing"></label>
                     <div class="workspace-span-2"><button type="submit"><?= icon('accounting') ?>Capitalize additional cost</button></div>
@@ -2456,15 +2498,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php else: ?>
     <section class="mbw-card">
-        <div class="mbw-card-head"><h2>Register a fixed asset</h2><span class="frm-optional">Registering posts the acquisition voucher automatically: Dr asset cost / Cr the funding you choose below</span></div>
-        <?php $registerMissing = fa_missing_mappings($companyId, ['ppe_cost', 'acquisition_clearing']); ?>
-        <?php if ($registerMissing !== []): ?>
-            <div class="notice error" style="margin-bottom:12px">
-                The acquisition voucher CANNOT post yet — missing ledger mapping<?= count($registerMissing) > 1 ? 's' : '' ?>:
-                <strong><?= e(implode(', ', array_map(static fn (string $p): string => fa_mapping_purposes()[$p]['label'] ?? $p, $registerMissing))) ?></strong>.
-                Set <?= count($registerMissing) > 1 ? 'them' : 'it' ?> on the <a href="<?= e(url('admin/fixed-assets.php?view=mapping')) ?>">Ledger Mapping</a> tab first, or the asset will sit in the register without touching the books.
-            </div>
-        <?php endif; ?>
+        <div class="mbw-card-head"><h2>Register a fixed asset</h2><span class="frm-optional">The ledgers you choose here belong to THIS asset only — registration posts Dr asset cost / Cr funded-from immediately</span></div>
+        <?php
+        $regDefCost = fa_resolve_mapping($companyId, 'ppe_cost');
+        $regDefFunding = fa_resolve_mapping($companyId, 'acquisition_clearing');
+        $regDefDepExp = fa_resolve_mapping($companyId, 'depreciation_expense');
+        $regDefAccum = fa_resolve_mapping($companyId, 'accumulated_depreciation');
+        ?>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="add_asset">
@@ -2482,21 +2522,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Residual value<input type="number" step="0.01" name="residual_value" value="0.00"></label>
             <label>Useful life (months)<input type="number" step="1" name="useful_life_months" value="60"></label>
             <label>Available for use date<input type="date" name="available_for_use_date"></label>
-            <label>Funded by
-                <select name="funding_mode">
-                    <option value="clearing">Acquisition — clearing ledger (default)</option>
-                    <option value="supplier">Acquisition — on credit from supplier</option>
-                    <option value="cash">Acquisition — paid by cash/bank</option>
-                    <option value="opening">Opening balance / transfer-in (migrated asset)</option>
-                </select>
+            <label>Asset cost ledger (debit)
+                <?= fa_ledger_select('cost_ledger_id', $ledgers, (int) ($regDefCost['id'] ?? 0)) ?>
             </label>
-            <label>Supplier (when on credit)
-                <select name="supplier_party_id">
-                    <option value="0">— select supplier —</option>
-                    <?php foreach ($faParties as $fp): ?>
-                        <option value="<?= (int) $fp['id'] ?>"><?= e($fp['name'] . ' (' . $fp['code'] . ')') ?></option>
-                    <?php endforeach; ?>
-                </select>
+            <label>Funded from (credit) — ledger, supplier, or opening balance
+                <?= fa_funded_from_select('funded_from', $ledgers, $faParties, (int) ($regDefFunding['id'] ?? 0)) ?>
+            </label>
+            <label>Depreciation expense ledger
+                <?= fa_ledger_select('dep_expense_ledger_id', $ledgers, (int) ($regDefDepExp['id'] ?? 0)) ?>
+            </label>
+            <label>Accumulated depreciation ledger
+                <?= fa_ledger_select('accum_dep_ledger_id', $ledgers, (int) ($regDefAccum['id'] ?? 0)) ?>
             </label>
             <div class="workspace-span-2"><button type="submit"><?= icon('companies') ?>Register asset</button></div>
         </form>
