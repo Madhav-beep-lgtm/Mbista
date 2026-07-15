@@ -301,8 +301,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         };
         $collect("SELECT id FROM vouchers WHERE company_id = :cid AND source_id = :aid AND source_type IN ('fixed_asset_acquisition', 'asset_disposal', 'asset_held_for_sale', 'asset_cwip_capitalization')", ['cid' => $companyId, 'aid' => $assetId]);
-        // Additions post with source_id NULL; their voucher_no embeds the code.
+        // Additions and capitalized borrowing costs post with source_id NULL;
+        // their voucher_no embeds the asset code.
         $collect("SELECT id FROM vouchers WHERE company_id = :cid AND source_type = 'fixed_asset_addition' AND voucher_no LIKE :pattern", ['cid' => $companyId, 'pattern' => 'FA-ADD-' . $asset['asset_code'] . '-%']);
+        $collect("SELECT id FROM vouchers WHERE company_id = :cid AND source_type = 'asset_borrowing_cost' AND voucher_no LIKE :pattern", ['cid' => $companyId, 'pattern' => 'FA-INT-' . $asset['asset_code'] . '-%']);
         $collect('SELECT voucher_id FROM asset_depreciation_schedule WHERE asset_id = :aid AND voucher_id IS NOT NULL', ['aid' => $assetId]);
         $collect('SELECT voucher_id FROM asset_impairments WHERE asset_id = :aid AND voucher_id IS NOT NULL', ['aid' => $assetId]);
         $collect("SELECT v.id FROM vouchers v INNER JOIN asset_impairments i ON i.id = v.source_id WHERE v.company_id = :cid AND v.source_type IN ('asset_impairment', 'asset_impairment_reversal') AND i.asset_id = :aid", ['cid' => $companyId, 'aid' => $assetId]);
@@ -315,6 +317,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $leasePlaceholders = implode(',', array_fill(0, count($leaseIds), '?'));
                 $collect("SELECT id FROM vouchers WHERE company_id = ? AND source_type = 'lease_commencement' AND source_id IN ($leasePlaceholders)", array_merge([$companyId], $leaseIds));
                 $collect("SELECT voucher_id FROM lease_schedule_lines WHERE voucher_id IS NOT NULL AND lease_id IN ($leasePlaceholders)", $leaseIds);
+                foreach ($leaseIds as $modLeaseId) {
+                    $collect("SELECT id FROM vouchers WHERE company_id = ? AND source_type = 'lease_modification' AND voucher_no LIKE ?", [$companyId, 'FA-MOD-' . $modLeaseId . '-%']);
+                }
             }
         }
         $voucherIds = array_keys($voucherIds);
@@ -1235,12 +1240,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
     }
 
+    if ($action === 'capitalize_borrowing_cost') {
+        // IAS 23: borrowing costs directly attributable to a QUALIFYING asset
+        // under construction are capitalized onto the asset while the work is
+        // in progress — expenditure × capitalization rate × time, or the
+        // actual interest on a specific borrowing. Dr Capital WIP / Cr
+        // interest payable, bank, or the lender. Capitalization stops when
+        // the asset is ready for use (transfer it to PPE then).
+        require_permission('accounting', 'post');
+        $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
+        if (!$asset) {
+            flash('error', 'Asset not found for this company.');
+            redirect('admin/fixed-assets.php');
+        }
+        $assetId = (int) $asset['id'];
+        if ((string) $asset['asset_class'] !== 'cwip') {
+            flash('error', 'Borrowing costs are capitalized on Capital WIP (a qualifying asset under construction) only — this asset is already in service.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        $borrowing = max(0.0, round((float) ($_POST['borrowing_amount'] ?? 0), 2));
+        $ratePct = max(0.0, (float) ($_POST['interest_rate_annual'] ?? 0));
+        $months = max(0, (int) ($_POST['months'] ?? 0));
+        $interestOverride = max(0.0, round((float) ($_POST['interest_amount'] ?? 0), 2));
+        $interest = $interestOverride > 0 ? $interestOverride : round($borrowing * ($ratePct / 100) * ($months / 12), 2);
+        $intDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($_POST['interest_date'] ?? '')) ? (string) $_POST['interest_date'] : date('Y-m-d');
+        if ($interest <= 0) {
+            flash('error', 'Enter the borrowing amount, annual rate and months — or the interest amount directly.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        if (is_period_locked($companyId, $fiscalYearId, $intDate)) {
+            flash('error', 'The interest date is inside a locked accounting period.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        $cwipL = fa_resolve_mapping($companyId, 'cwip', $assetId);
+        [$creditLedger, $voucherPartyId] = fa_funded_from_ledger($companyId, (string) ($_POST['funded_from'] ?? ''));
+        if (!$cwipL || !$creditLedger) {
+            flash('error', 'Set the Capital WIP ledger on this asset\'s page and choose where the interest credit goes (interest payable, bank, or the lender).');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        try {
+            db()->beginTransaction();
+            create_voucher_with_entries([
+                'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
+                'voucher_no' => 'FA-INT-' . $asset['asset_code'] . '-' . date('His'),
+                'voucher_type' => 'journal', 'voucher_date' => $intDate,
+                'source_type' => 'asset_borrowing_cost', 'source_id' => null,
+                'party_id' => $voucherPartyId,
+                'total_amount' => $interest,
+                'narration' => 'Borrowing cost capitalized on ' . $asset['name'] . ' (' . $asset['asset_code'] . ') per IAS 23'
+                    . ($interestOverride > 0 ? '' : ': ' . number_format($borrowing, 2) . ' × ' . number_format($ratePct, 2) . '% × ' . $months . '/12') . '.',
+                'status' => 'posted', 'posted_by' => $userId,
+            ], [
+                ['ledger_id' => (int) $cwipL['id'], 'entry_type' => 'debit', 'amount' => $interest],
+                ['ledger_id' => (int) $creditLedger['id'], 'entry_type' => 'credit', 'amount' => $interest],
+            ]);
+            db()->prepare('UPDATE fixed_assets SET cost = cost + :a, carrying_amount = carrying_amount + :a2 WHERE id = :id AND company_id = :cid')
+                ->execute(['a' => $interest, 'a2' => $interest, 'id' => $assetId, 'cid' => $companyId]);
+            db()->commit();
+            security_event('asset_borrowing_cost', 'success', 'Borrowing cost ' . number_format($interest, 2) . ' capitalized on CWIP asset #' . $assetId . '.', $companyId, $userId);
+            log_activity('fixed_asset', $assetId, 'borrowing_cost_capitalized', 'Borrowing cost ' . number_format($interest, 2) . ' capitalized (IAS 23).', $userId);
+            flash('success', 'Borrowing cost ' . site_currency_symbol() . number_format($interest, 2) . ' capitalized onto ' . $asset['asset_code'] . ' (Dr Capital WIP / Cr ' . ($creditLedger['name'] ?? 'funding') . ').');
+        } catch (Throwable $e) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            flash('error', 'Could not capitalize the borrowing cost: ' . $e->getMessage());
+        }
+        redirect('admin/fixed-assets.php?view=' . $assetId);
+    }
+
     if ($action === 'create_lease') {
         require_permission('accounting', 'post');
         // IFRS 16: create a ROU asset + lease liability with a full amortization schedule.
         $ref = strtoupper(trim((string) ($_POST['contract_ref'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
-        $liability = max(0.0, round((float) ($_POST['initial_liability'] ?? 0), 2));
         $prepay = max(0.0, round((float) ($_POST['prepayments'] ?? 0), 2));
         $idc = max(0.0, round((float) ($_POST['initial_direct_costs'] ?? 0), 2));
         $incentive = max(0.0, round((float) ($_POST['incentives'] ?? 0), 2));
@@ -1250,8 +1323,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $payment = max(0.0, round((float) ($_POST['payment'] ?? 0), 2));
         $timing = (string) ($_POST['payment_timing'] ?? 'arrears') === 'advance' ? 'advance' : 'arrears';
         $commence = trim((string) ($_POST['commencement_date'] ?? '')) ?: date('Y-m-d');
+        // The liability is DERIVED, never typed in: PV of the payment stream
+        // at the incremental borrowing rate (IFRS 16.26). A posted
+        // initial_liability is only honoured as a legacy fallback when no
+        // payment is given.
+        $liability = $payment > 0
+            ? fa_annuity_present_value($payment, $rateAnnual / 1200.0, $term, $timing)
+            : max(0.0, round((float) ($_POST['initial_liability'] ?? 0), 2));
         if ($ref === '' || $name === '' || $liability <= 0) {
-            flash('error', 'Lease reference, ROU asset name and initial liability are required.');
+            flash('error', 'Lease reference, ROU asset name, monthly payment, term and discount rate are required — the lease liability is calculated from them.');
             redirect('admin/fixed-assets.php?view=leases');
         }
         $rou = fa_rou_initial($liability, $prepay, $idc, $restoration, $incentive);
@@ -1292,11 +1372,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $hasLessorColumn ? ['lessor' => $lessorPartyId > 0 ? $lessorPartyId : null] : []
                 ));
             $leaseId = (int) db()->lastInsertId();
-            // Generate the amortization schedule.
+            // Generate the amortization schedule. Each line carries its real
+            // payment date: arrears pay at period END (+p months), advance at
+            // period START (+p−1) — not the commencement date on every row.
             $schedule = fa_lease_schedule($liability, $rateAnnual / 1200.0, $payment, $term, $timing);
             $lineStmt = db()->prepare('INSERT INTO lease_schedule_lines (lease_id, period_no, period_date, opening, interest, payment, principal, closing) VALUES (:lid,:pno,:pdate,:o,:i,:pay,:pr,:cl)');
             foreach ($schedule as $line) {
-                $lineStmt->execute(['lid' => $leaseId, 'pno' => $line['period'], 'pdate' => $commence, 'o' => $line['opening'], 'i' => $line['interest'], 'pay' => $line['payment'], 'pr' => $line['principal'], 'cl' => $line['closing']]);
+                $monthsOut = $timing === 'advance' ? ((int) $line['period'] - 1) : (int) $line['period'];
+                $lineStmt->execute(['lid' => $leaseId, 'pno' => $line['period'], 'pdate' => date('Y-m-d', strtotime($commence . ' +' . $monthsOut . ' months')), 'o' => $line['opening'], 'i' => $line['interest'], 'pay' => $line['payment'], 'pr' => $line['principal'], 'cl' => $line['closing']]);
             }
             // Commencement voucher when both legs mapped. Dr ROU / Cr Lease
             // liability; the net of prepayments + IDC - incentives is the cash/
@@ -1404,6 +1487,138 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', 'Lease period ' . $line['period_no'] . ' posted: interest ' . site_currency_symbol() . number_format($interest, 2) . ', payment ' . site_currency_symbol() . number_format($payment, 2) . '.');
         } catch (Throwable $e) { if (db()->inTransaction()) { db()->rollBack(); } flash('error', 'Could not post lease period: ' . $e->getMessage()); }
         redirect('admin/fixed-assets.php?view=leases&lease_id=' . (int) $line['lease_id']);
+    }
+
+    if ($action === 'modify_lease') {
+        // IFRS 16.44–46 lease modification (no scope decrease in units): the
+        // liability is REMEASURED to the PV of the revised payments over the
+        // revised remaining term at the revised discount rate, and the RoU
+        // asset is adjusted by the same amount. A decrease that exceeds the
+        // RoU carrying amount goes to P&L. Unposted schedule lines are
+        // regenerated; posted periods stay untouched.
+        require_permission('accounting', 'post');
+        $lease = fa_company_lease((int) ($_POST['lease_id'] ?? 0), $companyId);
+        if (!$lease) {
+            flash('error', 'Lease not found for this company.');
+            redirect('admin/fixed-assets.php?view=leases');
+        }
+        $leaseId = (int) $lease['id'];
+        $backUrl = 'admin/fixed-assets.php?view=leases&lease_id=' . $leaseId;
+        if ((string) $lease['status'] !== 'active') {
+            flash('error', 'Only active leases can be modified.');
+            redirect($backUrl);
+        }
+        $newPayment = max(0.0, round((float) ($_POST['new_payment'] ?? 0), 2));
+        $newRemainingTerm = max(1, (int) ($_POST['new_remaining_term'] ?? 0));
+        $newRateAnnual = max(0.0, (float) ($_POST['new_discount_rate_annual'] ?? (float) $lease['discount_rate_annual']));
+        $effectiveDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($_POST['effective_date'] ?? '')) ? (string) $_POST['effective_date'] : date('Y-m-d');
+        $reason = trim((string) ($_POST['modification_reason'] ?? ''));
+        if ($newPayment <= 0) {
+            flash('error', 'Enter the revised payment, remaining term and discount rate — the remeasured liability is calculated from them.');
+            redirect($backUrl);
+        }
+        if (is_period_locked($companyId, $fiscalYearId, $effectiveDate)) {
+            flash('error', 'The modification date is inside a locked accounting period.');
+            redirect($backUrl);
+        }
+        $timing = (string) ($lease['payment_timing'] ?? 'arrears') === 'advance' ? 'advance' : 'arrears';
+        $rouAssetId = (int) ($lease['asset_id'] ?? 0);
+        $rouAsset = fa_company_asset($rouAssetId, $companyId);
+
+        $postedStmt = db()->prepare('SELECT COUNT(*) AS cnt, COALESCE(MAX(period_no), 0) AS last_no FROM lease_schedule_lines WHERE lease_id = :lid AND posted = 1');
+        $postedStmt->execute(['lid' => $leaseId]);
+        $postedInfo = $postedStmt->fetch(PDO::FETCH_ASSOC) ?: ['cnt' => 0, 'last_no' => 0];
+        $postedCount = (int) $postedInfo['cnt'];
+        $lastPostedNo = (int) $postedInfo['last_no'];
+        if ($postedCount > 0) {
+            $closingStmt = db()->prepare('SELECT closing FROM lease_schedule_lines WHERE lease_id = :lid AND posted = 1 ORDER BY period_no DESC LIMIT 1');
+            $closingStmt->execute(['lid' => $leaseId]);
+            $outstanding = round((float) $closingStmt->fetchColumn(), 2);
+        } else {
+            $outstanding = round((float) $lease['initial_liability'], 2);
+        }
+
+        $newPv = fa_annuity_present_value($newPayment, $newRateAnnual / 1200.0, $newRemainingTerm, $timing);
+        $delta = round($newPv - $outstanding, 2);
+
+        $liabL = fa_resolve_mapping($companyId, 'lease_liability', $rouAssetId ?: null);
+        $rouL = fa_resolve_mapping($companyId, 'rou_asset', $rouAssetId ?: null);
+        if (!$liabL || !$rouL) {
+            flash('error', 'Set the RoU asset and Lease liability ledgers on this lease\'s RoU asset page first.');
+            redirect($backUrl);
+        }
+
+        try {
+            db()->beginTransaction();
+            $rouAdjustment = 0.0;
+            $modGain = 0.0;
+            if (abs($delta) >= 0.005) {
+                if ($delta > 0) {
+                    $rouAdjustment = $delta;
+                    $entries = [
+                        ['ledger_id' => (int) $rouL['id'], 'entry_type' => 'debit', 'amount' => $delta, 'memo' => 'RoU adjustment on lease modification'],
+                        ['ledger_id' => (int) $liabL['id'], 'entry_type' => 'credit', 'amount' => $delta, 'memo' => 'Lease liability remeasured'],
+                    ];
+                } else {
+                    $reduction = -$delta;
+                    $rouCarrying = max(0.0, (float) ($rouAsset['carrying_amount'] ?? 0));
+                    $rouAdjustment = -min($reduction, $rouCarrying);
+                    $modGain = round($reduction + $rouAdjustment, 2); // excess over RoU carrying → P&L
+                    $entries = [
+                        ['ledger_id' => (int) $liabL['id'], 'entry_type' => 'debit', 'amount' => $reduction, 'memo' => 'Lease liability remeasured'],
+                    ];
+                    if (-$rouAdjustment > 0) {
+                        $entries[] = ['ledger_id' => (int) $rouL['id'], 'entry_type' => 'credit', 'amount' => -$rouAdjustment, 'memo' => 'RoU adjustment on lease modification'];
+                    }
+                    if ($modGain > 0.004) {
+                        $gainL = fa_resolve_mapping($companyId, 'gain_on_disposal', $rouAssetId ?: null);
+                        if (!$gainL) {
+                            throw new RuntimeException('The liability decrease exceeds the RoU carrying amount — set the Gain on Disposal ledger on the RoU asset page to receive the P&L credit.');
+                        }
+                        $entries[] = ['ledger_id' => (int) $gainL['id'], 'entry_type' => 'credit', 'amount' => $modGain, 'memo' => 'Modification gain (IFRS 16.46(a))'];
+                    }
+                }
+                create_voucher_with_entries([
+                    'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
+                    'voucher_no' => 'FA-MOD-' . $leaseId . '-' . date('His'),
+                    'voucher_type' => 'journal', 'voucher_date' => $effectiveDate,
+                    'source_type' => 'lease_modification', 'source_id' => null,
+                    'total_amount' => abs($delta),
+                    'narration' => 'Lease modification ' . $lease['contract_ref'] . ': liability remeasured from ' . number_format($outstanding, 2) . ' to ' . number_format($newPv, 2) . ($reason !== '' ? ' — ' . $reason : '') . '.',
+                    'status' => 'posted', 'posted_by' => $userId,
+                ], $entries);
+                if ($rouAsset && abs($rouAdjustment) >= 0.005) {
+                    db()->prepare('UPDATE fixed_assets SET cost = cost + :d, carrying_amount = carrying_amount + :d2 WHERE id = :id AND company_id = :cid')
+                        ->execute(['d' => $rouAdjustment, 'd2' => $rouAdjustment, 'id' => $rouAssetId, 'cid' => $companyId]);
+                }
+            }
+
+            // Replace the UNPOSTED tail of the schedule with the revised terms.
+            db()->prepare('DELETE FROM lease_schedule_lines WHERE lease_id = :lid AND posted = 0')->execute(['lid' => $leaseId]);
+            $schedule = fa_lease_schedule($newPv, $newRateAnnual / 1200.0, $newPayment, $newRemainingTerm, $timing);
+            $lineStmt = db()->prepare('INSERT INTO lease_schedule_lines (lease_id, period_no, period_date, opening, interest, payment, principal, closing) VALUES (:lid,:pno,:pdate,:o,:i,:pay,:pr,:cl)');
+            foreach ($schedule as $line) {
+                $monthsOut = $timing === 'advance' ? ((int) $line['period'] - 1) : (int) $line['period'];
+                $lineStmt->execute(['lid' => $leaseId, 'pno' => $lastPostedNo + (int) $line['period'], 'pdate' => date('Y-m-d', strtotime($effectiveDate . ' +' . $monthsOut . ' months')), 'o' => $line['opening'], 'i' => $line['interest'], 'pay' => $line['payment'], 'pr' => $line['principal'], 'cl' => $line['closing']]);
+            }
+            db()->prepare('UPDATE lease_liabilities SET payment = :pay, term_months = :term, discount_rate_annual = :rate WHERE id = :id AND company_id = :cid')
+                ->execute(['pay' => $newPayment, 'term' => $lastPostedNo + $newRemainingTerm, 'rate' => $newRateAnnual, 'id' => $leaseId, 'cid' => $companyId]);
+            if ($rouAsset) {
+                // Spread the adjusted RoU over the revised total term.
+                db()->prepare('UPDATE fixed_assets SET useful_life_months = :life WHERE id = :id AND company_id = :cid')
+                    ->execute(['life' => $lastPostedNo + $newRemainingTerm, 'id' => $rouAssetId, 'cid' => $companyId]);
+            }
+            db()->commit();
+            security_event('lease_modified', 'success', 'Lease #' . $leaseId . ' modified (liability ' . number_format($outstanding, 2) . ' → ' . number_format($newPv, 2) . ').', $companyId, $userId);
+            log_activity('lease', $leaseId, 'modified', 'Lease modified: payment ' . number_format($newPayment, 2) . ', remaining term ' . $newRemainingTerm . 'm, rate ' . number_format($newRateAnnual, 2) . '%. Liability ' . number_format($outstanding, 2) . ' → ' . number_format($newPv, 2) . '.' . ($modGain > 0 ? ' Modification gain ' . number_format($modGain, 2) . '.' : ''), $userId);
+            flash('success', 'Lease modified. Liability remeasured from ' . site_currency_symbol() . number_format($outstanding, 2) . ' to ' . site_currency_symbol() . number_format($newPv, 2) . ($delta >= 0 ? ' (RoU increased ' : ' (RoU/P&L decreased ') . site_currency_symbol() . number_format(abs($delta), 2) . '). Remaining schedule regenerated over ' . $newRemainingTerm . ' months.');
+        } catch (Throwable $e) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            flash('error', 'Could not modify the lease: ' . $e->getMessage());
+        }
+        redirect($backUrl);
     }
 
     if ($action === 'save_asset_ledgers') {
@@ -1532,11 +1747,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <nav class="mbw-tabbar" aria-label="Fixed asset workspace" style="margin:6px 0 16px">
-    <a class="<?= in_array($faView, ['register', 'detail'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?>Register</a>
-    <a class="<?= $faView === 'models' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=models')) ?>"><?= icon('settings') ?>Measurement Models</a>
-    <a class="<?= $faView === 'revaluation' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=revaluation')) ?>"><?= icon('wallet') ?>Revaluation</a>
-    <a class="<?= $faView === 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=leases')) ?>"><?= icon('contracts') ?>Leases (IFRS 16)</a>
-    <a class="<?= $faView === 'categories' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=categories')) ?>"><?= icon('layers') ?>Categories</a>
+    <a class="mbw-tab <?= in_array($faView, ['register', 'detail'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?>Register</a>
+    <a class="mbw-tab <?= $faView === 'models' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=models')) ?>"><?= icon('settings') ?>Measurement Models</a>
+    <a class="mbw-tab <?= $faView === 'revaluation' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=revaluation')) ?>"><?= icon('wallet') ?>Revaluation</a>
+    <a class="mbw-tab <?= $faView === 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=leases')) ?>"><?= icon('contracts') ?>Lease</a>
+    <a class="mbw-tab <?= $faView === 'categories' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=categories')) ?>"><?= icon('layers') ?>Categories</a>
 </nav>
 
 <?php if ($faView === 'models'): ?>
@@ -2128,6 +2343,22 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php else: ?>
                 <p style="color:var(--mbw-muted);font-size:12.5px;margin:0 0 12px">All periods for this lease are posted.</p>
             <?php endif; ?>
+            <?php if ((string) $activeLease['status'] === 'active'): ?>
+            <details class="feature-disclosure" style="margin-bottom:12px">
+                <summary><span><strong><?= icon('settings') ?>Modify lease (change payment / term / rate)</strong><small>IFRS 16: the liability is remeasured to the PV of the revised payments at the revised rate; the RoU asset is adjusted by the same amount and the remaining schedule is regenerated. Posted periods stay untouched.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <form method="post" class="workspace-form-grid" data-confirm="Remeasure this lease? Unposted schedule periods are replaced with the revised terms.">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="modify_lease">
+                    <input type="hidden" name="lease_id" value="<?= (int) $activeLease['id'] ?>">
+                    <label>Revised monthly payment<input type="number" step="0.01" name="new_payment" value="<?= e(number_format((float) $activeLease['payment'], 2, '.', '')) ?>" required></label>
+                    <label>Remaining term from now (months)<input type="number" step="1" name="new_remaining_term" value="<?= e((string) max(1, count(array_filter($leaseLines, static fn (array $l): bool => (int) $l['posted'] === 0)))) ?>" required></label>
+                    <label>Revised discount rate % (annual)<input type="number" step="0.0001" name="new_discount_rate_annual" value="<?= e(number_format((float) $activeLease['discount_rate_annual'], 4, '.', '')) ?>"></label>
+                    <label>Effective date<input type="date" name="effective_date" value="<?= e(date('Y-m-d')) ?>"></label>
+                    <label class="workspace-span-2">Reason<input type="text" name="modification_reason" maxlength="190" placeholder="e.g. Rent increased on renewal, term extended 12 months"></label>
+                    <div class="workspace-span-2"><button type="submit"><?= icon('accounting') ?>Remeasure lease</button></div>
+                </form>
+            </details>
+            <?php endif; ?>
             <div class="rc-table-scroll"><table class="rc-table">
                 <thead><tr><th>Period</th><th>Date</th><th class="align-right">Opening</th><th class="align-right">Interest</th><th class="align-right">Payment</th><th class="align-right">Principal</th><th class="align-right">Closing</th><th>Status</th></tr></thead>
                 <tbody>
@@ -2168,11 +2399,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Contract ref<input type="text" name="contract_ref" required></label>
             <label>ROU asset name<input type="text" name="name" required></label>
             <label>Commencement date<input type="date" name="commencement_date"></label>
-            <label>Term (months)<input type="number" name="term_months" value="48"></label>
-            <label>Initial lease liability<input type="number" step="0.01" name="initial_liability" value="0.00" required></label>
-            <label>Level payment / period<input type="number" step="0.01" name="payment" value="0.00"></label>
-            <label>Discount rate % (annual)<input type="number" step="0.0001" name="discount_rate_annual" value="0.00"></label>
+            <label>Monthly payment<input type="number" step="0.01" name="payment" value="0.00" required></label>
+            <label>Term (months)<input type="number" name="term_months" value="48" required></label>
+            <label>Discount rate % (annual)<input type="number" step="0.0001" name="discount_rate_annual" value="0.00" required></label>
             <label>Payment timing<select name="payment_timing"><option value="arrears">Arrears (period end)</option><option value="advance">Advance (period start)</option></select></label>
+            <div class="workspace-span-2" style="color:var(--mbw-muted);font-size:12.5px;align-self:end">Lease liability = present value of the payments at the discount rate — calculated automatically. RoU asset = liability + prepayments + initial direct costs + restoration − incentives.</div>
             <label>Prepayments<input type="number" step="0.01" name="prepayments" value="0.00"></label>
             <label>Initial direct costs<input type="number" step="0.01" name="initial_direct_costs" value="0.00"></label>
             <label>Lease incentives<input type="number" step="0.01" name="incentives" value="0.00"></label>
@@ -2376,7 +2607,23 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
             <?php if ((string) $detailAsset['asset_class'] === 'cwip'): ?>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('upload') ?>Capitalize from CWIP</strong><small>Reclassify Capital Work-in-Progress to an in-service asset and start depreciation.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('wallet') ?>Capitalize borrowing cost (IAS 23)</strong><small>Qualifying asset under construction: interest = borrowing × annual rate × months ÷ 12, added to the CWIP cost. Stops once the asset is ready for use.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <form method="post" class="workspace-form-grid">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="capitalize_borrowing_cost"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
+                    <label>Borrowing / expenditure amount<input type="number" step="0.01" name="borrowing_amount" value="<?= e(number_format((float) $detailAsset['cost'], 2, '.', '')) ?>"></label>
+                    <label>Annual interest rate %<input type="number" step="0.0001" name="interest_rate_annual" value="0.00"></label>
+                    <label>Months in the period<input type="number" step="1" name="months" value="12"></label>
+                    <label>OR interest amount directly<input type="number" step="0.01" name="interest_amount" value="0.00" title="When set, this amount is capitalized as-is (actual interest on a specific borrowing)"></label>
+                    <label>Date<input type="date" name="interest_date" value="<?= e(date('Y-m-d')) ?>"></label>
+                    <?php $intFunding = fa_resolve_mapping($companyId, 'acquisition_clearing', (int) $detailAsset['id']); ?>
+                    <label>Credit goes to (interest payable / bank / lender)
+                        <?= fa_funded_from_select('funded_from', $ledgers, $faParties, (int) ($intFunding['id'] ?? 0)) ?>
+                    </label>
+                    <div class="workspace-span-2"><button type="submit"><?= icon('accounting') ?>Capitalize interest onto CWIP</button></div>
+                </form>
+            </details>
+            <details class="feature-disclosure">
+                <summary><span><strong><?= icon('upload') ?>Complete &amp; transfer to fixed asset</strong><small>Construction finished: posts Dr PPE / Cr Capital WIP for the accumulated cost, reclassifies the asset and starts depreciation.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="capitalize_cwip"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Target class<select name="new_asset_class">
@@ -2387,7 +2634,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <label>Depreciation method<select name="depreciation_method"><?php foreach ($methods as $k => $v): ?><option value="<?= e($k) ?>"><?= e($v) ?></option><?php endforeach; ?></select></label>
                     <label>Useful life (months)<input type="number" step="1" name="useful_life_months" value="60"></label>
                     <label>Residual value<input type="number" step="0.01" name="residual_value" value="0.00"></label>
-                    <div class="workspace-span-2"><button type="submit"><?= icon('upload') ?>Capitalize asset</button></div>
+                    <div class="workspace-span-2"><button type="submit"><?= icon('upload') ?>Complete &amp; transfer to fixed asset</button></div>
                 </form>
             </details>
             <?php endif; ?>
