@@ -99,6 +99,14 @@ $fyAdj = create_fiscal_year($cidA, 'FY 2027/28', '2027-07-16', '2028-07-15', fal
 ok($fyAdj['ok'], 'Adjacent non-overlapping year accepted');
 ok(create_fiscal_year($cidB, 'FY 2024/25', '2024-07-16', '2025-07-15', true)['ok'], 'Same period accepted for a DIFFERENT company');
 
+// Continuity: years form an unbroken chain — no islands, no gaps.
+$island = create_fiscal_year($cidA, 'FY island', '2035-01-01', '2035-12-31', false);
+ok(!$island['ok'] && str_contains((string) $island['error'], 'continuous'), 'A year leaving a gap (island) is rejected — fiscal years must be continuous');
+ok(create_fiscal_year($cidA, 'FY 2023/24', '2023-07-16', '2024-07-15', false)['ok'], 'Extending the chain backward (ends the day before the first year) accepted');
+// Legacy gap (inserted directly, as old data could be) can be FILLED via the service.
+db()->prepare("INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_active, is_default) VALUES (?, 'FY legacy 2030', '2030-01-01', '2030-12-31', 1, 0)")->execute([$cidA]);
+ok(create_fiscal_year($cidA, 'FY gap filler', '2028-07-16', '2029-12-31', false)['ok'], 'Filling a legacy gap (adjacent to the chain) accepted');
+
 $defCount = db()->prepare('SELECT COUNT(*) FROM fiscal_years WHERE company_id = ? AND is_default = 1');
 $defCount->execute([$cidA]);
 ok((int) $defCount->fetchColumn() === 1, 'Exactly one default fiscal year after creation');

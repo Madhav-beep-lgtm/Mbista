@@ -187,6 +187,138 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
     redirect('admin/settings.php');
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'split_fiscal_year') {
+    verify_csrf();
+    if (!user_can('admin')) {
+        flash('error', 'Only administrators can split fiscal years.');
+        redirect('admin/settings.php');
+    }
+    require_permission('accounting', 'edit');
+
+    $fyId = (int) ($_POST['fiscal_year_id'] ?? 0);
+    $splitDate = (string) ($_POST['split_date'] ?? '');
+    $secondLabel = trim((string) ($_POST['second_label'] ?? ''));
+    $fy = fiscal_year_by_id($fyId);
+    if (!$fy || (int) $fy['company_id'] !== $settingsCompanyId) {
+        flash('error', 'Fiscal year not found for this company.');
+        redirect('admin/settings.php');
+    }
+    $fySplitStatus = fiscal_year_status($fy);
+    if (in_array($fySplitStatus, ['closed', 'locked'], true)) {
+        flash('error', 'Fiscal year "' . $fy['label'] . '" is ' . $fySplitStatus . ' — reopen it before splitting (audited).');
+        redirect('admin/settings.php');
+    }
+    $validSplit = DateTimeImmutable::createFromFormat('Y-m-d', $splitDate);
+    if (!$validSplit || $validSplit->format('Y-m-d') !== $splitDate || $splitDate < (string) $fy['start_date'] || $splitDate >= (string) $fy['end_date']) {
+        flash('error', 'The split date must lie inside the year: on or after ' . $fy['start_date'] . ' and before ' . $fy['end_date'] . '. The first part ends ON the split date; the second part starts the day after.');
+        redirect('admin/settings.php');
+    }
+    $secondStart = date('Y-m-d', strtotime($splitDate . ' +1 day'));
+    $secondEnd = (string) $fy['end_date'];
+    if ($secondLabel === '') {
+        $secondLabel = $fy['label'] . ' (part 2)';
+    }
+    // The second half must not collide with any OTHER year (the original is
+    // being shrunk, so it is excluded), and its label must be unique.
+    $splitOverlap = db()->prepare('SELECT label, start_date, end_date FROM fiscal_years WHERE company_id = :cid AND id <> :exclude AND :new_start <= end_date AND :new_end >= start_date LIMIT 1');
+    $splitOverlap->execute(['cid' => $settingsCompanyId, 'exclude' => $fyId, 'new_start' => $secondStart, 'new_end' => $secondEnd]);
+    $splitClash = $splitOverlap->fetch();
+    if ($splitClash) {
+        flash('error', 'Cannot split: the second part (' . $secondStart . ' to ' . $secondEnd . ') would overlap "' . $splitClash['label'] . '" (' . $splitClash['start_date'] . ' to ' . $splitClash['end_date'] . '). Shrink this year with Edit instead, or pick a different split date.');
+        redirect('admin/settings.php');
+    }
+    $dupSplitLabel = db()->prepare('SELECT COUNT(*) FROM fiscal_years WHERE company_id = :cid AND label = :label');
+    $dupSplitLabel->execute(['cid' => $settingsCompanyId, 'label' => $secondLabel]);
+    if ((int) $dupSplitLabel->fetchColumn() > 0) {
+        flash('error', 'A fiscal year named "' . $secondLabel . '" already exists — give the second part a different name.');
+        redirect('admin/settings.php');
+    }
+    try {
+        db()->beginTransaction();
+        db()->prepare('SELECT id FROM companies WHERE id = :cid FOR UPDATE')->execute(['cid' => $settingsCompanyId]);
+        $hasLifecycle = column_exists('fiscal_years', 'status');
+        db()->prepare('UPDATE fiscal_years SET end_date = :end' . (column_exists('fiscal_years', 'updated_by') ? ', updated_by = :uid' : '') . ' WHERE id = :id')
+            ->execute(['end' => $splitDate, 'id' => $fyId] + (column_exists('fiscal_years', 'updated_by') ? ['uid' => $settingsUserId] : []));
+        $insertSql = 'INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_active, is_default'
+            . ($hasLifecycle ? ', status, created_by' : '') . ') VALUES (:cid, :label, :start, :end, 1, 0'
+            . ($hasLifecycle ? ', :status, :uid' : '') . ')';
+        $insertParams = ['cid' => $settingsCompanyId, 'label' => $secondLabel, 'start' => $secondStart, 'end' => $secondEnd]
+            + ($hasLifecycle ? ['status' => $fySplitStatus, 'uid' => $settingsUserId] : []);
+        db()->prepare($insertSql)->execute($insertParams);
+        $secondId = (int) db()->lastInsertId();
+        // Vouchers follow their DATES into the correct half — dates are never
+        // changed, only the fiscal-year link.
+        $relink = db()->prepare('UPDATE vouchers SET fiscal_year_id = :new_fy WHERE fiscal_year_id = :old_fy AND COALESCE(voucher_date, DATE(created_at)) > :split');
+        $relink->execute(['new_fy' => $secondId, 'old_fy' => $fyId, 'split' => $splitDate]);
+        $movedVouchers = (int) $relink->rowCount();
+        // A cutoff beyond the first part's new end belongs to the second part.
+        if (table_exists('fiscal_period_locks')) {
+            $lockRow = db()->prepare('SELECT locked_through FROM fiscal_period_locks WHERE company_id = :cid AND fiscal_year_id = :fy LIMIT 1');
+            $lockRow->execute(['cid' => $settingsCompanyId, 'fy' => $fyId]);
+            $lockedThrough = $lockRow->fetchColumn();
+            if ($lockedThrough !== false && (string) $lockedThrough > $splitDate) {
+                db()->prepare('INSERT INTO fiscal_period_locks (company_id, fiscal_year_id, locked_through, locked_by) VALUES (:cid, :fy, :through, :uid) ON DUPLICATE KEY UPDATE locked_through = VALUES(locked_through)')
+                    ->execute(['cid' => $settingsCompanyId, 'fy' => $secondId, 'through' => (string) $lockedThrough, 'uid' => $settingsUserId]);
+                db()->prepare('UPDATE fiscal_period_locks SET locked_through = :through WHERE company_id = :cid AND fiscal_year_id = :fy')
+                    ->execute(['through' => $splitDate, 'cid' => $settingsCompanyId, 'fy' => $fyId]);
+            }
+        }
+        db()->commit();
+        $auditNote = 'Fiscal year "' . $fy['label'] . '" split at ' . $splitDate . ': "' . $fy['label'] . '" now ' . $fy['start_date'] . '..' . $splitDate . '; new "' . $secondLabel . '" ' . $secondStart . '..' . $secondEnd . '; ' . $movedVouchers . ' voucher(s) re-linked by date.';
+        log_activity('fiscal_year', $fyId, 'split', $auditNote, $settingsUserId);
+        security_event('fiscal_year_split', 'success', $auditNote, $settingsCompanyId, $settingsUserId);
+        flash('success', 'Fiscal year split: "' . $fy['label'] . '" ends ' . $splitDate . ', "' . $secondLabel . '" runs ' . $secondStart . ' to ' . $secondEnd . '. ' . $movedVouchers . ' voucher(s) moved to the second part by their dates. Opening balances stay continuous automatically.');
+    } catch (Throwable $exception) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+        flash('error', 'Could not split the fiscal year: ' . $exception->getMessage());
+    }
+    redirect('admin/settings.php');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'delete_fiscal_year') {
+    verify_csrf();
+    if (!user_can('admin') || !user_can('delete')) {
+        flash('error', 'Deleting a fiscal year needs the administrator and Delete capabilities.');
+        redirect('admin/settings.php');
+    }
+    require_permission('accounting', 'edit');
+
+    $fyId = (int) ($_POST['fiscal_year_id'] ?? 0);
+    $fy = fiscal_year_by_id($fyId);
+    if (!$fy || (int) $fy['company_id'] !== $settingsCompanyId) {
+        flash('error', 'Fiscal year not found for this company.');
+        redirect('admin/settings.php');
+    }
+    if ((int) ($fy['is_default'] ?? 0) === 1) {
+        flash('error', 'Fiscal year "' . $fy['label'] . '" is the company default — make another year the default first.');
+        redirect('admin/settings.php');
+    }
+    $fyDelStatus = fiscal_year_status($fy);
+    if ($fyDelStatus === 'locked') {
+        flash('error', 'Fiscal year "' . $fy['label'] . '" is locked — unlock it first (audited).');
+        redirect('admin/settings.php');
+    }
+    // Only an EMPTY year can be deleted: a year holding postings is history,
+    // not clutter. (Vouchers keep their dates; move them by fixing the year
+    // ranges or diagnose_fiscal_years --relink, then delete.)
+    $voucherCount = db()->prepare('SELECT COUNT(*) FROM vouchers WHERE fiscal_year_id = :fy');
+    $voucherCount->execute(['fy' => $fyId]);
+    $linked = (int) $voucherCount->fetchColumn();
+    if ($linked > 0) {
+        flash('error', 'Fiscal year "' . $fy['label'] . '" still holds ' . $linked . ' voucher(s) — it cannot be deleted. Re-link them to the correct year first (php database/diagnose_fiscal_years.php --relink).');
+        redirect('admin/settings.php');
+    }
+    db()->prepare('DELETE FROM fiscal_period_locks WHERE company_id = :cid AND fiscal_year_id = :fy')->execute(['cid' => $settingsCompanyId, 'fy' => $fyId]);
+    db()->prepare('DELETE FROM fiscal_years WHERE id = :id AND company_id = :cid')->execute(['id' => $fyId, 'cid' => $settingsCompanyId]);
+    $auditNote = 'Fiscal year "' . $fy['label'] . '" (' . $fy['start_date'] . '..' . $fy['end_date'] . ', ' . $fyDelStatus . ', no vouchers) deleted.';
+    log_activity('fiscal_year', $fyId, 'deleted', $auditNote, $settingsUserId);
+    security_event('fiscal_year_deleted', 'success', $auditNote, $settingsCompanyId, $settingsUserId);
+    flash('success', 'Fiscal year "' . $fy['label'] . '" deleted.');
+    redirect('admin/settings.php');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'set_default_fiscal_year') {
     verify_csrf();
     if (!user_can('admin')) {
@@ -642,6 +774,25 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <button type="submit" class="button secondary" style="min-height:32px" onclick="return confirm('Save changes to <?= e($fyRow['label']) ?>? Overlaps are rejected and existing vouchers must stay inside the new period.')">Save</button>
                                 </form>
                             </details>
+                            <details style="display:inline-block;vertical-align:middle">
+                                <summary class="button secondary" style="min-height:30px;padding:3px 10px;display:inline-flex;align-items:center;cursor:pointer;list-style:none">Split</summary>
+                                <form method="post" style="display:flex;gap:6px;flex-wrap:wrap;align-items:end;padding:8px;border:1px solid var(--mbw-border,#d8dfe8);border-radius:8px;margin-top:6px;background:var(--mbw-surface,#fff)">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="split_fiscal_year">
+                                    <input type="hidden" name="fiscal_year_id" value="<?= (int) $fyRow['id'] ?>">
+                                    <label style="margin:0;font-size:11px">First part ends on<input type="date" name="split_date" min="<?= e($fyRow['start_date']) ?>" max="<?= e(date('Y-m-d', strtotime((string) $fyRow['end_date'] . ' -1 day'))) ?>" required></label>
+                                    <label style="margin:0;font-size:11px">Second part name<input type="text" name="second_label" placeholder="<?= e($fyRow['label']) ?> (part 2)" style="min-width:130px"></label>
+                                    <button type="submit" class="button secondary" style="min-height:32px" onclick="return confirm('Split <?= e($fyRow['label']) ?>? The two parts stay continuous (no gap, no overlap) and vouchers follow their own dates into the correct part.')">Split</button>
+                                </form>
+                            </details>
+                        <?php endif; ?>
+                        <?php if ((int) $fyRow['is_default'] !== 1 && $fyRowStatus !== 'locked' && user_can('delete')): ?>
+                            <form method="post" style="display:inline" onsubmit="return confirm('Delete fiscal year <?= e($fyRow['label']) ?>? Only possible while it holds no vouchers. This cannot be undone.')">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="delete_fiscal_year">
+                                <input type="hidden" name="fiscal_year_id" value="<?= (int) $fyRow['id'] ?>">
+                                <button type="submit" class="button danger" style="min-height:30px;padding:3px 10px">Delete</button>
+                            </form>
                         <?php endif; ?>
                     </td>
                 </tr>

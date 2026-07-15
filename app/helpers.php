@@ -1148,6 +1148,32 @@ function create_fiscal_year(int $companyId, string $label, string $startDate, st
             db()->rollBack();
             return ['ok' => false, 'error' => $overlapError, 'id' => 0];
         }
+        // Continuity: fiscal years must form an unbroken chain — the previous
+        // year's closing IS the next year's opening, so a new year has to
+        // touch an existing one (start = an existing end + 1 day, or end = an
+        // existing start − 1 day). Filling a legacy gap satisfies both sides.
+        // The company's very first year is free to start anywhere.
+        $neighborStmt = db()->prepare('SELECT start_date, end_date FROM fiscal_years WHERE company_id = :cid');
+        $neighborStmt->execute(['cid' => $companyId]);
+        $neighbors = $neighborStmt->fetchAll();
+        if ($neighbors !== []) {
+            $adjacent = false;
+            $latestEnd = null;
+            foreach ($neighbors as $neighbor) {
+                $afterNeighbor = date('Y-m-d', strtotime((string) $neighbor['end_date'] . ' +1 day'));
+                $beforeNeighbor = date('Y-m-d', strtotime((string) $neighbor['start_date'] . ' -1 day'));
+                if ($startDate === $afterNeighbor || $endDate === $beforeNeighbor) {
+                    $adjacent = true;
+                }
+                if ($latestEnd === null || (string) $neighbor['end_date'] > $latestEnd) {
+                    $latestEnd = (string) $neighbor['end_date'];
+                }
+            }
+            if (!$adjacent) {
+                db()->rollBack();
+                return ['ok' => false, 'error' => 'Fiscal years must be continuous — the new year must start the day after an existing year ends (e.g. ' . date('Y-m-d', strtotime($latestEnd . ' +1 day')) . ') or end the day before one starts. Gaps between years are not allowed.', 'id' => 0];
+            }
+        }
         $duplicateLabel = db()->prepare('SELECT COUNT(*) FROM fiscal_years WHERE company_id = :cid AND label = :label');
         $duplicateLabel->execute(['cid' => $companyId, 'label' => trim($label)]);
         if ((int) $duplicateLabel->fetchColumn() > 0) {
