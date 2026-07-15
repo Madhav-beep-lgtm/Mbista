@@ -552,10 +552,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ['ledger_id' => (int) $expLedger['id'], 'entry_type' => 'debit', 'amount' => $charge],
                 ['ledger_id' => (int) $accLedger['id'], 'entry_type' => 'credit', 'amount' => $charge],
             ]);
+            if ($voucherId <= 0) {
+                // Never record a "posted" schedule row whose voucher does not exist.
+                throw new RuntimeException('The depreciation voucher could not be posted — nothing was recorded.');
+            }
 
             db()->prepare('INSERT INTO asset_depreciation_schedule (company_id, asset_id, period_no, period_date, depreciation, accumulated, carrying, voucher_id, posted)
                 VALUES (:cid, :aid, :pno, :pdate, :dep, :acc, :carry, :vid, 1)')
-                ->execute(['cid' => $companyId, 'aid' => (int) $asset['id'], 'pno' => $periodNo, 'pdate' => $today, 'dep' => $charge, 'acc' => $newAccum, 'carry' => $newCarrying, 'vid' => $voucherId ?: null]);
+                ->execute(['cid' => $companyId, 'aid' => (int) $asset['id'], 'pno' => $periodNo, 'pdate' => $today, 'dep' => $charge, 'acc' => $newAccum, 'carry' => $newCarrying, 'vid' => $voucherId]);
 
             $status = $newCarrying <= (float) $asset['residual_value'] + 0.005 ? 'fully_depreciated' : 'active';
             db()->prepare('UPDATE fixed_assets SET accumulated_depreciation = :acc, carrying_amount = :carry, status = :st WHERE id = :id AND company_id = :cid')
@@ -609,8 +613,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ['ledger_id' => (int) $lossL['id'], 'entry_type' => 'debit', 'amount' => $imp['impairment']],
                 ['ledger_id' => (int) $accL['id'], 'entry_type' => 'credit', 'amount' => $imp['impairment']],
             ]);
+            if ($vid <= 0) {
+                // Register-and-GL must move together: an unposted voucher with a
+                // recorded event is exactly how registers drift from the books.
+                throw new RuntimeException('The impairment voucher could not be posted — nothing was recorded.');
+            }
             db()->prepare('UPDATE asset_impairments SET voucher_id = :vid WHERE id = :id')
-                ->execute(['vid' => $vid ?: null, 'id' => $eventId]);
+                ->execute(['vid' => $vid, 'id' => $eventId]);
             db()->prepare('UPDATE fixed_assets SET accumulated_impairment = accumulated_impairment + :imp, carrying_amount = :carry WHERE id = :id AND company_id = :cid')
                 ->execute(['imp' => $imp['impairment'], 'carry' => $imp['revised_carrying'], 'id' => (int) $asset['id'], 'cid' => $companyId]);
             db()->commit();
@@ -674,8 +683,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ['ledger_id' => (int) $accL['id'], 'entry_type' => 'debit', 'amount' => $reversalAmount],
                 ['ledger_id' => (int) $incomeL['id'], 'entry_type' => 'credit', 'amount' => $reversalAmount],
             ]);
+            if ($vid <= 0) {
+                throw new RuntimeException('The reversal voucher could not be posted — nothing was recorded.');
+            }
             db()->prepare('UPDATE asset_impairments SET voucher_id = :vid WHERE id = :id')
-                ->execute(['vid' => $vid ?: null, 'id' => $eventId]);
+                ->execute(['vid' => $vid, 'id' => $eventId]);
             db()->prepare('UPDATE fixed_assets SET accumulated_impairment = accumulated_impairment - :rev, carrying_amount = :carry WHERE id = :id AND company_id = :cid')
                 ->execute(['rev' => $reversalAmount, 'carry' => $revisedCarrying, 'id' => (int) $asset['id'], 'cid' => $companyId]);
             db()->commit();
@@ -693,22 +705,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fv = max(0.0, round((float) ($_POST['fair_value'] ?? 0), 2));
         $costs = max(0.0, round((float) ($_POST['costs_to_sell'] ?? 0), 2));
         $hfs = fa_held_for_sale((float) $asset['carrying_amount'], $fv, $costs);
+        // The write-down must reach the ledger or nothing happens at all —
+        // recording the event while skipping the voucher is how the register
+        // and the books drift apart.
+        if ($hfs['impairment'] > 0) {
+            $lossL = fa_resolve_mapping($companyId, 'impairment_loss', (int) $asset['id']);
+            $accL = fa_resolve_mapping($companyId, 'accumulated_impairment', (int) $asset['id']);
+            if (!$lossL || !$accL) {
+                flash('error', 'Set the Impairment Loss and Accumulated Impairment ledgers in "This asset posts to" on this asset\'s page before classifying — the write-down of ' . site_currency_symbol() . number_format($hfs['impairment'], 2) . ' cannot post without them.');
+                redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
+            }
+        }
         try {
             db()->beginTransaction();
             $vid = 0;
             if ($hfs['impairment'] > 0) {
-                $lossL = fa_resolve_mapping($companyId, 'impairment_loss', (int) $asset['id']);
-                $accL = fa_resolve_mapping($companyId, 'accumulated_impairment', (int) $asset['id']);
-                if ($lossL && $accL) {
-                    $vid = create_voucher_with_entries([
-                        'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
-                        'voucher_no' => 'FA-HFS-' . $asset['asset_code'], 'voucher_type' => 'journal', 'voucher_date' => date('Y-m-d'),
-                        'source_type' => 'asset_held_for_sale', 'source_id' => (int) $asset['id'], 'total_amount' => $hfs['impairment'],
-                        'narration' => 'Held-for-sale write-down of ' . $asset['name'] . ' (IFRS 5).', 'status' => 'posted', 'posted_by' => $userId,
-                    ], [
-                        ['ledger_id' => (int) $lossL['id'], 'entry_type' => 'debit', 'amount' => $hfs['impairment']],
-                        ['ledger_id' => (int) $accL['id'], 'entry_type' => 'credit', 'amount' => $hfs['impairment']],
-                    ]);
+                $vid = create_voucher_with_entries([
+                    'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
+                    'voucher_no' => 'FA-HFS-' . $asset['asset_code'], 'voucher_type' => 'journal', 'voucher_date' => date('Y-m-d'),
+                    'source_type' => 'asset_held_for_sale', 'source_id' => (int) $asset['id'], 'total_amount' => $hfs['impairment'],
+                    'narration' => 'Held-for-sale write-down of ' . $asset['name'] . ' (IFRS 5).', 'status' => 'posted', 'posted_by' => $userId,
+                ], [
+                    ['ledger_id' => (int) $lossL['id'], 'entry_type' => 'debit', 'amount' => $hfs['impairment']],
+                    ['ledger_id' => (int) $accL['id'], 'entry_type' => 'credit', 'amount' => $hfs['impairment']],
+                ]);
+                if ($vid <= 0) {
+                    throw new RuntimeException('The write-down voucher could not be posted — nothing was recorded.');
                 }
             }
             db()->prepare('INSERT INTO asset_impairments (company_id, asset_id, test_date, kind, carrying_amount, fair_value_less_costs, recoverable_amount, impairment_loss, voucher_id, created_by)
@@ -728,6 +750,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('accounting', 'post');
         $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
         if (!$asset) { flash('error', 'Asset not found.'); redirect('admin/fixed-assets.php'); }
+        // Never derecognize what was never recognized: a disposal voucher
+        // against an asset whose acquisition/commencement never reached the
+        // ledger leaves one-sided history on the cost and accumulated
+        // ledgers (credits with no matching debits).
+        if ((float) $asset['cost'] > 0) {
+            $onBooksStmt = (string) $asset['asset_class'] === 'rou'
+                ? db()->prepare("SELECT COUNT(*) FROM vouchers v INNER JOIN lease_liabilities ll ON ll.id = v.source_id WHERE v.source_type = 'lease_commencement' AND ll.asset_id = :aid AND v.company_id = :cid")
+                : db()->prepare("SELECT COUNT(*) FROM vouchers WHERE source_type = 'fixed_asset_acquisition' AND source_id = :aid AND company_id = :cid");
+            $onBooksStmt->execute(['aid' => (int) $asset['id'], 'cid' => $companyId]);
+            if ((int) $onBooksStmt->fetchColumn() === 0) {
+                flash('error', 'This asset\'s ' . ((string) $asset['asset_class'] === 'rou' ? 'lease commencement' : 'acquisition') . ' was never posted to the ledger — post it first (see the red panel on the asset page), then dispose. Disposing now would credit ledgers that were never debited.');
+                redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
+            }
+        }
         $proceeds = max(0.0, round((float) ($_POST['proceeds'] ?? 0), 2));
         $cost = (float) $asset['cost'];
         $accumDep = (float) $asset['accumulated_depreciation'];
@@ -771,6 +807,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'narration' => 'Disposal of ' . $asset['name'] . ' — ' . ($gainLoss >= 0 ? 'gain ' : 'loss ') . number_format(abs($gainLoss), 2) . ($disposalPartyId ? ' (buyer: ' . ($procL['name'] ?? 'party') . ')' : '') . '.',
                 'status' => 'posted', 'posted_by' => $userId,
             ], $entries);
+            if ($vid <= 0) {
+                throw new RuntimeException('The disposal voucher could not be posted — the asset was NOT derecognized.');
+            }
             db()->prepare('UPDATE fixed_assets SET status = \'disposed\', disposed_on = :d, carrying_amount = 0 WHERE id = :id AND company_id = :cid')
                 ->execute(['d' => date('Y-m-d'), 'id' => (int) $asset['id'], 'cid' => $companyId]);
             db()->commit();
@@ -1365,6 +1404,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             fa_set_asset_ledger($companyId, $rouAssetId, 'accumulated_depreciation', (int) ($_POST['accum_dep_ledger_id'] ?? 0), $userId);
             $rouL = fa_resolve_mapping($companyId, 'rou_asset', $rouAssetId);
             $liabL = fa_resolve_mapping($companyId, 'lease_liability', $rouAssetId);
+            if (!$rouL || !$liabL) {
+                // No lease without its commencement voucher — a lease that
+                // exists only in the register drifts from the books forever.
+                throw new RuntimeException('Choose the RoU asset ledger and Lease liability ledger — the commencement voucher cannot post without them.');
+            }
             db()->prepare('INSERT INTO lease_liabilities (company_id, asset_id, ' . ($hasLessorColumn ? 'lessor_party_id, ' : '') . 'contract_ref, commencement_date, term_months, payment, payment_timing, discount_rate_annual, initial_liability, initial_direct_costs, prepayments, incentives, restoration, rou_initial, status, created_by)
                 VALUES (:cid,:aid,' . ($hasLessorColumn ? ':lessor,' : '') . ':ref,:d,:term,:pay,:timing,:rate,:liab,:idc,:prep,:inc,:rest,:rou,\'active\',:uid)')
                 ->execute(array_merge(
@@ -1449,6 +1493,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $interest = (float) $line['interest'];
         $payment = (float) $line['payment'];
+        // Interest belongs to its period: the voucher is dated on the line's
+        // own period date (not "today"), and locked periods block posting.
+        $periodDate = (string) ($line['period_date'] ?? '') ?: date('Y-m-d');
+        if (is_period_locked($companyId, $fiscalYearId, $periodDate)) {
+            flash('error', 'Period ' . $line['period_no'] . ' (' . $periodDate . ') is inside a locked accounting period. Unlock it first.');
+            redirect('admin/fixed-assets.php?view=leases&lease_id=' . (int) $line['lease_id']);
+        }
         try {
             db()->beginTransaction();
             $entries = [];
@@ -1469,7 +1520,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // UNIQUE per company — key on the lease id + period, which is
                 // both short and unique, instead of the free-text contract ref.
                 'voucher_no' => 'FA-LSE-' . (int) $line['lease_id'] . '-' . str_pad((string) $line['period_no'], 3, '0', STR_PAD_LEFT),
-                'voucher_type' => 'journal', 'voucher_date' => date('Y-m-d'),
+                'voucher_type' => 'journal', 'voucher_date' => $periodDate,
                 // Keyed on the schedule LINE id, not the lease id: vouchers has
                 // UNIQUE(source_type, source_id), so a lease-scoped key would let
                 // only the first period of each lease ever post. Per-line keying
@@ -1479,8 +1530,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'narration' => 'Lease period ' . $line['period_no'] . ' — ' . $line['contract_ref'] . ' (interest + payment, IFRS 16).',
                 'status' => 'posted', 'posted_by' => $userId,
             ], $entries);
+            if ($vid <= 0) {
+                throw new RuntimeException('The period voucher could not be posted — the schedule line stays unposted.');
+            }
             db()->prepare('UPDATE lease_schedule_lines SET posted = 1, voucher_id = :vid WHERE id = :id')
-                ->execute(['vid' => $vid ?: null, 'id' => $lineId]);
+                ->execute(['vid' => $vid, 'id' => $lineId]);
             db()->commit();
             security_event('lease_period_posted', 'success', 'Lease period ' . $line['period_no'] . ' posted for lease #' . (int) $line['lease_id'] . '.', $companyId, $userId);
             log_activity('lease', (int) $line['lease_id'], 'period_posted', 'Lease period ' . $line['period_no'] . ' posted (interest ' . number_format($interest, 2) . ', payment ' . number_format($payment, 2) . ').', $userId);
@@ -1711,6 +1765,31 @@ $unpostedStmt = db()->prepare("SELECT fa.id FROM fixed_assets fa
 $unpostedStmt->execute(['cid' => $companyId]);
 $unpostedAcquisitionIds = array_map('intval', $unpostedStmt->fetchAll(PDO::FETCH_COLUMN));
 
+// Register ↔ ledger integrity sweep: events and schedule rows that claim a
+// posting the ledger does not have. Fix with database/repair_fixed_asset_gl_sync.php
+// or the pointers in each message.
+$faIntegrityIssues = [];
+$impMissStmt = db()->prepare("SELECT i.id, fa.asset_code, i.kind, GREATEST(i.impairment_loss, i.reversal) AS amount
+    FROM asset_impairments i INNER JOIN fixed_assets fa ON fa.id = i.asset_id
+    WHERE i.company_id = :cid AND GREATEST(i.impairment_loss, i.reversal) > 0
+      AND (i.voucher_id IS NULL OR NOT EXISTS (SELECT 1 FROM vouchers v WHERE v.id = i.voucher_id))");
+$impMissStmt->execute(['cid' => $companyId]);
+foreach ($impMissStmt->fetchAll(PDO::FETCH_ASSOC) as $issueRow) {
+    $faIntegrityIssues[] = ucfirst(str_replace('_', ' ', (string) $issueRow['kind'])) . ' of ' . number_format((float) $issueRow['amount'], 2) . ' on ' . $issueRow['asset_code'] . ' is recorded in the register but was never posted to the ledger.';
+}
+$depMissStmt = db()->prepare("SELECT fa.asset_code, s.period_no FROM asset_depreciation_schedule s INNER JOIN fixed_assets fa ON fa.id = s.asset_id
+    WHERE s.company_id = :cid AND s.posted = 1 AND (s.voucher_id IS NULL OR NOT EXISTS (SELECT 1 FROM vouchers v WHERE v.id = s.voucher_id))");
+$depMissStmt->execute(['cid' => $companyId]);
+foreach ($depMissStmt->fetchAll(PDO::FETCH_ASSOC) as $issueRow) {
+    $faIntegrityIssues[] = 'Depreciation period ' . $issueRow['period_no'] . ' of ' . $issueRow['asset_code'] . ' claims to be posted but its voucher no longer exists.';
+}
+$lseMissStmt = db()->prepare("SELECT ll.contract_ref, lsl.period_no FROM lease_schedule_lines lsl INNER JOIN lease_liabilities ll ON ll.id = lsl.lease_id
+    WHERE ll.company_id = :cid AND lsl.posted = 1 AND (lsl.voucher_id IS NULL OR NOT EXISTS (SELECT 1 FROM vouchers v WHERE v.id = lsl.voucher_id))");
+$lseMissStmt->execute(['cid' => $companyId]);
+foreach ($lseMissStmt->fetchAll(PDO::FETCH_ASSOC) as $issueRow) {
+    $faIntegrityIssues[] = 'Lease ' . $issueRow['contract_ref'] . ' period ' . $issueRow['period_no'] . ' claims to be posted but its voucher no longer exists.';
+}
+
 $totalCost = array_sum(array_map(static fn (array $a): float => (float) $a['cost'], $assets));
 $totalAccum = array_sum(array_map(static fn (array $a): float => (float) $a['accumulated_depreciation'], $assets));
 $totalImpair = array_sum(array_map(static fn (array $a): float => (float) $a['accumulated_impairment'], $assets));
@@ -1753,6 +1832,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a class="mbw-tab <?= $faView === 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=leases')) ?>"><?= icon('contracts') ?>Lease</a>
     <a class="mbw-tab <?= $faView === 'categories' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=categories')) ?>"><?= icon('layers') ?>Categories</a>
 </nav>
+
+<?php if ($faIntegrityIssues !== [] && in_array($faView, ['register', 'detail', 'leases'], true)): ?>
+    <div class="notice error" style="margin-bottom:14px">
+        <strong>Register / ledger mismatch<?= count($faIntegrityIssues) > 1 ? 'es' : '' ?> found:</strong>
+        <ul style="margin:6px 0 0 18px">
+            <?php foreach ($faIntegrityIssues as $issueText): ?><li><?= e($issueText) ?></li><?php endforeach; ?>
+        </ul>
+        <span style="font-size:12.5px">Run <code>php database/repair_fixed_asset_gl_sync.php</code> (preview first, then --apply) to post the missing vouchers and reset phantom rows.</span>
+    </div>
+<?php endif; ?>
 
 <?php if ($faView === 'models'): ?>
     <?php // FIXED ASSET MEASUREMENT MODEL PAGE START ?>

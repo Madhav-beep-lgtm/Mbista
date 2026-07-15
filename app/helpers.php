@@ -2466,6 +2466,36 @@ function voucher_mutation_blocker(array $voucher): ?string
     if ($voucherDate !== '' && is_period_locked($companyId, $fiscalYearId, $voucherDate)) {
         return 'This voucher is inside a locked accounting period. Unlock the period first.';
     }
+    // Vouchers created by the Fixed Assets module back register rows
+    // (depreciation schedules, lease schedules, impairment events) that keep
+    // claiming "posted" after the voucher is gone — the exact register/GL
+    // drift this guard exists to prevent. Correct those from the asset or
+    // lease page; deleting the ASSET removes its vouchers consistently.
+    $faSourceTypes = [
+        'fixed_asset_acquisition', 'fixed_asset_addition', 'asset_depreciation',
+        'asset_impairment', 'asset_impairment_reversal', 'asset_held_for_sale',
+        'asset_disposal', 'asset_cwip_capitalization', 'asset_borrowing_cost',
+        'asset_revaluation_batch_line', 'lease_commencement', 'lease_period',
+        'lease_modification',
+    ];
+    if (in_array((string) ($voucher['source_type'] ?? ''), $faSourceTypes, true)) {
+        return 'This voucher was posted by the Fixed Assets module and backs its register. Correct it from the asset or lease page (or delete the asset, which removes its vouchers consistently) — editing or deleting it here would desync the asset register from the books.';
+    }
+    foreach ([
+        'asset_depreciation_schedule' => 'a depreciation schedule row',
+        'lease_schedule_lines' => 'a lease schedule period',
+        'asset_impairments' => 'an impairment event',
+        'asset_revaluation_lines' => 'a revaluation batch line',
+    ] as $refTable => $refLabel) {
+        if (!table_exists($refTable)) {
+            continue;
+        }
+        $refStmt = db()->prepare('SELECT COUNT(*) FROM ' . $refTable . ' WHERE voucher_id = :id');
+        $refStmt->execute(['id' => $voucherId]);
+        if ((int) $refStmt->fetchColumn() > 0) {
+            return 'This voucher backs ' . $refLabel . ' in the fixed-asset register. Correct it from the asset or lease page — removing it here would leave the register claiming a posting the ledger no longer has.';
+        }
+    }
     return null;
 }
 
