@@ -310,7 +310,10 @@ foreach ([$cidA, $cidB] as $cid) {
     db()->exec('DELETE FROM ledger_groups WHERE company_id = ' . $cid);
     db()->exec('DELETE FROM companies WHERE id = ' . $cid);
 }
-db()->exec("DELETE FROM activity_logs WHERE entity_type = 'fiscal_year' AND details LIKE '%FY 20%'");
+// Only audit rows for the fixture's own fiscal years — a broad LIKE would
+// erase REAL companies' fiscal-year audit history.
+$fixtureFyIds = [$fy1['id'], $fy2['id'], $fy3['id'], $fyAdj['id']];
+db()->exec("DELETE FROM activity_logs WHERE entity_type = 'fiscal_year' AND entity_id IN (" . implode(',', array_map('intval', $fixtureFyIds)) . ')');
 
 echo "\n=== {$pass} passed, {$fail} failed ===\n";
 exit($fail === 0 ? 0 : 1);

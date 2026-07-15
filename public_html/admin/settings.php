@@ -698,30 +698,48 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <form method="post" class="frm-grid frm-grid-4" style="padding-top:14px">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="create_fiscal_year">
+        <?php
+        // The next year always OPENS the day after the last one CLOSES — the
+        // closing balance struck at that end date is the new year's opening
+        // balance. Prefill the dates so a gap can never be typed by accident
+        // (the service layer rejects gaps anyway).
+        $fyChainRows = fiscal_years_for_company($settingsCompanyId, false);
+        usort($fyChainRows, static fn (array $a, array $b): int => strcmp((string) $a['start_date'], (string) $b['start_date']));
+        $fyChainLast = $fyChainRows !== [] ? $fyChainRows[count($fyChainRows) - 1] : null;
+        $fyNextStart = $fyChainLast ? date('Y-m-d', strtotime((string) $fyChainLast['end_date'] . ' +1 day')) : '';
+        $fyNextEnd = $fyNextStart !== '' ? date('Y-m-d', strtotime($fyNextStart . ' +1 year -1 day')) : '';
+        ?>
         <label>Fiscal year label<input type="text" name="label" placeholder="FY 2026-2027" required></label>
-        <label>Start date<input type="date" name="start_date" required></label>
-        <label>End date<input type="date" name="end_date" required></label>
+        <label>Start date<input type="date" name="start_date" value="<?= e($fyNextStart) ?>" required></label>
+        <label>End date<input type="date" name="end_date" value="<?= e($fyNextEnd) ?>" required></label>
         <label class="frm-toggle-wrap">Use as default year
             <span class="frm-toggle"><input type="checkbox" name="is_default" value="1" checked><i></i></span>
         </label>
+        <?php if ($fyChainLast): ?>
+            <div style="grid-column:1/-1;color:var(--mbw-muted);font-size:12.5px">Continues from <strong><?= e($fyChainLast['label']) ?></strong> — its closing balance on <?= e($fyChainLast['end_date']) ?> becomes the new year's opening balance on <?= e($fyNextStart) ?>. Gaps between years are rejected.</div>
+        <?php endif; ?>
         <div style="grid-column:1/-1"><button type="submit" class="button secondary"><?= icon('calendar') ?>Create Fiscal Year</button></div>
     </form>
 
     <?php
-    $settingsFyRows = fiscal_years_for_company($settingsCompanyId, false);
+    $settingsFyRows = $fyChainRows;
     $settingsFyHasStatus = column_exists('fiscal_years', 'status');
     ?>
     <div style="padding-top:16px">
-        <h3 style="margin:0 0 8px">Fiscal years of <?= e($settingsCompany['name'] ?? 'this company') ?></h3>
+        <h3 style="margin:0 0 8px">Fiscal years of <?= e($settingsCompany['name'] ?? 'this company') ?> <span style="color:var(--mbw-muted);font-weight:400;font-size:12.5px">(oldest first — each closing feeds the next opening)</span></h3>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Fiscal year</th><th>Period</th><th>Status</th><th>Default</th><th>Cutoff (locked through)</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Fiscal year</th><th>Period</th><th>Continuity</th><th>Status</th><th>Default</th><th>Cutoff (locked through)</th><th>Actions</th></tr></thead>
             <tbody>
-            <?php if ($settingsFyRows === []): ?><tr><td colspan="6">No fiscal years yet — create one above.</td></tr><?php endif; ?>
-            <?php foreach ($settingsFyRows as $fyRow): ?>
+            <?php if ($settingsFyRows === []): ?><tr><td colspan="7">No fiscal years yet — create one above.</td></tr><?php endif; ?>
+            <?php foreach ($settingsFyRows as $fyIndex => $fyRow): ?>
                 <?php
                 $fyRowStatus = fiscal_year_status($fyRow);
                 $fyStatusTone = ['upcoming' => 'blue', 'open' => 'green', 'closed' => 'amber', 'locked' => 'red'][$fyRowStatus] ?? 'gray';
                 $fyRowCutoff = period_locked_through($settingsCompanyId, (int) $fyRow['id']);
+                $fyPrevRow = $settingsFyRows[$fyIndex - 1] ?? null;
+                $fyNextRow = $settingsFyRows[$fyIndex + 1] ?? null;
+                $fyOpensFromPrev = $fyPrevRow && date('Y-m-d', strtotime((string) $fyPrevRow['end_date'] . ' +1 day')) === (string) $fyRow['start_date'];
+                $fyFeedsNext = $fyNextRow && date('Y-m-d', strtotime((string) $fyRow['end_date'] . ' +1 day')) === (string) $fyNextRow['start_date'];
                 $fyTransitions = [
                     'upcoming' => [['open', 'Open year', false]],
                     'open' => [['closed', 'Close year', false]],
@@ -732,6 +750,23 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <tr>
                     <td><strong><?= e($fyRow['label']) ?></strong></td>
                     <td><?= e($fyRow['start_date']) ?> — <?= e($fyRow['end_date']) ?></td>
+                    <td style="font-size:12px;line-height:1.5">
+                        <?php if ($fyPrevRow === null): ?>
+                            <span class="mbw-pill tone-gray">Chain start</span>
+                        <?php elseif ($fyOpensFromPrev): ?>
+                            <span title="The closing balance of <?= e($fyPrevRow['label']) ?> struck on <?= e($fyPrevRow['end_date']) ?> is this year's opening balance">✓ Opens from <strong><?= e($fyPrevRow['label']) ?></strong> closing (<?= e($fyPrevRow['end_date']) ?>)</span>
+                        <?php else: ?>
+                            <span class="mbw-pill tone-red">GAP before this year</span> <span><?= e(date('Y-m-d', strtotime((string) $fyPrevRow['end_date'] . ' +1 day'))) ?> to <?= e(date('Y-m-d', strtotime((string) $fyRow['start_date'] . ' -1 day'))) ?> uncovered</span>
+                        <?php endif; ?>
+                        <br>
+                        <?php if ($fyNextRow === null): ?>
+                            <span style="color:var(--mbw-muted)">Latest year — closing carries into the next year you create</span>
+                        <?php elseif ($fyFeedsNext): ?>
+                            <span title="This year's closing balance on <?= e($fyRow['end_date']) ?> is the opening balance of <?= e($fyNextRow['label']) ?>">✓ Closing (<?= e($fyRow['end_date']) ?>) → opens <strong><?= e($fyNextRow['label']) ?></strong></span>
+                        <?php else: ?>
+                            <span class="mbw-pill tone-red">GAP after this year</span>
+                        <?php endif; ?>
+                    </td>
                     <td><span class="mbw-pill tone-<?= e($fyStatusTone) ?>"><?= e(ucfirst($fyRowStatus)) ?></span></td>
                     <td>
                         <?php if ((int) $fyRow['is_default'] === 1): ?>
@@ -800,6 +835,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </tbody>
         </table></div>
         <p style="color:var(--mbw-muted);font-size:12px;margin:8px 0 0">Lifecycle: Upcoming → Open → Closed → Locked. Closed and locked years stay fully viewable and exportable but reject every accounting change. Reopening requires a reason and is written to the audit log.</p>
+        <p style="color:var(--mbw-muted);font-size:12px;margin:4px 0 0">Continuity: the closing balance struck at each year's end date IS the next year's opening balance — the next year opens the very next calendar day, so every date belongs to exactly one year (a shared date would make boundary-day transactions ambiguous). Gaps are rejected on creation and flagged in red above; permanent accounts carry forward automatically and income/expense restart at zero with prior profits in Retained Earnings b/f.</p>
     </div>
 </details>
 
