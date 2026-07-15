@@ -184,11 +184,11 @@ function seed_invoice(int $cid, int $taskId, string $no, float $amount, string $
 }
 
 $inv1 = seed_invoice($cid, $task1, 'INV-SMP-0001', 50000.00, 'issued', $d(10), $partyCustomer);
-seed_insert('invoice_line_items', ['invoice_id' => $inv1, 'company_id' => $cid, 'description' => 'Statutory audit — planning & fieldwork', 'quantity' => 1, 'rate' => 50000, 'vat_rate' => 13, 'amount' => 50000]);
+seed_insert('invoice_line_items', ['invoice_id' => $inv1, 'source_type' => 'task', 'description' => 'Statutory audit — planning & fieldwork', 'unit' => 'job', 'quantity' => 1, 'rate' => 50000, 'taxable_amount' => 50000, 'vat_rate' => 13, 'vat_amount' => 6500, 'total_amount' => 56500]);
 auto_post_task_invoice_voucher($inv1, $adminId);
 
 $inv2 = seed_invoice($cid, $task1, 'INV-SMP-0002', 30000.00, 'issued', $d(20), $partyCustomer);
-seed_insert('invoice_line_items', ['invoice_id' => $inv2, 'company_id' => $cid, 'description' => 'Statutory audit — reporting', 'quantity' => 1, 'rate' => 30000, 'vat_rate' => 13, 'amount' => 30000]);
+seed_insert('invoice_line_items', ['invoice_id' => $inv2, 'source_type' => 'task', 'description' => 'Statutory audit — reporting', 'unit' => 'job', 'quantity' => 1, 'rate' => 30000, 'taxable_amount' => 30000, 'vat_rate' => 13, 'vat_amount' => 3900, 'total_amount' => 33900]);
 auto_post_task_invoice_voucher($inv2, $adminId);
 
 $inv3 = seed_invoice($cid, $task2, 'INV-SMP-0003', 12000.00, 'draft', $d(30), $partyCustomer, 'proforma');

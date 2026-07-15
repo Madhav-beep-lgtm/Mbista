@@ -1151,10 +1151,22 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         $exciseRateDisplay = $showExcise ? (float) ($invoice['excise_rate'] ?? $defaultExciseRate) : 0.0;
                         $invoiceLines = $invoice['line_items'] ?? [];
                         if ($invoiceLines === []) {
-                            $fallbackTaxable = (float) ($invoice['taxable_amount'] ?? $invoice['amount'] ?? 0);
-                            $fallbackExcise = $showExcise ? (float) ($invoice['excise_amount'] ?? round($fallbackTaxable * ($exciseRateDisplay / 100), 2)) : 0.0;
+                            // The VAT columns default to 0.00 (not NULL), so treat a
+                            // stored zero as "not computed" and rebuild the figure —
+                            // null-coalescing alone never reaches the fallback.
+                            $fallbackTaxable = (float) ($invoice['taxable_amount'] ?? 0);
+                            if ($fallbackTaxable <= 0) {
+                                $fallbackTaxable = (float) ($invoice['amount'] ?? 0);
+                            }
+                            $fallbackExcise = $showExcise ? (float) ($invoice['excise_amount'] ?? 0) : 0.0;
+                            if ($showExcise && $fallbackExcise <= 0) {
+                                $fallbackExcise = round($fallbackTaxable * ($exciseRateDisplay / 100), 2);
+                            }
                             $fallbackVatRate = (float) ($invoice['vat_rate'] ?? 13.00);
-                            $fallbackVat = (float) ($invoice['vat_amount'] ?? round(($fallbackTaxable + $fallbackExcise) * ($fallbackVatRate / 100), 2));
+                            $fallbackVat = (float) ($invoice['vat_amount'] ?? 0);
+                            if ($fallbackVat <= 0) {
+                                $fallbackVat = round(($fallbackTaxable + $fallbackExcise) * ($fallbackVatRate / 100), 2);
+                            }
                             $invoiceLines = [[
                                 'description' => $invoice['description'] ?? ($invoice['task_title'] ?? 'Invoice line'),
                                 'unit' => 'job',
@@ -1190,10 +1202,21 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                             if ($lineTaxable <= 0) {
                                 $lineTaxable = round((float) ($line['quantity'] ?? 1) * (float) ($line['rate'] ?? 0), 2);
                             }
-                            $lineExcise = $showExcise ? (float) ($line['excise_amount'] ?? round($lineTaxable * ($exciseRateDisplay / 100), 2)) : 0.0;
+                            $lineExcise = $showExcise ? (float) ($line['excise_amount'] ?? 0) : 0.0;
+                            if ($showExcise && $lineExcise <= 0) {
+                                $lineExcise = round($lineTaxable * ($exciseRateDisplay / 100), 2);
+                            }
                             $lineVatRate = (float) ($line['vat_rate'] ?? $invoice['vat_rate'] ?? 13.00);
-                            $lineVat = (float) ($line['vat_amount'] ?? round(($lineTaxable + $lineExcise) * ($lineVatRate / 100), 2));
-                            $lineTotal = (float) ($line['total_amount'] ?? round($lineTaxable + $lineExcise + $lineVat, 2));
+                            // Stored 0.00 (column default) means "not computed" — rebuild
+                            // from the line's own rate instead of printing zero.
+                            $lineVat = (float) ($line['vat_amount'] ?? 0);
+                            if ($lineVat <= 0) {
+                                $lineVat = round(($lineTaxable + $lineExcise) * ($lineVatRate / 100), 2);
+                            }
+                            $lineTotal = (float) ($line['total_amount'] ?? 0);
+                            if ($lineTotal <= 0) {
+                                $lineTotal = round($lineTaxable + $lineExcise + $lineVat, 2);
+                            }
                         ?>
                         <div class="invoice-line">
                             <div><?php echo e($line['description'] ?? ($invoice['task_title'] ?? 'Invoice line')); ?></div>
