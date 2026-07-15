@@ -56,26 +56,58 @@ if (!$selectedFiscalYear && $fiscalYears !== []) {
     $fiscalYearId = (int) $selectedFiscalYear['id'];
 }
 
-$isValidDate = static fn (string $value): bool => $value !== '' && DateTimeImmutable::createFromFormat('Y-m-d', $value) !== false;
-$fromDate = trim((string) ($_GET['from'] ?? ''));
-$toDate = trim((string) ($_GET['to'] ?? ''));
-if (!$isValidDate($fromDate)) {
-    $fromDate = (string) ($selectedFiscalYear['start_date'] ?? date('Y') . '-01-01');
-}
-if (!$isValidDate($toDate)) {
-    $toDate = (string) ($selectedFiscalYear['end_date'] ?? date('Y') . '-12-31');
-}
-// Date filters can never leave the selected fiscal year: a stale bookmark,
-// hand-edited query string, or filters kept from a previously selected year
-// are clamped to the year's own range instead of leaking other years' data.
+// STRICT AD date check: the value must round-trip exactly (rejects rolled-over
+// impossibilities like 2084-03-32) and sit in a plausible AD range — a BS
+// string such as 2084-03-15 must never be compared against AD periods.
+$isValidDate = static function (string $value): bool {
+    if ($value === '') {
+        return false;
+    }
+    $dt = DateTimeImmutable::createFromFormat('Y-m-d', $value);
+    return $dt instanceof DateTimeImmutable
+        && $dt->format('Y-m-d') === $value
+        && $value >= '1990-01-01' && $value <= '2060-12-31';
+};
+$fromRequested = trim((string) ($_GET['from'] ?? ''));
+$toRequested = trim((string) ($_GET['to'] ?? ''));
+$dateFilterNotice = '';
 $fyClampStart = (string) ($selectedFiscalYear['start_date'] ?? '');
 $fyClampEnd = (string) ($selectedFiscalYear['end_date'] ?? '');
-if ($fyClampStart !== '' && $fyClampEnd !== '') {
-    $fromDate = max($fyClampStart, min($fromDate, $fyClampEnd));
-    $toDate = max($fyClampStart, min($toDate, $fyClampEnd));
+$fromDate = $fromRequested;
+$toDate = $toRequested;
+if (($fromRequested !== '' && !$isValidDate($fromRequested)) || ($toRequested !== '' && !$isValidDate($toRequested))) {
+    $dateFilterNotice = 'The supplied dates could not be read as valid calendar dates — showing the full fiscal year instead.';
+    $fromDate = '';
+    $toDate = '';
+}
+if (!$isValidDate($fromDate)) {
+    $fromDate = $fyClampStart !== '' ? $fyClampStart : date('Y') . '-01-01';
+}
+if (!$isValidDate($toDate)) {
+    $toDate = $fyClampEnd !== '' ? $fyClampEnd : date('Y') . '-12-31';
 }
 if ($fromDate > $toDate) {
     [$fromDate, $toDate] = [$toDate, $fromDate];
+}
+// Date filters can never leave the selected fiscal year. A range that lies
+// entirely outside it (stale filters from a previously selected year, an old
+// bookmark) RESETS to the full year; a partially-outside range is clamped.
+// Either way the user is told what happened instead of silently seeing
+// different dates than requested.
+if ($fyClampStart !== '' && $fyClampEnd !== '') {
+    if ($toDate < $fyClampStart || $fromDate > $fyClampEnd) {
+        $dateFilterNotice = 'The requested period ' . $fromDate . ' to ' . $toDate . ' lies outside fiscal year ' . ($selectedFiscalYear['label'] ?? '') . ' (' . $fyClampStart . ' to ' . $fyClampEnd . ') — showing the full fiscal year instead.';
+        $fromDate = $fyClampStart;
+        $toDate = $fyClampEnd;
+    } else {
+        $fromClamped = max($fyClampStart, min($fromDate, $fyClampEnd));
+        $toClamped = max($fyClampStart, min($toDate, $fyClampEnd));
+        if ($fromClamped !== $fromDate || $toClamped !== $toDate) {
+            $dateFilterNotice = 'The requested period was adjusted to stay inside fiscal year ' . ($selectedFiscalYear['label'] ?? '') . ': showing ' . $fromClamped . ' to ' . $toClamped . '.';
+        }
+        $fromDate = $fromClamped;
+        $toDate = $toClamped;
+    }
 }
 
 $voucherTypes = ['payment', 'receipt', 'journal', 'sales', 'purchase', 'contra', 'debit_note', 'credit_note'];
@@ -397,6 +429,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </button>
 </div>
 
+<?php if ($dateFilterNotice !== ''): ?>
+    <div class="notice" style="margin-bottom:12px" role="status"><?= e($dateFilterNotice) ?></div>
+<?php endif; ?>
 <form method="get" action="<?= e(url('admin/reports-center.php')) ?>" class="rc-filter-card rc2-filters" id="rc2FilterForm" data-fy-start="<?= e((string) ($selectedFiscalYear['start_date'] ?? '')) ?>" data-fy-end="<?= e((string) ($selectedFiscalYear['end_date'] ?? '')) ?>">
     <input type="hidden" name="report" value="<?= e($reportId) ?>">
     <?php if ($compareEnabled): ?><input type="hidden" name="compare" value="1"><?php endif; ?>
@@ -413,13 +448,25 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="rc2-filters-body" data-rc2-body>
     <div class="rc-filter-grid">
         <label>Fiscal Year
-            <select name="fy">
+            <select name="fy" id="rc2-fy-select">
                 <?php foreach ($fiscalYears as $fiscalYearRow): ?>
                     <option value="<?= e((int) $fiscalYearRow['id']) ?>" <?= (int) $fiscalYearRow['id'] === $fiscalYearId ? 'selected' : '' ?>><?= e($fiscalYearRow['label']) ?> (<?= e(date('d M Y', strtotime((string) $fiscalYearRow['start_date']))) ?> - <?= e(date('d M Y', strtotime((string) $fiscalYearRow['end_date']))) ?>)</option>
                 <?php endforeach; ?>
                 <?php if ($fiscalYears === []): ?><option value="0">No fiscal year</option><?php endif; ?>
             </select>
         </label>
+        <script>
+        // Changing the fiscal year must not drag the previous year's dates
+        // along: clear them so the server defaults to the new year's range.
+        document.getElementById('rc2-fy-select').addEventListener('change', function () {
+            var form = this.form;
+            ['from', 'to', 'cfrom', 'cto'].forEach(function (name) {
+                var input = form.querySelector('[name="' + name + '"]');
+                if (input) { input.value = ''; }
+            });
+            form.submit();
+        });
+        </script>
         <label>From Date<input type="date" name="from" value="<?= e($fromDate) ?>"></label>
         <label>To Date<input type="date" name="to" value="<?= e($toDate) ?>"></label>
         <label>Branch

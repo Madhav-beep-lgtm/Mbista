@@ -122,6 +122,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
     redirect('admin/settings.php');
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'update_fiscal_year') {
+    verify_csrf();
+    if (!user_can('admin')) {
+        flash('error', 'Only administrators can edit fiscal years.');
+        redirect('admin/settings.php');
+    }
+    require_permission('accounting', 'edit');
+
+    $fyId = (int) ($_POST['fiscal_year_id'] ?? 0);
+    $newLabel = trim((string) ($_POST['label'] ?? ''));
+    $newStart = (string) ($_POST['start_date'] ?? '');
+    $newEnd = (string) ($_POST['end_date'] ?? '');
+    $fy = fiscal_year_by_id($fyId);
+    if (!$fy || (int) $fy['company_id'] !== $settingsCompanyId) {
+        flash('error', 'Fiscal year not found for this company.');
+        redirect('admin/settings.php');
+    }
+    if ($newLabel === '') {
+        flash('error', 'The fiscal year label is required.');
+        redirect('admin/settings.php');
+    }
+    $fyEditStatus = fiscal_year_status($fy);
+    if (in_array($fyEditStatus, ['closed', 'locked'], true)) {
+        flash('error', 'Fiscal year "' . $fy['label'] . '" is ' . $fyEditStatus . ' — reopen it before editing its period (audited).');
+        redirect('admin/settings.php');
+    }
+    // The same overlap rule as creation, excluding the year being edited.
+    // A label-only edit (dates untouched) is allowed even while a legacy
+    // overlap exists — fixing the label must not be hostage to old data.
+    $datesChanged = $newStart !== (string) $fy['start_date'] || $newEnd !== (string) $fy['end_date'];
+    if ($datesChanged) {
+        $overlapError = fiscal_year_overlap_error($settingsCompanyId, $newStart, $newEnd, $fyId);
+        if ($overlapError !== null) {
+            flash('error', $overlapError);
+            redirect('admin/settings.php');
+        }
+    }
+    $dupLabel = db()->prepare('SELECT COUNT(*) FROM fiscal_years WHERE company_id = :cid AND label = :label AND id <> :id');
+    $dupLabel->execute(['cid' => $settingsCompanyId, 'label' => $newLabel, 'id' => $fyId]);
+    if ((int) $dupLabel->fetchColumn() > 0) {
+        flash('error', 'Another fiscal year is already named "' . $newLabel . '".');
+        redirect('admin/settings.php');
+    }
+    // Shrinking the period must never orphan existing postings: every voucher
+    // already linked to this year has to stay inside the new range. Only
+    // checked when the dates actually change — pre-existing misfiled vouchers
+    // (repairable via diagnose_fiscal_years --relink) must not block a
+    // label-only edit.
+    if ($datesChanged) {
+        $orphanStmt = db()->prepare('SELECT COUNT(*) FROM vouchers WHERE fiscal_year_id = :fy AND (COALESCE(voucher_date, DATE(created_at)) < :start OR COALESCE(voucher_date, DATE(created_at)) > :end)');
+        $orphanStmt->execute(['fy' => $fyId, 'start' => $newStart, 'end' => $newEnd]);
+        $orphanCount = (int) $orphanStmt->fetchColumn();
+        if ($orphanCount > 0) {
+            flash('error', 'Cannot change the period: ' . $orphanCount . ' posted voucher(s) of "' . $fy['label'] . '" would fall outside ' . $newStart . ' to ' . $newEnd . '. Adjust or move those vouchers first.');
+            redirect('admin/settings.php');
+        }
+    }
+    db()->prepare('UPDATE fiscal_years SET label = :label, start_date = :start_date, end_date = :end_date' . (column_exists('fiscal_years', 'updated_by') ? ', updated_by = :uid' : '') . ' WHERE id = :id AND company_id = :cid')
+        ->execute(['label' => $newLabel, 'start_date' => $newStart, 'end_date' => $newEnd, 'id' => $fyId, 'cid' => $settingsCompanyId]
+            + (column_exists('fiscal_years', 'updated_by') ? ['uid' => $settingsUserId] : []));
+    log_activity('fiscal_year', $fyId, 'updated', 'Fiscal year edited: "' . $fy['label'] . '" (' . $fy['start_date'] . '..' . $fy['end_date'] . ') -> "' . $newLabel . '" (' . $newStart . '..' . $newEnd . ').', $settingsUserId);
+    flash('success', 'Fiscal year "' . $newLabel . '" updated.');
+    redirect('admin/settings.php');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'set_default_fiscal_year') {
     verify_csrf();
     if (!user_can('admin')) {
@@ -563,6 +628,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <button type="submit" class="button <?= $fyTarget === 'locked' ? 'danger' : 'secondary' ?>" style="min-height:30px;padding:3px 10px"><?= e($fyLabel) ?></button>
                                 </form>
                             <?php endforeach; ?>
+                        <?php endif; ?>
+                        <?php if (!in_array($fyRowStatus, ['closed', 'locked'], true)): ?>
+                            <details style="display:inline-block;vertical-align:middle">
+                                <summary class="button secondary" style="min-height:30px;padding:3px 10px;display:inline-flex;align-items:center;cursor:pointer;list-style:none">Edit</summary>
+                                <form method="post" style="display:flex;gap:6px;flex-wrap:wrap;align-items:end;padding:8px;border:1px solid var(--mbw-border,#d8dfe8);border-radius:8px;margin-top:6px;background:var(--mbw-surface,#fff)">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="update_fiscal_year">
+                                    <input type="hidden" name="fiscal_year_id" value="<?= (int) $fyRow['id'] ?>">
+                                    <label style="margin:0;font-size:11px">Label<input type="text" name="label" value="<?= e($fyRow['label']) ?>" required style="min-width:120px"></label>
+                                    <label style="margin:0;font-size:11px">Start<input type="date" name="start_date" value="<?= e($fyRow['start_date']) ?>" required></label>
+                                    <label style="margin:0;font-size:11px">End<input type="date" name="end_date" value="<?= e($fyRow['end_date']) ?>" required></label>
+                                    <button type="submit" class="button secondary" style="min-height:32px" onclick="return confirm('Save changes to <?= e($fyRow['label']) ?>? Overlaps are rejected and existing vouchers must stay inside the new period.')">Save</button>
+                                </form>
+                            </details>
                         <?php endif; ?>
                     </td>
                 </tr>

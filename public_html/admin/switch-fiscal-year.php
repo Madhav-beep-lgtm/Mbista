@@ -31,12 +31,19 @@ if ($companyId <= 0 || !$fiscalYear || (int) $fiscalYear['company_id'] !== $comp
 }
 
 // Return to the page the user was on so every fiscal-year-dependent screen
-// re-renders in the new context; same-host paths only.
+// re-renders in the new context; same-host paths only. Date filters and the
+// per-page fiscal-year parameter are STRIPPED so the page opens fresh on the
+// newly selected year's own range instead of carrying stale dates across.
 $backTo = (string) ($_POST['return_to'] ?? '');
 $parsedPath = (string) (parse_url($backTo, PHP_URL_PATH) ?? '');
 $parsedQuery = (string) (parse_url($backTo, PHP_URL_QUERY) ?? '');
 if ($parsedPath !== '' && str_starts_with($parsedPath, '/') && !str_starts_with($parsedPath, '//')) {
-    header('Location: ' . $parsedPath . ($parsedQuery !== '' ? '?' . $parsedQuery : ''));
+    parse_str($parsedQuery, $queryParams);
+    foreach (['from', 'to', 'cfrom', 'cto', 'fy', 'fiscal_year_id', 'page'] as $staleParam) {
+        unset($queryParams[$staleParam]);
+    }
+    $cleanQuery = http_build_query($queryParams);
+    header('Location: ' . $parsedPath . ($cleanQuery !== '' ? '?' . $cleanQuery : ''));
     exit;
 }
 redirect('admin/accounting-dashboard.php');
