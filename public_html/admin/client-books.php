@@ -122,6 +122,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash('success', 'Voucher cancelled.');
         redirect($booksUrl('vouchers'));
     }
+    if ($action === 'delete_client_voucher') {
+        require_permission('accounting', 'edit');
+        // Cancelling flags a voucher; deleting removes it from the client's
+        // books entirely — reserved for direct-access admins with the Delete
+        // capability, never for approval-gated staff.
+        if ($access !== 'direct' || !user_can('delete')) {
+            flash('error', 'Only a firm admin with the Delete capability can delete vouchers from client books.');
+            redirect($booksUrl('vouchers'));
+        }
+        $result = delete_voucher_with_entries((int) ($_POST['voucher_id'] ?? 0), $booksCompanyId, $userId);
+        if ($result['ok']) {
+            log_activity('client_books', $clientId, 'client_voucher_deleted', 'Voucher ' . $result['voucher_no'] . ' deleted from client books #' . $booksCompanyId . '.', $userId ?: null);
+        }
+        flash($result['ok'] ? 'success' : 'error', $result['ok'] ? 'Voucher ' . $result['voucher_no'] . ' deleted permanently.' : $result['error']);
+        redirect($booksUrl('vouchers'));
+    }
 }
 
 $booksBusinessType = company_accounting_business_type($booksCompanyId);
@@ -232,6 +248,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <input type="hidden" name="client_id" value="<?= (int) $clientId ?>">
                                 <input type="hidden" name="voucher_id" value="<?= (int) $v['id'] ?>">
                                 <button type="submit" class="button danger" style="min-height:30px;padding:3px 10px">Cancel</button>
+                            </form>
+                        <?php endif; ?>
+                        <?php if ($access === 'direct' && user_can('delete')): ?>
+                            <form method="post" style="display:inline" onsubmit="return confirm('Permanently delete voucher <?= e($v['voucher_no']) ?> from this client\'s books? This cannot be undone.')">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="delete_client_voucher">
+                                <input type="hidden" name="client_id" value="<?= (int) $clientId ?>">
+                                <input type="hidden" name="voucher_id" value="<?= (int) $v['id'] ?>">
+                                <button type="submit" class="button danger" style="min-height:30px;padding:3px 10px">Delete</button>
                             </form>
                         <?php endif; ?>
                     </td>

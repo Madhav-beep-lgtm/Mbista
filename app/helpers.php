@@ -2442,6 +2442,73 @@ function create_voucher_with_entries(array $voucher, array $entries): int
     return $voucherId;
 }
 
+/**
+ * Why a voucher cannot be edited or deleted, or null when it can.
+ * The two hard blockers: a bank-reconciled entry (removing it would desync
+ * the reconciliation), and a voucher date inside a locked accounting period.
+ */
+function voucher_mutation_blocker(array $voucher): ?string
+{
+    $voucherId = (int) ($voucher['id'] ?? 0);
+    if ($voucherId <= 0) {
+        return 'Voucher not found.';
+    }
+    if (column_exists('voucher_entries', 'reconciled_at')) {
+        $reconciledStmt = db()->prepare('SELECT COUNT(*) FROM voucher_entries WHERE voucher_id = :id AND reconciled_at IS NOT NULL');
+        $reconciledStmt->execute(['id' => $voucherId]);
+        if ((int) $reconciledStmt->fetchColumn() > 0) {
+            return 'This voucher has bank-reconciled entries. Undo the reconciliation before editing or deleting it.';
+        }
+    }
+    $companyId = (int) ($voucher['company_id'] ?? 0);
+    $fiscalYearId = (int) ($voucher['fiscal_year_id'] ?? 0);
+    $voucherDate = (string) ($voucher['voucher_date'] ?? '');
+    if ($voucherDate !== '' && is_period_locked($companyId, $fiscalYearId, $voucherDate)) {
+        return 'This voucher is inside a locked accounting period. Unlock the period first.';
+    }
+    return null;
+}
+
+/**
+ * Permanently removes a voucher with its entries and attachments (both
+ * cascade on the FK). Callers gate WHO may delete; this enforces WHAT may
+ * be deleted: company scope, no reconciled entries, no locked period.
+ */
+function delete_voucher_with_entries(int $voucherId, int $companyId, ?int $actorId = null): array
+{
+    $stmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :company_id LIMIT 1');
+    $stmt->execute(['id' => $voucherId, 'company_id' => $companyId]);
+    $voucher = $stmt->fetch();
+    if (!$voucher) {
+        return ['ok' => false, 'error' => 'Voucher not found for this company.', 'voucher_no' => ''];
+    }
+    $blocker = voucher_mutation_blocker($voucher);
+    if ($blocker !== null) {
+        return ['ok' => false, 'error' => $blocker, 'voucher_no' => (string) $voucher['voucher_no']];
+    }
+
+    // Remove attachment files from disk before the rows cascade away.
+    if (table_exists('voucher_attachments')) {
+        $fileStmt = db()->prepare('SELECT file_path FROM voucher_attachments WHERE voucher_id = :id');
+        $fileStmt->execute(['id' => $voucherId]);
+        foreach ($fileStmt->fetchAll(PDO::FETCH_COLUMN) as $filePath) {
+            $absolute = __DIR__ . '/../public_html/' . ltrim((string) $filePath, '/');
+            if (is_file($absolute)) {
+                @unlink($absolute);
+            }
+        }
+    }
+
+    db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :company_id')
+        ->execute(['id' => $voucherId, 'company_id' => $companyId]);
+
+    $summary = 'Voucher ' . $voucher['voucher_no'] . ' (' . $voucher['voucher_type'] . ', ' . number_format((float) $voucher['total_amount'], 2) . ') deleted.';
+    security_event('voucher_deleted', 'success', $summary, $companyId, $actorId);
+    log_activity('voucher', $voucherId, 'deleted', $summary, $actorId);
+
+    return ['ok' => true, 'error' => null, 'voucher_no' => (string) $voucher['voucher_no']];
+}
+
 function auto_post_order_payment_voucher(int $orderId, ?int $actorId = null): void
 {
     if (!table_exists('vouchers') || !table_exists('voucher_entries') || !table_exists('ledgers')) {

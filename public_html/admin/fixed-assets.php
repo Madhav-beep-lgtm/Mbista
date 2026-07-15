@@ -152,6 +152,114 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/fixed-assets.php');
     }
 
+    if ($action === 'delete_asset') {
+        // Permanently removes a mistakenly registered asset together with
+        // every voucher it generated (acquisition, additions, depreciation,
+        // impairments, held-for-sale, disposal, CWIP capitalization, lease
+        // journals). Correct disposals of REAL assets go through
+        // dispose_asset — this is the undo for wrong entries.
+        require_permission('accounting', 'edit');
+        if (!user_can('delete')) {
+            flash('error', 'You do not have permission to delete assets. Ask an administrator to grant the Delete capability.');
+            redirect('admin/fixed-assets.php');
+        }
+        $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
+        if (!$asset) {
+            flash('error', 'Asset not found for this company.');
+            redirect('admin/fixed-assets.php');
+        }
+        $assetId = (int) $asset['id'];
+
+        // Revaluation journals belong to the batch workflow — the batch has
+        // to be rejected/removed before its assets can be deleted.
+        if (table_exists('asset_revaluation_lines')) {
+            $revStmt = db()->prepare('SELECT COUNT(*) FROM asset_revaluation_lines l INNER JOIN asset_revaluation_batches b ON b.id = l.batch_id WHERE l.asset_id = :aid AND b.company_id = :cid');
+            $revStmt->execute(['aid' => $assetId, 'cid' => $companyId]);
+            if ((int) $revStmt->fetchColumn() > 0) {
+                flash('error', 'This asset appears in a revaluation batch. Reject or remove it from the batch before deleting the asset.');
+                redirect('admin/fixed-assets.php?view=' . $assetId);
+            }
+        }
+
+        // Collect every voucher this asset generated.
+        $voucherIds = [];
+        $collect = static function (string $sql, array $params) use (&$voucherIds): void {
+            $stmt = db()->prepare($sql);
+            $stmt->execute($params);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
+                if ((int) $id > 0) {
+                    $voucherIds[(int) $id] = true;
+                }
+            }
+        };
+        $collect("SELECT id FROM vouchers WHERE company_id = :cid AND source_id = :aid AND source_type IN ('fixed_asset_acquisition', 'asset_disposal', 'asset_held_for_sale', 'asset_cwip_capitalization')", ['cid' => $companyId, 'aid' => $assetId]);
+        // Additions post with source_id NULL; their voucher_no embeds the code.
+        $collect("SELECT id FROM vouchers WHERE company_id = :cid AND source_type = 'fixed_asset_addition' AND voucher_no LIKE :pattern", ['cid' => $companyId, 'pattern' => 'FA-ADD-' . $asset['asset_code'] . '-%']);
+        $collect('SELECT voucher_id FROM asset_depreciation_schedule WHERE asset_id = :aid AND voucher_id IS NOT NULL', ['aid' => $assetId]);
+        $collect('SELECT voucher_id FROM asset_impairments WHERE asset_id = :aid AND voucher_id IS NOT NULL', ['aid' => $assetId]);
+        $collect("SELECT v.id FROM vouchers v INNER JOIN asset_impairments i ON i.id = v.source_id WHERE v.company_id = :cid AND v.source_type IN ('asset_impairment', 'asset_impairment_reversal') AND i.asset_id = :aid", ['cid' => $companyId, 'aid' => $assetId]);
+        $leaseIds = [];
+        if (table_exists('lease_liabilities')) {
+            $leaseStmt = db()->prepare('SELECT id FROM lease_liabilities WHERE asset_id = :aid AND company_id = :cid');
+            $leaseStmt->execute(['aid' => $assetId, 'cid' => $companyId]);
+            $leaseIds = array_map('intval', $leaseStmt->fetchAll(PDO::FETCH_COLUMN));
+            if ($leaseIds !== []) {
+                $leasePlaceholders = implode(',', array_fill(0, count($leaseIds), '?'));
+                $collect("SELECT id FROM vouchers WHERE company_id = ? AND source_type = 'lease_commencement' AND source_id IN ($leasePlaceholders)", array_merge([$companyId], $leaseIds));
+                $collect("SELECT voucher_id FROM lease_schedule_lines WHERE voucher_id IS NOT NULL AND lease_id IN ($leasePlaceholders)", $leaseIds);
+            }
+        }
+        $voucherIds = array_keys($voucherIds);
+
+        // Same blockers as voucher delete: reconciled entries, locked periods.
+        if ($voucherIds !== []) {
+            $vPlaceholders = implode(',', array_fill(0, count($voucherIds), '?'));
+            if (column_exists('voucher_entries', 'reconciled_at')) {
+                $reconStmt = db()->prepare("SELECT COUNT(*) FROM voucher_entries WHERE voucher_id IN ($vPlaceholders) AND reconciled_at IS NOT NULL");
+                $reconStmt->execute($voucherIds);
+                if ((int) $reconStmt->fetchColumn() > 0) {
+                    flash('error', 'A voucher of this asset has bank-reconciled entries. Undo the reconciliation before deleting the asset.');
+                    redirect('admin/fixed-assets.php?view=' . $assetId);
+                }
+            }
+            $lockProbe = db()->prepare("SELECT voucher_no, fiscal_year_id, voucher_date FROM vouchers WHERE id IN ($vPlaceholders)");
+            $lockProbe->execute($voucherIds);
+            foreach ($lockProbe->fetchAll(PDO::FETCH_ASSOC) as $lockRow) {
+                if (is_period_locked($companyId, (int) ($lockRow['fiscal_year_id'] ?? 0), (string) ($lockRow['voucher_date'] ?? ''))) {
+                    flash('error', 'Voucher ' . $lockRow['voucher_no'] . ' of this asset is inside a locked accounting period. Unlock the period first.');
+                    redirect('admin/fixed-assets.php?view=' . $assetId);
+                }
+            }
+        }
+
+        try {
+            db()->beginTransaction();
+            if ($voucherIds !== []) {
+                $vPlaceholders = implode(',', array_fill(0, count($voucherIds), '?'));
+                db()->prepare("DELETE FROM vouchers WHERE company_id = ? AND id IN ($vPlaceholders)")->execute(array_merge([$companyId], $voucherIds));
+            }
+            if ($leaseIds !== []) {
+                $leasePlaceholders = implode(',', array_fill(0, count($leaseIds), '?'));
+                db()->prepare("DELETE FROM lease_schedule_lines WHERE lease_id IN ($leasePlaceholders)")->execute($leaseIds);
+                db()->prepare("DELETE FROM lease_liabilities WHERE id IN ($leasePlaceholders)")->execute($leaseIds);
+            }
+            // Depreciation schedule, impairment events, and ledger mappings
+            // cascade on the fixed_assets FK.
+            db()->prepare('DELETE FROM fixed_assets WHERE id = :id AND company_id = :cid')->execute(['id' => $assetId, 'cid' => $companyId]);
+            db()->commit();
+            $summary = 'Asset ' . $asset['asset_code'] . ' (' . $asset['name'] . ') deleted with ' . count($voucherIds) . ' linked voucher(s).';
+            security_event('asset_deleted', 'success', $summary, $companyId, $userId);
+            log_activity('fixed_asset', $assetId, 'deleted', $summary, $userId);
+            flash('success', $summary);
+        } catch (Throwable $e) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            flash('error', 'Could not delete the asset: ' . $e->getMessage());
+        }
+        redirect('admin/fixed-assets.php');
+    }
+
     if ($action === 'add_asset_cost') {
         // Subsequent expenditure capitalized onto an existing asset (IAS 16.13):
         // Dr asset cost / Cr supplier payable | cash | clearing. Raises cost and
@@ -2302,7 +2410,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <td class="align-right"><?= e(number_format((float) $a['accumulated_depreciation'], 2)) ?></td>
                         <td class="align-right"><?= e(number_format((float) $a['carrying_amount'], 2)) ?></td>
                         <td><span class="mbw-pill <?= (string) $a['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', (string) $a['status'])) ?></span></td>
-                        <td><div class="fa-row-actions"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=' . (int) $a['id'])) ?>">Open</a><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $a['id'])) ?>">Revalue</a></div></td>
+                        <td><div class="fa-row-actions"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=' . (int) $a['id'])) ?>">Open</a><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $a['id'])) ?>">Revalue</a><?php if (user_can('delete') && user_can_do('accounting', 'edit')): ?><form method="post" style="display:inline" onsubmit="return confirm('Permanently delete asset <?= e($a['asset_code']) ?> and every voucher it posted (acquisition, depreciation, impairment, disposal, lease)? Use Dispose for a real asset leaving the business — Delete is only for wrong entries and cannot be undone.')"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="delete_asset"><input type="hidden" name="asset_id" value="<?= (int) $a['id'] ?>"><button type="submit" class="button danger">Delete</button></form><?php endif; ?></div></td>
                     </tr>
                 <?php endforeach; ?>
                 <?php if ($assets === []): ?><tr><td colspan="10" style="text-align:center;color:var(--mbw-muted)">No assets registered yet — add one above.</td></tr><?php endif; ?>

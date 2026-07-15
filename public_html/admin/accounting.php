@@ -94,6 +94,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/accounting.php');
     }
 
+    if ($postAction === 'delete_voucher') {
+        if (!user_can('delete')) {
+            flash('error', 'You do not have permission to delete vouchers. Ask an administrator to grant the Delete capability.');
+            redirect('admin/accounting.php');
+        }
+        if (staff_accountant_forces_approval()) {
+            flash('error', 'Vouchers in client books can be deleted only by the firm admin.');
+            redirect('admin/accounting.php');
+        }
+        require_permission('accounting', 'edit');
+
+        $result = delete_voucher_with_entries((int) ($_POST['voucher_id'] ?? 0), $companyId, $userId);
+        flash($result['ok'] ? 'success' : 'error', $result['ok'] ? 'Voucher ' . $result['voucher_no'] . ' deleted permanently.' : $result['error']);
+        redirect('admin/accounting.php');
+    }
 
     if ($postAction === 'create_voucher') {
         if (!user_can('create')) {
@@ -427,12 +442,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div style="overflow-x:auto">
     <table>
         <thead>
-            <tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Reference</th><th class="is-numeric">Total</th><th>Status</th><th>Posted At</th><?php if ($hasVoucherApprovals): ?><th>Approval</th><?php endif; ?></tr>
+            <tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Reference</th><th class="is-numeric">Total</th><th>Status</th><th>Posted At</th><?php if ($hasVoucherApprovals): ?><th>Approval</th><?php endif; ?><th>Actions</th></tr>
         </thead>
         <tbody>
             <?php if ($vouchers === []): ?>
-                <tr><td colspan="<?= $hasVoucherApprovals ? '9' : '8' ?>">No vouchers posted for selected context.</td></tr>
+                <tr><td colspan="<?= $hasVoucherApprovals ? '10' : '9' ?>">No vouchers posted for selected context.</td></tr>
             <?php endif; ?>
+            <?php $canEditVouchers = user_can('edit') && user_can_do('accounting', 'edit'); ?>
+            <?php $canDeleteVouchers = user_can('delete') && user_can_do('accounting', 'edit') && !staff_accountant_forces_approval(); ?>
             <?php foreach ($vouchers as $voucher): ?>
                 <tr>
                     <td><?= e($voucher['voucher_date'] ?? date('Y-m-d', strtotime((string) $voucher['posted_at']))) ?></td>
@@ -472,6 +489,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <?php endif; ?>
                         </td>
                     <?php endif; ?>
+                    <td>
+                        <?php if ($canEditVouchers): ?>
+                            <a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/voucher-form.php?edit=' . (int) $voucher['id'])) ?>">Edit</a>
+                        <?php endif; ?>
+                        <?php if ($canDeleteVouchers): ?>
+                            <form method="post" class="inline-action-form" style="display:inline" onsubmit="return confirm('Permanently delete voucher <?= e($voucher['voucher_no']) ?>? Its ledger entries are removed from the books and this cannot be undone.')">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="delete_voucher">
+                                <input type="hidden" name="voucher_id" value="<?= (int) $voucher['id'] ?>">
+                                <button type="submit" class="button danger" style="min-height:30px;padding:3px 10px">Delete</button>
+                            </form>
+                        <?php endif; ?>
+                    </td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
