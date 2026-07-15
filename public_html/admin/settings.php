@@ -100,35 +100,99 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
     $label = trim((string) ($_POST['label'] ?? ''));
     $startDate = (string) ($_POST['start_date'] ?? '');
     $endDate = (string) ($_POST['end_date'] ?? '');
-    $isDefault = isset($_POST['is_default']) ? 1 : 0;
+    $isDefault = isset($_POST['is_default']);
 
-    if ($settingsCompanyId <= 0 || $label === '' || $startDate === '' || $endDate === '' || $startDate > $endDate) {
+    if ($settingsCompanyId <= 0 || $label === '') {
         flash('error', 'Fiscal year label, start date, and end date are required.');
         redirect('admin/settings.php');
     }
 
-    if ($isDefault === 1) {
-        $resetStmt = db()->prepare('UPDATE fiscal_years SET is_default = 0 WHERE company_id = :company_id');
-        $resetStmt->execute(['company_id' => $settingsCompanyId]);
-    }
-
-    try {
-        $stmt = db()->prepare('INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_active, is_default) VALUES (:company_id, :label, :start_date, :end_date, 1, :is_default)');
-        $stmt->execute([
-            'company_id' => $settingsCompanyId,
-            'label' => $label,
-            'start_date' => $startDate,
-            'end_date' => $endDate,
-            'is_default' => $isDefault,
-        ]);
-        if ($isDefault === 1) {
-            $_SESSION['fiscal_year_id'] = (int) db()->lastInsertId();
+    // Overlap/duplicate protection + race-safe single default live in the
+    // service function, shared with the Companies page.
+    $result = create_fiscal_year($settingsCompanyId, $label, $startDate, $endDate, $isDefault, $settingsUserId);
+    if ($result['ok']) {
+        if ($isDefault) {
+            set_context($settingsCompanyId, $result['id']);
         }
         flash('success', 'Fiscal year created for accounting.');
-    } catch (Throwable $exception) {
-        flash('error', 'Could not create fiscal year.');
+    } else {
+        flash('error', (string) $result['error']);
     }
 
+    redirect('admin/settings.php');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'set_default_fiscal_year') {
+    verify_csrf();
+    if (!user_can('admin')) {
+        flash('error', 'Only administrators can change the company default fiscal year.');
+        redirect('admin/settings.php');
+    }
+    require_permission('accounting', 'edit');
+    $result = set_default_fiscal_year($settingsCompanyId, (int) ($_POST['fiscal_year_id'] ?? 0), $settingsUserId);
+    flash($result['ok'] ? 'success' : 'error', $result['ok'] ? 'Default fiscal year updated.' : (string) $result['error']);
+    redirect('admin/settings.php');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'transition_fiscal_year') {
+    verify_csrf();
+    if (!user_can('admin')) {
+        flash('error', 'Only administrators can change a fiscal year\'s status.');
+        redirect('admin/settings.php');
+    }
+    require_permission('accounting', 'edit');
+
+    $fyId = (int) ($_POST['fiscal_year_id'] ?? 0);
+    $target = (string) ($_POST['target_status'] ?? '');
+    $reason = trim((string) ($_POST['reason'] ?? ''));
+    $fy = fiscal_year_by_id($fyId);
+    if (!$fy || (int) $fy['company_id'] !== $settingsCompanyId || !column_exists('fiscal_years', 'status')) {
+        flash('error', 'Fiscal year not found for this company.');
+        redirect('admin/settings.php');
+    }
+    $currentStatus = fiscal_year_status($fy);
+    // Lifecycle: upcoming -> open -> closed -> locked; closed -> open is the
+    // audited reopening path. Locked years never move except by unlocking to
+    // closed (also audited).
+    $allowedTransitions = [
+        'upcoming' => ['open'],
+        'open' => ['closed'],
+        'closed' => ['locked', 'open'],
+        'locked' => ['closed'],
+    ];
+    if (!in_array($target, $allowedTransitions[$currentStatus] ?? [], true)) {
+        flash('error', 'Cannot change fiscal year "' . $fy['label'] . '" from ' . $currentStatus . ' to ' . $target . '.');
+        redirect('admin/settings.php');
+    }
+    if (($currentStatus === 'closed' && $target === 'open') || ($currentStatus === 'locked' && $target === 'closed')) {
+        if ($reason === '') {
+            flash('error', 'Reopening or unlocking a fiscal year requires a reason (it is recorded in the audit log).');
+            redirect('admin/settings.php');
+        }
+    }
+    if ($target === 'closed' && $currentStatus === 'open') {
+        // Earlier open years must be resolved first so balances brought
+        // forward into this year cannot change after it is closed.
+        $earlierOpen = db()->prepare("SELECT label FROM fiscal_years WHERE company_id = :cid AND end_date < :start AND status IN ('open') LIMIT 1");
+        $earlierOpen->execute(['cid' => $settingsCompanyId, 'start' => (string) $fy['start_date']]);
+        $earlier = $earlierOpen->fetchColumn();
+        if ($earlier) {
+            flash('error', 'Close earlier fiscal year "' . $earlier . '" first — a year cannot be closed while an earlier year is still open.');
+            redirect('admin/settings.php');
+        }
+    }
+    db()->prepare('UPDATE fiscal_years SET status = :status' . (column_exists('fiscal_years', 'updated_by') ? ', updated_by = :uid' : '') . ' WHERE id = :id')
+        ->execute(['status' => $target, 'id' => $fyId] + (column_exists('fiscal_years', 'updated_by') ? ['uid' => $settingsUserId] : []));
+    $auditNote = 'Fiscal year "' . $fy['label'] . '" status changed: ' . $currentStatus . ' -> ' . $target . ($reason !== '' ? ' — reason: ' . $reason : '') . '.';
+    log_activity('fiscal_year', $fyId, 'status_' . $target, $auditNote, $settingsUserId);
+    security_event('fiscal_year_' . $target, 'success', $auditNote, $settingsCompanyId, $settingsUserId);
+    if ($currentStatus === 'closed' && $target === 'open') {
+        // Report-based carry-forward recalculates later-year openings live,
+        // so no snapshot goes stale — but the reopening itself must be loud.
+        flash('success', 'Fiscal year "' . $fy['label'] . '" reopened. Later years\' opening balances and retained earnings recalculate automatically from the ledger; review them after making changes.');
+    } else {
+        flash('success', 'Fiscal year "' . $fy['label'] . '" is now ' . $target . '.');
+    }
     redirect('admin/settings.php');
 }
 
@@ -445,6 +509,68 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </label>
         <div style="grid-column:1/-1"><button type="submit" class="button secondary"><?= icon('calendar') ?>Create Fiscal Year</button></div>
     </form>
+
+    <?php
+    $settingsFyRows = fiscal_years_for_company($settingsCompanyId, false);
+    $settingsFyHasStatus = column_exists('fiscal_years', 'status');
+    ?>
+    <div style="padding-top:16px">
+        <h3 style="margin:0 0 8px">Fiscal years of <?= e($settingsCompany['name'] ?? 'this company') ?></h3>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Fiscal year</th><th>Period</th><th>Status</th><th>Default</th><th>Cutoff (locked through)</th><th>Actions</th></tr></thead>
+            <tbody>
+            <?php if ($settingsFyRows === []): ?><tr><td colspan="6">No fiscal years yet — create one above.</td></tr><?php endif; ?>
+            <?php foreach ($settingsFyRows as $fyRow): ?>
+                <?php
+                $fyRowStatus = fiscal_year_status($fyRow);
+                $fyStatusTone = ['upcoming' => 'blue', 'open' => 'green', 'closed' => 'amber', 'locked' => 'red'][$fyRowStatus] ?? 'gray';
+                $fyRowCutoff = period_locked_through($settingsCompanyId, (int) $fyRow['id']);
+                $fyTransitions = [
+                    'upcoming' => [['open', 'Open year', false]],
+                    'open' => [['closed', 'Close year', false]],
+                    'closed' => [['locked', 'Lock year', false], ['open', 'Reopen', true]],
+                    'locked' => [['closed', 'Unlock to closed', true]],
+                ][$fyRowStatus] ?? [];
+                ?>
+                <tr>
+                    <td><strong><?= e($fyRow['label']) ?></strong></td>
+                    <td><?= e($fyRow['start_date']) ?> — <?= e($fyRow['end_date']) ?></td>
+                    <td><span class="mbw-pill tone-<?= e($fyStatusTone) ?>"><?= e(ucfirst($fyRowStatus)) ?></span></td>
+                    <td>
+                        <?php if ((int) $fyRow['is_default'] === 1): ?>
+                            <span class="mbw-pill tone-green">Default</span>
+                        <?php else: ?>
+                            <form method="post" style="display:inline">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="set_default_fiscal_year">
+                                <input type="hidden" name="fiscal_year_id" value="<?= (int) $fyRow['id'] ?>">
+                                <button type="submit" class="button secondary" style="min-height:30px;padding:3px 10px">Make default</button>
+                            </form>
+                        <?php endif; ?>
+                    </td>
+                    <td><?= $fyRowCutoff !== null ? e($fyRowCutoff) : '<span style="color:var(--mbw-muted)">none</span>' ?></td>
+                    <td>
+                        <?php if (!$settingsFyHasStatus): ?>
+                            <span style="color:var(--mbw-muted);font-size:12px">Run migration 051 for status controls</span>
+                        <?php else: ?>
+                            <?php foreach ($fyTransitions as [$fyTarget, $fyLabel, $fyNeedsReason]): ?>
+                                <form method="post" style="display:inline" onsubmit="return confirm('<?= e($fyLabel) ?> — <?= e($fyRow['label']) ?>?')">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="transition_fiscal_year">
+                                    <input type="hidden" name="fiscal_year_id" value="<?= (int) $fyRow['id'] ?>">
+                                    <input type="hidden" name="target_status" value="<?= e($fyTarget) ?>">
+                                    <?php if ($fyNeedsReason): ?><input type="text" name="reason" placeholder="Reason (audited)" required style="min-width:140px"><?php endif; ?>
+                                    <button type="submit" class="button <?= $fyTarget === 'locked' ? 'danger' : 'secondary' ?>" style="min-height:30px;padding:3px 10px"><?= e($fyLabel) ?></button>
+                                </form>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table></div>
+        <p style="color:var(--mbw-muted);font-size:12px;margin:8px 0 0">Lifecycle: Upcoming → Open → Closed → Locked. Closed and locked years stay fully viewable and exportable but reject every accounting change. Reopening requires a reason and is written to the audit log.</p>
+    </div>
 </details>
 
 <?php

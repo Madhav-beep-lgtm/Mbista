@@ -86,28 +86,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/companies.php');
         }
 
-        if ($startDate > $endDate) {
-            flash('error', 'Fiscal year start date cannot be after end date.');
+        // Shared service: overlap/duplicate rejection + race-safe single
+        // default, identical to the Settings page.
+        $result = create_fiscal_year($companyId, $label, $startDate, $endDate, $isDefault === 1, (int) ($currentAdmin['id'] ?? 0));
+        if (!$result['ok']) {
+            flash('error', (string) $result['error']);
             redirect('admin/companies.php');
         }
-
-        if ($isDefault === 1) {
-            $reset = db()->prepare('UPDATE fiscal_years SET is_default = 0 WHERE company_id = :company_id');
-            $reset->execute(['company_id' => $companyId]);
+        if ($isActive === 0) {
+            db()->prepare('UPDATE fiscal_years SET is_active = 0 WHERE id = :id')->execute(['id' => $result['id']]);
         }
-
-        $stmt = db()->prepare('INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_active, is_default) VALUES (:company_id, :label, :start_date, :end_date, :is_active, :is_default)');
-        $stmt->execute([
-            'company_id' => $companyId,
-            'label' => $label,
-            'start_date' => $startDate,
-            'end_date' => $endDate,
-            'is_active' => $isActive,
-            'is_default' => $isDefault,
-        ]);
-
-        $fiscalYearId = (int) db()->lastInsertId();
-        log_activity('fiscal_year', $fiscalYearId, 'created', 'Fiscal year created from admin workflow.', (int) ($currentAdmin['id'] ?? 0));
         flash('success', 'Fiscal year created.');
         redirect('admin/companies.php');
     }

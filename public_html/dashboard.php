@@ -951,10 +951,33 @@ include __DIR__ . '/../app/views/partials/client_header.php';
         $abVouchers = [];
         $abPending = [];
         $abSnapshot = ['cash' => 0.0, 'receivables' => 0.0, 'payables' => 0.0, 'income' => 0.0, 'expenses' => 0.0, 'net' => 0.0];
+        $abFyList = [];
         if ($abCompanyId > 0) {
-            $abFyStmt = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = :cid ORDER BY is_default DESC, is_active DESC, id DESC LIMIT 1');
-            $abFyStmt->execute(['cid' => $abCompanyId]);
-            $abFy = $abFyStmt->fetch() ?: null;
+            // Client portal fiscal-year selection: view-only, remembered per
+            // client-books company in the session, validated to belong to the
+            // client's OWN books — a tampered id cannot reach another entity.
+            $abFyList = fiscal_years_for_company($abCompanyId, true);
+            $abRequestedFy = (int) ($_GET['fy'] ?? 0);
+            if ($abRequestedFy > 0) {
+                foreach ($abFyList as $abFyOption) {
+                    if ((int) $abFyOption['id'] === $abRequestedFy) {
+                        $_SESSION['client_fy_selection'][$abCompanyId] = $abRequestedFy;
+                        break;
+                    }
+                }
+            }
+            $abRememberedFy = (int) ($_SESSION['client_fy_selection'][$abCompanyId] ?? 0);
+            foreach ($abFyList as $abFyOption) {
+                if ((int) $abFyOption['id'] === $abRememberedFy) {
+                    $abFy = $abFyOption;
+                    break;
+                }
+            }
+            if (!$abFy) {
+                $abFyStmt = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = :cid ORDER BY is_default DESC, is_active DESC, id DESC LIMIT 1');
+                $abFyStmt->execute(['cid' => $abCompanyId]);
+                $abFy = $abFyStmt->fetch() ?: null;
+            }
             if ($abFy) {
                 $abSnapshot = company_financials_snapshot($abCompanyId, (int) $abFy['id']);
             }
@@ -969,6 +992,22 @@ include __DIR__ . '/../app/views/partials/client_header.php';
         <?php if ($abCompanyId <= 0): ?>
             <section class="mbw-card"><div class="mbw-card-head"><h2>My Accounting</h2></div><p style="color:var(--mbw-muted)">Your accounting books have not been set up yet. Please contact your service provider.</p></section>
         <?php else: ?>
+            <?php if (count($abFyList) > 1 && $abFy): ?>
+                <section class="mbw-card" style="padding:10px 16px">
+                    <form method="get" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                        <input type="hidden" name="view" value="accounting">
+                        <label for="client-fy" style="margin:0;font-weight:600">Fiscal year</label>
+                        <select name="fy" id="client-fy" onchange="this.form.submit()" style="min-height:34px">
+                            <?php foreach ($abFyList as $abFyOption): ?>
+                                <option value="<?= (int) $abFyOption['id'] ?>" <?= (int) $abFyOption['id'] === (int) $abFy['id'] ? 'selected' : '' ?>>
+                                    <?= e($abFyOption['label']) ?> (<?= e($abFyOption['start_date']) ?> to <?= e($abFyOption['end_date']) ?>)<?= (int) ($abFyOption['is_default'] ?? 0) === 1 ? ' · Default' : '' ?><?= in_array(fiscal_year_status($abFyOption), ['closed', 'locked'], true) ? ' · ' . ucfirst(fiscal_year_status($abFyOption)) . ' 🔒' : '' ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <span class="mbw-pill tone-<?= e(['upcoming' => 'blue', 'open' => 'green', 'closed' => 'amber', 'locked' => 'red'][fiscal_year_status($abFy)] ?? 'gray') ?>"><?= e(ucfirst(fiscal_year_status($abFy))) ?></span>
+                    </form>
+                </section>
+            <?php endif; ?>
             <section class="mbw-kpi-grid">
                 <?php foreach ([['Cash & Bank', $abSnapshot['cash'], 'blue', 'bank'], ['Receivables', $abSnapshot['receivables'], 'green', 'clients'], ['Payables', $abSnapshot['payables'], 'red', 'card'], ['Net Profit', $abSnapshot['net'], 'purple', 'trend-up']] as [$abLabel, $abAmount, $abTone, $abIcon]): ?>
                     <article class="mbw-kpi"><div><span class="mbw-kpi-label"><?= e($abLabel) ?></span><div class="mbw-kpi-value"><?= e($abMoney((float) $abAmount)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e($abFy['label'] ?? '') ?></span></span></div><span class="mbw-chip tone-<?= e($abTone) ?>"><?= icon($abIcon) ?></span></article>

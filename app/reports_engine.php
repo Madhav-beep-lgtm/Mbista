@@ -231,8 +231,18 @@ function rc_cash_flow_figures(int $scopeCompanyId, string $from, string $to): ar
 
 /**
  * Per-ledger opening/transaction/closing figures for a company and period.
+ *
+ * When $fyStart is given, temporary accounts (revenue/expense) reset at the
+ * fiscal-year boundary: their opening balance counts only activity from
+ * $fyStart up to $from, never prior years. The prior years' net P&L is
+ * returned instead as ONE synthetic equity row — "Retained Earnings b/f"
+ * (id 0, master equity) — so the trial balance still balances and the
+ * balance sheet shows brought-forward earnings separately from the current
+ * year's profit. Permanent (asset/liability/equity) accounts keep their full
+ * cumulative opening, which is how closing balances carry forward across
+ * any number of years without snapshots or duplication.
  */
-function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, string $voucherType = '', int $groupId = 0, int $ledgerId = 0, array $dims = []): array
+function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, string $voucherType = '', int $groupId = 0, int $ledgerId = 0, array $dims = [], ?string $fyStart = null): array
 {
     $voucherWhere = "company_id = :company_id AND status = 'posted'";
     $subParams = ['company_id' => $scopeCompanyId];
@@ -253,7 +263,8 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
     $sql = "
         SELECT l.id, l.code, l.name, l.type, lg.name AS group_name, lg.master_key, COALESCE(lg.is_cash_or_bank, 0) AS is_cash_or_bank,
                COALESCE(b.op_dr, 0) AS op_dr, COALESCE(b.op_cr, 0) AS op_cr,
-               COALESCE(b.tx_dr, 0) AS tx_dr, COALESCE(b.tx_cr, 0) AS tx_cr
+               COALESCE(b.tx_dr, 0) AS tx_dr, COALESCE(b.tx_cr, 0) AS tx_cr,
+               COALESCE(b.pre_fy_dr, 0) AS pre_fy_dr, COALESCE(b.pre_fy_cr, 0) AS pre_fy_cr
         FROM ledgers l
         LEFT JOIN ledger_groups lg ON lg.id = l.group_id
         LEFT JOIN (
@@ -261,7 +272,9 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
                    SUM(CASE WHEN d.vdate < :from1 AND e.entry_type = 'debit' THEN e.amount ELSE 0 END) AS op_dr,
                    SUM(CASE WHEN d.vdate < :from2 AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS op_cr,
                    SUM(CASE WHEN d.vdate BETWEEN :from3 AND :to1 AND e.entry_type = 'debit' THEN e.amount ELSE 0 END) AS tx_dr,
-                   SUM(CASE WHEN d.vdate BETWEEN :from4 AND :to2 AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS tx_cr
+                   SUM(CASE WHEN d.vdate BETWEEN :from4 AND :to2 AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS tx_cr,
+                   SUM(CASE WHEN d.vdate < :fy_start1 AND e.entry_type = 'debit' THEN e.amount ELSE 0 END) AS pre_fy_dr,
+                   SUM(CASE WHEN d.vdate < :fy_start2 AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS pre_fy_cr
             FROM voucher_entries e
             INNER JOIN (
                 SELECT id, COALESCE(voucher_date, DATE(created_at)) AS vdate
@@ -272,9 +285,11 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
         ) b ON b.ledger_id = l.id
         WHERE l.company_id = :company_id2
     ";
+    $fyBoundary = $fyStart !== null && $fyStart !== '' ? $fyStart : $from;
     $params = $subParams + [
         'from1' => $from, 'from2' => $from, 'from3' => $from, 'from4' => $from,
         'to1' => $to, 'to2' => $to,
+        'fy_start1' => $fyBoundary, 'fy_start2' => $fyBoundary,
         'company_id2' => $scopeCompanyId,
     ];
     if ($groupId > 0) {
@@ -291,8 +306,25 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
     $stmt->execute($params);
     $rows = $stmt->fetchAll();
 
+    $useFyReset = $fyStart !== null && $fyStart !== '';
+    $retainedBroughtForward = 0.0; // net CREDIT = cumulative prior-years profit
     foreach ($rows as &$row) {
-        $opening = (float) $row['op_dr'] - (float) $row['op_cr'];
+        $opDr = (float) $row['op_dr'];
+        $opCr = (float) $row['op_cr'];
+        if ($useFyReset) {
+            $nature = rc_ledger_nature($row);
+            if ($nature === 'revenue' || $nature === 'expense') {
+                // Temporary account: opening = current-fiscal-year activity
+                // before the report window only. Everything earlier belongs
+                // to prior years' profit and moves to retained earnings.
+                $retainedBroughtForward += (float) $row['pre_fy_cr'] - (float) $row['pre_fy_dr'];
+                $opDr -= (float) $row['pre_fy_dr'];
+                $opCr -= (float) $row['pre_fy_cr'];
+                $row['op_dr'] = $opDr;
+                $row['op_cr'] = $opCr;
+            }
+        }
+        $opening = $opDr - $opCr;
         $closing = $opening + (float) $row['tx_dr'] - (float) $row['tx_cr'];
         $row['opening_net'] = $opening;
         $row['closing_net'] = $closing;
@@ -303,7 +335,34 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
     }
     unset($row);
 
+    if ($useFyReset && abs($retainedBroughtForward) >= 0.005 && $groupId <= 0 && $ledgerId <= 0) {
+        // One computed equity line carries the prior years' cumulative
+        // result. It is NOT a plug figure: it equals, by construction, the
+        // exact amount removed from the temporary accounts' openings above,
+        // so total debits still equal total credits. A loss shows as an
+        // opening DEBIT (negative retained earnings), never as income.
+        $opening = -$retainedBroughtForward; // debit-positive convention
+        $rows[] = [
+            'id' => 0, 'code' => '', 'name' => 'Retained Earnings b/f',
+            'type' => 'equity', 'group_name' => 'Retained Earnings',
+            'master_key' => 'equity', 'is_cash_or_bank' => 0,
+            'op_dr' => max(0.0, $opening), 'op_cr' => max(0.0, -$opening),
+            'tx_dr' => 0.0, 'tx_cr' => 0.0,
+            'pre_fy_dr' => 0.0, 'pre_fy_cr' => 0.0,
+            'opening_net' => $opening, 'closing_net' => $opening,
+            'op_side_dr' => max(0.0, $opening), 'op_side_cr' => max(0.0, -$opening),
+            'cl_side_dr' => max(0.0, $opening), 'cl_side_cr' => max(0.0, -$opening),
+        ];
+    }
+
     return $rows;
+}
+
+/** The selected fiscal year's start date from the report context, or null. */
+function rc_ctx_fy_start(array $ctx): ?string
+{
+    $fyStart = (string) ($ctx['fy_start'] ?? '');
+    return $fyStart !== '' ? $fyStart : null;
 }
 
 function rc_ledger_nature(array $row): string
@@ -351,7 +410,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
     $ctx += ['vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => 'all', 'dims' => []];
     switch ($reportId) {
         case 'trial-balance': {
-            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, (string) $ctx['vtype'], (int) $ctx['group_id'], (int) $ctx['ledger_id'], (array) ($ctx['dims'] ?? []));
+            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, (string) $ctx['vtype'], (int) $ctx['group_id'], (int) $ctx['ledger_id'], (array) ($ctx['dims'] ?? []), rc_ctx_fy_start($ctx));
             // Master -> Group -> Ledger hierarchy in natural chart order.
             $tbValue = static fn (array $b): array => [
                 (float) $b['op_side_dr'], (float) $b['op_side_cr'],
@@ -547,7 +606,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         }
 
         case 'balance-sheet': {
-            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0, (array) ($ctx['dims'] ?? []));
+            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0, (array) ($ctx['dims'] ?? []), rc_ctx_fy_start($ctx));
             $asAtCur = date('d M Y', strtotime($to));
             $asAtPrev = date('d M Y', strtotime($from . ' -1 day'));
 
@@ -611,7 +670,10 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
 
             $rows[] = rc_row(['EQUITY AND LIABILITIES', '', '', '', '', ''], 'section');
             $rows = array_merge($rows, $sectionRows['3']);
-            $rows[] = rc_row($bsCells('Profit for the period', '', $profitCur, $profitPrev), 'bold', ['level' => 1, 'parent' => 's3']);
+            // With a fiscal-year context, retained earnings brought forward is
+            // its own equity row (from rc_ledger_balances) and this line holds
+            // ONLY the selected year's result — the profit is never added twice.
+            $rows[] = rc_row($bsCells('Profit / (Loss) for the period', '', $profitCur, $profitPrev), 'bold', ['level' => 1, 'parent' => 's3']);
             $rows = array_merge($rows, $sectionRows['4'], $sectionRows['5']);
             $equityCur = $sectionTotals['3'][0] + $profitCur;
             $equityPrev = $sectionTotals['3'][1] + $profitPrev;
@@ -663,7 +725,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         case 'ledger-report': {
             // Account statement for one ledger (defaults to the cash ledger).
             $ledgerId = (int) $ctx['ledger_id'];
-            $allBalances = rc_ledger_balances($scopeCompanyId, $from, $to);
+            $allBalances = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0, [], rc_ctx_fy_start($ctx));
             $target = null;
             foreach ($allBalances as $b) {
                 if ($ledgerId > 0 && (int) $b['id'] === $ledgerId) {
@@ -721,7 +783,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         }
 
         case 'group-report': {
-            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, $ctx['vtype'], 0, 0);
+            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, $ctx['vtype'], 0, 0, [], rc_ctx_fy_start($ctx));
             $groups = [];
             foreach ($balances as $b) {
                 $groupName = (string) ($b['group_name'] ?? 'Ungrouped');
@@ -1488,7 +1550,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         }
 
         case 'financial-ratios': {
-            $balances = rc_ledger_balances($scopeCompanyId, $from, $to);
+            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0, [], rc_ctx_fy_start($ctx));
             $agg = ['current_asset' => 0.0, 'asset' => 0.0, 'current_liability' => 0.0, 'liability' => 0.0, 'equity' => 0.0, 'revenue' => 0.0, 'expense' => 0.0, 'inventory' => 0.0, 'cash' => 0.0];
             foreach ($balances as $b) {
                 $closing = (float) $b['closing_net'];

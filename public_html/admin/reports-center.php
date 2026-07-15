@@ -65,6 +65,18 @@ if (!$isValidDate($fromDate)) {
 if (!$isValidDate($toDate)) {
     $toDate = (string) ($selectedFiscalYear['end_date'] ?? date('Y') . '-12-31');
 }
+// Date filters can never leave the selected fiscal year: a stale bookmark,
+// hand-edited query string, or filters kept from a previously selected year
+// are clamped to the year's own range instead of leaking other years' data.
+$fyClampStart = (string) ($selectedFiscalYear['start_date'] ?? '');
+$fyClampEnd = (string) ($selectedFiscalYear['end_date'] ?? '');
+if ($fyClampStart !== '' && $fyClampEnd !== '') {
+    $fromDate = max($fyClampStart, min($fromDate, $fyClampEnd));
+    $toDate = max($fyClampStart, min($toDate, $fyClampEnd));
+}
+if ($fromDate > $toDate) {
+    [$fromDate, $toDate] = [$toDate, $fromDate];
+}
 
 $voucherTypes = ['payment', 'receipt', 'journal', 'sales', 'purchase', 'contra', 'debit_note', 'credit_note'];
 $voucherType = (string) ($_GET['vtype'] ?? '');
@@ -217,6 +229,9 @@ $generatorContext = [
     'company_id' => $scopeCompanyId,
     'dims' => $dimensionFilters,
     'payroll_run' => $payrollRunFilter,
+    // Temporary (income/expense) accounts reset at this boundary; prior
+    // years' P&L reports as Retained Earnings b/f — see rc_ledger_balances.
+    'fy_start' => (string) ($selectedFiscalYear['start_date'] ?? ''),
     'company_name' => $scopeCompanyId === $companyId ? (string) ($company['name'] ?? '') : '',
     'subsidiaries' => $scopeCompanyId === $companyId ? array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'name' => (string) $row['name']], $subsidiaries) : [],
 ];
@@ -229,7 +244,15 @@ if ($generatorContext['company_name'] === '') {
 }
 
 $report = rc_generate($reportId, $scopeCompanyId, $fromDate, $toDate, $generatorContext);
-$compareReport = $compareEnabled ? rc_generate($reportId, $scopeCompanyId, $compareFrom, $compareTo, $generatorContext) : null;
+// Comparative reports are the ONE sanctioned way to look at another period:
+// the comparison year is chosen separately, labelled separately, and resolves
+// its own fiscal-year boundary so its P&L accounts reset at the right date.
+$compareContext = $generatorContext;
+if ($compareEnabled) {
+    $compareFy = fiscal_year_for_date($scopeCompanyId, $compareFrom);
+    $compareContext['fy_start'] = (string) ($compareFy['start_date'] ?? '');
+}
+$compareReport = $compareEnabled ? rc_generate($reportId, $scopeCompanyId, $compareFrom, $compareTo, $compareContext) : null;
 [$reportLabel, $reportDescription, $reportIcon] = $reportRegistry[$reportId];
 
 // ---------------------------------------------------------------------------

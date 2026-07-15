@@ -84,6 +84,14 @@ function accounting_module_repair_database(): array
         }
     };
 
+    $run('Upgrade fiscal year lifecycle', static function (): void {
+        // Migration 051: status lifecycle + authorship. Cutoff stays in
+        // fiscal_period_locks; overlap protection lives in create_fiscal_year().
+        accounting_repair_add_column('fiscal_years', 'status', "`status` ENUM('upcoming','open','closed','locked') NOT NULL DEFAULT 'open' AFTER `is_default`");
+        accounting_repair_add_column('fiscal_years', 'created_by', '`created_by` INT UNSIGNED DEFAULT NULL AFTER `status`');
+        accounting_repair_add_column('fiscal_years', 'updated_by', '`updated_by` INT UNSIGNED DEFAULT NULL AFTER `created_by`');
+    });
+
     $run('Upgrade voucher metadata', static function (): void {
         accounting_repair_add_column('vouchers', 'voucher_date', '`voucher_date` DATE DEFAULT NULL AFTER `voucher_no`');
         accounting_repair_add_column('vouchers', 'party_id', '`party_id` INT UNSIGNED DEFAULT NULL AFTER `source_id`');

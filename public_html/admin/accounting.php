@@ -7,9 +7,14 @@ require_staff_admin_or_client_books();
 require_company_context();
 accounting_module_repair_database();
 
-// Handle fiscal year selection for accounting module
+// Handle fiscal year selection for accounting module. The requested year
+// must belong to the current company — a foreign id (typo, tampered URL,
+// stale bookmark) must never pollute the session context.
 if (!empty($_GET['fiscal_year_id'])) {
-    $_SESSION['fiscal_year_id'] = (int) $_GET['fiscal_year_id'];
+    $requestedFy = fiscal_year_by_id((int) $_GET['fiscal_year_id']);
+    if ($requestedFy && (int) $requestedFy['company_id'] === current_company_id() && (int) ($requestedFy['is_active'] ?? 0) === 1) {
+        set_context(current_company_id(), (int) $requestedFy['id']);
+    }
 }
 
 $pageTitle = 'Vouchers';

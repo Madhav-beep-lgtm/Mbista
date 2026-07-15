@@ -39,6 +39,15 @@ $prefillType = isset($formTypes[(string) ($_GET['type'] ?? '')]) ? (string) $_GE
 // ---------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
+    // Multi-tab safety: the fiscal year selected when this form was OPENED
+    // must still be the one the backend resolves now. If another tab switched
+    // years in between, reject instead of posting into the wrong year.
+    $formContextFy = (int) ($_POST['context_fiscal_year_id'] ?? 0);
+    if ($formContextFy > 0 && $formContextFy !== $fiscalYearId) {
+        $staleFy = fiscal_year_by_id($formContextFy);
+        flash('error', 'The fiscal-year context changed after this form was opened (' . ($staleFy['label'] ?? '#' . $formContextFy) . ' → ' . ($fiscalYear['label'] ?? '#' . $fiscalYearId) . '), possibly from another browser tab. Nothing was saved — please review the form and submit again.');
+        redirect('admin/voucher-form.php');
+    }
     $editVoucherId = (int) ($_POST['voucher_id'] ?? 0);
     if ($editVoucherId > 0) {
         if (!user_can('edit')) {
@@ -417,9 +426,21 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="notice">This voucher was auto-posted from <strong><?= e(str_replace('_', ' ', $editSourceType)) ?><?= !empty($editVoucher['source_id']) ? ' #' . (int) $editVoucher['source_id'] : '' ?></strong>. Editing changes only the books — the source document stays as it is.</div>
 <?php endif; ?>
 
+<?php
+// Default the entry date INSIDE the selected fiscal year: when today falls
+// outside it, the year-end date is proposed instead of silently posting
+// today's date into a different year. The engine re-validates on save.
+$fyStartBound = (string) ($fiscalYear['start_date'] ?? '');
+$fyEndBound = (string) ($fiscalYear['end_date'] ?? '');
+$defaultEntryDate = date('Y-m-d');
+if ($fyStartBound !== '' && $fyEndBound !== '' && ($defaultEntryDate < $fyStartBound || $defaultEntryDate > $fyEndBound)) {
+    $defaultEntryDate = $fyEndBound;
+}
+?>
 <form method="post" action="<?= e(url('admin/voucher-form.php' . ($editVoucher ? '?edit=' . (int) $editVoucher['id'] : ''))) ?>" enctype="multipart/form-data" id="voucher-form">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <input type="hidden" name="save_mode" id="frm-save-mode" value="submit">
+    <input type="hidden" name="context_fiscal_year_id" value="<?= (int) $fiscalYearId ?>">
     <?php if ($editVoucher): ?><input type="hidden" name="voucher_id" value="<?= (int) $editVoucher['id'] ?>"><?php endif; ?>
     <div class="frm-main">
         <section class="mbw-card frm-section" data-step-target="1">
@@ -482,8 +503,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <section class="mbw-card frm-section" data-step-target="2">
             <div class="frm-section-head"><span class="mbw-chip is-square tone-amber"><?= icon('calendar') ?></span><h2>Dates &amp; Period</h2></div>
             <div class="frm-grid frm-grid-4">
-                <label>Transaction Date <em>*</em><input type="date" name="voucher_date" id="frm-date" value="<?= e((string) ($editVoucher['voucher_date'] ?? date('Y-m-d'))) ?>" required></label>
-                <label>Posting Date <em>*</em><input type="date" name="posting_date" value="<?= e((string) ($editVoucher['posting_date'] ?? $editVoucher['voucher_date'] ?? date('Y-m-d'))) ?>" required></label>
+                <label>Transaction Date <em>*</em><input type="date" name="voucher_date" id="frm-date" value="<?= e((string) ($editVoucher['voucher_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?> required></label>
+                <label>Posting Date <em>*</em><input type="date" name="posting_date" value="<?= e((string) ($editVoucher['posting_date'] ?? $editVoucher['voucher_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?> required></label>
                 <label>Fiscal Year <em>*</em>
                     <select disabled title="The fiscal year comes from your current portal context">
                         <option selected><?= e($fiscalYear['label']) ?> (<?= e((string) $fiscalYear['start_date']) ?> – <?= e((string) $fiscalYear['end_date']) ?>)</option>

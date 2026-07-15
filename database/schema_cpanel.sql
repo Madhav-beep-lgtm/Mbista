@@ -153,11 +153,15 @@ CREATE TABLE IF NOT EXISTS `fiscal_years` (
   `end_date` DATE NOT NULL,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
   `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+  `status` ENUM('upcoming', 'open', 'closed', 'locked') NOT NULL DEFAULT 'open',
+  `created_by` INT UNSIGNED DEFAULT NULL,
+  `updated_by` INT UNSIGNED DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_fiscal_years_company` (`company_id`),
   KEY `idx_fiscal_years_active` (`is_active`),
+  KEY `idx_fiscal_years_status` (`status`),
   CONSTRAINT `fk_fiscal_years_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -1056,6 +1056,195 @@ function set_context(int $companyId, int $fiscalYearId): void
 {
     $_SESSION['company_id'] = $companyId;
     $_SESSION['fiscal_year_id'] = $fiscalYearId;
+    // Remember the user's viewing selection PER COMPANY so switching between
+    // companies restores each one's last-used fiscal year independently.
+    // This is the user's selection for viewing — it never changes the
+    // company-wide default (that's set_default_fiscal_year()).
+    if ($fiscalYearId > 0) {
+        $_SESSION['fy_selection'][$companyId] = $fiscalYearId;
+    }
+}
+
+/**
+ * The fiscal year the user last selected for this company (validated), or 0.
+ */
+function remembered_fiscal_year_id(int $companyId): int
+{
+    $remembered = (int) ($_SESSION['fy_selection'][$companyId] ?? 0);
+    if ($remembered <= 0) {
+        return 0;
+    }
+    $fy = fiscal_year_by_id($remembered);
+    return ($fy && (int) $fy['company_id'] === $companyId) ? $remembered : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Fiscal-year lifecycle service. One canonical AD date pair (start_date /
+// end_date) drives every comparison; BS labels are display-only.
+// ---------------------------------------------------------------------------
+
+/** Lifecycle status with a safe default for pre-migration rows. */
+function fiscal_year_status(array $fiscalYear): string
+{
+    $status = (string) ($fiscalYear['status'] ?? '');
+    return in_array($status, ['upcoming', 'open', 'closed', 'locked'], true) ? $status : 'open';
+}
+
+/** The company's fiscal year whose range contains the date, or null. */
+function fiscal_year_for_date(int $companyId, string $date): ?array
+{
+    if ($companyId <= 0 || !table_exists('fiscal_years')) {
+        return null;
+    }
+    $stmt = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = :cid AND :d BETWEEN start_date AND end_date ORDER BY is_default DESC, start_date DESC LIMIT 1');
+    $stmt->execute(['cid' => $companyId, 'd' => $date]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+/**
+ * Why the proposed period is invalid for this company, or null when valid.
+ * Overlap rule: new_start <= existing_end AND new_end >= existing_start,
+ * scoped by company — different companies may use identical periods.
+ */
+function fiscal_year_overlap_error(int $companyId, string $startDate, string $endDate, int $excludeId = 0): ?string
+{
+    $valid = static fn (string $d): bool => DateTimeImmutable::createFromFormat('Y-m-d', $d) instanceof DateTimeImmutable
+        && DateTimeImmutable::createFromFormat('Y-m-d', $d)->format('Y-m-d') === $d;
+    if (!$valid($startDate) || !$valid($endDate)) {
+        return 'Start and end dates must be valid calendar dates (YYYY-MM-DD).';
+    }
+    if ($startDate >= $endDate) {
+        return 'The start date must be before the end date.';
+    }
+    $stmt = db()->prepare('SELECT label, start_date, end_date FROM fiscal_years WHERE company_id = :cid AND id <> :exclude AND :new_start <= end_date AND :new_end >= start_date LIMIT 1');
+    $stmt->execute(['cid' => $companyId, 'exclude' => $excludeId, 'new_start' => $startDate, 'new_end' => $endDate]);
+    $clash = $stmt->fetch();
+    if ($clash) {
+        return 'The period ' . $startDate . ' to ' . $endDate . ' overlaps fiscal year "' . $clash['label'] . '" (' . $clash['start_date'] . ' to ' . $clash['end_date'] . '). Fiscal years of one company must not overlap.';
+    }
+    return null;
+}
+
+/**
+ * Creates a fiscal year with overlap protection and race-safe single-default,
+ * inside one transaction (the company row lock serializes concurrent creates).
+ *
+ * @return array{ok: bool, error: ?string, id: int}
+ */
+function create_fiscal_year(int $companyId, string $label, string $startDate, string $endDate, bool $isDefault, ?int $actorId = null): array
+{
+    if ($companyId <= 0 || trim($label) === '') {
+        return ['ok' => false, 'error' => 'Company and fiscal year label are required.', 'id' => 0];
+    }
+    try {
+        db()->beginTransaction();
+        // Serialize per company so two simultaneous requests cannot create
+        // overlapping periods or two defaults.
+        db()->prepare('SELECT id FROM companies WHERE id = :cid FOR UPDATE')->execute(['cid' => $companyId]);
+
+        $overlapError = fiscal_year_overlap_error($companyId, $startDate, $endDate);
+        if ($overlapError !== null) {
+            db()->rollBack();
+            return ['ok' => false, 'error' => $overlapError, 'id' => 0];
+        }
+        $duplicateLabel = db()->prepare('SELECT COUNT(*) FROM fiscal_years WHERE company_id = :cid AND label = :label');
+        $duplicateLabel->execute(['cid' => $companyId, 'label' => trim($label)]);
+        if ((int) $duplicateLabel->fetchColumn() > 0) {
+            db()->rollBack();
+            return ['ok' => false, 'error' => 'A fiscal year named "' . trim($label) . '" already exists for this company.', 'id' => 0];
+        }
+
+        if ($isDefault) {
+            db()->prepare('UPDATE fiscal_years SET is_default = 0 WHERE company_id = :cid')->execute(['cid' => $companyId]);
+        }
+        $hasLifecycle = column_exists('fiscal_years', 'status');
+        $status = $startDate > date('Y-m-d') ? 'upcoming' : 'open';
+        $sql = 'INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_active, is_default'
+            . ($hasLifecycle ? ', status, created_by' : '')
+            . ') VALUES (:cid, :label, :start_date, :end_date, 1, :is_default'
+            . ($hasLifecycle ? ', :status, :created_by' : '') . ')';
+        $params = [
+            'cid' => $companyId, 'label' => trim($label),
+            'start_date' => $startDate, 'end_date' => $endDate,
+            'is_default' => $isDefault ? 1 : 0,
+        ];
+        if ($hasLifecycle) {
+            $params['status'] = $status;
+            $params['created_by'] = $actorId ?: null;
+        }
+        db()->prepare($sql)->execute($params);
+        $newId = (int) db()->lastInsertId();
+        db()->commit();
+        log_activity('fiscal_year', $newId, 'created', 'Fiscal year "' . trim($label) . '" (' . $startDate . ' to ' . $endDate . ', ' . $status . ($isDefault ? ', default' : '') . ') created.', $actorId);
+        return ['ok' => true, 'error' => null, 'id' => $newId];
+    } catch (Throwable $exception) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+        return ['ok' => false, 'error' => 'Could not create the fiscal year: ' . $exception->getMessage(), 'id' => 0];
+    }
+}
+
+/**
+ * Makes one fiscal year the company-wide default — transactional, so exactly
+ * one default can exist per company even under concurrent requests.
+ *
+ * @return array{ok: bool, error: ?string}
+ */
+function set_default_fiscal_year(int $companyId, int $fiscalYearId, ?int $actorId = null): array
+{
+    try {
+        db()->beginTransaction();
+        db()->prepare('SELECT id FROM companies WHERE id = :cid FOR UPDATE')->execute(['cid' => $companyId]);
+        $fyStmt = db()->prepare('SELECT * FROM fiscal_years WHERE id = :id AND company_id = :cid LIMIT 1');
+        $fyStmt->execute(['id' => $fiscalYearId, 'cid' => $companyId]);
+        $fy = $fyStmt->fetch();
+        if (!$fy) {
+            db()->rollBack();
+            return ['ok' => false, 'error' => 'Fiscal year not found for this company.'];
+        }
+        db()->prepare('UPDATE fiscal_years SET is_default = 0 WHERE company_id = :cid')->execute(['cid' => $companyId]);
+        $updateSql = 'UPDATE fiscal_years SET is_default = 1' . (column_exists('fiscal_years', 'updated_by') ? ', updated_by = :uid' : '') . ' WHERE id = :id';
+        $params = ['id' => $fiscalYearId] + (column_exists('fiscal_years', 'updated_by') ? ['uid' => $actorId ?: null] : []);
+        db()->prepare($updateSql)->execute($params);
+        db()->commit();
+        log_activity('fiscal_year', $fiscalYearId, 'default_changed', 'Fiscal year "' . $fy['label'] . '" set as the company default.', $actorId);
+        return ['ok' => true, 'error' => null];
+    } catch (Throwable $exception) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+        return ['ok' => false, 'error' => 'Could not change the default fiscal year: ' . $exception->getMessage()];
+    }
+}
+
+/**
+ * Why a transaction dated $date cannot post into this fiscal year, or null.
+ * Covers: date outside the year's range, lifecycle status, and the cutoff
+ * date (fiscal_period_locks). The error names the date, the year, and its
+ * allowed range so the user can see exactly why posting was rejected.
+ */
+function fiscal_year_posting_blocker(array $fiscalYear, string $date): ?string
+{
+    $label = (string) ($fiscalYear['label'] ?? '#' . (int) ($fiscalYear['id'] ?? 0));
+    $start = (string) ($fiscalYear['start_date'] ?? '');
+    $end = (string) ($fiscalYear['end_date'] ?? '');
+    $status = fiscal_year_status($fiscalYear);
+    if ($status === 'closed' || $status === 'locked') {
+        return 'Fiscal year ' . $label . ' (' . $start . ' to ' . $end . ') is ' . $status . ' — accounting changes are not allowed. Reports remain available.';
+    }
+    if ($status === 'upcoming') {
+        return 'Fiscal year ' . $label . ' (' . $start . ' to ' . $end . ') is upcoming — open it before posting transactions.';
+    }
+    if ($start !== '' && $end !== '' && ($date < $start || $date > $end)) {
+        return 'Transaction date ' . $date . ' is outside fiscal year ' . $label . ' (allowed: ' . $start . ' to ' . $end . ').';
+    }
+    if (is_period_locked((int) ($fiscalYear['company_id'] ?? 0), (int) ($fiscalYear['id'] ?? 0), $date)) {
+        $cutoff = period_locked_through((int) ($fiscalYear['company_id'] ?? 0), (int) ($fiscalYear['id'] ?? 0));
+        return 'Transaction date ' . $date . ' is on or before the cutoff date ' . (string) $cutoff . ' of fiscal year ' . $label . ' — the period is locked.';
+    }
+    return null;
 }
 
 function set_selected_company(int $companyId): void
@@ -1298,15 +1487,21 @@ function activate_company_context(int $companyId, bool $markVerified = false): b
         return false;
     }
 
-    $fyStmt = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = :company_id AND is_active = 1 ORDER BY is_default DESC, start_date DESC LIMIT 1');
-    $fyStmt->execute(['company_id' => $companyId]);
-    $fiscalYear = $fyStmt->fetch();
-    if (!$fiscalYear) {
-        return false;
+    // The user's remembered per-company selection wins over the company
+    // default, so switching companies restores each one's last-used year.
+    $fiscalYearId = remembered_fiscal_year_id($companyId);
+    if ($fiscalYearId <= 0) {
+        $fyStmt = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = :company_id AND is_active = 1 ORDER BY is_default DESC, start_date DESC LIMIT 1');
+        $fyStmt->execute(['company_id' => $companyId]);
+        $fiscalYear = $fyStmt->fetch();
+        if (!$fiscalYear) {
+            return false;
+        }
+        $fiscalYearId = (int) $fiscalYear['id'];
     }
 
     set_selected_company($companyId);
-    set_context($companyId, (int) $fiscalYear['id']);
+    set_context($companyId, $fiscalYearId);
 
     if ($markVerified) {
         mark_company_pin_verified($companyId);
@@ -1372,6 +1567,12 @@ function ensure_company_context_selected(): bool
 
     if (!table_exists('fiscal_years')) {
         return false;
+    }
+
+    $rememberedId = remembered_fiscal_year_id((int) $company['id']);
+    if ($rememberedId > 0) {
+        set_context((int) $company['id'], $rememberedId);
+        return true;
     }
 
     $stmt = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = :company_id AND is_active = 1 ORDER BY is_default DESC, start_date DESC LIMIT 1');
@@ -2370,6 +2571,26 @@ function create_voucher_with_entries(array $voucher, array $entries): int
             throw new RuntimeException('Refusing to post voucher: fiscal year #' . (int) $voucher['fiscal_year_id'] . ' does not belong to company #' . $voucherCompanyId . '.');
         }
     }
+    // The transaction DATE decides the fiscal year — never a submitted
+    // fiscal_year_id alone (which the browser, an import file, or a stale
+    // session could get wrong). Recalculate the year from the date, then
+    // enforce lifecycle status and the cutoff date HERE, at the single
+    // choke point every posting module flows through (vouchers, invoices,
+    // payroll, inventory, fixed assets, leases, imports, client books).
+    if (table_exists('fiscal_years')) {
+        $postingDate = (string) ($voucher['voucher_date'] ?? date('Y-m-d'));
+        $dateFiscalYear = fiscal_year_for_date($voucherCompanyId, $postingDate);
+        if (!$dateFiscalYear) {
+            throw new RuntimeException('No fiscal year of company #' . $voucherCompanyId . ' covers the transaction date ' . $postingDate . '. Create or open a fiscal year for this period before posting.');
+        }
+        $postingBlocker = fiscal_year_posting_blocker($dateFiscalYear, $postingDate);
+        if ($postingBlocker !== null) {
+            throw new RuntimeException($postingBlocker);
+        }
+        // Recalculated year wins: a mismatched fiscal_year_id would misfile
+        // the voucher in reports and period locks.
+        $voucher['fiscal_year_id'] = (int) $dateFiscalYear['id'];
+    }
     // A tampered party_id must not attach another tenant's party to this
     // voucher (its name would then surface via party joins). Drop it rather
     // than fail the whole posting when it is foreign.
@@ -2465,6 +2686,17 @@ function voucher_mutation_blocker(array $voucher): ?string
     $voucherDate = (string) ($voucher['voucher_date'] ?? '');
     if ($voucherDate !== '' && is_period_locked($companyId, $fiscalYearId, $voucherDate)) {
         return 'This voucher is inside a locked accounting period. Unlock the period first.';
+    }
+    // A closed or locked fiscal year rejects every accounting change while
+    // staying fully available for viewing and export.
+    if ($fiscalYearId > 0) {
+        $voucherFy = fiscal_year_by_id($fiscalYearId);
+        if ($voucherFy) {
+            $fyStatus = fiscal_year_status($voucherFy);
+            if ($fyStatus === 'closed' || $fyStatus === 'locked') {
+                return 'Fiscal year ' . $voucherFy['label'] . ' is ' . $fyStatus . ' — vouchers in it cannot be edited or deleted. Reopen the year first (requires permission and is audited).';
+            }
+        }
     }
     // Vouchers created by the Fixed Assets module back register rows
     // (depreciation schedules, lease schedules, impairment events) that keep

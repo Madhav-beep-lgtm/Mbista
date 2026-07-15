@@ -311,6 +311,59 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     </span>
                 </div>
             <?php endif; ?>
+            <?php
+            // Global fiscal-year switcher: the accounting context selector for
+            // every module, report, export, and transaction screen. Selection
+            // is per user + per company (session) and never changes the
+            // company default. The endpoint re-validates ownership server-side.
+            $headerFyOptions = $headerCompanyId > 0 && table_exists('fiscal_years') ? fiscal_years_for_company($headerCompanyId, true) : [];
+            ?>
+            <?php if ($headerFyOptions !== [] && $headerFiscalYear): ?>
+                <?php
+                $headerFyStatus = fiscal_year_status($headerFiscalYear);
+                $headerFyStatusTone = ['upcoming' => 'blue', 'open' => 'green', 'closed' => 'amber', 'locked' => 'red'][$headerFyStatus] ?? 'gray';
+                ?>
+                <form method="post" action="<?= e(url('admin/switch-fiscal-year.php')) ?>" id="fy-switcher-form" style="display:flex;align-items:center;gap:6px"
+                      title="Fiscal year <?= e($headerFiscalYear['label']) ?>: <?= e($headerFiscalYear['start_date']) ?> to <?= e($headerFiscalYear['end_date']) ?> (<?= e($headerFyStatus) ?><?= (int) ($headerFiscalYear['is_default'] ?? 0) === 1 ? ', company default' : '' ?>)">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="return_to" value="<?= e((string) ($_SERVER['REQUEST_URI'] ?? '')) ?>">
+                    <label for="fy-switcher" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Fiscal year</label>
+                    <select name="fiscal_year_id" id="fy-switcher" style="max-width:200px;min-height:32px;font-size:12.5px">
+                        <?php foreach ($headerFyOptions as $fyOption): ?>
+                            <?php $fyOptStatus = fiscal_year_status($fyOption); ?>
+                            <option value="<?= (int) $fyOption['id'] ?>" <?= (int) $fyOption['id'] === (int) $headerFiscalYear['id'] ? 'selected' : '' ?>
+                                title="<?= e($fyOption['start_date']) ?> to <?= e($fyOption['end_date']) ?>">
+                                <?= e($fyOption['label']) ?> · <?= e(ucfirst($fyOptStatus)) ?><?= (int) ($fyOption['is_default'] ?? 0) === 1 ? ' · Default' : '' ?><?= in_array($fyOptStatus, ['closed', 'locked'], true) ? ' 🔒' : '' ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <span class="mbw-pill tone-<?= e($headerFyStatusTone) ?>" aria-live="polite"><?= e(ucfirst($headerFyStatus)) ?></span>
+                </form>
+                <script>
+                (function () {
+                    var switcher = document.getElementById('fy-switcher');
+                    if (!switcher) { return; }
+                    var previousValue = switcher.value;
+                    var pageDirty = false;
+                    document.addEventListener('input', function (event) {
+                        var form = event.target && event.target.form;
+                        if (form && form.id !== 'fy-switcher-form') { pageDirty = true; }
+                    }, true);
+                    switcher.addEventListener('change', function () {
+                        var label = switcher.options[switcher.selectedIndex] ? switcher.options[switcher.selectedIndex].text.trim() : 'the selected year';
+                        if (pageDirty && !confirm('This page has unsaved changes that will be lost.\n\nSwitch fiscal year to ' + label + ' and discard them?')) {
+                            switcher.value = previousValue;
+                            return;
+                        }
+                        if (!pageDirty && !confirm('Switch fiscal year to ' + label + '? All accounting screens, reports and filters will use it.')) {
+                            switcher.value = previousValue;
+                            return;
+                        }
+                        document.getElementById('fy-switcher-form').submit();
+                    });
+                })();
+                </script>
+            <?php endif; ?>
             <?php if (date_mode() !== 'ad'): ?><span class="mbw-pill tone-amber" title="Bikram Sambat (today)" style="align-self:center"><?= e(bs_format(date('Y-m-d'))) ?> BS</span><?php endif; ?>
             <div class="admin-topbar-actions">
                 <form method="post" action="<?= e(url('set-date-mode.php')) ?>" style="align-self:center;margin:0">
