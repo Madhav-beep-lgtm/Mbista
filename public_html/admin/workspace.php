@@ -1441,6 +1441,24 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
 
         $invoiceId = (int) db()->lastInsertId();
+
+        try {
+            $vatRate = default_vat_rate();
+            $vatAmount = round($amount * ($vatRate / 100), 2);
+            $totalAmount = round($amount + $vatAmount, 2);
+            db()->prepare('UPDATE task_invoices SET vat_rate = :vat_rate, vat_amount = :vat_amount, taxable_amount = :taxable_amount, total_amount = :total_amount WHERE id = :id AND company_id = :company_id')
+                ->execute([
+                    'vat_rate' => $vatRate,
+                    'vat_amount' => $vatAmount,
+                    'taxable_amount' => $amount,
+                    'total_amount' => $totalAmount,
+                    'id' => $invoiceId,
+                    'company_id' => $companyId,
+                ]);
+        } catch (Throwable $exception) {
+            // Keep backward compatibility for databases without VAT migration.
+        }
+
         log_activity('task_invoice', $invoiceId, 'issued', 'Task invoice issued from admin work portal.', $adminId);
         if ($status === 'issued') {
             auto_post_task_invoice_voucher($invoiceId, $adminId);

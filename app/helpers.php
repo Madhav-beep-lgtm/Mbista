@@ -2640,10 +2640,23 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
         return;
     }
 
-    $taxableAmount = round((float) ($invoice['taxable_amount'] ?? $invoice['amount'] ?? 0), 2);
+    // The VAT columns default to 0.00 (not NULL), so null-coalescing alone
+    // never reaches `amount` on rows written by amount-only insert paths.
+    // Rebuild the missing figures exactly like the printed invoice does, or
+    // the voucher silently never posts (taxable 0) / posts without VAT.
+    $taxableAmount = round((float) ($invoice['taxable_amount'] ?? 0), 2);
+    if ($taxableAmount <= 0) {
+        $taxableAmount = round((float) ($invoice['amount'] ?? 0), 2);
+    }
     $exciseAmount = round((float) ($invoice['excise_amount'] ?? 0), 2);
     $vatAmount = round((float) ($invoice['vat_amount'] ?? 0), 2);
-    $totalAmount = round((float) ($invoice['total_amount'] ?? ($taxableAmount + $exciseAmount + $vatAmount)), 2);
+    if ($vatAmount <= 0 && ($taxableAmount + $exciseAmount) > 0) {
+        $vatAmount = round(($taxableAmount + $exciseAmount) * (((float) ($invoice['vat_rate'] ?? 13.00)) / 100), 2);
+    }
+    $totalAmount = round((float) ($invoice['total_amount'] ?? 0), 2);
+    if ($totalAmount <= 0) {
+        $totalAmount = round($taxableAmount + $exciseAmount + $vatAmount, 2);
+    }
     if ($totalAmount <= 0 || $taxableAmount <= 0) {
         return;
     }
@@ -3956,7 +3969,13 @@ function export_invoice_html(array $invoice): string
     $clientPan = (string) ($invoice['client_pan'] ?? '');
 
     $vatRate = (float) ($invoice['vat_rate'] ?? 13.00);
-    $taxableAmount = (float) ($invoice['taxable_amount'] ?? ($invoice['amount'] ?? 0));
+    // The VAT columns default to 0.00 (not NULL), so null-coalescing alone
+    // never reaches `amount` on rows written by amount-only insert paths —
+    // treat a zero taxable/total as "not computed" and rebuild from `amount`.
+    $taxableAmount = (float) ($invoice['taxable_amount'] ?? 0);
+    if ($taxableAmount <= 0) {
+        $taxableAmount = (float) ($invoice['amount'] ?? 0);
+    }
     $showExcise = $sourceType === 'manufacturing';
     $exciseRate = $showExcise
         ? (float) ($invoice['excise_rate'] ?? company_accounting_default_excise_rate($companyId))
@@ -3967,7 +3986,10 @@ function export_invoice_html(array $invoice): string
     if ($vatAmount <= 0 && $vatBase > 0) {
         $vatAmount = round($vatBase * ($vatRate / 100), 2);
     }
-    $totalAmount = (float) ($invoice['total_amount'] ?? ($taxableAmount + $exciseAmount + $vatAmount));
+    $totalAmount = (float) ($invoice['total_amount'] ?? 0);
+    if ($totalAmount <= 0) {
+        $totalAmount = round($taxableAmount + $exciseAmount + $vatAmount, 2);
+    }
     $discountAmount = (float) ($invoice['discount_amount'] ?? 0);
     $amountWords = npr_amount_in_words($totalAmount);
 
