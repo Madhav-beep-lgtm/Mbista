@@ -1225,20 +1225,26 @@ function handle_company_switch(int $companyId, string $failureUrl): never
         redirect($failureUrl);
     }
 
-    // Client books companies open PIN-free for admins with direct access.
+    // Client books companies open PIN-free for admins with direct access, and
+    // for staff accountants the admin assigned/granted to that client
+    // ('approval' level) — every voucher a staff member enters there is forced
+    // to pending_approval and flagged for the client, so opening the workspace
+    // itself is safe.
     if ((int) ($company['is_client_company'] ?? 0) === 1) {
         $bookProfileStmt = db()->prepare('SELECT * FROM client_profiles WHERE books_company_id = :cid LIMIT 1');
         $bookProfileStmt->execute(['cid' => $companyId]);
         $bookProfile = $bookProfileStmt->fetch();
-        if (!$bookProfile || client_books_access_level($bookProfile) !== 'direct') {
-            flash('error', 'You do not have direct access to the books of that client.');
+        $bookAccessLevel = $bookProfile ? client_books_access_level($bookProfile) : '';
+        if (!in_array($bookAccessLevel, ['direct', 'approval'], true)) {
+            flash('error', 'You do not have access to the books of that client.');
             redirect($failureUrl);
         }
         if (!activate_company_context($companyId, true)) {
             flash('error', 'No active fiscal year is available for the books of this client.');
             redirect($failureUrl);
         }
-        flash('success', 'Opened full accounting for ' . ($bookProfile['organization_name'] ?? 'client') . '.');
+        flash('success', 'Opened full accounting for ' . ($bookProfile['organization_name'] ?? 'client') . '.'
+            . ($bookAccessLevel === 'approval' ? ' Entries you make here are sent to the client and admin for approval.' : ''));
         redirect('admin/accounting-dashboard.php');
     }
 
@@ -1734,6 +1740,10 @@ function staff_scoped_client_ids(int $staffId, int $companyId): array
             $bindings[] = $staffId;
         }
     }
+    if (table_exists('client_task_assignees')) {
+        $where .= ' OR EXISTS (SELECT 1 FROM client_task_assignees cta INNER JOIN client_tasks ct4 ON ct4.id = cta.task_id WHERE ct4.client_id = cp.id AND cta.user_id = ?)';
+        $bindings[] = $staffId;
+    }
     if ($myTeamIds !== []) {
         $teamPlaceholders = implode(',', array_fill(0, count($myTeamIds), '?'));
         $where .= " OR EXISTS (SELECT 1 FROM client_tasks ct3 WHERE ct3.client_id = cp.id AND ct3.team_id IN ($teamPlaceholders))";
@@ -1745,6 +1755,202 @@ function staff_scoped_client_ids(int $staffId, int $companyId): array
     $stmt->execute($bindings);
 
     return array_map('intval', array_column($stmt->fetchAll(), 'id'));
+}
+
+function task_assignee_ids(int $taskId): array
+{
+    if (!table_exists('client_task_assignees')) {
+        return [];
+    }
+
+    $stmt = db()->prepare('SELECT user_id FROM client_task_assignees WHERE task_id = :task_id ORDER BY is_lead DESC, id ASC');
+    $stmt->execute(['task_id' => $taskId]);
+
+    return array_map('intval', array_column($stmt->fetchAll(), 'user_id'));
+}
+
+/**
+ * Map of task_id => list of assignee rows (user_id, name, is_lead) for the given tasks.
+ */
+function task_assignees_by_task(array $taskIds): array
+{
+    $taskIds = array_values(array_filter(array_map('intval', $taskIds), static fn (int $id): bool => $id > 0));
+    if ($taskIds === [] || !table_exists('client_task_assignees')) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($taskIds), '?'));
+    $stmt = db()->prepare("SELECT cta.task_id, cta.user_id, cta.is_lead, u.name
+        FROM client_task_assignees cta
+        INNER JOIN users u ON u.id = cta.user_id
+        WHERE cta.task_id IN ($placeholders)
+        ORDER BY cta.is_lead DESC, cta.id ASC");
+    $stmt->execute($taskIds);
+
+    $map = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $map[(int) $row['task_id']][] = [
+            'user_id' => (int) $row['user_id'],
+            'name' => (string) $row['name'],
+            'is_lead' => (int) $row['is_lead'] === 1,
+        ];
+    }
+
+    return $map;
+}
+
+/**
+ * Replace the assignee set of a task with $userIds (first entry becomes lead).
+ * Keeps the legacy client_tasks.assigned_staff_user_id column in sync and
+ * records assigned/removed events in task_assignment_events.
+ */
+function sync_task_assignees(int $taskId, int $companyId, array $userIds, ?int $actorId = null): void
+{
+    if (!table_exists('client_task_assignees')) {
+        // Legacy fallback: single-staff column only.
+        if (column_exists('client_tasks', 'assigned_staff_user_id')) {
+            $firstId = 0;
+            foreach ($userIds as $candidate) {
+                if ((int) $candidate > 0) {
+                    $firstId = (int) $candidate;
+                    break;
+                }
+            }
+            db()->prepare('UPDATE client_tasks SET assigned_staff_user_id = :staff_id WHERE id = :id')
+                ->execute(['staff_id' => $firstId > 0 ? $firstId : null, 'id' => $taskId]);
+        }
+        return;
+    }
+
+    $userIds = array_values(array_unique(array_filter(array_map('intval', $userIds), static fn (int $id): bool => $id > 0)));
+    $currentIds = task_assignee_ids($taskId);
+
+    $toAdd = array_diff($userIds, $currentIds);
+    $toRemove = array_diff($currentIds, $userIds);
+
+    $insertStmt = db()->prepare('INSERT IGNORE INTO client_task_assignees (company_id, task_id, user_id, is_lead, assigned_by) VALUES (:company_id, :task_id, :user_id, :is_lead, :assigned_by)');
+    foreach ($toAdd as $userId) {
+        $insertStmt->execute([
+            'company_id' => $companyId,
+            'task_id' => $taskId,
+            'user_id' => $userId,
+            'is_lead' => 0,
+            'assigned_by' => $actorId,
+        ]);
+    }
+    if ($toRemove !== []) {
+        $removePlaceholders = implode(',', array_fill(0, count($toRemove), '?'));
+        $deleteStmt = db()->prepare("DELETE FROM client_task_assignees WHERE task_id = ? AND user_id IN ($removePlaceholders)");
+        $deleteStmt->execute(array_merge([$taskId], array_values($toRemove)));
+    }
+
+    $leadId = $userIds[0] ?? 0;
+    db()->prepare('UPDATE client_task_assignees SET is_lead = CASE WHEN user_id = :lead_id THEN 1 ELSE 0 END WHERE task_id = :task_id')
+        ->execute(['lead_id' => $leadId, 'task_id' => $taskId]);
+    if (column_exists('client_tasks', 'assigned_staff_user_id')) {
+        db()->prepare('UPDATE client_tasks SET assigned_staff_user_id = :staff_id WHERE id = :id')
+            ->execute(['staff_id' => $leadId > 0 ? $leadId : null, 'id' => $taskId]);
+    }
+
+    if (table_exists('task_assignment_events')) {
+        $eventStmt = db()->prepare('INSERT INTO task_assignment_events (company_id, task_id, event_type, from_user_id, to_user_id, created_by) VALUES (:company_id, :task_id, :event_type, :from_user_id, :to_user_id, :created_by)');
+        foreach ($toAdd as $userId) {
+            $eventStmt->execute([
+                'company_id' => $companyId,
+                'task_id' => $taskId,
+                'event_type' => 'assigned',
+                'from_user_id' => null,
+                'to_user_id' => $userId,
+                'created_by' => $actorId,
+            ]);
+        }
+        foreach ($toRemove as $userId) {
+            $eventStmt->execute([
+                'company_id' => $companyId,
+                'task_id' => $taskId,
+                'event_type' => 'removed',
+                'from_user_id' => $userId,
+                'to_user_id' => null,
+                'created_by' => $actorId,
+            ]);
+        }
+    }
+}
+
+/**
+ * Plain-text progress snapshot of a task: status, stage completion, and
+ * billing position. Used as the handoff note when staff are replaced.
+ */
+function task_progress_summary_text(int $taskId): string
+{
+    $taskStmt = db()->prepare('SELECT t.*, cp.organization_name FROM client_tasks t INNER JOIN client_profiles cp ON cp.id = t.client_id WHERE t.id = :id LIMIT 1');
+    $taskStmt->execute(['id' => $taskId]);
+    $task = $taskStmt->fetch();
+    if (!$task) {
+        return '';
+    }
+
+    $lines = [];
+    $lines[] = 'Task #' . $taskId . ' "' . (string) $task['title'] . '" for ' . (string) $task['organization_name'];
+    $lines[] = 'Status: ' . str_replace('_', ' ', (string) $task['status']) . ' | Priority: ' . (string) $task['priority']
+        . ($task['due_date'] ? ' | Due: ' . (string) $task['due_date'] : '');
+
+    if (table_exists('task_stages')) {
+        $stageStmt = db()->prepare('SELECT * FROM task_stages WHERE task_id = :task_id ORDER BY sequence_no ASC, id ASC');
+        $stageStmt->execute(['task_id' => $taskId]);
+        $stages = $stageStmt->fetchAll();
+        if ($stages !== []) {
+            $completed = count(array_filter($stages, static fn (array $s): bool => ($s['status'] ?? '') === 'completed'));
+            $percent = (int) round(($completed / count($stages)) * 100);
+            $lines[] = 'Progress: ' . $completed . ' of ' . count($stages) . ' stages completed (' . $percent . '%).';
+            foreach ($stages as $stage) {
+                $stageLine = ' - Stage ' . (int) $stage['sequence_no'] . ': ' . (string) $stage['stage_name']
+                    . ' [' . str_replace('_', ' ', (string) $stage['status']) . ']';
+                if (!empty($stage['completed_at'])) {
+                    $stageLine .= ' completed ' . (string) $stage['completed_at'];
+                }
+                $lines[] = $stageLine;
+            }
+        } else {
+            $lines[] = 'Progress: no stages defined; task status is ' . str_replace('_', ' ', (string) $task['status']) . '.';
+        }
+    }
+
+    if (table_exists('task_invoices')) {
+        $invoicedStmt = db()->prepare("SELECT COALESCE(SUM(amount),0) FROM task_invoices WHERE task_id = :task_id AND status <> 'cancelled'");
+        $invoicedStmt->execute(['task_id' => $taskId]);
+        $invoiced = (float) $invoicedStmt->fetchColumn();
+        $lines[] = 'Billing: ' . number_format($invoiced, 2) . ' invoiced of ' . number_format((float) $task['quoted_fee'], 2) . ' quoted.';
+    }
+
+    if (!empty($task['description'])) {
+        $lines[] = 'Description: ' . (string) $task['description'];
+    }
+
+    return implode("\n", $lines);
+}
+
+/**
+ * Deliver the work-progress handoff to a newly assigned staff member as a
+ * message thread. Failures are swallowed so the reassignment itself never
+ * rolls back because messaging is unavailable.
+ */
+function notify_task_handoff(int $companyId, int $taskId, string $taskTitle, int $newStaffId, int $actorId, string $summary, string $note = ''): void
+{
+    if (!table_exists('message_threads') || !table_exists('message_thread_participants') || !table_exists('messages')) {
+        return;
+    }
+
+    $body = "You have been assigned to take over this task. Current work progress:\n\n" . $summary;
+    if ($note !== '') {
+        $body .= "\n\nHandoff note: " . $note;
+    }
+
+    try {
+        create_message_thread($companyId, null, 'Task handoff: #' . $taskId . ' ' . $taskTitle, $actorId, $body, [], [$newStaffId]);
+    } catch (Throwable $exception) {
+        // Messaging is best-effort; the assignment event still records the summary.
+    }
 }
 
 function admin_count(): int
@@ -2793,6 +2999,18 @@ function client_mirror_ledger(int $booksCompanyId, string $kind, ?string $provid
     return null;
 }
 
+/**
+ * Flags a pending voucher so the client's owner/approver sees it in their
+ * approval queue and bell — used for client-mirror vouchers and for vouchers a
+ * staff accountant enters directly in a client's books (migration 049).
+ */
+function mark_voucher_requires_client_approval(int $voucherId): void
+{
+    if ($voucherId > 0 && column_exists('vouchers', 'requires_client_approval')) {
+        db()->prepare('UPDATE vouchers SET requires_client_approval = 1 WHERE id = :id')->execute(['id' => $voucherId]);
+    }
+}
+
 /** True when a mirror voucher with this source signature already exists. */
 function client_mirror_voucher_exists(string $sourceType, int $sourceId): bool
 {
@@ -2820,9 +3038,7 @@ function client_mirror_create_voucher(array $target, string $sourceType, int $so
         'submitted_by' => $actorId,
     ], $entries);
 
-    if ($voucherId > 0 && column_exists('vouchers', 'requires_client_approval')) {
-        db()->prepare('UPDATE vouchers SET requires_client_approval = 1 WHERE id = :id')->execute(['id' => $voucherId]);
-    }
+    mark_voucher_requires_client_approval($voucherId);
     if ($voucherId > 0) {
         security_event('client_mirror_posted', 'success', ucfirst($voucherType) . ' mirror voucher #' . $voucherId . ' submitted to client books for approval (' . $sourceType . ' #' . $sourceId . ').', (int) $target['books_company_id'], $actorId);
     }
@@ -4774,7 +4990,12 @@ function client_books_access_level(array $clientProfile): string
     }
     if ($role === 'staff') {
         $assigned = (int) ($clientProfile['assigned_staff_user_id'] ?? 0) === (int) ($user['id'] ?? 0);
-        return ($assigned && $servesFromPortal) ? 'approval' : ($assigned && $portalCode === 'MBAACA' ? 'approval' : '');
+        // Admin-granted per-client accounting access (migration 049) opens the
+        // same approval-gated door as a direct client assignment.
+        $granted = function_exists('staff_accounting_client_ids')
+            && in_array((int) ($clientProfile['id'] ?? 0), staff_accounting_client_ids((int) ($user['id'] ?? 0)), true);
+        $reachable = $assigned || $granted;
+        return ($reachable && $servesFromPortal) ? 'approval' : ($reachable && $portalCode === 'MBAACA' ? 'approval' : '');
     }
     if ($role === 'customer') {
         // A client login works directly in its own books — owner or a portal
@@ -4811,7 +5032,12 @@ function client_books_clients_for_scope(): array
             $params['portal_id'] = $portalId;
         }
     } elseif ($role === 'staff') {
-        $sql .= ' AND cp.assigned_staff_user_id = :staff_id';
+        $grantedClientIds = function_exists('staff_accounting_client_ids') ? staff_accounting_client_ids((int) ($user['id'] ?? 0)) : [];
+        if ($grantedClientIds !== []) {
+            $sql .= ' AND (cp.assigned_staff_user_id = :staff_id OR cp.id IN (' . implode(',', array_map('intval', $grantedClientIds)) . '))';
+        } else {
+            $sql .= ' AND cp.assigned_staff_user_id = :staff_id';
+        }
         $params['staff_id'] = (int) ($user['id'] ?? 0);
         if ($portalCode !== 'MBAACA') {
             $sql .= ' AND cp.company_id = :portal_id';
@@ -5945,6 +6171,19 @@ function attention_summary(): array
                     $stmt = db()->prepare("SELECT COUNT(*) FROM document_requests WHERE company_id = :cid AND status = 'uploaded'");
                     $stmt->execute(['cid' => $companyId]);
                     $items[] = ['label' => 'Uploaded documents to review', 'count' => (int) $stmt->fetchColumn(), 'url' => url('admin/documents.php?view=requests')];
+                }
+            }
+            // Staff-accountant / mirror vouchers waiting in the books of clients
+            // this admin serves — visible from any company context so the admin
+            // is notified without having to open each client's books first.
+            if ($role === 'admin' && column_exists('vouchers', 'approval_state') && function_exists('client_books_company_ids_for_servers')) {
+                $bookIds = array_values(array_unique(client_books_company_ids_for_servers(authorized_company_ids())));
+                $bookIds = array_diff($bookIds, [$companyId]);
+                if ($bookIds !== []) {
+                    $placeholders = implode(',', array_fill(0, count($bookIds), '?'));
+                    $stmt = db()->prepare("SELECT COUNT(*) FROM vouchers WHERE approval_state = 'pending_approval' AND company_id IN ($placeholders)");
+                    $stmt->execute(array_values($bookIds));
+                    $items[] = ['label' => 'Client-books vouchers awaiting approval', 'count' => (int) $stmt->fetchColumn(), 'url' => url('admin/client-books.php')];
                 }
             }
         } elseif ($role === 'customer') {

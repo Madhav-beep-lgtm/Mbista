@@ -41,7 +41,7 @@ $action = $_GET['action'] ?? 'list';
 $invoiceId = (int) ($_GET['id'] ?? 0);
 $message = null;
 $error = null;
-$allowedInvoiceType = ['stage', 'task', 'inventory', 'manufacturing', 'other'];
+$allowedInvoiceType = ['stage', 'task', 'inventory', 'manufacturing', 'other', 'termination'];
 $allowedInvoiceSourceTypes = $invoiceBusinessProfile['allowed_invoice_sources'];
 $defaultInvoiceSourceType = $invoiceBusinessProfile['default_invoice_source'];
 $allowedInvoiceStatus = ['draft', 'issued', 'paid', 'cancelled'];
@@ -155,6 +155,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Invoice amount must be greater than zero.';
             } elseif ($invoiceSourceType === 'task' && $invoiceType === 'task' && ($task['status'] ?? 'new') !== 'completed') {
                 $error = 'Task invoice can be issued only after task completion.';
+            } elseif ($invoiceSourceType === 'task' && $invoiceType === 'termination' && ($task['status'] ?? 'new') !== 'terminated') {
+                $error = 'Termination/compensation invoice can be issued only for a terminated task.';
+            } elseif ($invoiceSourceType !== 'task' && $invoiceType === 'termination') {
+                $error = 'Termination invoice applies only to task invoicing.';
             } else {
                 if ($invoiceSourceType === 'task' && $invoiceType === 'stage') {
                     if ($stageId <= 0) {
@@ -452,7 +456,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($amount > 0) {
             $requestId = create_payment_request($invoiceId, (int) $currentCompany['id'], $adminId, $amount, $method, $notes);
             if ($requestId) {
-                $message = 'Payment request created successfully';
+                // Redirect-after-POST so a browser refresh cannot create a
+                // duplicate payment request.
+                flash('success', 'Payment request created successfully. The client sees it on their dashboard.');
+                redirect('admin/invoice.php?action=view&id=' . $invoiceId);
             } else {
                 $error = 'Failed to create payment request';
             }
@@ -532,7 +539,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
 
-                    $message = 'Payment recorded and receipt generated.';
+                    // Redirect-after-POST: a refresh must not record the payment
+                    // twice, and the Record Payment form re-renders collapsed.
+                    flash('success', 'Payment recorded and receipt generated.');
+                    redirect('admin/invoice.php?action=view&id=' . $invoiceId);
                 }
             }
         } elseif ($postAction === 'convert_to_tax') {
@@ -861,6 +871,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                             <select name="invoice_type" id="invoice_type">
                                 <option value="stage" <?php echo $selectedInvoiceType === 'stage' ? 'selected' : ''; ?>>Stage Invoice</option>
                                 <option value="task" <?php echo $selectedInvoiceType === 'task' ? 'selected' : ''; ?>>Task Invoice</option>
+                                <option value="termination" <?php echo $selectedInvoiceType === 'termination' ? 'selected' : ''; ?>>Termination Settlement / Compensation</option>
                             </select>
                         </div>
 
@@ -1295,22 +1306,28 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                                 </div>
                                             <?php endif; ?>
                                             <?php if (in_array($pr['status'], ['pending', 'partial'], true)): ?>
-                                                <form method="post" class="inline-action-form" style="display:grid; gap:6px; max-width:260px;">
-                                                    <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
-                                                    <input type="hidden" name="action" value="record_payment">
-                                                    <input type="hidden" name="invoice_id" value="<?php echo (int) $invoice['id']; ?>">
-                                                    <input type="hidden" name="payment_request_id" value="<?php echo (int) $pr['id']; ?>">
-                                                    <select name="payment_status">
-                                                        <option value="paid" <?php echo $prefillStatus === 'paid' ? 'selected' : ''; ?>>Paid</option>
-                                                        <option value="partial" <?php echo $prefillStatus === 'partial' ? 'selected' : ''; ?>>Partial</option>
-                                                    </select>
-                                                    <input type="number" name="payment_amount" min="0.01" step="0.01" value="<?php echo e(number_format($prefillAmount, 2, '.', '')); ?>" required>
-                                                    <input type="date" name="payment_received_on" value="<?php echo e($prefillDate); ?>" required>
-                                                    <input type="text" name="payment_method" placeholder="Method (bank/cash/etc)" value="<?php echo e($prefillMethod); ?>">
-                                                    <input type="text" name="payment_reference" placeholder="Reference #" value="<?php echo e($prefillReference); ?>">
-                                                    <textarea name="payment_notes" placeholder="Payment note"></textarea>
-                                                    <button type="submit" class="btn btn-success">Record Payment</button>
-                                                </form>
+                                                <details class="feature-disclosure" style="max-width:280px;" <?php echo $prDeclared && (string) $pr['status'] === 'pending' ? 'open' : ''; ?>>
+                                                    <summary>
+                                                        <span><strong>Record Payment</strong>
+                                                        <small><?php echo $prDeclared ? 'Client declared a payment — verify and record it.' : 'Open to record a received payment.'; ?></small></span>
+                                                    </summary>
+                                                    <form method="post" class="inline-action-form" style="display:grid; gap:6px; max-width:260px; margin-top:6px;">
+                                                        <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
+                                                        <input type="hidden" name="action" value="record_payment">
+                                                        <input type="hidden" name="invoice_id" value="<?php echo (int) $invoice['id']; ?>">
+                                                        <input type="hidden" name="payment_request_id" value="<?php echo (int) $pr['id']; ?>">
+                                                        <select name="payment_status">
+                                                            <option value="paid" <?php echo $prefillStatus === 'paid' ? 'selected' : ''; ?>>Paid</option>
+                                                            <option value="partial" <?php echo $prefillStatus === 'partial' ? 'selected' : ''; ?>>Partial</option>
+                                                        </select>
+                                                        <input type="number" name="payment_amount" min="0.01" step="0.01" value="<?php echo e(number_format($prefillAmount, 2, '.', '')); ?>" required>
+                                                        <input type="date" name="payment_received_on" value="<?php echo e($prefillDate); ?>" required>
+                                                        <input type="text" name="payment_method" placeholder="Method (bank/cash/etc)" value="<?php echo e($prefillMethod); ?>">
+                                                        <input type="text" name="payment_reference" placeholder="Reference #" value="<?php echo e($prefillReference); ?>">
+                                                        <textarea name="payment_notes" placeholder="Payment note"></textarea>
+                                                        <button type="submit" class="btn btn-success">Record Payment</button>
+                                                    </form>
+                                                </details>
                                             <?php endif; ?>
                                             <?php if (table_exists('invoice_payment_receipts')): ?>
                                                 <?php $receipt = get_payment_receipt_by_request((int) $pr['id'], (int) $currentCompany['id']); ?>

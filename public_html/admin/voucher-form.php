@@ -140,7 +140,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $voucherNo = strtoupper(substr($voucherType, 0, 2)) . '-' . date('Ymd-His');
-    $needsApproval = $hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve');
+    // Staff accountants in a client's books never self-post — see accounting.php.
+    $staffForcedApproval = $hasVoucherApprovals && staff_accountant_forces_approval();
+    $needsApproval = $staffForcedApproval
+        || ($hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve'));
     $fullNarration = $title . ($narration !== '' ? ' — ' . $narration : '');
 
     try {
@@ -170,8 +173,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'memo' => $entry['memo'],
         ], $entries));
 
+        if ($voucherId > 0 && !$isDraft && $staffForcedApproval) {
+            mark_voucher_requires_client_approval($voucherId);
+        }
         if ($voucherId > 0) {
-            security_event('voucher_posted', 'success', 'Voucher #' . $voucherId . ' posted via guided form.', $companyId, $userId);
+            security_event('voucher_posted', 'success', 'Voucher #' . $voucherId . ($staffForcedApproval && !$isDraft ? ' submitted for client/admin approval via guided form.' : ' posted via guided form.'), $companyId, $userId);
         }
 
         if ($voucherId > 0 && $hasFormMeta) {

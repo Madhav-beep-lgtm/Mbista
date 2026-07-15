@@ -1143,7 +1143,10 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                         <tr><td colspan="7">No invoices issued yet.</td></tr>
                     <?php endif; ?>
                     <?php foreach ($invoices as $invoice): ?>
-                        <?php $invoicePaymentRequests = $paymentRequestsByInvoice[(int) $invoice['id']] ?? []; ?>
+                        <?php
+                            $invoicePaymentRequests = $paymentRequestsByInvoice[(int) $invoice['id']] ?? [];
+                            $invoiceAwaitingPayment = in_array((string) $invoice['status'], ['issued', 'draft'], true);
+                        ?>
                         <tr>
                             <td><?= e($invoice['invoice_no']) ?><br><small><?= e($invoice['invoice_type']) ?> invoice · <?= e($invoice['invoice_category'] ?? 'proforma') ?></small></td>
                             <td><?= e($invoice['task_title'] ?? ($invoice['description'] ?? 'General invoice')) ?><br><small><?= e($invoice['task_title'] !== null ? ($invoice['stage_name'] ?? 'Full task invoice') : ucfirst((string) ($invoice['invoice_source_type'] ?? 'general')) . ' invoice') ?></small></td>
@@ -1153,7 +1156,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                             <td><?= e($invoice['issued_on']) ?></td>
                             <td><?= e($invoice['due_on'] ?? '-') ?></td>
                         </tr>
-                        <?php if ($invoicePaymentRequests !== []): ?>
+                        <?php if ($invoicePaymentRequests !== [] || $invoiceAwaitingPayment): ?>
                             <tr>
                                 <td colspan="7" style="padding: 0.5rem 1rem 1rem;">
                                     <?php foreach ($invoicePaymentRequests as $paymentRequest): ?>
@@ -1207,36 +1210,39 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                                     </form>
                                                 </details>
 
-                                                <details class="feature-disclosure" style="margin-top: 0.5rem;">
-                                                    <summary>
-                                                        <span><strong><?= icon('tickets') ?>Ask for more time, a discount, or offer a payment</strong>
-                                                        <small>Request a credit period, a discount, or propose a partial / advance payment on this invoice.</small></span>
-                                                        <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
-                                                    </summary>
-                                                    <form method="post" class="workspace-form-grid">
-                                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                                        <input type="hidden" name="action" value="request_invoice_adjustment">
-                                                        <input type="hidden" name="target_invoice_id" value="<?= e((int) $invoice['id']) ?>">
-                                                        <label>Request type
-                                                            <select name="adjustment_type" required>
-                                                                <option value="credit_period_request">Additional credit period</option>
-                                                                <option value="discount_request">Discount</option>
-                                                                <option value="partial_payment_request">Partial payment (pay part now)</option>
-                                                                <option value="advance_payment_request">Advance payment</option>
-                                                            </select>
-                                                        </label>
-                                                        <label>New due date (for credit period)<input type="date" name="requested_due_on"></label>
-                                                        <label>Amount (discount or payment)<input type="number" name="requested_amount" min="0" step="0.01"></label>
-                                                        <label>Discount percent (optional)<input type="number" name="requested_percent" min="0" max="100" step="0.01"></label>
-                                                        <label class="workspace-span-2">Reason<textarea name="reason" rows="2" required></textarea></label>
-                                                        <div class="workspace-span-2">
-                                                            <button type="submit"><?= icon('tickets') ?>Send request</button>
-                                                        </div>
-                                                    </form>
-                                                </details>
                                             <?php endif; ?>
                                         </div>
                                     <?php endforeach; ?>
+
+                                    <?php if ($invoiceAwaitingPayment && table_exists('support_ticket_requests')): ?>
+                                        <details class="feature-disclosure" style="margin-top: 0.5rem;">
+                                            <summary>
+                                                <span><strong><?= icon('tickets') ?>Ask for more time, a discount, or offer a payment</strong>
+                                                <small>Request a credit period, a discount, or propose a partial / advance payment on this invoice.</small></span>
+                                                <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
+                                            </summary>
+                                            <form method="post" class="workspace-form-grid">
+                                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                                <input type="hidden" name="action" value="request_invoice_adjustment">
+                                                <input type="hidden" name="target_invoice_id" value="<?= e((int) $invoice['id']) ?>">
+                                                <label>Request type
+                                                    <select name="adjustment_type" required>
+                                                        <option value="credit_period_request">Additional credit period</option>
+                                                        <option value="discount_request">Discount</option>
+                                                        <option value="partial_payment_request">Partial payment (pay part now)</option>
+                                                        <option value="advance_payment_request">Advance payment</option>
+                                                    </select>
+                                                </label>
+                                                <label>New due date (for credit period)<input type="date" name="requested_due_on"></label>
+                                                <label>Amount (discount or payment)<input type="number" name="requested_amount" min="0" step="0.01"></label>
+                                                <label>Discount percent (optional)<input type="number" name="requested_percent" min="0" max="100" step="0.01"></label>
+                                                <label class="workspace-span-2">Reason<textarea name="reason" rows="2" required></textarea></label>
+                                                <div class="workspace-span-2">
+                                                    <button type="submit"><?= icon('tickets') ?>Send request</button>
+                                                </div>
+                                            </form>
+                                        </details>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endif; ?>

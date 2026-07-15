@@ -20,7 +20,7 @@ $allowedSort = [
     'email_desc' => 'u.email DESC, u.created_at DESC',
 ];
 $perPageOptions = [10, 20, 50, 100];
-$staffWorkflowActions = ['save_staff_profile', 'upload_kyc_document', 'review_kyc_document', 'save_permissions'];
+$staffWorkflowActions = ['save_staff_profile', 'upload_kyc_document', 'review_kyc_document', 'save_permissions', 'save_client_accounting_access'];
 $hasAccessLevels = column_exists('users', 'access_level');
 
 if (
@@ -366,6 +366,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string) ($_POST['action']
         security_event('permission_change', 'success', 'Set ' . count($grants) . ' grants for staff #' . $targetUserId . '.', $companyId, (int) ($currentAdmin['id'] ?? 0));
         log_activity('user', $targetUserId, 'permission_change', 'Granular permissions updated (' . count($grants) . ' grants).', (int) ($currentAdmin['id'] ?? 0));
         flash('success', 'Permissions updated. The staff member will sign in again to pick up the new access.');
+        redirect('admin/users.php?view=' . $targetUserId);
+    }
+
+    if ($action === 'save_client_accounting_access') {
+        // Which clients this staff accountant may keep books for. Grants are
+        // per-client; the staff member reaches ONLY those clients' books and
+        // every voucher they enter there waits for client/admin approval.
+        if ((string) ($targetStaff['role'] ?? '') !== 'staff') {
+            flash('error', 'Client accounting access applies to staff accounts only.');
+            redirect('admin/users.php?view=' . $targetUserId);
+        }
+        $requestedClientIds = array_values(array_unique(array_filter(array_map('intval', (array) ($_POST['client_ids'] ?? [])), static fn (int $id): bool => $id > 0)));
+        $validClientIds = [];
+        if ($requestedClientIds !== []) {
+            $placeholders = implode(',', array_fill(0, count($requestedClientIds), '?'));
+            $checkStmt = db()->prepare('SELECT id FROM client_profiles WHERE company_id = ? AND is_active = 1 AND id IN (' . $placeholders . ')');
+            $checkStmt->execute(array_merge([$companyId], $requestedClientIds));
+            $validClientIds = array_map('intval', $checkStmt->fetchAll(PDO::FETCH_COLUMN));
+        }
+        set_staff_accounting_clients($targetUserId, $validClientIds, (int) ($currentAdmin['id'] ?? 0));
+        // Scope changes take effect on next sign-in, like module permissions.
+        revoke_user_sessions($targetUserId);
+        security_event('permission_change', 'success', 'Client accounting access set to ' . count($validClientIds) . ' client(s) for staff #' . $targetUserId . '.', $companyId, (int) ($currentAdmin['id'] ?? 0));
+        log_activity('user', $targetUserId, 'client_accounting_access', 'Client accounting access updated (' . count($validClientIds) . ' clients).', (int) ($currentAdmin['id'] ?? 0));
+        flash('success', 'Client accounting access updated. The staff member will sign in again to pick up the new scope.');
         redirect('admin/users.php?view=' . $targetUserId);
     }
 
@@ -1183,6 +1208,50 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         </div>
                     </form>
                 </div>
+
+                <?php if (table_exists('staff_client_accounting_access')): ?>
+                    <?php
+                    $accessClientsStmt = db()->prepare('SELECT id, organization_name, client_code, books_company_id FROM client_profiles WHERE company_id = :company_id AND is_active = 1 ORDER BY organization_name ASC');
+                    $accessClientsStmt->execute(['company_id' => $companyId]);
+                    $accessClients = $accessClientsStmt->fetchAll();
+                    $grantedClientIds = staff_accounting_client_ids((int) $viewUser['id']);
+                    ?>
+                    <div class="form-card">
+                        <h3>Client accounting access</h3>
+                        <p class="muted">
+                            Tick the clients this staff accountant may keep books for. They can open only the ticked
+                            clients' accounting books, and every voucher they enter there is
+                            <strong>sent for approval to the client and the admin</strong> — it posts only after one of
+                            them approves it.
+                            <?php if ($grantedClientIds !== []): ?>
+                                <span class="mbw-pill tone-amber"><?= e((string) count($grantedClientIds)) ?> client(s) granted</span>
+                            <?php else: ?>
+                                <span class="mbw-pill tone-gray">No client books access</span>
+                            <?php endif; ?>
+                        </p>
+                        <form method="post">
+                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                            <input type="hidden" name="action" value="save_client_accounting_access">
+                            <input type="hidden" name="user_id" value="<?= e((int) $viewUser['id']) ?>">
+                            <?php if ($accessClients === []): ?>
+                                <p class="muted">No active clients in this company portal yet.</p>
+                            <?php else: ?>
+                                <div class="users-edit-grid">
+                                    <?php foreach ($accessClients as $accessClient): ?>
+                                        <label class="checkbox-line">
+                                            <input type="checkbox" name="client_ids[]" value="<?= e((int) $accessClient['id']) ?>" <?= in_array((int) $accessClient['id'], $grantedClientIds, true) ? 'checked' : '' ?>>
+                                            <?= e($accessClient['organization_name']) ?>
+                                            <small>(<?= e($accessClient['client_code'] ?? 'no code') ?><?= (int) ($accessClient['books_company_id'] ?? 0) > 0 ? '' : ', books not set up yet' ?>)</small>
+                                        </label>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                            <div class="actions" style="margin-top:12px;">
+                                <button type="submit" class="button">Save client accounting access</button>
+                            </div>
+                        </form>
+                    </div>
+                <?php endif; ?>
             <?php endif; ?>
 
             <?php if (in_array(($viewUser['role'] ?? ''), ['staff', 'admin'], true)): ?>

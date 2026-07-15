@@ -98,6 +98,19 @@ $_SESSION['fiscal_year_id'] = $fyId;
 
 say("Seeding into company MBAACA (id {$cid}), fiscal year {$fy['label']} ({$fyStart})...");
 
+// Guard: this seeder is not re-runnable over its own data (unique emails,
+// SMP- codes). Bail out cleanly instead of dying mid-way with a partial seed.
+$alreadySeeded = db()->prepare("SELECT COUNT(*) FROM users WHERE email IN ('sample.admin@mbista.local', 'sample.staff@mbista.local', 'sample.client@mbista.local')");
+$alreadySeeded->execute();
+if ((int) $alreadySeeded->fetchColumn() > 0) {
+    exit("Sample data already present (sample.* users exist). Remove the SMP-/sample.* records first if you want to reseed.\n");
+}
+$partyLeftovers = db()->prepare("SELECT COUNT(*) FROM accounting_parties WHERE company_id = :cid AND code LIKE 'SMP-%'");
+$partyLeftovers->execute(['cid' => $cid]);
+if ((int) $partyLeftovers->fetchColumn() > 0) {
+    exit("Leftover SMP- accounting parties found from an earlier run. Remove them first so the seed starts clean.\n");
+}
+
 // ---------------------------------------------------------------------------
 // 1. Users, staff profile, client profile
 // ---------------------------------------------------------------------------

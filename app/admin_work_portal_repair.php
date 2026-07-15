@@ -33,6 +33,15 @@ function admin_work_portal_repair_constraint_exists(string $tableName, string $c
     return (int) $stmt->fetchColumn() > 0;
 }
 
+function admin_work_portal_repair_enum_has(string $tableName, string $columnName, string $value): bool
+{
+    $stmt = db()->prepare('SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema = :db_name AND table_name = :table_name AND column_name = :column_name');
+    $stmt->execute(['db_name' => DB_NAME, 'table_name' => $tableName, 'column_name' => $columnName]);
+    $columnType = (string) $stmt->fetchColumn();
+
+    return stripos($columnType, "'" . $value . "'") !== false;
+}
+
 function admin_work_portal_repair_add_column(string $tableName, string $columnName, string $definition): void
 {
     if (admin_work_portal_repair_table_exists($tableName) && !admin_work_portal_repair_column_exists($tableName, $columnName)) {
@@ -177,6 +186,73 @@ function admin_work_portal_repair_database(): array
                  OR spe.code = c.code
             )
         ");
+    });
+
+    $run('Create task multi-assignee table', static function (): void {
+        db()->exec("
+            CREATE TABLE IF NOT EXISTS `client_task_assignees` (
+              `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+              `company_id` INT UNSIGNED DEFAULT NULL,
+              `task_id` INT UNSIGNED NOT NULL,
+              `user_id` INT UNSIGNED NOT NULL,
+              `is_lead` TINYINT(1) NOT NULL DEFAULT 0,
+              `assigned_by` INT UNSIGNED DEFAULT NULL,
+              `assigned_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              UNIQUE KEY `uniq_task_assignee` (`task_id`, `user_id`),
+              KEY `idx_task_assignees_company` (`company_id`),
+              KEY `idx_task_assignees_user` (`user_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+        admin_work_portal_repair_add_constraint('client_task_assignees', 'fk_task_assignees_task', '`fk_task_assignees_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks`(`id`) ON DELETE CASCADE');
+        admin_work_portal_repair_add_constraint('client_task_assignees', 'fk_task_assignees_user', '`fk_task_assignees_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE');
+        if (admin_work_portal_repair_column_exists('client_tasks', 'assigned_staff_user_id')) {
+            db()->exec('
+                INSERT IGNORE INTO client_task_assignees (company_id, task_id, user_id, is_lead, assigned_at)
+                SELECT t.company_id, t.id, t.assigned_staff_user_id, 1, t.updated_at
+                FROM client_tasks t
+                WHERE t.assigned_staff_user_id IS NOT NULL
+            ');
+        }
+    });
+
+    $run('Create task assignment event table', static function (): void {
+        db()->exec("
+            CREATE TABLE IF NOT EXISTS `task_assignment_events` (
+              `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+              `company_id` INT UNSIGNED DEFAULT NULL,
+              `task_id` INT UNSIGNED NOT NULL,
+              `event_type` ENUM('assigned', 'replaced', 'removed') NOT NULL,
+              `from_user_id` INT UNSIGNED DEFAULT NULL,
+              `to_user_id` INT UNSIGNED DEFAULT NULL,
+              `note` TEXT DEFAULT NULL,
+              `progress_summary` TEXT DEFAULT NULL,
+              `created_by` INT UNSIGNED DEFAULT NULL,
+              `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `idx_task_assignment_events_task` (`task_id`),
+              KEY `idx_task_assignment_events_company` (`company_id`),
+              KEY `idx_task_assignment_events_to_user` (`to_user_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+        admin_work_portal_repair_add_constraint('task_assignment_events', 'fk_task_assignment_events_task', '`fk_task_assignment_events_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks`(`id`) ON DELETE CASCADE');
+    });
+
+    $run('Add task progress override column', static function (): void {
+        admin_work_portal_repair_add_column('client_tasks', 'progress_percent', '`progress_percent` TINYINT UNSIGNED DEFAULT NULL AFTER `priority`');
+    });
+
+    $run('Add task termination support', static function (): void {
+        if (!admin_work_portal_repair_enum_has('client_tasks', 'status', 'terminated')) {
+            db()->exec("ALTER TABLE client_tasks MODIFY COLUMN `status` ENUM('new', 'in_progress', 'on_hold', 'completed', 'cancelled', 'terminated') NOT NULL DEFAULT 'new'");
+        }
+        admin_work_portal_repair_add_column('client_tasks', 'terminated_at', '`terminated_at` DATETIME DEFAULT NULL AFTER `completed_at`');
+        admin_work_portal_repair_add_column('client_tasks', 'terminated_by', '`terminated_by` INT UNSIGNED DEFAULT NULL AFTER `terminated_at`');
+        admin_work_portal_repair_add_column('client_tasks', 'termination_reason', '`termination_reason` TEXT DEFAULT NULL AFTER `terminated_by`');
+        admin_work_portal_repair_add_column('client_tasks', 'termination_compensation', '`termination_compensation` DECIMAL(12,2) DEFAULT NULL AFTER `termination_reason`');
+        if (!admin_work_portal_repair_enum_has('task_invoices', 'invoice_type', 'termination')) {
+            db()->exec("ALTER TABLE task_invoices MODIFY COLUMN `invoice_type` ENUM('stage', 'task', 'inventory', 'manufacturing', 'other', 'termination') NOT NULL DEFAULT 'task'");
+        }
     });
 
     $run('Backfill client status values', static function (): void {

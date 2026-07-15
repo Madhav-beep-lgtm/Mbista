@@ -159,7 +159,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/voucher-import.php?token=' . (string) $_POST['token']);
         }
 
-        $needsApproval = $hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve');
+        // Staff accountants in a client's books never self-post — see accounting.php.
+        $staffForcedApproval = $hasVoucherApprovals && staff_accountant_forces_approval();
+        $needsApproval = $staffForcedApproval
+            || ($hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve'));
         $batch = strtoupper(bin2hex(random_bytes(2)));
         $now = date('Y-m-d H:i:s');
         $hasLineMeta = column_exists('voucher_entries', 'cost_centre');
@@ -197,6 +200,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ], $voucher['lines']));
                 if ($voucherId <= 0) {
                     throw new RuntimeException('Voucher ' . $voucher['key'] . ' could not be created.');
+                }
+                if ($staffForcedApproval) {
+                    mark_voucher_requires_client_approval($voucherId);
                 }
                 if ($hasFormMeta) {
                     db()->prepare('UPDATE vouchers SET posting_date = :posting_date, department = :department, location = :location, cost_centre = :cost_centre

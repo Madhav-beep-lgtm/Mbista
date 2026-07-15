@@ -58,6 +58,17 @@ $allowedClientStatus = ['active', 'suspended', 'inactive'];
 
 $hasTaskAssignment = column_exists('client_tasks', 'assigned_staff_user_id');
 $hasStageAssignment = column_exists('task_stages', 'assigned_staff_user_id');
+$hasMultiAssignees = table_exists('client_task_assignees');
+$hasTermination = column_exists('client_tasks', 'terminated_at')
+    && admin_work_portal_repair_enum_has('client_tasks', 'status', 'terminated');
+$hasTerminationInvoice = admin_work_portal_repair_enum_has('task_invoices', 'invoice_type', 'termination');
+$hasProgressColumn = column_exists('client_tasks', 'progress_percent');
+if ($hasTermination) {
+    $allowedTaskStatus[] = 'terminated';
+}
+if ($hasTerminationInvoice) {
+    $allowedInvoiceType[] = 'termination';
+}
 
 $allowedViews = ['home', 'clients', 'industries', 'service-providers', 'teams', 'contracts', 'tasks', 'invoices', 'staff'];
 $view = (string) ($_GET['view'] ?? 'home');
@@ -477,6 +488,49 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/workspace.php?view=clients');
     }
 
+    if ($action === 'create_profile_for_user') {
+        // Rescue path for the "user vs client" mix-up: a customer LOGIN created
+        // from user management has no client profile, so it can never appear in
+        // the client directory or Work Portal. This links one retroactively.
+        $targetUserId = (int) ($_POST['user_id'] ?? 0);
+        $userStmt = db()->prepare("SELECT * FROM users WHERE id = :id AND company_id = :company_id AND role = 'customer' LIMIT 1");
+        $userStmt->execute(['id' => $targetUserId, 'company_id' => $companyId]);
+        $targetUser = $userStmt->fetch();
+        if (!$targetUser) {
+            flash('error', 'Customer login not found in this company portal.');
+            redirect('admin/workspace.php?view=clients');
+        }
+        $existingProfile = db()->prepare('SELECT id FROM client_profiles WHERE user_id = :uid LIMIT 1');
+        $existingProfile->execute(['uid' => $targetUserId]);
+        if ($existingProfile->fetch()) {
+            flash('error', 'This login already has a client profile.');
+            redirect('admin/workspace.php?view=clients');
+        }
+        if (table_exists('client_portal_users')) {
+            $memberCheck = db()->prepare('SELECT id FROM client_portal_users WHERE user_id = :uid LIMIT 1');
+            $memberCheck->execute(['uid' => $targetUserId]);
+            if ($memberCheck->fetch()) {
+                flash('error', 'This login is already a portal member of another client organization.');
+                redirect('admin/workspace.php?view=clients');
+            }
+        }
+
+        $organizationName = trim((string) ($targetUser['company'] ?? '')) !== '' ? (string) $targetUser['company'] : (string) $targetUser['name'];
+        $clientCode = generate_client_code($organizationName);
+        db()->prepare("INSERT INTO client_profiles (user_id, company_id, organization_name, client_code, contact_number, client_status, is_active) VALUES (:user_id, :company_id, :organization_name, :client_code, :contact_number, 'active', 1)")
+            ->execute([
+                'user_id' => $targetUserId,
+                'company_id' => $companyId,
+                'organization_name' => $organizationName,
+                'client_code' => $clientCode,
+                'contact_number' => $targetUser['phone'] ?? null,
+            ]);
+        $newProfileId = (int) db()->lastInsertId();
+        log_activity('client_profile', $newProfileId, 'created', 'Client profile created for existing customer login #' . $targetUserId . '.', $adminId);
+        flash('success', 'Client profile created for ' . $organizationName . ' (code ' . $clientCode . '). It now appears in the client directory and Work Portal.');
+        redirect('admin/workspace.php?view=clients&mode=view&client_id=' . $newProfileId);
+    }
+
     if ($action === 'save_industry') {
         $industryId = (int) ($_POST['industry_id'] ?? 0);
         $name = trim((string) ($_POST['name'] ?? ''));
@@ -671,7 +725,11 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $serviceProviderEntityId = (int) ($_POST['service_provider_entity_id'] ?? 0);
         $contractId = (int) ($_POST['contract_id'] ?? 0);
         $teamId = (int) ($_POST['team_id'] ?? 0);
-        $assignedStaffUserId = (int) ($_POST['assigned_staff_user_id'] ?? 0);
+        $assignedStaffUserIds = array_values(array_unique(array_filter(
+            array_map('intval', (array) ($_POST['assigned_staff_user_ids'] ?? [(int) ($_POST['assigned_staff_user_id'] ?? 0)])),
+            static fn (int $id): bool => $id > 0
+        )));
+        $assignedStaffUserId = $assignedStaffUserIds[0] ?? 0;
         $title = trim((string) ($_POST['title'] ?? ''));
         $description = trim((string) ($_POST['description'] ?? ''));
         $quotedFeeRaw = trim((string) ($_POST['quoted_fee'] ?? '0'));
@@ -703,6 +761,13 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect('admin/workspace.php?view=tasks');
             }
         }
+        if ($serviceProviderEntityId <= 0) {
+            // The client is administered by the service provider entity chosen
+            // when the client was created — tasks inherit it automatically, so
+            // it never has to be re-selected here.
+            $linkedEntityIds = client_service_provider_ids($clientId);
+            $serviceProviderEntityId = (int) ($linkedEntityIds[0] ?? 0);
+        }
 
         if ($contractId > 0) {
             $contractCheck = db()->prepare('SELECT id FROM service_contracts WHERE id = :id AND client_id = :client_id AND company_id = :company_id LIMIT 1');
@@ -726,12 +791,14 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        if ($assignedStaffUserId > 0) {
+        if ($assignedStaffUserIds !== []) {
             $staffCheck = db()->prepare("SELECT id FROM users WHERE id = :id AND company_id = :company_id AND role IN ('staff', 'admin') AND status = 'active' LIMIT 1");
-            $staffCheck->execute(['id' => $assignedStaffUserId, 'company_id' => $companyId]);
-            if (!$staffCheck->fetch()) {
-                flash('error', 'Selected staff member was not found in this company.');
-                redirect('admin/workspace.php?view=tasks');
+            foreach ($assignedStaffUserIds as $candidateStaffId) {
+                $staffCheck->execute(['id' => $candidateStaffId, 'company_id' => $companyId]);
+                if (!$staffCheck->fetch()) {
+                    flash('error', 'One of the selected staff members was not found in this company.');
+                    redirect('admin/workspace.php?view=tasks');
+                }
             }
         }
 
@@ -743,7 +810,8 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!in_array($priority, $allowedTaskPriority, true)) {
             $priority = 'normal';
         }
-        if (!in_array($status, $allowedTaskStatus, true)) {
+        if (!in_array($status, $allowedTaskStatus, true) || $status === 'terminated') {
+            // Termination goes through the dedicated terminate action only.
             $status = 'new';
         }
 
@@ -775,8 +843,166 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute($taskInsertParams);
 
         $taskId = (int) db()->lastInsertId();
+        if ($assignedStaffUserIds !== []) {
+            sync_task_assignees($taskId, $companyId, $assignedStaffUserIds, $adminId);
+        }
         log_activity('client_task', $taskId, 'created', 'Client task created from admin work portal.', $adminId);
         flash('success', 'Client task created successfully.');
+        redirect('admin/workspace.php?view=tasks');
+    }
+
+    if ($action === 'update_task') {
+        $taskId = (int) ($_POST['task_id'] ?? 0);
+        $title = trim((string) ($_POST['title'] ?? ''));
+        $description = trim((string) ($_POST['description'] ?? ''));
+        $contractId = (int) ($_POST['contract_id'] ?? 0);
+        $teamId = (int) ($_POST['team_id'] ?? 0);
+        $serviceProviderEntityId = (int) ($_POST['service_provider_entity_id'] ?? 0);
+        $assignedStaffUserIds = array_values(array_unique(array_filter(
+            array_map('intval', (array) ($_POST['assigned_staff_user_ids'] ?? [])),
+            static fn (int $id): bool => $id > 0
+        )));
+        $quotedFeeRaw = trim((string) ($_POST['quoted_fee'] ?? '0'));
+        $status = (string) ($_POST['status'] ?? 'new');
+        $priority = (string) ($_POST['priority'] ?? 'normal');
+        $startDate = trim((string) ($_POST['start_date'] ?? ''));
+        $dueDate = trim((string) ($_POST['due_date'] ?? ''));
+        $progressRaw = trim((string) ($_POST['progress_percent'] ?? ''));
+
+        if ($taskId <= 0 || $title === '' || !is_numeric($quotedFeeRaw)) {
+            flash('error', 'Task, title, and quoted fee are required.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+
+        $taskStmt = db()->prepare('SELECT * FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $taskStmt->execute(['id' => $taskId, 'company_id' => $companyId]);
+        $taskRow = $taskStmt->fetch();
+        if (!$taskRow) {
+            flash('error', 'Task not found for editing.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+
+        $quotedFee = round((float) $quotedFeeRaw, 2);
+        if ($quotedFee < 0) {
+            flash('error', 'Quoted fee cannot be negative.');
+            redirect('admin/workspace.php?view=tasks&mode=edit&task_id=' . $taskId);
+        }
+        if (!in_array($priority, $allowedTaskPriority, true)) {
+            $priority = 'normal';
+        }
+        // Termination has its own action (reason + compensation are required
+        // there); editing keeps the current status when 'terminated' is posted.
+        if (!in_array($status, $allowedTaskStatus, true) || $status === 'terminated') {
+            $status = (string) $taskRow['status'];
+        }
+
+        if ($contractId > 0) {
+            $contractCheck = db()->prepare('SELECT id FROM service_contracts WHERE id = :id AND client_id = :client_id AND company_id = :company_id LIMIT 1');
+            $contractCheck->execute(['id' => $contractId, 'client_id' => (int) $taskRow['client_id'], 'company_id' => $companyId]);
+            if (!$contractCheck->fetch()) {
+                flash('error', 'Selected contract is invalid for this task\'s client.');
+                redirect('admin/workspace.php?view=tasks&mode=edit&task_id=' . $taskId);
+            }
+        }
+        if ($teamId > 0) {
+            $teamCheck = db()->prepare('SELECT id FROM teams WHERE id = :id AND company_id = :company_id LIMIT 1');
+            $teamCheck->execute(['id' => $teamId, 'company_id' => $companyId]);
+            if (!$teamCheck->fetch()) {
+                flash('error', 'Selected team was not found.');
+                redirect('admin/workspace.php?view=tasks&mode=edit&task_id=' . $taskId);
+            }
+        }
+        if ($assignedStaffUserIds !== []) {
+            $staffCheck = db()->prepare("SELECT id FROM users WHERE id = :id AND company_id = :company_id AND role IN ('staff', 'admin') AND status = 'active' LIMIT 1");
+            foreach ($assignedStaffUserIds as $candidateStaffId) {
+                $staffCheck->execute(['id' => $candidateStaffId, 'company_id' => $companyId]);
+                if (!$staffCheck->fetch()) {
+                    flash('error', 'One of the selected staff members was not found in this company.');
+                    redirect('admin/workspace.php?view=tasks&mode=edit&task_id=' . $taskId);
+                }
+            }
+        }
+
+        $progressPercent = null;
+        if ($progressRaw !== '') {
+            if (!is_numeric($progressRaw) || (int) $progressRaw < 0 || (int) $progressRaw > 100) {
+                flash('error', 'Work progress must be between 0 and 100.');
+                redirect('admin/workspace.php?view=tasks&mode=edit&task_id=' . $taskId);
+            }
+            $progressPercent = (int) $progressRaw;
+        }
+
+        $setProgress = column_exists('client_tasks', 'progress_percent') ? ', progress_percent = :progress_percent' : '';
+        $setServiceProvider = column_exists('client_tasks', 'service_provider_entity_id') ? ', service_provider_entity_id = :service_provider_entity_id' : '';
+        $completedAtSql = $status === 'completed'
+            ? ', completed_at = COALESCE(completed_at, NOW())'
+            : ($status !== (string) $taskRow['status'] ? ', completed_at = NULL' : '');
+        $updateParams = [
+            'title' => $title,
+            'description' => $description !== '' ? $description : null,
+            'contract_id' => $contractId > 0 ? $contractId : null,
+            'team_id' => $teamId > 0 ? $teamId : null,
+            'quoted_fee' => $quotedFee,
+            'status' => $status,
+            'priority' => $priority,
+            'start_date' => $startDate !== '' ? $startDate : null,
+            'due_date' => $dueDate !== '' ? $dueDate : null,
+            'id' => $taskId,
+            'company_id' => $companyId,
+        ];
+        if ($setProgress !== '') {
+            $updateParams['progress_percent'] = $progressPercent;
+        }
+        if ($setServiceProvider !== '') {
+            $updateParams['service_provider_entity_id'] = $serviceProviderEntityId > 0 ? $serviceProviderEntityId : null;
+        }
+        db()->prepare("UPDATE client_tasks SET title = :title, description = :description, contract_id = :contract_id, team_id = :team_id{$setServiceProvider}, quoted_fee = :quoted_fee, status = :status, priority = :priority{$setProgress}, start_date = :start_date, due_date = :due_date{$completedAtSql} WHERE id = :id AND company_id = :company_id")
+            ->execute($updateParams);
+
+        if ($hasTaskAssignment) {
+            sync_task_assignees($taskId, $companyId, $assignedStaffUserIds, $adminId);
+        }
+
+        log_activity('client_task', $taskId, 'updated', 'Task fully edited from admin work portal.', $adminId);
+        flash('success', 'Task updated successfully.');
+        redirect('admin/workspace.php?view=tasks');
+    }
+
+    if ($action === 'update_task_progress') {
+        $taskId = (int) ($_POST['task_id'] ?? 0);
+        $progressRaw = trim((string) ($_POST['progress_percent'] ?? ''));
+
+        if (!column_exists('client_tasks', 'progress_percent')) {
+            flash('error', 'Work-progress tracking requires a database upgrade. Run the database repair first.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+        if ($taskId <= 0 || $progressRaw === '' || !is_numeric($progressRaw) || (int) $progressRaw < 0 || (int) $progressRaw > 100) {
+            flash('error', 'Work progress must be a number between 0 and 100.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+
+        $taskStmt = db()->prepare('SELECT id, status FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $taskStmt->execute(['id' => $taskId, 'company_id' => $companyId]);
+        $taskRow = $taskStmt->fetch();
+        if (!$taskRow) {
+            flash('error', 'Task not found for the progress update.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+        if (in_array((string) $taskRow['status'], ['completed', 'cancelled', 'terminated'], true)) {
+            flash('error', 'Progress of a ' . str_replace('_', ' ', (string) $taskRow['status']) . ' task can no longer be changed.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+
+        $progressPercent = (int) $progressRaw;
+        $statusSql = '';
+        if ($progressPercent > 0 && (string) $taskRow['status'] === 'new') {
+            $statusSql = ", status = 'in_progress'";
+        }
+        db()->prepare("UPDATE client_tasks SET progress_percent = :progress{$statusSql} WHERE id = :id AND company_id = :company_id")
+            ->execute(['progress' => $progressPercent, 'id' => $taskId, 'company_id' => $companyId]);
+
+        log_activity('client_task', $taskId, 'progress_updated', 'Work progress set to ' . $progressPercent . '% from admin work portal.', $adminId);
+        flash('success', 'Work progress updated to ' . $progressPercent . '%.');
         redirect('admin/workspace.php?view=tasks');
     }
 
@@ -844,7 +1070,10 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'assign_task_staff' && $hasTaskAssignment) {
         $taskId = (int) ($_POST['task_id'] ?? 0);
-        $assignedStaffUserId = (int) ($_POST['assigned_staff_user_id'] ?? 0);
+        $assignedStaffUserIds = array_values(array_unique(array_filter(
+            array_map('intval', (array) ($_POST['assigned_staff_user_ids'] ?? [(int) ($_POST['assigned_staff_user_id'] ?? 0)])),
+            static fn (int $id): bool => $id > 0
+        )));
 
         $taskCheck = db()->prepare('SELECT id FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1');
         $taskCheck->execute(['id' => $taskId, 'company_id' => $companyId]);
@@ -853,24 +1082,151 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/workspace.php?view=tasks');
         }
 
-        if ($assignedStaffUserId > 0) {
+        if ($assignedStaffUserIds !== []) {
             $staffCheck = db()->prepare("SELECT id FROM users WHERE id = :id AND company_id = :company_id AND role IN ('staff', 'admin') AND status = 'active' LIMIT 1");
-            $staffCheck->execute(['id' => $assignedStaffUserId, 'company_id' => $companyId]);
-            if (!$staffCheck->fetch()) {
-                flash('error', 'Selected staff member was not found in this company.');
-                redirect('admin/workspace.php?view=tasks');
+            foreach ($assignedStaffUserIds as $candidateStaffId) {
+                $staffCheck->execute(['id' => $candidateStaffId, 'company_id' => $companyId]);
+                if (!$staffCheck->fetch()) {
+                    flash('error', 'One of the selected staff members was not found in this company.');
+                    redirect('admin/workspace.php?view=tasks');
+                }
             }
         }
 
-        db()->prepare('UPDATE client_tasks SET assigned_staff_user_id = :staff_id WHERE id = :id AND company_id = :company_id')
+        sync_task_assignees($taskId, $companyId, $assignedStaffUserIds, $adminId);
+
+        log_activity('client_task', $taskId, 'staff_assigned', $assignedStaffUserIds !== [] ? 'Task assigned to staff: ' . implode(', ', array_map(static fn (int $id): string => '#' . $id, $assignedStaffUserIds)) . '.' : 'Task staff assignment cleared.', $adminId);
+        flash('success', $assignedStaffUserIds !== [] ? 'Task staff assignment saved (' . count($assignedStaffUserIds) . ' staff).' : 'Task staff assignment cleared.');
+        redirect('admin/workspace.php?view=tasks');
+    }
+
+    if ($action === 'replace_task_staff' && $hasTaskAssignment) {
+        $taskId = (int) ($_POST['task_id'] ?? 0);
+        $fromUserId = (int) ($_POST['from_user_id'] ?? 0);
+        $toUserId = (int) ($_POST['to_user_id'] ?? 0);
+        $handoffNote = trim((string) ($_POST['handoff_note'] ?? ''));
+
+        if ($taskId <= 0 || $fromUserId <= 0 || $toUserId <= 0) {
+            flash('error', 'Task, current staff, and replacement staff are required.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+        if ($fromUserId === $toUserId) {
+            flash('error', 'Replacement staff must be different from the current staff.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+
+        $taskStmt = db()->prepare('SELECT id, title, status, assigned_staff_user_id FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $taskStmt->execute(['id' => $taskId, 'company_id' => $companyId]);
+        $taskRow = $taskStmt->fetch();
+        if (!$taskRow) {
+            flash('error', 'Task not found for staff replacement.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+
+        $staffCheck = db()->prepare("SELECT id, name FROM users WHERE id = :id AND company_id = :company_id AND role IN ('staff', 'admin') AND status = 'active' LIMIT 1");
+        $staffCheck->execute(['id' => $toUserId, 'company_id' => $companyId]);
+        $toUser = $staffCheck->fetch();
+        if (!$toUser) {
+            flash('error', 'Replacement staff member was not found in this company.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+
+        $currentAssignees = $hasMultiAssignees ? task_assignee_ids($taskId) : [];
+        if ($currentAssignees === [] && (int) ($taskRow['assigned_staff_user_id'] ?? 0) > 0) {
+            $currentAssignees = [(int) $taskRow['assigned_staff_user_id']];
+        }
+        if (!in_array($fromUserId, $currentAssignees, true)) {
+            flash('error', 'The staff member being replaced is not currently assigned to this task.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+
+        // Snapshot progress before the swap so the incoming staff receives it.
+        $progressSummary = task_progress_summary_text($taskId);
+
+        $newAssignees = [];
+        foreach ($currentAssignees as $assigneeId) {
+            $newAssignees[] = $assigneeId === $fromUserId ? $toUserId : $assigneeId;
+        }
+        $newAssignees = array_values(array_unique($newAssignees));
+        sync_task_assignees($taskId, $companyId, $newAssignees, $adminId);
+
+        // Hand over any unfinished stages held by the outgoing staff.
+        if ($hasStageAssignment) {
+            db()->prepare("UPDATE task_stages SET assigned_staff_user_id = :to_user WHERE task_id = :task_id AND company_id = :company_id AND assigned_staff_user_id = :from_user AND status <> 'completed'")
+                ->execute([
+                    'to_user' => $toUserId,
+                    'task_id' => $taskId,
+                    'company_id' => $companyId,
+                    'from_user' => $fromUserId,
+                ]);
+        }
+
+        if (table_exists('task_assignment_events')) {
+            db()->prepare('INSERT INTO task_assignment_events (company_id, task_id, event_type, from_user_id, to_user_id, note, progress_summary, created_by) VALUES (:company_id, :task_id, :event_type, :from_user_id, :to_user_id, :note, :progress_summary, :created_by)')
+                ->execute([
+                    'company_id' => $companyId,
+                    'task_id' => $taskId,
+                    'event_type' => 'replaced',
+                    'from_user_id' => $fromUserId,
+                    'to_user_id' => $toUserId,
+                    'note' => $handoffNote !== '' ? $handoffNote : null,
+                    'progress_summary' => $progressSummary !== '' ? $progressSummary : null,
+                    'created_by' => $adminId,
+                ]);
+        }
+
+        notify_task_handoff($companyId, $taskId, (string) $taskRow['title'], $toUserId, $adminId, $progressSummary, $handoffNote);
+
+        log_activity('client_task', $taskId, 'staff_replaced', 'Staff #' . $fromUserId . ' replaced by #' . $toUserId . ' with progress handoff.', $adminId);
+        flash('success', 'Staff replaced. ' . (string) $toUser['name'] . ' received the work progress update.');
+        redirect('admin/workspace.php?view=tasks');
+    }
+
+    if ($action === 'terminate_task') {
+        $taskId = (int) ($_POST['task_id'] ?? 0);
+        $terminationReason = trim((string) ($_POST['termination_reason'] ?? ''));
+        $compensationRaw = trim((string) ($_POST['termination_compensation'] ?? ''));
+
+        if (!$hasTermination) {
+            flash('error', 'Task termination requires a database upgrade. Run the database repair first.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+        if ($taskId <= 0 || $terminationReason === '') {
+            flash('error', 'Task and termination reason are required.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+        $compensation = null;
+        if ($compensationRaw !== '') {
+            if (!is_numeric($compensationRaw) || (float) $compensationRaw < 0) {
+                flash('error', 'Compensation claim must be a non-negative amount.');
+                redirect('admin/workspace.php?view=tasks');
+            }
+            $compensation = round((float) $compensationRaw, 2);
+        }
+
+        $taskStmt = db()->prepare('SELECT id, title, status FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $taskStmt->execute(['id' => $taskId, 'company_id' => $companyId]);
+        $taskRow = $taskStmt->fetch();
+        if (!$taskRow) {
+            flash('error', 'Task not found for termination.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+        if (in_array((string) $taskRow['status'], ['completed', 'cancelled', 'terminated'], true)) {
+            flash('error', 'Only open tasks can be terminated. This task is already ' . str_replace('_', ' ', (string) $taskRow['status']) . '.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+
+        db()->prepare("UPDATE client_tasks SET status = 'terminated', terminated_at = NOW(), terminated_by = :terminated_by, termination_reason = :reason, termination_compensation = :compensation WHERE id = :id AND company_id = :company_id")
             ->execute([
-                'staff_id' => $assignedStaffUserId > 0 ? $assignedStaffUserId : null,
+                'terminated_by' => $adminId > 0 ? $adminId : null,
+                'reason' => $terminationReason,
+                'compensation' => $compensation,
                 'id' => $taskId,
                 'company_id' => $companyId,
             ]);
 
-        log_activity('client_task', $taskId, 'staff_assigned', $assignedStaffUserId > 0 ? 'Task assigned to staff #' . $assignedStaffUserId . '.' : 'Task staff assignment cleared.', $adminId);
-        flash('success', $assignedStaffUserId > 0 ? 'Task assigned to staff member.' : 'Task staff assignment cleared.');
+        log_activity('client_task', $taskId, 'terminated', 'Task terminated mid-way. Reason: ' . $terminationReason . ($compensation !== null ? ' Compensation claim: ' . number_format($compensation, 2) . '.' : ''), $adminId);
+        flash('success', 'Task terminated. Invoice its completed stages or issue a termination/compensation invoice from the Invoices tab.');
         redirect('admin/workspace.php?view=tasks');
     }
 
@@ -913,13 +1269,18 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/workspace.php?view=tasks');
         }
 
-        $stageCheckStmt = db()->prepare('SELECT id FROM task_stages WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $stageCheckStmt = db()->prepare('SELECT ts.id, t.status AS task_status FROM task_stages ts INNER JOIN client_tasks t ON t.id = ts.task_id WHERE ts.id = :id AND ts.company_id = :company_id LIMIT 1');
         $stageCheckStmt->execute([
             'id' => $stageId,
             'company_id' => $companyId,
         ]);
-        if (!$stageCheckStmt->fetch()) {
+        $stageCheckRow = $stageCheckStmt->fetch();
+        if (!$stageCheckRow) {
             flash('error', 'Selected stage is not available in the current company context.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+        if (in_array((string) $stageCheckRow['task_status'], ['cancelled', 'terminated'], true)) {
+            flash('error', 'Stages of a ' . (string) $stageCheckRow['task_status'] . ' task can no longer be completed.');
             redirect('admin/workspace.php?view=tasks');
         }
 
@@ -940,15 +1301,26 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/workspace.php?view=tasks');
         }
 
+        $taskCheckStmt = db()->prepare('SELECT id, status FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $taskCheckStmt->execute([
+            'id' => $taskId,
+            'company_id' => $companyId,
+        ]);
+        $taskCheckRow = $taskCheckStmt->fetch();
+        if (!$taskCheckRow) {
+            flash('error', 'Selected task is not available in the current company context.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+        if (in_array((string) $taskCheckRow['status'], ['cancelled', 'terminated'], true)) {
+            flash('error', 'A ' . (string) $taskCheckRow['status'] . ' task cannot be marked completed.');
+            redirect('admin/workspace.php?view=tasks');
+        }
+
         $stmt = db()->prepare("UPDATE client_tasks SET status = 'completed', completed_at = NOW() WHERE id = :id AND company_id = :company_id");
         $stmt->execute([
             'id' => $taskId,
             'company_id' => $companyId,
         ]);
-        if ($stmt->rowCount() === 0) {
-            flash('error', 'Selected task is not available in the current company context.');
-            redirect('admin/workspace.php?view=tasks');
-        }
         log_activity('client_task', $taskId, 'completed', 'Task marked completed.', $adminId);
         flash('success', 'Task marked as completed.');
         redirect('admin/workspace.php?view=tasks');
@@ -972,7 +1344,8 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $status = 'issued';
         }
 
-        $taskStmt = db()->prepare('SELECT id, quoted_fee, status FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $terminationSelect = $hasTermination ? ', termination_compensation' : '';
+        $taskStmt = db()->prepare("SELECT id, quoted_fee, status{$terminationSelect} FROM client_tasks WHERE id = :id AND company_id = :company_id LIMIT 1");
         $taskStmt->execute(['id' => $taskId, 'company_id' => $companyId]);
         $task = $taskStmt->fetch();
         if (!$task) {
@@ -987,13 +1360,20 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($invoiceType === 'task' && ($task['status'] ?? 'new') !== 'completed') {
-            flash('error', 'Task invoice can be issued only after task completion.');
+            flash('error', 'Task invoice can be issued only after task completion. For a terminated task, use a stage or termination invoice.');
+            redirect('admin/workspace.php?view=invoices');
+        }
+
+        if ($invoiceType === 'termination' && ($task['status'] ?? 'new') !== 'terminated') {
+            flash('error', 'Termination/compensation invoice can be issued only for a terminated task.');
             redirect('admin/workspace.php?view=invoices');
         }
 
         $taskQuoted = (float) ($task['quoted_fee'] ?? 0);
 
-        if ($invoiceType === 'stage') {
+        if ($invoiceType === 'termination') {
+            $stageId = 0;
+        } elseif ($invoiceType === 'stage') {
             if ($stageId <= 0) {
                 flash('error', 'Stage invoice requires a valid completed stage.');
                 redirect('admin/workspace.php?view=invoices');
@@ -1042,7 +1422,8 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/workspace.php?view=invoices');
         }
 
-        $invoiceNo = 'INV-TSK-' . date('Ymd') . '-' . str_pad((string) $taskId, 5, '0', STR_PAD_LEFT) . '-' . strtoupper(substr((string) bin2hex(random_bytes(3)), 0, 4));
+        $invoicePrefix = $invoiceType === 'termination' ? 'INV-TRM-' : 'INV-TSK-';
+        $invoiceNo = $invoicePrefix . date('Ymd') . '-' . str_pad((string) $taskId, 5, '0', STR_PAD_LEFT) . '-' . strtoupper(substr((string) bin2hex(random_bytes(3)), 0, 4));
 
         $stmt = db()->prepare('INSERT INTO task_invoices (company_id, task_id, stage_id, invoice_no, invoice_type, amount, status, issued_on, due_on, notes, issued_by) VALUES (:company_id, :task_id, :stage_id, :invoice_no, :invoice_type, :amount, :status, :issued_on, :due_on, :notes, :issued_by)');
         $stmt->execute([
@@ -1104,6 +1485,12 @@ $totalPages = 1;
 $stages = [];
 $invoices = [];
 $staffWorkloads = [];
+$taskAssigneesMap = [];
+$editTask = null;
+$editTaskAssigneeIds = [];
+$terminatePrefillTaskId = (int) ($_GET['terminate_task_id'] ?? 0);
+$unlinkedCustomers = [];
+$otherPortalClients = [];
 
 if ($missingTables === []) {
     $staffStmt = db()->prepare("SELECT id, name, email FROM users WHERE role = 'staff' AND status = 'active' AND company_id = :company_id ORDER BY name ASC");
@@ -1142,6 +1529,10 @@ if ($missingTables === []) {
                 }
                 if ($hasStageAssignment) {
                     $staffTaskWhere .= ' OR EXISTS (SELECT 1 FROM task_stages sts WHERE sts.task_id = t.id AND sts.assigned_staff_user_id = ?)';
+                    $staffTaskBindings[] = $staffUserId;
+                }
+                if ($hasMultiAssignees) {
+                    $staffTaskWhere .= ' OR EXISTS (SELECT 1 FROM client_task_assignees cta WHERE cta.task_id = t.id AND cta.user_id = ?)';
                     $staffTaskBindings[] = $staffUserId;
                 }
                 $staffTaskWhere .= ')';
@@ -1190,6 +1581,34 @@ if ($missingTables === []) {
         $clientRow['service_provider_names'] = client_service_provider_names((int) $clientRow['id']);
     }
     unset($clientRow);
+
+    if ($view === 'clients') {
+        // Customer LOGINS with no client profile (created from user management
+        // instead of "New Client") — they are invisible to the client
+        // directory and Work Portal until a profile is linked.
+        $memberExclusion = table_exists('client_portal_users') ? ' AND NOT EXISTS (SELECT 1 FROM client_portal_users pu WHERE pu.user_id = u.id)' : '';
+        $unlinkedStmt = db()->prepare("SELECT u.id, u.name, u.email, u.company, u.created_at
+            FROM users u
+            WHERE u.role = 'customer' AND u.company_id = :company_id
+              AND NOT EXISTS (SELECT 1 FROM client_profiles cp WHERE cp.user_id = u.id){$memberExclusion}
+            ORDER BY u.created_at DESC LIMIT 50");
+        $unlinkedStmt->execute(['company_id' => $companyId]);
+        $unlinkedCustomers = $unlinkedStmt->fetchAll();
+
+        // Clients that live in OTHER portals this admin may open — created
+        // while a different company context was active.
+        $otherCompanyIds = array_values(array_diff(authorized_company_ids(), [$companyId]));
+        if ($otherCompanyIds !== []) {
+            $otherPlaceholders = implode(',', array_fill(0, count($otherCompanyIds), '?'));
+            $otherStmt = db()->prepare("SELECT cp.id, cp.organization_name, cp.client_code, co.name AS serving_company
+                FROM client_profiles cp
+                INNER JOIN companies co ON co.id = cp.company_id
+                WHERE cp.company_id IN ($otherPlaceholders)
+                ORDER BY cp.created_at DESC LIMIT 30");
+            $otherStmt->execute($otherCompanyIds);
+            $otherPortalClients = $otherStmt->fetchAll();
+        }
+    }
 
     if ($selectedClientId > 0) {
         $selectedStmt = db()->prepare("SELECT cp.*, u.name, u.email, i.name AS industry_name
@@ -1275,7 +1694,9 @@ if ($missingTables === []) {
     $assignedNameSelect = $hasTaskAssignment ? ', au.name AS assigned_staff_name' : ', NULL AS assigned_staff_name';
     $assignedNameJoin = $hasTaskAssignment ? ' LEFT JOIN users au ON au.id = t.assigned_staff_user_id' : '';
     $tasksSql = "SELECT t.*, cp.organization_name, tm.name AS team_name, sc.contract_no, u.name AS created_by_name{$assignedNameSelect},
-            COALESCE((SELECT SUM(si.amount) FROM task_invoices si WHERE si.task_id = t.id AND si.company_id = t.company_id AND si.status <> 'cancelled'), 0) AS invoiced_total
+            COALESCE((SELECT SUM(si.amount) FROM task_invoices si WHERE si.task_id = t.id AND si.company_id = t.company_id AND si.status <> 'cancelled'), 0) AS invoiced_total,
+            (SELECT COUNT(*) FROM task_stages sct WHERE sct.task_id = t.id) AS stage_total,
+            (SELECT COUNT(*) FROM task_stages scc WHERE scc.task_id = t.id AND scc.status = 'completed') AS stage_completed
         FROM client_tasks t
         INNER JOIN client_profiles cp ON cp.id = t.client_id
         LEFT JOIN teams tm ON tm.id = t.team_id
@@ -1292,6 +1713,23 @@ if ($missingTables === []) {
     $taskStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $taskStmt->execute();
     $tasks = $taskStmt->fetchAll();
+    if ($hasMultiAssignees && $tasks !== []) {
+        $taskAssigneesMap = task_assignees_by_task(array_map('intval', array_column($tasks, 'id')));
+    }
+
+    if ($view === 'tasks' && (string) ($_GET['mode'] ?? '') === 'edit') {
+        $editTaskId = (int) ($_GET['task_id'] ?? 0);
+        if ($editTaskId > 0) {
+            $editStmt = db()->prepare('SELECT t.*, cp.organization_name FROM client_tasks t INNER JOIN client_profiles cp ON cp.id = t.client_id WHERE t.id = :id AND t.company_id = :company_id LIMIT 1');
+            $editStmt->execute(['id' => $editTaskId, 'company_id' => $companyId]);
+            $editTask = $editStmt->fetch() ?: null;
+            if ($editTask) {
+                $editTaskAssigneeIds = $hasMultiAssignees
+                    ? task_assignee_ids($editTaskId)
+                    : array_values(array_filter([(int) ($editTask['assigned_staff_user_id'] ?? 0)]));
+            }
+        }
+    }
 
     $stageNameSelect = $hasStageAssignment ? ', sau.name AS assigned_staff_name' : ', NULL AS assigned_staff_name';
     $stageNameJoin = $hasStageAssignment ? ' LEFT JOIN users sau ON sau.id = ts.assigned_staff_user_id' : '';
@@ -1527,6 +1965,66 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </div>
                 </form>
             </div>
+        <?php endif; ?>
+
+        <?php if ($unlinkedCustomers !== []): ?>
+            <section class="mbw-card">
+                <div class="mbw-card-head">
+                    <h2>Customer Logins Without a Client Profile</h2>
+                </div>
+                <div class="notice">
+                    These logins were created from user management, so they are only <strong>users</strong> — not clients.
+                    They will not appear in the client directory or Work Portal until you create their client profile here.
+                </div>
+                <div style="overflow-x:auto">
+                <table>
+                    <thead><tr><th>Login</th><th>Organization (from user)</th><th>Created</th><th>Action</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($unlinkedCustomers as $unlinkedUser): ?>
+                            <tr>
+                                <td><?= e($unlinkedUser['name']) ?><br><small><?= e($unlinkedUser['email']) ?></small></td>
+                                <td><?= e($unlinkedUser['company'] ?? '') ?: '<small>not set</small>' ?></td>
+                                <td><?= e($unlinkedUser['created_at']) ?></td>
+                                <td>
+                                    <form method="post">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="create_profile_for_user">
+                                        <input type="hidden" name="user_id" value="<?= e((int) $unlinkedUser['id']) ?>">
+                                        <button type="submit" class="button secondary">Create client profile</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($otherPortalClients !== []): ?>
+            <section class="mbw-card">
+                <div class="mbw-card-head">
+                    <h2>Clients in Other Portals You Manage</h2>
+                </div>
+                <div class="notice">
+                    These clients were created while a different company portal was active, so they are listed under that
+                    portal — not this one. Switch the portal (top of the sidebar) to manage them there.
+                </div>
+                <div style="overflow-x:auto">
+                <table>
+                    <thead><tr><th>Client</th><th>Code</th><th>Served by portal</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($otherPortalClients as $otherClient): ?>
+                            <tr>
+                                <td><?= e($otherClient['organization_name']) ?></td>
+                                <td><?= e($otherClient['client_code'] ?? 'N/A') ?></td>
+                                <td><?= e($otherClient['serving_company']) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div>
+            </section>
         <?php endif; ?>
 
         <section class="mbw-card">
@@ -1864,7 +2362,79 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <h2>Tasks</h2>
         </div>
         <div class="workspace-feature-stack">
-            
+            <?php if ($editTask): ?>
+                <div class="form-card">
+                <h3>Edit Task #<?= e((int) $editTask['id']) ?> — <?= e($editTask['title']) ?></h3>
+                <form method="post" class="workspace-form-grid">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="update_task">
+                    <input type="hidden" name="task_id" value="<?= e((int) $editTask['id']) ?>">
+                    <label>Client<input type="text" value="<?= e($editTask['organization_name']) ?>" readonly></label>
+                    <label>Task title<input type="text" name="title" value="<?= e($editTask['title']) ?>" required></label>
+                    <label>Contract (optional)
+                        <select name="contract_id">
+                            <option value="0">No contract</option>
+                            <?php foreach ($contracts as $contract): ?>
+                                <?php if ((int) $contract['client_id'] === (int) $editTask['client_id']): ?>
+                                    <option value="<?= e((int) $contract['id']) ?>" <?= (int) ($editTask['contract_id'] ?? 0) === (int) $contract['id'] ? 'selected' : '' ?>><?= e($contract['contract_no']) ?> - <?= e($contract['title']) ?></option>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Service Provider Entity
+                        <select name="service_provider_entity_id">
+                            <option value="0">Select when applicable</option>
+                            <?php foreach ($serviceProviderEntities as $entity): ?>
+                                <option value="<?= e((int) $entity['id']) ?>" <?= (int) ($editTask['service_provider_entity_id'] ?? 0) === (int) $entity['id'] ? 'selected' : '' ?>><?= e($entity['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Team assignment (optional)
+                        <select name="team_id">
+                            <option value="0">Unassigned</option>
+                            <?php foreach ($teams as $team): ?>
+                                <option value="<?= e((int) $team['id']) ?>" <?= (int) ($editTask['team_id'] ?? 0) === (int) $team['id'] ? 'selected' : '' ?>><?= e($team['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <?php if ($hasTaskAssignment): ?>
+                        <label>Assigned staff (hold Ctrl/Cmd to pick several)
+                            <select name="assigned_staff_user_ids[]" multiple size="5">
+                                <?php foreach ($staffUsers as $staffUser): ?>
+                                    <option value="<?= e((int) $staffUser['id']) ?>" <?= in_array((int) $staffUser['id'], $editTaskAssigneeIds, true) ? 'selected' : '' ?>><?= e($staffUser['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+                    <?php endif; ?>
+                    <label>Quoted total fee<input type="number" step="0.01" min="0" name="quoted_fee" value="<?= e((string) $editTask['quoted_fee']) ?>" required></label>
+                    <label>Status
+                        <select name="status" required>
+                            <?php foreach ($allowedTaskStatus as $statusOption): ?>
+                                <?php if ($statusOption === 'terminated' && (string) $editTask['status'] !== 'terminated') { continue; } ?>
+                                <option value="<?= e($statusOption) ?>" <?= (string) $editTask['status'] === $statusOption ? 'selected' : '' ?>><?= e(str_replace('_', ' ', $statusOption)) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Priority
+                        <select name="priority" required>
+                            <?php foreach ($allowedTaskPriority as $priorityOption): ?>
+                                <option value="<?= e($priorityOption) ?>" <?= (string) $editTask['priority'] === $priorityOption ? 'selected' : '' ?>><?= e($priorityOption) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <?php if ($hasProgressColumn): ?>
+                        <label>Work progress % (blank = from stages)<input type="number" name="progress_percent" min="0" max="100" step="1" value="<?= e($editTask['progress_percent'] !== null ? (string) (int) $editTask['progress_percent'] : '') ?>"></label>
+                    <?php endif; ?>
+                    <label>Start date<input type="date" name="start_date" value="<?= e($editTask['start_date'] ?? '') ?>"></label>
+                    <label>Due date<input type="date" name="due_date" value="<?= e($editTask['due_date'] ?? '') ?>"></label>
+                    <label class="workspace-span-2">Description<textarea name="description"><?= e($editTask['description'] ?? '') ?></textarea></label>
+                    <div class="workspace-span-2">
+                        <button type="submit"><?= icon('settings') ?>Save task</button>
+                        <a class="button secondary" href="<?= e(url('admin/workspace.php?view=tasks')) ?>">Cancel</a>
+                    </div>
+                </form>
+                </div>
+            <?php else: ?>
                 <div class="form-card">
                 <h3>Create task</h3>
                 <form method="post" class="workspace-form-grid">
@@ -1887,12 +2457,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         </select>
                     </label>
                     <label>Service Provider Entity
-                        <select name="service_provider_entity_id">
-                            <option value="0">Select when applicable</option>
-                            <?php foreach ($serviceProviderEntities as $entity): ?>
-                                <option value="<?= e((int) $entity['id']) ?>"><?= e($entity['name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
+                        <input type="text" value="Inherited from the client automatically" readonly title="The entity selected on the client's profile administers the client; every task inherits it.">
                     </label>
                     <label>Team assignment (optional)
                         <select name="team_id">
@@ -1903,9 +2468,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         </select>
                     </label>
                     <?php if ($hasTaskAssignment): ?>
-                        <label>Assigned staff (optional)
-                            <select name="assigned_staff_user_id">
-                                <option value="0">Unassigned</option>
+                        <label>Assigned staff (optional, hold Ctrl/Cmd to pick several)
+                            <select name="assigned_staff_user_ids[]" multiple size="5">
                                 <?php foreach ($staffUsers as $staffUser): ?>
                                     <option value="<?= e((int) $staffUser['id']) ?>"><?= e($staffUser['name']) ?></option>
                                 <?php endforeach; ?>
@@ -1939,9 +2503,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </div>
                 </form>
                 </div>
-            
+            <?php endif; ?>
 
-            <details class="feature-disclosure">
+            <details class="feature-disclosure" <?= $terminatePrefillTaskId > 0 ? 'open' : '' ?>>
                 <summary>
                     <span class="stat-icon"><?= icon('insights') ?></span>
                     <span>
@@ -2011,6 +2575,65 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </label>
                     <div>
                         <button type="submit"><?= icon('staff') ?>Assign stage</button>
+                    </div>
+                </form>
+                <?php endif; ?>
+
+                <?php if ($hasTaskAssignment): ?>
+                <h3 style="margin-top:18px;">Replace assigned staff (with progress handoff)</h3>
+                <p style="color:var(--mbw-muted); margin:4px 0 10px;">The replacement staff member receives the task's work progress update (stage completion, billing position, and your handoff note) as a message.</p>
+                <form method="post" class="workspace-form-grid" style="margin-bottom:12px;">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="replace_task_staff">
+                    <label>Task
+                        <select name="task_id" required>
+                            <option value="">Select task</option>
+                            <?php foreach ($taskOptions as $task): ?>
+                                <option value="<?= e((int) $task['id']) ?>">#<?= e((int) $task['id']) ?> - <?= e($task['title']) ?> (<?= e($task['organization_name']) ?>)</option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Staff being replaced
+                        <select name="from_user_id" required>
+                            <option value="">Select current staff</option>
+                            <?php foreach ($staffUsers as $staffUser): ?>
+                                <option value="<?= e((int) $staffUser['id']) ?>"><?= e($staffUser['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Replacement staff
+                        <select name="to_user_id" required>
+                            <option value="">Select new staff</option>
+                            <?php foreach ($staffUsers as $staffUser): ?>
+                                <option value="<?= e((int) $staffUser['id']) ?>"><?= e($staffUser['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label class="workspace-span-2">Handoff note (optional)<textarea name="handoff_note" placeholder="Anything the incoming staff member should know beyond the automatic progress summary"></textarea></label>
+                    <div>
+                        <button type="submit"><?= icon('staff') ?>Replace staff</button>
+                    </div>
+                </form>
+                <?php endif; ?>
+
+                <?php if ($hasTermination): ?>
+                <h3 style="margin-top:18px;" id="terminate-task">Terminate task mid-way</h3>
+                <p style="color:var(--mbw-muted); margin:4px 0 10px;">Stops further work. Completed stages stay invoiceable, and a termination/compensation invoice can be issued from the Invoices tab.</p>
+                <form method="post" class="workspace-form-grid" onsubmit="return confirm('Terminate this task? Remaining work stops; completed stages remain invoiceable.');">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="terminate_task">
+                    <label>Task
+                        <select name="task_id" required>
+                            <option value="">Select task</option>
+                            <?php foreach ($taskOptions as $task): ?>
+                                <option value="<?= e((int) $task['id']) ?>" <?= $terminatePrefillTaskId === (int) $task['id'] ? 'selected' : '' ?>>#<?= e((int) $task['id']) ?> - <?= e($task['title']) ?> (<?= e($task['organization_name']) ?>)</option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Compensation claim amount (optional)<input type="number" step="0.01" min="0" name="termination_compensation" placeholder="Claim for work beyond completed stages"></label>
+                    <label class="workspace-span-2">Termination reason<textarea name="termination_reason" required placeholder="Why the task is being terminated mid-way"></textarea></label>
+                    <div>
+                        <button type="submit" class="button"><?= icon('tasks') ?>Terminate task</button>
                     </div>
                 </form>
                 <?php endif; ?>
@@ -2105,14 +2728,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <th>Assigned staff</th>
                         <th class="is-numeric">Quoted fee</th>
                         <th class="is-numeric">Invoiced</th>
+                        <th>Progress</th>
                         <th>Status</th>
                         <th>Priority</th>
                         <th>Due</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if ($tasks === []): ?>
-                        <tr><td colspan="9">No tasks found.</td></tr>
+                        <tr><td colspan="11">No tasks found.</td></tr>
                     <?php endif; ?>
                     <?php foreach ($tasks as $task): ?>
                         <?php $remaining = round((float) $task['quoted_fee'] - (float) $task['invoiced_total'], 2); ?>
@@ -2121,28 +2746,88 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <td><?= e($task['organization_name']) ?></td>
                             <td><?= e($task['team_name'] ?? 'Unassigned') ?></td>
                             <td>
+                                <?php
+                                    $taskAssignees = $taskAssigneesMap[(int) $task['id']] ?? [];
+                                    $taskAssigneeIds = array_map(static fn (array $a): int => $a['user_id'], $taskAssignees);
+                                    if ($taskAssignees === [] && !empty($task['assigned_staff_name'])) {
+                                        $taskAssigneeIds = [(int) ($task['assigned_staff_user_id'] ?? 0)];
+                                    }
+                                ?>
+                                <?php if ($taskAssignees !== []): ?>
+                                    <div style="margin-bottom:4px;">
+                                        <?php foreach ($taskAssignees as $assignee): ?>
+                                            <span class="mbw-pill tone-<?= $assignee['is_lead'] ? 'blue' : 'gray' ?>" title="<?= $assignee['is_lead'] ? 'Lead assignee' : 'Assignee' ?>"><?= e($assignee['name']) ?></span>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php elseif (!empty($task['assigned_staff_name'])): ?>
+                                    <div style="margin-bottom:4px;"><span class="mbw-pill tone-blue"><?= e($task['assigned_staff_name']) ?></span></div>
+                                <?php else: ?>
+                                    <div style="margin-bottom:4px;"><small>Unassigned</small></div>
+                                <?php endif; ?>
                                 <?php if ($hasTaskAssignment): ?>
-                                    <form method="post" style="display:flex; gap:4px; align-items:center;">
+                                    <form method="post" style="display:flex; gap:4px; align-items:flex-start;">
                                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                         <input type="hidden" name="action" value="assign_task_staff">
                                         <input type="hidden" name="task_id" value="<?= e((int) $task['id']) ?>">
-                                        <select name="assigned_staff_user_id">
-                                            <option value="0">Unassigned</option>
+                                        <select name="assigned_staff_user_ids[]" <?= $hasMultiAssignees ? 'multiple size="3" title="Hold Ctrl/Cmd to pick several staff"' : '' ?>>
+                                            <?php if (!$hasMultiAssignees): ?><option value="0">Unassigned</option><?php endif; ?>
                                             <?php foreach ($staffUsers as $staffUser): ?>
-                                                <option value="<?= e((int) $staffUser['id']) ?>" <?= (int) ($task['assigned_staff_user_id'] ?? 0) === (int) $staffUser['id'] ? 'selected' : '' ?>><?= e($staffUser['name']) ?></option>
+                                                <option value="<?= e((int) $staffUser['id']) ?>" <?= in_array((int) $staffUser['id'], $taskAssigneeIds, true) ? 'selected' : '' ?>><?= e($staffUser['name']) ?></option>
                                             <?php endforeach; ?>
                                         </select>
                                         <button type="submit" class="button secondary" title="Save staff assignment">Save</button>
                                     </form>
-                                <?php else: ?>
-                                    <?= e($task['assigned_staff_name'] ?? 'Unassigned') ?>
                                 <?php endif; ?>
                             </td>
                             <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $task['quoted_fee'], 2)) ?></td>
                             <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $task['invoiced_total'], 2)) ?><br><small>Remaining: <?= e(site_currency_symbol()) ?><?= e(number_format($remaining, 2)) ?></small></td>
+                            <td>
+                                <?php
+                                    $taskOpen = !in_array((string) $task['status'], ['completed', 'cancelled', 'terminated'], true);
+                                    if ($hasProgressColumn && $task['progress_percent'] !== null) {
+                                        $taskProgress = (int) $task['progress_percent'];
+                                    } elseif ((int) ($task['stage_total'] ?? 0) > 0) {
+                                        $taskProgress = (int) round(((int) $task['stage_completed'] / (int) $task['stage_total']) * 100);
+                                    } else {
+                                        $taskProgress = match ((string) $task['status']) {
+                                            'completed' => 100,
+                                            'in_progress' => 50,
+                                            'on_hold' => 25,
+                                            default => 0,
+                                        };
+                                    }
+                                ?>
+                                <div class="progress-track" style="min-width:70px;"><div class="progress-fill" style="width: <?= e((string) $taskProgress) ?>%"></div></div>
+                                <small><?= e((string) $taskProgress) ?>%</small>
+                                <?php if ($hasProgressColumn && $taskOpen): ?>
+                                    <form method="post" style="display:flex; gap:4px; align-items:center; margin-top:4px;">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="update_task_progress">
+                                        <input type="hidden" name="task_id" value="<?= e((int) $task['id']) ?>">
+                                        <input type="number" name="progress_percent" min="0" max="100" step="1" value="<?= e((string) $taskProgress) ?>" style="width:64px;" aria-label="Work progress percent">
+                                        <button type="submit" class="button secondary" title="Update work progress">Set</button>
+                                    </form>
+                                <?php endif; ?>
+                            </td>
                             <td><span class="mbw-pill tone-<?= e($mbwStatusTone[$task['status']] ?? 'gray') ?>"><?= e(str_replace('_', ' ', (string) $task['status'])) ?></span></td>
                             <td><span class="mbw-pill tone-<?= e($mbwPriorityTone[$task['priority']] ?? 'gray') ?>"><?= e($task['priority']) ?></span></td>
                             <td><?= e($task['due_date'] ?? '-') ?></td>
+                            <td>
+                                <div class="actions" style="flex-direction:column; align-items:stretch; gap:4px;">
+                                    <a class="button secondary" href="<?= e(url('admin/workspace.php?view=tasks&mode=edit&task_id=' . (int) $task['id'])) ?>">Edit</a>
+                                    <?php if ($taskOpen): ?>
+                                        <form method="post" onsubmit="return confirm('Mark this task as completed?');">
+                                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                            <input type="hidden" name="action" value="complete_task">
+                                            <input type="hidden" name="task_id" value="<?= e((int) $task['id']) ?>">
+                                            <button type="submit" class="button secondary" style="width:100%;">Complete</button>
+                                        </form>
+                                        <?php if ($hasTermination): ?>
+                                            <a class="button secondary" href="<?= e(url('admin/workspace.php?view=tasks&terminate_task_id=' . (int) $task['id'])) ?>#terminate-task">Terminate</a>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                </div>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -2185,6 +2870,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                          <select name="invoice_type" required>
                              <option value="stage">Completed stage invoice</option>
                              <option value="task">Completed task invoice</option>
+                             <?php if ($hasTerminationInvoice): ?>
+                                 <option value="termination">Termination settlement / compensation</option>
+                             <?php endif; ?>
                          </select>
                      </label>
                      <label>Stage (required for stage invoice)
@@ -2238,7 +2926,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                          <?php foreach ($invoices as $invoice): ?>
                              <tr>
                                  <td><?= e($invoice['invoice_no']) ?><br><small><?= e($invoice['invoice_type']) ?> invoice</small></td>
-                                 <td><?= e($invoice['task_title']) ?><br><small><?= e($invoice['stage_name'] ?? 'Full task invoice') ?></small></td>
+                                 <td><?= e($invoice['task_title']) ?><br><small><?= e($invoice['invoice_type'] === 'termination' ? 'Termination settlement' : ($invoice['stage_name'] ?? 'Full task invoice')) ?></small></td>
                                  <td><?= e($invoice['organization_name']) ?></td>
                                  <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $invoice['amount'], 2)) ?></td>
                                  <td><span class="mbw-pill tone-<?= e($mbwStatusTone[$invoice['status']] ?? 'gray') ?>"><?= e($invoice['status']) ?></span></td>

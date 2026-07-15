@@ -28,6 +28,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash('error', 'Your role cannot approve or reject vouchers.');
         redirect('admin/audit-trail.php');
     }
+    if (staff_accountant_forces_approval()) {
+        flash('error', 'Vouchers in client books are approved by the client or the firm admin, not by staff.');
+        redirect('admin/audit-trail.php');
+    }
 
     require_permission('accounting', 'approve');
 

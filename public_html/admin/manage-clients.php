@@ -46,6 +46,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $clients = client_books_clients_for_scope();
 $staffStmt = db()->query("SELECT id, name FROM users WHERE role = 'staff' AND status = 'active' ORDER BY name ASC");
 $staffUsers = $staffStmt ? $staffStmt->fetchAll() : [];
+
+// Clients this admin manages that live under a DIFFERENT portal: created while
+// another company context was active, so they are absent from the list below.
+$otherPortalClients = [];
+if ($role === 'admin') {
+    $shownClientIds = array_map(static fn (array $c): int => (int) $c['id'], $clients);
+    $authorizedIds = array_values(array_diff(authorized_company_ids(), [current_company_id()]));
+    if ($authorizedIds !== []) {
+        $otherPlaceholders = implode(',', array_fill(0, count($authorizedIds), '?'));
+        $otherStmt = db()->prepare("SELECT cp.id, cp.organization_name, cp.client_code, co.name AS serving_company
+            FROM client_profiles cp
+            INNER JOIN companies co ON co.id = cp.company_id
+            WHERE cp.is_active = 1 AND cp.company_id IN ($otherPlaceholders)
+            ORDER BY cp.created_at DESC LIMIT 30");
+        $otherStmt->execute($authorizedIds);
+        $otherPortalClients = array_values(array_filter(
+            $otherStmt->fetchAll(),
+            static fn (array $c): bool => !in_array((int) $c['id'], $shownClientIds, true)
+        ));
+    }
+}
 $withBooks = count(array_filter($clients, static fn (array $c): bool => (int) ($c['books_company_id'] ?? 0) > 0));
 $assigned = count(array_filter($clients, static fn (array $c): bool => (int) ($c['assigned_staff_user_id'] ?? 0) > 0));
 
@@ -67,6 +88,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Books Provisioned</span><div class="mbw-kpi-value"><?= $withBooks ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Active accounting spaces</span></span></div><span class="mbw-chip tone-green"><?= icon('journal') ?></span></article>
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Staff Assigned</span><div class="mbw-kpi-value"><?= $assigned ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Clients with a staff owner</span></span></div><span class="mbw-chip tone-purple"><?= icon('staff') ?></span></article>
 </section>
+
+<?php if ($otherPortalClients !== []): ?>
+    <div class="notice">
+        <strong><?= e((string) count($otherPortalClients)) ?> client<?= count($otherPortalClients) > 1 ? 's' : '' ?></strong>
+        you manage <?= count($otherPortalClients) > 1 ? 'are' : 'is' ?> listed under a different portal:
+        <?php foreach ($otherPortalClients as $i => $otherClient): ?><?= $i > 0 ? ', ' : ' ' ?><em><?= e($otherClient['organization_name']) ?></em> (<?= e($otherClient['serving_company']) ?>)<?php endforeach; ?>.
+        Switch the portal from the sidebar to manage <?= count($otherPortalClients) > 1 ? 'them' : 'it' ?>.
+    </div>
+<?php endif; ?>
 
 <section class="mbw-card" aria-label="Clients">
     <div class="mbw-card-head"><h2>Client Accounting Books</h2><span class="mbw-info"><?= icon('about') ?></span></div>

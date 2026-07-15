@@ -12,7 +12,9 @@ $view = (string) ($_GET['view'] ?? 'home');
 if (!in_array($view, $allowedViews, true)) {
     $view = 'home';
 }
-$allowedTaskStatus = ['new', 'in_progress', 'on_hold', 'completed', 'cancelled'];
+$allowedTaskStatus = ['new', 'in_progress', 'on_hold', 'completed', 'cancelled', 'terminated'];
+$hasMultiAssignees = table_exists('client_task_assignees');
+$hasProgressColumn = column_exists('client_tasks', 'progress_percent');
 
 $myTeamIds = [];
 if (table_exists('team_members')) {
@@ -79,6 +81,10 @@ if (table_exists('client_tasks')) {
         $taskWhere .= ' OR EXISTS (SELECT 1 FROM task_stages sts WHERE sts.task_id = t.id AND sts.assigned_staff_user_id = ?)';
         $taskBindings[] = $staffId;
     }
+    if ($hasMultiAssignees) {
+        $taskWhere .= ' OR EXISTS (SELECT 1 FROM client_task_assignees cta WHERE cta.task_id = t.id AND cta.user_id = ?)';
+        $taskBindings[] = $staffId;
+    }
     $taskWhere .= ')';
 
     $assignedNameSelect = $hasTaskAssignment ? ', au.name AS assigned_staff_name' : ', NULL AS assigned_staff_name';
@@ -104,6 +110,24 @@ if (table_exists('client_tasks')) {
             $stagesByTask[(int) $stage['task_id']][] = $stage;
         }
     }
+}
+
+$taskAssigneesMap = $hasMultiAssignees && $myTasks !== []
+    ? task_assignees_by_task(array_map('intval', array_column($myTasks, 'id')))
+    : [];
+
+// Handoffs addressed to this staff member: the progress update recorded when
+// they replaced someone on a task.
+$myHandoffs = [];
+if (table_exists('task_assignment_events')) {
+    $handoffStmt = db()->prepare("SELECT tae.*, t.title AS task_title, fu.name AS from_user_name
+        FROM task_assignment_events tae
+        INNER JOIN client_tasks t ON t.id = tae.task_id
+        LEFT JOIN users fu ON fu.id = tae.from_user_id
+        WHERE tae.to_user_id = :staff_id AND tae.event_type = 'replaced' AND t.company_id = :company_id
+        ORDER BY tae.created_at DESC LIMIT 5");
+    $handoffStmt->execute(['staff_id' => $staffId, 'company_id' => $companyId]);
+    $myHandoffs = $handoffStmt->fetchAll();
 }
 
 $unreadMessageCount = table_exists('message_thread_participants') ? unread_message_thread_count($staffId) : 0;
@@ -134,12 +158,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'complete_stage') {
         $stageId = (int) ($_POST['stage_id'] ?? 0);
-        $stmt = db()->prepare('SELECT ts.id, ts.task_id, t.client_id FROM task_stages ts INNER JOIN client_tasks t ON t.id = ts.task_id WHERE ts.id = :id LIMIT 1');
+        $stmt = db()->prepare('SELECT ts.id, ts.task_id, t.client_id, t.status AS task_status FROM task_stages ts INNER JOIN client_tasks t ON t.id = ts.task_id WHERE ts.id = :id LIMIT 1');
         $stmt->execute(['id' => $stageId]);
         $stageRow = $stmt->fetch();
 
         if (!$stageRow || !in_array((int) $stageRow['client_id'], $myClientIds, true)) {
             flash('error', 'That stage is not part of your assigned clients.');
+            redirect('staff/index.php?view=tasks');
+        }
+        if (in_array((string) $stageRow['task_status'], ['cancelled', 'terminated'], true)) {
+            flash('error', 'This task has been ' . (string) $stageRow['task_status'] . '; its stages can no longer be completed.');
             redirect('staff/index.php?view=tasks');
         }
 
@@ -150,14 +178,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('staff/index.php?view=tasks');
     }
 
+    if ($action === 'update_task_progress') {
+        $taskId = (int) ($_POST['task_id'] ?? 0);
+        $progressRaw = trim((string) ($_POST['progress_percent'] ?? ''));
+
+        if (!column_exists('client_tasks', 'progress_percent')) {
+            flash('error', 'Work-progress tracking is not available yet. Ask an admin to run the database repair.');
+            redirect('staff/index.php?view=tasks');
+        }
+        if ($taskId <= 0 || $progressRaw === '' || !is_numeric($progressRaw) || (int) $progressRaw < 0 || (int) $progressRaw > 100) {
+            flash('error', 'Work progress must be a number between 0 and 100.');
+            redirect('staff/index.php?view=tasks');
+        }
+
+        $stmt = db()->prepare('SELECT id, client_id, status, assigned_staff_user_id FROM client_tasks WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $taskId]);
+        $taskRow = $stmt->fetch();
+        if (!$taskRow || !in_array((int) $taskRow['client_id'], $myClientIds, true)) {
+            flash('error', 'That task is not part of your assigned clients.');
+            redirect('staff/index.php?view=tasks');
+        }
+
+        // Progress may only be updated by staff actually assigned to the task
+        // (directly, through the multi-assignee list, or via one of its stages).
+        $isAssignee = (int) ($taskRow['assigned_staff_user_id'] ?? 0) === $staffId;
+        if (!$isAssignee && table_exists('client_task_assignees')) {
+            $assigneeCheck = db()->prepare('SELECT id FROM client_task_assignees WHERE task_id = :task_id AND user_id = :user_id LIMIT 1');
+            $assigneeCheck->execute(['task_id' => $taskId, 'user_id' => $staffId]);
+            $isAssignee = (bool) $assigneeCheck->fetch();
+        }
+        if (!$isAssignee && column_exists('task_stages', 'assigned_staff_user_id')) {
+            $stageCheck = db()->prepare('SELECT id FROM task_stages WHERE task_id = :task_id AND assigned_staff_user_id = :user_id LIMIT 1');
+            $stageCheck->execute(['task_id' => $taskId, 'user_id' => $staffId]);
+            $isAssignee = (bool) $stageCheck->fetch();
+        }
+        if (!$isAssignee) {
+            flash('error', 'Only staff assigned to this task can update its work progress.');
+            redirect('staff/index.php?view=tasks');
+        }
+        if (in_array((string) $taskRow['status'], ['completed', 'cancelled', 'terminated'], true)) {
+            flash('error', 'Progress of a ' . str_replace('_', ' ', (string) $taskRow['status']) . ' task can no longer be changed.');
+            redirect('staff/index.php?view=tasks');
+        }
+
+        $progressPercent = (int) $progressRaw;
+        $statusSql = $progressPercent > 0 && (string) $taskRow['status'] === 'new' ? ", status = 'in_progress'" : '';
+        db()->prepare("UPDATE client_tasks SET progress_percent = :progress{$statusSql} WHERE id = :id")
+            ->execute(['progress' => $progressPercent, 'id' => $taskId]);
+
+        log_activity('client_task', $taskId, 'progress_updated', 'Work progress set to ' . $progressPercent . '% from staff portal.', $staffId);
+        flash('success', 'Work progress updated to ' . $progressPercent . '%.');
+        redirect('staff/index.php?view=tasks');
+    }
+
     if ($action === 'complete_task') {
         $taskId = (int) ($_POST['task_id'] ?? 0);
-        $stmt = db()->prepare('SELECT id, client_id FROM client_tasks WHERE id = :id LIMIT 1');
+        $stmt = db()->prepare('SELECT id, client_id, status FROM client_tasks WHERE id = :id LIMIT 1');
         $stmt->execute(['id' => $taskId]);
         $taskRow = $stmt->fetch();
 
         if (!$taskRow || !in_array((int) $taskRow['client_id'], $myClientIds, true)) {
             flash('error', 'That task is not part of your assigned clients.');
+            redirect('staff/index.php?view=tasks');
+        }
+        if (in_array((string) $taskRow['status'], ['cancelled', 'terminated'], true)) {
+            flash('error', 'A ' . (string) $taskRow['status'] . ' task cannot be marked completed.');
             redirect('staff/index.php?view=tasks');
         }
 
@@ -174,6 +259,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 function staff_task_progress_percent(array $task, array $stages): int
 {
+    // A manually set work-progress value overrides the stage-derived figure.
+    if (array_key_exists('progress_percent', $task) && $task['progress_percent'] !== null) {
+        return max(0, min(100, (int) $task['progress_percent']));
+    }
+
     if ($stages !== []) {
         $completed = 0;
         foreach ($stages as $stage) {
@@ -210,7 +300,7 @@ function staff_status_tone(string $status): string
         'completed', 'active' => 'green',
         'in_progress' => 'blue',
         'on_hold' => 'amber',
-        'cancelled' => 'red',
+        'cancelled', 'terminated' => 'red',
         default => 'gray',
     };
 }
@@ -301,6 +391,26 @@ include __DIR__ . '/../../app/views/partials/staff_header.php';
 <?php endif; ?>
 
 <?php if ($view === 'tasks'): ?>
+    <?php if ($myHandoffs !== []): ?>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Work Handed Over to You</h2></div>
+        <p style="color:var(--mbw-muted);">You were assigned to take over these tasks. Each handoff includes the work progress at the time of the replacement.</p>
+        <?php foreach ($myHandoffs as $handoff): ?>
+            <details style="margin-bottom:10px;">
+                <summary>
+                    <strong>#<?= e((int) $handoff['task_id']) ?> <?= e($handoff['task_title']) ?></strong>
+                    — taking over from <?= e($handoff['from_user_name'] ?? 'previous staff') ?> on <?= e($handoff['created_at']) ?>
+                </summary>
+                <?php if (!empty($handoff['progress_summary'])): ?>
+                    <pre style="white-space:pre-wrap; background:var(--mbw-surface-2, rgba(0,0,0,0.04)); padding:10px; border-radius:8px; margin:8px 0;"><?= e($handoff['progress_summary']) ?></pre>
+                <?php endif; ?>
+                <?php if (!empty($handoff['note'])): ?>
+                    <p><strong>Handoff note:</strong> <?= nl2br(e($handoff['note'])) ?></p>
+                <?php endif; ?>
+            </details>
+        <?php endforeach; ?>
+    </section>
+    <?php endif; ?>
     <section class="mbw-card">
         <div class="mbw-card-head"><h2>Tasks for My Clients</h2></div>
         <div style="overflow-x:auto">
@@ -325,19 +435,49 @@ include __DIR__ . '/../../app/views/partials/staff_header.php';
                         $taskStages = $stagesByTask[(int) $task['id']] ?? [];
                         $progress = staff_task_progress_percent($task, $taskStages);
                         $pendingStages = array_filter($taskStages, static fn (array $s): bool => ($s['status'] ?? '') !== 'completed');
+                        $taskIsLocked = in_array((string) $task['status'], ['cancelled', 'terminated'], true);
+                        $rowAssignees = $taskAssigneesMap[(int) $task['id']] ?? [];
+                        $isMyAssignment = (int) ($task['assigned_staff_user_id'] ?? 0) === $staffId
+                            || in_array($staffId, array_map(static fn (array $a): int => $a['user_id'], $rowAssignees), true);
+                        if (!$isMyAssignment) {
+                            foreach ($taskStages as $stageRow) {
+                                if ((int) ($stageRow['assigned_staff_user_id'] ?? 0) === $staffId) {
+                                    $isMyAssignment = true;
+                                    break;
+                                }
+                            }
+                        }
                     ?>
                     <tr>
-                        <td>#<?= e((int) $task['id']) ?> <?= e($task['title']) ?><br><small><?= e($task['contract_no'] ?? 'No contract') ?></small></td>
+                        <td>
+                            #<?= e((int) $task['id']) ?> <?= e($task['title']) ?><br><small><?= e($task['contract_no'] ?? 'No contract') ?></small>
+                            <?php $rowAssignees = $taskAssigneesMap[(int) $task['id']] ?? []; ?>
+                            <?php if ($rowAssignees !== []): ?>
+                                <br><small>Assigned: <?= e(implode(', ', array_map(static fn (array $a): string => $a['name'], $rowAssignees))) ?></small>
+                            <?php endif; ?>
+                        </td>
                         <td><?= e($task['organization_name']) ?></td>
                         <td>
                             <div class="progress-track"><div class="progress-fill" style="width: <?= e((string) $progress) ?>%"></div></div>
                             <small><?= e((string) $progress) ?>%</small>
+                            <?php if ($hasProgressColumn && $isMyAssignment && !$taskIsLocked && $task['status'] !== 'completed'): ?>
+                                <form method="post" style="display:flex; gap:4px; align-items:center; margin-top:4px;">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="update_task_progress">
+                                    <input type="hidden" name="task_id" value="<?= e((int) $task['id']) ?>">
+                                    <input type="number" name="progress_percent" min="0" max="100" step="1" value="<?= e((string) $progress) ?>" style="width:64px;" aria-label="Work progress percent">
+                                    <button type="submit" class="button secondary">Update</button>
+                                </form>
+                            <?php endif; ?>
                         </td>
                         <td><span class="mbw-pill tone-<?= e(staff_status_tone((string) $task['status'])) ?>"><?= e($task['status']) ?></span></td>
                         <td><span class="mbw-pill tone-<?= e(staff_priority_tone((string) $task['priority'])) ?>"><?= e($task['priority']) ?></span></td>
                         <td><?= e($task['due_date'] ?? '-') ?></td>
                         <td>
-                            <?php if ($pendingStages !== []): ?>
+                            <?php if ($taskIsLocked): ?>
+                                <small><?= e($task['status'] === 'terminated' ? 'Task terminated; no further work.' : 'Task cancelled.') ?></small>
+                            <?php endif; ?>
+                            <?php if ($pendingStages !== [] && !$taskIsLocked): ?>
                                 <form method="post" class="inline-action-form">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="complete_stage">
@@ -349,7 +489,7 @@ include __DIR__ . '/../../app/views/partials/staff_header.php';
                                     <button type="submit" class="button secondary">Complete stage</button>
                                 </form>
                             <?php endif; ?>
-                            <?php if ($task['status'] !== 'completed' && $task['status'] !== 'cancelled'): ?>
+                            <?php if ($task['status'] !== 'completed' && !$taskIsLocked): ?>
                                 <form method="post" class="inline-action-form">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="complete_task">

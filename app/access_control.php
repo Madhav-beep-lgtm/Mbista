@@ -99,6 +99,26 @@ function access_control_ensure_schema(): void
             );
         }
 
+        // Migration 049: per-client accounting access for staff accountants.
+        if (!table_exists('staff_client_accounting_access') && table_exists('users') && table_exists('client_profiles')) {
+            db()->exec(
+                'CREATE TABLE IF NOT EXISTS staff_client_accounting_access (
+                    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    company_id INT UNSIGNED DEFAULT NULL,
+                    staff_user_id INT UNSIGNED NOT NULL,
+                    client_id INT UNSIGNED NOT NULL,
+                    granted_by INT UNSIGNED DEFAULT NULL,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uniq_staff_client_accounting (staff_user_id, client_id),
+                    KEY idx_staff_client_accounting_company (company_id),
+                    KEY idx_staff_client_accounting_client (client_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+            );
+        }
+
         // Migration 045: extra customer logins per client organization.
         if (!table_exists('client_portal_users') && table_exists('client_profiles')) {
             db()->exec(
@@ -395,13 +415,107 @@ function client_books_company_ids_for_servers(array $companyIds): array
 }
 
 /**
+ * Client ids a staff member may account for (migration 049): active rows the
+ * admin granted in staff_client_accounting_access. Cached per request.
+ */
+function staff_accounting_client_ids(?int $staffUserId = null): array
+{
+    $staffUserId = $staffUserId ?? (int) (current_user()['id'] ?? 0);
+    if ($staffUserId <= 0 || !table_exists('staff_client_accounting_access')) {
+        return [];
+    }
+
+    static $cache = [];
+    if (isset($cache[$staffUserId])) {
+        return $cache[$staffUserId];
+    }
+
+    $stmt = db()->prepare('SELECT client_id FROM staff_client_accounting_access WHERE staff_user_id = :uid AND is_active = 1');
+    $stmt->execute(['uid' => $staffUserId]);
+    $cache[$staffUserId] = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+    return $cache[$staffUserId];
+}
+
+/**
+ * Replace a staff member's client accounting grants with $clientIds.
+ * Deactivates removed grants (keeps the audit trail) and re-activates or
+ * inserts the granted ones. Unknown client ids are silently dropped.
+ */
+function set_staff_accounting_clients(int $staffUserId, array $clientIds, ?int $grantedBy = null): void
+{
+    if ($staffUserId <= 0 || !table_exists('staff_client_accounting_access')) {
+        return;
+    }
+
+    $clientIds = array_values(array_unique(array_filter(array_map('intval', $clientIds), static fn (int $id): bool => $id > 0)));
+
+    db()->prepare('UPDATE staff_client_accounting_access SET is_active = 0 WHERE staff_user_id = :uid')
+        ->execute(['uid' => $staffUserId]);
+
+    if ($clientIds === []) {
+        return;
+    }
+
+    $companyStmt = db()->prepare('SELECT id, company_id FROM client_profiles WHERE id IN (' . implode(',', array_fill(0, count($clientIds), '?')) . ')');
+    $companyStmt->execute($clientIds);
+    $clientCompanies = [];
+    foreach ($companyStmt->fetchAll() as $row) {
+        $clientCompanies[(int) $row['id']] = (int) ($row['company_id'] ?? 0);
+    }
+
+    $grantStmt = db()->prepare('INSERT INTO staff_client_accounting_access (company_id, staff_user_id, client_id, granted_by, is_active)
+        VALUES (:company_id, :staff_user_id, :client_id, :granted_by, 1)
+        ON DUPLICATE KEY UPDATE is_active = 1, granted_by = VALUES(granted_by), company_id = VALUES(company_id)');
+    foreach ($clientIds as $clientId) {
+        if (!isset($clientCompanies[$clientId])) {
+            continue;
+        }
+        $grantStmt->execute([
+            'company_id' => $clientCompanies[$clientId] > 0 ? $clientCompanies[$clientId] : null,
+            'staff_user_id' => $staffUserId,
+            'client_id' => $clientId,
+            'granted_by' => $grantedBy,
+        ]);
+    }
+}
+
+/**
+ * True while a STAFF login is working inside a client's books company.
+ * Their vouchers are then always forced to pending_approval and flagged
+ * requires_client_approval — both the client (owner/approver) and the firm
+ * admin are notified and either may approve. Staff never self-approve there.
+ */
+function staff_accountant_forces_approval(?array $user = null): bool
+{
+    $user = $user ?? current_user();
+    if (!$user || (string) ($user['role'] ?? '') !== 'staff') {
+        return false;
+    }
+
+    $companyId = current_company_id();
+    if ($companyId <= 0 || !table_exists('client_profiles') || !column_exists('client_profiles', 'books_company_id')) {
+        return false;
+    }
+
+    static $cache = [];
+    if (!array_key_exists($companyId, $cache)) {
+        $stmt = db()->prepare('SELECT COUNT(*) FROM client_profiles WHERE books_company_id = :cid');
+        $stmt->execute(['cid' => $companyId]);
+        $cache[$companyId] = (int) $stmt->fetchColumn() > 0;
+    }
+
+    return $cache[$companyId];
+}
+
+/**
  * The complete set of company ids the user may open, read or report on.
  *
  *  - Super Admin (M. Bista & Associates): every active company.
  *  - Admin (service provider / client admin): home company + its subsidiaries
  *    + explicit memberships + the books of clients those companies serve.
  *  - Staff: home company + explicit memberships + books of clients assigned
- *    to them personally.
+ *    to them personally or granted to them for accounting (migration 049).
  *  - Customer (client login): the books company of their own client profile.
  */
 function authorized_company_ids(?array $user = null): array
@@ -459,6 +573,16 @@ function authorized_company_ids(?array $user = null): array
         $stmt = db()->prepare('SELECT books_company_id FROM client_profiles WHERE assigned_staff_user_id = :uid AND books_company_id IS NOT NULL AND is_active = 1');
         $stmt->execute(['uid' => $userId]);
         $ids = array_merge($ids, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+
+        // ... plus the books of clients the admin granted them accounting
+        // access to (staff_client_accounting_access, migration 049).
+        $grantedClientIds = staff_accounting_client_ids($userId);
+        if ($grantedClientIds !== []) {
+            $placeholders = implode(',', array_fill(0, count($grantedClientIds), '?'));
+            $stmt = db()->prepare('SELECT books_company_id FROM client_profiles WHERE id IN (' . $placeholders . ') AND books_company_id IS NOT NULL AND is_active = 1');
+            $stmt->execute($grantedClientIds);
+            $ids = array_merge($ids, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        }
     } elseif ($role === 'customer' && table_exists('client_profiles') && column_exists('client_profiles', 'books_company_id')) {
         // A client login (owner or added portal member) reaches only its own books.
         $profile = client_profile_for_user($userId);

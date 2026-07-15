@@ -519,7 +519,8 @@ function accounting_module_repair_database(): array
             db()->exec('ALTER TABLE `task_invoices` MODIFY COLUMN `task_id` INT UNSIGNED NULL');
         }
         if (accounting_repair_column_exists('task_invoices', 'invoice_type')) {
-            db()->exec("ALTER TABLE `task_invoices` MODIFY COLUMN `invoice_type` ENUM('stage', 'task', 'inventory', 'manufacturing', 'other') NOT NULL DEFAULT 'task'");
+            // 'termination' must survive this repair; see migration 048.
+            db()->exec("ALTER TABLE `task_invoices` MODIFY COLUMN `invoice_type` ENUM('stage', 'task', 'inventory', 'manufacturing', 'other', 'termination') NOT NULL DEFAULT 'task'");
         }
         accounting_repair_add_column('task_invoices', 'invoice_source_type', "`invoice_source_type` ENUM('task', 'inventory', 'manufacturing', 'other') NOT NULL DEFAULT 'task' AFTER `invoice_type`");
         accounting_repair_add_column('task_invoices', 'source_id', '`source_id` INT UNSIGNED DEFAULT NULL AFTER `invoice_source_type`');

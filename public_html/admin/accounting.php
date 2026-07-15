@@ -57,6 +57,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'You do not have approval permission.');
             redirect('admin/accounting.php');
         }
+        if (staff_accountant_forces_approval()) {
+            flash('error', 'Vouchers in client books are approved by the client or the firm admin, not by staff.');
+            redirect('admin/accounting.php');
+        }
 
         require_permission('accounting', 'approve');
 
@@ -185,7 +189,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         try {
-            $needsApproval = $hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve');
+            // Staff accountants working in a client's books can never self-post:
+            // their vouchers always wait for the client or the firm admin.
+            $staffForcedApproval = $hasVoucherApprovals && staff_accountant_forces_approval();
+            $needsApproval = $staffForcedApproval
+                || ($hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve'));
             $voucherId = create_voucher_with_entries([
                 'company_id' => $companyId,
                 'fiscal_year_id' => $fiscalYearId,
@@ -206,10 +214,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'posted_by' => $needsApproval ? null : $userId,
                 'posted_at' => $needsApproval ? null : date('Y-m-d H:i:s'),
             ], $entries);
-            if ($voucherId > 0) {
-                security_event('voucher_posted', 'success', 'Voucher #' . $voucherId . ' posted.', $companyId, $userId);
+            if ($voucherId > 0 && $staffForcedApproval) {
+                // Notify the client's approval queue (their bell + dashboard)
+                // alongside the admin's pending list.
+                mark_voucher_requires_client_approval($voucherId);
             }
-            flash('success', $needsApproval ? 'Voucher submitted for approval.' : 'Voucher posted.');
+            if ($voucherId > 0) {
+                security_event('voucher_posted', 'success', 'Voucher #' . $voucherId . ($staffForcedApproval ? ' submitted for client/admin approval.' : ' posted.'), $companyId, $userId);
+            }
+            flash('success', $needsApproval
+                ? ($staffForcedApproval ? 'Voucher submitted for approval. The client and admin have been notified.' : 'Voucher submitted for approval.')
+                : 'Voucher posted.');
         } catch (Throwable $exception) {
             flash('error', 'Could not post voucher. Check voucher number uniqueness.');
         }

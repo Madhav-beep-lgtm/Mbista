@@ -529,11 +529,16 @@ CREATE TABLE IF NOT EXISTS `client_tasks` (
   `title` VARCHAR(190) NOT NULL,
   `description` TEXT DEFAULT NULL,
   `quoted_fee` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-  `status` ENUM('new', 'in_progress', 'on_hold', 'completed', 'cancelled') NOT NULL DEFAULT 'new',
+  `status` ENUM('new', 'in_progress', 'on_hold', 'completed', 'cancelled', 'terminated') NOT NULL DEFAULT 'new',
   `priority` ENUM('low', 'normal', 'high', 'urgent') NOT NULL DEFAULT 'normal',
+  `progress_percent` TINYINT UNSIGNED DEFAULT NULL,
   `start_date` DATE DEFAULT NULL,
   `due_date` DATE DEFAULT NULL,
   `completed_at` DATETIME DEFAULT NULL,
+  `terminated_at` DATETIME DEFAULT NULL,
+  `terminated_by` INT UNSIGNED DEFAULT NULL,
+  `termination_reason` TEXT DEFAULT NULL,
+  `termination_compensation` DECIMAL(12,2) DEFAULT NULL,
   `created_by` INT UNSIGNED DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -545,13 +550,73 @@ CREATE TABLE IF NOT EXISTS `client_tasks` (
   KEY `idx_client_tasks_status` (`status`),
   KEY `idx_client_tasks_assigned_staff` (`assigned_staff_user_id`),
   KEY `idx_client_tasks_service_provider_entity` (`service_provider_entity_id`),
+  KEY `idx_client_tasks_terminated_by` (`terminated_by`),
   CONSTRAINT `fk_client_tasks_service_provider_entity` FOREIGN KEY (`service_provider_entity_id`) REFERENCES `service_provider_entities` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_client_tasks_assigned_staff` FOREIGN KEY (`assigned_staff_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_client_tasks_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_client_tasks_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_client_tasks_team` FOREIGN KEY (`team_id`) REFERENCES `teams` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_client_tasks_contract` FOREIGN KEY (`contract_id`) REFERENCES `service_contracts` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_client_tasks_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_client_tasks_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_client_tasks_terminated_by` FOREIGN KEY (`terminated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `client_task_assignees` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `task_id` INT UNSIGNED NOT NULL,
+  `user_id` INT UNSIGNED NOT NULL,
+  `is_lead` TINYINT(1) NOT NULL DEFAULT 0,
+  `assigned_by` INT UNSIGNED DEFAULT NULL,
+  `assigned_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_task_assignee` (`task_id`, `user_id`),
+  KEY `idx_task_assignees_company` (`company_id`),
+  KEY `idx_task_assignees_user` (`user_id`),
+  CONSTRAINT `fk_task_assignees_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_assignees_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_task_assignees_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_task_assignees_assigner` FOREIGN KEY (`assigned_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `task_assignment_events` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `task_id` INT UNSIGNED NOT NULL,
+  `event_type` ENUM('assigned', 'replaced', 'removed') NOT NULL,
+  `from_user_id` INT UNSIGNED DEFAULT NULL,
+  `to_user_id` INT UNSIGNED DEFAULT NULL,
+  `note` TEXT DEFAULT NULL,
+  `progress_summary` TEXT DEFAULT NULL,
+  `created_by` INT UNSIGNED DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_task_assignment_events_task` (`task_id`),
+  KEY `idx_task_assignment_events_company` (`company_id`),
+  KEY `idx_task_assignment_events_to_user` (`to_user_id`),
+  CONSTRAINT `fk_task_assignment_events_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_assignment_events_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_task_assignment_events_from_user` FOREIGN KEY (`from_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_assignment_events_to_user` FOREIGN KEY (`to_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_task_assignment_events_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `staff_client_accounting_access` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED DEFAULT NULL,
+  `staff_user_id` INT UNSIGNED NOT NULL,
+  `client_id` INT UNSIGNED NOT NULL,
+  `granted_by` INT UNSIGNED DEFAULT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_staff_client_accounting` (`staff_user_id`, `client_id`),
+  KEY `idx_staff_client_accounting_company` (`company_id`),
+  KEY `idx_staff_client_accounting_client` (`client_id`),
+  CONSTRAINT `fk_staff_client_accounting_staff` FOREIGN KEY (`staff_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_staff_client_accounting_client` FOREIGN KEY (`client_id`) REFERENCES `client_profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_staff_client_accounting_granted_by` FOREIGN KEY (`granted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `task_stages` (
@@ -582,7 +647,7 @@ CREATE TABLE IF NOT EXISTS `task_invoices` (
   `task_id` INT UNSIGNED DEFAULT NULL,
   `stage_id` INT UNSIGNED DEFAULT NULL,
   `invoice_no` VARCHAR(100) NOT NULL,
-  `invoice_type` ENUM('stage', 'task', 'inventory', 'manufacturing', 'other') NOT NULL DEFAULT 'task',
+  `invoice_type` ENUM('stage', 'task', 'inventory', 'manufacturing', 'other', 'termination') NOT NULL DEFAULT 'task',
   `invoice_source_type` ENUM('task', 'inventory', 'manufacturing', 'other') NOT NULL DEFAULT 'task',
   `source_id` INT UNSIGNED DEFAULT NULL,
   `party_id` INT UNSIGNED DEFAULT NULL,
