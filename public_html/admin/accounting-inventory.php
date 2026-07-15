@@ -42,7 +42,7 @@ function inventory_valid_date(string $value): ?string
 }
 
 /**
- * The inventory posting purposes shown on the Ledger Mapping tab, with a
+ * The inventory posting purposes (chosen per item on the item form and its
  * human label and the account type each SHOULD point at (used for the
  * "wrong-type" warning so an asset is not mapped to income, etc.).
  */
@@ -68,6 +68,45 @@ function inventory_mapping_purposes(): array
         'tax_input'            => ['label' => 'Recoverable Input Tax', 'expect' => 'asset'],
         'tax_output'           => ['label' => 'Output Tax Payable', 'expect' => 'liability'],
     ];
+}
+
+/**
+ * Sets (or with ledger id 0 clears) ONE item-scope ledger mapping — the same
+ * per-record arrangement as fixed assets: ledgers are chosen on the item form
+ * and the item's "This item posts to" panel; inv_resolve_mapping still walks
+ * item -> category -> global, so old global rows keep working as defaults.
+ */
+function inventory_set_item_ledger(int $companyId, int $itemId, string $purpose, int $ledgerId, ?int $userId = null): void
+{
+    if ($itemId <= 0 || !array_key_exists($purpose, inventory_mapping_purposes())) {
+        return;
+    }
+    if ($ledgerId > 0) {
+        $own = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE id = :id AND company_id = :cid');
+        $own->execute(['id' => $ledgerId, 'cid' => $companyId]);
+        if ((int) $own->fetchColumn() === 0) {
+            return; // never map a foreign company's ledger
+        }
+    }
+    db()->prepare("DELETE FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = 'item' AND item_id = :iid AND purpose = :p AND category IS NULL")
+        ->execute(['cid' => $companyId, 'iid' => $itemId, 'p' => $purpose]);
+    if ($ledgerId > 0) {
+        db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, category, item_id, purpose, ledger_id, created_by) VALUES (:cid, 'item', NULL, :iid, :p, :lid, :uid)")
+            ->execute(['cid' => $companyId, 'iid' => $itemId, 'p' => $purpose, 'lid' => $ledgerId, 'uid' => $userId ?: null]);
+    }
+}
+
+/** The posting purposes that apply to ONE item, by its type (FA-style filter). */
+function inventory_purposes_for_item(array $item): array
+{
+    $base = ['inventory_asset', 'opening_equity', 'purchase_clearing', 'cogs', 'sales_revenue', 'inventory_gain', 'inventory_loss', 'write_down_expense', 'write_down_allowance', 'write_down_reversal', 'tax_input', 'tax_output'];
+    return match ((string) ($item['item_type'] ?? 'stock')) {
+        'raw_material' => array_merge($base, ['raw_material', 'wip']),
+        'finished_good' => array_merge($base, ['finished_goods', 'wip', 'labour_clearing', 'overhead_absorbed']),
+        'wip' => array_merge($base, ['wip', 'raw_material', 'finished_goods']),
+        'scrap', 'by_product' => array_merge($base, ['scrap_inventory', 'wip']),
+        default => $base,
+    };
 }
 
 /** Item scoped to the current company, or null — never trust a POSTed item id. */
@@ -216,7 +255,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $params = [
             'company_id' => $companyId,
-            'ledger_id' => (int) ($_POST['ledger_id'] ?? 0) ?: null,
+            // The legacy linked-ledger column follows the item's chosen
+            // Inventory Asset ledger so older reads stay consistent.
+            'ledger_id' => (int) ($_POST['item_map']['inventory_asset'] ?? ($_POST['ledger_id'] ?? 0)) ?: null,
             'sku' => $sku,
             'name' => $name,
             'category' => trim((string) ($_POST['category'] ?? '')) ?: null,
@@ -254,6 +295,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Opening qty/rate or method may have changed — rebuild layers.
                 inv_rebuild_layers($companyId, $itemId, $valuationMethod, (float) $params['opening_qty'], (float) $params['purchase_rate']);
                 log_activity('inventory_item', $itemId, 'updated', 'Inventory item updated.', $userId);
+                $savedItemId = $itemId;
                 flash('success', 'Item updated.');
             } else {
                 db()->prepare('
@@ -271,7 +313,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     inv_add_layer($companyId, $newItemId, (float) $params['opening_qty'], (float) $params['purchase_rate'], '2000-01-01');
                 }
                 log_activity('inventory_item', $newItemId, 'created', 'Inventory item created.', $userId);
+                $savedItemId = $newItemId;
                 flash('success', 'Item created.');
+            }
+            // The ledgers chosen on the form belong to THIS item only — saved
+            // as item-scope mappings so every movement (purchase, sale,
+            // adjustment, NRV, manufacturing) posts to them without a
+            // separate mapping step. 0 = inherit the category/global default.
+            foreach ((array) ($_POST['item_map'] ?? []) as $mapPurpose => $mapLedgerId) {
+                inventory_set_item_ledger($companyId, $savedItemId, (string) $mapPurpose, (int) $mapLedgerId, $userId);
             }
             db()->commit();
         } catch (Throwable $exception) {
@@ -522,7 +572,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $glNote = ' GL voucher posted (' . site_currency_symbol() . number_format($postingValue, 2) . ').';
             } elseif ($mapMissing !== []) {
                 $labels = array_map(static fn (string $p): string => inventory_mapping_purposes()[$p]['label'] ?? $p, $mapMissing);
-                $glNote = ' Stock recorded — map ' . implode(' & ', $labels) . ' on the Ledger Mapping tab to auto-post the accounting voucher.';
+                $glNote = ' Stock recorded — map ' . implode(' & ', $labels) . ' in the item\'s "This item posts to" panel (edit the item) to auto-post the accounting voucher.';
             }
             $relNote = $allowanceReleased > 0
                 ? ' NRV allowance released: ' . site_currency_symbol() . number_format($allowanceReleased, 2) . ' (expense reduced to the written-down carrying amount, IAS 2.34).'
@@ -656,7 +706,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $glNote = ' GL voucher posted (' . site_currency_symbol() . number_format($postedValue, 2) . ').';
             } elseif ($mapMissing !== []) {
                 $labels = array_map(static fn (string $p): string => inventory_mapping_purposes()[$p]['label'] ?? $p, $mapMissing);
-                $glNote = ' Stock-only recorded — map ' . implode(' & ', $labels) . ' on the Ledger Mapping tab to auto-post the accounting voucher.';
+                $glNote = ' Stock-only recorded — map ' . implode(' & ', $labels) . ' in the item\'s "This item posts to" panel (edit the item) to auto-post the accounting voucher.';
             }
             security_event('inventory_nrv_posted', 'success', ($isWriteDown ? 'NRV write-down ' : 'NRV reversal ') . number_format($postedValue, 2) . ' posted for item #' . $itemId . '.', $companyId, $userId);
             flash('success', ($isWriteDown ? 'NRV write-down of ' : 'NRV reversal of ') . site_currency_symbol() . number_format($postedValue, 2) . ' posted for ' . $item['sku'] . '.' . $glNote);
@@ -806,25 +856,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mapItemId = $mapScope === 'item' ? (int) ($_POST['map_item_id'] ?? 0) : 0;
         if ($mapScope === 'category' && $mapCategory === '') {
             flash('error', 'Select an item category for the override.');
-            redirect('admin/accounting-inventory.php?view=mapping');
+            redirect('admin/accounting-inventory.php');
         }
         if ($mapScope === 'item') {
             $chk = db()->prepare('SELECT COUNT(*) FROM inventory_items WHERE id = :id AND company_id = :cid');
             $chk->execute(['id' => $mapItemId, 'cid' => $companyId]);
             if ($mapItemId <= 0 || (int) $chk->fetchColumn() === 0) {
                 flash('error', 'Select a valid inventory item for the override.');
-                redirect('admin/accounting-inventory.php?view=mapping');
+                redirect('admin/accounting-inventory.php');
             }
         }
         $scopeWhere = 'company_id = :cid AND scope = :scope AND purpose = :p AND '
             . ($mapScope === 'category' ? 'category = :sid AND item_id IS NULL' : ($mapScope === 'item' ? 'item_id = :sid AND category IS NULL' : 'category IS NULL AND item_id IS NULL'));
-        $backTo = 'admin/accounting-inventory.php?view=mapping&map_scope=' . $mapScope
-            . ($mapCategory !== '' ? '&map_category=' . urlencode($mapCategory) : '')
-            . ($mapItemId > 0 ? '&map_item_id=' . $mapItemId : '');
+        // The per-item panel drives this action now (the mapping tab is gone);
+        // return to the item being edited so the panel re-renders in place.
+        $backTo = $mapScope === 'item'
+            ? 'admin/accounting-inventory.php?edit_id=' . $mapItemId . '#create-item'
+            : 'admin/accounting-inventory.php';
 
         $purposes = array_keys(inventory_mapping_purposes());
         $saved = 0;
         foreach ($purposes as $purpose) {
+            // Only purposes present in the submission are touched: the panel
+            // shows a type-filtered subset, and an unsubmitted purpose must
+            // keep its existing row instead of being wiped.
+            if (!array_key_exists($purpose, (array) ($_POST['map'] ?? []))) {
+                continue;
+            }
             $ledgerId = (int) ($_POST['map'][$purpose] ?? 0);
             $deleteParams = ['cid' => $companyId, 'scope' => $mapScope, 'p' => $purpose];
             if ($mapScope !== 'global') {
@@ -1355,7 +1413,10 @@ $inventoryTypeCards = $inventoryProfile['show_manufacturing']
         ['Consumable', 'Low-value operational items tracked for stock control.'],
 ];
 $invView = (string) ($_GET['view'] ?? 'inventory');
-$allowedViews = ['inventory', 'valuation', 'mapping'];
+// 'mapping' is gone on purpose: ledgers are chosen per item on the item form
+// and each item's "This item posts to" panel — same arrangement as fixed
+// assets. Old global/category rows keep working as inherited defaults.
+$allowedViews = ['inventory', 'valuation'];
 if ($inventoryProfile['show_manufacturing'] ?? false) {
     $allowedViews[] = 'manufacturing';
 }
@@ -1437,7 +1498,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <nav class="mbw-tabbar inventory-workspace-tabs" aria-label="Inventory workspace">
     <a class="mbw-tab <?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('cart') ?>Items &amp; Transactions</a>
     <a class="mbw-tab <?= $invView === 'valuation' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=valuation')) ?>"><?= icon('reports') ?>Valuation &amp; NRV</a>
-    <a class="mbw-tab <?= $invView === 'mapping' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=mapping')) ?>"><?= icon('accounting') ?>Ledger Mapping</a>
     <?php if ($inventoryProfile['show_manufacturing']): ?><a class="mbw-tab <?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('layers') ?>Manufacturing</a><?php endif; ?>
 </nav>
 
@@ -1521,105 +1581,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         })();
         </script>
     </section>
-<?php elseif ($invView === 'mapping'): ?>
-    <?php
-    $mapScopeRaw = (string) ($_GET['map_scope'] ?? 'global');
-    $mapScope = in_array($mapScopeRaw, ['global', 'category', 'item'], true) ? $mapScopeRaw : 'global';
-    $mapCategory = $mapScope === 'category' ? trim((string) ($_GET['map_category'] ?? '')) : '';
-    $mapItemId = $mapScope === 'item' ? (int) ($_GET['map_item_id'] ?? 0) : 0;
-    $mapCategoryOptions = db()->prepare("SELECT DISTINCT category FROM inventory_items WHERE company_id = :cid AND category IS NOT NULL AND category <> '' ORDER BY category ASC");
-    $mapCategoryOptions->execute(['cid' => $companyId]);
-    $mapCategoryOptions = $mapCategoryOptions->fetchAll(PDO::FETCH_COLUMN);
-    $mapItemOptions = db()->prepare('SELECT id, sku, name FROM inventory_items WHERE company_id = :cid ORDER BY name ASC');
-    $mapItemOptions->execute(['cid' => $companyId]);
-    $mapItemOptions = $mapItemOptions->fetchAll(PDO::FETCH_ASSOC);
-    if ($mapScope === 'category' && $mapCategory === '' && $mapCategoryOptions !== []) { $mapCategory = (string) $mapCategoryOptions[0]; }
-    if ($mapScope === 'item' && $mapItemId <= 0 && $mapItemOptions !== []) { $mapItemId = (int) $mapItemOptions[0]['id']; }
-
-    // Current mappings for the selected scope + wrong-type detection.
-    $currentMappings = [];
-    if ($mapScope === 'category' && $mapCategory !== '') {
-        $mapStmt = db()->prepare("SELECT m.purpose, m.ledger_id, l.type AS ledger_type, l.code, l.name FROM inventory_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = 'category' AND m.category = :sid");
-        $mapStmt->execute(['cid' => $companyId, 'sid' => $mapCategory]);
-    } elseif ($mapScope === 'item' && $mapItemId > 0) {
-        $mapStmt = db()->prepare("SELECT m.purpose, m.ledger_id, l.type AS ledger_type, l.code, l.name FROM inventory_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = 'item' AND m.item_id = :sid");
-        $mapStmt->execute(['cid' => $companyId, 'sid' => $mapItemId]);
-    } else {
-        $mapStmt = db()->prepare("SELECT m.purpose, m.ledger_id, l.type AS ledger_type, l.code, l.name FROM inventory_ledger_mappings m JOIN ledgers l ON l.id = m.ledger_id WHERE m.company_id = :cid AND m.scope = 'global'");
-        $mapStmt->execute(['cid' => $companyId]);
-    }
-    foreach ($mapStmt->fetchAll(PDO::FETCH_ASSOC) as $mr) {
-        $currentMappings[$mr['purpose']] = $mr;
-    }
-    ?>
-    <section class="mbw-card" aria-label="Ledger mapping">
-        <div class="mbw-card-head">
-            <h2>Ledger Mapping<?= $mapScope === 'global' ? ' (global defaults)' : ($mapScope === 'category' ? ' — category "' . e($mapCategory) . '"' : ' — per item') ?></h2>
-            <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Precedence: item &rarr; category &rarr; global. Postings are blocked until every required purpose resolves to a ledger.</span></div>
-        </div>
-        <form method="get" action="<?= e(url('admin/accounting-inventory.php')) ?>" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
-            <input type="hidden" name="view" value="mapping">
-            <label style="margin:0">Mapping scope
-                <select name="map_scope" onchange="this.form.submit()">
-                    <option value="global" <?= $mapScope === 'global' ? 'selected' : '' ?>>Global defaults</option>
-                    <option value="category" <?= $mapScope === 'category' ? 'selected' : '' ?>>Per item category</option>
-                    <option value="item" <?= $mapScope === 'item' ? 'selected' : '' ?>>Per individual item</option>
-                </select>
-            </label>
-            <?php if ($mapScope === 'category'): ?>
-                <label style="margin:0">Category
-                    <select name="map_category" onchange="this.form.submit()">
-                        <?php foreach ($mapCategoryOptions as $mc): ?><option value="<?= e($mc) ?>" <?= $mapCategory === (string) $mc ? 'selected' : '' ?>><?= e($mc) ?></option><?php endforeach; ?>
-                    </select>
-                </label>
-            <?php elseif ($mapScope === 'item'): ?>
-                <label style="margin:0">Item
-                    <select name="map_item_id" onchange="this.form.submit()">
-                        <?php foreach ($mapItemOptions as $mi): ?><option value="<?= (int) $mi['id'] ?>" <?= $mapItemId === (int) $mi['id'] ? 'selected' : '' ?>><?= e(($mi['sku'] ? $mi['sku'] . ' — ' : '') . $mi['name']) ?></option><?php endforeach; ?>
-                    </select>
-                </label>
-            <?php endif; ?>
-        </form>
-        <form method="post">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="save_inventory_mappings">
-            <input type="hidden" name="map_scope" value="<?= e($mapScope) ?>">
-            <?php if ($mapScope === 'category'): ?><input type="hidden" name="map_category" value="<?= e($mapCategory) ?>"><?php endif; ?>
-            <?php if ($mapScope === 'item'): ?><input type="hidden" name="map_item_id" value="<?= (int) $mapItemId ?>"><?php endif; ?>
-            <div class="rc-table-scroll">
-                <table class="rc-table">
-                    <thead><tr><th>Purpose</th><th>Expected type</th><th>Mapped ledger</th><th>Status</th></tr></thead>
-                    <tbody>
-                        <?php foreach (inventory_mapping_purposes() as $purposeKey => $meta): ?>
-                            <?php
-                            $cur = $currentMappings[$purposeKey] ?? null;
-                            $curId = (int) ($cur['ledger_id'] ?? 0);
-                            $typeMismatch = $cur && (string) $cur['ledger_type'] !== $meta['expect'];
-                            ?>
-                            <tr>
-                                <td><strong><?= e($meta['label']) ?></strong></td>
-                                <td><span class="mbw-pill tone-gray"><?= e(ucfirst($meta['expect'])) ?></span></td>
-                                <td>
-                                    <select name="map[<?= e($purposeKey) ?>]" style="min-width:230px">
-                                        <option value="0"><?= $mapScope === 'global' ? 'Not mapped' : '— inherit —' ?></option>
-                                        <?php foreach ($ledgers as $ledger): ?>
-                                            <option value="<?= e((int) $ledger['id']) ?>" <?= $curId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </td>
-                                <td>
-                                    <?php if (!$cur): ?><span class="mbw-pill <?= $mapScope === 'global' ? 'tone-amber' : 'tone-gray' ?>"><?= $mapScope === 'global' ? 'Incomplete' : 'Inherits' ?></span>
-                                    <?php elseif ($typeMismatch): ?><span class="mbw-pill tone-amber" title="Mapped ledger type is <?= e((string) $cur['ledger_type']) ?>, expected <?= e($meta['expect']) ?>">Type warning</span>
-                                    <?php else: ?><span class="mbw-pill tone-green">Mapped</span><?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-            <div style="margin-top:12px"><button type="submit"><?= icon('accounting') ?>Save mappings</button></div>
-        </form>
-    </section>
 <?php endif; ?>
 
 <?php if ($invView === 'inventory'): ?>
@@ -1697,12 +1658,84 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Purchase rate<input type="number" step="0.01" name="purchase_rate" value="<?= e($editItem['purchase_rate'] ?? '0.00') ?>"></label>
             <label>Opening qty<input type="number" step="0.001" name="opening_qty" value="<?= e($editItem['opening_qty'] ?? '0.000') ?>"></label>
             <label>Reorder level<input type="number" step="0.001" name="reorder_level" value="<?= e($editItem['reorder_level'] ?? '0.000') ?>"></label>
-            <label>Linked ledger<select name="ledger_id"><option value="0">No linked ledger</option><?php foreach ($ledgers as $ledger): ?><option value="<?= e((int) $ledger['id']) ?>" <?= (int) ($editItem['ledger_id'] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option><?php endforeach; ?></select></label>
             <label>Default warehouse<select name="default_warehouse_id"><option value="0">— none —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>" <?= (int) ($editItem['default_warehouse_id'] ?? 0) === (int) $warehouse['id'] ? 'selected' : '' ?>><?= e($warehouse['name'] . ($warehouse['code'] ? ' (' . $warehouse['code'] . ')' : '')) ?></option><?php endforeach; ?></select></label>
+            <?php
+            // Per-item ledgers, exactly like the fixed-asset register form:
+            // the four everyday purposes are chosen here and belong to THIS
+            // item only; the full lifecycle list lives in the panel below
+            // when editing. 0 = inherit the category/global default.
+            $itemMapCurrent = [];
+            if ($editItem) {
+                $itemMapStmt = db()->prepare("SELECT purpose, ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = 'item' AND item_id = :iid AND category IS NULL");
+                $itemMapStmt->execute(['cid' => $companyId, 'iid' => (int) $editItem['id']]);
+                foreach ($itemMapStmt->fetchAll(PDO::FETCH_ASSOC) as $imRow) {
+                    $itemMapCurrent[(string) $imRow['purpose']] = (int) $imRow['ledger_id'];
+                }
+            }
+            $itemFormPurposes = ['inventory_asset', 'purchase_clearing', 'cogs', 'opening_equity'];
+            $itemPurposeMeta = inventory_mapping_purposes();
+            ?>
+            <?php foreach ($itemFormPurposes as $itemFormPurpose): ?>
+                <?php
+                $inheritLedger = inv_resolve_mapping($companyId, $itemFormPurpose, null, trim((string) ($editItem['category'] ?? '')) ?: null);
+                $ownLedgerId = $itemMapCurrent[$itemFormPurpose] ?? 0;
+                ?>
+                <label><?= e($itemPurposeMeta[$itemFormPurpose]['label'] ?? $itemFormPurpose) ?> ledger (this item only)
+                    <select name="item_map[<?= e($itemFormPurpose) ?>]">
+                        <option value="0">— inherit default<?= $inheritLedger ? ': ' . e($inheritLedger['name']) : ' (not set)' ?> —</option>
+                        <?php foreach ($ledgers as $ledger): ?>
+                            <option value="<?= (int) $ledger['id'] ?>" <?= $ownLedgerId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+            <?php endforeach; ?>
             <label class="workspace-span-2">Notes<textarea name="notes"><?= e($editItem['notes'] ?? '') ?></textarea></label>
             <div class="workspace-span-2"><button type="submit"><?= icon('services') ?>Save item</button><?php if ($editItem): ?> <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php')) ?>">Cancel edit</a><?php endif; ?></div>
         </form>
     </details>
+
+    <?php if ($editItem): ?>
+    <?php
+    // "This item posts to" — every posting purpose this item's movements use
+    // (purchases, sales, adjustments, NRV, manufacturing), filtered by item
+    // type. Same arrangement as the fixed-asset panel: rows set here apply to
+    // THIS item only; blank rows inherit the category/global default, which
+    // is shown so the effective ledger is never a mystery.
+    $panelPurposeMeta = inventory_mapping_purposes();
+    ?>
+    <details class="feature-disclosure" open>
+        <summary><span><strong><?= icon('accounting') ?>This item posts to (ledgers)</strong><small><?= e($editItem['sku']) ?> — <?= e($editItem['name']) ?>: acquisition, sales, adjustment, NRV and production ledgers. Applies to this item only.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_inventory_mappings">
+            <input type="hidden" name="map_scope" value="item">
+            <input type="hidden" name="map_item_id" value="<?= (int) $editItem['id'] ?>">
+            <div class="rc-table-scroll"><table class="rc-table">
+                <thead><tr><th>Used for</th><th>Expected type</th><th>Ledger (this item only)</th><th>Currently posting to</th></tr></thead>
+                <tbody>
+                    <?php foreach (inventory_purposes_for_item($editItem) as $panelPurpose): ?>
+                        <?php
+                        $panelOwnId = $itemMapCurrent[$panelPurpose] ?? 0;
+                        $panelEffective = inv_resolve_mapping($companyId, $panelPurpose, (int) $editItem['id'], trim((string) ($editItem['category'] ?? '')) ?: null);
+                        ?>
+                        <tr>
+                            <td><strong><?= e($panelPurposeMeta[$panelPurpose]['label'] ?? $panelPurpose) ?></strong></td>
+                            <td><span class="mbw-pill tone-gray"><?= e(ucfirst($panelPurposeMeta[$panelPurpose]['expect'] ?? '')) ?></span></td>
+                            <td><select name="map[<?= e($panelPurpose) ?>]" style="min-width:230px">
+                                <option value="0">— use inherited default —</option>
+                                <?php foreach ($ledgers as $ledger): ?>
+                                    <option value="<?= (int) $ledger['id'] ?>" <?= $panelOwnId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select></td>
+                            <td><?php if ($panelEffective): ?><span class="mbw-pill <?= $panelOwnId > 0 ? 'tone-green' : 'tone-gray' ?>"><?= e($panelEffective['name']) ?><?= $panelOwnId > 0 ? '' : ' (inherited)' ?></span><?php else: ?><span class="mbw-pill tone-red">Not set — postings needing it will be blocked</span><?php endif; ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table></div>
+            <div style="margin-top:12px"><button type="submit"><?= icon('accounting') ?>Save this item's ledgers</button></div>
+        </form>
+    </details>
+    <?php endif; ?>
 
     <details class="feature-disclosure" id="warehouses">
         <summary><span><strong><?= icon('services') ?>Warehouses / Locations</strong><small>Stock locations for this company — used to track where inventory physically sits.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
