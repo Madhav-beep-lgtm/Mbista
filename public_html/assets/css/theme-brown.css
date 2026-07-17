@@ -364,3 +364,83 @@ body.home-page .hero-stats-band span { color:rgba(255,255,255,.76) !important; }
 /* Keep brown as a controlled accent that complements the photograph. */
 body.home-page .hero .button:not(.secondary) { background:#704a35 !important;border-color:#9a735c !important; }
 body.home-page .hero .button:not(.secondary):hover { background:#563625 !important; }
+/* Dimensional brown application system
+   Warm photographic atmosphere outside; clean white work surfaces inside. */
+:root{
+  --dim-brown-0:#160b07;
+  --dim-brown-1:#24140d;
+  --dim-brown-2:#321d14;
+  --dim-brown-3:#452a1d;
+  --dim-brown-4:#5d3a28;
+  --dim-copper:#8b5b3f;
+  --dim-gold:#d6ad52;
+  --dim-gold-light:#f0d58c;
+  --dim-canvas:linear-gradient(135deg,#1b0e09 0%,#321d14 38%,#452a1d 68%,#24140d 100%);
+  --dim-glow:radial-gradient(circle at 16% 4%,rgba(240,213,140,.18),transparent 26rem),radial-gradient(circle at 88% 12%,rgba(139,91,63,.28),transparent 32rem),radial-gradient(circle at 52% 110%,rgba(93,58,40,.34),transparent 38rem);
+  --dim-card-shadow:0 1px 1px rgba(36,20,13,.08),0 8px 22px rgba(36,20,13,.12),0 24px 56px rgba(36,20,13,.10);
+  --dim-card-hover:0 2px 2px rgba(36,20,13,.08),0 14px 30px rgba(36,20,13,.16),0 30px 70px rgba(36,20,13,.12);
+}
+
+/* Shared atmospheric canvas. */
+body:not(.auth-page){background-color:var(--dim-brown-1)!important;background-image:var(--dim-glow),var(--dim-canvas)!important;background-attachment:fixed!important;background-size:cover!important}
+body:not(.auth-page)::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:-1;background:linear-gradient(115deg,rgba(255,255,255,.035),transparent 24%,transparent 70%,rgba(214,173,82,.035)),repeating-linear-gradient(135deg,rgba(255,255,255,.012) 0 1px,transparent 1px 14px)}
+
+/* Public chrome: polished brown glass with a fine gold edge. */
+.utility-bar{background:linear-gradient(90deg,#1b0e09,#321d14 52%,#1b0e09)!important;border-bottom:1px solid rgba(214,173,82,.22)!important}
+.site-header,body.home-page .site-header{background:linear-gradient(135deg,rgba(36,20,13,.98),rgba(59,36,24,.97) 58%,rgba(36,20,13,.98))!important;border-bottom:1px solid rgba(214,173,82,.32)!important;box-shadow:0 10px 30px rgba(16,8,5,.22)!important}
+.site-header .brand strong,.site-header .brand-designation,.site-header .brand small,.site-header .nav a,.site-header .nav-main-link,.site-header .dropdown-toggle{color:#fffaf7!important}
+.site-header .brand small{color:#e9ddd5!important}
+.site-header .brand-mark{background:linear-gradient(145deg,#5d3a28,#24140d)!important;border:1px solid rgba(214,173,82,.55)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 8px 20px rgba(16,8,5,.28)!important}
+.header-nav-bar{border-color:rgba(214,173,82,.22)!important;background:rgba(22,11,7,.22)!important}
+.site-header .nav a:hover,.site-header .nav-main-link:hover,.site-header .nav a.is-active,.site-header .nav-item.is-active .nav-main-link{color:var(--dim-gold-light)!important;background:rgba(255,255,255,.045)!important}
+.site-header-search input{background:#fff!important;color:#231f1c!important;border-color:#d7c4b8!important;box-shadow:inset 0 2px 5px rgba(36,20,13,.08)!important}
+
+/* Public content: brown canvas around elevated white pages and cards. */
+body:not(.home-page):not(.admin-layout):not(.auth-page) main{background:transparent!important;padding-block:24px}
+body:not(.home-page):not(.admin-layout):not(.auth-page) main>.container,
+body:not(.home-page):not(.admin-layout):not(.auth-page) main>.section,
+body:not(.home-page):not(.admin-layout):not(.auth-page) .section>.container{border-radius:18px}
+.section:not(.hero):not(.auth2){background:rgba(250,247,244,.97);box-shadow:0 -1px 0 rgba(255,255,255,.5)}
+.card,.panel,.form-card,.table-card,.report-card,.settings-card,.workspace-card{border:1px solid #e4dad3!important;box-shadow:var(--dim-card-shadow)!important}
+.card:hover{box-shadow:var(--dim-card-hover)!important}
+
+/* Homepage preserves the image while matching the warm photographic reference. */
+body.home-page .hero-backdrop{background-color:rgba(69,42,29,.70)!important;background-blend-mode:multiply!important;filter:sepia(.16) saturate(.86) contrast(1.04)}
+body.home-page .hero-panel::before{background:linear-gradient(90deg,rgba(36,20,13,.94) 0%,rgba(59,36,24,.78) 48%,rgba(36,20,13,.28) 100%)!important}
+body.home-page .hero-card{background:linear-gradient(145deg,rgba(69,42,29,.96),rgba(36,20,13,.95))!important;border:1px solid rgba(214,173,82,.30)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 24px 60px rgba(16,8,5,.36)!important}
+body.home-page .hero-stats-band{background:linear-gradient(135deg,#1b0e09,#321d14 52%,#452a1d)!important;border:1px solid rgba(214,173,82,.28)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 22px 56px rgba(16,8,5,.30)!important}
+
+/* Portal selector: same dimensional background with crisp white choices. */
+.portal-selector-page{background:transparent!important}
+.portal-selector-page .hero-grid>div{background:var(--dim-glow),linear-gradient(135deg,#24140d,#452a1d 64%,#321d14)!important;border-color:rgba(214,173,82,.30)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 26px 64px rgba(16,8,5,.30)!important}
+.portal-selector-page form.card{box-shadow:var(--dim-card-shadow)!important}
+.portal-selector-page form.card:hover{box-shadow:var(--dim-card-hover)!important}
+
+/* Admin, staff and client shells: immersive brown canvas, white work surfaces. */
+body.admin-layout .admin-shell{background:transparent!important}
+body.admin-layout .admin-sidebar{background:linear-gradient(180deg,#1b0e09 0%,#2b1710 46%,#160b07 100%)!important;border-right:1px solid rgba(214,173,82,.26)!important;box-shadow:10px 0 34px rgba(16,8,5,.22)!important}
+body.admin-layout .admin-topbar{background:linear-gradient(135deg,#24140d,#3b2418 62%,#2b1710)!important;border-bottom:1px solid rgba(214,173,82,.25)!important;box-shadow:0 10px 26px rgba(16,8,5,.18)!important}
+body.admin-layout .admin-main{background:transparent!important}
+body.admin-layout .admin-content{background:linear-gradient(145deg,rgba(250,247,244,.985),rgba(255,255,255,.975))!important;margin:14px!important;border:1px solid rgba(228,218,211,.92)!important;border-radius:20px!important;box-shadow:0 24px 70px rgba(16,8,5,.24)!important}
+body.admin-layout .cr-head{border-radius:14px!important;box-shadow:0 8px 24px rgba(59,36,24,.08)!important}
+body.admin-layout .card,body.admin-layout .panel,body.admin-layout .table-card,body.admin-layout .ov-kpi,body.admin-layout .admin-chart-card,body.admin-layout .admin-analysis-card{background:linear-gradient(155deg,#fff 0%,#fff 74%,#faf7f4 100%)!important;border-color:#e4dad3!important;box-shadow:var(--dim-card-shadow)!important}
+body.admin-layout .card:hover,body.admin-layout .ov-kpi:hover{transform:translateY(-2px);box-shadow:var(--dim-card-hover)!important}
+body.admin-layout .admin-nav a.is-active,body.admin-layout .admin-nav a[aria-current=page]{background:linear-gradient(135deg,#704a35,#5d3a28)!important;border:1px solid rgba(214,173,82,.34)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 10px 22px rgba(16,8,5,.24)!important}
+
+/* Dimensional controls, restrained rather than glossy. */
+.button.primary,button[type=submit]:not(.danger):not(.success):not(.warning),.nav-button{background:linear-gradient(145deg,#704a35,#452a1d)!important;border-color:#8b5b3f!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 8px 18px rgba(36,20,13,.20)!important}
+.button.primary:hover,button[type=submit]:not(.danger):not(.success):not(.warning):hover,.nav-button:hover{background:linear-gradient(145deg,#8b5b3f,#5d3a28)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 12px 24px rgba(36,20,13,.26)!important}
+input:not([type=checkbox]):not([type=radio]),select,textarea{box-shadow:inset 0 2px 5px rgba(36,20,13,.055)!important}
+
+/* Login already contains the reference photograph; make every layer match it. */
+.auth2{background:var(--dim-glow),var(--dim-canvas)!important}
+.auth2-left{background:linear-gradient(100deg,rgba(36,20,13,.96),rgba(69,42,29,.83) 52%,rgba(59,36,24,.58)),url('/assets/img/audit-workflow-hero.png') center/cover no-repeat!important}
+.auth2-right{background:var(--dim-glow),linear-gradient(155deg,#1b0e09,#321d14)!important}
+.auth2-card{background:linear-gradient(155deg,rgba(69,42,29,.96),rgba(36,20,13,.98))!important;border-color:rgba(214,173,82,.28)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 30px 80px rgba(16,8,5,.44)!important}
+.auth2-foot{background:#160b07!important;border-top-color:rgba(214,173,82,.30)!important}
+
+/* Footer closes every page with the same rich depth. */
+.site-footer{background:linear-gradient(135deg,#160b07,#24140d 55%,#321d14)!important;border-top:1px solid rgba(214,173,82,.28)!important;box-shadow:0 -16px 36px rgba(16,8,5,.18)!important}
+
+@media(max-width:992px){body.admin-layout .admin-content{margin:8px!important;border-radius:14px!important}.site-header{background:#24140d!important}}
+@media print{body,body.admin-layout .admin-content{background:#fff!important;background-image:none!important;margin:0!important;border:0!important;box-shadow:none!important}.card,.panel,.table-card{box-shadow:none!important}}
