@@ -200,40 +200,6 @@ if ($navSection === '') {
     </div>
     <div class="mobile-nav-overlay" data-mobile-menu-overlay hidden></div>
 </header>
-<?php if (str_contains($bodyClass, 'home-page')): ?>
-    <section class="trust-strip" aria-label="Firm highlights">
-        <div class="container trust-strip-inner">
-            <div class="trust-item">
-                <?= icon('admin') ?>
-                <div class="trust-item-text">
-                    <strong>Trusted Expertise</strong>
-                    <span>Proven. Reliable. Ethical.</span>
-                </div>
-            </div>
-            <div class="trust-item">
-                <?= icon('teams') ?>
-                <div class="trust-item-text">
-                    <strong>Client-Centric Approach</strong>
-                    <span>Your Success, Our Priority.</span>
-                </div>
-            </div>
-            <div class="trust-item">
-                <?= icon('award') ?>
-                <div class="trust-item-text">
-                    <strong>Quality &amp; Integrity</strong>
-                    <span>Excellence in Every Engagement.</span>
-                </div>
-            </div>
-            <div class="trust-item">
-                <?= icon('headset') ?>
-                <div class="trust-item-text">
-                    <strong>Responsive Support</strong>
-                    <span>Always Here to Help.</span>
-                </div>
-            </div>
-        </div>
-    </section>
-<?php endif; ?>
 <main>
     <?php if ($message = flash('success')): ?>
         <div class="container">

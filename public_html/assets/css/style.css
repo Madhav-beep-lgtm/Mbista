@@ -3110,7 +3110,7 @@ body.company-pin-page main {
 }
 
 /* Wider app canvas for non-home screens */
-body:not(.home-page) .container {
+body:not(.home-page) main .container {
   width: calc(100% - clamp(32px, 5vw, 96px));
   max-width: none;
 }
@@ -10938,3 +10938,13 @@ body.home-page .hero::before {
 }
 
 } /* end @media screen */
+
+
+/* Full-width public header alignment */
+.utility-bar > .container,
+.site-header > .container,
+.site-header .header-nav-bar > .container {
+  width: calc(100% - clamp(32px, 5vw, 96px));
+  max-width: none;
+  margin-inline: auto;
+}
