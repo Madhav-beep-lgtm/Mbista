@@ -296,3 +296,35 @@ body.admin-layout .notice.error,body.admin-layout .badge.danger,body.admin-layou
 body.admin-layout .notice.warning,body.admin-layout .badge.warning,body.admin-layout .tag.status-pending { color:#8a3f08 !important; }
 
 @media(max-width:760px){body.home-page .hero-title{font-size:clamp(34px,10vw,48px)!important}}
+/* 11/10 refinement batch 2 */
+body.admin-layout.theme-dark,body.admin-layout.admin-dark{--mbw-canvas:#faf7f4!important;--mbw-card:#fff!important;--mbw-card-soft:#faf7f4!important;--mbw-border:#e4dad3!important;--mbw-border-soft:#eee6e1!important;--mbw-heading:#231f1c!important;--mbw-text:#231f1c!important;--mbw-muted:#665b54!important;--mbw-primary:#704a35!important;--mbw-primary-soft:#efe5de!important;--mbw-gray-soft:#eee9e5!important;color-scheme:light}
+body.admin-layout.theme-dark .admin-sidebar,body.admin-layout.admin-dark .admin-sidebar{--mbw-heading:#fffaf7;--mbw-text:#f4ece7;--mbw-muted:#d6c5ba;--mbw-border:rgba(255,255,255,.18);color-scheme:dark}
+body.admin-layout.theme-dark .admin-topbar,body.admin-layout.admin-dark .admin-topbar{--mbw-heading:#fffaf7;--mbw-text:#fffaf7;--mbw-muted:#e9ddd5;--mbw-border:#654838;--mbw-card:#312018;color-scheme:dark}
+
+/* Dashboard KPI cards: direct classes used by admin/index.php. */
+body.admin-layout .ov-kpi{background:#fff!important;border-color:#e4dad3!important;box-shadow:0 6px 18px rgba(59,36,24,.08)!important}
+body.admin-layout .ov-kpi:hover{border-color:#cdbbaf!important;box-shadow:0 10px 24px rgba(59,36,24,.13)!important}
+body.admin-layout .ov-kpi-label,body.admin-layout .ov-kpi-sub{color:#665b54!important}
+body.admin-layout .ov-kpi-value{color:#231f1c!important}
+body.admin-layout .ov-kpi-trend{border-color:#e4dad3!important}
+body.admin-layout .ov-kpi-trend.is-flat{color:#81736a!important}
+body.admin-layout .ov-ring{background:radial-gradient(closest-side,#fff 72%,transparent 73% 100%),conic-gradient(#704a35 calc(var(--p,0)*1%),#eee9e5 0)!important}
+body.admin-layout .admin-chart-card,body.admin-layout .admin-analysis-card{background:#fff!important;color:#231f1c!important}
+body.admin-layout .mbw-chart-wrap,body.admin-layout .mbw-donut-box{background:#faf7f4!important;border-color:#e4dad3!important}
+body.admin-layout .ov-card-head h2,body.admin-layout .ov-card-head h3,body.admin-layout .ov-donut-center b{color:#231f1c!important}
+body.admin-layout .ov-donut-center small,body.admin-layout .ov-legend-row{color:#665b54!important}
+
+/* Login page: replace the remaining navy design with the shared brown identity. */
+.auth2{background:radial-gradient(ellipse at 78% 15%,rgba(112,74,53,.28),transparent 55%),radial-gradient(ellipse at 10% 85%,rgba(86,54,37,.24),transparent 50%),linear-gradient(155deg,#24140d 0%,#1b100b 55%,#3b2418 100%)!important}
+.auth2-left{background:linear-gradient(100deg,rgba(36,20,13,.96) 0%,rgba(59,36,24,.88) 48%,rgba(59,36,24,.62) 100%),url('/assets/img/audit-workflow-hero.png') center/cover no-repeat!important;border-color:rgba(205,187,175,.35)!important}
+.auth2-right{background:linear-gradient(155deg,#24140d,#3b2418)!important}
+.auth2-card{background:linear-gradient(170deg,rgba(59,36,24,.96),rgba(36,20,13,.98))!important;border-color:rgba(205,187,175,.28)!important;box-shadow:0 28px 70px rgba(20,10,6,.48)!important}
+.auth2-card h2,.auth2-card label,.auth2-card .auth2-note,.auth2-card .auth2-sub{color:#fffaf7!important}
+.auth2-input input{background:#fff!important;color:#231f1c!important;border-color:#cdbbaf!important}
+.auth2-input input::placeholder{color:#81736a!important}
+.auth2-eye{background:#704a35!important;color:#fff!important}
+.auth2-submit{background:#704a35!important;border-color:#8e6650!important;color:#fff!important}
+.auth2-submit:hover{background:#563625!important}
+.auth2-encrypt{background:rgba(36,20,13,.78)!important;border-color:rgba(205,187,175,.4)!important}
+.site-header .nav a::after{background:linear-gradient(90deg,#704a35,#c9a03c)!important}
+@media(max-width:900px){.auth2{grid-template-columns:1fr}.auth2-left{padding:32px 24px}.auth2-right{padding:32px 20px}}
