@@ -15,9 +15,11 @@ if (!$currentCompany || !$fiscalYear) {
     exit;
 }
 
+// Both formats carry the full ledger — the printable HTML must not bypass
+// the export permission the CSV branch enforces.
+require_permission('reports', 'export');
+
 if ($format === 'excel') {
-    // Export as Excel/CSV
-    require_permission('reports', 'export');
     $export = export_ledger_to_excel((int) $currentCompany['id'], (int) $fiscalYear['id']);
     $filename = $export['filename'] ?? 'ledger.csv';
     $data = $export['data'] ?? [];

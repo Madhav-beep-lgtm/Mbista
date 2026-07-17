@@ -22,6 +22,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
 
+    // Redirect back to where the user was (tab, filters, open panel) instead of
+    // resetting to the default view. Forms pass their query string as return_to;
+    // $strip removes keys that should not survive (e.g. close the panel on success).
+    $partiesReturn = static function (string $fallback, array $strip = []): string {
+        $qs = (string) ($_POST['return_to'] ?? '');
+        if ($qs === '' || strlen($qs) > 600 || !preg_match('/^[A-Za-z0-9_\-=&%.+\[\]]*$/', $qs)) {
+            return $fallback;
+        }
+        parse_str($qs, $params);
+        foreach ($strip as $key) {
+            unset($params[$key]);
+        }
+        $query = http_build_query($params);
+        return 'admin/accounting-parties.php' . ($query !== '' ? '?' . $query : '');
+    };
+
     if ($action === 'save_party') {
         require_permission('sales', 'edit');
         $partyId = (int) ($_POST['party_id'] ?? 0);
@@ -37,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($code === '' || $name === '' || !in_array($partyType, $partyTypes, true) || !in_array($status, $statuses, true)) {
             flash('error', 'Party code, name, type, and status are required.');
-            redirect('admin/accounting-parties.php');
+            redirect($partiesReturn('admin/accounting-parties.php'));
         }
         if (!in_array($openingBalanceType, ['debit', 'credit'], true)) {
             $openingBalanceType = 'debit';
@@ -49,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $clientLinkCheck->execute(['id' => $clientProfileId, 'company_id' => $companyId]);
             if (!$clientLinkCheck->fetch()) {
                 flash('error', 'Selected client portal link is not a client of this company.');
-                redirect('admin/accounting-parties.php');
+                redirect($partiesReturn('admin/accounting-parties.php'));
             }
         }
 
@@ -119,12 +135,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ensure_party_ledger($companyId, $savedPartyId, 'payable');
                 }
                 post_party_opening_balance($companyId, $savedPartyId, $userId);
+                // The opening post is one-time and swallows failures internally;
+                // if this party carries an opening balance, make sure the books
+                // actually have it rather than reporting success blindly.
+                if (abs($openingBalance) > 0.004) {
+                    $obCheckStmt = db()->prepare("SELECT COUNT(*) FROM vouchers WHERE source_type = 'party_opening' AND source_id = :pid AND company_id = :cid");
+                    $obCheckStmt->execute(['pid' => $savedPartyId, 'cid' => $companyId]);
+                    if ((int) $obCheckStmt->fetchColumn() === 0) {
+                        flash('error', 'Party saved, but the opening-balance journal did NOT post — check that an open fiscal year covers today and the Opening Balance ledger exists, then re-save the party.');
+                    }
+                }
             }
         } catch (Throwable $exception) {
             flash('error', 'Could not save party. The code may already exist.');
         }
 
-        redirect('admin/accounting-parties.php');
+        redirect($partiesReturn('admin/accounting-parties.php', ['panel', 'edit_id', 'create']));
     }
 
     if ($action === 'toggle_party') {
@@ -133,10 +159,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($partyId > 0) {
             db()->prepare("UPDATE accounting_parties SET status = IF(status = 'active', 'inactive', 'active') WHERE id = :id AND company_id = :company_id")
                 ->execute(['id' => $partyId, 'company_id' => $companyId]);
+            // A party created inactive and activated later still needs its
+            // ledgers and one-time opening-balance journal (both idempotent).
+            $toggledStmt = db()->prepare('SELECT * FROM accounting_parties WHERE id = :id AND company_id = :company_id LIMIT 1');
+            $toggledStmt->execute(['id' => $partyId, 'company_id' => $companyId]);
+            $toggledParty = $toggledStmt->fetch();
+            if ($toggledParty && (string) $toggledParty['status'] === 'active') {
+                if (in_array((string) $toggledParty['party_type'], ['customer', 'both'], true)) {
+                    ensure_party_ledger($companyId, $partyId, 'receivable');
+                }
+                if (in_array((string) $toggledParty['party_type'], ['supplier', 'both'], true)) {
+                    ensure_party_ledger($companyId, $partyId, 'payable');
+                }
+                post_party_opening_balance($companyId, $partyId, $userId);
+            }
             log_activity('accounting_party', $partyId, 'status_toggled', 'Accounting party status toggled.', $userId);
             flash('success', 'Party status updated.');
         }
-        redirect('admin/accounting-parties.php');
+        redirect($partiesReturn('admin/accounting-parties.php'));
     }
 
     if ($action === 'save_note') {
@@ -174,7 +214,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$invoice || $amount <= 0 || $outstanding <= 0) {
             flash('error', 'Choose an open invoice and enter a payment amount.');
-            redirect('admin/accounting-parties.php?panel=payment');
+            redirect($partiesReturn('admin/accounting-parties.php?panel=payment'));
         }
 
         $amount = min($amount, $outstanding);
@@ -197,10 +237,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
         $paymentRequestId = (int) db()->lastInsertId();
 
+        $paymentPostingError = null;
         try {
             auto_post_invoice_payment_voucher($paymentRequestId, $userId);
         } catch (Throwable $exception) {
-            // Payment stays recorded even if the accounting auto-post cannot run.
+            $paymentPostingError = $exception->getMessage();
+        }
+        // The auto-post helper also returns silently when a mapping is missing,
+        // so verify the receipt voucher actually exists — a paid invoice with
+        // no cash/receivable movement in the books must never pass quietly.
+        $rvCheckStmt = db()->prepare("SELECT COUNT(*) FROM vouchers WHERE source_type = 'invoice_payment_request' AND source_id = :id");
+        $rvCheckStmt->execute(['id' => $paymentRequestId]);
+        if ((int) $rvCheckStmt->fetchColumn() === 0) {
+            flash('error', 'Payment recorded, but its receipt voucher did NOT post'
+                . ($paymentPostingError !== null ? ' (' . $paymentPostingError . ')' : ' — check the cash / receivable ledger mappings in Settings')
+                . '. The books will not show this cash until a receipt voucher is posted.');
+        }
+
+        // Goods invoices whose stock leg hasn't run yet (e.g. issued while the
+        // ledger mappings were missing) get an idempotent retry on collection.
+        try {
+            $paymentStockNotes = invoice_issue_inventory_stock($invoiceId, $userId);
+            if ($paymentStockNotes !== []) {
+                flash('info', implode(' ', $paymentStockNotes));
+            }
+        } catch (Throwable $exception) {
+            // Stock issue is best-effort here; the payment is already recorded.
         }
 
         // Issue a receipt here too, so receipts exist no matter which desk
@@ -228,7 +290,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         security_event('voucher_posted', 'success', 'Receipt recorded for invoice ' . $invoice['invoice_no'] . '.', $companyId, $userId);
         log_activity('invoice_payment', $paymentRequestId, 'recorded', 'Payment recorded against invoice ' . $invoice['invoice_no'] . '.', $userId);
         flash('success', 'Payment of ' . site_currency_symbol() . number_format($amount, 2) . ' recorded against ' . $invoice['invoice_no'] . '.');
-        redirect('admin/accounting-parties.php?tab=sales');
+        redirect($partiesReturn('admin/accounting-parties.php?tab=sales', ['panel']));
     }
 
     if ($action === 'record_purchase') {
@@ -271,7 +333,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$party || !$expenseLedger || $creditLedgerId <= 0 || $total <= 0 || current_fiscal_year_id() <= 0) {
             flash('error', 'Supplier, expense ledger, and a positive amount are required to record a purchase.');
-            redirect('admin/accounting-parties.php?panel=purchase');
+            redirect($partiesReturn('admin/accounting-parties.php?panel=purchase'));
         }
 
         $voucherNo = 'PB-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
@@ -302,7 +364,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Could not record the purchase bill.');
         }
 
-        redirect('admin/accounting-parties.php?tab=purchases');
+        redirect($partiesReturn('admin/accounting-parties.php?tab=purchases', ['panel']));
     }
 
     if ($action === 'record_supplier_payment') {
@@ -329,7 +391,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$party || !$cashLedger || $payableLedgerId <= 0 || $amount <= 0 || current_fiscal_year_id() <= 0) {
             flash('error', 'Supplier and a positive amount are required to record a payment.');
-            redirect('admin/accounting-parties.php?panel=supplier-payment');
+            redirect($partiesReturn('admin/accounting-parties.php?panel=supplier-payment'));
         }
 
         $voucherNo = 'PV-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
@@ -360,7 +422,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Could not record the supplier payment.');
         }
 
-        redirect('admin/accounting-parties.php?tab=purchases');
+        redirect($partiesReturn('admin/accounting-parties.php?tab=purchases', ['panel']));
     }
 }
 
@@ -507,7 +569,8 @@ foreach ($documents as $documentIndex => &$document) {
     $outstanding = max(0, $amount - $paid);
     $daysOverdue = max(0, (int) $dueDate->diff($today)->format('%r%a'));
     $bucket = $daysOverdue <= 30 ? '0 - 30 Days' : ($daysOverdue <= 60 ? '31 - 60 Days' : ($daysOverdue <= 90 ? '61 - 90 Days' : '90+ Days'));
-    $status = $outstanding <= 0 ? 'Paid' : ($dueDate < $today ? 'Overdue' : 'Open');
+    $isDraftInvoice = (string) ($document['status'] ?? '') === 'draft';
+    $status = $isDraftInvoice ? 'Draft' : ($outstanding <= 0 ? 'Paid' : ($dueDate < $today ? 'Overdue' : 'Open'));
 
     $sourceLabel = match ((string) ($document['invoice_source_type'] ?? 'task')) {
         'inventory' => 'Inventory Invoice',
@@ -534,16 +597,21 @@ foreach ($documents as $documentIndex => &$document) {
     $document['credit_limit'] = 0;
     $document['opening_balance'] = $outstanding;
 
-    $summary['sales'] += $amount;
-    $summary['receivables'] += $outstanding;
-    $receivableAging[$bucket] += $outstanding;
-    if ($invoiceDate >= $monthStart) {
-        $summary['month_sales'] += $amount;
-    }
-    $summary['paid'] += $paid;
-    if ($status === 'Overdue') {
-        $summary['overdue'] += $outstanding;
-        $summary['overdue_count']++;
+    // Draft invoices are not yet receivables — they stay visible in the
+    // register with a Draft pill, but must not inflate the KPIs, aging
+    // buckets, or the party statement.
+    if (!$isDraftInvoice) {
+        $summary['sales'] += $amount;
+        $summary['receivables'] += $outstanding;
+        $receivableAging[$bucket] += $outstanding;
+        if ($invoiceDate >= $monthStart) {
+            $summary['month_sales'] += $amount;
+        }
+        $summary['paid'] += $paid;
+        if ($status === 'Overdue') {
+            $summary['overdue'] += $outstanding;
+            $summary['overdue_count']++;
+        }
     }
 }
 unset($document);
@@ -611,35 +679,14 @@ foreach ($partyPurchaseTotals as $billPartyId => $bills) {
     }
 }
 
-$collections = [];
-if (table_exists('invoice_payment_requests') && table_exists('task_invoices')) {
-    $collectionSql = '
-        SELECT pr.id, pr.payment_amount, pr.payment_method, pr.payment_received_on, pr.status, pr.notes, pr.requested_on,
-               ti.invoice_no, ti.total_amount AS invoice_total,
-               COALESCE(ap.name, cp.organization_name, "Client") AS party_name
-        FROM invoice_payment_requests pr
-        INNER JOIN task_invoices ti ON ti.id = pr.invoice_id
-        LEFT JOIN accounting_parties ap ON ap.id = ti.party_id
-        LEFT JOIN client_tasks ct ON ct.id = ti.task_id
-        LEFT JOIN client_profiles cp ON cp.id = ct.client_id
-        WHERE ti.company_id = :company_id AND pr.status IN ("paid", "partial")
-          AND COALESCE(pr.payment_received_on, DATE(pr.requested_on)) BETWEEN :from_date AND :to_date
-    ';
-    $collectionParams = ['company_id' => $companyId, 'from_date' => $fromDate, 'to_date' => $toDate];
-    if ($searchQuery !== '') {
-        $collectionSql .= ' AND (ti.invoice_no LIKE :search OR ap.name LIKE :search2 OR cp.organization_name LIKE :search3)';
-        $like = '%' . $searchQuery . '%';
-        $collectionParams += ['search' => $like, 'search2' => $like, 'search3' => $like];
-    }
-    $collectionSql .= ' ORDER BY COALESCE(pr.payment_received_on, DATE(pr.requested_on)) DESC, pr.id DESC LIMIT 300';
-    $stmt = db()->prepare($collectionSql);
-    $stmt->execute($collectionParams);
-    $collections = $stmt->fetchAll();
-}
-
 // ---------------------------------------------------------------------------
 // Selected party, its transactions, running ledger.
+// The side panel and party-scoped actions only engage when the user actually
+// picked a party (party_id in the URL); the old behavior auto-selected the
+// first party, showing a random profile and letting Print Statement target a
+// party the user never chose.
 // ---------------------------------------------------------------------------
+$partyExplicitlySelected = isset($_GET['party_id']) && (int) $_GET['party_id'] > 0;
 $selectedPartyId = (int) ($_GET['party_id'] ?? ($editParty['id'] ?? ($parties[0]['id'] ?? 0)));
 $selectedParty = null;
 foreach ($parties as $partyRow) {
@@ -678,7 +725,23 @@ $partyTransactions = array_values(array_filter($documents, static fn (array $doc
 // purchase bills credit, supplier payments debit.
 $partyLedgerRows = [];
 if ($selectedParty) {
+    // The ledger/statement opens with the party's master opening balance —
+    // previously the closing figure ignored it entirely.
+    $partyOpening = round((float) ($selectedParty['opening_balance'] ?? 0), 2);
+    if (abs($partyOpening) > 0.004) {
+        $openingSide = (string) ($selectedParty['opening_balance_type'] ?? 'debit');
+        $partyLedgerRows[] = [
+            'date' => $fromDate,
+            'ref' => 'OPENING',
+            'label' => 'Opening balance',
+            'debit' => $openingSide === 'debit' ? $partyOpening : 0.0,
+            'credit' => $openingSide === 'credit' ? $partyOpening : 0.0,
+        ];
+    }
     foreach ($partyTransactions as $row) {
+        if ((string) ($row['status'] ?? '') === 'draft') {
+            continue; // Drafts are not receivables — keep them off the statement.
+        }
         $partyLedgerRows[] = ['date' => $row['issued_raw'], 'ref' => $row['voucher_no'], 'label' => $row['display_type'], 'debit' => (float) $row['total_amount'], 'credit' => 0.0];
         if ((float) $row['paid_amount'] > 0) {
             $partyLedgerRows[] = ['date' => $row['issued_raw'], 'ref' => $row['voucher_no'], 'label' => 'Payment received', 'debit' => 0.0, 'credit' => (float) $row['paid_amount']];
@@ -786,13 +849,24 @@ $statusFilteredDocuments = $documents;
 if ($statusFilter !== '' && in_array($statusFilter, ['open', 'paid', 'overdue'], true)) {
     $statusFilteredDocuments = array_values(array_filter($documents, static fn (array $document): bool => strtolower((string) $document['display_status']) === $statusFilter));
 }
+// The toolbar search also filters the party lists (code, name, email, phone) —
+// previously it only applied to invoices/vouchers and was dead on these tabs.
+$partyMatchesSearch = static function (array $party) use ($searchQuery): bool {
+    if ($searchQuery === '') {
+        return true;
+    }
+    $haystack = strtolower(implode(' ', [
+        (string) ($party['code'] ?? ''),
+        (string) ($party['name'] ?? ''),
+        (string) ($party['email'] ?? ''),
+        (string) ($party['phone'] ?? ''),
+    ]));
+    return str_contains($haystack, strtolower($searchQuery));
+};
 $activeRows = match ($tab) {
-    'sales' => $statusFilteredDocuments,
     'purchases' => $purchaseBills,
-    'collections' => $collections,
-    'payments' => $supplierPayments,
-    'customers' => array_values(array_filter($parties, static fn (array $party): bool => in_array((string) $party['party_type'], ['customer', 'both'], true))),
-    'suppliers' => $supplierParties,
+    'customers' => array_values(array_filter($parties, static fn (array $party): bool => in_array((string) $party['party_type'], ['customer', 'both'], true) && $partyMatchesSearch($party))),
+    'suppliers' => array_values(array_filter($supplierParties, $partyMatchesSearch)),
     default => $statusFilteredDocuments,
 };
 $totalRows = count($activeRows);
@@ -807,6 +881,41 @@ $showingTo = min($totalRows, $page * $perPage);
     <div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div>
 <?php endif; ?>
 
+<div class="mbw-kpi-grid" style="margin-bottom:14px">
+    <a class="mbw-kpi" href="<?= e(parties_page_url(['tab' => 'sales', 'type' => null, 'status' => 'open', 'page' => null])) ?>">
+        <div>
+            <div class="mbw-kpi-label">Receivables (period)</div>
+            <div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($summary['receivables'], 2)) ?></div>
+            <span class="mbw-kpi-delta">From <?= e(number_format($summary['sales'], 2)) ?> billed</span>
+        </div>
+        <span class="mbw-chip is-square tone-blue"><?= icon('trend-up') ?></span>
+    </a>
+    <a class="mbw-kpi" href="<?= e(parties_page_url(['tab' => 'purchases', 'type' => null, 'status' => null, 'page' => null])) ?>">
+        <div>
+            <div class="mbw-kpi-label">Payables (period)</div>
+            <div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($summary['payables'], 2)) ?></div>
+            <span class="mbw-kpi-delta">From <?= e(number_format($summary['purchases'], 2)) ?> purchased</span>
+        </div>
+        <span class="mbw-chip is-square tone-amber"><?= icon('trend-down') ?></span>
+    </a>
+    <a class="mbw-kpi" href="<?= e(parties_page_url(['tab' => 'sales', 'type' => null, 'status' => 'overdue', 'page' => null])) ?>">
+        <div>
+            <div class="mbw-kpi-label">Overdue</div>
+            <div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($summary['overdue'], 2)) ?></div>
+            <span class="mbw-kpi-delta <?= $summary['overdue_count'] > 0 ? 'is-down' : '' ?>"><?= e((string) $summary['overdue_count']) ?> invoice<?= $summary['overdue_count'] === 1 ? '' : 's' ?> past due</span>
+        </div>
+        <span class="mbw-chip is-square tone-red"><?= icon('compliance') ?></span>
+    </a>
+    <div class="mbw-kpi">
+        <div>
+            <div class="mbw-kpi-label">Collection efficiency</div>
+            <div class="mbw-kpi-value"><?= e(number_format($collectionEfficiency, 1)) ?>%</div>
+            <span class="mbw-kpi-delta <?= $collectionEfficiency >= 60 ? 'is-up' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format($summary['paid'], 2)) ?> collected</span>
+        </div>
+        <span class="mbw-chip is-square tone-green"><?= icon('badge-check') ?></span>
+    </div>
+</div>
+
 <nav class="reference-tabs" aria-label="Sales and purchase sections">
     <?php foreach ($tabLinks as $tabKey => [$tabLabel, $tabUrl]): ?>
         <a class="<?= $tab === $tabKey ? 'is-active' : '' ?>" href="<?= e($tabUrl) ?>"><?= e($tabLabel) ?></a>
@@ -814,71 +923,108 @@ $showingTo = min($totalRows, $page * $perPage);
 </nav>
 
 
+<?php
+// Tab-aware toolbar: every action stays clickable on every tab, but the
+// primary (filled) button follows the work the active tab is about, and
+// party-scoped actions fall back to the party lists when nothing is picked.
+$newPartyLabel = match ($tab) {
+    'customers' => 'New Customer',
+    'suppliers' => 'New Supplier',
+    default => 'New Party',
+};
+$primaryAction = match ($tab) {
+    'purchases' => 'purchase',
+    'customers', 'suppliers' => 'party',
+    default => 'invoice',
+};
+$partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($selectedParty['id'] ?? 0) > 0;
+?>
 <div class="reference-toolbar">
     <div class="reference-toolbar-actions">
-        <a class="button" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Create Invoice</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'payment'])) ?>"><?= icon('documents') ?>Record Payment</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'purchase'])) ?>"><?= icon('documents') ?>Record Purchase</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'supplier-payment'])) ?>"><?= icon('services') ?>Pay Supplier</a>
-        <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) ($selectedParty['id'] ?? 0)])) ?>"><?= icon('documents') ?>Send Statement</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) ($selectedParty['id'] ?? 0)])) ?>"><?= icon('accounting') ?>View Party Ledger</a>
-        <details class="reference-menu" <?= ($editParty || isset($_GET['create'])) ? 'open' : '' ?>>
-            <summary>More Actions</summary>
-            <form method="post" class="reference-party-form">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="save_party">
-                <input type="hidden" name="party_id" value="<?= e((int) ($editParty['id'] ?? 0)) ?>">
-                <label>Code<input type="text" name="code" maxlength="60" value="<?= e($editParty['code'] ?? '') ?>" placeholder="CUST-001" required></label>
-                <label>Name<input type="text" name="name" maxlength="190" value="<?= e($editParty['name'] ?? '') ?>" required></label>
-                <label>Type<select name="party_type"><?php foreach ($partyTypes as $type): ?><option value="<?= e($type) ?>" <?= ($editParty['party_type'] ?? 'both') === $type ? 'selected' : '' ?>><?= e(ucfirst($type)) ?></option><?php endforeach; ?></select></label>
-                <label>Status<select name="status"><?php foreach ($statuses as $statusOption): ?><option value="<?= e($statusOption) ?>" <?= ($editParty['status'] ?? 'active') === $statusOption ? 'selected' : '' ?>><?= e(ucfirst($statusOption)) ?></option><?php endforeach; ?></select></label>
-                <label>Linked ledger<select name="ledger_id"><option value="0">No linked ledger</option><?php foreach ($ledgers as $ledger): ?><option value="<?= e((int) $ledger['id']) ?>" <?= (int) ($editParty['ledger_id'] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option><?php endforeach; ?></select></label>
-                <?php
-                // Optional party -> client portal link: invoices raised for this
-                // party then appear in that client's My Invoices.
-                $partyClientOptions = [];
-                if (column_exists('accounting_parties', 'client_profile_id') && table_exists('client_profiles')) {
-                    $partyClientStmt = db()->prepare('SELECT id, organization_name, client_code FROM client_profiles WHERE company_id = :cid AND is_active = 1 ORDER BY organization_name ASC');
-                    $partyClientStmt->execute(['cid' => $companyId]);
-                    $partyClientOptions = $partyClientStmt->fetchAll();
-                }
-                ?>
-                <?php if ($partyClientOptions !== []): ?>
-                    <label>Client portal link<select name="client_profile_id"><option value="0">Not a portal client</option><?php foreach ($partyClientOptions as $partyClientOption): ?><option value="<?= e((int) $partyClientOption['id']) ?>" <?= (int) ($editParty['client_profile_id'] ?? 0) === (int) $partyClientOption['id'] ? 'selected' : '' ?>><?= e($partyClientOption['organization_name'] . (!empty($partyClientOption['client_code']) ? ' (' . $partyClientOption['client_code'] . ')' : '')) ?></option><?php endforeach; ?></select></label>
-                <?php endif; ?>
-                <label>PAN / Tax No<input type="text" name="pan_no" maxlength="60" value="<?= e($editParty['pan_no'] ?? '') ?>"></label>
-                <label>Email<input type="email" name="email" maxlength="190" value="<?= e($editParty['email'] ?? '') ?>"></label>
-                <label>Phone<input type="text" name="phone" maxlength="80" value="<?= e($editParty['phone'] ?? '') ?>"></label>
-                <label>Opening balance<input type="number" step="0.01" name="opening_balance" value="<?= e($editParty['opening_balance'] ?? '0.00') ?>"></label>
-                <label>Opening side<select name="opening_balance_type"><option value="debit" <?= ($editParty['opening_balance_type'] ?? 'debit') === 'debit' ? 'selected' : '' ?>>Debit</option><option value="credit" <?= ($editParty['opening_balance_type'] ?? '') === 'credit' ? 'selected' : '' ?>>Credit</option></select></label>
-                <label>Credit limit<input type="number" step="0.01" name="credit_limit" value="<?= e($editParty['credit_limit'] ?? '0.00') ?>"></label>
-                <label class="span-2">Billing address<textarea name="billing_address"><?= e($editParty['billing_address'] ?? '') ?></textarea></label>
-                <button type="submit"><?= icon('users') ?>Save party</button>
-            </form>
-        </details>
+        <a class="button<?= $primaryAction === 'invoice' ? '' : ' secondary' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Create Invoice</a>
+        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'payment', 'edit_id' => null])) ?>"><?= icon('receipt-voucher') ?>Record Payment</a>
+        <a class="button<?= $primaryAction === 'purchase' ? '' : ' secondary' ?>" href="<?= e(parties_page_url(['panel' => 'purchase', 'edit_id' => null])) ?>"><?= icon('cart') ?>Record Purchase</a>
+        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'supplier-payment', 'edit_id' => null])) ?>"><?= icon('wallet') ?>Pay Supplier</a>
+        <?php if ($partyPicked): ?>
+            <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) $selectedParty['id']])) ?>"><?= icon('documents') ?>Print Statement</a>
+            <a class="button secondary" href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) $selectedParty['id'], 'panel' => null, 'edit_id' => null])) ?>"><?= icon('accounting') ?>View Party Ledger</a>
+        <?php else: ?>
+            <a class="button secondary" title="Pick a party first — opens the Customers list" href="<?= e(parties_page_url(['tab' => null, 'type' => 'customer', 'panel' => null, 'edit_id' => null])) ?>"><?= icon('documents') ?>Print Statement</a>
+            <a class="button secondary" title="Pick a party first — opens the Customers list" href="<?= e(parties_page_url(['tab' => null, 'type' => 'customer', 'panel' => null, 'edit_id' => null])) ?>"><?= icon('accounting') ?>View Party Ledger</a>
+        <?php endif; ?>
+        <a class="button<?= $primaryAction === 'party' ? '' : ' secondary' ?>" href="<?= e(parties_page_url(['panel' => 'party', 'edit_id' => null])) ?>"><?= icon('users') ?><?= e($newPartyLabel) ?></a>
     </div>
     <form class="reference-filter-group" method="get" action="<?= e(url('admin/accounting-parties.php')) ?>">
-        <?php if ($tab !== 'overview' && !in_array($tab, ['customers', 'suppliers'], true)): ?><input type="hidden" name="tab" value="<?= e($tab) ?>"><?php endif; ?>
+        <?php if (!in_array($tab, ['customers', 'suppliers'], true)): ?><input type="hidden" name="tab" value="<?= e($tab) ?>"><?php endif; ?>
         <?php if ($typeFilter !== ''): ?><input type="hidden" name="type" value="<?= e($typeFilter) ?>"><?php endif; ?>
-        <label class="reference-date-field"><?= icon('compliance') ?><input type="date" name="from" value="<?= e($fromDate) ?>" aria-label="From date"></label>
-        <label class="reference-date-field"><input type="date" name="to" value="<?= e($toDate) ?>" aria-label="To date"></label>
-        <select name="status" aria-label="Status filter">
-            <option value="">All statuses</option>
-            <?php foreach (['open' => 'Open', 'paid' => 'Paid', 'overdue' => 'Overdue'] as $statusValue => $statusLabel): ?>
-                <option value="<?= e($statusValue) ?>" <?= $statusFilter === $statusValue ? 'selected' : '' ?>><?= e($statusLabel) ?></option>
-            <?php endforeach; ?>
-        </select>
-        <div class="reference-search"><?= icon('portal') ?><input type="search" name="q" value="<?= e($searchQuery) ?>" placeholder="Search invoice, party, or ref no."></div>
-        <button class="button secondary" type="submit"><?= icon('settings') ?>Apply</button>
+        <?php if (!in_array($tab, ['customers', 'suppliers'], true)): ?>
+            <label class="reference-date-field"><?= icon('compliance') ?><input type="date" name="from" value="<?= e($fromDate) ?>" aria-label="From date"></label>
+            <label class="reference-date-field"><input type="date" name="to" value="<?= e($toDate) ?>" aria-label="To date"></label>
+        <?php endif; ?>
+        <?php if ($tab === 'sales'): ?>
+            <select name="status" aria-label="Status filter">
+                <option value="">All statuses</option>
+                <?php foreach (['open' => 'Open', 'paid' => 'Paid', 'overdue' => 'Overdue'] as $statusValue => $statusLabel): ?>
+                    <option value="<?= e($statusValue) ?>" <?= $statusFilter === $statusValue ? 'selected' : '' ?>><?= e($statusLabel) ?></option>
+                <?php endforeach; ?>
+            </select>
+        <?php endif; ?>
+        <div class="reference-search"><?= icon('search') ?><input type="search" name="q" value="<?= e($searchQuery) ?>" placeholder="<?= e(in_array($tab, ['customers', 'suppliers'], true) ? 'Search code, name, email, phone' : 'Search invoice, party, or ref no.') ?>"></div>
+        <button class="button secondary" type="submit"><?= icon('filter') ?>Apply</button>
     </form>
 </div>
 
-<?php if ($panel === 'payment'): ?>
+<?php if ($panel === 'party' || $editParty): ?>
+    <?php
+    // Party create/edit lives in a proper panel card (it used to hide inside a
+    // "More Actions" dropdown that overflowed the viewport). Creating from the
+    // Customers/Suppliers tab preselects the matching party type.
+    $partyFormType = $editParty['party_type'] ?? match ($tab) {
+        'customers' => 'customer',
+        'suppliers' => 'supplier',
+        default => 'both',
+    };
+    $partyPanelClose = parties_page_url(['panel' => null, 'edit_id' => null, 'create' => null]);
+    $partyClientOptions = [];
+    if (column_exists('accounting_parties', 'client_profile_id') && table_exists('client_profiles')) {
+        $partyClientStmt = db()->prepare('SELECT id, organization_name, client_code FROM client_profiles WHERE company_id = :cid AND is_active = 1 ORDER BY organization_name ASC');
+        $partyClientStmt->execute(['cid' => $companyId]);
+        $partyClientOptions = $partyClientStmt->fetchAll();
+    }
+    ?>
+    <section id="panel-forms" class="mbw-card reference-panel-card">
+        <div class="mbw-card-head"><h2><?= $editParty ? 'Edit Party — ' . e($editParty['name']) : e($newPartyLabel) ?></h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e($partyPanelClose) ?>">Close</a></div></div>
+        <form method="post" class="reference-party-form">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_party">
+            <input type="hidden" name="party_id" value="<?= e((int) ($editParty['id'] ?? 0)) ?>">
+            <input type="hidden" name="return_to" value="<?= e((string) ($_SERVER['QUERY_STRING'] ?? '')) ?>">
+            <label>Code<input type="text" name="code" maxlength="60" value="<?= e($editParty['code'] ?? '') ?>" placeholder="CUST-001" required></label>
+            <label>Name<input type="text" name="name" maxlength="190" value="<?= e($editParty['name'] ?? '') ?>" required></label>
+            <label>Type<select name="party_type"><?php foreach ($partyTypes as $type): ?><option value="<?= e($type) ?>" <?= $partyFormType === $type ? 'selected' : '' ?>><?= e(ucfirst($type)) ?></option><?php endforeach; ?></select></label>
+            <label>Status<select name="status"><?php foreach ($statuses as $statusOption): ?><option value="<?= e($statusOption) ?>" <?= ($editParty['status'] ?? 'active') === $statusOption ? 'selected' : '' ?>><?= e(ucfirst($statusOption)) ?></option><?php endforeach; ?></select></label>
+            <label>Linked ledger<select name="ledger_id"><option value="0">No linked ledger</option><?php foreach ($ledgers as $ledger): ?><option value="<?= e((int) $ledger['id']) ?>" <?= (int) ($editParty['ledger_id'] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option><?php endforeach; ?></select></label>
+            <?php if ($partyClientOptions !== []): ?>
+                <label>Client portal link<select name="client_profile_id"><option value="0">Not a portal client</option><?php foreach ($partyClientOptions as $partyClientOption): ?><option value="<?= e((int) $partyClientOption['id']) ?>" <?= (int) ($editParty['client_profile_id'] ?? 0) === (int) $partyClientOption['id'] ? 'selected' : '' ?>><?= e($partyClientOption['organization_name'] . (!empty($partyClientOption['client_code']) ? ' (' . $partyClientOption['client_code'] . ')' : '')) ?></option><?php endforeach; ?></select></label>
+            <?php endif; ?>
+            <label>PAN / Tax No<input type="text" name="pan_no" maxlength="60" value="<?= e($editParty['pan_no'] ?? '') ?>"></label>
+            <label>Email<input type="email" name="email" maxlength="190" value="<?= e($editParty['email'] ?? '') ?>"></label>
+            <label>Phone<input type="text" name="phone" maxlength="80" value="<?= e($editParty['phone'] ?? '') ?>"></label>
+            <label>Opening balance<input type="number" step="0.01" name="opening_balance" value="<?= e($editParty['opening_balance'] ?? '0.00') ?>"></label>
+            <label>Opening side<select name="opening_balance_type"><option value="debit" <?= ($editParty['opening_balance_type'] ?? 'debit') === 'debit' ? 'selected' : '' ?>>Debit</option><option value="credit" <?= ($editParty['opening_balance_type'] ?? '') === 'credit' ? 'selected' : '' ?>>Credit</option></select></label>
+            <label>Credit limit<input type="number" step="0.01" name="credit_limit" value="<?= e($editParty['credit_limit'] ?? '0.00') ?>"></label>
+            <label class="span-2">Billing address<textarea name="billing_address"><?= e($editParty['billing_address'] ?? '') ?></textarea></label>
+            <button type="submit"><?= icon('users') ?>Save party</button>
+            <a class="button secondary" href="<?= e($partyPanelClose) ?>">Cancel</a>
+        </form>
+    </section>
+<?php elseif ($panel === 'payment'): ?>
     <section id="panel-forms" class="mbw-card reference-panel-card">
         <div class="mbw-card-head"><h2>Record a Customer Payment</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(parties_page_url(['panel' => null])) ?>">Close</a></div></div>
         <form method="post" class="reference-party-form">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="record_payment">
+            <input type="hidden" name="return_to" value="<?= e((string) ($_SERVER['QUERY_STRING'] ?? '')) ?>">
             <label>Open invoice
                 <select name="invoice_id" required>
                     <option value="">Select invoice</option>
@@ -901,11 +1047,12 @@ $showingTo = min($totalRows, $page * $perPage);
     <section id="panel-forms" class="mbw-card reference-panel-card">
         <div class="mbw-card-head"><h2>Record a Purchase Bill</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(parties_page_url(['panel' => null])) ?>">Close</a></div></div>
         <?php if ($supplierParties === []): ?>
-            <p class="muted">Create a supplier first (More Actions → Save party with type Supplier).</p>
+            <p class="muted">Create a supplier first — use the <a class="reference-link" href="<?= e(parties_page_url(['panel' => 'party', 'edit_id' => null])) ?>">New Party</a> button and pick type Supplier.</p>
         <?php else: ?>
             <form method="post" class="reference-party-form">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="record_purchase">
+                <input type="hidden" name="return_to" value="<?= e((string) ($_SERVER['QUERY_STRING'] ?? '')) ?>">
                 <label>Supplier
                     <select name="party_id" required>
                         <option value="">Select supplier</option>
@@ -937,11 +1084,12 @@ $showingTo = min($totalRows, $page * $perPage);
     <section id="panel-forms" class="mbw-card reference-panel-card">
         <div class="mbw-card-head"><h2>Pay a Supplier</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(parties_page_url(['panel' => null])) ?>">Close</a></div></div>
         <?php if ($supplierParties === []): ?>
-            <p class="muted">Create a supplier first (More Actions → Save party with type Supplier).</p>
+            <p class="muted">Create a supplier first — use the <a class="reference-link" href="<?= e(parties_page_url(['panel' => 'party', 'edit_id' => null])) ?>">New Party</a> button and pick type Supplier.</p>
         <?php else: ?>
             <form method="post" class="reference-party-form">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="record_supplier_payment">
+                <input type="hidden" name="return_to" value="<?= e((string) ($_SERVER['QUERY_STRING'] ?? '')) ?>">
                 <label>Supplier
                     <select name="party_id" required>
                         <option value="">Select supplier</option>
@@ -979,18 +1127,23 @@ $tabHeadings = [
 ];
 ?>
 <?php if ($tab !== 'aging'): ?>
-<div class="reference-workspace">
+<div class="reference-workspace<?= $partyPicked ? '' : ' is-full-width' ?>">
     <main id="documents" class="mbw-card reference-table-card">
         <div class="mbw-card-head">
             <h2><?= e($tabHeadings[$tab] ?? 'Documents') ?></h2>
             <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=party-wise')) ?>">Aging Report</a></div>
         </div>
         <?php if ($tab === 'sales'): ?>
+            <div class="reference-bulk-bar" id="invoice-bulk-bar" style="display:none;align-items:center;gap:10px;margin:0 0 10px;padding:8px 12px;border:1px solid var(--mbw-border,#dcebf5);border-radius:9px;background:var(--mbw-primary-soft,#e0f2fe)">
+                <strong><span id="invoice-bulk-count">0</span> selected</strong>
+                <button type="button" class="button secondary" id="invoice-bulk-export"><?= icon('download') ?>Export CSV</button>
+                <button type="button" class="button secondary" id="invoice-bulk-clear"><?= icon('close') ?>Clear</button>
+            </div>
             <div style="overflow-x:auto">
-            <table class="reference-table">
+            <table class="reference-table" id="invoice-table">
                 <thead>
                     <tr>
-                        <th><input type="checkbox" aria-label="Select all"></th>
+                        <th><input type="checkbox" id="invoice-select-all" aria-label="Select all invoices"></th>
                         <th>Invoice No.</th><th>Party Name</th><th>Type</th><th>Invoice Date</th><th>Due Date</th><th class="is-numeric">Amount</th><th class="is-numeric">Paid</th><th class="is-numeric">Outstanding</th><th>Status</th><th>Actions</th>
                     </tr>
                 </thead>
@@ -998,7 +1151,7 @@ $tabHeadings = [
                     <?php if ($pagedRows === []): ?><tr><td colspan="11">No invoices match the current filters.</td></tr><?php endif; ?>
                     <?php foreach ($pagedRows as $document): ?>
                         <tr>
-                            <td><input type="checkbox" aria-label="Select <?= e($document['voucher_no']) ?>"></td>
+                            <td><input type="checkbox" class="invoice-check" value="<?= e((int) $document['id']) ?>" aria-label="Select <?= e($document['voucher_no']) ?>"></td>
                             <td><a class="reference-link" href="<?= e(parties_page_url(['party_id' => (int) ($document['party_id'] ?? 0)])) ?>"><?= e($document['voucher_no']) ?></a></td>
                             <td><?= e($document['party_name'] ?: 'Direct entry') ?></td>
                             <td><span class="mbw-pill tone-blue"><?= e($document['display_type']) ?></span></td>
@@ -1018,19 +1171,20 @@ $tabHeadings = [
             <div style="overflow-x:auto">
             <table class="reference-table">
                 <thead>
-                    <tr><th>Bill No.</th><th>Supplier</th><th>Bill Date</th><th>Reference</th><th class="is-numeric">Amount</th><th class="is-numeric">Outstanding</th><th>Narration</th></tr>
+                    <tr><th>Bill No.</th><th>Supplier</th><th>Bill Date</th><th>Reference</th><th class="is-numeric">Amount</th><th class="is-numeric">Outstanding</th><th>Narration</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
-                    <?php if ($pagedRows === []): ?><tr><td colspan="7">No purchase bills recorded yet. Use Record Purchase to add one.</td></tr><?php endif; ?>
+                    <?php if ($pagedRows === []): ?><tr><td colspan="8">No purchase bills recorded yet. Use Record Purchase to add one.</td></tr><?php endif; ?>
                     <?php foreach ($pagedRows as $bill): ?>
                         <tr>
-                            <td><span class="reference-link"><?= e($bill['voucher_no']) ?></span></td>
+                            <td><a class="reference-link" href="<?= e(url('admin/voucher-form.php?edit=' . (int) $bill['id'])) ?>"><?= e($bill['voucher_no']) ?></a></td>
                             <td><?= e($bill['party_name'] ?: 'Direct entry') ?></td>
                             <td><?= e(date('d M Y', strtotime((string) ($bill['voucher_date'] ?: $bill['created_at'])))) ?></td>
                             <td><?= e($bill['reference_no'] ?? '-') ?></td>
                             <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $bill['total_amount'], 2)) ?></td>
                             <td class="is-numeric <?= ($billOutstanding[(int) $bill['id']] ?? 0) > 0 ? 'text-danger' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format((float) ($billOutstanding[(int) $bill['id']] ?? 0), 2)) ?></td>
                             <td><?= e($bill['narration'] ?? '') ?></td>
+                            <td><div class="reference-row-actions"><a href="<?= e(url('admin/voucher-form.php?edit=' . (int) $bill['id'])) ?>" title="Open voucher"><?= icon('journal') ?></a><?php if (($billOutstanding[(int) $bill['id']] ?? 0) > 0): ?><a href="<?= e(parties_page_url(['panel' => 'supplier-payment', 'party_id' => (int) ($bill['party_id'] ?? 0)])) ?>" title="Pay supplier"><?= icon('wallet') ?></a><?php endif; ?></div></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -1043,7 +1197,7 @@ $tabHeadings = [
                     <tr><th>Code</th><th>Name</th><th>Type</th><th>Email</th><th>Phone</th><th class="is-numeric">Credit Limit</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
-                    <?php if ($pagedRows === []): ?><tr><td colspan="8">No <?= e($tab === 'suppliers' ? 'suppliers' : 'customers') ?> yet. Use More Actions to create one.</td></tr><?php endif; ?>
+                    <?php if ($pagedRows === []): ?><tr><td colspan="8">No <?= e($tab === 'suppliers' ? 'suppliers' : 'customers') ?> yet. Use the <?= e($newPartyLabel) ?> button to create one.</td></tr><?php endif; ?>
                     <?php foreach ($pagedRows as $party): ?>
                         <tr>
                             <td><span class="reference-link"><?= e($party['code']) ?></span></td>
@@ -1060,7 +1214,8 @@ $tabHeadings = [
                                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                         <input type="hidden" name="action" value="toggle_party">
                                         <input type="hidden" name="party_id" value="<?= e((int) $party['id']) ?>">
-                                        <button type="submit" title="Toggle status"><?= icon('theme') ?></button>
+                                        <input type="hidden" name="return_to" value="<?= e((string) ($_SERVER['QUERY_STRING'] ?? '')) ?>">
+                                        <button type="submit" title="<?= e($party['status'] === 'active' ? 'Deactivate party' : 'Activate party') ?>"><?= icon($party['status'] === 'active' ? 'lock' : 'badge-check') ?></button>
                                     </form>
                                 </div>
                             </td>
@@ -1084,6 +1239,7 @@ $tabHeadings = [
         </div>
     </main>
 
+    <?php if ($partyPicked): ?>
     <aside id="party-panel" class="reference-party-panel">
         <?php if ($selectedParty): ?>
             <div class="party-panel-head">
@@ -1092,7 +1248,7 @@ $tabHeadings = [
                     <span class="mbw-pill tone-blue"><?= e(ucfirst($selectedParty['party_type'])) ?></span>
                     <small>Since <?= e(date('M Y', strtotime((string) ($selectedParty['created_at'] ?? 'now')))) ?></small>
                 </div>
-                <a href="<?= e(url('admin/accounting-parties.php')) ?>" aria-label="Close">x</a>
+                <a href="<?= e(url('admin/accounting-parties.php')) ?>" aria-label="Close"><?= icon('close') ?></a>
             </div>
             <nav class="party-panel-tabs">
                 <?php foreach (['profile' => 'Profile', 'ledger' => 'Ledger', 'documents' => 'Documents', 'notes' => 'Notes'] as $ptabKey => $ptabLabel): ?>
@@ -1104,13 +1260,31 @@ $tabHeadings = [
                     <h4>Contact Details <a href="<?= e(parties_page_url(['edit_id' => (int) $selectedParty['id']])) ?>">Edit</a></h4>
                     <dl><dt>Contact Person</dt><dd><?= e($selectedParty['name']) ?></dd><dt>Email</dt><dd><?= e($selectedParty['email'] ?? '-') ?></dd><dt>Phone</dt><dd><?= e($selectedParty['phone'] ?? '-') ?></dd><dt>Address</dt><dd><?= e($selectedParty['billing_address'] ?? '-') ?></dd></dl>
                 </section>
+                <?php
+                // Suppliers get a purchases-shaped summary; the old card always
+                // showed customer figures (all zeros for a pure supplier) and
+                // painted payables as a red receivable-style balance.
+                $isSupplierParty = (string) ($selectedParty['party_type'] ?? '') === 'supplier';
+                $partyBills = array_values(array_filter($purchaseBills, static fn (array $bill): bool => (int) ($bill['party_id'] ?? 0) === (int) $selectedParty['id']));
+                $partyBillTotal = array_sum(array_map(static fn (array $bill): float => (float) $bill['total_amount'], $partyBills));
+                $partyBillOutstanding = array_sum(array_map(static fn (array $bill): float => (float) ($billOutstanding[(int) $bill['id']] ?? 0), $partyBills));
+                $partyPaymentsMade = array_sum(array_map(
+                    static fn (array $payment): float => (int) ($payment['party_id'] ?? 0) === (int) $selectedParty['id'] ? (float) $payment['total_amount'] : 0.0,
+                    $supplierPayments
+                ));
+                $partyBalance = (float) (end($partyLedgerRows)['balance'] ?? $selectedParty['opening_balance']);
+                ?>
                 <section>
                     <h4>Financial Details</h4>
-                    <dl><dt>Credit Limit</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format((float) $selectedParty['credit_limit'], 2)) ?></dd><dt>Current Balance</dt><dd class="text-danger"><?= e(site_currency_symbol()) ?><?= e(number_format((float) (end($partyLedgerRows)['balance'] ?? $selectedParty['opening_balance']), 2)) ?></dd><dt>Tax / VAT No.</dt><dd><?= e($selectedParty['pan_no'] ?? '-') ?></dd><dt>PAN No.</dt><dd><?= e($selectedParty['pan_no'] ?? '-') ?></dd></dl>
+                    <dl><dt>Credit Limit</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format((float) $selectedParty['credit_limit'], 2)) ?></dd><dt>Current Balance</dt><dd class="<?= $partyBalance > 0 ? 'text-danger' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format(abs($partyBalance), 2)) ?> <?= $partyBalance > 0 ? 'Dr' : ($partyBalance < 0 ? 'Cr' : '') ?></dd><dt>PAN / Tax No.</dt><dd><?= e($selectedParty['pan_no'] ?? '-') ?></dd></dl>
                 </section>
                 <section>
                     <h4 id="party-ledger">Account Summary <a href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) $selectedParty['id']])) ?>">View Ledger</a></h4>
-                    <dl><dt>Total Sales</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['total_amount'], $partyTransactions)), 2)) ?></dd><dt>Payments Received</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['paid_amount'], $partyTransactions)), 2)) ?></dd><dt>Outstanding</dt><dd class="text-danger"><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['outstanding_amount'], $partyTransactions)), 2)) ?></dd><dt>Last Invoice</dt><dd><?= e($partyTransactions[0]['invoice_date'] ?? '-') ?></dd></dl>
+                    <?php if ($isSupplierParty): ?>
+                        <dl><dt>Total Purchases</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format($partyBillTotal, 2)) ?></dd><dt>Payments Made</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format($partyPaymentsMade, 2)) ?></dd><dt>Payable Outstanding</dt><dd class="<?= $partyBillOutstanding > 0 ? 'text-danger' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format($partyBillOutstanding, 2)) ?></dd><dt>Last Bill</dt><dd><?= e($partyBills !== [] ? date('d M Y', strtotime((string) ($partyBills[0]['voucher_date'] ?: $partyBills[0]['created_at']))) : '-') ?></dd></dl>
+                    <?php else: ?>
+                        <dl><dt>Total Sales</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['total_amount'], $partyTransactions)), 2)) ?></dd><dt>Payments Received</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['paid_amount'], $partyTransactions)), 2)) ?></dd><dt>Outstanding</dt><dd class="text-danger"><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['outstanding_amount'], $partyTransactions)), 2)) ?></dd><dt>Last Invoice</dt><dd><?= e($partyTransactions[0]['invoice_date'] ?? '-') ?></dd></dl>
+                    <?php endif; ?>
                 </section>
             <?php elseif ($ptab === 'ledger'): ?>
                 <section>
@@ -1169,7 +1343,71 @@ $tabHeadings = [
             <section><h3>No party selected</h3><p class="muted">Create a customer or supplier to populate this panel.</p></section>
         <?php endif; ?>
     </aside>
+    <?php endif; ?>
 </div>
+<?php endif; ?>
+
+<?php if ($tab === 'sales'): ?>
+<script>
+(function () {
+    'use strict';
+    var selectAll = document.getElementById('invoice-select-all');
+    var bulkBar = document.getElementById('invoice-bulk-bar');
+    if (!selectAll || !bulkBar) {
+        return;
+    }
+    var countEl = document.getElementById('invoice-bulk-count');
+    var checks = Array.prototype.slice.call(document.querySelectorAll('.invoice-check'));
+
+    function refresh() {
+        var picked = checks.filter(function (c) { return c.checked; });
+        bulkBar.style.display = picked.length === 0 ? 'none' : 'flex';
+        if (countEl) {
+            countEl.textContent = String(picked.length);
+        }
+        selectAll.checked = picked.length > 0 && picked.length === checks.length;
+        selectAll.indeterminate = picked.length > 0 && picked.length < checks.length;
+    }
+
+    selectAll.addEventListener('change', function () {
+        checks.forEach(function (c) { c.checked = selectAll.checked; });
+        refresh();
+    });
+    checks.forEach(function (c) { c.addEventListener('change', refresh); });
+
+    var clearBtn = document.getElementById('invoice-bulk-clear');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function () {
+            checks.forEach(function (c) { c.checked = false; });
+            refresh();
+        });
+    }
+
+    var exportBtn = document.getElementById('invoice-bulk-export');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', function () {
+            var rows = [['Invoice No.', 'Party', 'Type', 'Invoice Date', 'Due Date', 'Amount', 'Paid', 'Outstanding', 'Status']];
+            checks.filter(function (c) { return c.checked; }).forEach(function (c) {
+                var tr = c.closest('tr');
+                if (!tr) {
+                    return;
+                }
+                var cells = Array.prototype.slice.call(tr.querySelectorAll('td')).slice(1, 10);
+                rows.push(cells.map(function (td) { return td.textContent.trim().replace(/\s+/g, ' '); }));
+            });
+            var csv = rows.map(function (r) {
+                return r.map(function (v) { return '"' + v.replace(/"/g, '""') + '"'; }).join(',');
+            }).join('\r\n');
+            var link = document.createElement('a');
+            link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+            link.download = 'invoices-selected.csv';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        });
+    }
+})();
+</script>
 <?php endif; ?>
 
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

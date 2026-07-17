@@ -115,6 +115,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('accounting', 'edit');
 
         $vid = (int) ($_POST['voucher_id'] ?? 0);
+        // Cancelling removes a voucher from the books' totals, so it obeys the
+        // same guards as deletion: no reconciled entries, no locked/closed
+        // period, no module-owned voucher (previously this bypassed them all).
+        $cancelVoucherStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :cid LIMIT 1');
+        $cancelVoucherStmt->execute(['id' => $vid, 'cid' => $booksCompanyId]);
+        $cancelVoucher = $cancelVoucherStmt->fetch();
+        $cancelBlocker = $cancelVoucher ? voucher_mutation_blocker($cancelVoucher) : 'Voucher not found.';
+        if ($cancelBlocker !== null) {
+            flash('error', 'Cannot cancel: ' . $cancelBlocker);
+            redirect($booksUrl('vouchers'));
+        }
         $where = $access === 'direct' ? '' : " AND approval_state = 'pending_approval' AND submitted_by = " . $userId;
         db()->exec("UPDATE vouchers SET status = 'cancelled', approval_state = 'rejected' WHERE id = " . $vid . ' AND company_id = ' . $booksCompanyId . $where);
         security_event('client_voucher_cancelled', 'success', 'Client voucher #' . $vid . ' cancelled.', $booksCompanyId, $userId);

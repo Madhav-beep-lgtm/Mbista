@@ -46,7 +46,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:company_id, :group_id, :code, :name, :type, 0, 'active')")
                 ->execute(['company_id' => $companyId, 'group_id' => $groupId, 'code' => $code, 'name' => $name, 'type' => $ledgerType]);
+            $ledgerId = (int) db()->lastInsertId();
             flash('success', 'Ledger created.');
+        }
+
+        // Balance-sheet ledgers (asset/liability/equity) can carry an opening
+        // balance, journalled once against Opening Balance Adjustments and
+        // replaced whenever the figure here changes. The field arrives empty
+        // when untouched — only act when the user typed something.
+        $openingRaw = trim((string) ($_POST['opening_balance'] ?? ''));
+        if ($openingRaw !== '' && $ledgerId > 0 && in_array($ledgerType, ['asset', 'liability', 'equity'], true)) {
+            $openingError = post_ledger_opening_balance(
+                $companyId,
+                $ledgerId,
+                (float) $openingRaw,
+                (string) ($_POST['opening_side'] ?? 'debit'),
+                (int) (current_user()['id'] ?? 0) ?: null
+            );
+            if ($openingError !== null) {
+                flash('error', 'Opening balance not posted: ' . $openingError);
+            } elseif ((float) $openingRaw > 0) {
+                flash('success', 'Opening balance journalled against Opening Balance Adjustments.');
+            }
         }
         redirect('admin/chart-ledgers.php');
     }
@@ -54,6 +75,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('accounting', 'edit');
         $ledgerId = (int) ($_POST['ledger_id'] ?? 0);
         if ($ledgerId > 0) {
+            // Never delete a ledger that carries accounting entries — the
+            // entries (and the vouchers' balance) must survive. Offer suspend.
+            $entryCount = db()->prepare('SELECT COUNT(*) FROM voucher_entries ve JOIN ledgers l ON l.id = ve.ledger_id WHERE ve.ledger_id = :id AND l.company_id = :company_id');
+            $entryCount->execute(['id' => $ledgerId, 'company_id' => $companyId]);
+            if ((int) $entryCount->fetchColumn() > 0) {
+                flash('error', 'This ledger has posted entries and cannot be deleted — suspend it instead (Edit → status Suspended) to hide it from new postings.');
+                redirect('admin/chart-ledgers.php');
+            }
             try {
                 db()->prepare('DELETE FROM ledgers WHERE id = :id AND company_id = :company_id')->execute(['id' => $ledgerId, 'company_id' => $companyId]);
                 security_event('ledger_deleted', 'success', 'Ledger #' . $ledgerId . ' deleted.', $companyId, (int) (current_user()['id'] ?? 0) ?: null);
@@ -100,6 +129,32 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php foreach ($groups as $group): ?>
                         <option value="<?= e((int) $group['id']) ?>" <?= (int) ($editLedger['group_id'] ?? 0) === (int) $group['id'] ? 'selected' : '' ?>><?= e($masters[$group['master_key']]['label'] ?? $group['master_key']) ?> / <?= e($group['name']) ?></option>
                     <?php endforeach; ?>
+                </select>
+            </label>
+            <?php
+            // Current opening balance (from the ledger's OB voucher) prefills the
+            // edit form; leaving the field untouched (blank) changes nothing.
+            $existingOpening = null;
+            if ($editLedger) {
+                $obStmt = db()->prepare("
+                    SELECT ve.entry_type, ve.amount FROM vouchers v
+                    JOIN voucher_entries ve ON ve.voucher_id = v.id AND ve.ledger_id = :lid
+                    WHERE v.source_type = 'ledger_opening' AND v.source_id = :lid2 AND v.company_id = :cid LIMIT 1
+                ");
+                $obStmt->execute(['lid' => (int) $editLedger['id'], 'lid2' => (int) $editLedger['id'], 'cid' => $companyId]);
+                $existingOpening = $obStmt->fetch() ?: null;
+            }
+            ?>
+            <label>Opening balance
+                <input type="number" step="0.01" min="0" name="opening_balance"
+                       value="<?= e($existingOpening !== null ? number_format((float) $existingOpening['amount'], 2, '.', '') : '') ?>"
+                       placeholder="Assets, liabilities & equity only — 0 clears it"
+                       title="Journalled against Opening Balance Adjustments at the fiscal year start. Income and expense ledgers always open at zero.">
+            </label>
+            <label>Opening side
+                <select name="opening_side">
+                    <option value="debit" <?= ($existingOpening['entry_type'] ?? 'debit') === 'debit' ? 'selected' : '' ?>>Debit (Dr)</option>
+                    <option value="credit" <?= ($existingOpening['entry_type'] ?? '') === 'credit' ? 'selected' : '' ?>>Credit (Cr)</option>
                 </select>
             </label>
             <div class="workspace-span-2">

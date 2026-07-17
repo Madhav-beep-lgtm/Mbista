@@ -330,6 +330,9 @@ $reportMeta = [
 $reportNumberedTitle = (isset($report['number']) ? $report['number'] . '. ' : '') . ($report['title'] ?? $reportLabel);
 
 if (isset($_GET['view']) && $_GET['view'] === 'print') {
+    // The print view carries the full report — it must not bypass the export
+    // permission the CSV path enforces.
+    require_permission('reports', 'export');
     ?><!doctype html>
     <html lang="en">
     <head>

@@ -23,9 +23,12 @@ if (!$invoice || (int) ($invoice['company_id'] ?? 0) !== (int) $currentCompany['
     exit;
 }
 
+// Both formats carry the full invoice; the printable branch must not bypass
+// the export permission the CSV branch enforces.
+require_permission('reports', 'export');
+
 if ($format === 'excel') {
     // Export as Excel/CSV
-    require_permission('reports', 'export');
     $export = export_invoice_to_excel($invoiceId);
     $filename = $export['filename'] ?? 'invoice.csv';
     $data = $export['rows'] ?? ($export['data'] ?? []);

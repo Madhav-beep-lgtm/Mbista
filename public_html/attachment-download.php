@@ -41,8 +41,11 @@ if ($type === 'message') {
     $row = $stmt->fetch();
 
     if ($row && $row['attachment_path']) {
+        // The check must use the SESSION company, not the thread's own company —
+        // passing the row's company made the admin branch a tautology that let
+        // any admin fetch any tenant's attachments.
         $companyId = $role === 'admin' ? current_company_id() : (int) ($user['company_id'] ?? 0);
-        $authorized = attachment_user_can_access_thread($role, $userId, (int) $row['company_id'], (int) $row['thread_id']);
+        $authorized = attachment_user_can_access_thread($role, $userId, $companyId, (int) $row['thread_id']);
 
         if ($authorized) {
             $filePath = (string) $row['attachment_path'];

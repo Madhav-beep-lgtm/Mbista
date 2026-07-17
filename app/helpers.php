@@ -436,6 +436,18 @@ function icon(string $name): string
             'viewBox' => '0 0 24 24',
             'paths' => ['M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9', 'M13.73 21a2 2 0 0 1-3.46 0'],
         ],
+        'box' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M21 8l-9-5-9 5v8l9 5 9-5V8z', 'M3.3 8.3L12 13l8.7-4.7', 'M12 13v9'],
+        ],
+        'sliders' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M4 21v-7', 'M4 10V3', 'M12 21v-9', 'M12 8V3', 'M20 21v-5', 'M20 12V3', 'M1 14h6', 'M9 8h6', 'M17 16h6'],
+        ],
+        'key' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M21 2l-2 2', 'M15.5 7.5L19 4', 'M21 2l-8.6 8.6', 'M11.4 10.6a5 5 0 1 0 2 2z'],
+        ],
     ];
 
     $icon = $icons[$name] ?? [
@@ -536,7 +548,17 @@ function export_csv(string $filename, array $data): void
     fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
 
     foreach ($data as $row) {
-        fputcsv($output, $row);
+        // Formula-injection hardening: user-controlled text (party/ledger
+        // names) opening with =, +, @ or a tab would execute as a formula in
+        // spreadsheet apps. Leading '-' stays untouched so negative amounts
+        // export cleanly.
+        $safeRow = array_map(static function ($cell) {
+            if (is_string($cell) && $cell !== '' && preg_match('/^[=+@\t]/', $cell)) {
+                return "'" . $cell;
+            }
+            return $cell;
+        }, $row);
+        fputcsv($output, $safeRow);
     }
 
     fclose($output);
@@ -2671,22 +2693,153 @@ function create_voucher_with_entries(array $voucher, array $entries): int
         $params['approval_state'] = ($params['status'] === 'posted') ? 'approved' : 'draft';
     }
 
-    $stmt = db()->prepare('INSERT INTO vouchers (company_id, fiscal_year_id, voucher_no, voucher_type, source_type, source_id, narration, total_amount, status, posted_by, posted_at' . $extraColumns . ') VALUES (:company_id, :fiscal_year_id, :voucher_no, :voucher_type, :source_type, :source_id, :narration, :total_amount, :status, :posted_by, :posted_at' . $extraValues . ')');
-    $stmt->execute($params);
+    // A POSTED voucher must balance: Dr total == Cr total to the paisa. Drafts
+    // may be saved unbalanced (work in progress) but can never reach the books
+    // unbalanced because posting always flows back through this validation.
+    if (($params['status'] ?? 'posted') === 'posted') {
+        $balanceCheck = 0.0;
+        foreach ($entries as $entry) {
+            $entryAmount = round((float) ($entry['amount'] ?? 0), 2);
+            $balanceCheck += ($entry['entry_type'] ?? '') === 'debit' ? $entryAmount : -$entryAmount;
+        }
+        if (abs(round($balanceCheck, 2)) > 0.005) {
+            throw new RuntimeException('Refusing to post unbalanced voucher ' . ($voucher['voucher_no'] ?? '') . ': debits and credits differ by ' . number_format(abs($balanceCheck), 2) . '.');
+        }
+        if ($entries === []) {
+            throw new RuntimeException('Refusing to post voucher ' . ($voucher['voucher_no'] ?? '') . ' without entries.');
+        }
+    }
 
-    $voucherId = (int) db()->lastInsertId();
-    $entryStmt = db()->prepare('INSERT INTO voucher_entries (voucher_id, ledger_id, entry_type, amount, memo) VALUES (:voucher_id, :ledger_id, :entry_type, :amount, :memo)');
-    foreach ($entries as $entry) {
-        $entryStmt->execute([
-            'voucher_id' => $voucherId,
-            'ledger_id' => $entry['ledger_id'],
-            'entry_type' => $entry['entry_type'],
-            'amount' => $entry['amount'],
-            'memo' => $entry['memo'] ?? null,
-        ]);
+    // Header + entries commit together, so a mid-loop failure can never leave
+    // a partial (one-legged) voucher behind. Callers that already opened a
+    // transaction keep owning it — we only manage one we started ourselves.
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        $stmt = db()->prepare('INSERT INTO vouchers (company_id, fiscal_year_id, voucher_no, voucher_type, source_type, source_id, narration, total_amount, status, posted_by, posted_at' . $extraColumns . ') VALUES (:company_id, :fiscal_year_id, :voucher_no, :voucher_type, :source_type, :source_id, :narration, :total_amount, :status, :posted_by, :posted_at' . $extraValues . ')');
+        $stmt->execute($params);
+
+        $voucherId = (int) db()->lastInsertId();
+        $entryStmt = db()->prepare('INSERT INTO voucher_entries (voucher_id, ledger_id, entry_type, amount, memo) VALUES (:voucher_id, :ledger_id, :entry_type, :amount, :memo)');
+        foreach ($entries as $entry) {
+            $entryStmt->execute([
+                'voucher_id' => $voucherId,
+                'ledger_id' => $entry['ledger_id'],
+                'entry_type' => $entry['entry_type'],
+                'amount' => $entry['amount'],
+                'memo' => $entry['memo'] ?? null,
+            ]);
+        }
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $postingException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        throw $postingException;
     }
 
     return $voucherId;
+}
+
+/**
+ * Set (or update, or clear with amount 0) the opening balance of a
+ * balance-sheet ledger — assets, liabilities and equity only; income and
+ * expense ledgers open at zero by definition. Posts a journal against the
+ * Opening Balance Adjustments equity ledger, dated at the default fiscal
+ * year's start. One voucher per ledger (source ledger_opening/<ledger id>);
+ * updating replaces it, honouring the usual mutation guards (reconciled
+ * entries, locked periods).
+ * Returns null on success or a human-readable reason on failure.
+ */
+function post_ledger_opening_balance(int $companyId, int $ledgerId, float $amount, string $side, ?int $actorId = null): ?string
+{
+    if (!table_exists('vouchers') || !table_exists('voucher_entries')) {
+        return 'accounting tables are missing';
+    }
+    $amount = round($amount, 2);
+    if ($amount < 0) {
+        return 'opening balance cannot be negative — flip the Dr/Cr side instead';
+    }
+    if (!in_array($side, ['debit', 'credit'], true)) {
+        $side = 'debit';
+    }
+
+    $ledgerStmt = db()->prepare('SELECT * FROM ledgers WHERE id = :id AND company_id = :cid LIMIT 1');
+    $ledgerStmt->execute(['id' => $ledgerId, 'cid' => $companyId]);
+    $ledger = $ledgerStmt->fetch();
+    if (!$ledger) {
+        return 'ledger not found for this company';
+    }
+    if (!in_array((string) $ledger['type'], ['asset', 'liability', 'equity'], true)) {
+        return 'opening balances apply to asset, liability and equity ledgers only — income and expense ledgers always open at zero';
+    }
+
+    $contraLedgerId = opening_balance_ledger_id($companyId);
+    if ($contraLedgerId <= 0) {
+        return 'the Opening Balance Adjustments ledger could not be resolved';
+    }
+    if ($contraLedgerId === $ledgerId) {
+        return 'the Opening Balance Adjustments ledger cannot carry its own opening balance';
+    }
+
+    // Replace any existing opening voucher for this ledger.
+    $existingStmt = db()->prepare("SELECT * FROM vouchers WHERE source_type = 'ledger_opening' AND source_id = :lid AND company_id = :cid LIMIT 1");
+    $existingStmt->execute(['lid' => $ledgerId, 'cid' => $companyId]);
+    $existing = $existingStmt->fetch();
+    if ($existing) {
+        $blocker = voucher_mutation_blocker($existing);
+        if ($blocker !== null) {
+            return 'the existing opening voucher cannot be replaced: ' . $blocker;
+        }
+    }
+
+    $defaultFy = current_fiscal_year() ?: (resolve_default_company_and_fiscal_year()['fiscal_year'] ?? null);
+    $openingDate = (string) ($defaultFy['start_date'] ?? date('Y-m-d'));
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        if ($existing) {
+            db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
+                ->execute(['id' => (int) $existing['id'], 'cid' => $companyId]);
+        }
+        if ($amount > 0.004) {
+            create_voucher_with_entries([
+                'company_id' => $companyId,
+                'fiscal_year_id' => (int) ($defaultFy['id'] ?? 0) ?: null,
+                'voucher_no' => 'OB-L' . $ledgerId,
+                'voucher_type' => 'journal',
+                'source_type' => 'ledger_opening',
+                'source_id' => $ledgerId,
+                'voucher_date' => $openingDate,
+                'narration' => 'Opening balance — ' . $ledger['name'],
+                'total_amount' => $amount,
+                'status' => 'posted',
+                'posted_by' => $actorId,
+                'posted_at' => date('Y-m-d H:i:s'),
+            ], [
+                ['ledger_id' => $ledgerId, 'entry_type' => $side, 'amount' => $amount, 'memo' => 'Opening balance'],
+                ['ledger_id' => $contraLedgerId, 'entry_type' => $side === 'debit' ? 'credit' : 'debit', 'amount' => $amount, 'memo' => 'Opening balance contra — ' . $ledger['name']],
+            ]);
+        }
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $openingException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        return $openingException->getMessage();
+    }
+
+    log_activity('ledger', $ledgerId, 'opening_balance_set', 'Opening balance ' . ($amount > 0 ? number_format($amount, 2) . ' ' . strtoupper(substr($side, 0, 2)) : 'cleared') . ' for ledger ' . $ledger['name'] . '.', $actorId);
+    return null;
 }
 
 /**
@@ -2694,7 +2847,7 @@ function create_voucher_with_entries(array $voucher, array $entries): int
  * The two hard blockers: a bank-reconciled entry (removing it would desync
  * the reconciliation), and a voucher date inside a locked accounting period.
  */
-function voucher_mutation_blocker(array $voucher): ?string
+function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []): ?string
 {
     $voucherId = (int) ($voucher['id'] ?? 0);
     if ($voucherId <= 0) {
@@ -2739,6 +2892,25 @@ function voucher_mutation_blocker(array $voucher): ?string
     if (in_array((string) ($voucher['source_type'] ?? ''), $faSourceTypes, true)) {
         return 'This voucher was posted by the Fixed Assets module and backs its register. Correct it from the asset or lease page (or delete the asset, which removes its vouchers consistently) — editing or deleting it here would desync the asset register from the books.';
     }
+    // Same protection for the other module-owned vouchers: inventory movements,
+    // manufacturing orders, NRV allowances, invoices and their receipts all keep
+    // register rows (inventory_transactions.voucher_id, invoice/payment status)
+    // that would claim a posting the ledger no longer has. Reverse them from
+    // their own module instead.
+    $moduleSourceTypes = [
+        'inventory_movement' => 'the Inventory module (reverse the movement from Inventory & Manufacturing)',
+        'manufacturing_order' => 'the Manufacturing module (its order register references this posting)',
+        'inventory_nrv_release' => 'the Inventory module (NRV allowance tracking references this posting)',
+        'inventory_nrv_assessment' => 'the Inventory module (NRV allowance tracking references this posting)',
+        'task_invoice' => 'the Invoicing module (the invoice would keep claiming revenue was posted)',
+        'invoice_payment_request' => 'the Invoicing module (the payment would keep showing paid with no cash in the books)',
+        'invoice_discount' => 'the Invoicing module (the invoice totals already reflect this discount — removing its voucher would desync the receivable)',
+        'party_opening' => 'the Parties module (the party opening balance would silently vanish from the books)',
+    ];
+    $voucherSourceType = (string) ($voucher['source_type'] ?? '');
+    if (isset($moduleSourceTypes[$voucherSourceType]) && !in_array($voucherSourceType, $allowModuleSources, true)) {
+        return 'This voucher was posted by ' . $moduleSourceTypes[$voucherSourceType] . ' — deleting or cancelling it here would desync that register from the books.';
+    }
     foreach ([
         'asset_depreciation_schedule' => 'a depreciation schedule row',
         'lease_schedule_lines' => 'a lease schedule period',
@@ -2770,27 +2942,90 @@ function delete_voucher_with_entries(int $voucherId, int $companyId, ?int $actor
     if (!$voucher) {
         return ['ok' => false, 'error' => 'Voucher not found for this company.', 'voucher_no' => ''];
     }
-    $blocker = voucher_mutation_blocker($voucher);
+
+    // Invoice-family vouchers may be deleted here because their register rows
+    // can be rolled back in the same transaction (invoice returns to draft,
+    // payment becomes cancelled) — the register never claims a posting the
+    // ledger no longer has. Inventory/manufacturing/fixed-asset vouchers stay
+    // hard-blocked: their reversal must run through their own module.
+    $cascadableSources = ['task_invoice', 'invoice_payment_request'];
+    $sourceType = (string) ($voucher['source_type'] ?? '');
+    $sourceId = (int) ($voucher['source_id'] ?? 0);
+    $blocker = voucher_mutation_blocker($voucher, $cascadableSources);
     if ($blocker !== null) {
         return ['ok' => false, 'error' => $blocker, 'voucher_no' => (string) $voucher['voucher_no']];
     }
 
-    // Remove attachment files from disk before the rows cascade away.
-    if (table_exists('voucher_attachments')) {
-        $fileStmt = db()->prepare('SELECT file_path FROM voucher_attachments WHERE voucher_id = :id');
-        $fileStmt->execute(['id' => $voucherId]);
-        foreach ($fileStmt->fetchAll(PDO::FETCH_COLUMN) as $filePath) {
-            $absolute = __DIR__ . '/../public_html/' . ltrim((string) $filePath, '/');
-            if (is_file($absolute)) {
-                @unlink($absolute);
-            }
+    $registerNote = '';
+    if ($sourceType === 'task_invoice' && $sourceId > 0 && table_exists('invoice_payment_requests')) {
+        $payCheck = db()->prepare("SELECT COUNT(*) FROM invoice_payment_requests WHERE invoice_id = :iid AND status IN ('paid', 'partial')");
+        $payCheck->execute(['iid' => $sourceId]);
+        if ((int) $payCheck->fetchColumn() > 0) {
+            return ['ok' => false, 'error' => 'This sales voucher\'s invoice has recorded payments. Delete the payment (receipt) vouchers first, then this one.', 'voucher_no' => (string) $voucher['voucher_no']];
         }
     }
 
-    db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :company_id')
-        ->execute(['id' => $voucherId, 'company_id' => $companyId]);
+    // Collect attachment paths now, unlink only after the DB commit succeeds.
+    $attachmentPaths = [];
+    if (table_exists('voucher_attachments')) {
+        $fileStmt = db()->prepare('SELECT file_path FROM voucher_attachments WHERE voucher_id = :id');
+        $fileStmt->execute(['id' => $voucherId]);
+        $attachmentPaths = $fileStmt->fetchAll(PDO::FETCH_COLUMN);
+    }
 
-    $summary = 'Voucher ' . $voucher['voucher_no'] . ' (' . $voucher['voucher_type'] . ', ' . number_format((float) $voucher['total_amount'], 2) . ') deleted.';
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        if ($sourceType === 'task_invoice' && $sourceId > 0 && table_exists('task_invoices')) {
+            db()->prepare("UPDATE task_invoices SET status = 'draft' WHERE id = :id AND company_id = :cid")
+                ->execute(['id' => $sourceId, 'cid' => $companyId]);
+            $registerNote = ' Its invoice was returned to draft so the register matches the books.';
+        }
+        if ($sourceType === 'invoice_payment_request' && $sourceId > 0 && table_exists('invoice_payment_requests')) {
+            $reqStmt = db()->prepare('SELECT invoice_id FROM invoice_payment_requests WHERE id = :id LIMIT 1');
+            $reqStmt->execute(['id' => $sourceId]);
+            $paidInvoiceId = (int) ($reqStmt->fetchColumn() ?: 0);
+            db()->prepare("UPDATE invoice_payment_requests SET status = 'cancelled' WHERE id = :id")
+                ->execute(['id' => $sourceId]);
+            if (table_exists('invoice_payment_receipts')) {
+                db()->prepare('DELETE FROM invoice_payment_receipts WHERE payment_request_id = :id')
+                    ->execute(['id' => $sourceId]);
+            }
+            // With that payment gone, a fully-paid invoice drops back to issued.
+            if ($paidInvoiceId > 0 && table_exists('task_invoices')) {
+                $remainStmt = db()->prepare("SELECT COUNT(*) FROM invoice_payment_requests WHERE invoice_id = :iid AND status IN ('paid', 'partial')");
+                $remainStmt->execute(['iid' => $paidInvoiceId]);
+                if ((int) $remainStmt->fetchColumn() === 0) {
+                    db()->prepare("UPDATE task_invoices SET status = 'issued' WHERE id = :id AND company_id = :cid AND status = 'paid'")
+                        ->execute(['id' => $paidInvoiceId, 'cid' => $companyId]);
+                }
+            }
+            $registerNote = ' Its payment record was cancelled so the register matches the books.';
+        }
+
+        db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :company_id')
+            ->execute(['id' => $voucherId, 'company_id' => $companyId]);
+
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $deleteException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        return ['ok' => false, 'error' => 'Could not delete the voucher: ' . $deleteException->getMessage(), 'voucher_no' => (string) $voucher['voucher_no']];
+    }
+
+    foreach ($attachmentPaths as $filePath) {
+        $absolute = __DIR__ . '/../public_html/' . ltrim((string) $filePath, '/');
+        if (is_file($absolute)) {
+            @unlink($absolute);
+        }
+    }
+
+    $summary = 'Voucher ' . $voucher['voucher_no'] . ' (' . $voucher['voucher_type'] . ', ' . number_format((float) $voucher['total_amount'], 2) . ') deleted.' . $registerNote;
     security_event('voucher_deleted', 'success', $summary, $companyId, $actorId);
     log_activity('voucher', $voucherId, 'deleted', $summary, $actorId);
 
@@ -2943,6 +3178,181 @@ function auto_post_order_refund_voucher(int $orderId, ?int $actorId = null): voi
     log_activity('order', $orderId, 'refund_voucher_posted', 'Auto-posted refund voucher #' . $voucherId . '.', $actorId);
 }
 
+/**
+ * Issue stock and post COGS for every item line of a goods invoice
+ * (invoice_source_type inventory or manufacturing, status issued/paid).
+ *
+ * Lines are aggregated per item and the movement is idempotent — an item that
+ * already has a 'sale' movement referencing this invoice number is skipped —
+ * so the function can safely run again on the draft→issued/paid transition or
+ * as a retry after a mapping failure. Returns human-readable notes.
+ */
+function invoice_issue_inventory_stock(int $invoiceId, ?int $actorId = null): array
+{
+    if (!table_exists('task_invoices') || !table_exists('inventory_transactions') || !table_exists('invoice_line_items')) {
+        return [];
+    }
+
+    $invoiceStmt = db()->prepare('SELECT * FROM task_invoices WHERE id = :id LIMIT 1');
+    $invoiceStmt->execute(['id' => $invoiceId]);
+    $invoice = $invoiceStmt->fetch();
+    if (!$invoice
+        || !in_array((string) ($invoice['invoice_source_type'] ?? ''), ['inventory', 'manufacturing'], true)
+        || !in_array((string) ($invoice['status'] ?? ''), ['issued', 'paid'], true)) {
+        return [];
+    }
+
+    $companyId = (int) $invoice['company_id'];
+    $invoiceNo = (string) $invoice['invoice_no'];
+    $issuedOn = (string) ($invoice['issued_on'] ?? date('Y-m-d'));
+    $partyId = (int) ($invoice['party_id'] ?? 0);
+    $fiscalYearId = current_fiscal_year_id() ?: null;
+    $actorId = (int) ($actorId ?? 0);
+
+    // One movement per item: aggregate the invoice's lines.
+    $lineStmt = db()->prepare('
+        SELECT item_id, SUM(quantity) AS quantity, SUM(taxable_amount) AS taxable_amount
+        FROM invoice_line_items
+        WHERE invoice_id = :invoice_id AND item_id IS NOT NULL
+        GROUP BY item_id
+    ');
+    $lineStmt->execute(['invoice_id' => $invoiceId]);
+    $itemLines = $lineStmt->fetchAll();
+    if ($itemLines === []) {
+        return [];
+    }
+
+    $hasWarehouseCols = column_exists('inventory_transactions', 'warehouse_id')
+        && column_exists('inventory_items', 'default_warehouse_id');
+
+    $itemStmt = db()->prepare('
+        SELECT i.*, i.opening_qty + COALESCE((SELECT SUM(t.qty_in - t.qty_out) FROM inventory_transactions t WHERE t.item_id = i.id), 0) AS on_hand
+        FROM inventory_items i WHERE i.id = :id AND i.company_id = :company_id LIMIT 1
+    ');
+    $existsStmt = db()->prepare('
+        SELECT COUNT(*) FROM inventory_transactions
+        WHERE company_id = :company_id AND item_id = :item_id AND transaction_type = \'sale\' AND ref_no = :ref_no
+    ');
+    $insertSql = '
+        INSERT INTO inventory_transactions (
+            company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date,
+            qty_in, qty_out, rate, amount, notes' . ($hasWarehouseCols ? ', warehouse_id' : '') . '
+        ) VALUES (
+            :company_id, :fiscal_year_id, :item_id, \'sale\', :ref_no, :transaction_date,
+            0, :qty_out, :rate, :amount, :notes' . ($hasWarehouseCols ? ', :warehouse_id' : '') . '
+        )';
+    $insertStmt = db()->prepare($insertSql);
+
+    $notes = [];
+    foreach ($itemLines as $line) {
+        $itemId = (int) $line['item_id'];
+        $quantity = round((float) $line['quantity'], 3);
+        $taxable = round((float) $line['taxable_amount'], 2);
+        if ($itemId <= 0 || $quantity <= 0) {
+            continue;
+        }
+
+        $existsStmt->execute(['company_id' => $companyId, 'item_id' => $itemId, 'ref_no' => $invoiceNo]);
+        if ((int) $existsStmt->fetchColumn() > 0) {
+            continue; // Already issued for this invoice.
+        }
+
+        $itemStmt->execute(['id' => $itemId, 'company_id' => $companyId]);
+        $item = $itemStmt->fetch();
+        if (!$item) {
+            continue;
+        }
+
+        $rate = $quantity > 0 ? round($taxable / $quantity, 2) : 0.0;
+        $warehouseId = $hasWarehouseCols ? ((int) ($item['default_warehouse_id'] ?? 0) ?: null) : null;
+
+        try {
+            db()->beginTransaction();
+            $insertParams = [
+                'company_id' => $companyId,
+                'fiscal_year_id' => $fiscalYearId,
+                'item_id' => $itemId,
+                'ref_no' => $invoiceNo,
+                'transaction_date' => $issuedOn,
+                'qty_out' => $quantity,
+                'rate' => $rate,
+                'amount' => $taxable,
+                'notes' => 'Auto stock issue from invoice ' . $invoiceNo,
+            ];
+            if ($hasWarehouseCols) {
+                $insertParams['warehouse_id'] = $warehouseId;
+            }
+            $insertStmt->execute($insertParams);
+            $txnId = (int) db()->lastInsertId();
+
+            $issueValue = inv_apply_movement(
+                $companyId,
+                $itemId,
+                0.0,
+                $quantity,
+                $rate,
+                $issuedOn,
+                (string) ($item['valuation_method'] ?? 'weighted_average'),
+                $txnId,
+                $warehouseId
+            );
+
+            $voucherId = 0;
+            try {
+                $voucherId = inv_post_movement_voucher(
+                    $companyId,
+                    $fiscalYearId,
+                    $txnId,
+                    'sale',
+                    $item,
+                    'out',
+                    $issueValue,
+                    $issuedOn,
+                    $actorId,
+                    $partyId > 0 ? $partyId : null
+                );
+            } catch (RuntimeException $mapException) {
+                if (!str_starts_with($mapException->getMessage(), 'MAP_MISSING:')) {
+                    throw $mapException;
+                }
+                $notes[] = $item['sku'] . ' stock recorded — map its inventory ledgers to auto-post COGS.';
+            }
+            if ($voucherId > 0) {
+                db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
+                    ->execute(['vid' => $voucherId, 'id' => $txnId, 'cid' => $companyId]);
+            }
+
+            // Written-down stock sold through an invoice must release its share
+            // of the NRV allowance exactly as a manual sale does (IAS 2.34).
+            [$allowanceReleased, ] = inv_post_allowance_release(
+                $companyId,
+                $fiscalYearId,
+                $txnId,
+                $item,
+                'sale',
+                'out',
+                $quantity,
+                (float) ($item['on_hand'] ?? 0),
+                $issuedOn,
+                $actorId,
+                $voucherId,
+                $issueValue
+            );
+            if ($allowanceReleased > 0) {
+                $notes[] = $item['sku'] . ' NRV allowance released: ' . site_currency_symbol() . number_format($allowanceReleased, 2) . '.';
+            }
+            db()->commit();
+        } catch (Throwable $stockException) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            $notes[] = $item['sku'] . ' stock movement failed: ' . $stockException->getMessage();
+        }
+    }
+
+    return $notes;
+}
+
 function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): void
 {
     if (!table_exists('vouchers') || !table_exists('voucher_entries') || !table_exists('ledgers')) {
@@ -3022,6 +3432,47 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
         return;
     }
 
+    // Goods invoices credit the 'sales_revenue' ledger mapped per item /
+    // category / global (inventory_ledger_mappings); anything unmapped and all
+    // service invoices fall back to the company's default service revenue.
+    $revenueSplits = [];
+    $isGoodsInvoice = in_array((string) ($invoice['invoice_source_type'] ?? ''), ['inventory', 'manufacturing'], true);
+    if ($isGoodsInvoice && table_exists('invoice_line_items') && function_exists('inv_resolve_mapping')) {
+        $revenueLineStmt = db()->prepare('
+            SELECT li.item_id, li.taxable_amount, ii.category
+            FROM invoice_line_items li
+            LEFT JOIN inventory_items ii ON ii.id = li.item_id
+            WHERE li.invoice_id = :invoice_id
+        ');
+        $revenueLineStmt->execute(['invoice_id' => $invoiceId]);
+        foreach ($revenueLineStmt->fetchAll() as $revenueLine) {
+            $lineTaxable = round((float) $revenueLine['taxable_amount'], 2);
+            if ($lineTaxable <= 0) {
+                continue;
+            }
+            $mapped = !empty($revenueLine['item_id'])
+                ? inv_resolve_mapping($companyId, 'sales_revenue', (int) $revenueLine['item_id'], $revenueLine['category'] ?? null)
+                : null;
+            // inv_resolve_mapping returns the resolved LEDGER row, so its key is id.
+            $ledgerId = (int) ($mapped['id'] ?? 0) ?: (int) $revenueLedger['id'];
+            $revenueSplits[$ledgerId] = round(($revenueSplits[$ledgerId] ?? 0) + $lineTaxable, 2);
+        }
+        // Any difference between the header taxable figure and the line sum
+        // (rounding, header-level adjustments) stays on the default ledger.
+        $splitTotal = round(array_sum($revenueSplits), 2);
+        $splitDelta = round($taxableAmount - $splitTotal, 2);
+        if (abs($splitDelta) >= 0.01) {
+            $defaultLedgerId = (int) $revenueLedger['id'];
+            $revenueSplits[$defaultLedgerId] = round(($revenueSplits[$defaultLedgerId] ?? 0) + $splitDelta, 2);
+            if ($revenueSplits[$defaultLedgerId] <= 0) {
+                unset($revenueSplits[$defaultLedgerId]);
+            }
+        }
+    }
+    if ($revenueSplits === []) {
+        $revenueSplits = [(int) $revenueLedger['id'] => $taxableAmount];
+    }
+
     $voucherNo = 'SV-' . date('Ymd') . '-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT);
     $entries = [
         [
@@ -3030,13 +3481,18 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
             'amount' => $totalAmount,
             'memo' => 'Amount receivable from client',
         ],
-        [
-            'ledger_id' => (int) $revenueLedger['id'],
-            'entry_type' => 'credit',
-            'amount' => $taxableAmount,
-            'memo' => 'Service revenue recognized',
-        ],
     ];
+    foreach ($revenueSplits as $revenueLedgerIdSplit => $revenueAmountSplit) {
+        if ($revenueAmountSplit <= 0) {
+            continue;
+        }
+        $entries[] = [
+            'ledger_id' => (int) $revenueLedgerIdSplit,
+            'entry_type' => 'credit',
+            'amount' => $revenueAmountSplit,
+            'memo' => $isGoodsInvoice ? 'Sales revenue recognized' : 'Service revenue recognized',
+        ];
+    }
     if ($exciseAmount > 0 && $excisePayableLedger) {
         $entries[] = [
             'ledger_id' => (int) $excisePayableLedger['id'],
@@ -3419,24 +3875,24 @@ function client_mirror_create_voucher(array $target, string $sourceType, int $so
  *   Dr input VAT receivable (if mapped)         VAT
  *   Cr service provider payable                 total
  */
-function auto_post_client_mirror_invoice(int $invoiceId, ?int $actorId = null): void
+function auto_post_client_mirror_invoice(int $invoiceId, ?int $actorId = null): ?string
 {
     try {
         if (!table_exists('vouchers') || !table_exists('voucher_entries') || !table_exists('task_invoices')) {
-            return;
+            return 'accounting tables are missing';
         }
         if (client_mirror_voucher_exists('client_mirror_invoice', $invoiceId)) {
-            return;
+            return null; // Already mirrored.
         }
         $stmt = db()->prepare('SELECT * FROM task_invoices WHERE id = :id LIMIT 1');
         $stmt->execute(['id' => $invoiceId]);
         $invoice = $stmt->fetch();
         if (!$invoice) {
-            return;
+            return 'invoice not found';
         }
         $target = client_mirror_target($invoice);
         if (!$target) {
-            return;
+            return 'the invoice\'s party is not linked to an active client profile with its own books — set the party\'s "Client portal link" (Sales & Invoices → edit party) and give that client a books company';
         }
 
         $taxableAmount = round((float) ($invoice['taxable_amount'] ?? $invoice['amount'] ?? 0), 2);
@@ -3444,7 +3900,7 @@ function auto_post_client_mirror_invoice(int $invoiceId, ?int $actorId = null): 
         $vatAmount = round((float) ($invoice['vat_amount'] ?? 0), 2);
         $totalAmount = round((float) ($invoice['total_amount'] ?? ($taxableAmount + $exciseAmount + $vatAmount)), 2);
         if ($totalAmount <= 0 || $taxableAmount <= 0) {
-            return;
+            return 'invoice total is zero';
         }
 
         $sourceType = in_array((string) ($invoice['invoice_source_type'] ?? ''), ['task', 'inventory', 'manufacturing'], true)
@@ -3453,7 +3909,7 @@ function auto_post_client_mirror_invoice(int $invoiceId, ?int $actorId = null): 
         $expenseLedger = client_mirror_ledger((int) $target['books_company_id'], 'expense_' . $sourceType, $target['provider_name']);
         $payableLedger = client_mirror_ledger((int) $target['books_company_id'], 'payable', $target['provider_name']);
         if (!$expenseLedger || !$payableLedger) {
-            return;
+            return 'the client books\' expense/payable ledgers could not be resolved or created';
         }
         $taxLedger = $vatAmount > 0 ? client_mirror_ledger((int) $target['books_company_id'], 'tax_receivable') : null;
 
@@ -3478,8 +3934,10 @@ function auto_post_client_mirror_invoice(int $invoiceId, ?int $actorId = null): 
             $entries,
             $actorId
         );
+        return null;
     } catch (Throwable $exception) {
         // Mirror is best-effort; the firm-side posting must never fail on it.
+        return 'mirror posting failed: ' . $exception->getMessage();
     }
 }
 
@@ -3541,6 +3999,106 @@ function auto_post_client_mirror_payment(int $paymentRequestId, ?int $actorId = 
     } catch (Throwable $exception) {
         // best-effort
     }
+}
+
+/**
+ * Firm side of an approved invoice discount: Dr Discount Allowed (expense)
+ * + Dr VAT Payable (the VAT that no longer applies) / Cr the party's
+ * receivable, for the drop in the invoice total. Without this the SV voucher
+ * kept the full pre-discount receivable on the books forever.
+ * Idempotent per billing request. Only posts when the invoice's sales voucher
+ * exists (a draft invoice has no posting to adjust).
+ */
+function auto_post_invoice_discount_voucher(int $billingRequestId, int $invoiceId, float $discountAmount, float $vatDelta, float $totalDelta, ?int $actorId = null): void
+{
+    if (!table_exists('vouchers') || !table_exists('voucher_entries') || $totalDelta <= 0) {
+        return;
+    }
+    $sourceId = $billingRequestId > 0 ? $billingRequestId : $invoiceId;
+    $existsStmt = db()->prepare("SELECT id FROM vouchers WHERE source_type = 'invoice_discount' AND source_id = :sid LIMIT 1");
+    $existsStmt->execute(['sid' => $sourceId]);
+    if ($existsStmt->fetch()) {
+        return;
+    }
+    // No sales voucher -> the revenue/receivable never posted; header change is enough.
+    $svStmt = db()->prepare("SELECT id, company_id FROM vouchers WHERE source_type = 'task_invoice' AND source_id = :iid LIMIT 1");
+    $svStmt->execute(['iid' => $invoiceId]);
+    $salesVoucher = $svStmt->fetch();
+    if (!$salesVoucher) {
+        return;
+    }
+    $companyId = (int) $salesVoucher['company_id'];
+
+    $invoiceStmt = db()->prepare('SELECT * FROM task_invoices WHERE id = :id LIMIT 1');
+    $invoiceStmt->execute(['id' => $invoiceId]);
+    $invoice = $invoiceStmt->fetch();
+    if (!$invoice) {
+        return;
+    }
+
+    // Same receivable resolution as the sales voucher used.
+    $invoicePartyId = invoice_party_id($invoice, $companyId);
+    $receivableLedgerId = $invoicePartyId > 0 ? ensure_party_ledger($companyId, $invoicePartyId, 'receivable') : 0;
+    if ($receivableLedgerId <= 0) {
+        $receivableLedger = get_mapped_ledger($companyId, 'default_accounts_receivable');
+        $receivableLedgerId = (int) ($receivableLedger['id'] ?? 0);
+    }
+    if ($receivableLedgerId <= 0) {
+        return;
+    }
+
+    // Discount Allowed lives under indirect expenses; created once per company.
+    $discountLedgerStmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND code = 'DISC-ALLOWED' LIMIT 1");
+    $discountLedgerStmt->execute(['cid' => $companyId]);
+    $discountLedgerId = (int) ($discountLedgerStmt->fetchColumn() ?: 0);
+    if ($discountLedgerId <= 0) {
+        $groupStmt = db()->prepare("SELECT id FROM ledger_groups WHERE company_id = :cid AND master_key IN ('indirect_expense', 'direct_expense') ORDER BY master_key = 'indirect_expense' DESC LIMIT 1");
+        $groupStmt->execute(['cid' => $companyId]);
+        $expenseGroupId = (int) ($groupStmt->fetchColumn() ?: 0);
+        if ($expenseGroupId <= 0) {
+            return;
+        }
+        db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status) VALUES (:cid, :gid, 'DISC-ALLOWED', 'Discount Allowed', 'expense', 'active')")
+            ->execute(['cid' => $companyId, 'gid' => $expenseGroupId]);
+        $discountLedgerId = (int) db()->lastInsertId();
+    }
+
+    // VAT no longer due reduces the VAT payable; without the mapped tax ledger
+    // the whole delta is treated as discount so the receivable still corrects.
+    $taxLedger = $vatDelta > 0 ? get_mapped_ledger($companyId, 'default_tax_payable') : null;
+    if ($vatDelta > 0 && !$taxLedger) {
+        $discountAmount = round($discountAmount + $vatDelta, 2);
+        $vatDelta = 0.0;
+    }
+    // Absorb rounding residue into the discount leg so the voucher balances.
+    $discountAmount = round($totalDelta - $vatDelta, 2);
+
+    $entries = [
+        ['ledger_id' => $discountLedgerId, 'entry_type' => 'debit', 'amount' => $discountAmount, 'memo' => 'Discount allowed on invoice ' . ($invoice['invoice_no'] ?? '#' . $invoiceId)],
+    ];
+    if ($vatDelta > 0 && $taxLedger) {
+        $entries[] = ['ledger_id' => (int) $taxLedger['id'], 'entry_type' => 'debit', 'amount' => $vatDelta, 'memo' => 'VAT reversed on discounted portion'];
+    }
+    $entries[] = ['ledger_id' => $receivableLedgerId, 'entry_type' => 'credit', 'amount' => $totalDelta, 'memo' => 'Receivable reduced by approved discount'];
+
+    $voucherId = create_voucher_with_entries([
+        'company_id' => $companyId,
+        'fiscal_year_id' => current_fiscal_year_id() ?: null,
+        'voucher_no' => 'DISC-' . date('Ymd') . '-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT),
+        'voucher_type' => 'journal',
+        'source_type' => 'invoice_discount',
+        'source_id' => $sourceId,
+        'reference_no' => $invoice['invoice_no'] ?? null,
+        'voucher_date' => date('Y-m-d'),
+        'party_id' => $invoicePartyId > 0 ? $invoicePartyId : null,
+        'narration' => 'Discount approved on invoice ' . ($invoice['invoice_no'] ?? '#' . $invoiceId),
+        'total_amount' => $totalDelta,
+        'status' => 'posted',
+        'posted_by' => $actorId,
+        'posted_at' => date('Y-m-d H:i:s'),
+    ], $entries);
+
+    log_activity('task_invoice', $invoiceId, 'discount_posted', 'Discount voucher #' . $voucherId . ' posted (receivable reduced by ' . number_format($totalDelta, 2) . ').', $actorId);
 }
 
 /**
@@ -5697,8 +6255,8 @@ function export_ledger_html(int $companyId, int $fiscalYearId): string
 
     $stmt = db()->prepare("
         SELECT l.id, l.code, l.name, l.type,
-               COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE 0 END), 0) AS debit_total,
-               COALESCE(SUM(CASE WHEN ve.entry_type = 'credit' THEN ve.amount ELSE 0 END), 0) AS credit_total
+               COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = 'debit' THEN ve.amount ELSE 0 END), 0) AS debit_total,
+               COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = 'credit' THEN ve.amount ELSE 0 END), 0) AS credit_total
         FROM ledgers l
         LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
         LEFT JOIN vouchers v
@@ -6768,6 +7326,19 @@ function apply_ticket_request_decision(array $request, int $companyId, ?float $a
                 'company_id' => $companyId,
             ]);
         $appliedInvoiceId = $targetInvoiceId;
+
+        // The firm's own books must record the discount too — previously only
+        // the invoice header shrank while the sales voucher kept the full
+        // pre-discount receivable sitting in Accounts Receivable.
+        $oldVat = round((float) ($invoice['vat_amount'] ?? 0), 2);
+        auto_post_invoice_discount_voucher(
+            (int) ($request['id'] ?? 0),
+            $targetInvoiceId,
+            $discountAmount,
+            round($oldVat - $newVat, 2),
+            round($oldTotal - $newTotal, 2),
+            $actorId
+        );
 
         // Mirror the benefit into the client's books as discount received.
         auto_post_client_mirror_discount((int) ($request['id'] ?? 0), $targetInvoiceId, $oldTotal - $newTotal, $actorId);

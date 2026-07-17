@@ -41,24 +41,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Cash & bank ledgers with FY movement + reconciliation coverage.
+// Inventory stock ledgers can end up misfiled in the Bank group (seed data did
+// this); anything the inventory module posts to is never a bank/cash account.
+$inventoryLedgerGuard = '';
+if (table_exists('inventory_ledger_mappings')) {
+    $inventoryLedgerGuard .= ' AND l.id NOT IN (SELECT ilm.ledger_id FROM inventory_ledger_mappings ilm WHERE ilm.company_id = l.company_id AND ilm.ledger_id IS NOT NULL)';
+}
+if (table_exists('inventory_items') && column_exists('inventory_items', 'ledger_id')) {
+    $inventoryLedgerGuard .= ' AND l.id NOT IN (SELECT ii.ledger_id FROM inventory_items ii WHERE ii.company_id = l.company_id AND ii.ledger_id IS NOT NULL)';
+}
+
+// Cash & bank ledgers. Inflow/Outflow/Unreconciled are movement within the
+// selected fiscal year (posted vouchers only — the old query let drafts and
+// other years leak into the SUMs via the LEFT JOIN). Balance is cumulative:
+// every posted entry dated up to the FY end, so assets carry forward.
+$fiscalYearEnd = (string) ($fiscalYear['end_date'] ?? date('Y-m-d'));
 $accountStmt = db()->prepare('
     SELECT l.id, l.code, l.name,
            ' . ($hasBankMeta ? 'l.bank_name, l.bank_account_no,' : 'NULL AS bank_name, NULL AS bank_account_no,') . '
-           COALESCE(SUM(CASE WHEN ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) AS inflow,
-           COALESCE(SUM(CASE WHEN ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS outflow,
-           COALESCE(SUM(CASE WHEN ve.id IS NOT NULL AND ve.reconciled_at IS NULL THEN 1 ELSE 0 END), 0) AS unreconciled,
-           MAX(COALESCE(v.voucher_date, DATE(v.created_at))) AS last_move
+           COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) AS inflow,
+           COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS outflow,
+           COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.reconciled_at IS NULL THEN 1 ELSE 0 END), 0) AS unreconciled,
+           MAX(COALESCE(v.voucher_date, DATE(v.created_at))) AS last_move,
+           COALESCE((
+               SELECT SUM(CASE WHEN ve2.entry_type = \'debit\' THEN ve2.amount ELSE -ve2.amount END)
+               FROM voucher_entries ve2
+               INNER JOIN vouchers v2 ON v2.id = ve2.voucher_id
+               WHERE ve2.ledger_id = l.id AND v2.company_id = l.company_id AND v2.status = \'posted\'
+                 AND COALESCE(v2.voucher_date, DATE(v2.created_at)) <= :fy_end
+           ), 0) AS balance
     FROM ledgers l
     INNER JOIN ledger_groups g ON g.id = l.group_id AND COALESCE(g.is_cash_or_bank, 0) = 1
     LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
     LEFT JOIN vouchers v ON v.id = ve.voucher_id
         AND v.company_id = l.company_id AND v.fiscal_year_id = :fiscal_year_id AND v.status = \'posted\'
-    WHERE l.company_id = :company_id
+    WHERE l.company_id = :company_id' . $inventoryLedgerGuard . '
     GROUP BY l.id, l.code, l.name' . ($hasBankMeta ? ', l.bank_name, l.bank_account_no' : '') . '
     ORDER BY l.name ASC
 ');
-$accountStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
+$accountStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId, 'fy_end' => $fiscalYearEnd]);
 $accounts = $accountStmt->fetchAll();
 
 $totalBalance = 0.0;
@@ -66,7 +87,7 @@ $totalInflow = 0.0;
 $totalOutflow = 0.0;
 $totalUnreconciled = 0;
 foreach ($accounts as $account) {
-    $totalBalance += (float) $account['inflow'] - (float) $account['outflow'];
+    $totalBalance += (float) $account['balance'];
     $totalInflow += (float) $account['inflow'];
     $totalOutflow += (float) $account['outflow'];
     $totalUnreconciled += (int) $account['unreconciled'];
@@ -75,13 +96,13 @@ foreach ($accounts as $account) {
 // Recent bank/cash movements in this fiscal year.
 $txnStmt = db()->prepare('
     SELECT ve.id, ve.entry_type, ve.amount, ve.reconciled_at, l.name AS ledger_name,
-           v.voucher_no, v.voucher_type, v.narration,
+           v.id AS voucher_id, v.voucher_no, v.voucher_type, v.narration,
            COALESCE(v.voucher_date, DATE(v.created_at)) AS voucher_date
     FROM voucher_entries ve
     INNER JOIN ledgers l ON l.id = ve.ledger_id
     INNER JOIN ledger_groups g ON g.id = l.group_id AND COALESCE(g.is_cash_or_bank, 0) = 1
     INNER JOIN vouchers v ON v.id = ve.voucher_id
-    WHERE v.company_id = :company_id AND v.fiscal_year_id = :fiscal_year_id AND v.status = \'posted\'
+    WHERE v.company_id = :company_id AND v.fiscal_year_id = :fiscal_year_id AND v.status = \'posted\'' . $inventoryLedgerGuard . '
     ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) DESC, ve.id DESC
     LIMIT 25
 ');
@@ -99,39 +120,47 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
 <section class="mbw-kpi-grid" aria-label="Banking overview">
-    <article class="mbw-kpi">
+    <a class="mbw-kpi" href="<?= e(url('admin/reports-center.php?report=cash-book&fy=' . $fiscalYearId)) ?>">
         <div>
             <span class="mbw-kpi-label">Cash &amp; Bank Balance</span>
             <div class="mbw-kpi-value"><?= e($fmtMoney($totalBalance)) ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= count($accounts) ?> accounts</span></span>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= count($accounts) ?> accounts · as of FY end</span></span>
         </div>
         <span class="mbw-chip tone-blue"><?= icon('bank') ?></span>
-    </article>
-    <article class="mbw-kpi">
+    </a>
+    <a class="mbw-kpi" href="<?= e(url('admin/reports-center.php?report=cash-book&fy=' . $fiscalYearId)) ?>">
         <div>
             <span class="mbw-kpi-label">Inflow (This FY)</span>
             <div class="mbw-kpi-value"><?= e($fmtMoney($totalInflow)) ?></div>
             <span class="mbw-kpi-delta is-up"><?= icon('trend-up') ?><span class="mbw-kpi-vs">Money received</span></span>
         </div>
         <span class="mbw-chip tone-green"><?= icon('trend-up') ?></span>
-    </article>
-    <article class="mbw-kpi">
+    </a>
+    <a class="mbw-kpi" href="<?= e(url('admin/reports-center.php?report=cash-book&fy=' . $fiscalYearId)) ?>">
         <div>
             <span class="mbw-kpi-label">Outflow (This FY)</span>
             <div class="mbw-kpi-value"><?= e($fmtMoney($totalOutflow)) ?></div>
             <span class="mbw-kpi-delta is-down"><?= icon('trend-down') ?><span class="mbw-kpi-vs">Money paid out</span></span>
         </div>
         <span class="mbw-chip tone-red"><?= icon('trend-down') ?></span>
-    </article>
+    </a>
     <a class="mbw-kpi" href="<?= e(url('admin/reconciliation.php')) ?>">
         <div>
             <span class="mbw-kpi-label">Unreconciled Entries</span>
             <div class="mbw-kpi-value"><?= (int) $totalUnreconciled ?></div>
-            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Open items to reconcile</span></span>
+            <span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Open items this FY</span></span>
         </div>
         <span class="mbw-chip tone-purple"><?= icon('reconcile') ?></span>
     </a>
 </section>
+
+<div class="reference-toolbar-actions" style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0" aria-label="Banking quick actions">
+    <a class="button" href="<?= e(url('admin/voucher-form.php?type=contra')) ?>"><?= icon('reconcile') ?>New Transfer</a>
+    <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=receipt')) ?>"><?= icon('trend-up') ?>Record Receipt</a>
+    <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=payment')) ?>"><?= icon('trend-down') ?>Record Payment</a>
+    <a class="button secondary" href="<?= e(url('admin/voucher-import.php')) ?>"><?= icon('upload') ?>Import Statement</a>
+    <a class="button secondary" href="<?= e(url('admin/reconciliation.php')) ?>"><?= icon('badge-check') ?>Reconciliation</a>
+</div>
 
 <section class="mbw-card" aria-label="Bank accounts">
     <div class="mbw-card-head">
@@ -146,10 +175,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <tbody>
             <?php if ($accounts === []): ?><tr><td colspan="7" style="color:var(--mbw-muted)">No cash or bank ledgers yet. Create one from the Chart of Accounts.</td></tr><?php endif; ?>
             <?php foreach ($accounts as $account): ?>
-                <?php $balance = (float) $account['inflow'] - (float) $account['outflow']; ?>
+                <?php $balance = (float) $account['balance']; ?>
                 <tr>
                     <td><strong style="color:var(--mbw-heading)"><?= e(($account['bank_name'] ?? '') !== '' && $account['bank_name'] !== null ? $account['bank_name'] : $account['name']) ?></strong></td>
-                    <td><?= e($account['name']) ?> <span class="mbw-pill tone-gray"><?= e($account['code']) ?></span></td>
+                    <td><a class="reference-link" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . (int) $account['id'] . '&fy=' . $fiscalYearId)) ?>" title="Open account statement"><?= e($account['name']) ?></a> <span class="mbw-pill tone-gray"><?= e($account['code']) ?></span></td>
                     <td><?= e($maskAccount($account['bank_account_no'] ?? null)) ?></td>
                     <td class="is-numeric <?= $balance < 0 ? 'amount-negative' : '' ?>"><?= e($fmtMoney($balance)) ?></td>
                     <td><?= $account['last_move'] ? e(date('d M Y', strtotime((string) $account['last_move']))) : '<span style="color:var(--mbw-muted)">No activity</span>' ?></td>
@@ -185,7 +214,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php foreach ($transactions as $txn): ?>
                 <tr>
                     <td><?= e(date('d M Y', strtotime((string) $txn['voucher_date']))) ?></td>
-                    <td><a href="<?= e(url('admin/accounting.php')) ?>" style="color:var(--mbw-primary);text-decoration:none"><?= e($txn['voucher_no']) ?></a></td>
+                    <td><a href="<?= e(url('admin/voucher-form.php?edit=' . (int) $txn['voucher_id'])) ?>" style="color:var(--mbw-primary);text-decoration:none"><?= e($txn['voucher_no']) ?></a></td>
                     <td><?= e($txn['ledger_name']) ?></td>
                     <td><?= e($txn['narration'] ?: ucwords(str_replace('_', ' ', (string) $txn['voucher_type']))) ?></td>
                     <td class="is-numeric amount-positive"><?= (string) $txn['entry_type'] === 'debit' ? e($fmtMoney((float) $txn['amount'])) : '' ?></td>
@@ -204,7 +233,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <div class="modal-card">
                 <div class="modal-head">
                     <h3>Bank Details — <?= e($account['name']) ?></h3>
-                    <button type="button" class="button secondary" data-modal-close aria-label="Close"><?= icon('close') ?></button>
+                    <button type="button" class="button secondary" data-modal-close="bank-meta-<?= (int) $account['id'] ?>" aria-label="Close"><?= icon('close') ?></button>
                 </div>
                 <form method="post" action="<?= e(url('admin/banking.php')) ?>">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

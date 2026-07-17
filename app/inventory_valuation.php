@@ -378,6 +378,22 @@ function inv_consume_layers(int $companyId, int $itemId, float $qty, string $met
         $toIssue -= $take;
     }
 
+    // Moving average: an issue leaves every REMAINING unit valued at the same
+    // average cost. The layers previously kept their historical unit costs, so
+    // remaining subledger value != (balance value - issue value) and cumulative
+    // COGS could exceed everything ever debited to inventory (GL going negative
+    // with stock at zero). Re-costing the survivors keeps subledger == GL.
+    if ($issueUnitCost !== null) {
+        db()->prepare(
+            'UPDATE inventory_cost_layers SET unit_cost = :cost
+             WHERE company_id = :cid AND item_id = :iid AND qty_remaining > 0.00005'
+        )->execute([
+            'cost' => inv_round_cost($issueUnitCost),
+            'cid' => $companyId,
+            'iid' => $itemId,
+        ]);
+    }
+
     return inv_round_money($cogs);
 }
 

@@ -782,6 +782,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'This is one leg of a transfer. Reversing a single leg would leave stock stranded at the other location — record a transfer in the opposite direction instead.');
             redirect('admin/accounting-inventory.php');
         }
+        // One reversal per movement: the mirror row is keyed REV-<id>, so a
+        // re-submit (or double click) must not duplicate stock and GL again.
+        $revExistsStmt = db()->prepare('SELECT id FROM inventory_transactions WHERE company_id = :cid AND ref_no = :ref LIMIT 1');
+        $revExistsStmt->execute(['cid' => $companyId, 'ref' => 'REV-' . $movementId]);
+        if ($revExistsStmt->fetchColumn()) {
+            flash('error', 'Movement #' . $movementId . ' has already been reversed — reversing it again would duplicate the stock and the accounting entries.');
+            redirect('admin/accounting-inventory.php');
+        }
         $revItem = inventory_company_item((int) $movement['item_id'], $companyId);
         try {
             db()->beginTransaction();

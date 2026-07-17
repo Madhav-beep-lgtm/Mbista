@@ -207,6 +207,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
+                // A Manufacturing Output invoice must reference a completed order
+                // of this company — previously the id was stored unchecked.
+                if (!$error && $invoiceSourceType === 'manufacturing' && $sourceId > 0 && table_exists('manufacturing_orders')) {
+                    $moStmt = db()->prepare('SELECT status FROM manufacturing_orders WHERE id = :id AND company_id = :company_id LIMIT 1');
+                    $moStmt->execute(['id' => $sourceId, 'company_id' => (int) $currentCompany['id']]);
+                    $moStatus = $moStmt->fetchColumn();
+                    if ($moStatus === false) {
+                        $error = 'Selected manufacturing order not found for this company.';
+                    } elseif ((string) $moStatus !== 'completed') {
+                        $error = 'Manufacturing order must be completed before its output can be invoiced.';
+                    }
+                }
+
+                // Goods invoices that will issue stock now are validated against
+                // on-hand quantities up front — previously the invoice and its
+                // full revenue voucher posted even when the stock leg failed.
+                if (!$error && in_array($invoiceSourceType, ['inventory', 'manufacturing'], true)
+                    && in_array($status, ['issued', 'paid'], true) && table_exists('inventory_transactions')) {
+                    $requestedByItem = [];
+                    foreach ($lineItems as $line) {
+                        if (!empty($line['item_id'])) {
+                            $requestedByItem[(int) $line['item_id']] = ($requestedByItem[(int) $line['item_id']] ?? 0) + (float) $line['quantity'];
+                        }
+                    }
+                    if ($requestedByItem !== []) {
+                        $onHandStmt = db()->prepare('
+                            SELECT i.sku, i.name,
+                                   i.opening_qty + COALESCE((SELECT SUM(t.qty_in - t.qty_out) FROM inventory_transactions t WHERE t.item_id = i.id), 0) AS on_hand
+                            FROM inventory_items i WHERE i.id = :id AND i.company_id = :company_id LIMIT 1
+                        ');
+                        $shortages = [];
+                        foreach ($requestedByItem as $requestedItemId => $requestedQty) {
+                            $onHandStmt->execute(['id' => $requestedItemId, 'company_id' => (int) $currentCompany['id']]);
+                            $onHandRow = $onHandStmt->fetch();
+                            if (!$onHandRow) {
+                                $shortages[] = 'item #' . $requestedItemId . ' not found';
+                                continue;
+                            }
+                            if ((float) $onHandRow['on_hand'] + 0.0005 < $requestedQty) {
+                                $shortages[] = $onHandRow['sku'] . ' (' . $onHandRow['name'] . '): need ' . rtrim(rtrim(number_format($requestedQty, 3), '0'), '.') . ', on hand ' . rtrim(rtrim(number_format((float) $onHandRow['on_hand'], 3), '0'), '.');
+                            }
+                        }
+                        if ($shortages !== []) {
+                            $error = 'Insufficient stock — ' . implode('; ', $shortages) . '. Reduce quantities or receive stock first.';
+                        }
+                    }
+                }
+
                 if (!$error) {
                     if ($lineItems === []) {
                         $lineExcise = $invoiceSourceType === 'manufacturing' ? round($amount * ($exciseRate / 100), 2) : 0.0;
@@ -294,117 +342,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
 
-                    $stockPostingNotes = [];
-                    if ($invoiceSourceType === 'inventory' && in_array($status, ['issued', 'paid'], true) && table_exists('inventory_transactions')) {
-                        $invFiscalYearId = current_fiscal_year_id() ?: null;
-                        $stockItemStmt = db()->prepare('
-                            SELECT i.id, i.category, i.sku, i.name, i.valuation_method,
-                                   i.opening_qty + COALESCE((SELECT SUM(t.qty_in - t.qty_out) FROM inventory_transactions t WHERE t.item_id = i.id), 0) AS on_hand
-                            FROM inventory_items i WHERE i.id = :id AND i.company_id = :company_id LIMIT 1
-                        ');
-                        $stockInsertStmt = db()->prepare('
-                            INSERT INTO inventory_transactions (
-                                company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date,
-                                qty_in, qty_out, rate, amount, notes
-                            ) VALUES (
-                                :company_id, :fiscal_year_id, :item_id, "sale", :ref_no, :transaction_date,
-                                0, :qty_out, :rate, :amount, :notes
-                            )
-                        ');
-                        foreach ($lineItems as $line) {
-                            if (empty($line['item_id'])) {
-                                continue;
-                            }
-                            $stockItemStmt->execute(['id' => (int) $line['item_id'], 'company_id' => (int) $currentCompany['id']]);
-                            $stockItem = $stockItemStmt->fetch();
-                            if (!$stockItem) {
-                                continue;
-                            }
-                            // Mirror accounting-inventory.php's record_movement: insert the
-                            // movement, draw down FIFO/weighted-average/specific cost layers
-                            // for the real issue cost, then post the balanced Dr COGS / Cr
-                            // Inventory GL voucher — so an inventory-sourced invoice posts
-                            // both legs (revenue below, COGS here) instead of a raw stock
-                            // row with no cost-layer or GL impact.
-                            try {
-                                db()->beginTransaction();
-                                $stockInsertStmt->execute([
-                                    'company_id' => (int) $currentCompany['id'],
-                                    'fiscal_year_id' => $invFiscalYearId,
-                                    'item_id' => (int) $line['item_id'],
-                                    'ref_no' => $invoiceNo,
-                                    'transaction_date' => $issuedOn,
-                                    'qty_out' => $line['quantity'],
-                                    'rate' => $line['rate'],
-                                    'amount' => $line['taxable_amount'],
-                                    'notes' => 'Auto stock issue from invoice ' . $invoiceNo,
-                                ]);
-                                $stockTxnId = (int) db()->lastInsertId();
-                                $stockMethod = (string) ($stockItem['valuation_method'] ?? 'weighted_average');
-                                $issueValue = inv_apply_movement(
-                                    (int) $currentCompany['id'],
-                                    (int) $line['item_id'],
-                                    0.0,
-                                    (float) $line['quantity'],
-                                    (float) $line['rate'],
-                                    $issuedOn,
-                                    $stockMethod,
-                                    $stockTxnId
-                                );
-                                $stockVoucherId = 0;
-                                try {
-                                    $stockVoucherId = inv_post_movement_voucher(
-                                        (int) $currentCompany['id'],
-                                        $invFiscalYearId,
-                                        $stockTxnId,
-                                        'sale',
-                                        $stockItem,
-                                        'out',
-                                        $issueValue,
-                                        $issuedOn,
-                                        $adminId,
-                                        $partyId > 0 ? $partyId : null
-                                    );
-                                } catch (RuntimeException $mapEx) {
-                                    if (!str_starts_with($mapEx->getMessage(), 'MAP_MISSING:')) {
-                                        throw $mapEx;
-                                    }
-                                    $stockPostingNotes[] = $stockItem['sku'] . ' stock recorded — map its inventory ledgers to auto-post COGS.';
-                                }
-                                if ($stockVoucherId > 0) {
-                                    db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
-                                        ->execute(['vid' => $stockVoucherId, 'id' => $stockTxnId, 'cid' => (int) $currentCompany['id']]);
-                                }
-                                // Written-down stock sold through an invoice must release its
-                                // share of the NRV allowance exactly as a manually recorded
-                                // sale does, or the two sale paths disagree and the allowance
-                                // strands on the balance sheet (IAS 2.34).
-                                [$invAllowanceReleased, ] = inv_post_allowance_release(
-                                    (int) $currentCompany['id'],
-                                    $invFiscalYearId,
-                                    $stockTxnId,
-                                    $stockItem,
-                                    'sale',
-                                    'out',
-                                    (float) $line['quantity'],
-                                    (float) ($stockItem['on_hand'] ?? 0),
-                                    $issuedOn,
-                                    $adminId,
-                                    $stockVoucherId,
-                                    $issueValue
-                                );
-                                if ($invAllowanceReleased > 0) {
-                                    $stockPostingNotes[] = $stockItem['sku'] . ' NRV allowance released: ' . site_currency_symbol() . number_format($invAllowanceReleased, 2) . '.';
-                                }
-                                db()->commit();
-                            } catch (Throwable $stockException) {
-                                if (db()->inTransaction()) {
-                                    db()->rollBack();
-                                }
-                                $stockPostingNotes[] = $stockItem['sku'] . ' stock movement failed: ' . $stockException->getMessage();
-                            }
-                        }
-                    }
+                    // Stock issue + COGS + NRV release for goods invoices
+                    // (inventory AND manufacturing) via the shared idempotent
+                    // helper — the same routine also runs on the draft→issued
+                    // /paid transition so no path skips the stock leg.
+                    $stockPostingNotes = invoice_issue_inventory_stock($newInvoiceId, $adminId);
 
                     try {
                         $updateVatStmt = db()->prepare('UPDATE task_invoices SET invoice_category = :invoice_category, vat_rate = :vat_rate, vat_amount = :vat_amount, taxable_amount = :taxable_amount, excise_rate = :excise_rate, excise_amount = :excise_amount, total_amount = :total_amount WHERE id = :id AND company_id = :company_id');
@@ -424,8 +366,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     log_activity('task_invoice', $newInvoiceId, 'issued', 'Task invoice issued from invoice tab.', $adminId);
+                    $mirrorNote = '';
                     if (in_array($status, ['issued', 'paid'], true)) {
                         auto_post_task_invoice_voucher($newInvoiceId, $adminId);
+                        // Tell the issuer whether the client-books mirror entry
+                        // went out, and if not, exactly why (it used to skip
+                        // silently, which read as "unable to post").
+                        $mirrorReason = auto_post_client_mirror_invoice($newInvoiceId, $adminId);
+                        if ($mirrorReason === null) {
+                            $mirrorNote = ' A mirror purchase entry was submitted to the client\'s books for their approval.';
+                        } elseif ($partyId > 0) {
+                            $mirrorNote = ' No client mirror entry: ' . $mirrorReason . '.';
+                        }
                     }
                     if ($status === 'paid') {
                         $requestId = create_payment_request($newInvoiceId, (int) $currentCompany['id'], $adminId, $totalAmount, 'manual', 'Auto-created for paid invoice.');
@@ -440,7 +392,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             auto_post_invoice_payment_voucher((int) $requestId, $adminId);
                         }
                     }
-                    $message = 'Invoice created successfully.' . ($stockPostingNotes !== [] ? ' ' . implode(' ', $stockPostingNotes) : '');
+                    $message = 'Invoice created successfully.' . $mirrorNote . ($stockPostingNotes !== [] ? ' ' . implode(' ', $stockPostingNotes) : '');
                 }
             }
         }
@@ -510,6 +462,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ]);
 
                     auto_post_invoice_payment_voucher($paymentRequestId, $adminId);
+
+                    // A draft goods invoice collected here transitions to
+                    // issued/paid — issue its stock and COGS now (idempotent;
+                    // no-op for invoices that already moved stock at creation).
+                    $paymentStockNotes = invoice_issue_inventory_stock($invoiceId, $adminId);
+                    if ($paymentStockNotes !== []) {
+                        flash('info', implode(' ', $paymentStockNotes));
+                    }
 
                     if (table_exists('invoice_payment_receipts')) {
                         $existingReceipt = get_payment_receipt_by_request($paymentRequestId, (int) $currentCompany['id']);
