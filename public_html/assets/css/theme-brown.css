@@ -206,3 +206,93 @@ body.admin-layout .tag[class*=status-],body.admin-layout .status-paid,body.admin
   .portal-selector-page .hero-grid > div { padding: 24px 20px !important; }
   .portal-selector-page .admin-grid { grid-template-columns: 1fr !important; }
 }
+/* Emergency contrast correction v1
+   Dark brown stays on navigation chrome. Work surfaces stay white in both modes. */
+
+/* Homepage hero and statistics */
+body.home-page .hero-title,
+body.home-page .hero-title-line,
+body.home-page .hero-card h3,
+body.home-page .hero-card p,
+body.home-page .hero-card li { color:#fff !important; }
+body.home-page .hero-title-accent { color:#f3c868 !important; }
+body.home-page .hero-stats-band,
+body.home-page .hero-stats-band * { color:#fff !important; }
+body.home-page .hero-stats-band .icon-stat-body span { color:rgba(255,255,255,.76) !important; }
+body.home-page .hero-title { font-size:clamp(40px,3.65vw,60px) !important; }
+
+/* Company selector: white cards always use dark text, even when dark mode is active. */
+body.theme-dark .portal-selector-page,
+body.theme-dark .portal-selector-page > .container { background:#faf7f4 !important; }
+body.theme-dark .portal-selector-page form.card {
+  background:#fff !important;
+  color:#231f1c !important;
+  border-color:#e4dad3 !important;
+}
+body.theme-dark .portal-selector-page form.card h1,
+body.theme-dark .portal-selector-page form.card h2,
+body.theme-dark .portal-selector-page form.card h3,
+body.theme-dark .portal-selector-page form.card h4 { color:#231f1c !important; }
+body.theme-dark .portal-selector-page form.card p,
+body.theme-dark .portal-selector-page form.card small { color:#665b54 !important; }
+body.theme-dark .portal-selector-page form.card .badge { color:#3b2418 !important; }
+body.theme-dark .portal-selector-page form.card p:last-of-type { color:#0f6538 !important; }
+
+/* Admin, staff and client: dark shell plus white working canvas in both modes. */
+body.admin-layout.theme-dark .admin-main,
+body.admin-layout.theme-dark .admin-content,
+body.admin-layout.admin-dark .admin-main,
+body.admin-layout.admin-dark .admin-content {
+  background:#faf7f4 !important;
+  color:#231f1c !important;
+}
+body.admin-layout.theme-dark .admin-content :where(.card,.panel,.form-card,.table-card,.stat-card,.metric-card,.dashboard-card,.report-card,.settings-card,.workspace-card,.admin-card,.admin-panel,.cr-card,.rc-card,.mbw-card,.ad-panel,.ad-kpi-card,.ad-chart-card,.chart-card,.analytics-card),
+body.admin-layout.admin-dark .admin-content :where(.card,.panel,.form-card,.table-card,.stat-card,.metric-card,.dashboard-card,.report-card,.settings-card,.workspace-card,.admin-card,.admin-panel,.cr-card,.rc-card,.mbw-card,.ad-panel,.ad-kpi-card,.ad-chart-card,.chart-card,.analytics-card) {
+  background:#fff !important;
+  color:#231f1c !important;
+  border-color:#e4dad3 !important;
+}
+body.admin-layout.theme-dark .admin-content :where(h1,h2,h3,h4,h5,h6,strong,label,legend,th,td),
+body.admin-layout.admin-dark .admin-content :where(h1,h2,h3,h4,h5,h6,strong,label,legend,th,td) { color:#231f1c !important; }
+body.admin-layout.theme-dark .admin-content :where(p,small,.meta,.muted,.help,.hint),
+body.admin-layout.admin-dark .admin-content :where(p,small,.meta,.muted,.help,.hint) { color:#665b54 !important; }
+body.admin-layout.theme-dark .admin-content table,
+body.admin-layout.admin-dark .admin-content table { background:#fff !important; color:#231f1c !important; }
+body.admin-layout.theme-dark .admin-content thead th,
+body.admin-layout.admin-dark .admin-content thead th { background:#efe5de !important; color:#24140d !important; }
+body.admin-layout.theme-dark .admin-content tbody tr:nth-child(even),
+body.admin-layout.admin-dark .admin-content tbody tr:nth-child(even) { background:#faf7f4 !important; }
+body.admin-layout.theme-dark .admin-content tbody tr:hover,
+body.admin-layout.admin-dark .admin-content tbody tr:hover { background:#f4ece7 !important; }
+body.admin-layout.theme-dark .admin-content input,
+body.admin-layout.theme-dark .admin-content select,
+body.admin-layout.theme-dark .admin-content textarea,
+body.admin-layout.admin-dark .admin-content input,
+body.admin-layout.admin-dark .admin-content select,
+body.admin-layout.admin-dark .admin-content textarea {
+  background:#fff !important;
+  color:#231f1c !important;
+  border-color:#cdbbaf !important;
+  color-scheme:light;
+}
+
+/* Dashboard-specific panels and chart labels that use legacy selectors. */
+body.admin-layout.theme-dark .admin-content [class*='kpi'],
+body.admin-layout.theme-dark .admin-content [class*='chart'],
+body.admin-layout.theme-dark .admin-content [class*='analytics'],
+body.admin-layout.admin-dark .admin-content [class*='kpi'],
+body.admin-layout.admin-dark .admin-content [class*='chart'],
+body.admin-layout.admin-dark .admin-content [class*='analytics'] {
+  --mbw-heading:#231f1c;
+  --mbw-text:#231f1c;
+  --mbw-muted:#665b54;
+}
+body.admin-layout.theme-dark .admin-content canvas,
+body.admin-layout.admin-dark .admin-content canvas { color:#231f1c !important; }
+
+/* Keep semantic states readable above the general work-surface rules. */
+body.admin-layout .notice.success,body.admin-layout .badge.success,body.admin-layout .tag.status-completed,body.admin-layout .tag.status-paid { color:#0f6538 !important; }
+body.admin-layout .notice.error,body.admin-layout .badge.danger,body.admin-layout .tag.status-overdue,body.admin-layout .tag.status-failed { color:#a61f1f !important; }
+body.admin-layout .notice.warning,body.admin-layout .badge.warning,body.admin-layout .tag.status-pending { color:#8a3f08 !important; }
+
+@media(max-width:760px){body.home-page .hero-title{font-size:clamp(34px,10vw,48px)!important}}
