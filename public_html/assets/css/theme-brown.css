@@ -328,3 +328,39 @@ body.admin-layout .ov-donut-center small,body.admin-layout .ov-legend-row{color:
 .auth2-encrypt{background:rgba(36,20,13,.78)!important;border-color:rgba(205,187,175,.4)!important}
 .site-header .nav a::after{background:linear-gradient(90deg,#704a35,#c9a03c)!important}
 @media(max-width:900px){.auth2{grid-template-columns:1fr}.auth2-left{padding:32px 24px}.auth2-right{padding:32px 20px}}
+/* Context-matched background correction */
+
+/* Login footer must merge with the deep-brown login canvas. */
+.auth-page .auth2-foot,
+.auth2-foot {
+  background:#24140d !important;
+  border-top-color:#654838 !important;
+  color:#e9ddd5 !important;
+}
+.auth2-foot span,.auth2-foot a { color:#e9ddd5 !important; }
+.auth2-foot a:hover,.auth2-foot strong { color:#f3c868 !important; }
+
+/* Homepage photograph is blue-teal; use its sampled dominant colour for overlays. */
+body.home-page .hero-card {
+  background:linear-gradient(145deg,rgba(18,58,74,.96),rgba(13,46,59,.95)) !important;
+  border-color:rgba(190,220,231,.26) !important;
+  box-shadow:0 18px 48px rgba(7,31,42,.34) !important;
+}
+body.home-page .hero-card h3,
+body.home-page .hero-card p,
+body.home-page .hero-card li { color:#f7fbfc !important; }
+body.home-page .hero-card .ui-icon,
+body.home-page .hero-card .checklist li::before { color:#e0bd63 !important; }
+body.home-page .hero-stats-band {
+  background:linear-gradient(135deg,#0d2e3b,#123a4a) !important;
+  border-color:rgba(190,220,231,.24) !important;
+  box-shadow:0 16px 40px rgba(7,31,42,.30) !important;
+}
+body.home-page .hero-stats-band .icon-stat + .icon-stat { border-color:rgba(190,220,231,.22) !important; }
+body.home-page .hero-stats-band .icon-stat-icon { background:rgba(255,255,255,.08) !important;border-color:rgba(255,255,255,.28) !important;color:#fff !important; }
+body.home-page .hero-stats-band strong { color:#fff !important; }
+body.home-page .hero-stats-band span { color:rgba(255,255,255,.76) !important; }
+
+/* Keep brown as a controlled accent that complements the photograph. */
+body.home-page .hero .button:not(.secondary) { background:#704a35 !important;border-color:#9a735c !important; }
+body.home-page .hero .button:not(.secondary):hover { background:#563625 !important; }
