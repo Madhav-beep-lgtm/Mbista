@@ -6,8 +6,8 @@
     { "src": "/assets/img/favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
     { "src": "/assets/img/favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "maskable" }
   ],
-  "theme_color": "#0b1c36",
-  "background_color": "#0b1c36",
+  "theme_color": "#0c4a6e",
+  "background_color": "#0c4a6e",
   "display": "standalone",
   "start_url": "/"
 }

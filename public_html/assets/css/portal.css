@@ -11,16 +11,16 @@
 
 body.admin-layout {
   /* Light tokens */
-  --mbw-canvas: #eef2f7;
+  --mbw-canvas: #eef6fc;
   --mbw-card: #ffffff;
-  --mbw-card-soft: #f7fafd;
-  --mbw-border: #e3e9f2;
-  --mbw-border-soft: #edf1f7;
-  --mbw-heading: #0f1e33;
-  --mbw-text: #26344c;
-  --mbw-muted: #4d5d76;
-  --mbw-primary: #2563eb;
-  --mbw-primary-soft: #e7effd;
+  --mbw-card-soft: #f5fafe;
+  --mbw-border: #dcebf5;
+  --mbw-border-soft: #e9f3fa;
+  --mbw-heading: #0c4a6e;
+  --mbw-text: #1e3a4f;
+  --mbw-muted: #4a677c;
+  --mbw-primary: #0284c7;
+  --mbw-primary-soft: #e0f2fe;
   --mbw-green: #16a34a;
   --mbw-green-soft: #e5f6ec;
   --mbw-red: #e5484d;
@@ -31,16 +31,16 @@ body.admin-layout {
   --mbw-purple-soft: #f0eafd;
   --mbw-teal: #0d9488;
   --mbw-teal-soft: #e0f5f4;
-  --mbw-gray-soft: #eef1f6;
-  --mbw-sidebar: #0e2240;
-  --mbw-sidebar-deep: #0b1c36;
-  --mbw-sidebar-line: rgba(148, 178, 215, 0.14);
-  --mbw-sidebar-text: #cdd9ea;
-  --mbw-sidebar-active: #1d3a63;
+  --mbw-gray-soft: #ecf3f9;
+  --mbw-sidebar: #075985;
+  --mbw-sidebar-deep: #0c4a6e;
+  --mbw-sidebar-line: rgba(186, 230, 253, 0.20);
+  --mbw-sidebar-text: #dbeffd;
+  --mbw-sidebar-active: #0369a1;
   --mbw-gold: #e3a13c;
-  --mbw-shadow: 0 1px 2px rgba(22, 38, 62, 0.05), 0 4px 14px rgba(22, 38, 62, 0.04);
-  --mbw-radius: 12px;
-  --mbw-radius-sm: 8px;
+  --mbw-shadow: 0 1px 2px rgba(2, 101, 158, 0.06), 0 4px 14px rgba(2, 101, 158, 0.05);
+  --mbw-radius: 14px;
+  --mbw-radius-sm: 9px;
   --mbw-font: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
 
   /* Re-point legacy alias tokens consumed by old markup */
@@ -69,16 +69,16 @@ body.admin-layout {
 /* Dark tokens — both portal dark classes behave identically */
 body.admin-layout.theme-dark,
 body.admin-layout.admin-dark {
-  --mbw-canvas: #0a1120;
-  --mbw-card: #111b30;
-  --mbw-card-soft: #16223a;
-  --mbw-border: rgba(148, 178, 215, 0.18);
-  --mbw-border-soft: rgba(148, 178, 215, 0.10);
-  --mbw-heading: #f2f6fc;
-  --mbw-text: #dbe4f0;
-  --mbw-muted: #a9b9cf;
-  --mbw-primary: #7fb0f5;
-  --mbw-primary-soft: rgba(127, 176, 245, 0.16);
+  --mbw-canvas: #081722;
+  --mbw-card: #0d2130;
+  --mbw-card-soft: #122c3f;
+  --mbw-border: rgba(125, 211, 252, 0.18);
+  --mbw-border-soft: rgba(125, 211, 252, 0.10);
+  --mbw-heading: #f0f9ff;
+  --mbw-text: #d9ecf7;
+  --mbw-muted: #a3c3d6;
+  --mbw-primary: #38bdf8;
+  --mbw-primary-soft: rgba(56, 189, 248, 0.16);
   --mbw-green: #3ecf7d;
   --mbw-green-soft: rgba(62, 207, 125, 0.14);
   --mbw-red: #f47c80;
@@ -89,9 +89,9 @@ body.admin-layout.admin-dark {
   --mbw-purple-soft: rgba(179, 154, 248, 0.15);
   --mbw-teal: #46c4b9;
   --mbw-teal-soft: rgba(70, 196, 185, 0.14);
-  --mbw-gray-soft: rgba(148, 178, 215, 0.12);
-  --mbw-sidebar: #0a1728;
-  --mbw-sidebar-deep: #081221;
+  --mbw-gray-soft: rgba(125, 211, 252, 0.12);
+  --mbw-sidebar: #0a2e47;
+  --mbw-sidebar-deep: #082438;
   --mbw-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
   /* Legacy reference-layout tokens (style.css hardcodes light values on
      body.accounting-reference-layout, which every admin page carries) */
@@ -99,6 +99,12 @@ body.admin-layout.admin-dark {
   --ref-muted: var(--mbw-muted);
   --ref-line: var(--mbw-border);
   --ref-soft: var(--mbw-card-soft);
+  --ref-navy: var(--mbw-primary);
+  --ref-navy-2: var(--mbw-primary);
+  --ref-gold: var(--mbw-gold);
+  /* Native form internals (date segment highlight, pickers, scrollbars)
+     must follow the theme, not the UA's light default */
+  color-scheme: dark;
   background: var(--mbw-canvas);
   color: var(--mbw-text);
 }
@@ -128,7 +134,7 @@ body.admin-layout .admin-sidebar {
   border-right: 1px solid var(--mbw-sidebar-line);
   background: linear-gradient(180deg, var(--mbw-sidebar) 0%, var(--mbw-sidebar-deep) 100%);
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 178, 215, 0.35) transparent;
+  scrollbar-color: rgba(144, 194, 219, 0.35) transparent;
 }
 
 body.admin-layout .admin-sidebar .brand.brand-admin {
@@ -157,7 +163,7 @@ body.admin-layout .admin-sidebar .brand-mark {
 
 body.admin-layout .admin-sidebar .brand strong {
   display: block;
-  color: #f2f6fc;
+  color: #f2f9fc;
   font-size: 15px;
   font-weight: 700;
   line-height: 1.2;
@@ -165,7 +171,7 @@ body.admin-layout .admin-sidebar .brand strong {
 
 body.admin-layout .admin-sidebar .brand small {
   display: block;
-  color: #8fa4bf;
+  color: #8fafbf;
   font-size: 11px;
   font-weight: 500;
 }
@@ -175,13 +181,13 @@ body.admin-layout .admin-sidebar-context {
   padding: 10px 12px;
   border: 1px solid var(--mbw-sidebar-line);
   border-radius: 10px;
-  background: rgba(148, 178, 215, 0.07);
-  color: #9fb1c6;
+  background: rgba(144, 194, 219, 0.07);
+  color: #9fb9c6;
   font-size: 11px;
 }
 
 body.admin-layout .admin-sidebar-context strong {
-  color: #dbe6f5;
+  color: #dbecf5;
   font-size: 12px;
 }
 
@@ -192,7 +198,7 @@ body.admin-layout .admin-nav {
 
 body.admin-layout .admin-nav-group {
   margin: 14px 4px 4px;
-  color: #7d93b8;
+  color: #7da3b8;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.09em;
@@ -224,7 +230,7 @@ body.admin-layout .admin-nav a .ui-icon {
 }
 
 body.admin-layout .admin-nav a:hover {
-  background: rgba(148, 178, 215, 0.10);
+  background: rgba(144, 194, 219, 0.10);
   color: #ffffff;
 }
 
@@ -269,7 +275,7 @@ body.admin-layout .mbw-subnav {
   display: none;
   margin: 2px 0 4px 20px;
   padding-left: 10px;
-  border-left: 1px solid rgba(148, 178, 215, 0.25);
+  border-left: 1px solid rgba(144, 194, 219, 0.25);
 }
 
 body.admin-layout .mbw-nav-parent.is-open .mbw-subnav {
@@ -569,6 +575,14 @@ body.admin-layout .admin-breadcrumb a {
 body.admin-layout .admin-content {
   display: grid;
   gap: 14px;
+}
+
+/* Grid items default to min-width:auto, so one wide table (even inside an
+   overflow-x:auto wrapper) stretches the whole content column past the
+   viewport and clips the KPI row. Zeroing the automatic minimum keeps the
+   column at the viewport and lets wide tables scroll inside their wrappers. */
+body.admin-layout .admin-content > * {
+  min-width: 0;
 }
 
 /* ==========================================================================
@@ -1037,10 +1051,10 @@ body.admin-layout .button:hover,
 body.admin-layout button:hover,
 body.admin-layout input[type="submit"]:hover,
 body.admin-layout .btn:hover {
-  background: #1d4fd7;
+  background: #0369a1;
   color: #ffffff;
-  transform: none;
-  box-shadow: none;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(2, 132, 199, 0.28);
 }
 
 /* Dark primary buttons keep --mbw-primary (light blue), so their text flips
@@ -1049,12 +1063,12 @@ body.admin-layout .btn:hover {
    getting unreadable dark-on-dark text. */
 body.admin-layout.theme-dark :where(.button, button, .btn):hover,
 body.admin-layout.admin-dark :where(.button, button, .btn):hover {
-  background: #99c0f8;
+  background: #7dd3fc;
 }
 
 body.admin-layout.theme-dark :where(.button, button, input[type="submit"], .btn),
 body.admin-layout.admin-dark :where(.button, button, input[type="submit"], .btn) {
-  color: #0b1420;
+  color: #082f49;
 }
 
 body.admin-layout .button.secondary,
@@ -1373,19 +1387,19 @@ body.admin-layout .mbw-chart-legend .mbw-legend-dot.is-line {
   z-index: 90;
   min-width: 150px;
   padding: 10px 12px;
-  border: 1px solid var(--mbw-border, #e3e9f2);
+  border: 1px solid var(--mbw-border, #e3edf2);
   border-radius: 8px;
   background: var(--mbw-card, #fff);
-  box-shadow: 0 8px 24px rgba(22, 38, 62, 0.14);
+  box-shadow: 0 8px 24px rgba(27, 58, 75, 0.14);
   font-family: "Inter", "Segoe UI", system-ui, sans-serif;
   font-size: 12px;
-  color: var(--mbw-text, #3f4c61);
+  color: var(--mbw-text, #3f5561);
   pointer-events: none;
 }
 
 .mbw-chart-tooltip .mbw-tip-title {
   margin-bottom: 6px;
-  color: var(--mbw-heading, #16263e);
+  color: var(--mbw-heading, #1b3a4b);
   font-weight: 700;
 }
 
@@ -1398,7 +1412,7 @@ body.admin-layout .mbw-chart-legend .mbw-legend-dot.is-line {
 
 .mbw-chart-tooltip .mbw-tip-row b {
   margin-left: auto;
-  color: var(--mbw-heading, #16263e);
+  color: var(--mbw-heading, #1b3a4b);
 }
 
 .mbw-chart-tooltip .mbw-tip-dot {
@@ -1447,7 +1461,7 @@ body.admin-layout .rpt-statement {
 
 body.admin-layout .rpt-bar {
   padding: 10px 16px;
-  background: #16325d;
+  background: #16445d;
   color: #ffffff;
   font-size: 14px;
   font-weight: 700;
@@ -1456,7 +1470,7 @@ body.admin-layout .rpt-bar {
 
 body.admin-layout.theme-dark .rpt-bar,
 body.admin-layout.admin-dark .rpt-bar {
-  background: #1d3a63;
+  background: #194c67;
 }
 
 body.admin-layout .rpt-bar-compare {
@@ -1474,7 +1488,7 @@ body.admin-layout .rpt-letterhead {
 }
 
 body.admin-layout .rpt-company {
-  color: #16325d;
+  color: #16445d;
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.03em;
@@ -1780,7 +1794,7 @@ body.admin-layout .mbw-tab.is-active {
 
 body.admin-layout.theme-dark .mbw-tab.is-active,
 body.admin-layout.admin-dark .mbw-tab.is-active {
-  color: #0b1420;
+  color: #10232d;
 }
 
 /* ==========================================================================
@@ -1982,7 +1996,7 @@ body.admin-layout .frm-toggle i::after {
   height: 16px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 3px rgba(22, 38, 62, 0.3);
+  box-shadow: 0 1px 3px rgba(27, 58, 75, 0.3);
   transition: transform 0.15s ease;
 }
 
@@ -2310,7 +2324,7 @@ body.admin-layout ::-webkit-scrollbar {
 body.admin-layout ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 8px;
-  background: rgba(107, 122, 144, 0.4);
+  background: rgba(107, 131, 144, 0.4);
   background-clip: content-box;
 }
 
@@ -2560,7 +2574,7 @@ body.admin-layout .rc2-report-view select {
 
 body.admin-layout.theme-dark .rc2-report-view,
 body.admin-layout.admin-dark .rc2-report-view {
-  color: #0b1c36;
+  color: #0e3245;
 }
 
 body.admin-layout .rc2-report-view select option {
@@ -2769,7 +2783,7 @@ body.admin-layout .rc2-apply {
 
 body.admin-layout.theme-dark .rc2-apply,
 body.admin-layout.admin-dark .rc2-apply {
-  color: #0b1c36;
+  color: #0e3245;
 }
 
 body.admin-layout .rc2-apply .ui-icon {
@@ -2848,7 +2862,7 @@ body.admin-layout .rc2-export-menu {
   border: 1px solid var(--mbw-border);
   border-radius: 10px;
   background: var(--mbw-card);
-  box-shadow: 0 12px 32px rgba(22, 38, 62, 0.14);
+  box-shadow: 0 12px 32px rgba(27, 58, 75, 0.14);
 }
 
 body.admin-layout .rc2-export.is-open .rc2-export-menu {
@@ -3731,7 +3745,7 @@ body.admin-layout .cr-kpi {
 
 body.admin-layout .cr-kpi.tone-green { background: linear-gradient(115deg, rgba(22, 163, 74, 0.10), var(--mbw-card) 65%); }
 body.admin-layout .cr-kpi.tone-red { background: linear-gradient(115deg, rgba(229, 72, 77, 0.10), var(--mbw-card) 65%); }
-body.admin-layout .cr-kpi.tone-blue { background: linear-gradient(115deg, rgba(37, 99, 235, 0.10), var(--mbw-card) 65%); }
+body.admin-layout .cr-kpi.tone-blue { background: linear-gradient(115deg, rgba(25, 167, 247, 0.10), var(--mbw-card) 65%); }
 body.admin-layout .cr-kpi.tone-purple { background: linear-gradient(115deg, rgba(139, 92, 246, 0.12), var(--mbw-card) 65%); }
 
 /* Apply the same soft tint to every existing KPI card app-wide, keyed off
@@ -3740,7 +3754,7 @@ body.admin-layout .cr-kpi.tone-purple { background: linear-gradient(115deg, rgba
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-green) { background: linear-gradient(115deg, rgba(22, 163, 74, 0.09), var(--mbw-card) 65%); }
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-red) { background: linear-gradient(115deg, rgba(229, 72, 77, 0.09), var(--mbw-card) 65%); }
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-blue),
-body.admin-layout .mbw-kpi:has(.mbw-chip.tone-primary) { background: linear-gradient(115deg, rgba(37, 99, 235, 0.09), var(--mbw-card) 65%); }
+body.admin-layout .mbw-kpi:has(.mbw-chip.tone-primary) { background: linear-gradient(115deg, rgba(25, 167, 247, 0.09), var(--mbw-card) 65%); }
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-purple) { background: linear-gradient(115deg, rgba(139, 92, 246, 0.11), var(--mbw-card) 65%); }
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-amber) { background: linear-gradient(115deg, rgba(226, 138, 9, 0.10), var(--mbw-card) 65%); }
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-teal) { background: linear-gradient(115deg, rgba(13, 148, 136, 0.10), var(--mbw-card) 65%); }
@@ -3831,7 +3845,7 @@ body.admin-layout .attn-menu {
   border: 1px solid var(--mbw-border);
   border-radius: 12px;
   background: var(--mbw-card);
-  box-shadow: 0 16px 40px rgba(22, 38, 62, 0.18);
+  box-shadow: 0 16px 40px rgba(27, 58, 75, 0.18);
 }
 
 body.admin-layout .attn-title {
@@ -3989,6 +4003,80 @@ body.admin-layout .reference-filter-group select {
   color: var(--mbw-text);
 }
 
+/* style.css hardcodes background:#fff on these reference-toolbar pills; the
+   tokens keep light mode white and follow the card surface in dark mode. */
+body.admin-layout .reference-date-field,
+body.admin-layout .reference-search,
+body.admin-layout .reference-filter-group .reference-search {
+  border-color: var(--mbw-border);
+  background: var(--mbw-card);
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .reference-date-field input,
+body.admin-layout .reference-search input {
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .reference-date-field input::-webkit-datetime-edit-day-field:focus,
+body.admin-layout .reference-date-field input::-webkit-datetime-edit-month-field:focus,
+body.admin-layout .reference-date-field input::-webkit-datetime-edit-year-field:focus {
+  background: var(--mbw-primary-soft);
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .reference-pagination a,
+body.admin-layout .reference-pagination button {
+  border-color: var(--mbw-border);
+  background: var(--mbw-card);
+  color: var(--mbw-text);
+}
+
+body.admin-layout .reference-pagination a.is-active {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-primary);
+  color: #ffffff;
+}
+
+body.admin-layout.theme-dark .reference-pagination a.is-active,
+body.admin-layout.admin-dark .reference-pagination a.is-active {
+  color: #082f49;
+}
+
+body.admin-layout .reference-link {
+  color: var(--mbw-primary);
+}
+
+body.admin-layout .text-danger {
+  color: var(--mbw-red) !important;
+}
+
+/* Single active-tab indicator: portal draws the primary border-bottom, so
+   drop style.css's leftover gold ::after bar */
+body.admin-layout .reference-tabs a.is-active::after {
+  display: none;
+}
+
+body.admin-layout .reference-row-actions a {
+  color: var(--mbw-primary);
+}
+
+body.admin-layout.theme-dark .reference-row-actions .inline-form button,
+body.admin-layout.admin-dark .reference-row-actions .inline-form button {
+  color: var(--mbw-primary);
+}
+
+/* Nepali-date decorations injected by nepali-date.js inherit the pill theme */
+body.admin-layout .bs-date-hint {
+  color: var(--mbw-muted);
+}
+
+/* Until the user picks a party, the side panel is not rendered and the
+   document table gets the full row width */
+body.admin-layout .reference-workspace.is-full-width {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 body.admin-layout .rc-report-card.is-active {
   border-color: var(--mbw-gold);
   background: var(--mbw-amber-soft);
@@ -4091,14 +4179,14 @@ body.admin-layout.accounting-module-page .mbw-kpi {
   border: 1px solid var(--mbw-border);
   border-radius: 16px;
   background: var(--mbw-card);
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 4px 14px rgba(20, 42, 55, 0.06);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
 body.admin-layout.accounting-module-page a.mbw-kpi:hover {
   transform: translateY(-3px);
   border-color: var(--mbw-primary);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
+  box-shadow: 0 10px 24px rgba(20, 42, 55, 0.10);
 }
 
 body.admin-layout.accounting-module-page .mbw-kpi-label {
@@ -4132,7 +4220,7 @@ body.admin-layout.accounting-module-page .mbw-kpi .mbw-chip .ui-icon {
 
 body.admin-layout.accounting-module-page .mbw-card {
   border-radius: 16px;
-  box-shadow: 0 5px 18px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 5px 18px rgba(20, 42, 55, 0.06);
 }
 
 body.admin-layout.accounting-module-page .mbw-card-head {
@@ -4186,9 +4274,9 @@ body.admin-layout.accounting-module-page .rc-table tbody tr:hover {
    ========================================================================== */
 
 body.admin-layout .users-workflow-page {
-  --uw-blue: #2563eb;
-  --uw-blue-dark: #1d4ed8;
-  --uw-blue-soft: rgba(37, 99, 235, 0.09);
+  --uw-blue: #19a7f7;
+  --uw-blue-dark: #1296e3;
+  --uw-blue-soft: rgba(25, 167, 247, 0.09);
   --uw-green: #059669;
   --uw-green-soft: rgba(5, 150, 105, 0.11);
   --uw-amber: #d97706;
@@ -4229,7 +4317,7 @@ body.admin-layout .uw-action-icon {
   border-radius: 13px;
   background: linear-gradient(145deg, var(--uw-blue), var(--uw-blue-dark));
   color: #fff;
-  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
+  box-shadow: 0 8px 18px rgba(25, 167, 247, 0.22);
 }
 
 body.admin-layout .uw-action-icon .ui-icon {
@@ -4275,12 +4363,12 @@ body.admin-layout .uw-primary-button {
   background: linear-gradient(145deg, var(--uw-blue), var(--uw-blue-dark));
   border-color: var(--uw-blue);
   color: #fff;
-  box-shadow: 0 7px 15px rgba(37, 99, 235, 0.19);
+  box-shadow: 0 7px 15px rgba(25, 167, 247, 0.19);
 }
 
 body.admin-layout .uw-primary-button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 19px rgba(37, 99, 235, 0.24);
+  box-shadow: 0 10px 19px rgba(25, 167, 247, 0.24);
 }
 
 body.admin-layout .uw-primary-button > span {
@@ -4302,7 +4390,7 @@ body.admin-layout .uw-filter-panel {
   border: 1px solid var(--mbw-border);
   border-radius: 15px;
   background: var(--mbw-card);
-  box-shadow: 0 5px 18px rgba(15, 23, 42, 0.055);
+  box-shadow: 0 5px 18px rgba(20, 42, 55, 0.055);
 }
 
 body.admin-layout .uw-role-matrix {
@@ -4452,7 +4540,7 @@ body.admin-layout .uw-role-matrix input[type="checkbox"] {
   width: 18px;
   height: 18px;
   margin: 0;
-  border: 1.5px solid #aab5c5;
+  border: 1.5px solid #aabcc5;
   border-radius: 4px;
   background: var(--mbw-card);
   cursor: pointer;
@@ -4486,14 +4574,14 @@ body.admin-layout .uw-role-matrix input[type="checkbox"]:checked::after {
 }
 
 body.admin-layout .uw-role-matrix input[type="checkbox"]:disabled {
-  border-color: #c8d0dc;
+  border-color: #c8d5dc;
   background: var(--mbw-gray-soft);
   cursor: not-allowed;
   opacity: 0.75;
 }
 
 body.admin-layout .uw-role-matrix input[type="checkbox"]:disabled:checked {
-  background: #aeb8c7;
+  background: #aebec7;
 }
 
 body.admin-layout .uw-role-save-bar {
@@ -4683,8 +4771,8 @@ body.admin-layout .uw-avatar-tone-0 {
 }
 
 body.admin-layout .uw-avatar-tone-1 {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
+  background: rgba(25, 167, 247, 0.12);
+  color: #1296e3;
 }
 
 body.admin-layout .uw-avatar-tone-2 {
@@ -4881,16 +4969,16 @@ body.admin-layout .uw-directory-card nav {
    ========================================================================== */
 
 body.accounting-dashboard-page {
-  --gd-page: #f3f6fa;
+  --gd-page: #f3f8fa;
   --gd-card: #ffffff;
-  --gd-soft: #f7f9fc;
-  --gd-border: #dce4ef;
-  --gd-border-soft: #e9eef5;
-  --gd-heading: #10213d;
-  --gd-text: #34445f;
-  --gd-muted: #6c7990;
-  --gd-blue: #2563eb;
-  --gd-blue-dark: #1d4ed8;
+  --gd-soft: #f7fafc;
+  --gd-border: #dce9ef;
+  --gd-border-soft: #e9f1f5;
+  --gd-heading: #14384b;
+  --gd-text: #34505f;
+  --gd-muted: #6c8390;
+  --gd-blue: #19a7f7;
+  --gd-blue-dark: #1296e3;
   --gd-green: #059669;
   --gd-red: #dc2626;
 }
@@ -4902,7 +4990,7 @@ body.accounting-dashboard-page .admin-content {
   background:
     radial-gradient(
       circle at 96% 3%,
-      rgba(37, 99, 235, 0.045),
+      rgba(25, 167, 247, 0.045),
       transparent 26rem
     ),
     var(--gd-page);
@@ -5001,7 +5089,7 @@ body.accounting-dashboard-page .mbw-card {
   border: 1px solid var(--gd-border);
   border-radius: 14px;
   background: var(--gd-card);
-  box-shadow: 0 5px 18px rgba(15, 35, 66, 0.055);
+  box-shadow: 0 5px 18px rgba(18, 59, 81, 0.055);
 }
 
 body.accounting-dashboard-page .mbw-card-head {
@@ -5062,7 +5150,7 @@ body.accounting-dashboard-page .mbw-kpi {
   border: 1px solid var(--gd-border);
   border-radius: 14px;
   background: var(--gd-card);
-  box-shadow: 0 5px 16px rgba(15, 35, 66, 0.05);
+  box-shadow: 0 5px 16px rgba(18, 59, 81, 0.05);
   text-decoration: none;
   transition:
     transform 160ms ease,
@@ -5072,8 +5160,8 @@ body.accounting-dashboard-page .mbw-kpi {
 
 body.accounting-dashboard-page .mbw-kpi:hover {
   transform: translateY(-2px);
-  border-color: rgba(37, 99, 235, 0.32);
-  box-shadow: 0 10px 24px rgba(15, 35, 66, 0.09);
+  border-color: rgba(25, 167, 247, 0.32);
+  box-shadow: 0 10px 24px rgba(18, 59, 81, 0.09);
 }
 
 body.accounting-dashboard-page .mbw-kpi > div {
@@ -5155,7 +5243,7 @@ body.accounting-dashboard-page
   padding: 8px 10px;
   border-bottom: 1px solid var(--gd-border);
   background: var(--gd-soft);
-  color: #40516e;
+  color: #405e6e;
   font-size: 9.5px;
   font-weight: 800;
   letter-spacing: 0.04em;
@@ -5183,7 +5271,7 @@ body.accounting-dashboard-page
 body.accounting-dashboard-page
   section[aria-label="Group companies snapshot"]
   tbody tr:hover td {
-  background: rgba(37, 99, 235, 0.035);
+  background: rgba(25, 167, 247, 0.035);
 }
 
 body.accounting-dashboard-page
@@ -5262,8 +5350,8 @@ body.accounting-dashboard-page .mbw-qa {
 
 body.accounting-dashboard-page .mbw-qa:hover {
   transform: translateY(-1px);
-  border-color: rgba(37, 99, 235, 0.3);
-  background: rgba(37, 99, 235, 0.035);
+  border-color: rgba(25, 167, 247, 0.3);
+  background: rgba(25, 167, 247, 0.035);
 }
 
 body.accounting-dashboard-page .mbw-qa .mbw-chip.is-square {
@@ -5336,7 +5424,7 @@ body.accounting-dashboard-page
   padding: 8px;
   border-bottom: 1px solid var(--gd-border);
   background: var(--gd-soft);
-  color: #40516e;
+  color: #405e6e;
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.035em;
@@ -5372,7 +5460,7 @@ body.accounting-dashboard-page
 body.accounting-dashboard-page
   section[aria-label="Bank accounts"]
   tbody tr:hover td {
-  background: rgba(37, 99, 235, 0.035);
+  background: rgba(25, 167, 247, 0.035);
 }
 
 body.accounting-dashboard-page
@@ -5430,21 +5518,21 @@ body.accounting-dashboard-page .amount-negative {
 /* Dark theme */
 
 body.accounting-dashboard-page.theme-dark {
-  --gd-page: #091321;
-  --gd-card: #101c2b;
-  --gd-soft: #0c1725;
-  --gd-border: rgba(143, 168, 201, 0.19);
-  --gd-border-soft: rgba(143, 168, 201, 0.11);
-  --gd-heading: #edf3fb;
-  --gd-text: #c5d1e1;
-  --gd-muted: #91a2b9;
+  --gd-page: #0d232f;
+  --gd-card: #152c38;
+  --gd-soft: #102732;
+  --gd-border: rgba(143, 181, 201, 0.19);
+  --gd-border-soft: rgba(143, 181, 201, 0.11);
+  --gd-heading: #edf6fb;
+  --gd-text: #c5d7e1;
+  --gd-muted: #91abb9;
 }
 
 body.accounting-dashboard-page.theme-dark .admin-content {
   background:
     radial-gradient(
       circle at 94% 2%,
-      rgba(37, 99, 235, 0.075),
+      rgba(25, 167, 247, 0.075),
       transparent 25rem
     ),
     var(--gd-page);
@@ -5460,8 +5548,8 @@ body.accounting-dashboard-page.theme-dark .mbw-qa {
 
 body.accounting-dashboard-page.theme-dark .mbw-kpi:hover,
 body.accounting-dashboard-page.theme-dark .mbw-qa:hover {
-  border-color: rgba(76, 132, 225, 0.48);
-  background: #132238;
+  border-color: rgba(67, 176, 234, 0.48);
+  background: #183645;
 }
 
 body.accounting-dashboard-page.theme-dark .ad-fiscal-form select {
@@ -5480,7 +5568,7 @@ body.accounting-dashboard-page.theme-dark
   section[aria-label="Bank accounts"]
   th {
   background: var(--gd-soft);
-  color: #9eb0c7;
+  color: #9eb9c7;
   border-color: var(--gd-border);
 }
 
@@ -5498,7 +5586,7 @@ body.accounting-dashboard-page.theme-dark
 }
 
 body.accounting-dashboard-page.theme-dark .mbw-view-all {
-  color: #74a5ff;
+  color: #77cdfc;
 }
 
 /* Responsive content */
@@ -6112,3 +6200,334 @@ body.theme-dark.fixed-assets-page .fa-approval-card {
     .fa-policy-callout { min-width: 0; }
 }
 /* FIXED ASSET MEASUREMENT MODELS END */
+
+/* ==========================================================================
+   SKY MOTION LAYER — PORTAL (2026-07-16)
+   Appearance-only: calm, professional motion for dense admin screens.
+   Loads last, so it also moderates the broader public-site motion layer
+   (style.css) wherever that would be too much inside the portal.
+   ========================================================================== */
+
+@media screen {
+
+/* Cards: no big lifts inside the portal — keep panels planted */
+body.admin-layout .card:hover {
+  transform: none;
+  box-shadow: var(--mbw-shadow);
+}
+
+/* --- Entrances: page head, KPI rows, quick actions, cards ---------------- */
+
+body.admin-layout .admin-main > * {
+  animation: skyFadeUp 0.4s var(--ease-out-soft, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+body.admin-layout .admin-main > *:nth-child(2) { animation-delay: 0.05s; }
+body.admin-layout .admin-main > *:nth-child(3) { animation-delay: 0.10s; }
+body.admin-layout .admin-main > *:nth-child(4) { animation-delay: 0.15s; }
+body.admin-layout .admin-main > *:nth-child(n+5) { animation-delay: 0.20s; }
+
+body.admin-layout .mbw-kpi-grid > *,
+body.admin-layout .mbw-qa-grid > *,
+body.admin-layout .admin-stats > * {
+  animation: skyFadeUp 0.45s var(--ease-out-soft, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+body.admin-layout .mbw-kpi-grid > *:nth-child(2),
+body.admin-layout .mbw-qa-grid > *:nth-child(2),
+body.admin-layout .admin-stats > *:nth-child(2) { animation-delay: 0.06s; }
+
+body.admin-layout .mbw-kpi-grid > *:nth-child(3),
+body.admin-layout .mbw-qa-grid > *:nth-child(3),
+body.admin-layout .admin-stats > *:nth-child(3) { animation-delay: 0.12s; }
+
+body.admin-layout .mbw-kpi-grid > *:nth-child(4),
+body.admin-layout .mbw-qa-grid > *:nth-child(4),
+body.admin-layout .admin-stats > *:nth-child(4) { animation-delay: 0.18s; }
+
+body.admin-layout .mbw-kpi-grid > *:nth-child(n+5),
+body.admin-layout .mbw-qa-grid > *:nth-child(n+5),
+body.admin-layout .admin-stats > *:nth-child(n+5) { animation-delay: 0.24s; }
+
+/* --- KPI cards: gentle lift, chip pop ------------------------------------ */
+
+body.admin-layout .mbw-kpi,
+body.admin-layout .stat-card,
+body.admin-layout .ad-kpi,
+body.admin-layout .accounting-stat-card,
+body.admin-layout .reference-stat {
+  transition:
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.18s ease;
+}
+
+body.admin-layout .mbw-kpi:hover,
+body.admin-layout .stat-card:hover,
+body.admin-layout .ad-kpi:hover,
+body.admin-layout .accounting-stat-card:hover,
+body.admin-layout .reference-stat:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--mbw-primary) 45%, var(--mbw-border));
+  box-shadow: 0 10px 26px rgba(2, 132, 199, 0.14);
+}
+
+.mbw-chip {
+  transition: transform 0.25s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+body.admin-layout .mbw-kpi:hover .mbw-chip,
+body.admin-layout .mbw-qa:hover .mbw-chip,
+body.admin-layout .mbw-due:hover .mbw-chip {
+  transform: scale(1.1);
+}
+
+/* --- Sidebar: slide-in links, animated submenu --------------------------- */
+
+body.admin-layout .admin-nav a {
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+body.admin-layout .admin-nav a:hover {
+  transform: translateX(3px);
+}
+
+body.admin-layout .admin-nav a.is-active {
+  box-shadow: inset 0 0 0 1px rgba(186, 230, 253, 0.14), 0 4px 14px rgba(3, 105, 161, 0.35);
+}
+
+body.admin-layout .admin-nav a .ui-icon {
+  transition: transform 0.2s cubic-bezier(0.34, 1.4, 0.64, 1), opacity 0.18s ease;
+}
+
+body.admin-layout .admin-nav a:hover .ui-icon {
+  transform: scale(1.12);
+  opacity: 1;
+}
+
+body.admin-layout .mbw-nav-parent.is-open .mbw-subnav {
+  animation: skySlideDown 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* --- Topbar: frosted glass ------------------------------------------------ */
+
+body.admin-layout .admin-topbar {
+  background: color-mix(in srgb, var(--mbw-card) 78%, transparent);
+  backdrop-filter: blur(12px) saturate(1.35);
+  -webkit-backdrop-filter: blur(12px) saturate(1.35);
+  transition: box-shadow 0.25s ease;
+}
+
+/* --- Tables: row hover ------------------------------------------------------ */
+
+body.admin-layout table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+body.admin-layout table tbody tr:hover > td {
+  background: color-mix(in srgb, var(--mbw-primary-soft) 55%, transparent);
+}
+
+/* --- Pills, badges, view-all links ------------------------------------------- */
+
+body.admin-layout .mbw-view-all {
+  transition: color 0.16s ease, letter-spacing 0.2s ease;
+}
+
+body.admin-layout .mbw-view-all:hover {
+  letter-spacing: 0.02em;
+}
+
+/* --- Modals -------------------------------------------------------------------- */
+
+body.admin-layout .modal-card,
+body.admin-layout .mbw-modal {
+  animation: skyScaleIn 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* --- Reduced motion --------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  body.admin-layout *,
+  body.admin-layout *::before,
+  body.admin-layout *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+} /* end @media screen */
+
+/* ==========================================================================
+   FORM NORMALIZATION LAYER (2026-07-17) — one metric set for portal fields.
+   Canonical: 38px / 8px 12px / 9px radius / 13px. Compact (toolbars): 34px.
+   Ends the mismatched field boxes: base 14px/6px-radius, mbw 34px/8px,
+   reference pills 0.78rem/6px, rc2 12.5px all coexisted on single screens.
+   ========================================================================== */
+
+/* 1. Canonical standalone fields. :where() keeps the type list at zero
+      specificity so embedded/borderless systems (rc2, reference wrappers)
+      still win via their own higher-specificity rules. */
+body.admin-layout input:where([type="text"], [type="search"], [type="email"],
+  [type="password"], [type="number"], [type="date"], [type="month"],
+  [type="time"], [type="datetime-local"], [type="url"], [type="tel"],
+  :not([type])),
+body.admin-layout select,
+body.admin-layout textarea {
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+body.admin-layout textarea { min-height: 110px; }
+
+/* 2. Legacy reference-* metrics (6px radius, 0.78rem) brought to canon */
+body.admin-layout .reference-party-form input,
+body.admin-layout .reference-party-form select,
+body.admin-layout .reference-party-form textarea,
+body.admin-layout .reference-filter-group select {
+  min-height: 38px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+body.admin-layout .reference-search,
+body.admin-layout .reference-date-field {
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+/* Inputs embedded in those wrappers stay borderless and un-padded */
+body.admin-layout .reference-search input,
+body.admin-layout .reference-date-field input {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+/* 3. rc2 embedded selects — restated so rule 1 cannot leak in */
+body.admin-layout .rc2-report-view select,
+body.admin-layout .rc2-quick select,
+body.admin-layout .rc2-saved select,
+body.admin-layout .rc2-view-select select {
+  min-height: 36px;
+  padding: 0 22px 0 2px;
+  border: 0;
+  border-radius: 0;
+  font-size: 12.5px;
+  box-shadow: none;
+}
+
+/* 4. Compact 34px variant — card tools and toolbars */
+body.admin-layout .mbw-select,
+body.admin-layout .mbw-card-tools select,
+body.admin-layout .field-compact {
+  min-height: 34px;
+  padding: 5px 10px;
+  border-radius: 9px;
+  font-size: 12.5px;
+}
+
+/* 5. Never-normalize safety net */
+body.admin-layout input[type="checkbox"],
+body.admin-layout input[type="radio"],
+body.admin-layout input[type="range"],
+body.admin-layout input[type="color"],
+body.admin-layout .frm-toggle input {
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* 6. One focus ring (sky); wrapper pills ring via :focus-within */
+body.admin-layout input:focus,
+body.admin-layout select:focus,
+body.admin-layout textarea:focus {
+  outline: none;
+  border-color: var(--mbw-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mbw-primary) 22%, transparent);
+}
+
+body.admin-layout .reference-search:focus-within,
+body.admin-layout .reference-date-field:focus-within,
+body.admin-layout .rc2-report-view:focus-within,
+body.admin-layout .rc2-quick:focus-within,
+body.admin-layout .rc2-saved:focus-within,
+body.admin-layout .rc2-view-select:focus-within {
+  border-color: var(--mbw-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mbw-primary) 22%, transparent);
+}
+
+body.admin-layout .rc2-report-view select:focus,
+body.admin-layout .rc2-quick select:focus,
+body.admin-layout .rc2-saved select:focus,
+body.admin-layout .rc2-view-select select:focus { box-shadow: none; }
+
+/* ==========================================================================
+   FILTER BAR (2026-07-17) — horizontal filter rows on Vouchers / Ledgers /
+   Day Book. The base stylesheet makes inputs and selects width:100%, which
+   forced every filter onto its own line inside the flex row.
+   ========================================================================== */
+
+body.admin-layout .mbw-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+body.admin-layout .mbw-filter-bar input,
+body.admin-layout .mbw-filter-bar select {
+  width: auto;
+  flex: 0 1 auto;
+}
+
+body.admin-layout .mbw-filter-bar input[type="date"] {
+  width: 150px;
+}
+
+body.admin-layout .mbw-filter-bar select {
+  min-width: 130px;
+  max-width: 240px;
+}
+
+body.admin-layout .mbw-filter-bar input[type="search"] {
+  flex: 1 1 240px;
+  min-width: 200px;
+  max-width: 380px;
+}
+
+/* nepali-date.js appends BS hints after each date input; keep them inline
+   in the row instead of breaking onto their own line */
+body.admin-layout .mbw-filter-bar .bs-date-hint {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+body.admin-layout .mbw-filter-bar .button {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 720px) {
+  body.admin-layout .mbw-filter-bar input,
+  body.admin-layout .mbw-filter-bar select,
+  body.admin-layout .mbw-filter-bar input[type="search"],
+  body.admin-layout .mbw-filter-bar input[type="date"] {
+    width: 100%;
+    max-width: none;
+    flex: 1 1 100%;
+  }
+}

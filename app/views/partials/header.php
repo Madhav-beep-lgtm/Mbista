@@ -36,14 +36,14 @@ if ($navSection === '') {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
     <meta name="description" content="<?= e(setting('site_meta_description', 'M.Bista & Associates, Chartered Accountants — audit, taxation, accounting, and advisory services in Nepal with a secure client portal.')) ?>">
-    <meta name="theme-color" content="#0b1c36">
+    <meta name="theme-color" content="#0c4a6e">
     <meta property="og:site_name" content="<?= e(app_name()) ?>">
     <meta property="og:title" content="<?= e($pageTitle) ?> | <?= e(app_name()) ?>">
     <meta property="og:description" content="<?= e(setting('site_meta_description', 'Audit, taxation, accounting, and advisory services with a secure client portal.')) ?>">
     <meta property="og:type" content="website">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
-    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
+    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0c4a6e">
     <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
 </head>
