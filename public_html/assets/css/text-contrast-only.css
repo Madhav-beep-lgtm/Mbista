@@ -113,3 +113,27 @@ body :is(.notice.error,.notice.warning,.alert-error,.alert-warning,.alert-danger
 @media print {
   body, body * { color: #000000 !important; -webkit-text-fill-color: #000000 !important; text-shadow: none !important; }
 }
+/* ABSOLUTE GREEN PANEL WHITE TEXT */
+html body main .content-prose .service-detail-grid,
+html body.theme-dark main .content-prose .service-detail-grid {
+  color: #ffffff !important;
+}
+html body main .content-prose .service-detail-grid :is(p,ul,ol,li,span,strong,a),
+html body.theme-dark main .content-prose .service-detail-grid :is(p,ul,ol,li,span,strong,a),
+html body:not(.theme-dark):not(.admin-dark) main .content-prose .service-detail-grid :is(p,ul,ol,li,span,strong,a) {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,.48) !important;
+}
+html body main .content-prose .service-detail-grid li::marker,
+html body.theme-dark main .content-prose .service-detail-grid li::marker,
+html body:not(.theme-dark):not(.admin-dark) main .content-prose .service-detail-grid li::marker {
+  color: #ffffff !important;
+}
+html body main .content-prose .service-detail-grid :is(h1,h2,h3,h4,h5,h6) {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,.48) !important;
+}
