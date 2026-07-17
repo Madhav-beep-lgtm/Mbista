@@ -13,7 +13,7 @@ $headerFiscalYear = current_fiscal_year();
 $headerScript = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
 $headerTab = (string) ($_GET['tab'] ?? '');
 $headerView = (string) ($_GET['view'] ?? '');
-$headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'fixed-assets.php'], true);
+$headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'ledgers.php', 'day-book.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'fixed-assets.php'], true);
 $headerCompanyId = (int) ($headerCompany['id'] ?? 0);
 $headerCompanyCode = (string) ($headerCompany['code'] ?? '');
 $headerBusinessType = company_accounting_business_type($headerCompanyId);
@@ -37,19 +37,21 @@ if ($headerCompanyCode !== 'MBAACA') {
 $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Chart of Accounts', 'admin/chart-of-accounts.php', 'tree', in_array($headerScript, $headerChartPages, true)],
     ['Vouchers', 'admin/accounting.php', 'journal', in_array($headerScript, ['accounting.php', 'voucher-form.php'], true)],
+    ['Ledgers', 'admin/ledgers.php', 'contracts', $headerScript === 'ledgers.php'],
+    ['Day Book', 'admin/day-book.php', 'calendar', $headerScript === 'day-book.php'],
     ['Voucher Import (Excel)', 'admin/voucher-import.php', 'upload', $headerScript === 'voucher-import.php'],
-    ['Sales & Invoices', 'admin/accounting-parties.php?tab=sales', 'invoices', $headerScript === 'accounting-parties.php' && in_array($headerTab, ['', 'sales'], true)],
+    ['Sales & Invoices', 'admin/accounting-parties.php?tab=sales', 'receipt-voucher', $headerScript === 'accounting-parties.php' && in_array($headerTab, ['', 'sales'], true)],
     ['Purchases', 'admin/accounting-parties.php?tab=purchases', 'cart', $headerScript === 'accounting-parties.php' && $headerTab === 'purchases'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
     // These shared accounting links are identical for admin, staff and client books.
-    ['Inventory & Manufacturing', 'admin/accounting-inventory.php', 'layers', $headerScript === 'accounting-inventory.php'],
+    ['Inventory & Manufacturing', 'admin/accounting-inventory.php', 'box', $headerScript === 'accounting-inventory.php'],
     // Models / revaluation / categories live on the Fixed Assets page's own
     // tab bar — the sidebar keeps only the two entry points.
-    ['Fixed Asset Register', 'admin/fixed-assets.php', 'companies',
+    ['Fixed Asset Register', 'admin/fixed-assets.php', 'tag',
         $headerScript === 'fixed-assets.php' && $headerView !== 'leases'],
-    ['Lease', 'admin/fixed-assets.php?view=leases', 'contracts',
+    ['Lease', 'admin/fixed-assets.php?view=leases', 'key',
         $headerScript === 'fixed-assets.php' && $headerView === 'leases'],
 ]);
 $headerAccountingActive = false;
@@ -68,17 +70,18 @@ $pageBreadcrumb = $pageBreadcrumb ?? null;
 $headerPageIcons = [
     'index.php' => 'home', 'accounting-dashboard.php' => 'dashboard', 'consolidated-report.php' => 'layers',
     'accounting.php' => 'journal', 'voucher-form.php' => 'journal', 'voucher-import.php' => 'upload',
-    'accounting-parties.php' => 'invoices', 'accounting-inventory.php' => 'layers', 'fixed-assets.php' => 'companies', 'banking.php' => 'bank',
+    'ledgers.php' => 'contracts', 'day-book.php' => 'calendar',
+    'accounting-parties.php' => 'receipt-voucher', 'accounting-inventory.php' => 'box', 'fixed-assets.php' => 'tag', 'banking.php' => 'bank',
     'reconciliation.php' => 'reconcile', 'chart-of-accounts.php' => 'tree', 'chart-groups.php' => 'tree',
     'chart-ledgers.php' => 'tree', 'chart-posting-accounts.php' => 'tree', 'chart-masters.php' => 'tree',
     'invoice.php' => 'invoices', 'reports-center.php' => 'reports', 'report-schedules.php' => 'calendar',
     'documents.php' => 'documents', 'compliance.php' => 'compliance', 'audit-trail.php' => 'admin',
     'workspace.php' => 'portal', 'companies.php' => 'companies', 'users.php' => 'users',
     'settings.php' => 'settings', 'tickets.php' => 'tickets', 'messages.php' => 'messages',
-    'hr.php' => 'attendance', 'manage-clients.php' => 'clients', 'client-books.php' => 'accounting',
+    'hr.php' => 'attendance', 'manage-clients.php' => 'handshake', 'client-books.php' => 'accounting',
     'search.php' => 'search', 'export-ledger.php' => 'reports', 'budgets.php' => 'pie',
-    'payroll.php' => 'wallet', 'payroll-employees.php' => 'users', 'payroll-settings.php' => 'settings',
-    'insights.php' => 'documents',
+    'payroll.php' => 'card', 'payroll-employees.php' => 'teams', 'payroll-settings.php' => 'sliders',
+    'insights.php' => 'insights',
 ];
 $headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php'];
 $headerPayrollActive = in_array($headerScript, $headerPayrollScripts, true);
@@ -86,7 +89,7 @@ if ($pageBreadcrumb === null) {
     $headerTrailHome = [['Home', 'admin/index.php']];
     $headerTrailReports = [['Home', 'admin/index.php'], ['Reports', 'admin/reports-center.php']];
     $headerTrailAccounting = [['Home', 'admin/index.php'], ['Accounting', 'admin/accounting-dashboard.php']];
-    $headerAccountingScripts = ['accounting.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'accounting-inventory.php', 'fixed-assets.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
+    $headerAccountingScripts = ['accounting.php', 'ledgers.php', 'day-book.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'accounting-inventory.php', 'fixed-assets.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
     if (in_array($headerScript, ['report-schedules.php', 'consolidated-report.php'], true)) {
         $pageBreadcrumb = $headerTrailReports;
     } elseif (in_array($headerScript, $headerPayrollScripts, true)) {
@@ -119,10 +122,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
-    <meta name="theme-color" content="#0b1c36">
+    <meta name="theme-color" content="#0c4a6e">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
-    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0b1c36">
+    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#0c4a6e">
     <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
     <link rel="stylesheet" href="/assets/css/portal.css?v=20260714m1">
@@ -190,7 +193,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" style="margin:0">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <input type="hidden" name="company_id" value="<?= (int) $headerHomeCompany['id'] ?>">
-                        <button type="submit" style="all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;min-height:38px;padding:8px 12px;border-radius:8px;color:var(--mbw-sidebar-text);font-size:13.5px;font-weight:500;cursor:pointer;width:100%"><?= icon('accounting') ?>My Company Accounting</button>
+                        <button type="submit" style="all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;min-height:38px;padding:8px 12px;border-radius:8px;color:var(--mbw-sidebar-text);font-size:13.5px;font-weight:500;cursor:pointer;width:100%"><?= icon('login') ?>My Company Accounting</button>
                     </form>
                 <?php endif; ?>
             <?php else: ?>
@@ -208,12 +211,12 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <?php endif; ?>
 
             <span class="admin-nav-group">Manage Clients</span>
-            <a class="<?= in_array($headerScript, ['manage-clients.php', 'client-books.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('clients') ?>Client Directory</a>
+            <a class="<?= in_array($headerScript, ['manage-clients.php', 'client-books.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('handshake') ?>Client Directory</a>
             <?php if ($headerClientBooksOptions !== []): ?>
                 <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" style="margin:2px 12px 4px; display:flex; gap:6px">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <label class="sr-only" for="sidebar-client-books">Open client accounting</label>
-                    <select id="sidebar-client-books" name="company_id" style="flex:1;min-height:32px;font-size:12px;border-radius:8px;border:1px solid var(--mbw-sidebar-line);background:rgba(148,178,215,0.08);color:#dbe6f5;padding:4px 8px" onchange="if(this.value){this.form.submit();}">
+                    <select id="sidebar-client-books" name="company_id" style="flex:1;min-height:32px;font-size:12px;border-radius:8px;border:1px solid var(--mbw-sidebar-line);background:rgba(186,230,253,0.10);color:#dbeffd;padding:4px 8px" onchange="if(this.value){this.form.submit();}">
                         <option value="">Select client...</option>
                         <?php foreach ($headerClientBooksOptions as $headerClientOption): ?>
                             <option value="<?= (int) $headerClientOption['books_company_id'] ?>" <?= $headerIsClientBooks && (int) $headerClientOption['books_company_id'] === $headerCompanyId ? 'selected' : '' ?>><?= e($headerClientOption['organization_name']) ?></option>
@@ -253,17 +256,17 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                 </a>
                 <div class="mbw-subnav">
-                    <a class="<?= $headerScript === 'payroll.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll.php')) ?>"><?= icon('wallet') ?>Payroll Processing</a>
-                    <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('users') ?>Employees &amp; Advances</a>
-                    <a class="<?= $headerScript === 'payroll-settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-settings.php')) ?>"><?= icon('settings') ?>Payroll Settings</a>
-                    <a href="<?= e(url('admin/reports-center.php?report=salary-sheet')) ?>"><?= icon('reports') ?>Salary Sheet Report</a>
+                    <a class="<?= $headerScript === 'payroll.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll.php')) ?>"><?= icon('card') ?>Payroll Processing</a>
+                    <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('teams') ?>Employees &amp; Advances</a>
+                    <a class="<?= $headerScript === 'payroll-settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-settings.php')) ?>"><?= icon('sliders') ?>Payroll Settings</a>
+                    <a href="<?= e(url('admin/reports-center.php?report=salary-sheet')) ?>"><?= icon('analytics') ?>Salary Sheet Report</a>
                 </div>
             </div>
 
             <span class="admin-nav-group">Users &amp; System</span>
             <a class="<?= $headerScript === 'users.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?>Users</a>
             <?php if ($headerCompanyCode === 'MBAACA'): ?>
-                <a class="<?= $headerScript === 'insights.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/insights.php')) ?>"><?= icon('documents') ?>Website Insights</a>
+                <a class="<?= $headerScript === 'insights.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/insights.php')) ?>"><?= icon('insights') ?>Website Insights</a>
             <?php endif; ?>
             <a class="<?= $headerScript === 'settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
             <a href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?>Logout</a>

@@ -261,6 +261,16 @@ $parties = [];
 $daybookEntries = [];
 $shareholdings = [];
 $availableInvesteeCompanies = [];
+// Filter-state defaults so the render never sees undefined variables when the
+// data guard below cannot run (missing company context or tables).
+$vFrom = '';
+$vTo = '';
+$vDateOk = static fn (string $value): bool => $value !== '' && DateTimeImmutable::createFromFormat('Y-m-d', $value) !== false;
+$vType = '';
+$vStatus = '';
+$vSearch = '';
+$voucherTypeOptions = [];
+$fyTotals = ['dr' => 0, 'cr' => 0];
 
 if ($company && table_exists('ledgers')) {
     $ledgerStmt = db()->prepare("SELECT l.*, g.master_key, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank
@@ -277,44 +287,72 @@ if ($company && table_exists('ledgers')) {
         $parties = $partyStmt->fetchAll();
     }
 
-    $voucherStmt = db()->prepare('
+    // Voucher register filters: date range, type, status, and free text over
+    // voucher no / reference / narration / party. Ledger balances and the
+    // day book moved to their own pages (ledgers.php, day-book.php).
+    $vFrom = trim((string) ($_GET['from'] ?? ''));
+    $vTo = trim((string) ($_GET['to'] ?? ''));
+    $vDateOk = static fn (string $value): bool => $value !== '' && DateTimeImmutable::createFromFormat('Y-m-d', $value) !== false;
+    $vType = (string) ($_GET['vtype'] ?? '');
+    $vStatus = (string) ($_GET['vstatus'] ?? '');
+    if (!in_array($vStatus, ['posted', 'draft', 'cancelled', ''], true)) {
+        $vStatus = '';
+    }
+    $vSearch = trim((string) ($_GET['q'] ?? ''));
+
+    $voucherSql = '
         SELECT v.*, p.code AS party_code, p.name AS party_name
         FROM vouchers v
         LEFT JOIN accounting_parties p ON p.id = v.party_id
         WHERE v.company_id = :company_id AND v.fiscal_year_id = :fiscal_year_id
-        ORDER BY COALESCE(v.voucher_date, DATE(v.posted_at)) DESC, v.id DESC
-        LIMIT 100
-    ');
-    $voucherStmt->execute([
+    ';
+    $voucherParams = [
         'company_id' => (int) $company['id'],
         'fiscal_year_id' => (int) ($fiscalYear['id'] ?? 0),
-    ]);
+    ];
+    if ($vDateOk($vFrom)) {
+        $voucherSql .= ' AND COALESCE(v.voucher_date, DATE(v.posted_at)) >= :from_date';
+        $voucherParams['from_date'] = $vFrom;
+    }
+    if ($vDateOk($vTo)) {
+        $voucherSql .= ' AND COALESCE(v.voucher_date, DATE(v.posted_at)) <= :to_date';
+        $voucherParams['to_date'] = $vTo;
+    }
+    if ($vType !== '') {
+        $voucherSql .= ' AND v.voucher_type = :vtype';
+        $voucherParams['vtype'] = $vType;
+    }
+    if ($vStatus !== '') {
+        $voucherSql .= ' AND v.status = :vstatus';
+        $voucherParams['vstatus'] = $vStatus;
+    }
+    if ($vSearch !== '') {
+        $voucherSql .= ' AND (v.voucher_no LIKE :q1 OR v.reference_no LIKE :q2 OR v.narration LIKE :q3 OR p.name LIKE :q4)';
+        $vLike = '%' . $vSearch . '%';
+        $voucherParams += ['q1' => $vLike, 'q2' => $vLike, 'q3' => $vLike, 'q4' => $vLike];
+    }
+    $voucherSql .= ' ORDER BY COALESCE(v.voucher_date, DATE(v.posted_at)) DESC, v.id DESC LIMIT 200';
+    $voucherStmt = db()->prepare($voucherSql);
+    $voucherStmt->execute($voucherParams);
     $vouchers = $voucherStmt->fetchAll();
 
-    $balanceStmt = db()->prepare("SELECT l.id, l.code, l.name, l.type, COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type='debit' THEN ve.amount ELSE 0 END),0) AS debit_total, COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type='credit' THEN ve.amount ELSE 0 END),0) AS credit_total FROM ledgers l LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id LEFT JOIN vouchers v ON v.id = ve.voucher_id AND v.company_id = l.company_id AND v.fiscal_year_id = :fiscal_year_id AND v.status = 'posted' WHERE l.company_id = :company_id GROUP BY l.id, l.code, l.name, l.type ORDER BY l.code ASC");
-    $balanceStmt->execute([
-        'company_id' => (int) $company['id'],
-        'fiscal_year_id' => (int) ($fiscalYear['id'] ?? 0),
-    ]);
-    $balances = $balanceStmt->fetchAll();
+    $voucherTypeStmt = db()->prepare('SELECT DISTINCT voucher_type FROM vouchers WHERE company_id = :cid ORDER BY voucher_type ASC');
+    $voucherTypeStmt->execute(['cid' => (int) $company['id']]);
+    $voucherTypeOptions = $voucherTypeStmt->fetchAll(PDO::FETCH_COLUMN);
 
-    $daybookStmt = db()->prepare("
-        SELECT v.id, v.voucher_no, v.voucher_type, COALESCE(v.voucher_date, DATE(v.posted_at)) AS voucher_date,
-               v.reference_no, v.narration, p.name AS party_name, l.code AS ledger_code, l.name AS ledger_name,
-               ve.entry_type, ve.amount, ve.memo
-        FROM vouchers v
-        INNER JOIN voucher_entries ve ON ve.voucher_id = v.id
-        INNER JOIN ledgers l ON l.id = ve.ledger_id
-        LEFT JOIN accounting_parties p ON p.id = v.party_id
-        WHERE v.company_id = :company_id AND v.fiscal_year_id = :fiscal_year_id
-        ORDER BY COALESCE(v.voucher_date, DATE(v.posted_at)) DESC, v.id DESC, ve.id ASC
-        LIMIT 240
+    // FY debit/credit totals for the KPI cards (posted entries only).
+    $totalsStmt = db()->prepare("
+        SELECT COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE 0 END), 0) AS dr,
+               COALESCE(SUM(CASE WHEN ve.entry_type = 'credit' THEN ve.amount ELSE 0 END), 0) AS cr
+        FROM voucher_entries ve
+        INNER JOIN vouchers v ON v.id = ve.voucher_id
+        WHERE v.company_id = :company_id AND v.fiscal_year_id = :fiscal_year_id AND v.status = 'posted'
     ");
-    $daybookStmt->execute([
+    $totalsStmt->execute([
         'company_id' => (int) $company['id'],
         'fiscal_year_id' => (int) ($fiscalYear['id'] ?? 0),
     ]);
-    $daybookEntries = $daybookStmt->fetchAll();
+    $fyTotals = $totalsStmt->fetch() ?: ['dr' => 0, 'cr' => 0];
 }
 
 if ($company && table_exists('company_shareholdings')) {
@@ -325,37 +363,19 @@ if ($company && table_exists('company_shareholdings')) {
 }
 
 $voucherTotal = array_sum(array_map(static fn (array $voucher): float => (float) $voucher['total_amount'], $vouchers));
-$ledgerDebitTotal = array_sum(array_map(static fn (array $row): float => (float) $row['debit_total'], $balances));
-$ledgerCreditTotal = array_sum(array_map(static fn (array $row): float => (float) $row['credit_total'], $balances));
+$ledgerDebitTotal = (float) ($fyTotals['dr'] ?? 0);
+$ledgerCreditTotal = (float) ($fyTotals['cr'] ?? 0);
 $fiscalYears = table_exists('fiscal_years') ? fiscal_years_for_company((int) $company['id']) : [];
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<!-- FISCAL YEAR TOP SECTION START -->
-<section class="mbw-card">
-    <div class="mbw-card-head"><h2>Fiscal Year</h2></div>
-    <form method="GET" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-        <label for="fiscal_year" style="margin: 0; font-weight: 600; color: var(--mbw-heading);">Select Fiscal Year:</label>
-        <select name="fiscal_year_id" id="fiscal_year" onchange="document.location='<?= url("admin/accounting.php?fiscal_year_id=") ?>' + this.value;">
-            <?php foreach ($fiscalYears as $fy): ?>
-                <option value="<?= (int) $fy['id'] ?>" <?= ((int) ($fiscalYear['id'] ?? 0) === (int) $fy['id']) ? 'selected' : '' ?>>
-                    <?= e($fy['label']) ?> (<?= e($fy['start_date']) ?> - <?= e($fy['end_date']) ?>)
-                </option>
-            <?php endforeach; ?>
-        </select>
-        <?php if ((int) ($fiscalYear['is_active'] ?? 0) === 1): ?>
-            <span class="mbw-pill tone-green">Active</span>
-        <?php else: ?>
-            <span class="mbw-pill tone-red">Closed</span>
-        <?php endif; ?>
-    </form>
-</section>
-<!-- FISCAL YEAR TOP SECTION END -->
-
+<?php // The fiscal-year switcher lives in the topbar — no duplicate card here. ?>
 <nav class="mbw-tabbar" aria-label="Voucher workspace">
     <a class="mbw-tab is-active" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('journal') ?>Voucher Register</a>
     <a class="mbw-tab" href="<?= e(url('admin/voucher-form.php')) ?>"><?= icon('receipt-voucher') ?>New Voucher</a>
     <a class="mbw-tab" href="<?= e(url('admin/voucher-import.php')) ?>"><?= icon('upload') ?>Import from Excel</a>
+    <a class="mbw-tab" href="<?= e(url('admin/ledgers.php')) ?>"><?= icon('contracts') ?>Ledgers</a>
+    <a class="mbw-tab" href="<?= e(url('admin/day-book.php')) ?>"><?= icon('calendar') ?>Day Book</a>
 </nav>
 
 <section class="mbw-kpi-grid">
@@ -416,34 +436,27 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php endif; ?>
 
 <section class="mbw-card">
-    <div class="mbw-card-head"><h2>Ledger balances</h2><div class="mbw-card-tools"><?php if ($company && $fiscalYear): ?><a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank">Export PDF</a> <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>">Export Excel</a><?php endif; ?></div></div>
-    <div style="overflow-x:auto">
-    <table>
-        <thead>
-            <tr><th>Code</th><th>Name</th><th>Type</th><th class="is-numeric">Total Debit</th><th class="is-numeric">Total Credit</th><th class="is-numeric">Balance</th></tr>
-        </thead>
-        <tbody>
-            <?php if ($balances === []): ?>
-                <tr><td colspan="6">No ledger balances available yet.</td></tr>
-            <?php endif; ?>
-            <?php foreach ($balances as $row): ?>
-                <?php $balance = (float) $row['debit_total'] - (float) $row['credit_total']; ?>
-                <tr>
-                    <td><?= e($row['code']) ?></td>
-                    <td><?= e($row['name']) ?></td>
-                    <td><?= e($row['type']) ?></td>
-                    <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $row['debit_total'], 2)) ?></td>
-                    <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $row['credit_total'], 2)) ?></td>
-                    <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format($balance, 2)) ?></td>
-                </tr>
+    <div class="mbw-card-head"><h2>Posted vouchers</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/ledgers.php')) ?>">Ledgers</a> <a class="mbw-view-all" href="<?= e(url('admin/day-book.php')) ?>">Day Book</a> <a class="mbw-view-all" href="<?= e(url('admin/voucher-form.php')) ?>">＋ New Voucher</a></div></div>
+    <form method="get" action="<?= e(url('admin/accounting.php')) ?>" class="mbw-filter-bar">
+        <?php if (!empty($_GET['fiscal_year_id'])): ?><input type="hidden" name="fiscal_year_id" value="<?= (int) $_GET['fiscal_year_id'] ?>"><?php endif; ?>
+        <input type="date" name="from" value="<?= e($vDateOk($vFrom) ? $vFrom : '') ?>" class="field-compact" aria-label="From date">
+        <input type="date" name="to" value="<?= e($vDateOk($vTo) ? $vTo : '') ?>" class="field-compact" aria-label="To date">
+        <select name="vtype" class="field-compact" aria-label="Voucher type">
+            <option value="">All types</option>
+            <?php foreach ($voucherTypeOptions as $voucherTypeOption): ?>
+                <option value="<?= e($voucherTypeOption) ?>" <?= $vType === $voucherTypeOption ? 'selected' : '' ?>><?= e(ucfirst($voucherTypeOption)) ?></option>
             <?php endforeach; ?>
-        </tbody>
-    </table>
-    </div>
-</section>
-
-<section class="mbw-card">
-    <div class="mbw-card-head"><h2>Posted vouchers</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/voucher-form.php')) ?>">＋ New Voucher</a></div></div>
+        </select>
+        <select name="vstatus" class="field-compact" aria-label="Status">
+            <option value="">All statuses</option>
+            <option value="posted" <?= $vStatus === 'posted' ? 'selected' : '' ?>>Posted</option>
+            <option value="draft" <?= $vStatus === 'draft' ? 'selected' : '' ?>>Draft</option>
+            <option value="cancelled" <?= $vStatus === 'cancelled' ? 'selected' : '' ?>>Cancelled</option>
+        </select>
+        <input type="search" name="q" value="<?= e($vSearch) ?>" class="field-compact" style="min-width:230px" placeholder="Search voucher no, reference, narration, party">
+        <button type="submit" class="button secondary"><?= icon('filter') ?>Apply</button>
+        <?php if ($vSearch !== '' || $vType !== '' || $vStatus !== '' || $vDateOk($vFrom) || $vDateOk($vTo)): ?><a class="button secondary" href="<?= e(url('admin/accounting.php')) ?>">Clear</a><?php endif; ?>
+    </form>
     <div style="overflow-x:auto">
     <table>
         <thead>
@@ -514,31 +527,4 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
-<section class="mbw-card" id="daybook">
-    <div class="mbw-card-head"><h2>Daybook</h2></div>
-    <div style="overflow-x:auto">
-    <table>
-        <thead>
-            <tr><th>Date</th><th>Voucher</th><th>Type</th><th>Party</th><th>Ledger</th><th class="is-numeric">Debit</th><th class="is-numeric">Credit</th><th>Memo</th></tr>
-        </thead>
-        <tbody>
-            <?php if ($daybookEntries === []): ?>
-                <tr><td colspan="8">No daybook entries available for selected context.</td></tr>
-            <?php endif; ?>
-            <?php foreach ($daybookEntries as $entry): ?>
-                <tr>
-                    <td><?= e($entry['voucher_date']) ?></td>
-                    <td><?= e($entry['voucher_no']) ?></td>
-                    <td><?= e($entry['voucher_type']) ?></td>
-                    <td><?= e($entry['party_name'] ?? '') ?></td>
-                    <td><?= e($entry['ledger_code'] . ' - ' . $entry['ledger_name']) ?></td>
-                    <td class="is-numeric"><?= $entry['entry_type'] === 'debit' ? e(site_currency_symbol()) . e(number_format((float) $entry['amount'], 2)) : '' ?></td>
-                    <td class="is-numeric"><?= $entry['entry_type'] === 'credit' ? e(site_currency_symbol()) . e(number_format((float) $entry['amount'], 2)) : '' ?></td>
-                    <td><?= e($entry['memo'] ?: $entry['narration']) ?></td>
-                </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
-    </div>
-</section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
