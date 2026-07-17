@@ -1,0 +1,115 @@
+/* Text-only contrast layer: preserves the green surfaces */
+:root {
+  --tc-white: #f7fff9;
+  --tc-soft: #d9eee2;
+  --tc-ink: #102a22;
+  --tc-green-950: #032e24;
+  --tc-green-900: #064e3b;
+  --tc-green-850: #075743;
+  --tc-green-700: #087a57;
+  --tc-line: rgba(220,247,231,.24);
+}
+
+/* Public content retains its green canvas; typography carries contrast. */
+body .content-prose,
+body .content-prose .service-detail-grid,
+body .public-section-content,
+body .public-content-panel {
+  background: linear-gradient(145deg,var(--tc-green-900),var(--tc-green-850)) !important;
+  border-color: var(--tc-line) !important;
+  color: var(--tc-white) !important;
+}
+body .content-prose :is(h1,h2,h3,h4,h5,h6,p,li,dt,dd,strong,span,label),
+body .content-prose .service-detail-grid :is(h1,h2,h3,h4,h5,h6,p,li,strong,span,a) {
+  color: var(--tc-white) !important;
+  -webkit-text-fill-color: var(--tc-white) !important;
+  opacity: 1 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,.38) !important;
+}
+body .content-prose :is(.lead,.meta,.muted,.description,small) {
+  color: var(--tc-soft) !important;
+  -webkit-text-fill-color: var(--tc-soft) !important;
+  opacity: 1 !important;
+}
+body .content-prose li::marker { color: #f0d37a !important; }
+body .content-prose .service-detail-grid h2 {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border-color: #d4a72c !important;
+}
+
+/* Related services stay green rather than becoming white cards. */
+body .content-prose .link-tile,
+body .content-prose .team-card,
+body .content-prose .insight-post,
+body .content-prose .contact-info-grid > div {
+  background: linear-gradient(145deg,#075743,#064e3b) !important;
+  border-color: var(--tc-line) !important;
+  color: var(--tc-white) !important;
+}
+body .content-prose :is(.link-tile,.team-card,.insight-post,.contact-info-grid > div) * {
+  color: var(--tc-white) !important;
+  -webkit-text-fill-color: var(--tc-white) !important;
+  opacity: 1 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,.34) !important;
+}
+body .content-prose .link-tile:hover {
+  background: linear-gradient(145deg,#087a57,#075743) !important;
+  border-color: rgba(240,211,122,.62) !important;
+}
+
+/* Green application chrome and intentionally dark cards. */
+body :is(
+  .utility-bar,.site-header,.site-footer,.admin-sidebar,.portal-sidebar,
+  .staff-sidebar,.client-sidebar,.admin-topbar,.portal-topbar,
+  .portal-selector-hero,.company-pin-showcase,.auth2-panel,.auth-panel,
+  .auth2-visual,.auth-showcase,.hero,.mbca-hero,.hero-card,.mbca-hero-card,
+  .mbca-metrics,.rpt-bar,.ad-kpi-card,.admin-stat-card,.dashboard-stat
+) :is(h1,h2,h3,h4,h5,h6,p,li,span,strong,small,a,label) {
+  color: var(--tc-white) !important;
+  -webkit-text-fill-color: var(--tc-white) !important;
+  opacity: 1 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,.42) !important;
+}
+
+/* Primary actions on green retain white text. */
+body :is(.button.primary,button.primary,button[type='submit'],input[type='submit'],.nav-button,.site-header-search button),
+body :is(.button.primary,button.primary,button[type='submit'],input[type='submit'],.nav-button,.site-header-search button) * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+  text-shadow: 0 1px 1px rgba(0,0,0,.35) !important;
+}
+
+/* Light controls and floating menus keep dark ink. */
+body :is(input:not([type='submit']),select,textarea),
+body .site-header :is(.dropdown-menu,.nav-dropdown-menu,[role='menu']),
+body .site-header :is(.dropdown-menu,.nav-dropdown-menu,[role='menu']) * {
+  color: var(--tc-ink) !important;
+  -webkit-text-fill-color: var(--tc-ink) !important;
+  text-shadow: none !important;
+  opacity: 1 !important;
+}
+body input::placeholder, body textarea::placeholder {
+  color: #60786e !important;
+  -webkit-text-fill-color: #60786e !important;
+  opacity: 1 !important;
+}
+
+/* Status meaning remains unmistakable. */
+body :is(.notice.success,.alert-success,.badge.success,.status-completed,.status-paid,.status-approved,.status-active),
+body :is(.notice.success,.alert-success,.badge.success,.status-completed,.status-paid,.status-approved,.status-active) * {
+  color: #126b39 !important;
+  -webkit-text-fill-color: #126b39 !important;
+  text-shadow: none !important;
+}
+body :is(.notice.error,.notice.warning,.alert-error,.alert-warning,.alert-danger,.badge.danger,.status-error,.status-failed,.status-overdue,.status-rejected),
+body :is(.notice.error,.notice.warning,.alert-error,.alert-warning,.alert-danger,.badge.danger,.status-error,.status-failed,.status-overdue,.status-rejected) * {
+  color: #a31515 !important;
+  -webkit-text-fill-color: #a31515 !important;
+  text-shadow: none !important;
+}
+
+@media print {
+  body, body * { color: #000000 !important; -webkit-text-fill-color: #000000 !important; text-shadow: none !important; }
+}
