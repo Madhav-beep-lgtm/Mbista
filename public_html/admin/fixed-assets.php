@@ -524,6 +524,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Nothing to depreciate — the asset is fully depreciated or has no useful life set.');
             redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
         }
+        // Part-period pro-ration (IAS 16.55: depreciation runs from the date the
+        // asset is available for use). An asset acquired 15 days before the
+        // fiscal year closes is charged 15/30 of the monthly amount into that
+        // year instead of a full month; the depreciable total is unchanged —
+        // the tail of the schedule simply extends by the unposted fraction.
+        $periodDays = (int) ($_POST['period_days'] ?? 30);
+        if ($periodDays < 1 || $periodDays > 31) {
+            $periodDays = 30;
+        }
+        $periodFraction = min(1.0, $periodDays / 30);
+        if ($periodFraction < 1.0) {
+            $charge = round($charge * $periodFraction, 2);
+            $remainingDepreciable = max(0.0, round((float) $asset['carrying_amount'] - (float) $asset['residual_value'], 2));
+            $charge = min($charge, $remainingDepreciable);
+        }
+        if ($charge <= 0) {
+            flash('error', 'The pro-rated charge is zero — nothing was posted.');
+            redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
+        }
         // Posting is BLOCKED unless both ledgers resolve (mapping-before-post).
         $expLedger = fa_resolve_mapping($companyId, 'depreciation_expense', (int) $asset['id']);
         $accLedger = fa_resolve_mapping($companyId, 'accumulated_depreciation', (int) $asset['id']);
@@ -546,7 +565,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'voucher_type' => 'journal', 'voucher_date' => $today,
                 'source_type' => 'asset_depreciation', 'source_id' => null,
                 'total_amount' => $charge,
-                'narration' => 'Depreciation period ' . $periodNo . ' — ' . $asset['name'] . ' (' . $asset['asset_code'] . ').',
+                'narration' => 'Depreciation period ' . $periodNo . ($periodDays < 30 ? ' (' . $periodDays . '/30 days, pro-rata)' : '') . ' — ' . $asset['name'] . ' (' . $asset['asset_code'] . ').',
                 'status' => 'posted', 'posted_by' => $userId,
             ], [
                 ['ledger_id' => (int) $expLedger['id'], 'entry_type' => 'debit', 'amount' => $charge],
@@ -2598,11 +2617,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <p><strong>Status:</strong> <span class="mbw-pill tone-blue"><?= e(str_replace('_', ' ', (string) $detailAsset['status'])) ?></span></p>
                 <p><strong>Next monthly charge:</strong> <?= e(site_currency_symbol()) ?><?= e(number_format($charge, 2)) ?></p>
                 <?php if ($charge > 0 && (string) $detailAsset['status'] !== 'held_for_sale' && (string) $detailAsset['status'] !== 'disposed'): ?>
-                    <form method="post" style="margin-top:8px">
+                    <form method="post" style="margin-top:8px;display:grid;gap:8px">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <input type="hidden" name="action" value="post_depreciation">
                         <input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
-                        <button type="submit"><?= icon('accounting') ?>Post one month's depreciation</button>
+                        <label style="font-size:12.5px">Days in service this period
+                            <input type="number" name="period_days" value="30" min="1" max="31" class="field-compact" style="max-width:110px"
+                                   title="Charge = monthly charge × days/30. Use this when the asset was available for only part of the period — e.g. bought 15 days before the fiscal year closes, enter 15.">
+                        </label>
+                        <div><button type="submit"><?= icon('accounting') ?>Post depreciation</button></div>
+                        <small class="muted">A part period (IAS 16: depreciation starts when the asset is available for use) is charged pro-rata at days/30 — enter 15 for a half month.</small>
                     </form>
                 <?php endif; ?>
             </div>
