@@ -11,16 +11,16 @@
 
 body.admin-layout {
   /* Light tokens */
-  --mbw-canvas: #eef6fc;
+  --mbw-canvas: #faf7f4;
   --mbw-card: #ffffff;
-  --mbw-card-soft: #f5fafe;
-  --mbw-border: #dcebf5;
-  --mbw-border-soft: #e9f3fa;
-  --mbw-heading: #0c4a6e;
-  --mbw-text: #1e3a4f;
-  --mbw-muted: #4a677c;
-  --mbw-primary: #0284c7;
-  --mbw-primary-soft: #e0f2fe;
+  --mbw-card-soft: #faf7f4;
+  --mbw-border: #e4dad3;
+  --mbw-border-soft: #eee6e1;
+  --mbw-heading: #3b2418;
+  --mbw-text: #231f1c;
+  --mbw-muted: #665b54;
+  --mbw-primary: #704a35;
+  --mbw-primary-soft: #efe5de;
   --mbw-green: #16a34a;
   --mbw-green-soft: #e5f6ec;
   --mbw-red: #e5484d;
@@ -31,12 +31,12 @@ body.admin-layout {
   --mbw-purple-soft: #f0eafd;
   --mbw-teal: #0d9488;
   --mbw-teal-soft: #e0f5f4;
-  --mbw-gray-soft: #ecf3f9;
-  --mbw-sidebar: #075985;
-  --mbw-sidebar-deep: #0c4a6e;
+  --mbw-gray-soft: #eee9e5;
+  --mbw-sidebar: #452a1d;
+  --mbw-sidebar-deep: #3b2418;
   --mbw-sidebar-line: rgba(186, 230, 253, 0.20);
-  --mbw-sidebar-text: #dbeffd;
-  --mbw-sidebar-active: #0369a1;
+  --mbw-sidebar-text: #f4ece7;
+  --mbw-sidebar-active: #5d3a28;
   --mbw-gold: #e3a13c;
   --mbw-shadow: 0 1px 2px rgba(2, 101, 158, 0.06), 0 4px 14px rgba(2, 101, 158, 0.05);
   --mbw-radius: 14px;
@@ -69,16 +69,16 @@ body.admin-layout {
 /* Dark tokens — both portal dark classes behave identically */
 body.admin-layout.theme-dark,
 body.admin-layout.admin-dark {
-  --mbw-canvas: #081722;
-  --mbw-card: #0d2130;
-  --mbw-card-soft: #122c3f;
-  --mbw-border: rgba(125, 211, 252, 0.18);
-  --mbw-border-soft: rgba(125, 211, 252, 0.10);
-  --mbw-heading: #f0f9ff;
-  --mbw-text: #d9ecf7;
-  --mbw-muted: #a3c3d6;
-  --mbw-primary: #38bdf8;
-  --mbw-primary-soft: rgba(56, 189, 248, 0.16);
+  --mbw-canvas: #160b07;
+  --mbw-card: #321d14;
+  --mbw-card-soft: #452a1d;
+  --mbw-border: rgba(240,213,140, 0.18);
+  --mbw-border-soft: rgba(240,213,140, 0.10);
+  --mbw-heading: #faf7f4;
+  --mbw-text: #f4ece7;
+  --mbw-muted: #d6c5ba;
+  --mbw-primary: #d6ad52;
+  --mbw-primary-soft: rgba(214,173,82, 0.16);
   --mbw-green: #3ecf7d;
   --mbw-green-soft: rgba(62, 207, 125, 0.14);
   --mbw-red: #f47c80;
@@ -89,9 +89,9 @@ body.admin-layout.admin-dark {
   --mbw-purple-soft: rgba(179, 154, 248, 0.15);
   --mbw-teal: #46c4b9;
   --mbw-teal-soft: rgba(70, 196, 185, 0.14);
-  --mbw-gray-soft: rgba(125, 211, 252, 0.12);
-  --mbw-sidebar: #0a2e47;
-  --mbw-sidebar-deep: #082438;
+  --mbw-gray-soft: rgba(240,213,140, 0.12);
+  --mbw-sidebar: #321d14;
+  --mbw-sidebar-deep: #1b0e09;
   --mbw-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
   /* Legacy reference-layout tokens (style.css hardcodes light values on
      body.accounting-reference-layout, which every admin page carries) */
@@ -134,7 +134,7 @@ body.admin-layout .admin-sidebar {
   border-right: 1px solid var(--mbw-sidebar-line);
   background: linear-gradient(180deg, var(--mbw-sidebar) 0%, var(--mbw-sidebar-deep) 100%);
   scrollbar-width: thin;
-  scrollbar-color: rgba(144, 194, 219, 0.35) transparent;
+  scrollbar-color: rgba(205,187,175, 0.35) transparent;
 }
 
 body.admin-layout .admin-sidebar .brand.brand-admin {
@@ -171,7 +171,7 @@ body.admin-layout .admin-sidebar .brand strong {
 
 body.admin-layout .admin-sidebar .brand small {
   display: block;
-  color: #8fafbf;
+  color: #cdbbaf;
   font-size: 11px;
   font-weight: 500;
 }
@@ -181,13 +181,13 @@ body.admin-layout .admin-sidebar-context {
   padding: 10px 12px;
   border: 1px solid var(--mbw-sidebar-line);
   border-radius: 10px;
-  background: rgba(144, 194, 219, 0.07);
+  background: rgba(205,187,175, 0.07);
   color: #9fb9c6;
   font-size: 11px;
 }
 
 body.admin-layout .admin-sidebar-context strong {
-  color: #dbecf5;
+  color: #f4ece7;
   font-size: 12px;
 }
 
@@ -230,7 +230,7 @@ body.admin-layout .admin-nav a .ui-icon {
 }
 
 body.admin-layout .admin-nav a:hover {
-  background: rgba(144, 194, 219, 0.10);
+  background: rgba(205,187,175, 0.10);
   color: #ffffff;
 }
 
@@ -275,7 +275,7 @@ body.admin-layout .mbw-subnav {
   display: none;
   margin: 2px 0 4px 20px;
   padding-left: 10px;
-  border-left: 1px solid rgba(144, 194, 219, 0.25);
+  border-left: 1px solid rgba(205,187,175, 0.25);
 }
 
 body.admin-layout .mbw-nav-parent.is-open .mbw-subnav {
@@ -1051,10 +1051,10 @@ body.admin-layout .button:hover,
 body.admin-layout button:hover,
 body.admin-layout input[type="submit"]:hover,
 body.admin-layout .btn:hover {
-  background: #0369a1;
+  background: #5d3a28;
   color: #ffffff;
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(2, 132, 199, 0.28);
+  box-shadow: 0 6px 16px rgba(112,74,53, 0.28);
 }
 
 /* Dark primary buttons keep --mbw-primary (light blue), so their text flips
@@ -1063,12 +1063,12 @@ body.admin-layout .btn:hover {
    getting unreadable dark-on-dark text. */
 body.admin-layout.theme-dark :where(.button, button, .btn):hover,
 body.admin-layout.admin-dark :where(.button, button, .btn):hover {
-  background: #7dd3fc;
+  background: #f0d58c;
 }
 
 body.admin-layout.theme-dark :where(.button, button, input[type="submit"], .btn),
 body.admin-layout.admin-dark :where(.button, button, input[type="submit"], .btn) {
-  color: #082f49;
+  color: #24140d;
 }
 
 body.admin-layout .button.secondary,
@@ -4040,7 +4040,7 @@ body.admin-layout .reference-pagination a.is-active {
 
 body.admin-layout.theme-dark .reference-pagination a.is-active,
 body.admin-layout.admin-dark .reference-pagination a.is-active {
-  color: #082f49;
+  color: #24140d;
 }
 
 body.admin-layout .reference-link {
@@ -6269,7 +6269,7 @@ body.admin-layout .accounting-stat-card:hover,
 body.admin-layout .reference-stat:hover {
   transform: translateY(-3px);
   border-color: color-mix(in srgb, var(--mbw-primary) 45%, var(--mbw-border));
-  box-shadow: 0 10px 26px rgba(2, 132, 199, 0.14);
+  box-shadow: 0 10px 26px rgba(112,74,53, 0.14);
 }
 
 .mbw-chip {
@@ -6296,7 +6296,7 @@ body.admin-layout .admin-nav a:hover {
 }
 
 body.admin-layout .admin-nav a.is-active {
-  box-shadow: inset 0 0 0 1px rgba(186, 230, 253, 0.14), 0 4px 14px rgba(3, 105, 161, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(186, 230, 253, 0.14), 0 4px 14px rgba(93,58,40, 0.35);
 }
 
 body.admin-layout .admin-nav a .ui-icon {
