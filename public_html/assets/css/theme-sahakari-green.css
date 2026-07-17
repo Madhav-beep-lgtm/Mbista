@@ -520,3 +520,40 @@ body:not(.theme-dark):not(.admin-dark) :is(
 body:not(.theme-dark):not(.admin-dark) :is(.status-pending,.status-draft,.status-open) {
   color: #795000 !important;
 }
+/* HEADER DROPDOWN CONTRAST FIX */
+.site-header .dropdown-menu,
+.site-header .nav-dropdown-menu,
+.site-header [role='menu'] {
+  background: #ffffff !important;
+  border: 1px solid #b8d5c4 !important;
+  color: #102a22 !important;
+  box-shadow: 0 18px 42px rgba(3,46,36,.20) !important;
+}
+.site-header .dropdown-menu :is(a,button,span,strong,small,p),
+.site-header .nav-dropdown-menu :is(a,button,span,strong,small,p),
+.site-header [role='menu'] :is(a,button,span,strong,small,p) {
+  color: #102a22 !important;
+  -webkit-text-fill-color: #102a22 !important;
+  opacity: 1 !important;
+}
+.site-header .dropdown-menu :is(a,button):hover,
+.site-header .dropdown-menu :is(a,button):focus-visible,
+.site-header .nav-dropdown-menu :is(a,button):hover,
+.site-header .nav-dropdown-menu :is(a,button):focus-visible,
+.site-header [role='menu'] :is(a,button):hover,
+.site-header [role='menu'] :is(a,button):focus-visible {
+  background: #e4f5ea !important;
+  color: #064e3b !important;
+  -webkit-text-fill-color: #064e3b !important;
+}
+.site-header .dropdown-menu .ui-icon,
+.site-header .nav-dropdown-menu .ui-icon,
+.site-header [role='menu'] .ui-icon {
+  color: #087a57 !important;
+}
+body.theme-dark .site-header .dropdown-menu,
+body.theme-dark .site-header .nav-dropdown-menu,
+body.theme-dark .site-header [role='menu'] {
+  background: #ffffff !important;
+  color: #102a22 !important;
+}
