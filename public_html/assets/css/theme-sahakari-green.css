@@ -1,0 +1,269 @@
+/* M.Bista Sahakari ERP visual system - presentation only */
+:root {
+  --sg-950: #032e24;
+  --sg-900: #064e3b;
+  --sg-850: #075743;
+  --sg-800: #08634a;
+  --sg-700: #087a57;
+  --sg-600: #0a8f61;
+  --sg-500: #16a34a;
+  --sg-400: #34d399;
+  --sg-100: #dcf7e7;
+  --sg-50: #f3fbf6;
+  --sg-ink: #102a22;
+  --sg-muted: #526b61;
+  --sg-line: #d4e7dc;
+  --sg-gold: #d4a72c;
+  --sg-red: #c62828;
+  --sg-amber: #b76a00;
+  --primary: var(--sg-700);
+  --primary-hover: var(--sg-900);
+  --secondary: var(--sg-600);
+  --accent: var(--sg-gold);
+  --background: var(--sg-50);
+  --surface: #ffffff;
+  --surface-soft: #f7fbf8;
+  --text-primary: var(--sg-ink);
+  --text-secondary: var(--sg-muted);
+  --text-muted: #71877e;
+  --border-color: var(--sg-line);
+  --border-dark: #b8d5c4;
+  --success: #168447;
+  --warning: var(--sg-red);
+  --danger: var(--sg-red);
+  --info: var(--sg-700);
+  --mbw-primary: var(--sg-700);
+  --mbw-primary-dark: var(--sg-900);
+  --mbw-canvas: var(--sg-50);
+  --mbw-card: #ffffff;
+  --mbw-card-soft: #f7fbf8;
+  --mbw-border: var(--sg-line);
+  --mbw-text: var(--sg-ink);
+  --mbw-muted: var(--sg-muted);
+  --mbw-green: #168447;
+  --mbw-red: var(--sg-red);
+  --mbw-amber: var(--sg-amber);
+}
+
+html { accent-color: var(--sg-700); }
+body {
+  background:
+    radial-gradient(circle at 15% -5%, rgba(52,211,153,.20), transparent 30rem),
+    radial-gradient(circle at 92% 8%, rgba(212,167,44,.12), transparent 25rem),
+    linear-gradient(145deg, var(--sg-950), var(--sg-900) 52%, #043b2e) fixed;
+  color: var(--sg-ink);
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: .22;
+  background-image: repeating-linear-gradient(115deg, rgba(255,255,255,.025) 0 1px, transparent 1px 8px);
+  z-index: -1;
+}
+
+/* Forest-green application chrome */
+.utility-bar,
+.site-header,
+.admin-sidebar,
+.admin-topbar,
+.portal-sidebar,
+.staff-sidebar,
+.client-sidebar,
+.auth2-footer,
+.site-footer {
+  background:
+    radial-gradient(circle at 20% 0, rgba(52,211,153,.13), transparent 20rem),
+    linear-gradient(135deg, var(--sg-950), var(--sg-900) 62%, #043b2e) !important;
+  border-color: rgba(220,247,231,.18) !important;
+  color: #fff !important;
+}
+.site-header { box-shadow: 0 12px 34px rgba(3,46,36,.24) !important; }
+.site-header a, .site-header strong, .site-header small,
+.utility-bar a, .utility-bar span,
+.site-footer, .site-footer a, .site-footer p, .site-footer h3, .site-footer h4,
+.admin-sidebar, .admin-sidebar a, .admin-sidebar strong, .admin-sidebar small,
+.portal-sidebar, .portal-sidebar a,
+.staff-sidebar, .staff-sidebar a,
+.client-sidebar, .client-sidebar a { color: #fff !important; }
+.brand-mark, .admin-brand-mark {
+  background: linear-gradient(145deg, var(--sg-700), var(--sg-950)) !important;
+  border: 1px solid rgba(212,167,44,.72) !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.22), 0 8px 18px rgba(0,0,0,.22) !important;
+}
+.main-navigation > a:hover, .nav-main-link:hover,
+.main-navigation > a.is-active, .nav-item.is-active .nav-main-link,
+.admin-sidebar a:hover, .admin-sidebar a.is-active,
+.portal-sidebar a:hover, .portal-sidebar a.is-active {
+  background: rgba(52,211,153,.15) !important;
+  color: #fff !important;
+  border-color: rgba(52,211,153,.52) !important;
+}
+
+/* White work surfaces with subtle dimensional depth */
+main, .admin-main, .portal-main, .staff-main, .client-main,
+.admin-content, .portal-content, .staff-content, .client-content {
+  background:
+    radial-gradient(circle at 90% 0, rgba(22,163,74,.055), transparent 24rem),
+    linear-gradient(180deg, #ffffff, #f7fbf8) !important;
+  color: var(--sg-ink) !important;
+}
+.card, .panel, .widget, .stat-card, .metric-card, .kpi-card,
+.form-card, .table-card, .chart-card, .dashboard-card,
+.portal-selector-page form.card, .company-card, .admin-card {
+  background: linear-gradient(150deg, #fff 0%, #fff 70%, #f2faf5 100%) !important;
+  border-color: var(--sg-line) !important;
+  color: var(--sg-ink) !important;
+  box-shadow: 0 12px 30px rgba(3,46,36,.09), inset 0 1px #fff !important;
+}
+.card:hover, .company-card:hover, .portal-selector-page form.card:hover {
+  border-color: rgba(10,143,97,.55) !important;
+  box-shadow: 0 18px 38px rgba(3,46,36,.14), inset 0 1px #fff !important;
+  transform: translateY(-2px);
+}
+h1, h2, h3, h4, h5, h6, label, legend, th, td, p, li,
+.card, .panel, .widget, .table-card, .form-card { color: var(--sg-ink); }
+.meta, .muted, small, .help-text, .form-help { color: var(--sg-muted); }
+a { color: var(--sg-700); }
+a:hover { color: var(--sg-900); }
+
+/* Forms, tables and controls */
+input, select, textarea {
+  background: #fff !important;
+  border-color: #bfd8c9 !important;
+  color: var(--sg-ink) !important;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--sg-600) !important;
+  box-shadow: 0 0 0 3px rgba(10,143,97,.16) !important;
+  outline: 0;
+}
+table thead, .table thead, .data-table thead {
+  background: linear-gradient(180deg, #e8f6ed, #dff1e6) !important;
+  color: var(--sg-900) !important;
+}
+table tbody tr:nth-child(even), .data-table tbody tr:nth-child(even) { background: #f7fbf8 !important; }
+table tbody tr:hover, .data-table tbody tr:hover { background: #ebf8f0 !important; }
+
+.button, button, input[type='submit'], .nav-button {
+  border-color: var(--sg-800) !important;
+}
+.button.primary, button.primary, input[type='submit'],
+.site-header-search button, .portal-selector-page form.card .button {
+  background: linear-gradient(145deg, var(--sg-600), var(--sg-900)) !important;
+  color: #fff !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.22), 0 8px 18px rgba(3,46,36,.18) !important;
+}
+.button.primary:hover, button.primary:hover, input[type='submit']:hover {
+  background: linear-gradient(145deg, var(--sg-500), var(--sg-800)) !important;
+}
+.button.secondary, .button.outline {
+  background: #fff !important;
+  color: var(--sg-800) !important;
+  border-color: var(--sg-700) !important;
+}
+
+/* Homepage: photographic green glass, no blue */
+body.home-page .mbca-hero, body.home-page .hero {
+  background-color: var(--sg-950) !important;
+  background-blend-mode: multiply, normal !important;
+}
+body.home-page .mbca-hero::before, body.home-page .hero::before {
+  background: linear-gradient(90deg, rgba(3,46,36,.97) 0%, rgba(6,78,59,.84) 46%, rgba(3,46,36,.38) 100%) !important;
+}
+body.home-page .hero-title, body.home-page .hero-copy, body.home-page .hero-copy p { color: #fff !important; }
+body.home-page .hero-title strong, body.home-page .eyebrow { color: #f0d37a !important; }
+body.home-page .hero-card, body.home-page .mbca-hero-card,
+body.home-page .mbca-metrics {
+  background: linear-gradient(145deg, rgba(6,78,59,.96), rgba(3,46,36,.96)) !important;
+  border-color: rgba(212,167,44,.44) !important;
+  color: #fff !important;
+  box-shadow: 0 24px 50px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.13) !important;
+}
+body.home-page .hero-card *, body.home-page .mbca-hero-card *, body.home-page .mbca-metrics * { color: #fff !important; }
+
+/* Login and company selection */
+.auth2-page, .auth-page {
+  background:
+    radial-gradient(circle at 14% 12%, rgba(52,211,153,.22), transparent 26rem),
+    linear-gradient(135deg, var(--sg-950), var(--sg-900)) !important;
+}
+.auth2-visual::before, .auth-showcase::before {
+  background: linear-gradient(90deg, rgba(3,46,36,.82), rgba(6,78,59,.52)) !important;
+}
+.auth2-panel, .auth-panel { background: linear-gradient(155deg, #075743, #032e24) !important; color: #fff !important; }
+.auth2-card, .auth-card { background: rgba(255,255,255,.075) !important; border-color: rgba(220,247,231,.22) !important; color: #fff !important; }
+.portal-selector-hero, .company-pin-showcase {
+  background:
+    radial-gradient(circle at 88% 20%, rgba(52,211,153,.20), transparent 26rem),
+    linear-gradient(135deg, var(--sg-950), var(--sg-800)) !important;
+  color: #fff !important;
+  border-color: rgba(212,167,44,.38) !important;
+}
+.portal-selector-hero *, .company-pin-showcase * { color: #fff !important; }
+
+/* ERP workspace */
+body.admin-layout, body.staff-layout, body.client-layout { background: var(--sg-950) !important; }
+body.admin-layout .admin-sidebar, body.staff-layout .admin-sidebar, body.client-layout .admin-sidebar {
+  box-shadow: inset -1px 0 rgba(255,255,255,.10), 16px 0 34px rgba(3,46,36,.16) !important;
+}
+.admin-topbar, .portal-topbar {
+  box-shadow: 0 10px 26px rgba(3,46,36,.16) !important;
+}
+.admin-topbar .button, .admin-topbar button, .portal-topbar .button {
+  background: rgba(255,255,255,.09) !important;
+  border-color: rgba(220,247,231,.24) !important;
+  color: #fff !important;
+}
+.dashboard-stat, .admin-stat-card {
+  background: linear-gradient(145deg, #fff, #eef9f2) !important;
+  border-color: var(--sg-line) !important;
+  color: var(--sg-ink) !important;
+}
+
+/* Semantic state language */
+.notice.success, .alert-success, .badge.success,
+.status-completed, .status-complete, .status-paid, .status-approved, .status-active,
+.tag.status-completed, .reference-pill.status-completed {
+  background: #e2f7e9 !important;
+  border-color: #9bd5af !important;
+  color: #126b39 !important;
+}
+.notice.error, .alert-error, .alert-danger, .badge.danger,
+.status-error, .status-failed, .status-overdue, .status-rejected, .status-cancelled,
+.button.danger {
+  background: #fde8e8 !important;
+  border-color: #e6a3a3 !important;
+  color: #a31515 !important;
+}
+.notice.warning, .alert-warning, .badge.warning, .status-warning {
+  background: #fde8e8 !important;
+  border-color: #e6a3a3 !important;
+  color: #a31515 !important;
+}
+.status-pending, .status-draft, .status-open {
+  background: #fff4d6 !important;
+  border-color: #e5c46c !important;
+  color: #795000 !important;
+}
+.notice.success::before, .alert-success::before { content: '\2713'; color: #168447; font-weight: 900; }
+.notice.error::before, .notice.warning::before, .alert-error::before, .alert-warning::before { content: '\26A0'; color: var(--sg-red); font-weight: 900; }
+
+/* Eliminate inherited legacy blue tones */
+.tone-blue, .tone-cyan, .badge.info, .status-info {
+  background: #e4f5ea !important;
+  border-color: #a7d7b8 !important;
+  color: var(--sg-800) !important;
+}
+::selection { background: #9ee7bb; color: var(--sg-950); }
+* { scrollbar-color: var(--sg-700) var(--sg-100); }
+:focus-visible { outline: 3px solid rgba(22,163,74,.42); outline-offset: 2px; }
+
+@media (max-width: 992px) {
+  .admin-sidebar, .portal-sidebar, .staff-sidebar, .client-sidebar { box-shadow: 18px 0 38px rgba(3,46,36,.28) !important; }
+  body.home-page .mbca-hero::before, body.home-page .hero::before { background: rgba(3,46,36,.88) !important; }
+}
+@media print {
+  body, main, .admin-main, .portal-main { background: #fff !important; color: #000 !important; }
+}

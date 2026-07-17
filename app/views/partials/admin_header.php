@@ -122,14 +122,15 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
-    <meta name="theme-color" content="#3b2418">
+    <meta name="theme-color" content="#064e3b">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
-    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#3b2418">
+    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#064e3b">
     <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
     <link rel="stylesheet" href="/assets/css/portal.css?v=20260714m1">
     <link rel="stylesheet" href="/assets/css/theme-brown.css?v=20260718g">
+    <link rel="stylesheet" href="/assets/css/theme-sahakari-green.css?v=20260718a">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
