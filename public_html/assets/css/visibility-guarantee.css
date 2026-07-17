@@ -1,0 +1,201 @@
+/* M.Bista global visibility guarantee - must load last */
+:root {
+  --vg-ink: #102a22;
+  --vg-muted: #526b61;
+  --vg-green-950: #032e24;
+  --vg-green-900: #064e3b;
+  --vg-green-700: #087a57;
+  --vg-green-100: #dcf7e7;
+  --vg-green-50: #f3fbf6;
+  --vg-line: #d4e7dc;
+  --vg-red: #a31515;
+  --vg-amber: #795000;
+}
+
+/* Every working canvas stays light and readable in both modes. */
+body main,
+body .admin-main,
+body .admin-content,
+body .portal-main,
+body .portal-content,
+body .staff-main,
+body .staff-content,
+body .client-main,
+body .client-content {
+  background: linear-gradient(180deg,#ffffff,#f3fbf6) !important;
+  color: var(--vg-ink) !important;
+}
+
+body main :is(h1,h2,h3,h4,h5,h6,p,li,dt,dd,label,legend,th,td,caption,strong),
+body :is(.admin-content,.portal-content,.staff-content,.client-content) :is(h1,h2,h3,h4,h5,h6,p,li,dt,dd,label,legend,th,td,caption,strong) {
+  color: var(--vg-ink) !important;
+  -webkit-text-fill-color: var(--vg-ink) !important;
+  opacity: 1 !important;
+}
+body main :is(small,.meta,.muted,.help,.hint,.help-text,.form-help,.description,.subtitle),
+body :is(.admin-content,.portal-content,.staff-content,.client-content) :is(small,.meta,.muted,.help,.hint,.help-text,.form-help,.description,.subtitle) {
+  color: var(--vg-muted) !important;
+  -webkit-text-fill-color: var(--vg-muted) !important;
+  opacity: 1 !important;
+}
+
+/* All reusable work surfaces are white, including legacy module families. */
+body main :is(
+  .card,.panel,.widget,.form-card,.table-card,.chart-card,.dashboard-card,
+  .report-card,.settings-card,.workspace-card,.admin-card,.admin-panel,
+  .cr-card,.rc-card,.mbw-card,.ad-card,.ad-kpi-card,.ad-chart-card,
+  .admin-chart-card,.admin-analysis-card,.accounting-stat-card,
+  .dashboard-stat,.admin-stat-card,.metric-card,.stat-card,.kpi-card,
+  .modal-content,.modal-card,.dialog,.popover,.dropdown-panel,.company-card,
+  .content-prose,.service-detail-grid,.link-tile,.team-card,.insight-post,
+  .contact-info-grid > div,.rpt-statement,.workspace-module-bar,.frm-section
+),
+body :is(.admin-content,.portal-content,.staff-content,.client-content) :is(
+  [class$='-card'],[class*='-card '],[class$='-panel'],[class*='-panel ']
+) {
+  background: linear-gradient(150deg,#ffffff 0%,#ffffff 74%,#f1f9f4 100%) !important;
+  border-color: var(--vg-line) !important;
+  color: var(--vg-ink) !important;
+  box-shadow: 0 12px 30px rgba(3,46,36,.10), inset 0 1px #ffffff !important;
+}
+body main :is(.card,.panel,.content-prose,.service-detail-grid,.link-tile,.team-card,.insight-post) *,
+body :is(.admin-content,.portal-content,.staff-content,.client-content) :is([class$='-card'],[class*='-card '],[class$='-panel'],[class*='-panel ']) * {
+  color: var(--vg-ink) !important;
+  -webkit-text-fill-color: var(--vg-ink) !important;
+  opacity: 1 !important;
+}
+
+/* Forms */
+body input:not([type='checkbox']):not([type='radio']):not([type='range']),
+body select,
+body textarea {
+  background: #ffffff !important;
+  color: var(--vg-ink) !important;
+  -webkit-text-fill-color: var(--vg-ink) !important;
+  border-color: #b8d5c4 !important;
+  opacity: 1 !important;
+}
+body input::placeholder,
+body textarea::placeholder {
+  color: #71877e !important;
+  -webkit-text-fill-color: #71877e !important;
+  opacity: 1 !important;
+}
+body input:disabled, body select:disabled, body textarea:disabled {
+  background: #edf3ef !important;
+  color: #526b61 !important;
+  -webkit-text-fill-color: #526b61 !important;
+  opacity: 1 !important;
+}
+
+/* Tables and reports */
+body table, body tbody, body tbody tr, body tbody td {
+  color: var(--vg-ink) !important;
+  -webkit-text-fill-color: var(--vg-ink) !important;
+}
+body tbody tr, body tbody td { background-color: #ffffff !important; }
+body tbody tr:nth-child(even), body tbody tr:nth-child(even) td { background-color: #f7fbf8 !important; }
+body tbody tr:hover, body tbody tr:hover td { background-color: #eaf7ef !important; }
+body thead th, body tfoot th, body tfoot td,
+body .rc-group-head td, body .rc-total-row td, body .table-total, body .grand-total {
+  background: #dff1e6 !important;
+  color: var(--vg-green-950) !important;
+  -webkit-text-fill-color: var(--vg-green-950) !important;
+}
+
+/* Normal links on light surfaces */
+body main a:not(.button):not(.badge):not(.tag):not([class*='status']),
+body :is(.admin-content,.portal-content,.staff-content,.client-content) a:not(.button):not(.badge):not(.tag):not([class*='status']) {
+  color: var(--vg-green-700) !important;
+  -webkit-text-fill-color: var(--vg-green-700) !important;
+}
+
+/* Intentionally green surfaces always use white text. */
+body :is(
+  .utility-bar,.site-header,.site-footer,.admin-sidebar,.portal-sidebar,
+  .staff-sidebar,.client-sidebar,.admin-topbar,.portal-topbar,
+  .portal-selector-hero,.company-pin-showcase,.auth2-panel,.auth-panel,
+  .auth2-visual,.auth-showcase,.hero-card,.mbca-hero-card,.mbca-metrics,
+  .rpt-bar
+),
+body :is(
+  .utility-bar,.site-header,.site-footer,.admin-sidebar,.portal-sidebar,
+  .staff-sidebar,.client-sidebar,.admin-topbar,.portal-topbar,
+  .portal-selector-hero,.company-pin-showcase,.auth2-panel,.auth-panel,
+  .auth2-visual,.auth-showcase,.hero-card,.mbca-hero-card,.mbca-metrics,
+  .rpt-bar
+) :is(h1,h2,h3,h4,h5,h6,p,li,span,strong,small,a,label) {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+}
+body.home-page :is(.hero,.mbca-hero),
+body.home-page :is(.hero,.mbca-hero) :is(h1,h2,h3,h4,h5,h6,p,li,span,strong,small,label) {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+}
+body.home-page :is(.hero,.mbca-hero) :is(.eyebrow,.accent,.hero-accent) {
+  color: #f0d37a !important;
+  -webkit-text-fill-color: #f0d37a !important;
+}
+
+/* Dropdowns are light surfaces even though they live inside the green header. */
+body .site-header :is(.dropdown-menu,.nav-dropdown-menu,[role='menu']) {
+  background: #ffffff !important;
+  border-color: #b8d5c4 !important;
+  color: var(--vg-ink) !important;
+}
+body .site-header :is(.dropdown-menu,.nav-dropdown-menu,[role='menu']) *,
+body .site-header :is(.dropdown-menu,.nav-dropdown-menu,[role='menu']) :is(a,button,span,strong,small,p) {
+  color: var(--vg-ink) !important;
+  -webkit-text-fill-color: var(--vg-ink) !important;
+  opacity: 1 !important;
+}
+body .site-header :is(.dropdown-menu,.nav-dropdown-menu,[role='menu']) :is(a,button):hover {
+  background: var(--vg-green-100) !important;
+  color: var(--vg-green-900) !important;
+  -webkit-text-fill-color: var(--vg-green-900) !important;
+}
+
+/* Buttons and selected navigation */
+body :is(
+  .button.primary,button.primary,button[type='submit'],input[type='submit'],
+  .nav-button,.site-header-search button,.mbw-tab.is-active,
+  .admin-nav a.active,.admin-nav a.is-active,.admin-nav a[aria-current='page']
+),
+body :is(
+  .button.primary,button.primary,button[type='submit'],input[type='submit'],
+  .nav-button,.site-header-search button,.mbw-tab.is-active,
+  .admin-nav a.active,.admin-nav a.is-active,.admin-nav a[aria-current='page']
+) * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+}
+body .button.secondary, body .button.outline {
+  background: #ffffff !important;
+  color: var(--vg-green-900) !important;
+  -webkit-text-fill-color: var(--vg-green-900) !important;
+}
+
+/* Status colors override generic card text. */
+body :is(.notice.success,.alert-success,.badge.success,.status-completed,.status-complete,.status-paid,.status-approved,.status-active),
+body :is(.notice.success,.alert-success,.badge.success,.status-completed,.status-complete,.status-paid,.status-approved,.status-active) * {
+  color: #126b39 !important;
+  -webkit-text-fill-color: #126b39 !important;
+}
+body :is(.notice.error,.notice.warning,.alert-error,.alert-warning,.alert-danger,.badge.danger,.status-error,.status-failed,.status-overdue,.status-rejected,.status-cancelled),
+body :is(.notice.error,.notice.warning,.alert-error,.alert-warning,.alert-danger,.badge.danger,.status-error,.status-failed,.status-overdue,.status-rejected,.status-cancelled) * {
+  color: var(--vg-red) !important;
+  -webkit-text-fill-color: var(--vg-red) !important;
+}
+body :is(.status-pending,.status-draft,.status-open),
+body :is(.status-pending,.status-draft,.status-open) * {
+  color: var(--vg-amber) !important;
+  -webkit-text-fill-color: var(--vg-amber) !important;
+}
+
+@media print {
+  body, body main, body main * { background: #ffffff !important; color: #000000 !important; -webkit-text-fill-color: #000000 !important; }
+}
