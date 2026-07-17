@@ -397,3 +397,126 @@ body.theme-dark .rc-table thead th, body.admin-dark .rc-table thead th {
   color: #087a57 !important;
 }
 .rpt-bar, .mbw-tab.is-active { color: #ffffff !important; }
+/* LIGHT MODE CONTRAST GUARANTEE */
+body:not(.theme-dark):not(.admin-dark) main,
+body:not(.theme-dark):not(.admin-dark) .admin-main,
+body:not(.theme-dark):not(.admin-dark) .admin-content,
+body:not(.theme-dark):not(.admin-dark) .portal-main,
+body:not(.theme-dark):not(.admin-dark) .portal-content,
+body:not(.theme-dark):not(.admin-dark) .staff-main,
+body:not(.theme-dark):not(.admin-dark) .staff-content,
+body:not(.theme-dark):not(.admin-dark) .client-main,
+body:not(.theme-dark):not(.admin-dark) .client-content {
+  background: linear-gradient(180deg,#ffffff,#f3fbf6) !important;
+  color: #102a22 !important;
+}
+
+body:not(.theme-dark):not(.admin-dark) :is(
+  .card,.panel,.widget,.form-card,.table-card,.chart-card,.dashboard-card,
+  .report-card,.settings-card,.workspace-card,.admin-card,.admin-panel,
+  .cr-card,.rc-card,.mbw-card,.ad-card,.ad-kpi-card,.ad-chart-card,
+  .admin-chart-card,.admin-analysis-card,.accounting-stat-card,
+  .dashboard-stat,.admin-stat-card,.metric-card,.stat-card,.kpi-card,
+  .modal-content,.dialog,.popover,.dropdown-panel,.company-card
+) {
+  background: linear-gradient(150deg,#ffffff 0%,#ffffff 72%,#f1f9f4 100%) !important;
+  border-color: #d4e7dc !important;
+  color: #102a22 !important;
+}
+
+body:not(.theme-dark):not(.admin-dark) main :is(
+  h1,h2,h3,h4,h5,h6,p,li,dt,dd,label,legend,th,td,
+  .title,.heading,.card-title,.panel-title,.stat-value,.metric-value,
+  .kpi-value,.ad-kpi-value,.ad-kpi-label,.mbw-heading,.mbw-value,
+  .rpt-title,.rpt-entity,.rpt-company,.frm-step-text strong
+) {
+  color: #102a22 !important;
+  opacity: 1 !important;
+}
+
+body:not(.theme-dark):not(.admin-dark) main :is(
+  small,.meta,.muted,.help,.hint,.help-text,.form-help,.description,
+  .subtitle,.card-subtitle,.stat-label,.metric-label,.kpi-label,
+  .ad-kpi-meta,.mbw-muted,.rpt-period,.rpt-meta,.frm-step-text small
+) {
+  color: #526b61 !important;
+  opacity: 1 !important;
+}
+
+body:not(.theme-dark):not(.admin-dark) main a:not(.button):not(.badge):not(.tag) {
+  color: #087a57 !important;
+}
+body:not(.theme-dark):not(.admin-dark) main a:not(.button):not(.badge):not(.tag):hover {
+  color: #064e3b !important;
+}
+
+body:not(.theme-dark):not(.admin-dark) table,
+body:not(.theme-dark):not(.admin-dark) tbody,
+body:not(.theme-dark):not(.admin-dark) tbody tr,
+body:not(.theme-dark):not(.admin-dark) tbody td {
+  background-color: #ffffff;
+  color: #102a22 !important;
+}
+body:not(.theme-dark):not(.admin-dark) tbody tr:nth-child(even),
+body:not(.theme-dark):not(.admin-dark) tbody tr:nth-child(even) td {
+  background-color: #f7fbf8 !important;
+}
+body:not(.theme-dark):not(.admin-dark) thead th {
+  background: #dff1e6 !important;
+  color: #032e24 !important;
+}
+
+body:not(.theme-dark):not(.admin-dark) input,
+body:not(.theme-dark):not(.admin-dark) select,
+body:not(.theme-dark):not(.admin-dark) textarea {
+  background: #ffffff !important;
+  color: #102a22 !important;
+  -webkit-text-fill-color: #102a22 !important;
+  opacity: 1 !important;
+}
+body:not(.theme-dark):not(.admin-dark) input::placeholder,
+body:not(.theme-dark):not(.admin-dark) textarea::placeholder {
+  color: #71877e !important;
+  opacity: 1 !important;
+}
+
+/* Keep text white only where the surface is intentionally green. */
+body:not(.theme-dark):not(.admin-dark) :is(
+  .utility-bar,.site-header,.site-footer,.admin-sidebar,.portal-sidebar,
+  .staff-sidebar,.client-sidebar,.admin-topbar,.portal-topbar,
+  .portal-selector-hero,.company-pin-showcase,.auth2-panel,.auth-panel,
+  .auth2-visual,.auth-showcase,.hero-card,.mbca-hero-card,.mbca-metrics,
+  .rpt-bar
+) :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,a,label,li) {
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+body:not(.theme-dark):not(.admin-dark).home-page :is(.hero,.mbca-hero) :is(h1,h2,h3,h4,p,span,strong,small,li) {
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+body:not(.theme-dark):not(.admin-dark).home-page :is(.hero,.mbca-hero) :is(.eyebrow,.accent,.hero-accent) {
+  color: #f0d37a !important;
+}
+
+body:not(.theme-dark):not(.admin-dark) :is(
+  .button.primary,button.primary,button[type='submit'],.nav-button,
+  .mbw-tab.is-active,.admin-nav a.active,.admin-nav a.is-active,
+  .admin-nav a[aria-current='page']
+) {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+/* Semantic labels always retain readable state colors. */
+body:not(.theme-dark):not(.admin-dark) :is(
+  .notice.success,.alert-success,.badge.success,.status-completed,
+  .status-complete,.status-paid,.status-approved,.status-active
+) { color: #126b39 !important; }
+body:not(.theme-dark):not(.admin-dark) :is(
+  .notice.error,.notice.warning,.alert-error,.alert-warning,.alert-danger,
+  .badge.danger,.status-error,.status-failed,.status-overdue,.status-rejected
+) { color: #a31515 !important; }
+body:not(.theme-dark):not(.admin-dark) :is(.status-pending,.status-draft,.status-open) {
+  color: #795000 !important;
+}
