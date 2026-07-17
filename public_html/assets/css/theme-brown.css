@@ -97,3 +97,112 @@ body.theme-dark .dropdown-menu{background:#312018!important;border-color:#654838
 
 @media print{html,body,main,.admin-main,.admin-content,.card,.panel,table{background:#fff!important;color:#000!important;box-shadow:none!important}.admin-sidebar,.admin-topbar,.site-header,.utility-bar,.site-footer,.no-print{display:none!important}th,td{color:#000!important;border-color:#aaa!important}}
 @media(max-width:992px){body.admin-layout .admin-sidebar{background:var(--brown-950)!important}.mobile-nav-head{background:var(--brown-950);color:#fff}}
+/* 11/10 refinement batch 1 */
+
+/* Homepage: preserve the photograph but replace the legacy blue cast with brown. */
+body.home-page .hero-backdrop {
+  background-color: rgba(59, 36, 24, .78) !important;
+  background-blend-mode: multiply !important;
+}
+body.home-page .hero-panel::before {
+  background: linear-gradient(90deg, rgba(36,20,13,.93) 0%, rgba(59,36,24,.76) 48%, rgba(36,20,13,.34) 100%) !important;
+}
+body.home-page .hero-card {
+  background: linear-gradient(145deg, rgba(59,36,24,.96), rgba(86,54,37,.94)) !important;
+  border-color: rgba(239,229,222,.28) !important;
+  box-shadow: 0 18px 48px rgba(36,20,13,.34) !important;
+}
+body.home-page .hero::before {
+  background: radial-gradient(circle, rgba(112,74,53,.24), transparent 65%) !important;
+}
+body.home-page .hero-title { font-size: clamp(42px, 4.25vw, 68px) !important; line-height: 1.04 !important; }
+body.home-page .hero-copy > p { max-width: 720px; color: rgba(255,255,255,.88) !important; }
+body.home-page .hero .button:not(.secondary) {
+  background: var(--brown-700) !important;
+  border-color: #9a735c !important;
+  box-shadow: 0 10px 24px rgba(36,20,13,.28) !important;
+}
+body.home-page .hero .button:not(.secondary):hover { background: var(--brown-800) !important; }
+body.home-page .hero-stats-band {
+  background: linear-gradient(135deg, var(--brown-950), var(--brown-900)) !important;
+  border-color: rgba(239,229,222,.22) !important;
+}
+
+/* Company selector: compact, balanced and consistently brown. */
+.portal-selector-page { padding-top: 32px !important; }
+.portal-selector-page .hero-grid > div {
+  min-height: 0 !important;
+  padding: 28px 34px 30px !important;
+  border-color: rgba(239,229,222,.18) !important;
+  background: radial-gradient(circle at 88% 22%, rgba(205,187,175,.16), transparent 22rem), linear-gradient(135deg, var(--brown-950), var(--brown-900) 58%, var(--brown-800)) !important;
+  box-shadow: 0 18px 44px rgba(36,20,13,.18) !important;
+}
+.portal-selector-page .mbw-logo-portal { max-height: 44px !important; margin-bottom: 14px !important; }
+.portal-selector-page .hero-panel h1 { max-width: 900px !important; font-size: clamp(25px,2.4vw,36px) !important; }
+.portal-selector-page .hero-panel p { margin-top: 10px !important; color: rgba(255,255,255,.82) !important; }
+.portal-selector-page form.card {
+  min-height: 225px !important;
+  padding: 22px !important;
+  border-color: var(--app-border) !important;
+  background: #fff !important;
+  box-shadow: 0 8px 24px rgba(59,36,24,.07) !important;
+}
+.portal-selector-page form.card:hover { border-color: var(--app-border-strong) !important; box-shadow: 0 14px 34px rgba(59,36,24,.12) !important; }
+.portal-selector-page form.card::before { background: linear-gradient(90deg,var(--brown-700),var(--brown-100)) !important; }
+.portal-selector-page form.card .badge { margin-bottom: 14px !important; background: var(--brown-100) !important; border-color: var(--app-border-strong) !important; color: var(--brown-900) !important; }
+.portal-selector-page form.card button[type=submit] { min-height: 42px !important; background: var(--brown-900) !important; border-color: var(--brown-900) !important; }
+
+/* Admin command bar: compact controls without collisions at common desktop widths. */
+body.admin-layout .admin-topbar {
+  min-height: 68px !important;
+  padding: 10px 16px !important;
+  gap: 8px !important;
+  align-items: center !important;
+}
+body.admin-layout .admin-topbar-search {
+  flex: 1 1 260px !important;
+  min-width: 220px !important;
+  max-width: 420px !important;
+}
+body.admin-layout .admin-topbar-search input { min-height: 42px !important; padding-right: 48px !important; }
+body.admin-layout .admin-topbar-search button { width: 42px !important; min-width: 42px !important; padding: 0 !important; }
+body.admin-layout .admin-topbar-actions { gap: 8px !important; }
+body.admin-layout .admin-icon-button { min-width: 42px !important; min-height: 42px !important; }
+body.admin-layout .admin-context-chip { max-width: 300px; min-height: 42px; }
+body.admin-layout .admin-context-chip strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Semantic controls: irreversible actions must never look like ordinary brown actions. */
+.notice.success::before,.alert-success::before,.status-completed::before,.status-approved::before,.status-paid::before { content:'\2713' !important; }
+.notice.error::before,.alert-error::before,.alert-danger::before,.status-overdue::before,.status-failed::before,.status-rejected::before { content:'\26A0' !important; }
+body.admin-layout form:has(input[name=action][value=delete]) button,
+body.admin-layout form:has(input[name=action][value=remove]) button,
+body.admin-layout button[name=action][value=delete],
+body.admin-layout .delete-button {
+  background: var(--app-danger) !important;
+  border-color: var(--app-danger) !important;
+  color: #fff !important;
+}
+body.admin-layout form:has(input[name=action][value=suspend]) button,
+body.admin-layout button[name=action][value=suspend] {
+  background: var(--app-warning-bg) !important;
+  border-color: #d79a59 !important;
+  color: #7c3708 !important;
+}
+body.admin-layout .tag[class*=status-],body.admin-layout .status-paid,body.admin-layout .status-overdue { text-transform: capitalize !important; }
+
+/* Remove leftover blue interaction glow from the legacy animation layer. */
+.button:hover,button:not(:disabled):hover,input[type=submit]:hover { box-shadow: 0 10px 24px rgba(59,36,24,.22) !important; }
+:focus-visible { outline-color: rgba(112,74,53,.62) !important; }
+::selection { background: rgba(112,74,53,.24) !important; }
+* { scrollbar-color: rgba(112,74,53,.48) transparent !important; }
+*::-webkit-scrollbar-thumb { background-color: rgba(112,74,53,.48) !important; }
+
+@media (max-width: 1200px) {
+  body.admin-layout .admin-topbar { flex-wrap: wrap !important; }
+  body.admin-layout .admin-topbar-search { order: 2; max-width: none !important; }
+}
+@media (max-width: 760px) {
+  body.home-page .hero-title { font-size: clamp(36px,11vw,52px) !important; }
+  .portal-selector-page .hero-grid > div { padding: 24px 20px !important; }
+  .portal-selector-page .admin-grid { grid-template-columns: 1fr !important; }
+}

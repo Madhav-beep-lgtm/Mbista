@@ -21,7 +21,7 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
     <link rel="stylesheet" href="/assets/css/portal.css?v=20260713f">
-    <link rel="stylesheet" href="/assets/css/theme-brown.css?v=20260717a">
+    <link rel="stylesheet" href="/assets/css/theme-brown.css?v=20260717b">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
