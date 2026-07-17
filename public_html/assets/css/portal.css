@@ -16,10 +16,10 @@ body.admin-layout {
   --mbw-card-soft: #faf7f4;
   --mbw-border: #e4dad3;
   --mbw-border-soft: #eee6e1;
-  --mbw-heading: #3b2418;
+  --mbw-heading: #064e3b;
   --mbw-text: #231f1c;
   --mbw-muted: #665b54;
-  --mbw-primary: #704a35;
+  --mbw-primary: #08634a;
   --mbw-primary-soft: #efe5de;
   --mbw-green: #16a34a;
   --mbw-green-soft: #e5f6ec;
@@ -27,18 +27,18 @@ body.admin-layout {
   --mbw-red-soft: #fdeaea;
   --mbw-amber: #e28a09;
   --mbw-amber-soft: #fdf1dd;
-  --mbw-purple: #8b5cf6;
-  --mbw-purple-soft: #f0eafd;
+  --mbw-purple: #34a66f;
+  --mbw-purple-soft: #e4f5ea;
   --mbw-teal: #0d9488;
-  --mbw-teal-soft: #e0f5f4;
+  --mbw-teal-soft: #e4f5ea;
   --mbw-gray-soft: #eee9e5;
-  --mbw-sidebar: #452a1d;
-  --mbw-sidebar-deep: #3b2418;
-  --mbw-sidebar-line: rgba(186, 230, 253, 0.20);
+  --mbw-sidebar: #064e3b;
+  --mbw-sidebar-deep: #064e3b;
+  --mbw-sidebar-line: rgba(228,245,234, 0.20);
   --mbw-sidebar-text: #f4ece7;
-  --mbw-sidebar-active: #5d3a28;
+  --mbw-sidebar-active: #08634a;
   --mbw-gold: #e3a13c;
-  --mbw-shadow: 0 1px 2px rgba(2, 101, 158, 0.06), 0 4px 14px rgba(2, 101, 158, 0.05);
+  --mbw-shadow: 0 1px 2px rgba(8,99,74, 0.06), 0 4px 14px rgba(8,99,74, 0.05);
   --mbw-radius: 14px;
   --mbw-radius-sm: 9px;
   --mbw-font: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
@@ -69,9 +69,9 @@ body.admin-layout {
 /* Dark tokens — both portal dark classes behave identically */
 body.admin-layout.theme-dark,
 body.admin-layout.admin-dark {
-  --mbw-canvas: #160b07;
-  --mbw-card: #321d14;
-  --mbw-card-soft: #452a1d;
+  --mbw-canvas: #032e24;
+  --mbw-card: #032e24;
+  --mbw-card-soft: #064e3b;
   --mbw-border: rgba(240,213,140, 0.18);
   --mbw-border-soft: rgba(240,213,140, 0.10);
   --mbw-heading: #faf7f4;
@@ -85,13 +85,13 @@ body.admin-layout.admin-dark {
   --mbw-red-soft: rgba(244, 124, 128, 0.14);
   --mbw-amber: #f3b04c;
   --mbw-amber-soft: rgba(243, 176, 76, 0.14);
-  --mbw-purple: #b39af8;
-  --mbw-purple-soft: rgba(179, 154, 248, 0.15);
+  --mbw-purple: #9bd5af;
+  --mbw-purple-soft: rgba(155,213,175, 0.15);
   --mbw-teal: #46c4b9;
   --mbw-teal-soft: rgba(70, 196, 185, 0.14);
   --mbw-gray-soft: rgba(240,213,140, 0.12);
-  --mbw-sidebar: #321d14;
-  --mbw-sidebar-deep: #1b0e09;
+  --mbw-sidebar: #032e24;
+  --mbw-sidebar-deep: #032e24;
   --mbw-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
   /* Legacy reference-layout tokens (style.css hardcodes light values on
      body.accounting-reference-layout, which every admin page carries) */
@@ -163,7 +163,7 @@ body.admin-layout .admin-sidebar .brand-mark {
 
 body.admin-layout .admin-sidebar .brand strong {
   display: block;
-  color: #f2f9fc;
+  color: #e4f5ea;
   font-size: 15px;
   font-weight: 700;
   line-height: 1.2;
@@ -182,7 +182,7 @@ body.admin-layout .admin-sidebar-context {
   border: 1px solid var(--mbw-sidebar-line);
   border-radius: 10px;
   background: rgba(205,187,175, 0.07);
-  color: #9fb9c6;
+  color: #9bd5af;
   font-size: 11px;
 }
 
@@ -198,7 +198,7 @@ body.admin-layout .admin-nav {
 
 body.admin-layout .admin-nav-group {
   margin: 14px 4px 4px;
-  color: #7da3b8;
+  color: #34a66f;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.09em;
@@ -1051,10 +1051,10 @@ body.admin-layout .button:hover,
 body.admin-layout button:hover,
 body.admin-layout input[type="submit"]:hover,
 body.admin-layout .btn:hover {
-  background: #5d3a28;
+  background: #08634a;
   color: #ffffff;
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(112,74,53, 0.28);
+  box-shadow: 0 6px 16px rgba(8,99,74, 0.28);
 }
 
 /* Dark primary buttons keep --mbw-primary (light blue), so their text flips
@@ -1068,7 +1068,7 @@ body.admin-layout.admin-dark :where(.button, button, .btn):hover {
 
 body.admin-layout.theme-dark :where(.button, button, input[type="submit"], .btn),
 body.admin-layout.admin-dark :where(.button, button, input[type="submit"], .btn) {
-  color: #24140d;
+  color: #032e24;
 }
 
 body.admin-layout .button.secondary,
@@ -1387,19 +1387,19 @@ body.admin-layout .mbw-chart-legend .mbw-legend-dot.is-line {
   z-index: 90;
   min-width: 150px;
   padding: 10px 12px;
-  border: 1px solid var(--mbw-border, #e3edf2);
+  border: 1px solid var(--mbw-border, #e4f5ea);
   border-radius: 8px;
   background: var(--mbw-card, #fff);
-  box-shadow: 0 8px 24px rgba(27, 58, 75, 0.14);
+  box-shadow: 0 8px 24px rgba(6,78,59, 0.14);
   font-family: "Inter", "Segoe UI", system-ui, sans-serif;
   font-size: 12px;
-  color: var(--mbw-text, #3f5561);
+  color: var(--mbw-text, #08634a);
   pointer-events: none;
 }
 
 .mbw-chart-tooltip .mbw-tip-title {
   margin-bottom: 6px;
-  color: var(--mbw-heading, #1b3a4b);
+  color: var(--mbw-heading, #064e3b);
   font-weight: 700;
 }
 
@@ -1412,7 +1412,7 @@ body.admin-layout .mbw-chart-legend .mbw-legend-dot.is-line {
 
 .mbw-chart-tooltip .mbw-tip-row b {
   margin-left: auto;
-  color: var(--mbw-heading, #1b3a4b);
+  color: var(--mbw-heading, #064e3b);
 }
 
 .mbw-chart-tooltip .mbw-tip-dot {
@@ -1461,7 +1461,7 @@ body.admin-layout .rpt-statement {
 
 body.admin-layout .rpt-bar {
   padding: 10px 16px;
-  background: #16445d;
+  background: #064e3b;
   color: #ffffff;
   font-size: 14px;
   font-weight: 700;
@@ -1470,7 +1470,7 @@ body.admin-layout .rpt-bar {
 
 body.admin-layout.theme-dark .rpt-bar,
 body.admin-layout.admin-dark .rpt-bar {
-  background: #194c67;
+  background: #08634a;
 }
 
 body.admin-layout .rpt-bar-compare {
@@ -1488,7 +1488,7 @@ body.admin-layout .rpt-letterhead {
 }
 
 body.admin-layout .rpt-company {
-  color: #16445d;
+  color: #064e3b;
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.03em;
@@ -1794,7 +1794,7 @@ body.admin-layout .mbw-tab.is-active {
 
 body.admin-layout.theme-dark .mbw-tab.is-active,
 body.admin-layout.admin-dark .mbw-tab.is-active {
-  color: #10232d;
+  color: #032e24;
 }
 
 /* ==========================================================================
@@ -1996,7 +1996,7 @@ body.admin-layout .frm-toggle i::after {
   height: 16px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 3px rgba(27, 58, 75, 0.3);
+  box-shadow: 0 1px 3px rgba(6,78,59, 0.3);
   transition: transform 0.15s ease;
 }
 
@@ -2324,7 +2324,7 @@ body.admin-layout ::-webkit-scrollbar {
 body.admin-layout ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 8px;
-  background: rgba(107, 131, 144, 0.4);
+  background: rgba(8,122,87, 0.4);
   background-clip: content-box;
 }
 
@@ -2574,7 +2574,7 @@ body.admin-layout .rc2-report-view select {
 
 body.admin-layout.theme-dark .rc2-report-view,
 body.admin-layout.admin-dark .rc2-report-view {
-  color: #0e3245;
+  color: #064e3b;
 }
 
 body.admin-layout .rc2-report-view select option {
@@ -2783,7 +2783,7 @@ body.admin-layout .rc2-apply {
 
 body.admin-layout.theme-dark .rc2-apply,
 body.admin-layout.admin-dark .rc2-apply {
-  color: #0e3245;
+  color: #064e3b;
 }
 
 body.admin-layout .rc2-apply .ui-icon {
@@ -2862,7 +2862,7 @@ body.admin-layout .rc2-export-menu {
   border: 1px solid var(--mbw-border);
   border-radius: 10px;
   background: var(--mbw-card);
-  box-shadow: 0 12px 32px rgba(27, 58, 75, 0.14);
+  box-shadow: 0 12px 32px rgba(6,78,59, 0.14);
 }
 
 body.admin-layout .rc2-export.is-open .rc2-export-menu {
@@ -3745,8 +3745,8 @@ body.admin-layout .cr-kpi {
 
 body.admin-layout .cr-kpi.tone-green { background: linear-gradient(115deg, rgba(22, 163, 74, 0.10), var(--mbw-card) 65%); }
 body.admin-layout .cr-kpi.tone-red { background: linear-gradient(115deg, rgba(229, 72, 77, 0.10), var(--mbw-card) 65%); }
-body.admin-layout .cr-kpi.tone-blue { background: linear-gradient(115deg, rgba(25, 167, 247, 0.10), var(--mbw-card) 65%); }
-body.admin-layout .cr-kpi.tone-purple { background: linear-gradient(115deg, rgba(139, 92, 246, 0.12), var(--mbw-card) 65%); }
+body.admin-layout .cr-kpi.tone-blue { background: linear-gradient(115deg, rgba(52,166,111, 0.10), var(--mbw-card) 65%); }
+body.admin-layout .cr-kpi.tone-purple { background: linear-gradient(115deg, rgba(52,166,111, 0.12), var(--mbw-card) 65%); }
 
 /* Apply the same soft tint to every existing KPI card app-wide, keyed off
    the tone of the icon chip it already contains (graceful no-op in browsers
@@ -3754,8 +3754,8 @@ body.admin-layout .cr-kpi.tone-purple { background: linear-gradient(115deg, rgba
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-green) { background: linear-gradient(115deg, rgba(22, 163, 74, 0.09), var(--mbw-card) 65%); }
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-red) { background: linear-gradient(115deg, rgba(229, 72, 77, 0.09), var(--mbw-card) 65%); }
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-blue),
-body.admin-layout .mbw-kpi:has(.mbw-chip.tone-primary) { background: linear-gradient(115deg, rgba(25, 167, 247, 0.09), var(--mbw-card) 65%); }
-body.admin-layout .mbw-kpi:has(.mbw-chip.tone-purple) { background: linear-gradient(115deg, rgba(139, 92, 246, 0.11), var(--mbw-card) 65%); }
+body.admin-layout .mbw-kpi:has(.mbw-chip.tone-primary) { background: linear-gradient(115deg, rgba(52,166,111, 0.09), var(--mbw-card) 65%); }
+body.admin-layout .mbw-kpi:has(.mbw-chip.tone-purple) { background: linear-gradient(115deg, rgba(52,166,111, 0.11), var(--mbw-card) 65%); }
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-amber) { background: linear-gradient(115deg, rgba(226, 138, 9, 0.10), var(--mbw-card) 65%); }
 body.admin-layout .mbw-kpi:has(.mbw-chip.tone-teal) { background: linear-gradient(115deg, rgba(13, 148, 136, 0.10), var(--mbw-card) 65%); }
 
@@ -3845,7 +3845,7 @@ body.admin-layout .attn-menu {
   border: 1px solid var(--mbw-border);
   border-radius: 12px;
   background: var(--mbw-card);
-  box-shadow: 0 16px 40px rgba(27, 58, 75, 0.18);
+  box-shadow: 0 16px 40px rgba(6,78,59, 0.18);
 }
 
 body.admin-layout .attn-title {
@@ -4040,7 +4040,7 @@ body.admin-layout .reference-pagination a.is-active {
 
 body.admin-layout.theme-dark .reference-pagination a.is-active,
 body.admin-layout.admin-dark .reference-pagination a.is-active {
-  color: #24140d;
+  color: #032e24;
 }
 
 body.admin-layout .reference-link {
@@ -4179,14 +4179,14 @@ body.admin-layout.accounting-module-page .mbw-kpi {
   border: 1px solid var(--mbw-border);
   border-radius: 16px;
   background: var(--mbw-card);
-  box-shadow: 0 4px 14px rgba(20, 42, 55, 0.06);
+  box-shadow: 0 4px 14px rgba(6,78,59, 0.06);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
 body.admin-layout.accounting-module-page a.mbw-kpi:hover {
   transform: translateY(-3px);
   border-color: var(--mbw-primary);
-  box-shadow: 0 10px 24px rgba(20, 42, 55, 0.10);
+  box-shadow: 0 10px 24px rgba(6,78,59, 0.10);
 }
 
 body.admin-layout.accounting-module-page .mbw-kpi-label {
@@ -4220,7 +4220,7 @@ body.admin-layout.accounting-module-page .mbw-kpi .mbw-chip .ui-icon {
 
 body.admin-layout.accounting-module-page .mbw-card {
   border-radius: 16px;
-  box-shadow: 0 5px 18px rgba(20, 42, 55, 0.06);
+  box-shadow: 0 5px 18px rgba(6,78,59, 0.06);
 }
 
 body.admin-layout.accounting-module-page .mbw-card-head {
@@ -4274,13 +4274,13 @@ body.admin-layout.accounting-module-page .rc-table tbody tr:hover {
    ========================================================================== */
 
 body.admin-layout .users-workflow-page {
-  --uw-blue: #19a7f7;
-  --uw-blue-dark: #1296e3;
-  --uw-blue-soft: rgba(25, 167, 247, 0.09);
+  --uw-blue: #34a66f;
+  --uw-blue-dark: #087a57;
+  --uw-blue-soft: rgba(52,166,111, 0.09);
   --uw-green: #059669;
   --uw-green-soft: rgba(5, 150, 105, 0.11);
-  --uw-amber: #d97706;
-  --uw-amber-soft: rgba(217, 119, 6, 0.11);
+  --uw-amber: #087a57;
+  --uw-amber-soft: rgba(8,122,87, 0.11);
   --uw-red: #dc2626;
   --uw-red-soft: rgba(220, 38, 38, 0.09);
   display: block;
@@ -4317,7 +4317,7 @@ body.admin-layout .uw-action-icon {
   border-radius: 13px;
   background: linear-gradient(145deg, var(--uw-blue), var(--uw-blue-dark));
   color: #fff;
-  box-shadow: 0 8px 18px rgba(25, 167, 247, 0.22);
+  box-shadow: 0 8px 18px rgba(52,166,111, 0.22);
 }
 
 body.admin-layout .uw-action-icon .ui-icon {
@@ -4363,12 +4363,12 @@ body.admin-layout .uw-primary-button {
   background: linear-gradient(145deg, var(--uw-blue), var(--uw-blue-dark));
   border-color: var(--uw-blue);
   color: #fff;
-  box-shadow: 0 7px 15px rgba(25, 167, 247, 0.19);
+  box-shadow: 0 7px 15px rgba(52,166,111, 0.19);
 }
 
 body.admin-layout .uw-primary-button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 19px rgba(25, 167, 247, 0.24);
+  box-shadow: 0 10px 19px rgba(52,166,111, 0.24);
 }
 
 body.admin-layout .uw-primary-button > span {
@@ -4390,7 +4390,7 @@ body.admin-layout .uw-filter-panel {
   border: 1px solid var(--mbw-border);
   border-radius: 15px;
   background: var(--mbw-card);
-  box-shadow: 0 5px 18px rgba(20, 42, 55, 0.055);
+  box-shadow: 0 5px 18px rgba(6,78,59, 0.055);
 }
 
 body.admin-layout .uw-role-matrix {
@@ -4540,7 +4540,7 @@ body.admin-layout .uw-role-matrix input[type="checkbox"] {
   width: 18px;
   height: 18px;
   margin: 0;
-  border: 1.5px solid #aabcc5;
+  border: 1.5px solid #9bd5af;
   border-radius: 4px;
   background: var(--mbw-card);
   cursor: pointer;
@@ -4574,14 +4574,14 @@ body.admin-layout .uw-role-matrix input[type="checkbox"]:checked::after {
 }
 
 body.admin-layout .uw-role-matrix input[type="checkbox"]:disabled {
-  border-color: #c8d5dc;
+  border-color: #e4f5ea;
   background: var(--mbw-gray-soft);
   cursor: not-allowed;
   opacity: 0.75;
 }
 
 body.admin-layout .uw-role-matrix input[type="checkbox"]:disabled:checked {
-  background: #aebec7;
+  background: #9bd5af;
 }
 
 body.admin-layout .uw-role-save-bar {
@@ -4767,16 +4767,16 @@ body.admin-layout .uw-avatar {
 
 body.admin-layout .uw-avatar-tone-0 {
   background: rgba(13, 148, 136, 0.13);
-  color: #0f766e;
+  color: #08634a;
 }
 
 body.admin-layout .uw-avatar-tone-1 {
-  background: rgba(25, 167, 247, 0.12);
-  color: #1296e3;
+  background: rgba(52,166,111, 0.12);
+  color: #087a57;
 }
 
 body.admin-layout .uw-avatar-tone-2 {
-  background: rgba(139, 92, 246, 0.13);
+  background: rgba(52,166,111, 0.13);
   color: #7c3aed;
 }
 
@@ -4851,7 +4851,7 @@ body.admin-layout .uw-users-table .actions button:hover {
 
 body.admin-layout .uw-users-table .actions form:nth-last-child(2) button,
 body.admin-layout .uw-users-table .actions form:nth-last-child(2) .button {
-  border-color: rgba(217, 119, 6, 0.3);
+  border-color: rgba(8,122,87, 0.3);
   color: var(--uw-amber);
 }
 
@@ -4969,16 +4969,16 @@ body.admin-layout .uw-directory-card nav {
    ========================================================================== */
 
 body.accounting-dashboard-page {
-  --gd-page: #f3f8fa;
+  --gd-page: #e4f5ea;
   --gd-card: #ffffff;
-  --gd-soft: #f7fafc;
-  --gd-border: #dce9ef;
-  --gd-border-soft: #e9f1f5;
-  --gd-heading: #14384b;
-  --gd-text: #34505f;
-  --gd-muted: #6c8390;
-  --gd-blue: #19a7f7;
-  --gd-blue-dark: #1296e3;
+  --gd-soft: #e4f5ea;
+  --gd-border: #e4f5ea;
+  --gd-border-soft: #e4f5ea;
+  --gd-heading: #064e3b;
+  --gd-text: #08634a;
+  --gd-muted: #087a57;
+  --gd-blue: #34a66f;
+  --gd-blue-dark: #087a57;
   --gd-green: #059669;
   --gd-red: #dc2626;
 }
@@ -4990,7 +4990,7 @@ body.accounting-dashboard-page .admin-content {
   background:
     radial-gradient(
       circle at 96% 3%,
-      rgba(25, 167, 247, 0.045),
+      rgba(52,166,111, 0.045),
       transparent 26rem
     ),
     var(--gd-page);
@@ -5089,7 +5089,7 @@ body.accounting-dashboard-page .mbw-card {
   border: 1px solid var(--gd-border);
   border-radius: 14px;
   background: var(--gd-card);
-  box-shadow: 0 5px 18px rgba(18, 59, 81, 0.055);
+  box-shadow: 0 5px 18px rgba(6,78,59, 0.055);
 }
 
 body.accounting-dashboard-page .mbw-card-head {
@@ -5150,7 +5150,7 @@ body.accounting-dashboard-page .mbw-kpi {
   border: 1px solid var(--gd-border);
   border-radius: 14px;
   background: var(--gd-card);
-  box-shadow: 0 5px 16px rgba(18, 59, 81, 0.05);
+  box-shadow: 0 5px 16px rgba(6,78,59, 0.05);
   text-decoration: none;
   transition:
     transform 160ms ease,
@@ -5160,8 +5160,8 @@ body.accounting-dashboard-page .mbw-kpi {
 
 body.accounting-dashboard-page .mbw-kpi:hover {
   transform: translateY(-2px);
-  border-color: rgba(25, 167, 247, 0.32);
-  box-shadow: 0 10px 24px rgba(18, 59, 81, 0.09);
+  border-color: rgba(52,166,111, 0.32);
+  box-shadow: 0 10px 24px rgba(6,78,59, 0.09);
 }
 
 body.accounting-dashboard-page .mbw-kpi > div {
@@ -5243,7 +5243,7 @@ body.accounting-dashboard-page
   padding: 8px 10px;
   border-bottom: 1px solid var(--gd-border);
   background: var(--gd-soft);
-  color: #405e6e;
+  color: #08634a;
   font-size: 9.5px;
   font-weight: 800;
   letter-spacing: 0.04em;
@@ -5271,7 +5271,7 @@ body.accounting-dashboard-page
 body.accounting-dashboard-page
   section[aria-label="Group companies snapshot"]
   tbody tr:hover td {
-  background: rgba(25, 167, 247, 0.035);
+  background: rgba(52,166,111, 0.035);
 }
 
 body.accounting-dashboard-page
@@ -5350,8 +5350,8 @@ body.accounting-dashboard-page .mbw-qa {
 
 body.accounting-dashboard-page .mbw-qa:hover {
   transform: translateY(-1px);
-  border-color: rgba(25, 167, 247, 0.3);
-  background: rgba(25, 167, 247, 0.035);
+  border-color: rgba(52,166,111, 0.3);
+  background: rgba(52,166,111, 0.035);
 }
 
 body.accounting-dashboard-page .mbw-qa .mbw-chip.is-square {
@@ -5424,7 +5424,7 @@ body.accounting-dashboard-page
   padding: 8px;
   border-bottom: 1px solid var(--gd-border);
   background: var(--gd-soft);
-  color: #405e6e;
+  color: #08634a;
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.035em;
@@ -5460,7 +5460,7 @@ body.accounting-dashboard-page
 body.accounting-dashboard-page
   section[aria-label="Bank accounts"]
   tbody tr:hover td {
-  background: rgba(25, 167, 247, 0.035);
+  background: rgba(52,166,111, 0.035);
 }
 
 body.accounting-dashboard-page
@@ -5518,21 +5518,21 @@ body.accounting-dashboard-page .amount-negative {
 /* Dark theme */
 
 body.accounting-dashboard-page.theme-dark {
-  --gd-page: #0d232f;
-  --gd-card: #152c38;
-  --gd-soft: #102732;
-  --gd-border: rgba(143, 181, 201, 0.19);
-  --gd-border-soft: rgba(143, 181, 201, 0.11);
-  --gd-heading: #edf6fb;
-  --gd-text: #c5d7e1;
-  --gd-muted: #91abb9;
+  --gd-page: #032e24;
+  --gd-card: #064e3b;
+  --gd-soft: #032e24;
+  --gd-border: rgba(52,166,111, 0.19);
+  --gd-border-soft: rgba(52,166,111, 0.11);
+  --gd-heading: #e4f5ea;
+  --gd-text: #e4f5ea;
+  --gd-muted: #34a66f;
 }
 
 body.accounting-dashboard-page.theme-dark .admin-content {
   background:
     radial-gradient(
       circle at 94% 2%,
-      rgba(25, 167, 247, 0.075),
+      rgba(52,166,111, 0.075),
       transparent 25rem
     ),
     var(--gd-page);
@@ -5548,8 +5548,8 @@ body.accounting-dashboard-page.theme-dark .mbw-qa {
 
 body.accounting-dashboard-page.theme-dark .mbw-kpi:hover,
 body.accounting-dashboard-page.theme-dark .mbw-qa:hover {
-  border-color: rgba(67, 176, 234, 0.48);
-  background: #183645;
+  border-color: rgba(52,166,111, 0.48);
+  background: #064e3b;
 }
 
 body.accounting-dashboard-page.theme-dark .ad-fiscal-form select {
@@ -5568,7 +5568,7 @@ body.accounting-dashboard-page.theme-dark
   section[aria-label="Bank accounts"]
   th {
   background: var(--gd-soft);
-  color: #9eb9c7;
+  color: #9bd5af;
   border-color: var(--gd-border);
 }
 
@@ -5586,7 +5586,7 @@ body.accounting-dashboard-page.theme-dark
 }
 
 body.accounting-dashboard-page.theme-dark .mbw-view-all {
-  color: #77cdfc;
+  color: #9bd5af;
 }
 
 /* Responsive content */
@@ -6269,7 +6269,7 @@ body.admin-layout .accounting-stat-card:hover,
 body.admin-layout .reference-stat:hover {
   transform: translateY(-3px);
   border-color: color-mix(in srgb, var(--mbw-primary) 45%, var(--mbw-border));
-  box-shadow: 0 10px 26px rgba(112,74,53, 0.14);
+  box-shadow: 0 10px 26px rgba(8,99,74, 0.14);
 }
 
 .mbw-chip {
@@ -6296,7 +6296,7 @@ body.admin-layout .admin-nav a:hover {
 }
 
 body.admin-layout .admin-nav a.is-active {
-  box-shadow: inset 0 0 0 1px rgba(186, 230, 253, 0.14), 0 4px 14px rgba(93,58,40, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(228,245,234, 0.14), 0 4px 14px rgba(8,99,74, 0.35);
 }
 
 body.admin-layout .admin-nav a .ui-icon {

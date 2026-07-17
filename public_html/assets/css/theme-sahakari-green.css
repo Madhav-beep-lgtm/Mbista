@@ -267,3 +267,133 @@ body.admin-layout .admin-sidebar, body.staff-layout .admin-sidebar, body.client-
 @media print {
   body, main, .admin-main, .portal-main { background: #fff !important; color: #000 !important; }
 }
+/* FINAL SAHAKARI GREEN CASCADE */
+:root,
+body.theme-dark,
+body.admin-dark,
+body.admin-layout.theme-dark,
+body.admin-layout.admin-dark {
+  --primary: #087a57 !important;
+  --primary-hover: #064e3b !important;
+  --secondary: #0a8f61 !important;
+  --brand: #064e3b !important;
+  --brand-2: #087a57 !important;
+  --brand-3: #08634a !important;
+  --background: #f3fbf6 !important;
+  --surface: #ffffff !important;
+  --surface-soft: #f7fbf8 !important;
+  --text-primary: #102a22 !important;
+  --text-secondary: #526b61 !important;
+  --border-color: #d4e7dc !important;
+  --mbw-navy: #032e24 !important;
+  --mbw-navy-2: #064e3b !important;
+  --mbw-blue: #087a57 !important;
+  --mbw-blue-2: #08634a !important;
+  --mbw-cyan: #0a8f61 !important;
+  --mbw-primary: #087a57 !important;
+  --mbw-primary-dark: #064e3b !important;
+  --mbw-primary-soft: #e4f5ea !important;
+  --mbw-teal: #0a8f61 !important;
+  --mbw-teal-soft: #e4f5ea !important;
+  --mbw-purple: #79620f !important;
+  --mbw-purple-soft: #fff4d6 !important;
+  --mbw-canvas: #f3fbf6 !important;
+  --mbw-card: #ffffff !important;
+  --mbw-card-soft: #f7fbf8 !important;
+  --mbw-heading: #102a22 !important;
+  --mbw-text: #102a22 !important;
+  --mbw-muted: #526b61 !important;
+  --mbw-border: #d4e7dc !important;
+}
+
+body.theme-dark,
+body.admin-dark,
+body.admin-layout.theme-dark,
+body.admin-layout.admin-dark,
+body.staff-portal.theme-dark,
+body.client-portal.theme-dark {
+  background: linear-gradient(145deg,#032e24,#064e3b) fixed !important;
+  color: #102a22 !important;
+}
+body.theme-dark main,
+body.theme-dark .admin-main,
+body.theme-dark .admin-content,
+body.theme-dark .portal-main,
+body.theme-dark .portal-content,
+body.theme-dark .staff-main,
+body.theme-dark .staff-content,
+body.theme-dark .client-main,
+body.theme-dark .client-content,
+body.admin-dark .admin-main,
+body.admin-dark .admin-content {
+  background: linear-gradient(180deg,#ffffff,#f3fbf6) !important;
+  color: #102a22 !important;
+}
+body.theme-dark .site-header,
+body.theme-dark .utility-bar,
+body.theme-dark .site-footer,
+body.theme-dark .admin-sidebar,
+body.theme-dark .admin-topbar,
+body.admin-dark .admin-sidebar,
+body.admin-dark .admin-topbar {
+  background: linear-gradient(135deg,#032e24,#064e3b 64%,#043b2e) !important;
+  border-color: rgba(220,247,231,.18) !important;
+  color: #ffffff !important;
+}
+body.theme-dark .card,
+body.theme-dark .panel,
+body.theme-dark .form-card,
+body.theme-dark .table-card,
+body.theme-dark .stat-card,
+body.theme-dark .metric-card,
+body.theme-dark .dashboard-card,
+body.theme-dark .report-card,
+body.theme-dark .settings-card,
+body.theme-dark .workspace-card,
+body.theme-dark .admin-card,
+body.theme-dark .admin-panel,
+body.theme-dark .cr-card,
+body.theme-dark .rc-card,
+body.theme-dark .mbw-card,
+body.admin-dark .card,
+body.admin-dark .panel,
+body.admin-dark .cr-card,
+body.admin-dark .mbw-card {
+  background: linear-gradient(150deg,#ffffff,#f3fbf6) !important;
+  border-color: #d4e7dc !important;
+  color: #102a22 !important;
+}
+body.theme-dark .card h1, body.theme-dark .card h2, body.theme-dark .card h3,
+body.theme-dark .panel h1, body.theme-dark .panel h2, body.theme-dark .panel h3,
+body.theme-dark .admin-content h1, body.theme-dark .admin-content h2, body.theme-dark .admin-content h3,
+body.theme-dark td, body.theme-dark th, body.theme-dark label,
+body.admin-dark .card h1, body.admin-dark .card h2, body.admin-dark td, body.admin-dark th {
+  color: #102a22 !important;
+}
+body.theme-dark input, body.theme-dark select, body.theme-dark textarea,
+body.admin-dark input, body.admin-dark select, body.admin-dark textarea {
+  background: #ffffff !important;
+  color: #102a22 !important;
+  border-color: #b8d5c4 !important;
+}
+body.theme-dark thead th, body.admin-dark thead th,
+body.theme-dark .rc-table thead th, body.admin-dark .rc-table thead th {
+  background: #dff1e6 !important;
+  color: #032e24 !important;
+}
+
+.admin-sidebar, .admin-topbar, .site-header, .utility-bar, .site-footer,
+.auth2-footer, .portal-selector-hero, .company-pin-showcase,
+.rpt-bar, .workspace-module-bar .is-active, .mbw-tab.is-active {
+  background-color: #064e3b !important;
+}
+.admin-nav a.active, .admin-nav a.is-active, .admin-nav a[aria-current='page'],
+.main-navigation > a.is-active, .nav-item.is-active .nav-main-link {
+  background-color: #087a57 !important;
+  color: #ffffff !important;
+}
+.rpt-company, .rpt-foot-actions a, .accounting-tabs a.is-active,
+.reference-tabs a.is-active, .party-panel-tabs a.is-active {
+  color: #087a57 !important;
+}
+.rpt-bar, .mbw-tab.is-active { color: #ffffff !important; }
