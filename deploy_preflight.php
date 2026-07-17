@@ -12,7 +12,6 @@ $checks = [
     ['type' => 'file', 'path' => $root . '/public_html/uploads/.htaccess', 'label' => 'uploads .htaccess'],
     ['type' => 'file', 'path' => $root . '/.env.example', 'label' => '.env.example'],
     ['type' => 'file', 'path' => $root . '/public_html/setup.php', 'label' => 'setup.php'],
-    ['type' => 'file', 'path' => $root . '/public_html/admin/receipts.php', 'label' => 'admin receipts module'],
     ['type' => 'file', 'path' => $root . '/public_html/admin/export-payment-receipt.php', 'label' => 'receipt export endpoint'],
 ];
 
@@ -30,7 +29,7 @@ if (is_dir($migrationDir)) {
 }
 sort($migrationFiles, SORT_NATURAL);
 
-$expectedLatest = '018_invoice_request_discount_receipts.sql';
+$expectedLatest = '052_voucher_entries_restrict_ledger_delete.sql';
 $hasLatest = in_array($expectedLatest, $migrationFiles, true);
 
 $passed = 0;
