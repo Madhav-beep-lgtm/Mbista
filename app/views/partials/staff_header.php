@@ -20,6 +20,7 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
     <link rel="stylesheet" href="/assets/css/portal.css?v=20260718h">
     <link rel="stylesheet" href="/assets/css/theme-brown.css?v=20260718h">
     <link rel="stylesheet" href="/assets/css/theme-sahakari-green.css?v=20260718h">
+    <link rel="stylesheet" href="/assets/css/text-contrast-only.css?v=20260718q">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">
