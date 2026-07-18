@@ -3227,6 +3227,19 @@ body.admin-layout .pr-newrun input {
   min-width: 150px;
 }
 
+body.admin-layout .pr-hint {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--mbw-muted);
+  opacity: 0.8;
+}
+
+body.admin-layout .pr-sheet .pr-sub {
+  font-weight: 500;
+  font-size: 0.8em;
+  color: var(--mbw-muted);
+}
+
 body.admin-layout .pr-flow {
   display: flex;
   gap: 8px;

@@ -264,6 +264,29 @@ function payroll_tax_withheld_ytd(int $employeeId, int $fiscalYearId, int $exclu
  * trace; does not write anything.
  */
 /**
+ * Nepali (Bikram Sambat) month name for a payroll period. The fiscal year starts
+ * in Shrawan, so period 1 = Shrawan … period 12 = Ashadh.
+ */
+function payroll_bs_month_name(int $periodNo): string
+{
+    $months = [
+        1 => 'Shrawan', 2 => 'Bhadra', 3 => 'Ashwin', 4 => 'Kartik', 5 => 'Mangsir', 6 => 'Poush',
+        7 => 'Magh', 8 => 'Falgun', 9 => 'Chaitra', 10 => 'Baisakh', 11 => 'Jestha', 12 => 'Ashadh',
+    ];
+    return $months[max(1, min(12, $periodNo))] ?? ('Month ' . $periodNo);
+}
+
+/** The date a run's accrual should post on: its explicit voucher date, else pay date. */
+function payroll_run_voucher_date(array $run): string
+{
+    $voucherDate = (string) ($run['voucher_date'] ?? '');
+    if ($voucherDate !== '') {
+        return $voucherDate;
+    }
+    return (string) ($run['pay_date'] ?? date('Y-m-d'));
+}
+
+/**
  * Calendar date range for a run's period: the fiscal-year start plus the period
  * offset (period 1 = FY start month, etc.). Used to count leave inside the run.
  * Returns ['', ''] when the fiscal year is unknown.
@@ -824,7 +847,7 @@ function payroll_approve_and_post(int $runId, int $approverId): array
                 'fiscal_year_id' => (int) $run['fiscal_year_id'],
                 'voucher_no' => 'PAY-' . $run['period_label'] . '-' . $runId,
                 'voucher_type' => 'journal',
-                'voucher_date' => (string) ($run['pay_date'] ?? date('Y-m-d')),
+                'voucher_date' => payroll_run_voucher_date($run),
                 'source_type' => 'payroll_run',
                 'source_id' => $runId,
                 'total_amount' => $debits,
@@ -933,7 +956,7 @@ function payroll_post_accrual(int $runId, int $userId): array
             'fiscal_year_id' => (int) $run['fiscal_year_id'],
             'voucher_no' => 'PAY-' . $run['period_label'] . '-' . $runId,
             'voucher_type' => 'journal',
-            'voucher_date' => (string) ($run['pay_date'] ?? date('Y-m-d')),
+            'voucher_date' => payroll_run_voucher_date($run),
             'source_type' => 'payroll_run',
             'source_id' => $runId,
             'total_amount' => $debits,

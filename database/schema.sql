@@ -1390,6 +1390,7 @@ CREATE TABLE IF NOT EXISTS `payroll_runs` (
   `period_no` TINYINT UNSIGNED NOT NULL DEFAULT 1,
   `period_label` VARCHAR(60) NOT NULL,
   `pay_date` DATE DEFAULT NULL,
+  `voucher_date` DATE DEFAULT NULL,
   `status` ENUM('draft', 'calculated', 'approved', 'posted', 'paid', 'cancelled') NOT NULL DEFAULT 'draft',
   `tax_version_id` INT UNSIGNED DEFAULT NULL,
   `total_gross` DECIMAL(14,2) NOT NULL DEFAULT 0.00,

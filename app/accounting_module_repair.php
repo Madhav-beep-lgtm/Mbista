@@ -708,5 +708,11 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Payroll run custom voucher date (migration 056)', static function (): void {
+        if (accounting_repair_table_exists('payroll_runs')) {
+            accounting_repair_add_column('payroll_runs', 'voucher_date', "`voucher_date` DATE NULL DEFAULT NULL AFTER `pay_date`");
+        }
+    });
+
     return $errors;
 }

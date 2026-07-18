@@ -27,20 +27,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'create_run') {
         $periodNo = max(1, min(12, (int) ($_POST['period_no'] ?? 1)));
+        // Periods are named by their Nepali BS month (Shrawan … Ashadh); the
+        // label defaults to that month name so runs read the way users expect.
         $periodLabel = trim((string) ($_POST['period_label'] ?? ''));
         if ($periodLabel === '') {
-            $periodLabel = ($fiscalYear['label'] ?? 'FY') . ' M' . str_pad((string) $periodNo, 2, '0', STR_PAD_LEFT);
+            $periodLabel = payroll_bs_month_name($periodNo);
         }
         $payDate = (string) ($_POST['pay_date'] ?? date('Y-m-d'));
+        $voucherDate = trim((string) ($_POST['voucher_date'] ?? ''));
+        $voucherDate = ($voucherDate !== '') ? $voucherDate : null;
         $dup = db()->prepare("SELECT id FROM payroll_runs WHERE company_id = :cid AND fiscal_year_id = :fy AND period_no = :p AND status <> 'cancelled' LIMIT 1");
         $dup->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'p' => $periodNo]);
         if ($dup->fetchColumn()) {
-            flash('error', 'A payroll run for period ' . $periodNo . ' of this fiscal year already exists. Cancel it first to redo it.');
+            flash('error', 'A payroll run for ' . payroll_bs_month_name($periodNo) . ' of this fiscal year already exists. Cancel it first to redo it.');
             redirect('admin/payroll.php');
         }
-        db()->prepare('INSERT INTO payroll_runs (company_id, fiscal_year_id, period_no, period_label, pay_date, created_by)
-                VALUES (:cid, :fy, :p, :label, :pay, :by)')
-            ->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'p' => $periodNo, 'label' => $periodLabel, 'pay' => $payDate, 'by' => $userId]);
+        db()->prepare('INSERT INTO payroll_runs (company_id, fiscal_year_id, period_no, period_label, pay_date, voucher_date, created_by)
+                VALUES (:cid, :fy, :p, :label, :pay, :vdate, :by)')
+            ->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'p' => $periodNo, 'label' => $periodLabel, 'pay' => $payDate, 'vdate' => $voucherDate, 'by' => $userId]);
         $newRunId = (int) db()->lastInsertId();
         log_activity('payroll_run', $newRunId, 'created', 'Payroll run ' . $periodLabel . ' created.', $userId);
         security_event('payroll_run_created', 'success', 'Payroll run #' . $newRunId . ' created.', $companyId, $userId);
@@ -152,10 +156,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ---------------------------------------------------------------------------
 // Page data.
 // ---------------------------------------------------------------------------
+// Scope the run list to the current (open/default) fiscal year — the one
+// selected in the header — so runs from other years don't mix in.
 $runsStmt = db()->prepare('SELECT r.*, fy.label AS fy_label FROM payroll_runs r
     INNER JOIN fiscal_years fy ON fy.id = r.fiscal_year_id
-    WHERE r.company_id = :cid ORDER BY r.created_at DESC LIMIT 30');
-$runsStmt->execute(['cid' => $companyId]);
+    WHERE r.company_id = :cid AND r.fiscal_year_id = :fy ORDER BY r.created_at DESC LIMIT 30');
+$runsStmt->execute(['cid' => $companyId, 'fy' => $fiscalYearId]);
 $runs = $runsStmt->fetchAll();
 
 $selectedRunId = (int) ($_GET['run'] ?? 0);
@@ -224,7 +230,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php if ($runs === []): ?><option value="">No runs yet</option><?php endif; ?>
                     <?php foreach ($runs as $runOption): ?>
                         <option value="<?= e((int) $runOption['id']) ?>" <?= $run && (int) $runOption['id'] === (int) $run['id'] ? 'selected' : '' ?>>
-                            <?= e($runOption['period_label'] . ' — ' . str_replace('_', ' ', ucfirst((string) $runOption['status'])) . ' (' . $runOption['fy_label'] . ')') ?>
+                            <?= e(payroll_bs_month_name((int) $runOption['period_no']) . ' — ' . str_replace('_', ' ', ucfirst((string) $runOption['status'])) . ' (' . $runOption['fy_label'] . ')') ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -243,9 +249,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <form method="post" class="pr-newrun">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="create_run">
-            <label>Period month<select name="period_no"><?php for ($m = 1; $m <= 12; $m++): ?><option value="<?= $m ?>"><?= $m ?></option><?php endfor; ?></select></label>
-            <label>Label<input type="text" name="period_label" placeholder="e.g. Shrawan <?= e($fiscalYear['label'] ?? '') ?>" maxlength="60"></label>
+            <label>Period month<select name="period_no"><?php for ($m = 1; $m <= 12; $m++): ?><option value="<?= $m ?>"><?= e(payroll_bs_month_name($m)) ?></option><?php endfor; ?></select></label>
+            <label>Label <span class="pr-hint">(optional)</span><input type="text" name="period_label" placeholder="defaults to month name" maxlength="60"></label>
             <label>Pay date<input type="date" name="pay_date" value="<?= e(date('Y-m-d')) ?>"></label>
+            <label>Voucher date <span class="pr-hint">(optional)</span><input type="date" name="voucher_date" title="Accounting date for the payroll postings. Leave blank to use the pay date."></label>
             <button type="submit"><?= icon('plus') ?>New Run + Calculate</button>
         </form>
     </div>
@@ -291,7 +298,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <div class="pr-workspace">
 <section class="mbw-card pr-sheet" aria-label="Payroll worksheet">
     <div class="mbw-card-head">
-        <h2>Worksheet — <?= e($run['period_label']) ?></h2>
+        <?php $wsMonth = payroll_bs_month_name((int) $run['period_no']); $wsLabel = trim((string) $run['period_label']); ?>
+        <h2>Worksheet — <?= e($wsMonth) ?><?php if ($wsLabel !== '' && $wsLabel !== $wsMonth): ?> <span class="pr-sub">(<?= e($wsLabel) ?>)</span><?php endif; ?></h2>
         <div class="mbw-card-tools">
             <?php if (in_array((string) $run['status'], ['draft', 'calculated'], true)): ?>
                 <form method="post" style="display:inline">
