@@ -2999,6 +2999,8 @@ function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []
         'party_opening' => 'the Parties module (the party opening balance would silently vanish from the books)',
         'task_advance' => 'the Advances workflow (deleting it would strand the client advance and leave any applied amount pointing at nothing)',
         'advance_applied' => 'the Advances workflow (the invoice would keep showing an advance payment with no backing voucher)',
+        'inventory_opening' => 'the Inventory module (the item\'s master opening stock backs it — change the opening on the item instead)',
+        'manufacturing_order_start' => 'the Manufacturing module (it carries the order\'s materials into WIP — complete or cancel the order instead)',
     ];
     $voucherSourceType = (string) ($voucher['source_type'] ?? '');
     if (isset($moduleSourceTypes[$voucherSourceType]) && !in_array($voucherSourceType, $allowModuleSources, true)) {

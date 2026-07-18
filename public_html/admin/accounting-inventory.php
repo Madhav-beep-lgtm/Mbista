@@ -323,7 +323,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ((array) ($_POST['item_map'] ?? []) as $mapPurpose => $mapLedgerId) {
                 inventory_set_item_ledger($companyId, $savedItemId, (string) $mapPurpose, (int) $mapLedgerId, $userId);
             }
+            // Master opening stock must reach the BOOKS too (Dr stock ledger /
+            // Cr opening equity), or the balance sheet starts life missing the
+            // opening inventory the layers already carry. Resolved AFTER the
+            // mapping loop so ledgers chosen on this very form are honoured;
+            // replaced/cleared automatically when the opening changes.
+            $openingResult = inv_post_item_opening_voucher($companyId, array_merge($params, ['id' => $savedItemId]), $userId);
             db()->commit();
+            if (($openingResult['note'] ?? '') !== '') {
+                flash('error', $openingResult['note']);
+            }
         } catch (Throwable $exception) {
             if (db()->inTransaction()) {
                 db()->rollBack();
@@ -1113,6 +1122,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/accounting-inventory.php?view=manufacturing');
         }
 
+        // Same fiscal-period gate as record_movement: material issues and the
+        // finished receipt are stock movements too, and the stock-only path
+        // (unmapped ledgers) never reaches the voucher engine's lock check.
+        foreach (array_unique([$startedOn, $mode === 'start' ? $startedOn : $completedOn]) as $moDate) {
+            $moFy = fiscal_year_for_date($companyId, $moDate);
+            if (!$moFy) {
+                flash('error', 'No fiscal year covers ' . $moDate . '. Open a fiscal year for that period before recording production.');
+                redirect('admin/accounting-inventory.php?view=manufacturing');
+            }
+            $moBlocker = fiscal_year_posting_blocker($moFy, $moDate);
+            if ($moBlocker !== null) {
+                flash('error', $moBlocker);
+                redirect('admin/accounting-inventory.php?view=manufacturing');
+            }
+        }
+
         try {
             db()->beginTransaction();
             $stmt = db()->prepare('
@@ -1141,44 +1166,96 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT INTO inventory_transactions (company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date, qty_in, qty_out, rate, amount, notes)
                 VALUES (:company_id, :fiscal_year_id, :item_id, :transaction_type, :ref_no, :transaction_date, :qty_in, :qty_out, :rate, :amount, :notes)
             ');
+            // Materials are issued at their ACTUAL cost-flow cost (FIFO / moving
+            // average from the item's layers), never the typed/purchase rate —
+            // the typed rate is only the layer seed default when a legacy item
+            // has no layers yet. The actual unit cost is stamped back onto both
+            // the movement row and the order input, so the GL credit, the
+            // subledger draw-down, and a later completion-from-WIP all carry
+            // the same rupees.
             $totalInputCost = 0.0;
             $inputCostByLedger = [];
-            foreach ($inputs as $input) {
-                $inputStmt->execute(['order_id' => $orderId, 'item_id' => (int) $input['item']['id'], 'quantity' => $input['qty'], 'rate' => $input['rate']]);
-                $amount = round($input['qty'] * $input['rate'], 2);
-                $totalInputCost += $amount;
-                $inputLedgerId = (int) ($input['item']['ledger_id'] ?? 0);
-                $inputCostByLedger[$inputLedgerId] = ($inputCostByLedger[$inputLedgerId] ?? 0.0) + $amount;
-                // Materials are issued to production when the order starts.
+            $unmappedInputs = [];
+            foreach ($inputs as $inputIndex => $input) {
+                $inputItem = $input['item'];
+                inv_ensure_layers($companyId, $inputItem);
                 $movementStmt->execute([
                     'company_id' => $companyId,
                     'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
-                    'item_id' => (int) $input['item']['id'],
+                    'item_id' => (int) $inputItem['id'],
                     'transaction_type' => 'consume',
                     'ref_no' => $orderNo,
                     'transaction_date' => $startedOn,
                     'qty_in' => 0,
                     'qty_out' => $input['qty'],
                     'rate' => $input['rate'],
-                    'amount' => $amount,
+                    'amount' => round($input['qty'] * $input['rate'], 2),
                     'notes' => 'Materials issued to ' . $orderNo,
                 ]);
+                $consumeTxnId = (int) db()->lastInsertId();
+                $issueValue = inv_apply_movement($companyId, (int) $inputItem['id'], 0.0, $input['qty'], $input['rate'], $startedOn, (string) ($inputItem['valuation_method'] ?? 'weighted_average'), $consumeTxnId);
+                $actualRate = $input['qty'] > INV_EPSILON ? round($issueValue / $input['qty'], 6) : 0.0;
+                db()->prepare('UPDATE inventory_transactions SET rate = :rate, amount = :amount WHERE id = :id AND company_id = :cid')
+                    ->execute(['rate' => $actualRate, 'amount' => $issueValue, 'id' => $consumeTxnId, 'cid' => $companyId]);
+                $inputStmt->execute(['order_id' => $orderId, 'item_id' => (int) $inputItem['id'], 'quantity' => $input['qty'], 'rate' => $actualRate]);
+                $inputs[$inputIndex]['issue_value'] = $issueValue;
+                $totalInputCost = round($totalInputCost + $issueValue, 2);
+                $inputLedgerId = inv_item_stock_ledger_id($companyId, $inputItem);
+                if ($inputLedgerId <= 0) {
+                    $unmappedInputs[] = (string) $inputItem['sku'];
+                }
+                $inputCostByLedger[$inputLedgerId] = round(($inputCostByLedger[$inputLedgerId] ?? 0.0) + $issueValue, 2);
             }
 
             if ($mode === 'start') {
-                foreach ($inputs as $input) {
-                    inv_rebuild_item($companyId, (int) $input['item']['id']);
+                // Dr WIP / Cr each material's stock ledger at actual issue cost,
+                // so the GL moves the value into Work in Progress the moment the
+                // physical stock does (the flash used to CLAIM this happened).
+                $wipVoucherId = 0;
+                $wipRow = inv_resolve_mapping($companyId, 'wip', $finishedItemId, ($finishedItem['category'] ?? null) ?: null);
+                $wipNote = '';
+                if ($totalInputCost > 0 && $wipRow && $unmappedInputs === []) {
+                    $wipVoucherId = (int) create_voucher_with_entries([
+                        'company_id' => $companyId,
+                        'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
+                        'voucher_no' => 'MFG-WIP-' . $orderNo,
+                        'voucher_type' => 'journal',
+                        'voucher_date' => $startedOn,
+                        'source_type' => 'manufacturing_order_start',
+                        'source_id' => $orderId,
+                        'total_amount' => $totalInputCost,
+                        'narration' => 'Production ' . $orderNo . ' started: materials issued to Work in Progress.',
+                        'status' => 'posted',
+                        'posted_by' => $userId,
+                    ], array_merge(
+                        [['ledger_id' => (int) $wipRow['id'], 'entry_type' => 'debit', 'amount' => $totalInputCost, 'memo' => 'Materials into WIP']],
+                        array_map(static fn (int $lid, float $amt): array => ['ledger_id' => $lid, 'entry_type' => 'credit', 'amount' => $amt, 'memo' => 'Materials issued'],
+                            array_keys($inputCostByLedger), array_values($inputCostByLedger))
+                    ));
+                    db()->prepare("UPDATE inventory_transactions SET voucher_id = :vid WHERE company_id = :cid AND ref_no = :ref AND transaction_type = 'consume'")
+                        ->execute(['vid' => $wipVoucherId, 'cid' => $companyId, 'ref' => $orderNo]);
+                } elseif ($totalInputCost > 0) {
+                    $wipNote = !$wipRow
+                        ? ' Stock issued WITHOUT a GL entry — map "Work in Progress" (Inventory → Ledger Mappings), then complete the order to post everything at completion.'
+                        : ' Stock issued WITHOUT a GL entry — map Inventory Asset for ' . implode(', ', $unmappedInputs) . ' to post the WIP journal.';
                 }
                 db()->commit();
-                log_activity('manufacturing_order', $orderId, 'started', 'Production started (WIP).', $userId);
-                flash('success', 'Production order ' . $orderNo . ' started: materials issued, value now sits in Work in Progress. Complete it from the orders table below.');
+                log_activity('manufacturing_order', $orderId, 'started', 'Production started (WIP)' . ($wipVoucherId > 0 ? ' — voucher MFG-WIP-' . $orderNo . ' posted.' : '.'), $userId);
+                flash('success', 'Production order ' . $orderNo . ' started: materials issued at actual cost ' . site_currency_symbol() . number_format($totalInputCost, 2) . '.'
+                    . ($wipVoucherId > 0 ? ' WIP journal posted (Dr Work in Progress / Cr materials).' : $wipNote)
+                    . ' Complete it from the orders table below.');
                 redirect('admin/accounting-inventory.php?view=manufacturing');
             }
 
             // IAS 2 absorbed cost: materials (net of abnormal waste) + labour +
-            // overhead - by-product value. Abnormal waste never enters FG cost.
+            // overhead - by-product value — with materials at their ACTUAL
+            // layer cost. Abnormal waste never enters FG cost.
             $orderCost = mfg_order_cost($totalInputCost, $labourCost, $overheadAbsorbed, $byproductValue, $abnormalWaste, $quantity);
             $finishedRate = $orderCost['unit_cost'];
+            // Backfill legacy layers BEFORE inserting the produce row — ensure
+            // replays existing transactions, so running it after would replay
+            // the new produce txn AND apply it again below (double stock).
+            inv_ensure_layers($companyId, $finishedItem);
             $movementStmt->execute([
                 'company_id' => $companyId,
                 'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
@@ -1192,7 +1269,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'amount' => $orderCost['inventoriable'],
                 'notes' => 'Finished goods from ' . $orderNo . ' at absorbed cost',
             ]);
-            $voucherId = inventory_post_production_voucher($companyId, $fiscalYearId, $orderId, $orderNo, $completedOn, (int) ($finishedItem['ledger_id'] ?? 0), $inputCostByLedger, $userId, [
+            $produceTxnId = (int) db()->lastInsertId();
+            inv_apply_movement($companyId, $finishedItemId, $quantity, 0.0, $finishedRate, $completedOn, (string) ($finishedItem['valuation_method'] ?? 'weighted_average'), $produceTxnId);
+            $voucherId = inventory_post_production_voucher($companyId, $fiscalYearId, $orderId, $orderNo, $completedOn, inv_item_stock_ledger_id($companyId, $finishedItem), $inputCostByLedger, $userId, [
                 'labour' => $labourCost, 'overhead' => $overheadAbsorbed,
                 'byproduct' => $byproductValue, 'abnormal' => $abnormalWaste,
             ]);
@@ -1213,10 +1292,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 db()->prepare("UPDATE inventory_transactions SET voucher_id = :vid WHERE company_id = :cid AND ref_no = :ref AND transaction_type IN ('consume', 'produce')")
                     ->execute(['vid' => $voucherId, 'cid' => $companyId, 'ref' => $orderNo]);
             }
-            foreach ($inputs as $input) {
-                inv_rebuild_item($companyId, (int) $input['item']['id']);
-            }
-            inv_rebuild_item($companyId, $finishedItemId);
             db()->commit();
             security_event('inventory_movement_posted', 'success', 'Manufacturing order #' . $orderId . ' created.', $companyId, $userId);
             log_activity('manufacturing_order', $orderId, 'completed', 'Manufacturing order completed.', $userId);
@@ -1244,10 +1319,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/accounting-inventory.php?view=manufacturing');
         }
         $orderNo = (string) $order['order_no'];
-        $inputRowsStmt = db()->prepare('SELECT moi.item_id, moi.quantity, moi.rate, i.ledger_id FROM manufacturing_order_inputs moi INNER JOIN inventory_items i ON i.id = moi.item_id WHERE moi.manufacturing_order_id = :id');
+        // Full item rows so the stock ledger resolves through the mapping chain
+        // (item -> category -> global -> legacy ledger_id), not the raw column.
+        $inputRowsStmt = db()->prepare('SELECT moi.item_id, moi.quantity, moi.rate, i.id, i.ledger_id, i.sku, i.name, i.item_type, i.category, i.valuation_method
+            FROM manufacturing_order_inputs moi INNER JOIN inventory_items i ON i.id = moi.item_id WHERE moi.manufacturing_order_id = :id');
         $inputRowsStmt->execute(['id' => $orderId]);
         $inputRows = $inputRowsStmt->fetchAll();
         $today = date('Y-m-d');
+        // Completion/cancellation moves stock today — enforce the period lock
+        // exactly like record_movement (the stock-only path bypasses the
+        // voucher engine's own check).
+        $moFy = fiscal_year_for_date($companyId, $today);
+        $moBlocker = $moFy ? fiscal_year_posting_blocker($moFy, $today) : ('No fiscal year covers ' . $today . '. Open a fiscal year for this period first.');
+        if ($moBlocker !== null) {
+            flash('error', $moBlocker);
+            redirect('admin/accounting-inventory.php?view=manufacturing');
+        }
+        // The WIP journal posted when this order STARTED (if any): completion
+        // must credit Work in Progress — crediting the material ledgers again
+        // would double-relieve them; cancellation must reverse it.
+        $startVoucherStmt = db()->prepare("SELECT * FROM vouchers WHERE source_type = 'manufacturing_order_start' AND source_id = :oid AND company_id = :cid LIMIT 1");
+        $startVoucherStmt->execute(['oid' => $orderId, 'cid' => $companyId]);
+        $startVoucher = $startVoucherStmt->fetch() ?: null;
 
         try {
             db()->beginTransaction();
@@ -1276,6 +1369,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                 }
                 db()->prepare("UPDATE manufacturing_orders SET status = 'cancelled' WHERE id = :id")->execute(['id' => $orderId]);
+                // Reverse the start-time WIP journal: deleting it (entries
+                // cascade) returns the value from WIP to the material ledgers,
+                // matching the physical return above. Guards still apply.
+                if ($startVoucher) {
+                    $svBlocker = voucher_mutation_blocker((array) $startVoucher, ['manufacturing_order_start']);
+                    if ($svBlocker !== null) {
+                        throw new RuntimeException('The WIP journal of this order cannot be reversed: ' . $svBlocker);
+                    }
+                    db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
+                        ->execute(['id' => (int) $startVoucher['id'], 'cid' => $companyId]);
+                }
                 foreach ($inputRows as $inputRow) {
                     inv_rebuild_item($companyId, (int) $inputRow['item_id']);
                 }
@@ -1287,13 +1391,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $quantity = (float) $order['quantity'];
+            // Input rates were stamped with the ACTUAL issue cost when the
+            // materials left stock at start, so qty x rate here is the true
+            // cost-flow value sitting in WIP (legacy pre-fix orders fall back
+            // to their typed rate — the best record that exists for them).
             $totalInputCost = 0.0;
             $inputCostByLedger = [];
             foreach ($inputRows as $inputRow) {
                 $amount = round((float) $inputRow['quantity'] * (float) $inputRow['rate'], 2);
-                $totalInputCost += $amount;
-                $ledgerId = (int) ($inputRow['ledger_id'] ?? 0);
-                $inputCostByLedger[$ledgerId] = ($inputCostByLedger[$ledgerId] ?? 0.0) + $amount;
+                $totalInputCost = round($totalInputCost + $amount, 2);
+                $ledgerId = inv_item_stock_ledger_id($companyId, (array) $inputRow);
+                $inputCostByLedger[$ledgerId] = round(($inputCostByLedger[$ledgerId] ?? 0.0) + $amount, 2);
+            }
+            // Order was started with a WIP journal: the whole material value now
+            // sits in the ledger that journal DEBITED, so completion credits
+            // that ledger (not the materials again) — and for EXACTLY the amount
+            // the journal put there. qty x 2dp-stored-rate can drift by paisa
+            // (e.g. 15 x 113.33 = 1,699.95 vs the true 1,700.00), which would
+            // strand the difference in WIP forever.
+            if ($startVoucher && $totalInputCost > 0) {
+                $wipLegStmt = db()->prepare("SELECT ledger_id FROM voucher_entries WHERE voucher_id = :vid AND entry_type = 'debit' LIMIT 1");
+                $wipLegStmt->execute(['vid' => (int) $startVoucher['id']]);
+                $wipLedgerId = (int) ($wipLegStmt->fetchColumn() ?: 0);
+                if ($wipLedgerId > 0) {
+                    $totalInputCost = round((float) $startVoucher['total_amount'], 2) ?: $totalInputCost;
+                    $inputCostByLedger = [$wipLedgerId => $totalInputCost];
+                }
             }
             // Absorb the conversion costs stored on the order (IAS 2).
             $ordLabour = (float) ($order['labour_cost'] ?? 0);
@@ -1302,6 +1425,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $ordAbnormal = (float) ($order['abnormal_waste_cost'] ?? 0);
             $orderCost = mfg_order_cost($totalInputCost, $ordLabour, $ordOverhead, $ordByproduct, $ordAbnormal, $quantity);
             $finishedRate = $orderCost['unit_cost'];
+            // Backfill legacy layers BEFORE inserting the produce row — ensure
+            // replays existing transactions, so running it after would replay
+            // the new produce txn AND apply it again below (double stock).
+            $finishedItemRow = inventory_company_item((int) $order['finished_item_id'], $companyId) ?: [];
+            inv_ensure_layers($companyId, $finishedItemRow + ['id' => (int) $order['finished_item_id']]);
             $movementStmt->execute([
                 'company_id' => $companyId,
                 'fiscal_year_id' => $fiscalYearId > 0 ? $fiscalYearId : null,
@@ -1315,24 +1443,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'amount' => $orderCost['inventoriable'],
                 'notes' => 'Finished goods from ' . $orderNo . ' at absorbed cost',
             ]);
+            $produceTxnId = (int) db()->lastInsertId();
             db()->prepare("UPDATE manufacturing_orders SET status = 'completed', completed_on = :done WHERE id = :id")
                 ->execute(['done' => $today, 'id' => $orderId]);
-            $finishedLedgerStmt = db()->prepare('SELECT ledger_id FROM inventory_items WHERE id = :id');
-            $finishedLedgerStmt->execute(['id' => (int) $order['finished_item_id']]);
-            $voucherId = inventory_post_production_voucher($companyId, $fiscalYearId, $orderId, $orderNo, $today, (int) ($finishedLedgerStmt->fetchColumn() ?: 0), $inputCostByLedger, $userId, [
+            inv_apply_movement($companyId, (int) $order['finished_item_id'], $quantity, 0.0, $finishedRate, $today, (string) ($finishedItemRow['valuation_method'] ?? 'weighted_average'), $produceTxnId);
+            $voucherId = inventory_post_production_voucher($companyId, $fiscalYearId, $orderId, $orderNo, $today, inv_item_stock_ledger_id($companyId, $finishedItemRow + ['id' => (int) $order['finished_item_id']]), $inputCostByLedger, $userId, [
                 'labour' => $ordLabour, 'overhead' => $ordOverhead,
                 'byproduct' => $ordByproduct, 'abnormal' => $ordAbnormal,
             ]);
             if ($voucherId > 0) {
-                db()->prepare("UPDATE inventory_transactions SET voucher_id = :vid WHERE company_id = :cid AND ref_no = :ref AND transaction_type IN ('consume', 'produce')")
+                db()->prepare("UPDATE inventory_transactions SET voucher_id = :vid WHERE company_id = :cid AND ref_no = :ref AND transaction_type = 'produce'")
                     ->execute(['vid' => $voucherId, 'cid' => $companyId, 'ref' => $orderNo]);
             }
-            inv_rebuild_item($companyId, (int) $order['finished_item_id']);
             db()->commit();
             security_event('inventory_movement_posted', 'success', 'Manufacturing order #' . $orderId . ' completed.', $companyId, $userId);
             log_activity('manufacturing_order', $orderId, 'completed', 'Production completed from WIP.', $userId);
             flash('success', 'Order ' . $orderNo . ' completed: ' . number_format($quantity, 3) . ' finished goods received into stock at ' . number_format($finishedRate, 2) . ' each.'
-                . ($voucherId > 0 ? ' Journal voucher MFG-' . $orderNo . ' posted.' : ''));
+                . ($voucherId > 0 ? ' Journal voucher MFG-' . $orderNo . ' posted.' : ' Stock updated WITHOUT a GL entry — map the finished/material item ledgers (edit the items) to post the production journal.'));
         } catch (Throwable $exception) {
             if (db()->inTransaction()) {
                 db()->rollBack();

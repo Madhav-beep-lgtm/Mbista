@@ -454,6 +454,110 @@ function inv_resolve_mapping(int $companyId, string $purpose, ?int $itemId = nul
 }
 
 /**
+ * The stock (balance-sheet) ledger id an item's inventory value posts to.
+ *
+ * Resolution order: the type-specific mapped purpose (finished_goods /
+ * raw_material / scrap_inventory), then the generic inventory_asset mapping —
+ * each walking item -> category -> global — and finally the legacy
+ * inventory_items.ledger_id column so pre-mapping items keep posting where
+ * they always did. Returns 0 when nothing resolves (caller records stock-only
+ * and surfaces the gap; it must never guess a ledger).
+ */
+function inv_item_stock_ledger_id(int $companyId, array $item): int
+{
+    $typePurpose = match ((string) ($item['item_type'] ?? 'stock')) {
+        'finished_good' => 'finished_goods',
+        'raw_material' => 'raw_material',
+        'scrap', 'by_product' => 'scrap_inventory',
+        default => null,
+    };
+    $itemId = (int) ($item['id'] ?? 0);
+    $category = ($item['category'] ?? null) !== '' ? ($item['category'] ?? null) : null;
+    foreach (array_filter([$typePurpose, 'inventory_asset']) as $purpose) {
+        $resolved = inv_resolve_mapping($companyId, $purpose, $itemId ?: null, $category);
+        if ($resolved) {
+            return (int) $resolved['id'];
+        }
+    }
+    return (int) ($item['ledger_id'] ?? 0);
+}
+
+/**
+ * Post (or replace, or clear) the GL voucher for an item's MASTER opening
+ * stock — Dr the item's stock ledger / Cr Opening Balance Equity — so the
+ * balance sheet carries the same opening value as the cost layers instead of
+ * the subledger silently diverging from day one. One voucher per item
+ * (source inventory_opening/<item id>), dated at the default fiscal year's
+ * start, replaced when the opening qty/rate or ledger changes and deleted
+ * when the opening is cleared; the usual mutation guards apply. Runs inside
+ * the caller's transaction. Returns ['voucher_id' => int, 'note' => string]
+ * — a non-empty note explains why nothing (or a stale voucher) is in the GL.
+ */
+function inv_post_item_opening_voucher(int $companyId, array $item, ?int $userId = null): array
+{
+    if (!table_exists('vouchers') || !table_exists('voucher_entries')) {
+        return ['voucher_id' => 0, 'note' => ''];
+    }
+    $itemId = (int) ($item['id'] ?? 0);
+    if ($itemId <= 0) {
+        return ['voucher_id' => 0, 'note' => ''];
+    }
+    $value = inv_round_money((float) ($item['opening_qty'] ?? 0) * (float) ($item['purchase_rate'] ?? 0));
+
+    $existingStmt = db()->prepare("SELECT * FROM vouchers WHERE source_type = 'inventory_opening' AND source_id = :iid AND company_id = :cid LIMIT 1");
+    $existingStmt->execute(['iid' => $itemId, 'cid' => $companyId]);
+    $existing = $existingStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+    $debitLedgerId = inv_item_stock_ledger_id($companyId, $item);
+    $creditRow = inv_resolve_mapping($companyId, 'opening_equity', $itemId, ($item['category'] ?? null) ?: null);
+    $creditLedgerId = $creditRow ? (int) $creditRow['id'] : (function_exists('opening_balance_ledger_id') ? opening_balance_ledger_id($companyId) : 0);
+
+    // Unchanged voucher: keep it (no id churn on every unrelated item save).
+    if ($existing && $value > INV_EPSILON && abs((float) $existing['total_amount'] - $value) < 0.005) {
+        $legStmt = db()->prepare("SELECT ledger_id FROM voucher_entries WHERE voucher_id = :vid AND entry_type = 'debit' LIMIT 1");
+        $legStmt->execute(['vid' => (int) $existing['id']]);
+        if ((int) $legStmt->fetchColumn() === $debitLedgerId) {
+            return ['voucher_id' => (int) $existing['id'], 'note' => ''];
+        }
+    }
+    if ($existing) {
+        $blocker = voucher_mutation_blocker($existing, ['inventory_opening']);
+        if ($blocker !== null) {
+            return ['voucher_id' => (int) $existing['id'], 'note' => 'Opening-stock voucher NOT updated: ' . $blocker];
+        }
+        db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
+            ->execute(['id' => (int) $existing['id'], 'cid' => $companyId]);
+    }
+    if ($value <= INV_EPSILON) {
+        return ['voucher_id' => 0, 'note' => ''];
+    }
+    if ($debitLedgerId <= 0 || $creditLedgerId <= 0) {
+        return ['voucher_id' => 0, 'note' => 'Opening stock recorded WITHOUT a GL entry — map '
+            . ($debitLedgerId <= 0 ? 'Inventory Asset' : 'Opening Balance Equity')
+            . ' in the item\'s "This item posts to" panel, then save the item again to post it.'];
+    }
+    $defaultFy = function_exists('current_fiscal_year') ? current_fiscal_year() : null;
+    $openingDate = (string) ($defaultFy['start_date'] ?? date('Y-m-d'));
+    $voucherId = (int) create_voucher_with_entries([
+        'company_id' => $companyId,
+        'fiscal_year_id' => (int) ($defaultFy['id'] ?? 0) ?: null,
+        'voucher_no' => 'INV-OPEN-' . $itemId,
+        'voucher_type' => 'journal',
+        'voucher_date' => $openingDate,
+        'source_type' => 'inventory_opening',
+        'source_id' => $itemId,
+        'total_amount' => $value,
+        'narration' => 'Opening stock — ' . ($item['sku'] ?? '') . ' ' . ($item['name'] ?? '') . ' (' . number_format((float) ($item['opening_qty'] ?? 0), 3) . ' @ ' . number_format((float) ($item['purchase_rate'] ?? 0), 2) . ')',
+        'status' => 'posted',
+        'posted_by' => $userId,
+    ], [
+        ['ledger_id' => $debitLedgerId, 'entry_type' => 'debit', 'amount' => $value, 'memo' => 'Opening stock'],
+        ['ledger_id' => $creditLedgerId, 'entry_type' => 'credit', 'amount' => $value, 'memo' => 'Opening stock contra'],
+    ]);
+    return ['voucher_id' => $voucherId, 'note' => ''];
+}
+
+/**
  * Validate that every purpose in $purposes resolves to a ledger for the item.
  * Returns the list of MISSING purposes (empty = ready to post). Posting engines
  * must call this and refuse to post when it is non-empty.
