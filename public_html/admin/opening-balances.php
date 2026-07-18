@@ -97,6 +97,13 @@ $canGenerate = user_can_do('opening_balance', 'generate');
 $sym = site_currency_symbol();
 $status = $batch ? (string) $batch['status'] : 'not_generated';
 $isLocked = in_array($status, ['finalized', 'locked'], true);
+// Adjustments are the controlled correction path and stay open until the batch
+// is HARD-locked — this mirrors ob_apply_adjustment(), which blocks only the
+// 'locked' state. A 'finalized' batch (including one just unlocked back from
+// 'locked') is still adjustable by an authorised user, so gate the Adjust
+// controls on this, not on $isLocked (which also covers 'finalized' and is used
+// to stop regeneration). Without this the Adjust column vanished after unlock.
+$canAdjustNow = $canAdjust && $batch && $status !== 'locked';
 
 $filterType = (string) ($_GET['type'] ?? '');
 $filterSide = (string) ($_GET['side'] ?? '');
@@ -225,7 +232,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <th class="is-numeric">System Dr</th><th class="is-numeric">System Cr</th>
             <th class="is-numeric">Adj. Dr</th><th class="is-numeric">Adj. Cr</th>
             <th class="is-numeric">Final Dr</th><th class="is-numeric">Final Cr</th>
-            <th>Reason</th><?php if ($canAdjust && !$isLocked): ?><th></th><?php endif; ?>
+            <th>Reason</th><?php if ($canAdjustNow): ?><th></th><?php endif; ?>
         </tr></thead>
         <tbody>
             <?php
@@ -267,7 +274,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <td class="is-numeric"><strong><?= $finalCr > 0 ? e(number_format($finalCr, 2)) : '–' ?></strong></td>
                     <?php endif; ?>
                     <td style="font-size:11px"><?= e((string) ($l['adjustment_reason'] ?? '')) ?></td>
-                    <?php if ($canAdjust && !$isLocked): ?>
+                    <?php if ($canAdjustNow): ?>
                         <td>
                             <?php if ($applicable && $l['ledger_id']): ?>
                             <details class="pr-adjust">
@@ -290,7 +297,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php endif; ?>
                 </tr>
             <?php endforeach; ?>
-            <?php if ($shown === 0): ?><tr><td colspan="13" class="muted">No lines match the filters.</td></tr><?php endif; ?>
+            <?php if ($shown === 0): ?><tr><td colspan="<?= $canAdjustNow ? 13 : 12 ?>" class="muted">No lines match the filters.</td></tr><?php endif; ?>
         </tbody>
     </table>
     </div>

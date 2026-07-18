@@ -306,6 +306,19 @@ $freshLine = $lineByLedger(ob_get_lines((int) ob_get_batch($cid, $fy2['id'])['id
 $adjAfterUnlock = ob_apply_adjustment((int) ob_get_batch($cid, $fy2['id'])['id'], (int) $freshLine['id'], 100000, 0, 'Correcting after unlock per audit', '', $userId);
 ok($adjAfterUnlock['ok'], 'After unlock, adjustments are permitted again');
 
+// UI regression: the engine permits adjustment in every state except 'locked',
+// but the Admin page used to hide the Adjust controls whenever $isLocked was
+// true — and $isLocked covers BOTH 'finalized' and 'locked'. So after an unlock
+// (which returns the batch to 'finalized') the Adjust column vanished even
+// though the engine would accept the adjustment. The page now gates the Adjust
+// column and per-line form on $canAdjustNow (status !== 'locked'). Pin that so
+// the "where is the adjustment after unlocking" bug cannot silently return.
+$obSrc = (string) file_get_contents(__DIR__ . '/../public_html/admin/opening-balances.php');
+ok(strpos($obSrc, '$canAdjustNow') !== false && strpos($obSrc, "\$status !== 'locked'") !== false,
+    'UI: adjust gate is $canAdjustNow, defined as status !== locked (adjustable while finalized)');
+ok(substr_count($obSrc, 'if ($canAdjustNow)') >= 2 && strpos($obSrc, 'if ($canAdjust && !$isLocked)') === false,
+    'UI: both the Reason-column header and the per-line Adjust cell gate on $canAdjustNow, not $isLocked');
+
 // ---------------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------------
