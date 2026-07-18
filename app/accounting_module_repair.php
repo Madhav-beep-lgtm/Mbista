@@ -234,6 +234,25 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Create opening-balance tables (migration 053)', static function (): void {
+        // Formal opening-balance batch/line/audit tables layered over the
+        // perpetual GL. Every statement is CREATE TABLE IF NOT EXISTS so
+        // re-running is safe. Replayed from the migration (single source).
+        $migrationFile = dirname(__DIR__) . '/database/migrations/053_opening_balances.sql';
+        if (!is_file($migrationFile)) {
+            return;
+        }
+        $sqlLines = array_filter(
+            preg_split('/\R/', (string) file_get_contents($migrationFile)) ?: [],
+            static fn (string $line): bool => !str_starts_with(ltrim($line), '--')
+        );
+        foreach (array_filter(array_map('trim', explode(';', implode("\n", $sqlLines)))) as $statement) {
+            if (stripos($statement, 'CREATE TABLE') === 0) {
+                db()->exec($statement);
+            }
+        }
+    });
+
     $run('Re-home payroll ledgers', static function (): void {
         // Auto-created payroll ledgers once landed in wrong groups (expense
         // under Prepaid Expenses, advances under Bank), which unbalanced the

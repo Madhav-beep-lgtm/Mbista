@@ -13,7 +13,7 @@ $headerFiscalYear = current_fiscal_year();
 $headerScript = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
 $headerTab = (string) ($_GET['tab'] ?? '');
 $headerView = (string) ($_GET['view'] ?? '');
-$headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'ledgers.php', 'day-book.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'fixed-assets.php'], true);
+$headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'ledgers.php', 'day-book.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'fixed-assets.php', 'opening-balances.php'], true);
 $headerCompanyId = (int) ($headerCompany['id'] ?? 0);
 $headerCompanyCode = (string) ($headerCompany['code'] ?? '');
 $headerBusinessType = company_accounting_business_type($headerCompanyId);
@@ -38,6 +38,7 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Chart of Accounts', 'admin/chart-of-accounts.php', 'tree', in_array($headerScript, $headerChartPages, true)],
     ['Vouchers', 'admin/accounting.php', 'journal', in_array($headerScript, ['accounting.php', 'voucher-form.php'], true)],
     ['Ledgers', 'admin/ledgers.php', 'contracts', $headerScript === 'ledgers.php'],
+    ['Opening Balances', 'admin/opening-balances.php', 'reconcile', $headerScript === 'opening-balances.php'],
     ['Day Book', 'admin/day-book.php', 'calendar', $headerScript === 'day-book.php'],
     ['Voucher Import (Excel)', 'admin/voucher-import.php', 'upload', $headerScript === 'voucher-import.php'],
     ['Sales & Invoices', 'admin/accounting-parties.php?tab=sales', 'receipt-voucher', $headerScript === 'accounting-parties.php' && in_array($headerTab, ['', 'sales'], true)],
@@ -70,7 +71,7 @@ $pageBreadcrumb = $pageBreadcrumb ?? null;
 $headerPageIcons = [
     'index.php' => 'home', 'accounting-dashboard.php' => 'dashboard', 'consolidated-report.php' => 'layers',
     'accounting.php' => 'journal', 'voucher-form.php' => 'journal', 'voucher-import.php' => 'upload',
-    'ledgers.php' => 'contracts', 'day-book.php' => 'calendar',
+    'ledgers.php' => 'contracts', 'day-book.php' => 'calendar', 'opening-balances.php' => 'reconcile',
     'accounting-parties.php' => 'receipt-voucher', 'accounting-inventory.php' => 'box', 'fixed-assets.php' => 'tag', 'banking.php' => 'bank',
     'reconciliation.php' => 'reconcile', 'chart-of-accounts.php' => 'tree', 'chart-groups.php' => 'tree',
     'chart-ledgers.php' => 'tree', 'chart-posting-accounts.php' => 'tree', 'chart-masters.php' => 'tree',
@@ -89,7 +90,7 @@ if ($pageBreadcrumb === null) {
     $headerTrailHome = [['Home', 'admin/index.php']];
     $headerTrailReports = [['Home', 'admin/index.php'], ['Reports', 'admin/reports-center.php']];
     $headerTrailAccounting = [['Home', 'admin/index.php'], ['Accounting', 'admin/accounting-dashboard.php']];
-    $headerAccountingScripts = ['accounting.php', 'ledgers.php', 'day-book.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'accounting-inventory.php', 'fixed-assets.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
+    $headerAccountingScripts = ['accounting.php', 'ledgers.php', 'day-book.php', 'opening-balances.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'accounting-inventory.php', 'fixed-assets.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
     if (in_array($headerScript, ['report-schedules.php', 'consolidated-report.php'], true)) {
         $pageBreadcrumb = $headerTrailReports;
     } elseif (in_array($headerScript, $headerPayrollScripts, true)) {

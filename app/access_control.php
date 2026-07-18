@@ -861,6 +861,7 @@ function rbac_modules(): array
 {
     return [
         'accounting' => ['label' => 'Accounting & Vouchers', 'actions' => ['view', 'create', 'edit', 'approve', 'post', 'export']],
+        'opening_balance' => ['label' => 'Opening Balances', 'actions' => ['view', 'generate', 'adjust', 'finalize']],
         'sales'      => ['label' => 'Sales & Invoices',      'actions' => ['view', 'create', 'edit', 'export']],
         'purchases'  => ['label' => 'Purchases',             'actions' => ['view', 'create', 'edit', 'export']],
         'receipts'   => ['label' => 'Receipts & Payments',   'actions' => ['view', 'create', 'edit', 'export']],
@@ -881,6 +882,7 @@ function rbac_action_labels(): array
     return [
         'view' => 'View', 'create' => 'Create', 'edit' => 'Edit',
         'approve' => 'Approve', 'post' => 'Post', 'export' => 'Export',
+        'generate' => 'Generate', 'adjust' => 'Adjust', 'finalize' => 'Finalize',
     ];
 }
 
