@@ -396,6 +396,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $method = (string) ($item['valuation_method'] ?? 'weighted_average');
 
+        // Enforce the fiscal-period lock HERE, before any stock row is written.
+        // Transfers post no GL voucher, and a normal movement whose ledgers are
+        // unmapped records stock but catches the voucher's MAP_MISSING — both
+        // paths skip create_voucher_with_entries (the usual lock choke point), so
+        // without this check stock could be dated into a closed period, silently
+        // changing on-hand and valuation behind the lock.
+        if (table_exists('fiscal_years')) {
+            $moveFiscalYear = fiscal_year_for_date($companyId, $date);
+            if (!$moveFiscalYear) {
+                flash('error', 'No fiscal year covers ' . $date . '. Open a fiscal year for that period before recording stock.');
+                redirect('admin/accounting-inventory.php');
+            }
+            $moveBlocker = fiscal_year_posting_blocker($moveFiscalYear, $date);
+            if ($moveBlocker !== null) {
+                flash('error', $moveBlocker);
+                redirect('admin/accounting-inventory.php');
+            }
+        }
+
         // Warehouse / departmental transfers relocate stock inside the entity:
         // two linked rows (out of the source, in to the destination) and nothing
         // else. The company still owns the same units at the same cost, so the
@@ -489,9 +508,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'This item already has an opening quantity (' . number_format((float) $item['opening_qty'], 3) . ') on its master record — edit the item instead of recording a second opening, or stock would be double-counted.');
             redirect('admin/accounting-inventory.php');
         }
-        if ($direction === 'out' && $qty > (float) $item['on_hand'] + 0.0005) {
-            flash('error', 'Insufficient stock: only ' . number_format((float) $item['on_hand'], 3) . ' ' . $item['unit'] . ' of ' . $item['sku'] . ' on hand. Record a purchase or an inward adjustment first.');
-            redirect('admin/accounting-inventory.php');
+        if ($direction === 'out') {
+            // When a warehouse is chosen, availability must be checked at THAT
+            // location, not company-wide: the company can hold plenty overall
+            // while the chosen warehouse holds none, which would otherwise drive
+            // that location's stock negative (the row is stamped with warehouse_id).
+            if ($warehouseId !== null) {
+                $sourceWarehouseQty = inv_item_warehouse_qty($companyId, $itemId, $warehouseId);
+                if ($qty > $sourceWarehouseQty + 0.0005) {
+                    flash('error', 'Insufficient stock at the selected warehouse: it holds ' . number_format($sourceWarehouseQty, 3) . ' ' . $item['unit'] . ' of ' . $item['sku'] . ' (company-wide on hand is ' . number_format((float) $item['on_hand'], 3) . ', but stock can only leave the location that actually holds it).');
+                    redirect('admin/accounting-inventory.php');
+                }
+            } elseif ($qty > (float) $item['on_hand'] + 0.0005) {
+                flash('error', 'Insufficient stock: only ' . number_format((float) $item['on_hand'], 3) . ' ' . $item['unit'] . ' of ' . $item['sku'] . ' on hand. Record a purchase or an inward adjustment first.');
+                redirect('admin/accounting-inventory.php');
+            }
         }
         if ($rate <= 0) {
             $rate = $type === 'sale' ? (float) $item['sales_rate'] : (float) $item['purchase_rate'];
@@ -799,17 +830,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // are silently blocked) and a reversed sale gives its released
             // allowance back.
             [$voidedAllowanceRows, $voidedAllowanceNet] = inv_void_allowance_rows_for_txn($companyId, $movementId, $fiscalYearId, date('Y-m-d'), $userId);
-            // Post a mirror stock movement (opposite direction, same qty/rate).
+            // Post a mirror stock movement (opposite direction).
             $revIn = (float) $movement['qty_out'];
             $revOut = (float) $movement['qty_in'];
             $today = date('Y-m-d');
+
+            // Read the original voucher's legs up-front: we both reverse them
+            // (Dr/Cr swap) and use the inventory cost they carry to re-inject
+            // stock at COST rather than the stored rate.
+            $origVoucherId = (int) ($movement['voucher_id'] ?? 0);
+            $origEntries = [];
+            $origDebitTotal = 0.0;
+            if ($origVoucherId > 0) {
+                $entries = db()->prepare('SELECT ledger_id, entry_type, amount FROM voucher_entries WHERE voucher_id = :vid');
+                $entries->execute(['vid' => $origVoucherId]);
+                $origEntries = $entries->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($origEntries as $en) {
+                    if ($en['entry_type'] === 'debit') { $origDebitTotal += (float) $en['amount']; }
+                }
+            }
+
+            // Reversing an OUTWARD movement re-adds stock: value it at the cost
+            // that was removed, never the stored rate. For a sale the stored rate
+            // is the SELLING price, so re-injecting at it would inflate the cost
+            // layers (inv_rebuild_layers values an inward row at its `rate`) and
+            // permanently push the perpetual subledger above the GL. The GL swap
+            // restores inventory by exactly the original voucher's debit total, so
+            // re-inject at that same cost/unit to keep subledger == GL. Fall back
+            // to the item's current unit cost when the movement had no voucher.
+            $revRate = (float) $movement['rate'];
+            if ($revIn > 0) {
+                if ($origDebitTotal > 0) {
+                    $revRate = round($origDebitTotal / $revIn, 6);
+                } else {
+                    $bal = inv_layer_balance($companyId, (int) $movement['item_id']);
+                    if ((float) ($bal['qty'] ?? 0) > 0) {
+                        $revRate = round(((float) $bal['value']) / (float) $bal['qty'], 6);
+                    }
+                }
+            }
+
             db()->prepare('INSERT INTO inventory_transactions (company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date, qty_in, qty_out, rate, amount, notes)
                 VALUES (:cid, :fy, :iid, :type, :ref, :d, :qin, :qout, :rate, :amt, :notes)')
                 ->execute([
                     'cid' => $companyId, 'fy' => $fiscalYearId > 0 ? $fiscalYearId : null, 'iid' => (int) $movement['item_id'],
                     'type' => (string) $movement['transaction_type'], 'ref' => 'REV-' . $movementId,
-                    'd' => $today, 'qin' => $revIn, 'qout' => $revOut, 'rate' => (float) $movement['rate'],
-                    'amt' => round(($revIn + $revOut) * (float) $movement['rate'], 2),
+                    'd' => $today, 'qin' => $revIn, 'qout' => $revOut, 'rate' => $revRate,
+                    'amt' => round(($revIn + $revOut) * $revRate, 2),
                     'notes' => 'Reversal of movement #' . $movementId,
                 ]);
             $revTxnId = (int) db()->lastInsertId();
@@ -817,13 +884,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Reverse the original voucher by swapping its Dr/Cr, never deleting it.
             $reversalVoucherId = 0;
-            $origVoucherId = (int) ($movement['voucher_id'] ?? 0);
-            if ($origVoucherId > 0) {
-                $entries = db()->prepare('SELECT ledger_id, entry_type, amount FROM voucher_entries WHERE voucher_id = :vid');
-                $entries->execute(['vid' => $origVoucherId]);
+            if ($origEntries !== []) {
                 $reversed = [];
                 $total = 0.0;
-                foreach ($entries->fetchAll(PDO::FETCH_ASSOC) as $en) {
+                foreach ($origEntries as $en) {
                     $reversed[] = ['ledger_id' => (int) $en['ledger_id'], 'entry_type' => $en['entry_type'] === 'debit' ? 'credit' : 'debit', 'amount' => (float) $en['amount']];
                     if ($en['entry_type'] === 'debit') { $total += (float) $en['amount']; }
                 }

@@ -255,10 +255,17 @@ function payroll_tax_withheld_ytd(int $employeeId, int $fiscalYearId, int $exclu
  * Calculate one employee's line for a run. Returns the values plus the full
  * trace; does not write anything.
  */
-function payroll_calculate_line(array $employee, array $run, array $taxVersion): array
+function payroll_calculate_line(array $employee, array $run, array $taxVersion, array $adjustments = []): array
 {
     $basic = round((float) $employee['basic_salary'], 2);
     $componentLines = payroll_employee_component_lines($employee);
+
+    // Per-period manual adjustments entered on THIS run's salary sheet. The extra
+    // earning is taxable remuneration (into gross + assessable income); the extra
+    // deduction is a post-tax employee deduction, like "other deductions".
+    $adjEarning = max(0.0, round((float) ($adjustments['earning'] ?? 0), 2));
+    $adjDeduction = max(0.0, round((float) ($adjustments['deduction'] ?? 0), 2));
+    $adjRemark = trim((string) ($adjustments['remark'] ?? ''));
 
     $allowances = 0.0;
     $overtime = 0.0;
@@ -271,8 +278,14 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion):
         $component = $line['component'];
         $amount = $line['amount'];
         $category = (string) $component['category'];
-        if ($category === 'deduction' && !(int) $component['employer_paid']) {
-            $otherDeduction += $amount;
+        if ($category === 'deduction') {
+            // Employee-borne deductions reduce net pay. Employer-paid deductions
+            // are an employer cost, NOT employee earnings — they must fall in this
+            // branch (not the allowances "else"), or they would inflate gross and,
+            // being excluded from otherDeduction, raise net pay by their full value.
+            if (!(int) $component['employer_paid']) {
+                $otherDeduction += $amount;
+            }
         } elseif ($category === 'overtime') {
             $overtime += $amount;
         } elseif ($category === 'benefit') {
@@ -293,7 +306,9 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion):
         ];
     }
 
-    $gross = round($basic + $allowances + $overtime + $benefits, 2);
+    // The adjustment earning is assessable, so fold it into taxable pay too.
+    $taxableMonthly += $adjEarning;
+    $gross = round($basic + $allowances + $overtime + $benefits + $adjEarning, 2);
 
     // Retirement contributions (monthly, % of basic per employee profile).
     $retEmployeeMonth = round($basic * (float) $employee['retirement_employee_rate'] / 100, 2);
@@ -346,7 +361,7 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion):
     }
     $advanceDeduction = round($advanceDeduction, 2);
 
-    $netPay = round($gross - $retEmployeeMonth - $taxMonth - $advanceDeduction - $otherDeduction, 2);
+    $netPay = round($gross - $retEmployeeMonth - $taxMonth - $advanceDeduction - $otherDeduction - $adjDeduction, 2);
 
     $warnings = [];
     if ($netPay < 0) {
@@ -375,6 +390,9 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion):
         'retirement_employer_month' => $retEmployerMonth,
         'advance_deduction' => $advanceDeduction,
         'other_deduction' => round($otherDeduction, 2),
+        'adj_earning' => $adjEarning,
+        'adj_deduction' => $adjDeduction,
+        'adj_remark' => $adjRemark,
         'net_pay' => $netPay,
         'line_status' => $netPay < 0 ? 'error' : ($warnings !== [] ? 'warning' : 'ok'),
         'warnings' => $warnings,
@@ -400,6 +418,7 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion):
                 'ytd_withheld' => round($taxYtdBefore, 2),
             ],
             'loans' => $loanPlan,
+            'adjustment' => ['earning' => $adjEarning, 'deduction' => $adjDeduction, 'remark' => $adjRemark],
         ],
     ];
 }
@@ -421,6 +440,20 @@ function payroll_calculate_run(int $runId): array
     }
 
     $pdo = db();
+
+    // Preserve any per-period manual adjustments already entered on this run's
+    // lines, so recalculating from the employee master never wipes them.
+    $existingAdj = [];
+    $adjStmt = $pdo->prepare('SELECT payroll_employee_id, adj_earning, adj_deduction, adj_remark FROM payroll_run_lines WHERE run_id = :run');
+    $adjStmt->execute(['run' => $runId]);
+    foreach ($adjStmt->fetchAll(PDO::FETCH_ASSOC) as $adjRow) {
+        $existingAdj[(int) $adjRow['payroll_employee_id']] = [
+            'earning' => (float) $adjRow['adj_earning'],
+            'deduction' => (float) $adjRow['adj_deduction'],
+            'remark' => (string) ($adjRow['adj_remark'] ?? ''),
+        ];
+    }
+
     $pdo->beginTransaction();
     try {
         $pdo->prepare('DELETE FROM payroll_run_lines WHERE run_id = :run')->execute(['run' => $runId]);
@@ -428,16 +461,16 @@ function payroll_calculate_run(int $runId): array
                 run_id, payroll_employee_id, basic, allowances, overtime, benefits, gross,
                 assessable_annual, retirement_deduction_annual, taxable_annual, annual_tax,
                 tax_ytd_before, tax_month, retirement_employee_month, retirement_employer_month,
-                advance_deduction, other_deduction, net_pay, trace, line_status, warnings
+                advance_deduction, other_deduction, adj_earning, adj_deduction, adj_remark, net_pay, trace, line_status, warnings
             ) VALUES (
                 :run_id, :pe, :basic, :allowances, :overtime, :benefits, :gross,
                 :assessable, :ret_ded, :taxable, :annual_tax,
                 :ytd, :tax_month, :ret_emp, :ret_er,
-                :advance, :other_ded, :net, :trace, :line_status, :warnings
+                :advance, :other_ded, :adj_earning, :adj_deduction, :adj_remark, :net, :trace, :line_status, :warnings
             )');
         $totals = ['gross' => 0.0, 'tax' => 0.0, 'deductions' => 0.0, 'employer' => 0.0, 'net' => 0.0];
         foreach ($employees as $employee) {
-            $calc = payroll_calculate_line($employee, $run, $taxVersion);
+            $calc = payroll_calculate_line($employee, $run, $taxVersion, $existingAdj[(int) $employee['id']] ?? []);
             $insert->execute([
                 'run_id' => $runId,
                 'pe' => (int) $employee['id'],
@@ -456,6 +489,9 @@ function payroll_calculate_run(int $runId): array
                 'ret_er' => $calc['retirement_employer_month'],
                 'advance' => $calc['advance_deduction'],
                 'other_ded' => $calc['other_deduction'],
+                'adj_earning' => $calc['adj_earning'],
+                'adj_deduction' => $calc['adj_deduction'],
+                'adj_remark' => $calc['adj_remark'] !== '' ? $calc['adj_remark'] : null,
                 'net' => $calc['net_pay'],
                 'trace' => json_encode($calc['trace'], JSON_UNESCAPED_UNICODE),
                 'line_status' => $calc['line_status'],
@@ -463,7 +499,7 @@ function payroll_calculate_run(int $runId): array
             ]);
             $totals['gross'] += $calc['gross'];
             $totals['tax'] += $calc['tax_month'];
-            $totals['deductions'] += $calc['retirement_employee_month'] + $calc['advance_deduction'] + $calc['other_deduction'];
+            $totals['deductions'] += $calc['retirement_employee_month'] + $calc['advance_deduction'] + $calc['other_deduction'] + $calc['adj_deduction'];
             $totals['employer'] += $calc['retirement_employer_month'];
             $totals['net'] += $calc['net_pay'];
         }
@@ -479,6 +515,95 @@ function payroll_calculate_run(int $runId): array
             ]);
         $pdo->commit();
         return ['ok' => true, 'employees' => count($employees)];
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return ['ok' => false, 'error' => $exception->getMessage()];
+    }
+}
+
+/**
+ * Set (or clear, with zeros) the per-period manual adjustment on ONE salary-sheet
+ * line and recompute that line plus the run totals. Editing is allowed only while
+ * the run is still draft/calculated — never after approval/posting. The extra
+ * earning is taxable and the extra deduction is post-tax, so tax and net recompute
+ * exactly as a full recalculation would. Returns ['ok'=>bool, 'error'=>?string].
+ */
+function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning, float $adjDeduction, string $remark): array
+{
+    $run = payroll_run($runId);
+    if (!$run || !in_array((string) $run['status'], ['draft', 'calculated'], true)) {
+        return ['ok' => false, 'error' => 'The salary sheet can only be edited while the run is draft or calculated (not after approval).'];
+    }
+    $taxVersion = payroll_active_tax_version((int) $run['company_id'], (int) $run['fiscal_year_id']);
+    if (!$taxVersion) {
+        return ['ok' => false, 'error' => 'No published tax configuration for this fiscal year.'];
+    }
+    $lineStmt = db()->prepare('SELECT payroll_employee_id FROM payroll_run_lines WHERE id = :id AND run_id = :run LIMIT 1');
+    $lineStmt->execute(['id' => $lineId, 'run' => $runId]);
+    $employeeId = (int) ($lineStmt->fetchColumn() ?: 0);
+    if ($employeeId <= 0) {
+        return ['ok' => false, 'error' => 'That salary line is not part of this run.'];
+    }
+    $empStmt = db()->prepare('SELECT * FROM payroll_employees WHERE id = :id AND company_id = :cid LIMIT 1');
+    $empStmt->execute(['id' => $employeeId, 'cid' => (int) $run['company_id']]);
+    $employee = $empStmt->fetch();
+    if (!$employee) {
+        return ['ok' => false, 'error' => 'Employee record not found for this company.'];
+    }
+
+    $calc = payroll_calculate_line($employee, $run, $taxVersion, [
+        'earning' => max(0.0, round($adjEarning, 2)),
+        'deduction' => max(0.0, round($adjDeduction, 2)),
+        'remark' => $remark,
+    ]);
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('UPDATE payroll_run_lines SET
+                basic = :basic, allowances = :allowances, overtime = :overtime, benefits = :benefits, gross = :gross,
+                assessable_annual = :assessable, retirement_deduction_annual = :ret_ded, taxable_annual = :taxable,
+                annual_tax = :annual_tax, tax_ytd_before = :ytd, tax_month = :tax_month,
+                retirement_employee_month = :ret_emp, retirement_employer_month = :ret_er,
+                advance_deduction = :advance, other_deduction = :other_ded,
+                adj_earning = :adj_earning, adj_deduction = :adj_deduction, adj_remark = :adj_remark,
+                net_pay = :net, trace = :trace, line_status = :line_status, warnings = :warnings
+            WHERE id = :id AND run_id = :run')
+            ->execute([
+                'basic' => $calc['basic'], 'allowances' => $calc['allowances'], 'overtime' => $calc['overtime'],
+                'benefits' => $calc['benefits'], 'gross' => $calc['gross'], 'assessable' => $calc['assessable_annual'],
+                'ret_ded' => $calc['retirement_deduction_annual'], 'taxable' => $calc['taxable_annual'],
+                'annual_tax' => $calc['annual_tax'], 'ytd' => $calc['tax_ytd_before'], 'tax_month' => $calc['tax_month'],
+                'ret_emp' => $calc['retirement_employee_month'], 'ret_er' => $calc['retirement_employer_month'],
+                'advance' => $calc['advance_deduction'], 'other_ded' => $calc['other_deduction'],
+                'adj_earning' => $calc['adj_earning'], 'adj_deduction' => $calc['adj_deduction'],
+                'adj_remark' => $calc['adj_remark'] !== '' ? $calc['adj_remark'] : null,
+                'net' => $calc['net_pay'], 'trace' => json_encode($calc['trace'], JSON_UNESCAPED_UNICODE),
+                'line_status' => $calc['line_status'], 'warnings' => $calc['warnings'] === [] ? null : implode(' | ', $calc['warnings']),
+                'id' => $lineId, 'run' => $runId,
+            ]);
+
+        // Re-sync the run header totals from all its lines.
+        $sum = $pdo->prepare('SELECT
+                COALESCE(SUM(gross),0) AS g,
+                COALESCE(SUM(tax_month),0) AS t,
+                COALESCE(SUM(retirement_employee_month + advance_deduction + other_deduction + adj_deduction),0) AS d,
+                COALESCE(SUM(retirement_employer_month),0) AS e,
+                COALESCE(SUM(net_pay),0) AS n
+            FROM payroll_run_lines WHERE run_id = :run');
+        $sum->execute(['run' => $runId]);
+        $t = $sum->fetch(PDO::FETCH_ASSOC) ?: ['g' => 0, 't' => 0, 'd' => 0, 'e' => 0, 'n' => 0];
+        $pdo->prepare("UPDATE payroll_runs SET status = 'calculated', total_gross = :g, total_tax = :t,
+                total_deductions = :d, total_employer_contrib = :e, total_net = :n WHERE id = :id")
+            ->execute([
+                'g' => round((float) $t['g'], 2), 't' => round((float) $t['t'], 2),
+                'd' => round((float) $t['d'], 2), 'e' => round((float) $t['e'], 2),
+                'n' => round((float) $t['n'], 2), 'id' => $runId,
+            ]);
+        $pdo->commit();
+        return ['ok' => true, 'net_pay' => $calc['net_pay']];
     } catch (Throwable $exception) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();

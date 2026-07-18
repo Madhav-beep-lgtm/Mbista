@@ -54,6 +54,14 @@ if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Approve or reject accounting entries submitted by assigned staff.
     if ($action === 'client_voucher_decision' && column_exists('vouchers', 'requires_client_approval')) {
+        // Only an owner/approver may decide a pending entry. Entry makers can
+        // create and edit but never approve/post — otherwise a maker could
+        // self-approve their own entries straight into the official books,
+        // defeating the whole approval control.
+        if (!client_portal_capability('approve')) {
+            flash('error', 'You do not have permission to approve or reject accounting entries. Ask an account owner or approver to review it.');
+            redirect('dashboard.php?view=accounting');
+        }
         $voucherId = (int) ($_POST['voucher_id'] ?? 0);
         $decision = (string) ($_POST['decision'] ?? '');
         $booksCompanyId = (int) ($clientProfile['books_company_id'] ?? 0);

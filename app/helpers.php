@@ -3353,10 +3353,17 @@ function invoice_issue_inventory_stock(int $invoiceId, ?int $actorId = null): ar
     return $notes;
 }
 
-function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): void
+/**
+ * Posts the sales revenue / receivable / tax voucher for an invoice.
+ * Returns null when the voucher was posted (or already existed), otherwise a
+ * short human-readable reason the caller can surface. Pure environment /
+ * idempotency conditions (accounting tables absent, voucher already posted)
+ * also return null so deployments without the accounting module are unaffected.
+ */
+function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): ?string
 {
     if (!table_exists('vouchers') || !table_exists('voucher_entries') || !table_exists('ledgers')) {
-        return;
+        return null;
     }
 
     $existingStmt = db()->prepare('SELECT id FROM vouchers WHERE source_type = :source_type AND source_id = :source_id LIMIT 1');
@@ -3365,14 +3372,14 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
         'source_id' => $invoiceId,
     ]);
     if ($existingStmt->fetch()) {
-        return;
+        return null; // Already posted — idempotent success.
     }
 
     $invoiceStmt = db()->prepare('SELECT * FROM task_invoices WHERE id = :id LIMIT 1');
     $invoiceStmt->execute(['id' => $invoiceId]);
     $invoice = $invoiceStmt->fetch();
     if (!$invoice) {
-        return;
+        return 'invoice record not found';
     }
 
     $companyId = current_company_id();
@@ -3380,7 +3387,7 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
     if ($companyId <= 0 || $fiscalYearId <= 0) {
         $default = resolve_default_company_and_fiscal_year();
         if (!$default) {
-            return;
+            return 'no active company or fiscal year';
         }
         $companyId = (int) $default['company']['id'];
         $fiscalYearId = (int) $default['fiscal_year']['id'];
@@ -3390,7 +3397,7 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
     $taxPayableLedger = get_mapped_ledger($companyId, 'default_tax_payable');
     $excisePayableLedger = get_mapped_ledger($companyId, 'default_excise_payable');
     if (!$revenueLedger) {
-        return;
+        return 'sales revenue ledger is not mapped for this company';
     }
 
     // Receivable posts to the client's own ledger under Trade Receivables;
@@ -3402,7 +3409,7 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
         $receivableLedgerId = (int) ($receivableLedger['id'] ?? 0);
     }
     if ($receivableLedgerId <= 0) {
-        return;
+        return 'receivable ledger could not be resolved';
     }
 
     // The VAT columns default to 0.00 (not NULL), so null-coalescing alone
@@ -3423,13 +3430,13 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
         $totalAmount = round($taxableAmount + $exciseAmount + $vatAmount, 2);
     }
     if ($totalAmount <= 0 || $taxableAmount <= 0) {
-        return;
+        return 'invoice has no taxable amount to post';
     }
     if ($exciseAmount > 0 && !$excisePayableLedger) {
-        return;
+        return 'excise payable ledger is not mapped';
     }
     if ($vatAmount > 0 && !$taxPayableLedger) {
-        return;
+        return 'VAT payable ledger is not mapped';
     }
 
     // Goods invoices credit the 'sales_revenue' ledger mapped per item /
@@ -3530,6 +3537,8 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): v
     log_activity('task_invoice', $invoiceId, 'voucher_posted', 'Auto-posted sales voucher #' . $voucherId . '.', $actorId);
 
     auto_post_client_mirror_invoice($invoiceId, $actorId);
+
+    return null;
 }
 
 function auto_post_invoice_payment_voucher(int $paymentRequestId, ?int $actorId = null): void
@@ -4014,9 +4023,15 @@ function auto_post_invoice_discount_voucher(int $billingRequestId, int $invoiceI
     if (!table_exists('vouchers') || !table_exists('voucher_entries') || $totalDelta <= 0) {
         return;
     }
+    // Namespace the two id domains so a billing_request id can never collide with
+    // an unrelated invoice id under the same (source_type, source_id) key. A
+    // billing-request-triggered discount stays idempotent per billing request; an
+    // invoice-direct discount (no billing request) is idempotent per invoice and
+    // lives in its OWN source_type, so the two id spaces never overlap.
+    $sourceType = $billingRequestId > 0 ? 'invoice_discount' : 'invoice_discount_direct';
     $sourceId = $billingRequestId > 0 ? $billingRequestId : $invoiceId;
-    $existsStmt = db()->prepare("SELECT id FROM vouchers WHERE source_type = 'invoice_discount' AND source_id = :sid LIMIT 1");
-    $existsStmt->execute(['sid' => $sourceId]);
+    $existsStmt = db()->prepare("SELECT id FROM vouchers WHERE source_type = :st AND source_id = :sid LIMIT 1");
+    $existsStmt->execute(['st' => $sourceType, 'sid' => $sourceId]);
     if ($existsStmt->fetch()) {
         return;
     }
@@ -4086,7 +4101,7 @@ function auto_post_invoice_discount_voucher(int $billingRequestId, int $invoiceI
         'fiscal_year_id' => current_fiscal_year_id() ?: null,
         'voucher_no' => 'DISC-' . date('Ymd') . '-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT),
         'voucher_type' => 'journal',
-        'source_type' => 'invoice_discount',
+        'source_type' => $sourceType,
         'source_id' => $sourceId,
         'reference_no' => $invoice['invoice_no'] ?? null,
         'voucher_date' => date('Y-m-d'),

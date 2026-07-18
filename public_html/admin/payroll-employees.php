@@ -31,12 +31,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $marital = in_array((string) ($_POST['marital_status'] ?? ''), ['individual', 'couple'], true) ? (string) $_POST['marital_status'] : 'individual';
         $scheme = in_array((string) ($_POST['retirement_scheme'] ?? ''), ['none', 'ssf', 'pf', 'cit'], true) ? (string) $_POST['retirement_scheme'] : 'none';
         $status = (string) ($_POST['status'] ?? 'active') === 'inactive' ? 'inactive' : 'active';
-        // Salary can only be processed for people who already exist in the
-        // system: staff/admin users of any company, or clients.
-        $userCheck = db()->prepare("SELECT id FROM users WHERE id = :id AND role IN ('admin', 'staff', 'customer') AND status = 'active'");
-        $userCheck->execute(['id' => $linkedUserId]);
+        // Salary is processed only for people who belong to THIS company. The
+        // roster is company-scoped (independent tenants must not see or enrol
+        // each other's people), so the linked user must be a member of the
+        // active company too.
+        $userCheck = db()->prepare("SELECT id FROM users WHERE id = :id AND company_id = :cid AND role IN ('admin', 'staff', 'customer') AND status = 'active'");
+        $userCheck->execute(['id' => $linkedUserId, 'cid' => $companyId]);
         if (!$userCheck->fetchColumn() || $code === '') {
-            flash('error', 'Pick an existing staff/client user and give an employee code.');
+            flash('error', 'Pick an existing user from this company and give an employee code.');
             redirect('admin/payroll-employees.php');
         }
         $params = [
@@ -155,11 +157,14 @@ if ($editEmployee) {
     $editComponentAmounts = array_map('floatval', $ecStmt->fetchAll(PDO::FETCH_KEY_PAIR));
 }
 
-// Staff and clients across all companies (M.Bista, Altiora, subsidiaries).
-$eligibleUsers = db()->query("SELECT u.id, u.name, u.email, u.role, c.name AS company_name
+// Enrollable people are scoped to the ACTIVE company only — independent tenants
+// must never see or enrol each other's staff/clients.
+$eligibleUsersStmt = db()->prepare("SELECT u.id, u.name, u.email, u.role, c.name AS company_name
     FROM users u LEFT JOIN companies c ON c.id = u.company_id
-    WHERE u.role IN ('admin', 'staff', 'customer') AND u.status = 'active'
-    ORDER BY FIELD(u.role, 'staff', 'admin', 'customer'), u.name ASC")->fetchAll();
+    WHERE u.company_id = :cid AND u.role IN ('admin', 'staff', 'customer') AND u.status = 'active'
+    ORDER BY FIELD(u.role, 'staff', 'admin', 'customer'), u.name ASC");
+$eligibleUsersStmt->execute(['cid' => $companyId]);
+$eligibleUsers = $eligibleUsersStmt->fetchAll();
 
 $employees = payroll_company_employees($companyId, false);
 $components = db()->prepare('SELECT * FROM payroll_components WHERE company_id = :cid AND active = 1 ORDER BY sort_order ASC, code ASC');

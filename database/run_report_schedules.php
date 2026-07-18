@@ -64,6 +64,11 @@ foreach ($due as $schedule) {
             'ledger_id' => (int) ($filters['ledger_id'] ?? 0),
             'item_id' => (int) ($filters['item_id'] ?? 0),
             'biz' => (string) ($filters['biz'] ?? 'all'),
+            // Temporary (income/expense) accounts reset at the fiscal-year
+            // boundary, with prior years' P&L rolling into Retained Earnings b/f
+            // (see rc_ledger_balances). The UI supplies this; without it an
+            // emailed trial balance / balance sheet differs from the on-screen one.
+            'fy_start' => (string) (fiscal_year_for_date($scopeCompanyId, $to)['start_date'] ?? ''),
             'company_id' => $scopeCompanyId,
             'company_name' => $companyName,
             'subsidiaries' => array_map(

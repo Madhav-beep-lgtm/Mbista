@@ -220,38 +220,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $amount = min($amount, $outstanding);
         $paymentStatus = $amount >= $outstanding ? 'paid' : 'partial';
 
-        db()->prepare('
-            INSERT INTO invoice_payment_requests
-                (invoice_id, company_id, requested_by, amount_requested, payment_method, status, payment_received_on, payment_amount, notes)
-            VALUES (:invoice_id, :company_id, :requested_by, :amount_requested, :payment_method, :status, :received_on, :payment_amount, :notes)
-        ')->execute([
-            'invoice_id' => $invoiceId,
-            'company_id' => $companyId,
-            'requested_by' => $userId,
-            'amount_requested' => $amount,
-            'payment_method' => $method !== '' ? $method : 'Cash',
-            'status' => $paymentStatus,
-            'received_on' => $receivedOn !== '' ? $receivedOn : date('Y-m-d'),
-            'payment_amount' => $amount,
-            'notes' => $note !== '' ? $note : null,
-        ]);
-        $paymentRequestId = (int) db()->lastInsertId();
-
-        $paymentPostingError = null;
+        // Record the payment and post its receipt voucher ATOMICALLY. The invoice
+        // flips to paid/partial the instant the request row lands (the paid_amount
+        // subquery counts it), so if the voucher can't post — a locked period, or
+        // a missing cash/receivable mapping (the helper returns silently) — the
+        // whole thing must roll back rather than leave a "paid" invoice with no
+        // cash in the books.
+        db()->beginTransaction();
         try {
+            db()->prepare('
+                INSERT INTO invoice_payment_requests
+                    (invoice_id, company_id, requested_by, amount_requested, payment_method, status, payment_received_on, payment_amount, notes)
+                VALUES (:invoice_id, :company_id, :requested_by, :amount_requested, :payment_method, :status, :received_on, :payment_amount, :notes)
+            ')->execute([
+                'invoice_id' => $invoiceId,
+                'company_id' => $companyId,
+                'requested_by' => $userId,
+                'amount_requested' => $amount,
+                'payment_method' => $method !== '' ? $method : 'Cash',
+                'status' => $paymentStatus,
+                'received_on' => $receivedOn !== '' ? $receivedOn : date('Y-m-d'),
+                'payment_amount' => $amount,
+                'notes' => $note !== '' ? $note : null,
+            ]);
+            $paymentRequestId = (int) db()->lastInsertId();
+
             auto_post_invoice_payment_voucher($paymentRequestId, $userId);
+
+            // The auto-post helper returns silently when a mapping is missing, so
+            // confirm the receipt voucher actually exists before committing.
+            if (table_exists('vouchers')) {
+                $rvCheckStmt = db()->prepare("SELECT COUNT(*) FROM vouchers WHERE source_type = 'invoice_payment_request' AND source_id = :id");
+                $rvCheckStmt->execute(['id' => $paymentRequestId]);
+                if ((int) $rvCheckStmt->fetchColumn() === 0) {
+                    throw new RuntimeException('its receipt voucher did not post — check the cash / receivable ledger mappings in Settings');
+                }
+            }
+            db()->commit();
         } catch (Throwable $exception) {
-            $paymentPostingError = $exception->getMessage();
-        }
-        // The auto-post helper also returns silently when a mapping is missing,
-        // so verify the receipt voucher actually exists — a paid invoice with
-        // no cash/receivable movement in the books must never pass quietly.
-        $rvCheckStmt = db()->prepare("SELECT COUNT(*) FROM vouchers WHERE source_type = 'invoice_payment_request' AND source_id = :id");
-        $rvCheckStmt->execute(['id' => $paymentRequestId]);
-        if ((int) $rvCheckStmt->fetchColumn() === 0) {
-            flash('error', 'Payment recorded, but its receipt voucher did NOT post'
-                . ($paymentPostingError !== null ? ' (' . $paymentPostingError . ')' : ' — check the cash / receivable ledger mappings in Settings')
-                . '. The books will not show this cash until a receipt voucher is posted.');
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            flash('error', 'Payment was NOT recorded: ' . $exception->getMessage() . '. No cash movement was left in the books.');
+            redirect($partiesReturn('admin/accounting-parties.php?panel=payment'));
         }
 
         // Goods invoices whose stock leg hasn't run yet (e.g. issued while the

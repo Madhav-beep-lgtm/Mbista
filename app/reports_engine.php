@@ -407,7 +407,8 @@ function rc_entry_lines(int $scopeCompanyId, array $ledgerIds, string $from, str
 function rc_generate(string $reportId, int $scopeCompanyId, string $from, string $to, array $ctx): array
 {
     $sym = $ctx['currency'];
-    $ctx += ['vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => 'all', 'dims' => []];
+    $ctx += ['vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => 'all', 'dims' => [],
+             'company_id' => $scopeCompanyId, 'company_name' => '', 'subsidiaries' => []];
     switch ($reportId) {
         case 'trial-balance': {
             $balances = rc_ledger_balances($scopeCompanyId, $from, $to, (string) $ctx['vtype'], (int) $ctx['group_id'], (int) $ctx['ledger_id'], (array) ($ctx['dims'] ?? []), rc_ctx_fy_start($ctx));
@@ -854,7 +855,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             }
             $stmt = db()->prepare('
                 SELECT ap.code, ap.name, ap.party_type,
-                       COALESCE((SELECT SUM(ti.total_amount) FROM task_invoices ti WHERE ti.party_id = ap.id AND ti.status <> "cancelled" AND COALESCE(ti.issued_on, DATE(ti.created_at)) BETWEEN :f1 AND :t1), 0) AS sales_total,
+                       COALESCE((SELECT SUM(ti.total_amount) FROM task_invoices ti WHERE ti.party_id = ap.id AND LOWER(COALESCE(ti.status, "")) NOT IN ("cancelled", "draft") AND COALESCE(ti.issued_on, DATE(ti.created_at)) BETWEEN :f1 AND :t1), 0) AS sales_total,
                        COALESCE((SELECT SUM(pr.payment_amount) FROM invoice_payment_requests pr INNER JOIN task_invoices ti2 ON ti2.id = pr.invoice_id WHERE ti2.party_id = ap.id AND pr.status IN ("paid", "partial") AND COALESCE(pr.payment_received_on, DATE(pr.requested_on)) BETWEEN :f2 AND :t2), 0) AS received_total,
                        COALESCE((SELECT SUM(v.total_amount) FROM vouchers v WHERE v.party_id = ap.id AND v.voucher_type = "purchase" AND v.status = "posted" AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :f3 AND :t3), 0) AS purchase_total,
                        COALESCE((SELECT SUM(v2.total_amount) FROM vouchers v2 WHERE v2.party_id = ap.id AND v2.voucher_type = "payment" AND v2.status = "posted" AND COALESCE(v2.voucher_date, DATE(v2.created_at)) BETWEEN :f4 AND :t4), 0) AS paid_total
@@ -1680,8 +1681,12 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             $glTotal = 0.0;
             if ($ledgerIds !== []) {
                 $ph = implode(',', array_fill(0, count($ledgerIds), '?'));
+                // The vouchers filter sits in the LEFT JOIN's ON clause, so entries
+                // whose voucher is a draft/cancelled/future row still survive the join.
+                // Guard the SUM on v.id IS NOT NULL so only posted, in-period entries
+                // contribute, while ledgers with no matching entries still show as 0.
                 $q = db()->prepare("SELECT l.code, l.name, l.id,
-                        COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0) AS bal
+                        COALESCE(SUM(CASE WHEN v.id IS NULL THEN 0 WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0) AS bal
                     FROM ledgers l
                     LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
                     LEFT JOIN vouchers v ON v.id = ve.voucher_id AND v.status='posted' AND v.company_id = l.company_id AND (v.voucher_date IS NULL OR v.voucher_date <= ?)

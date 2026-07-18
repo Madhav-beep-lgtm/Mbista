@@ -184,11 +184,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $voucherNo = (string) $existingVoucher['voucher_no'];
 
+            // The transaction DATE decides the fiscal year. Re-derive it exactly
+            // like create_voucher_with_entries does for new vouchers, so editing a
+            // voucher's date refiles it into the correct year (and honours that
+            // year's period lock) instead of leaving fiscal_year_id on the old
+            // year — which would file the voucher in two years at once (register
+            // KPIs sum by fiscal_year_id, date-range reports by voucher_date).
+            $editVoucherDate = $voucherDate !== '' ? $voucherDate : date('Y-m-d');
+            $editFiscalYearId = $fiscalYearId;
+            if (table_exists('fiscal_years')) {
+                $dateFiscalYear = fiscal_year_for_date($companyId, $editVoucherDate);
+                if (!$dateFiscalYear) {
+                    flash('error', 'No fiscal year covers ' . $editVoucherDate . '. Open a fiscal year for that period before saving.');
+                    redirect($formReturnUrl);
+                }
+                $postingBlocker = fiscal_year_posting_blocker($dateFiscalYear, $editVoucherDate);
+                if ($postingBlocker !== null) {
+                    flash('error', $postingBlocker);
+                    redirect($formReturnUrl);
+                }
+                $editFiscalYearId = (int) $dateFiscalYear['id'];
+            }
+
             db()->beginTransaction();
-            $updateSql = 'UPDATE vouchers SET voucher_type = :voucher_type, voucher_date = :voucher_date, narration = :narration, total_amount = :total_amount, status = :status';
+            $updateSql = 'UPDATE vouchers SET voucher_type = :voucher_type, voucher_date = :voucher_date, fiscal_year_id = :fiscal_year_id, narration = :narration, total_amount = :total_amount, status = :status';
             $updateParams = [
                 'voucher_type' => $voucherType,
                 'voucher_date' => $voucherDate !== '' ? $voucherDate : date('Y-m-d'),
+                'fiscal_year_id' => $editFiscalYearId,
                 'narration' => $fullNarration,
                 'total_amount' => $debitTotal,
                 'status' => $newStatus,

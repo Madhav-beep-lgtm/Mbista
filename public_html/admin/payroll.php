@@ -66,6 +66,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/payroll.php?run=' . $runId);
     }
 
+    if ($action === 'edit_line') {
+        $lineId = (int) ($_POST['line_id'] ?? 0);
+        $adjEarning = (float) ($_POST['adj_earning'] ?? 0);
+        $adjDeduction = (float) ($_POST['adj_deduction'] ?? 0);
+        $adjRemark = trim((string) ($_POST['adj_remark'] ?? ''));
+        $result = payroll_set_line_adjustment($runId, $lineId, $adjEarning, $adjDeduction, $adjRemark);
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? 'Salary line updated — tax and net pay recalculated.'
+            : (string) ($result['error'] ?? 'Could not update the salary line.'));
+        redirect('admin/payroll.php?run=' . $runId);
+    }
+
     if ($action === 'approve_post') {
         $result = payroll_approve_and_post($runId, $userId);
         if ($result['ok']) {
@@ -279,6 +291,22 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endif; ?>
         </div>
     </div>
+    <style>
+    .pr-actions { white-space: nowrap; }
+    .pr-adjust { position: relative; display: inline-block; }
+    .pr-adjust > summary { list-style: none; cursor: pointer; }
+    .pr-adjust > summary::-webkit-details-marker { display: none; }
+    .pr-adjust-form {
+        position: absolute; right: 0; z-index: 40; margin-top: 6px; width: 240px;
+        display: grid; gap: 8px; padding: 12px; text-align: left;
+        background: var(--mbw-surface, #ffffff); color: var(--mbw-ink, #12261f);
+        border: 1px solid var(--mbw-line, rgba(0,0,0,.16)); border-radius: 10px;
+        box-shadow: 0 14px 34px rgba(0,0,0,.22);
+    }
+    .pr-adjust-form label { display: grid; gap: 3px; font-size: 12px; font-weight: 600; color: var(--mbw-ink, #12261f); }
+    .pr-adjust-form input { min-height: 34px; }
+    .pr-adjust-form small { color: var(--mbw-muted, #5b6b64); font-weight: 400; font-size: 11px; }
+    </style>
     <div style="overflow-x:auto">
     <table class="pr-table">
         <thead><tr>
@@ -286,10 +314,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <th class="is-numeric">Benefits</th><th class="is-numeric">Gross</th><th class="is-numeric">Assessable (yr)</th>
             <th class="is-numeric">Retirement Ded. (yr)</th><th class="is-numeric">Taxable (yr)</th><th class="is-numeric">Tax (month)</th>
             <th class="is-numeric">Retirement (emp)</th><th class="is-numeric">Advance</th><th class="is-numeric">Other Ded.</th>
+            <th class="is-numeric">Adjustment</th>
             <th class="is-numeric">Net Payable</th><th></th>
         </tr></thead>
         <tbody>
-            <?php if ($lines === []): ?><tr><td colspan="15">No calculated lines. Enrol employees, then create or recalculate a run.</td></tr><?php endif; ?>
+            <?php if ($lines === []): ?><tr><td colspan="16">No calculated lines. Enrol employees, then create or recalculate a run.</td></tr><?php endif; ?>
             <?php foreach ($lines as $line): ?>
                 <tr class="pr-line<?= $line['line_status'] !== 'ok' ? ' pr-line-' . e($line['line_status']) : '' ?>" data-line-trace="<?= e((string) $line['trace']) ?>" data-line-name="<?= e($line['employee_code'] . ' — ' . $line['person_name']) ?>">
                     <td class="pr-emp"><strong><?= e($line['employee_code']) ?></strong> <?= e($line['person_name']) ?>
@@ -308,8 +337,34 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td class="is-numeric"><?= e(number_format((float) $line['retirement_employee_month'], 2)) ?></td>
                     <td class="is-numeric"><?= e(number_format((float) $line['advance_deduction'], 2)) ?></td>
                     <td class="is-numeric"><?= e(number_format((float) $line['other_deduction'], 2)) ?></td>
+                    <?php $adjE = (float) ($line['adj_earning'] ?? 0); $adjD = (float) ($line['adj_deduction'] ?? 0); ?>
+                    <td class="is-numeric">
+                        <?php if ($adjE > 0 || $adjD > 0): ?>
+                            <?php if ($adjE > 0): ?><span class="mbw-pill tone-green">+<?= e(number_format($adjE, 2)) ?></span><?php endif; ?>
+                            <?php if ($adjD > 0): ?><span class="mbw-pill tone-amber">&minus;<?= e(number_format($adjD, 2)) ?></span><?php endif; ?>
+                            <?php if ((string) ($line['adj_remark'] ?? '') !== ''): ?><small style="display:block"><?= e((string) $line['adj_remark']) ?></small><?php endif; ?>
+                        <?php else: ?>&ndash;<?php endif; ?>
+                    </td>
                     <td class="is-numeric"><strong><?= e(number_format((float) $line['net_pay'], 2)) ?></strong></td>
-                    <td><a class="button secondary" target="_blank" href="<?= e(url('admin/payroll-payslip.php?line=' . (int) $line['id'])) ?>" title="Open payslip">Payslip</a></td>
+                    <td class="pr-actions" onclick="event.stopPropagation()">
+                        <a class="button secondary" target="_blank" href="<?= e(url('admin/payroll-payslip.php?line=' . (int) $line['id'])) ?>" title="Open payslip">Payslip</a>
+                        <?php if (in_array((string) $run['status'], ['draft', 'calculated'], true)): ?>
+                        <details class="pr-adjust">
+                            <summary class="button secondary">Adjust</summary>
+                            <form method="post" class="pr-adjust-form">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="edit_line">
+                                <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
+                                <input type="hidden" name="line_id" value="<?= e((int) $line['id']) ?>">
+                                <label>Extra earning (taxable)<input type="number" step="0.01" min="0" name="adj_earning" value="<?= e(number_format($adjE, 2, '.', '')) ?>"></label>
+                                <label>Extra deduction<input type="number" step="0.01" min="0" name="adj_deduction" value="<?= e(number_format($adjD, 2, '.', '')) ?>"></label>
+                                <label>Remark<input type="text" name="adj_remark" maxlength="255" value="<?= e((string) ($line['adj_remark'] ?? '')) ?>" placeholder="e.g. Dashain bonus"></label>
+                                <button type="submit">Save &amp; recalculate</button>
+                                <small>Set both to 0 to clear. Tax and net pay recompute; the value survives Recalculate.</small>
+                            </form>
+                        </details>
+                        <?php endif; ?>
+                    </td>
                 </tr>
             <?php endforeach; ?>
         </tbody>

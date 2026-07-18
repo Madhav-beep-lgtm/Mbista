@@ -126,6 +126,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'update_compliance_deadline') {
+        // The page only requires the 'view' permission; editing a filing record
+        // (status, filing reference/date, remarks, attached document) additionally
+        // needs the 'edit' right, or a view-only staffer could mark filings done.
+        require_permission('compliance', 'edit');
         $deadlineId = (int) ($_POST['deadline_id'] ?? 0);
         $status = (string) ($_POST['status'] ?? '');
         $filingDate = trim((string) ($_POST['filing_date'] ?? ''));

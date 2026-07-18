@@ -12,12 +12,37 @@
  *     before the fix existed (Dr Discount Allowed + Dr VAT / Cr receivable).
  *  4. Prints a per-company Dr = Cr tie-out so you can see the books balance.
  *
- * Visit this page in the browser while logged in as an administrator.
+ * The schema/voucher changes run ONLY on an explicit POST protected by the
+ * session CSRF token — never on a bare GET. Otherwise a cross-site
+ * <img src="…/run-upgrade-20260717.php"> loaded by a logged-in administrator
+ * would silently fire DDL and voucher postings without intent.
  */
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_admin();
+
+$pageTitle = 'System Upgrade — 17 Jul 2026';
+$bodyClass = 'admin-layout';
+
+// GET (or any non-POST) shows a confirmation form only — it changes nothing.
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    include __DIR__ . '/../../app/views/partials/admin_header.php';
+    ?>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>System upgrade — 17 Jul 2026</h2></div>
+        <p class="muted" style="margin:0 0 12px">This one-time upgrade applies migration 052 (RESTRICT ledger deletion), repairs any one-legged posted vouchers, retro-posts missing discount vouchers, and prints a books tie-out. Every step checks before it changes anything, so it is safe to run more than once.</p>
+        <form method="post" action="<?= e(url('admin/run-upgrade-20260717.php')) ?>">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <button type="submit" class="button primary">Run the upgrade now</button>
+        </form>
+    </section>
+    <?php
+    include __DIR__ . '/../../app/views/partials/admin_footer.php';
+    return;
+}
+
+verify_csrf();
 
 $lines = [];
 $note = static function (string $text) use (&$lines): void {
@@ -124,8 +149,6 @@ $tieOut = db()->query('
     GROUP BY v.company_id, c.name
 ')->fetchAll();
 
-$pageTitle = 'System Upgrade — 17 Jul 2026';
-$bodyClass = 'admin-layout';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <section class="mbw-card">

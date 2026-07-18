@@ -342,12 +342,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
 
-                    // Stock issue + COGS + NRV release for goods invoices
-                    // (inventory AND manufacturing) via the shared idempotent
-                    // helper — the same routine also runs on the draft→issued
-                    // /paid transition so no path skips the stock leg.
-                    $stockPostingNotes = invoice_issue_inventory_stock($newInvoiceId, $adminId);
-
+                    // Finalize the header VAT/excise/total figures BEFORE any posting
+                    // so the revenue voucher reads the invoice's final amounts.
                     try {
                         $updateVatStmt = db()->prepare('UPDATE task_invoices SET invoice_category = :invoice_category, vat_rate = :vat_rate, vat_amount = :vat_amount, taxable_amount = :taxable_amount, excise_rate = :excise_rate, excise_amount = :excise_amount, total_amount = :total_amount WHERE id = :id AND company_id = :company_id');
                         $updateVatStmt->execute([
@@ -366,33 +362,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     log_activity('task_invoice', $newInvoiceId, 'issued', 'Task invoice issued from invoice tab.', $adminId);
+
+                    // Post revenue FIRST, then gate the stock/COGS and payment legs on
+                    // it. A goods invoice must never carry COGS with no matching sales
+                    // revenue: if the revenue voucher can't post (e.g. an unmapped
+                    // ledger) we hold the stock and payment legs back and tell the
+                    // issuer exactly why, instead of silently booking a half-set of
+                    // entries under a "success" message.
                     $mirrorNote = '';
+                    $revenueSkippedReason = null;
                     if (in_array($status, ['issued', 'paid'], true)) {
-                        auto_post_task_invoice_voucher($newInvoiceId, $adminId);
-                        // Tell the issuer whether the client-books mirror entry
-                        // went out, and if not, exactly why (it used to skip
-                        // silently, which read as "unable to post").
-                        $mirrorReason = auto_post_client_mirror_invoice($newInvoiceId, $adminId);
-                        if ($mirrorReason === null) {
-                            $mirrorNote = ' A mirror purchase entry was submitted to the client\'s books for their approval.';
-                        } elseif ($partyId > 0) {
-                            $mirrorNote = ' No client mirror entry: ' . $mirrorReason . '.';
+                        $revenueSkippedReason = auto_post_task_invoice_voucher($newInvoiceId, $adminId);
+                        if ($revenueSkippedReason === null) {
+                            // Tell the issuer whether the client-books mirror entry
+                            // went out, and if not, exactly why (it used to skip
+                            // silently, which read as "unable to post").
+                            $mirrorReason = auto_post_client_mirror_invoice($newInvoiceId, $adminId);
+                            if ($mirrorReason === null) {
+                                $mirrorNote = ' A mirror purchase entry was submitted to the client\'s books for their approval.';
+                            } elseif ($partyId > 0) {
+                                $mirrorNote = ' No client mirror entry: ' . $mirrorReason . '.';
+                            }
                         }
                     }
-                    if ($status === 'paid') {
-                        $requestId = create_payment_request($newInvoiceId, (int) $currentCompany['id'], $adminId, $totalAmount, 'manual', 'Auto-created for paid invoice.');
-                        if ($requestId) {
-                            db()->prepare('UPDATE invoice_payment_requests SET status = :status, payment_received_on = :payment_received_on, payment_amount = :payment_amount WHERE id = :id')
-                                ->execute([
-                                    'status' => 'paid',
-                                    'payment_received_on' => $issuedOn,
-                                    'payment_amount' => $totalAmount,
-                                    'id' => $requestId,
-                                ]);
-                            auto_post_invoice_payment_voucher((int) $requestId, $adminId);
+
+                    $stockPostingNotes = [];
+                    if ($revenueSkippedReason === null) {
+                        // Stock issue + COGS + NRV release for goods invoices
+                        // (inventory AND manufacturing) via the shared idempotent
+                        // helper — the same routine also runs on the draft→issued
+                        // /paid transition so no path skips the stock leg.
+                        $stockPostingNotes = invoice_issue_inventory_stock($newInvoiceId, $adminId);
+
+                        if ($status === 'paid') {
+                            $requestId = create_payment_request($newInvoiceId, (int) $currentCompany['id'], $adminId, $totalAmount, 'manual', 'Auto-created for paid invoice.');
+                            if ($requestId) {
+                                db()->prepare('UPDATE invoice_payment_requests SET status = :status, payment_received_on = :payment_received_on, payment_amount = :payment_amount WHERE id = :id')
+                                    ->execute([
+                                        'status' => 'paid',
+                                        'payment_received_on' => $issuedOn,
+                                        'payment_amount' => $totalAmount,
+                                        'id' => $requestId,
+                                    ]);
+                                auto_post_invoice_payment_voucher((int) $requestId, $adminId);
+                            }
                         }
                     }
-                    $message = 'Invoice created successfully.' . $mirrorNote . ($stockPostingNotes !== [] ? ' ' . implode(' ', $stockPostingNotes) : '');
+
+                    // Redirect-after-POST: a browser refresh must not re-run this
+                    // handler and mint a second invoice + stock issue + COGS +
+                    // revenue voucher (each refresh generated a fresh invoice_no,
+                    // so the stock helper's idempotency guard never fired).
+                    if ($revenueSkippedReason !== null) {
+                        flash('error', 'Invoice ' . $invoiceNo . ' was created, but its sales revenue could not be posted: ' . $revenueSkippedReason . '. Stock, COGS and payment were held back so the books stay balanced — map the required ledger, then re-issue the invoice.');
+                    } else {
+                        flash('success', 'Invoice created successfully.' . $mirrorNote . ($stockPostingNotes !== [] ? ' ' . implode(' ', $stockPostingNotes) : ''));
+                    }
+                    redirect('admin/invoice.php?action=view&id=' . $newInvoiceId);
                 }
             }
         }
@@ -523,8 +549,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? (float) ($_POST['excise_rate'] ?? ($targetInvoice['excise_rate'] ?? $defaultExciseRate))
             : 0.0;
 
+        // An invoice whose sales voucher is already in the books must not have its
+        // amounts silently rewritten underneath the ledgers. An issued proforma
+        // has already auto-posted its Dr AR / Cr Revenue / Cr VAT voucher, so a
+        // changed amount here would leave receivable and revenue overstated by the
+        // difference with no matching ledger adjustment. Block amount/VAT/excise
+        // changes once a posted sales voucher exists; notes/dates stay editable.
+        $postedSalesVoucherId = 0;
+        if (table_exists('vouchers')) {
+            $pvStmt = db()->prepare("SELECT id FROM vouchers WHERE source_type = 'task_invoice' AND source_id = :id AND status = 'posted' LIMIT 1");
+            $pvStmt->execute(['id' => $invoiceId]);
+            $postedSalesVoucherId = (int) ($pvStmt->fetchColumn() ?: 0);
+        }
+        $invoiceAmountChanged = abs($amount - (float) ($targetInvoice['amount'] ?? 0)) >= 0.01
+            || abs($vatRate - (float) ($targetInvoice['vat_rate'] ?? 0)) >= 0.0001
+            || ($invoiceSourceType === 'manufacturing' && abs($exciseRate - (float) ($targetInvoice['excise_rate'] ?? 0)) >= 0.0001);
+
         if (!invoice_is_editable($targetInvoice)) {
             $error = 'This invoice can no longer be edited. Only draft and proforma invoices that are not paid or cancelled are editable.';
+        } elseif ($postedSalesVoucherId > 0 && $invoiceAmountChanged) {
+            $error = 'This invoice already has a posted sales voucher (#' . $postedSalesVoucherId . ') in the books, so its amount, VAT or excise cannot be changed here — that would overstate receivables and revenue. Cancel and reissue the invoice, or raise a credit note, to change the amount.';
         } elseif ($invoiceNo && $amount > 0 && $issueDate) {
             $existingDiscount = (float) ($targetInvoice['discount_amount'] ?? 0);
             $taxableAmount = max($amount - $existingDiscount, 0.0);

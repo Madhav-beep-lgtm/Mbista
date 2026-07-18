@@ -189,6 +189,11 @@ function accounting_module_repair_database(): array
                 db()->exec($statement);
             }
         }
+        // Per-period salary-sheet adjustments (extra taxable earning + post-tax
+        // deduction + remark) editable on a draft/calculated run.
+        accounting_repair_add_column('payroll_run_lines', 'adj_earning', '`adj_earning` DECIMAL(14,2) NOT NULL DEFAULT 0.00 AFTER `other_deduction`');
+        accounting_repair_add_column('payroll_run_lines', 'adj_deduction', '`adj_deduction` DECIMAL(14,2) NOT NULL DEFAULT 0.00 AFTER `adj_earning`');
+        accounting_repair_add_column('payroll_run_lines', 'adj_remark', '`adj_remark` VARCHAR(255) DEFAULT NULL AFTER `adj_deduction`');
     });
 
     $run('Provision manufacturing costing (migration 038)', static function (): void {

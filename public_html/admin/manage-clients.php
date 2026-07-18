@@ -35,6 +35,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($action === 'assign_staff' && $role === 'admin') {
         $staffId = (int) ($_POST['staff_user_id'] ?? 0);
+        if ($staffId > 0) {
+            // The staff member must belong to THIS company. Otherwise an admin
+            // could bind a foreign tenant's staffer to this client and silently
+            // grant them access to its books — authorized_company_ids() grants a
+            // staffer any client where assigned_staff_user_id = their id, with no
+            // company scope of its own.
+            $staffCheck = db()->prepare("SELECT id FROM users WHERE id = :id AND role = 'staff' AND company_id = :company_id LIMIT 1");
+            $staffCheck->execute(['id' => $staffId, 'company_id' => current_company_id()]);
+            if (!$staffCheck->fetch()) {
+                flash('error', 'Select a staff member from your own company.');
+                redirect('admin/manage-clients.php');
+            }
+        }
         db()->prepare('UPDATE client_profiles SET assigned_staff_user_id = :sid WHERE id = :id')
             ->execute(['sid' => $staffId > 0 ? $staffId : null, 'id' => $clientId]);
         flash('success', 'Staff assignment updated.');
@@ -44,8 +57,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $clients = client_books_clients_for_scope();
-$staffStmt = db()->query("SELECT id, name FROM users WHERE role = 'staff' AND status = 'active' ORDER BY name ASC");
-$staffUsers = $staffStmt ? $staffStmt->fetchAll() : [];
+// Scope the assignable-staff roster to the active company. An unscoped query
+// leaked every other tenant's staff names/ids into this admin's dropdown.
+$staffStmt = db()->prepare("SELECT id, name FROM users WHERE role = 'staff' AND status = 'active' AND company_id = :company_id ORDER BY name ASC");
+$staffStmt->execute(['company_id' => current_company_id()]);
+$staffUsers = $staffStmt->fetchAll();
 
 // Clients this admin manages that live under a DIFFERENT portal: created while
 // another company context was active, so they are absent from the list below.
