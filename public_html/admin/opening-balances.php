@@ -255,7 +255,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </td>
                     <td><?= e(ucfirst((string) $l['account_type'])) ?></td>
                     <?php if (!$applicable): ?>
-                        <td colspan="8" class="muted" style="font-style:italic">Opening balance is not applicable to income and expense accounts.</td>
+                        <td colspan="8" class="muted">—</td>
                     <?php else: ?>
                         <td class="is-numeric"><?= $l['previous_closing_debit'] > 0 ? e(number_format((float) $l['previous_closing_debit'], 2)) : '–' ?></td>
                         <td class="is-numeric"><?= $l['previous_closing_credit'] > 0 ? e(number_format((float) $l['previous_closing_credit'], 2)) : '–' ?></td>

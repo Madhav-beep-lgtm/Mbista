@@ -2493,7 +2493,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     $leases = $leases->fetchAll(PDO::FETCH_ASSOC);
     ?>
     <section class="mbw-card">
-        <div class="mbw-card-head"><h2>New lease (IFRS 16)</h2><div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">ROU = liability + prepayments + initial direct costs + restoration − incentives. The ledgers below belong to THIS lease only.</span></div></div>
+        <div class="mbw-card-head"><h2>New lease (IFRS 16)</h2></div>
         <?php
         $leaseDefRou = fa_resolve_mapping($companyId, 'rou_asset');
         $leaseDefLiab = fa_resolve_mapping($companyId, 'lease_liability');
@@ -2511,7 +2511,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Term (months)<input type="number" name="term_months" value="48" required></label>
             <label>Discount rate % (annual)<input type="number" step="0.0001" name="discount_rate_annual" value="0.00" required></label>
             <label>Payment timing<select name="payment_timing"><option value="arrears">Arrears (period end)</option><option value="advance">Advance (period start)</option></select></label>
-            <div class="workspace-span-2" style="color:var(--mbw-muted);font-size:12.5px;align-self:end">Lease liability = present value of the payments at the discount rate — calculated automatically. RoU asset = liability + prepayments + initial direct costs + restoration − incentives.</div>
             <label>Prepayments<input type="number" step="0.01" name="prepayments" value="0.00"></label>
             <label>Initial direct costs<input type="number" step="0.01" name="initial_direct_costs" value="0.00"></label>
             <label>Lease incentives<input type="number" step="0.01" name="incentives" value="0.00"></label>

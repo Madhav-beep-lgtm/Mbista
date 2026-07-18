@@ -619,7 +619,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 <div class="rpt-fullwidth">
     <main class="rc-report-view rpt-statement" id="rc2Statement">
-        <div class="rpt-bar"><?= e($reportNumberedTitle) ?></div>
         <?php rc_render_letterhead($report, $reportMeta); ?>
         <div class="rc-table-scroll">
             <?php rc_render_table($report, $hasGroups); ?>

@@ -1699,7 +1699,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <div class="workspace-feature-stack">
     <?php if ($invView === 'inventory'): ?>
     <details class="feature-disclosure" id="create-item" open>
-        <summary><span><strong><?= icon('services') ?><?= $editItem ? 'Edit item' : 'Create item' ?></strong><small>Maintain inventory, service, raw material, and finished-goods master data.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <summary><span><strong><?= icon('services') ?><?= $editItem ? 'Edit item' : 'Create item' ?></strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_item">
@@ -1810,7 +1810,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <details class="feature-disclosure" id="warehouses">
-        <summary><span><strong><?= icon('services') ?>Warehouses / Locations</strong><small>Stock locations for this company — used to track where inventory physically sits.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <summary><span><strong><?= icon('services') ?>Warehouses / Locations</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <div class="rc-table-scroll">
             <table class="rc-table">
                 <thead><tr><th>Name</th><th>Code</th><th>Status</th><th></th></tr></thead>
@@ -1845,7 +1845,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </details>
 
     <details class="feature-disclosure" id="movement-purchase" <?= $moveItemId > 0 ? 'open' : '' ?>>
-        <summary><span><strong><?= icon('tasks') ?>Record Purchase / Opening Stock</strong><small>Post opening balances, purchases, and purchase returns.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <summary><span><strong><?= icon('tasks') ?>Record Purchase / Opening Stock</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid" id="purchaseMovementForm">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="record_movement">
