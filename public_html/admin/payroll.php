@@ -83,7 +83,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($result['ok']) {
             log_activity('payroll_run', $runId, 'approved', 'Payroll approved' . (($result['voucher_id'] ?? 0) > 0 ? ' and posted (voucher #' . $result['voucher_id'] . ')' : '') . '.', $userId);
             security_event('payroll_run_posted', 'success', 'Payroll run #' . $runId . ' approved and posted.', $companyId, $userId);
-            flash('success', 'Payroll approved.' . (($result['voucher_id'] ?? 0) > 0 ? ' Accrual voucher posted automatically.' : ' Auto-post is off; post manually from settings.'));
+            flash('success', 'Payroll approved.' . (($result['voucher_id'] ?? 0) > 0 ? ' Accrual voucher posted automatically.' : ' Auto-post is off — use “Post accrual to books” below to post the accrual.'));
+        } else {
+            flash('error', (string) $result['error']);
+        }
+        redirect('admin/payroll.php?run=' . $runId);
+    }
+
+    if ($action === 'post_accrual') {
+        $result = payroll_post_accrual($runId, $userId);
+        if ($result['ok']) {
+            log_activity('payroll_run', $runId, 'accrual_posted', 'Accrual voucher #' . (int) $result['voucher_id'] . ' posted to the books.', $userId);
+            security_event('payroll_run_posted', 'success', 'Payroll run #' . $runId . ' accrual posted (voucher #' . (int) $result['voucher_id'] . ').', $companyId, $userId);
+            flash('success', 'Accrual voucher posted to the books.');
         } else {
             flash('error', (string) $result['error']);
         }
@@ -410,9 +422,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <section class="mbw-card" aria-label="Journal preview">
     <div class="mbw-card-head">
-        <h2>Journal <?= in_array((string) $run['status'], ['posted', 'paid'], true) ? '(posted' . ($run['accrual_voucher_id'] ? ' — voucher #' . (int) $run['accrual_voucher_id'] : '') . ')' : 'Preview' ?></h2>
+        <h2>Journal <?= $run['accrual_voucher_id'] ? '(posted — voucher #' . (int) $run['accrual_voucher_id'] . ')' : (in_array((string) $run['status'], ['posted', 'paid'], true) ? '(accrual NOT posted)' : 'Preview') ?></h2>
         <?php if ($run['payment_voucher_id']): ?><div class="mbw-card-tools"><span class="mbw-pill tone-green">Payment voucher #<?= (int) $run['payment_voucher_id'] ?></span></div><?php endif; ?>
     </div>
+    <?php if (in_array((string) $run['status'], ['approved', 'posted', 'paid'], true) && !$run['accrual_voucher_id']): ?>
+        <div class="notice error" style="margin:0 0 12px">
+            <strong>The salary accrual is not posted to the books.</strong> This run was approved while auto-post was off, so the salary expense, TDS and payables were never journalised (which is why it doesn't appear correctly in the ledger / salary sheet). Post it now:
+            <form method="post" style="display:block;margin-top:8px" data-confirm="Post the salary accrual voucher for <?= e($run['period_label']) ?> (Dr salary expense &amp; employer cost / Cr TDS, retirement and net salary payable)?">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="post_accrual">
+                <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
+                <button type="submit"><?= icon('badge-check') ?>Post accrual to books</button>
+            </form>
+        </div>
+    <?php endif; ?>
     <?php if ($journalPreview === []): ?>
         <p style="color:var(--mbw-muted);font-size:12.5px;margin:0">Calculate the run and resolve blocking issues to preview the accrual voucher.</p>
     <?php else: ?>

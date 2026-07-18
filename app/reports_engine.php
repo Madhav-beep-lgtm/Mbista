@@ -1492,13 +1492,24 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             if ($payrollRunId > 0) {
                 $runStmt = db()->prepare('SELECT * FROM payroll_runs WHERE id = :id AND company_id = :cid LIMIT 1');
                 $runStmt->execute(['id' => $payrollRunId, 'cid' => $scopeCompanyId]);
+                $payrollRun = $runStmt->fetch();
             } else {
                 $runStmt = db()->prepare("SELECT * FROM payroll_runs
                     WHERE company_id = :cid AND status <> 'cancelled' AND (pay_date BETWEEN :f AND :t OR pay_date IS NULL)
                     ORDER BY FIELD(status, 'paid', 'posted', 'approved', 'calculated', 'draft'), pay_date DESC, id DESC LIMIT 1");
                 $runStmt->execute(['cid' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+                $payrollRun = $runStmt->fetch();
+                // A run whose pay_date falls outside the report period (e.g. a run
+                // in a different fiscal year) must still be reachable — fall back to
+                // the company's latest run so the sheet is never silently empty.
+                if (!$payrollRun) {
+                    $fallbackStmt = db()->prepare("SELECT * FROM payroll_runs
+                        WHERE company_id = :cid AND status <> 'cancelled'
+                        ORDER BY FIELD(status, 'paid', 'posted', 'approved', 'calculated', 'draft'), pay_date DESC, id DESC LIMIT 1");
+                    $fallbackStmt->execute(['cid' => $scopeCompanyId]);
+                    $payrollRun = $fallbackStmt->fetch();
+                }
             }
-            $payrollRun = $runStmt->fetch();
             if (!$payrollRun) {
                 return [
                     'title' => 'Salary Sheet',

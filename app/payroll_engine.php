@@ -891,6 +891,65 @@ function payroll_approve_and_post(int $runId, int $approverId): array
     }
 }
 
+/**
+ * Post the accrual voucher for a run that reached approved/posted/paid WITHOUT
+ * one — the case where auto-post was off at approval time, which otherwise left
+ * the salary expense, TDS and payables unposted (only the payment voucher, if
+ * any, was in the books). Idempotent: refuses when an accrual already exists.
+ * Does NOT touch loan recoveries (those already ran at approval time).
+ * Returns ['ok'=>bool, 'error'=>?string, 'voucher_id'=>int].
+ */
+function payroll_post_accrual(int $runId, int $userId): array
+{
+    $run = payroll_run($runId);
+    if (!$run) {
+        return ['ok' => false, 'error' => 'Run not found.', 'voucher_id' => 0];
+    }
+    if (!in_array((string) $run['status'], ['approved', 'posted', 'paid'], true)) {
+        return ['ok' => false, 'error' => 'Only an approved, posted or paid run can post its accrual.', 'voucher_id' => 0];
+    }
+    if ((int) ($run['accrual_voucher_id'] ?? 0) > 0) {
+        return ['ok' => false, 'error' => 'The accrual voucher is already posted for this run.', 'voucher_id' => 0];
+    }
+    $settings = payroll_settings((int) $run['company_id']);
+    foreach ([
+        'salary_expense_ledger_id' => 'Salary expense',
+        'salary_payable_ledger_id' => 'Salary payable',
+        'tds_payable_ledger_id' => 'Income tax (TDS) payable',
+    ] as $key => $label) {
+        if ((int) ($settings[$key] ?? 0) <= 0) {
+            return ['ok' => false, 'error' => $label . ' ledger is not mapped in Payroll Settings.', 'voucher_id' => 0];
+        }
+    }
+    $entries = payroll_accrual_entries($run, $settings);
+    $debits = round(array_sum(array_map(static fn (array $e): float => $e['entry_type'] === 'debit' ? $e['amount'] : 0, $entries)), 2);
+    $credits = round(array_sum(array_map(static fn (array $e): float => $e['entry_type'] === 'credit' ? $e['amount'] : 0, $entries)), 2);
+    if (abs($debits - $credits) > 0.011) {
+        return ['ok' => false, 'error' => 'Accrual journal does not balance (Dr ' . number_format($debits, 2) . ' vs Cr ' . number_format($credits, 2) . ').', 'voucher_id' => 0];
+    }
+    try {
+        $voucherId = create_voucher_with_entries([
+            'company_id' => (int) $run['company_id'],
+            'fiscal_year_id' => (int) $run['fiscal_year_id'],
+            'voucher_no' => 'PAY-' . $run['period_label'] . '-' . $runId,
+            'voucher_type' => 'journal',
+            'voucher_date' => (string) ($run['pay_date'] ?? date('Y-m-d')),
+            'source_type' => 'payroll_run',
+            'source_id' => $runId,
+            'total_amount' => $debits,
+            'narration' => 'Payroll accrual for ' . $run['period_label'] . ' (' . count(payroll_run_lines($runId)) . ' employees).',
+            'status' => 'posted',
+            'posted_by' => $userId,
+        ], $entries);
+        db()->prepare("UPDATE payroll_runs SET accrual_voucher_id = :vid, posted_at = COALESCE(posted_at, NOW()),
+                status = IF(status = 'approved', 'posted', status) WHERE id = :id")
+            ->execute(['vid' => $voucherId, 'id' => $runId]);
+        return ['ok' => true, 'error' => null, 'voucher_id' => $voucherId];
+    } catch (Throwable $exception) {
+        return ['ok' => false, 'error' => $exception->getMessage(), 'voucher_id' => 0];
+    }
+}
+
 /** Salary payment voucher: Dr Salary Payable / Cr Bank. Marks the run paid. */
 function payroll_record_payment(int $runId, int $userId, string $paymentDate = ''): array
 {
