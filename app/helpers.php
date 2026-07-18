@@ -978,10 +978,80 @@ function payment_settings(): array
         'bank_name' => (string) setting('bank_name', ''),
         'bank_account_name' => (string) setting('bank_account_name', ''),
         'bank_account_number' => (string) setting('bank_account_number', ''),
+        'bank_branch' => (string) setting('bank_branch', ''),
         'payment_note' => (string) setting('payment_note', ''),
         'stripe_checkout_url' => (string) setting('stripe_checkout_url', ''),
         'paypal_checkout_url' => (string) setting('paypal_checkout_url', ''),
     ];
+}
+
+/**
+ * The single source of truth for payment methods across the app: the built-in
+ * manual methods (cash / bank transfer / cheque) plus each online gateway the
+ * company has enabled in Settings -> Payments. Used to populate every
+ * "payment method" dropdown so they all reflect one configuration.
+ */
+function payment_methods(int $companyId = 0): array
+{
+    $methods = [
+        ['key' => 'cash', 'label' => 'Cash'],
+        ['key' => 'bank_transfer', 'label' => 'Bank Transfer'],
+        ['key' => 'cheque', 'label' => 'Cheque'],
+    ];
+    if ($companyId > 0 && table_exists('payment_gateways')) {
+        $labels = ['esewa' => 'eSewa', 'khalti' => 'Khalti', 'fonepay' => 'Fonepay', 'stripe' => 'Stripe'];
+        try {
+            $stmt = db()->prepare('SELECT provider FROM payment_gateways WHERE company_id = :cid AND enabled = 1');
+            $stmt->execute(['cid' => $companyId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $provider) {
+                $methods[] = ['key' => (string) $provider, 'label' => $labels[(string) $provider] ?? ucfirst((string) $provider)];
+            }
+        } catch (Throwable $e) {
+            // gateways table may not exist yet on older installs — manual methods still returned
+        }
+    }
+    return $methods;
+}
+
+/**
+ * Render a "payment method" field: a dropdown of the configured methods plus an
+ * "Other (type it)" option that reveals a free-text box. A hidden input carries
+ * the chosen value under $name so existing handlers keep reading $_POST[$name]
+ * unchanged. The wiring JS is emitted once per request.
+ */
+function payment_method_field(int $companyId, string $current = '', string $name = 'payment_method', string $labelText = 'Payment method'): string
+{
+    static $jsEmitted = false;
+    $methods = payment_methods($companyId);
+    $known = false;
+    foreach ($methods as $m) {
+        if ($current !== '' && strcasecmp($current, (string) $m['label']) === 0) {
+            $known = true;
+            break;
+        }
+    }
+    $html = '<div class="pm-field">';
+    $html .= '<label>' . e($labelText) . '<select class="pm-select">';
+    foreach ($methods as $m) {
+        $sel = ($known && strcasecmp($current, (string) $m['label']) === 0) ? ' selected' : '';
+        $html .= '<option value="' . e((string) $m['label']) . '"' . $sel . '>' . e((string) $m['label']) . '</option>';
+    }
+    $html .= '<option value="__other__"' . ($known ? '' : ($current !== '' ? ' selected' : '')) . '>Other (type it)</option>';
+    $html .= '</select></label>';
+    $html .= '<input type="text" class="pm-other" placeholder="Enter payment method" value="' . ($known ? '' : e($current)) . '" style="' . ($known || $current === '' ? 'display:none' : '') . '">';
+    $html .= '<input type="hidden" name="' . e($name) . '" class="pm-hidden" value="' . e($current) . '">';
+    $html .= '</div>';
+    if (!$jsEmitted) {
+        $jsEmitted = true;
+        $html .= '<script>document.addEventListener("DOMContentLoaded",function(){'
+            . 'document.querySelectorAll(".pm-field").forEach(function(f){'
+            . 'var s=f.querySelector(".pm-select"),o=f.querySelector(".pm-other"),h=f.querySelector(".pm-hidden");'
+            . 'if(!s||!o||!h)return;'
+            . 'function sync(){if(s.value==="__other__"){o.style.display="";h.value=o.value;}else{o.style.display="none";h.value=s.value;}}'
+            . 's.addEventListener("change",sync);o.addEventListener("input",function(){h.value=o.value;});'
+            . '});});</script>';
+    }
+    return $html;
 }
 
 function companies_list(bool $onlyActive = true): array

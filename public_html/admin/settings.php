@@ -957,6 +957,11 @@ if (table_exists('company_shareholdings')) {
             <label>Stripe checkout URL<input type="url" name="stripe_checkout_url" value="<?= e($settings['stripe_checkout_url'] ?? '') ?>" placeholder="https://buy.stripe.com/..."></label>
             <label>PayPal checkout URL<input type="url" name="paypal_checkout_url" value="<?= e($settings['paypal_checkout_url'] ?? '') ?>" placeholder="https://www.paypal.com/..."></label>
             <label>Payment note<input type="text" name="payment_note" value="<?= e($settings['payment_note'] ?? '') ?>"></label>
+            <div style="grid-column:1/-1; border-top:1px solid var(--mbw-border); margin-top:6px; padding-top:12px">
+                <strong style="color:var(--mbw-heading)"><?= icon('card') ?> Online payment gateways</strong>
+                <p style="margin:4px 0 8px; font-size:12.5px; color:var(--mbw-muted)">Let clients pay their invoices online via eSewa, Khalti, Fonepay or Stripe — a confirmed payment posts a receipt automatically. The bank details above are shown to clients as a manual bank-transfer option, and every method here feeds the app-wide payment-method dropdowns.</p>
+                <a class="button secondary" href="<?= e(url('admin/payment-gateways.php')) ?>"><?= icon('login') ?> Configure online gateways</a>
+            </div>
         </div>
     </details>
 

@@ -1249,7 +1249,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                                         </label>
                                                         <label>Amount paid<input type="number" name="declared_amount" min="0.01" step="0.01" value="<?= e(number_format((float) $paymentRequest['amount_requested'], 2, '.', '')) ?>" required></label>
                                                         <label>Paid on<input type="date" name="declared_on" value="<?= e(date('Y-m-d')) ?>" required></label>
-                                                        <label>Method (bank/cash/wallet)<input type="text" name="declared_method" maxlength="100"></label>
+                                                        <?php echo payment_method_field((int) $invoice['company_id'], '', 'declared_method', 'Method'); ?>
                                                         <label>Reference / transaction #<input type="text" name="declared_reference" maxlength="190"></label>
                                                         <label class="workspace-span-2">Note (optional)<textarea name="declared_note" rows="2"></textarea></label>
                                                         <div class="workspace-span-2">
@@ -1277,6 +1277,20 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                                     </form>
                                                 <?php endforeach; ?>
                                             </div>
+                                        </div>
+                                    <?php endif; ?>
+
+                                    <?php $bankPay = payment_settings(); ?>
+                                    <?php if ($invoiceAwaitingPayment && trim((string) $bankPay['bank_account_number']) !== ''): ?>
+                                        <div style="border: 1px solid var(--mbw-border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.75rem;">
+                                            <strong style="color: var(--mbw-heading);"><?= icon('bank') ?>Pay by bank transfer</strong>
+                                            <p style="margin: 0.25rem 0 0.5rem; font-size: 12.5px; color: var(--mbw-muted);">Transfer to the account below, then use &ldquo;I have made this payment&rdquo; to notify us for verification.</p>
+                                            <table style="font-size: 13px; border-collapse: collapse;">
+                                                <?php if (trim((string) $bankPay['bank_name']) !== ''): ?><tr><td style="padding:2px 14px 2px 0; color:var(--mbw-muted)">Bank</td><td><strong><?= e($bankPay['bank_name']) ?></strong></td></tr><?php endif; ?>
+                                                <?php if (trim((string) $bankPay['bank_account_name']) !== ''): ?><tr><td style="padding:2px 14px 2px 0; color:var(--mbw-muted)">Account name</td><td><strong><?= e($bankPay['bank_account_name']) ?></strong></td></tr><?php endif; ?>
+                                                <tr><td style="padding:2px 14px 2px 0; color:var(--mbw-muted)">Account no.</td><td><strong><?= e($bankPay['bank_account_number']) ?></strong></td></tr>
+                                                <?php if (trim((string) $bankPay['bank_branch']) !== ''): ?><tr><td style="padding:2px 14px 2px 0; color:var(--mbw-muted)">Branch</td><td><strong><?= e($bankPay['bank_branch']) ?></strong></td></tr><?php endif; ?>
+                                            </table>
                                         </div>
                                     <?php endif; ?>
 

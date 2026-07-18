@@ -1048,7 +1048,7 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
             </label>
             <label>Amount received<input type="number" step="0.01" min="0.01" name="amount" required></label>
             <label>Received on<input type="date" name="received_on" value="<?= e(date('Y-m-d')) ?>"></label>
-            <label>Method<select name="payment_method"><option>Cash</option><option>Bank Transfer</option><option>Cheque</option><option>eSewa / Wallet</option><option>Other</option></select></label>
+            <?= payment_method_field($companyId, '', 'payment_method', 'Method') ?>
             <label class="span-2">Notes<textarea name="notes" placeholder="Receipt reference, remarks"></textarea></label>
             <button type="submit"><?= icon('documents') ?>Record Payment</button>
             <a class="button secondary" href="<?= e(parties_page_url(['panel' => null])) ?>">Cancel</a>

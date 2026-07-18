@@ -1380,7 +1380,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                                         </select>
                                                         <input type="number" name="payment_amount" min="0.01" step="0.01" value="<?php echo e(number_format($prefillAmount, 2, '.', '')); ?>" required>
                                                         <input type="date" name="payment_received_on" value="<?php echo e($prefillDate); ?>" required>
-                                                        <input type="text" name="payment_method" placeholder="Method (bank/cash/etc)" value="<?php echo e($prefillMethod); ?>">
+                                                        <?php echo payment_method_field((int) ($currentCompany['id'] ?? 0), (string) $prefillMethod, 'payment_method', 'Method'); ?>
                                                         <input type="text" name="payment_reference" placeholder="Reference #" value="<?php echo e($prefillReference); ?>">
                                                         <textarea name="payment_notes" placeholder="Payment note"></textarea>
                                                         <button type="submit" class="btn btn-success">Record Payment</button>
@@ -1475,8 +1475,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                 </div>
                 
                 <div class="form-group">
-                    <label>Payment Method</label>
-                    <input type="text" name="payment_method" placeholder="e.g., Bank Transfer, Check, Cash">
+                    <?php echo payment_method_field((int) ($currentCompany['id'] ?? 0), '', 'payment_method', 'Payment Method'); ?>
                 </div>
                 
                 <div class="form-group">
