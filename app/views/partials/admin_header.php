@@ -42,6 +42,7 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Day Book', 'admin/day-book.php', 'calendar', $headerScript === 'day-book.php'],
     ['Voucher Import (Excel)', 'admin/voucher-import.php', 'upload', $headerScript === 'voucher-import.php'],
     ['Sales & Invoices', 'admin/accounting-parties.php?tab=sales', 'receipt-voucher', $headerScript === 'accounting-parties.php' && in_array($headerTab, ['', 'sales'], true)],
+    ['Payment Gateways', 'admin/payment-gateways.php', 'card', $headerScript === 'payment-gateways.php'],
     ['Purchases', 'admin/accounting-parties.php?tab=purchases', 'cart', $headerScript === 'accounting-parties.php' && $headerTab === 'purchases'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
@@ -82,6 +83,7 @@ $headerPageIcons = [
     'hr.php' => 'attendance', 'manage-clients.php' => 'handshake', 'client-books.php' => 'accounting',
     'search.php' => 'search', 'export-ledger.php' => 'reports', 'budgets.php' => 'pie',
     'payroll.php' => 'card', 'payroll-employees.php' => 'teams', 'payroll-settings.php' => 'sliders',
+    'payment-gateways.php' => 'card',
     'insights.php' => 'insights',
 ];
 $headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php'];
@@ -90,7 +92,7 @@ if ($pageBreadcrumb === null) {
     $headerTrailHome = [['Home', 'admin/index.php']];
     $headerTrailReports = [['Home', 'admin/index.php'], ['Reports', 'admin/reports-center.php']];
     $headerTrailAccounting = [['Home', 'admin/index.php'], ['Accounting', 'admin/accounting-dashboard.php']];
-    $headerAccountingScripts = ['accounting.php', 'ledgers.php', 'day-book.php', 'opening-balances.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'accounting-inventory.php', 'fixed-assets.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
+    $headerAccountingScripts = ['accounting.php', 'ledgers.php', 'day-book.php', 'opening-balances.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'payment-gateways.php', 'accounting-inventory.php', 'fixed-assets.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
     if (in_array($headerScript, ['report-schedules.php', 'consolidated-report.php'], true)) {
         $pageBreadcrumb = $headerTrailReports;
     } elseif (in_array($headerScript, $headerPayrollScripts, true)) {

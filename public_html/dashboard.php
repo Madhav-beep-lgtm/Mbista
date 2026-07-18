@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/payment_gateway_engine.php';
 
 require_login();
 $pageTitle = 'Dashboard';
@@ -1260,6 +1261,24 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                             <?php endif; ?>
                                         </div>
                                     <?php endforeach; ?>
+
+                                    <?php $payGateways = $invoiceAwaitingPayment ? pg_enabled_configs((int) $invoice['company_id']) : []; ?>
+                                    <?php if ($payGateways !== []): ?>
+                                        <div style="border: 1px solid var(--mbw-border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.75rem;">
+                                            <strong style="color: var(--mbw-heading);"><?= icon('card') ?>Pay online now</strong>
+                                            <p style="margin: 0.25rem 0 0.5rem; font-size: 12.5px; color: var(--mbw-muted);">You'll be redirected to the provider; your invoice updates automatically once payment is confirmed.</p>
+                                            <div style="display:flex;flex-wrap:wrap;gap:8px">
+                                                <?php foreach ($payGateways as $pgProvider => $pgConfig): ?>
+                                                    <form method="post" action="<?= e(url('pay/start.php')) ?>" style="display:inline">
+                                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                                        <input type="hidden" name="invoice_id" value="<?= e((int) $invoice['id']) ?>">
+                                                        <input type="hidden" name="provider" value="<?= e((string) $pgProvider) ?>">
+                                                        <button type="submit" class="button"><?= icon('card') ?>Pay with <?= e(pg_provider_label((string) $pgProvider)) ?></button>
+                                                    </form>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        </div>
+                                    <?php endif; ?>
 
                                     <?php if ($invoiceAwaitingPayment && table_exists('support_ticket_requests')): ?>
                                         <details class="feature-disclosure" style="margin-top: 0.5rem;">
