@@ -1048,7 +1048,7 @@ function payment_method_field(int $companyId, string $current = '', string $name
             . 'var s=f.querySelector(".pm-select"),o=f.querySelector(".pm-other"),h=f.querySelector(".pm-hidden");'
             . 'if(!s||!o||!h)return;'
             . 'function sync(){if(s.value==="__other__"){o.style.display="";h.value=o.value;}else{o.style.display="none";h.value=s.value;}}'
-            . 's.addEventListener("change",sync);o.addEventListener("input",function(){h.value=o.value;});'
+            . 's.addEventListener("change",sync);o.addEventListener("input",function(){h.value=o.value;});sync();'
             . '});});</script>';
     }
     return $html;
