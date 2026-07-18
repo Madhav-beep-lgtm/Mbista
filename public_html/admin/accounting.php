@@ -115,6 +115,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/accounting.php');
     }
 
+    if ($postAction === 'force_delete_voucher') {
+        // Admin-only override for module-posted / bank-reconciled vouchers the
+        // normal delete refuses. Rolls the owning register back in the same
+        // transaction and demands a written reason; fully security-logged.
+        if ((string) ($currentAdmin["role"] ?? "") !== "admin") {
+            flash('error', 'Only an admin can force-delete a voucher.');
+            redirect('admin/accounting.php');
+        }
+        require_permission('accounting', 'edit');
+        $result = force_delete_voucher((int) ($_POST['voucher_id'] ?? 0), $companyId, (string) ($_POST['force_reason'] ?? ''), $userId);
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? 'Voucher ' . $result['voucher_no'] . ' force-deleted.' . ($result['summary'] !== '' ? ' ' . ucfirst($result['summary']) . '.' : '')
+            : (string) $result['error']);
+        redirect('admin/accounting.php');
+    }
+
     if ($postAction === 'create_voucher') {
         if (!user_can('create')) {
             flash('error', 'You do not have permission to create vouchers.');
@@ -518,6 +534,23 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <input type="hidden" name="voucher_id" value="<?= (int) $voucher['id'] ?>">
                                 <button type="submit" class="button danger" style="min-height:30px;padding:3px 10px">Delete</button>
                             </form>
+                        <?php endif; ?>
+                        <?php if (($currentAdmin["role"] ?? "") === "admin" && voucher_mutation_blocker($voucher) !== null): ?>
+                            <details class="vr-force" style="position:relative;display:inline-block">
+                                <summary class="button secondary" style="min-height:30px;padding:3px 10px;color:#a33;list-style:none;cursor:pointer">Force delete…</summary>
+                                <form method="post" style="position:absolute;right:0;z-index:40;margin-top:6px;display:grid;gap:8px;width:280px;padding:12px;text-align:left;background:var(--mbw-card,#fff);border:1px solid var(--mbw-line,rgba(0,0,0,.16));border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.22)"
+                                      data-confirm="FORCE delete <?= e($voucher['voucher_no']) ?>? This overrides the module lock: the owning register is rolled back / unlinked, reconciled entries are un-reconciled, and the action is security-logged. It cannot be undone.">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="force_delete_voucher">
+                                    <input type="hidden" name="voucher_id" value="<?= (int) $voucher['id'] ?>">
+                                    <strong style="font-size:12px">Force delete <?= e($voucher['voucher_no']) ?></strong>
+                                    <small style="color:var(--mbw-muted);font-weight:400"><?= e((string) ($voucher['source_type'] ?? 'manual')) ?> — the module register is rolled back with it. Locked periods / closed years still refuse.</small>
+                                    <label style="display:grid;gap:3px;font-size:12px;font-weight:600">Reason (required, min 10 chars)
+                                        <input type="text" name="force_reason" minlength="10" required placeholder="e.g. duplicate auto-post, corrected outside">
+                                    </label>
+                                    <button type="submit" class="button danger">Force delete voucher</button>
+                                </form>
+                            </details>
                         <?php endif; ?>
                     </td>
                 </tr>

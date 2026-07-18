@@ -546,15 +546,26 @@ function ob_subledger_reconciliation(int $companyId, int $fiscalYearId): array
             $openingByLedger[(int) $r['ledger_id']] = (float) $r['opening_net'];
         }
     }
-    $result = ['receivable' => ['control' => 0.0, 'subledger' => 0.0, 'parties' => []], 'payable' => ['control' => 0.0, 'subledger' => 0.0, 'parties' => []]];
+    $result = [
+        'receivable' => ['control' => 0.0, 'subledger' => 0.0, 'parties' => [], 'control_ledgers' => [], 'excluded' => []],
+        'payable' => ['control' => 0.0, 'subledger' => 0.0, 'parties' => [], 'control_ledgers' => [], 'excluded' => []],
+    ];
     if (!table_exists('accounting_parties')) {
         return $result;
     }
+    $partyByRecLedger = [];
+    $partyByPayLedger = [];
     $parties = db()->prepare('SELECT id, code, name, party_type, ledger_id, payable_ledger_id FROM accounting_parties WHERE company_id = :cid');
     $parties->execute(['cid' => $companyId]);
     foreach ($parties->fetchAll(PDO::FETCH_ASSOC) as $p) {
         $recLedger = (int) ($p['ledger_id'] ?? 0);
         $payLedger = (int) ($p['payable_ledger_id'] ?? 0);
+        if ($recLedger > 0) {
+            $partyByRecLedger[$recLedger] = (string) $p['name'];
+        }
+        if ($payLedger > 0) {
+            $partyByPayLedger[$payLedger] = (string) $p['name'];
+        }
         $recOpening = $recLedger && isset($openingByLedger[$recLedger]) ? $openingByLedger[$recLedger] : 0.0;
         $payOpening = $payLedger && isset($openingByLedger[$payLedger]) ? $openingByLedger[$payLedger] : 0.0;
         if (abs($recOpening) > OB_EPSILON) {
@@ -569,13 +580,50 @@ function ob_subledger_reconciliation(int $companyId, int $fiscalYearId): array
             $result['payable']['parties'][] = ['code' => $p['code'], 'name' => $p['name'], 'opening' => ob_money(-$payOpening)];
         }
     }
-    // Control = sum of the openings of every ledger under a Trade Receivable / Payable group.
+    // Control = openings of ledgers under Trade Receivable / Payable groups.
+    // A greedy substring match used to swallow OTHER "payable" groups —
+    // Employee/Salary Payables and inventory utility ledgers (Purchase
+    // Clearing, NRV write-down allowance) are not supplier balances, and
+    // counting them made every reconciliation an unexplainable "Investigate".
+    // They are now skipped (utility ledgers listed under 'excluded' so the
+    // screen can show WHY), and each counted ledger is returned with its
+    // linked party — an unlinked one is precisely the row to act on.
+    $utilityLedgerIds = [];
+    if (table_exists('inventory_ledger_mappings')) {
+        $utilStmt = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND purpose IN ('purchase_clearing', 'write_down_allowance')");
+        $utilStmt->execute(['cid' => $companyId]);
+        $utilityLedgerIds = array_map('intval', $utilStmt->fetchAll(PDO::FETCH_COLUMN));
+    }
     foreach ($rows as $r) {
         $grp = strtolower((string) $r['group_name']);
-        if (str_contains($grp, 'receivable')) {
-            $result['receivable']['control'] += (float) $r['opening_net'];
-        } elseif (str_contains($grp, 'payable')) {
-            $result['payable']['control'] += (float) $r['opening_net'];
+        $ledgerId = (int) ($r['ledger_id'] ?? 0);
+        $openingNet = (float) $r['opening_net'];
+        if (str_contains($grp, 'employee') || str_contains($grp, 'salary') || str_contains($grp, 'staff') || str_contains($grp, 'payroll')) {
+            continue; // employee payables are not trade balances
+        }
+        // Only *receivable/payable*-named groups are the trade control — the
+        // generic Sundry Debtors/Creditors groups are deliberately outside the
+        // per-party subledger design and must not be pulled in.
+        $side = str_contains($grp, 'receivable') ? 'receivable' : (str_contains($grp, 'payable') ? 'payable' : '');
+        if ($side === '') {
+            continue;
+        }
+        $signed = $side === 'payable' ? -$openingNet : $openingNet;
+        if (in_array($ledgerId, $utilityLedgerIds, true)) {
+            if (abs($openingNet) > OB_EPSILON) {
+                $result[$side]['excluded'][] = ['ledger_id' => $ledgerId, 'name' => (string) $r['name'], 'opening' => ob_money($signed)];
+            }
+            continue;
+        }
+        $result[$side]['control'] += $openingNet;
+        if (abs($openingNet) > OB_EPSILON) {
+            $linkMap = $side === 'receivable' ? $partyByRecLedger : $partyByPayLedger;
+            $result[$side]['control_ledgers'][] = [
+                'ledger_id' => $ledgerId,
+                'name' => (string) $r['name'],
+                'opening' => ob_money($signed),
+                'party' => $linkMap[$ledgerId] ?? null,
+            ];
         }
     }
     $result['receivable']['control'] = ob_money($result['receivable']['control']);

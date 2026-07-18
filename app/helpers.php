@@ -3001,6 +3001,8 @@ function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []
         'advance_applied' => 'the Advances workflow (the invoice would keep showing an advance payment with no backing voucher)',
         'inventory_opening' => 'the Inventory module (the item\'s master opening stock backs it — change the opening on the item instead)',
         'manufacturing_order_start' => 'the Manufacturing module (it carries the order\'s materials into WIP — complete or cancel the order instead)',
+        'payroll_run' => 'the Payroll module (the run would keep claiming its accrual is posted — reopen the run for correction instead)',
+        'payroll_payment' => 'the Payroll module (the run would keep showing paid with no cash in the books — reopen the run for correction instead)',
     ];
     $voucherSourceType = (string) ($voucher['source_type'] ?? '');
     if (isset($moduleSourceTypes[$voucherSourceType]) && !in_array($voucherSourceType, $allowModuleSources, true)) {
@@ -3125,6 +3127,187 @@ function delete_voucher_with_entries(int $voucherId, int $companyId, ?int $actor
     log_activity('voucher', $voucherId, 'deleted', $summary, $actorId);
 
     return ['ok' => true, 'error' => null, 'voucher_no' => (string) $voucher['voucher_no']];
+}
+
+/**
+ * ADMIN-ONLY forced deletion of a voucher the normal delete path blocks —
+ * module-posted (payroll, inventory, manufacturing, fixed assets, leases,
+ * openings) or bank-reconciled entries. It is NOT a blind DELETE: inside one
+ * transaction it (1) un-reconciles the voucher's entries, (2) rolls back or
+ * unlinks every register row this app knows points at the voucher — so the
+ * module stops claiming a posting the ledger no longer has — then (3) deletes
+ * the voucher (entries cascade). A written reason (>= 10 chars) is mandatory
+ * and the whole action lands in the security log. Period locks and closed
+ * fiscal years still refuse: unlock the period / reopen the year first — force
+ * delete overrides MODULE ownership, never the accounting calendar.
+ * Returns ['ok' => bool, 'error' => ?string, 'voucher_no' => string, 'summary' => string].
+ */
+function force_delete_voucher(int $voucherId, int $companyId, string $reason, ?int $actorId = null): array
+{
+    $actor = current_user();
+    if (!$actor || (string) ($actor['role'] ?? '') !== 'admin') {
+        return ['ok' => false, 'error' => 'Only an admin can force-delete a voucher.', 'voucher_no' => '', 'summary' => ''];
+    }
+    $reason = trim($reason);
+    if (mb_strlen($reason) < 10) {
+        return ['ok' => false, 'error' => 'Give a reason of at least 10 characters — it is kept in the security log.', 'voucher_no' => '', 'summary' => ''];
+    }
+    $stmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $voucherId, 'cid' => $companyId]);
+    $voucher = $stmt->fetch();
+    if (!$voucher) {
+        return ['ok' => false, 'error' => 'Voucher not found for this company.', 'voucher_no' => '', 'summary' => ''];
+    }
+    $voucherNo = (string) $voucher['voucher_no'];
+    $sourceType = (string) ($voucher['source_type'] ?? '');
+    $sourceId = (int) ($voucher['source_id'] ?? 0);
+
+    // The accounting calendar is never overridden — only module ownership is.
+    $calendarDate = (string) ($voucher['voucher_date'] ?? '');
+    $voucherFyId = (int) ($voucher['fiscal_year_id'] ?? 0);
+    if ($calendarDate !== '' && is_period_locked($companyId, $voucherFyId, $calendarDate)) {
+        return ['ok' => false, 'error' => 'This voucher sits in a locked accounting period. Unlock the period first — force delete does not override the calendar.', 'voucher_no' => $voucherNo, 'summary' => ''];
+    }
+    if ($voucherFyId > 0) {
+        $vFy = fiscal_year_by_id($voucherFyId);
+        $vFyStatus = $vFy ? fiscal_year_status($vFy) : '';
+        if (in_array($vFyStatus, ['closed', 'locked'], true)) {
+            return ['ok' => false, 'error' => 'Fiscal year ' . ($vFy['label'] ?? '') . ' is ' . $vFyStatus . '. Reopen the year first — force delete does not override the calendar.', 'voucher_no' => $voucherNo, 'summary' => ''];
+        }
+    }
+
+    $notes = [];
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        // 1. Un-reconcile (audited via the summary + security event).
+        if (column_exists('voucher_entries', 'reconciled_at')) {
+            $recStmt = db()->prepare('SELECT COUNT(*) FROM voucher_entries WHERE voucher_id = :id AND reconciled_at IS NOT NULL');
+            $recStmt->execute(['id' => $voucherId]);
+            $reconciledCount = (int) $recStmt->fetchColumn();
+            if ($reconciledCount > 0) {
+                db()->prepare('UPDATE voucher_entries SET reconciled_at = NULL WHERE voucher_id = :id')->execute(['id' => $voucherId]);
+                $notes[] = $reconciledCount . ' bank-reconciled entr' . ($reconciledCount === 1 ? 'y' : 'ies') . ' un-reconciled (re-run the bank reconciliation)';
+            }
+        }
+
+        // 2. Register rollback per source, so no module keeps claiming this posting.
+        switch ($sourceType) {
+            case 'payroll_run':
+                if ($sourceId > 0 && table_exists('payroll_runs')) {
+                    db()->prepare("UPDATE payroll_runs SET accrual_voucher_id = NULL, posted_at = NULL,
+                            status = IF(status = 'posted', 'approved', status) WHERE id = :id AND company_id = :cid")
+                        ->execute(['id' => $sourceId, 'cid' => $companyId]);
+                    $notes[] = 'payroll run #' . $sourceId . ' marked accrual-unposted (re-post from Payroll)';
+                }
+                break;
+            case 'payroll_payment':
+                if ($sourceId > 0 && table_exists('payroll_runs')) {
+                    db()->prepare("UPDATE payroll_runs SET payment_voucher_id = NULL, paid_at = NULL,
+                            status = IF(status = 'paid', IF(accrual_voucher_id IS NULL, 'approved', 'posted'), status)
+                            WHERE id = :id AND company_id = :cid")
+                        ->execute(['id' => $sourceId, 'cid' => $companyId]);
+                    $notes[] = 'payroll run #' . $sourceId . ' marked unpaid (record the payment again from Payroll)';
+                }
+                break;
+            case 'inventory_movement':
+            case 'manufacturing_order':
+            case 'manufacturing_order_start':
+            case 'inventory_nrv_assessment':
+            case 'inventory_nrv_release':
+                if (table_exists('inventory_transactions')) {
+                    $unlink = db()->prepare('UPDATE inventory_transactions SET voucher_id = NULL WHERE voucher_id = :vid AND company_id = :cid');
+                    $unlink->execute(['vid' => $voucherId, 'cid' => $companyId]);
+                    if ($unlink->rowCount() > 0) {
+                        $notes[] = $unlink->rowCount() . ' stock movement(s) kept, unlinked from the books (stock quantities unchanged; the GL no longer carries their value)';
+                    }
+                }
+                if (table_exists('inventory_nrv_assessments') && column_exists('inventory_nrv_assessments', 'voucher_id')) {
+                    db()->prepare('UPDATE inventory_nrv_assessments SET voucher_id = NULL WHERE voucher_id = :vid')->execute(['vid' => $voucherId]);
+                }
+                break;
+            case 'inventory_opening':
+                $notes[] = 'item keeps its master opening quantity; saving the item (or the opening backfill) re-posts the voucher';
+                break;
+            case 'task_advance':
+            case 'advance_applied':
+                $notes[] = 'ADVANCE register may now reference a missing posting — re-record the advance if it is still owed';
+                break;
+            case 'asset_depreciation':
+                if (table_exists('asset_depreciation_schedule')) {
+                    $dep = db()->prepare('UPDATE asset_depreciation_schedule SET posted = 0, voucher_id = NULL WHERE voucher_id = :vid AND company_id = :cid');
+                    $dep->execute(['vid' => $voucherId, 'cid' => $companyId]);
+                    if ($dep->rowCount() > 0) {
+                        $notes[] = $dep->rowCount() . ' depreciation schedule period(s) marked unposted (re-run depreciation posting)';
+                    }
+                }
+                break;
+            case 'lease_period':
+                if (table_exists('lease_schedule_lines') && column_exists('lease_schedule_lines', 'voucher_id')) {
+                    $lp = db()->prepare('UPDATE lease_schedule_lines SET voucher_id = NULL' . (column_exists('lease_schedule_lines', 'posted') ? ', posted = 0' : '') . ' WHERE voucher_id = :vid');
+                    $lp->execute(['vid' => $voucherId]);
+                    if ($lp->rowCount() > 0) {
+                        $notes[] = $lp->rowCount() . ' lease schedule period(s) marked unposted (re-post from the lease page)';
+                    }
+                }
+                break;
+            case 'task_invoice':
+                if ($sourceId > 0 && table_exists('task_invoices')) {
+                    db()->prepare("UPDATE task_invoices SET status = 'draft' WHERE id = :id AND company_id = :cid")
+                        ->execute(['id' => $sourceId, 'cid' => $companyId]);
+                    $notes[] = 'invoice returned to draft';
+                }
+                break;
+            case 'invoice_payment_request':
+                if ($sourceId > 0 && table_exists('invoice_payment_requests')) {
+                    db()->prepare("UPDATE invoice_payment_requests SET status = 'cancelled' WHERE id = :id")->execute(['id' => $sourceId]);
+                    if (table_exists('invoice_payment_receipts')) {
+                        db()->prepare('DELETE FROM invoice_payment_receipts WHERE payment_request_id = :id')->execute(['id' => $sourceId]);
+                    }
+                    $notes[] = 'payment request cancelled and its receipt removed';
+                }
+                break;
+            default:
+                // Fixed-asset acquisition/disposal/impairment, ledger/party
+                // openings, gateway settlements, everything else: unlink any
+                // register row that stores this voucher id, then warn.
+                foreach ([
+                    ['fixed_assets', 'acquisition_voucher_id'],
+                    ['asset_impairments', 'voucher_id'],
+                    ['asset_disposals', 'voucher_id'],
+                    ['lease_contracts', 'commencement_voucher_id'],
+                ] as [$regTable, $regColumn]) {
+                    if (table_exists($regTable) && column_exists($regTable, $regColumn)) {
+                        db()->prepare("UPDATE `$regTable` SET `$regColumn` = NULL WHERE `$regColumn` = :vid")->execute(['vid' => $voucherId]);
+                    }
+                }
+                if ($sourceType !== '') {
+                    $notes[] = 'source ' . $sourceType . ' register may need re-posting from its own module';
+                }
+                break;
+        }
+
+        // 3. The voucher itself (entries cascade on the FK).
+        db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')->execute(['id' => $voucherId, 'cid' => $companyId]);
+
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $forceException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        return ['ok' => false, 'error' => 'Force delete failed: ' . $forceException->getMessage(), 'voucher_no' => $voucherNo, 'summary' => ''];
+    }
+
+    $summary = 'FORCE-DELETED voucher ' . $voucherNo . ' (' . $sourceType . ', ' . number_format((float) $voucher['total_amount'], 2) . '). Reason: ' . $reason
+        . ($notes !== [] ? ' — ' . implode('; ', $notes) . '.' : '');
+    security_event('voucher_force_deleted', 'warning', $summary, $companyId, $actorId);
+    log_activity('voucher', $voucherId, 'force_deleted', $summary, $actorId);
+
+    return ['ok' => true, 'error' => null, 'voucher_no' => $voucherNo, 'summary' => implode('; ', $notes)];
 }
 
 function auto_post_order_payment_voucher(int $orderId, ?int $actorId = null): void

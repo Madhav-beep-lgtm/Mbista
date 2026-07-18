@@ -1135,7 +1135,10 @@ function payroll_reopen_run(int $runId, int $userId, string $reason): array
         if (!$voucher) {
             continue; // already gone — tolerate and keep going
         }
-        $blocker = voucher_mutation_blocker((array) $voucher);
+        // Payroll sources are module-guarded against ad-hoc register deletes;
+        // reopen IS the payroll module's own reversal, so it may pass its own
+        // sources while every other guard (reconciled, locked, closed) holds.
+        $blocker = voucher_mutation_blocker((array) $voucher, ['payroll_run', 'payroll_payment']);
         if ($blocker !== null) {
             return ['ok' => false, 'error' => $blocker];
         }

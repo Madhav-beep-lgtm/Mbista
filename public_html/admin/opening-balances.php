@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/opening_balance_engine.php';
+require_once __DIR__ . '/../../app/inventory_valuation.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -59,6 +60,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash($res['ok'] ? 'success' : 'error', $res['ok'] ? 'Opening balances unlocked — corrections can be made through adjustments, then re-lock.' : (string) $res['error']);
         redirect('admin/opening-balances.php');
     }
+    if ($action === 'backfill_inventory_opening') {
+        // Post the missing opening-stock vouchers for items created before the
+        // opening-GL fix (save_item now posts them; existing items only get
+        // theirs on re-save — this does them all in one audited sweep).
+        require_permission('opening_balance', 'adjust');
+        $itemsStmt = db()->prepare("SELECT * FROM inventory_items WHERE company_id = :cid AND opening_qty > 0");
+        $itemsStmt->execute(['cid' => $companyId]);
+        $posted = 0; $kept = 0; $skipped = [];
+        foreach ($itemsStmt->fetchAll(PDO::FETCH_ASSOC) as $invItem) {
+            $before = (int) db()->query("SELECT COALESCE((SELECT id FROM vouchers WHERE source_type='inventory_opening' AND source_id=" . (int) $invItem['id'] . " LIMIT 1), 0)")->fetchColumn();
+            $res = inv_post_item_opening_voucher($companyId, $invItem, $userId);
+            if (($res['note'] ?? '') !== '') {
+                $skipped[] = (string) $invItem['sku'];
+            } elseif ((int) $res['voucher_id'] > 0 && (int) $res['voucher_id'] !== $before) {
+                $posted++;
+            } elseif ((int) $res['voucher_id'] > 0) {
+                $kept++;
+            }
+        }
+        log_activity('opening_balance', $companyId, 'inventory_backfill', "Opening-stock voucher backfill: $posted posted, $kept already current, " . count($skipped) . ' unmapped.', $userId);
+        $msg = $posted . ' opening-stock voucher(s) posted, ' . $kept . ' already in the books.';
+        if ($skipped !== []) {
+            $msg .= ' Skipped (no Inventory Asset / Opening Equity mapping): ' . implode(', ', array_slice($skipped, 0, 8)) . (count($skipped) > 8 ? ' +' . (count($skipped) - 8) . ' more' : '') . ' — map their ledgers on the item, then run this again.';
+        }
+        flash($skipped === [] ? 'success' : 'error', $msg);
+        redirect('admin/opening-balances.php');
+    }
+
     if ($action === 'adjust') {
         require_permission('opening_balance', 'adjust');
         $batch = ob_get_batch($companyId, $postFyId);
@@ -317,24 +346,71 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <table>
         <thead><tr><th>Sub-ledger</th><th class="is-numeric">Sub-ledger total</th><th class="is-numeric">Control account opening</th><th>Status</th></tr></thead>
         <tbody>
+            <?php foreach ([
+                'receivable' => ['label' => 'Customers → Accounts Receivable', 'link' => 'receivable ledger (Parties → link customer)'],
+                'payable' => ['label' => 'Suppliers → Accounts Payable', 'link' => 'payable ledger (Parties → link supplier)'],
+            ] as $reconSide => $reconMeta):
+                $reconRow = $recon[$reconSide];
+                $reconOk = ob_near((float) $reconRow['subledger'], (float) $reconRow['control']);
+            ?>
             <tr>
-                <td>Customers → Accounts Receivable</td>
-                <td class="is-numeric"><?= e($sym . number_format((float) $recon['receivable']['subledger'], 2)) ?></td>
-                <td class="is-numeric"><?= e($sym . number_format((float) $recon['receivable']['control'], 2)) ?></td>
-                <td><span class="mbw-pill <?= ob_near((float) $recon['receivable']['subledger'], (float) $recon['receivable']['control']) ? 'tone-green' : 'tone-red' ?>"><?= ob_near((float) $recon['receivable']['subledger'], (float) $recon['receivable']['control']) ? 'Reconciled' : 'Investigate' ?></span></td>
+                <td><?= e($reconMeta['label']) ?></td>
+                <td class="is-numeric"><?= e($sym . number_format((float) $reconRow['subledger'], 2)) ?></td>
+                <td class="is-numeric"><?= e($sym . number_format((float) $reconRow['control'], 2)) ?></td>
+                <td><span class="mbw-pill <?= $reconOk ? 'tone-green' : 'tone-red' ?>"><?= $reconOk ? 'Reconciled' : 'Investigate' ?></span></td>
             </tr>
+            <?php if (!$reconOk && (($reconRow['control_ledgers'] ?? []) !== [] || ($reconRow['excluded'] ?? []) !== [])): ?>
             <tr>
-                <td>Suppliers → Accounts Payable</td>
-                <td class="is-numeric"><?= e($sym . number_format((float) $recon['payable']['subledger'], 2)) ?></td>
-                <td class="is-numeric"><?= e($sym . number_format((float) $recon['payable']['control'], 2)) ?></td>
-                <td><span class="mbw-pill <?= ob_near((float) $recon['payable']['subledger'], (float) $recon['payable']['control']) ? 'tone-green' : 'tone-red' ?>"><?= ob_near((float) $recon['payable']['subledger'], (float) $recon['payable']['control']) ? 'Reconciled' : 'Investigate' ?></span></td>
+                <td colspan="4" style="padding-top:0">
+                    <details>
+                        <summary style="cursor:pointer;font-size:12px;color:var(--mbw-muted)">Why the difference — control-ledger breakdown &amp; what to do</summary>
+                        <table style="margin-top:6px;font-size:12.5px">
+                            <thead><tr><th>Control ledger</th><th class="is-numeric">Opening</th><th>Linked party</th><th>Action</th></tr></thead>
+                            <tbody>
+                                <?php foreach (($reconRow['control_ledgers'] ?? []) as $cl): ?>
+                                <tr>
+                                    <td><a href="<?= e(url('admin/ledgers.php?ledger=' . (int) $cl['ledger_id'])) ?>"><?= e($cl['name']) ?></a></td>
+                                    <td class="is-numeric"><?= e($sym . number_format((float) $cl['opening'], 2)) ?></td>
+                                    <td><?= $cl['party'] !== null ? e($cl['party']) : '<span class="mbw-pill tone-amber">not linked</span>' ?></td>
+                                    <td style="font-size:12px;color:var(--mbw-muted)"><?= $cl['party'] !== null
+                                        ? 'Counted in the sub-ledger — reconciled by construction.'
+                                        : 'Not counted in the sub-ledger: link this ledger to a party as its ' . e($reconMeta['link']) . ', or move the ledger out of the trade group if it is not a ' . ($reconSide === 'payable' ? 'supplier' : 'customer') . ' balance.' ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                                <?php foreach (($reconRow['excluded'] ?? []) as $ex): ?>
+                                <tr>
+                                    <td><?= e($ex['name']) ?></td>
+                                    <td class="is-numeric"><?= e($sym . number_format((float) $ex['opening'], 2)) ?></td>
+                                    <td><span class="mbw-pill tone-blue">utility</span></td>
+                                    <td style="font-size:12px;color:var(--mbw-muted)">Inventory utility ledger (clearing / allowance) — excluded from the trade control; consider moving it to its own group.</td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </details>
+                </td>
             </tr>
+            <?php endif; ?>
+            <?php endforeach; ?>
+            <?php $invReconOk = ob_near((float) $invOpen['total_value'], (float) $invOpen['control_opening']); ?>
             <tr>
                 <td>Inventory items → Inventory control</td>
                 <td class="is-numeric"><?= e($sym . number_format((float) $invOpen['total_value'], 2)) ?></td>
                 <td class="is-numeric"><?= e($sym . number_format((float) $invOpen['control_opening'], 2)) ?></td>
-                <td><span class="mbw-pill <?= ob_near((float) $invOpen['total_value'], (float) $invOpen['control_opening']) ? 'tone-green' : 'tone-amber' ?>"><?= ob_near((float) $invOpen['total_value'], (float) $invOpen['control_opening']) ? 'Reconciled' : 'Review' ?></span></td>
+                <td><span class="mbw-pill <?= $invReconOk ? 'tone-green' : 'tone-amber' ?>"><?= $invReconOk ? 'Reconciled' : 'Review' ?></span></td>
             </tr>
+            <?php if (!$invReconOk && $canAdjust): ?>
+            <tr>
+                <td colspan="4" style="padding-top:0">
+                    <form method="post" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap" data-confirm="Post the missing opening-stock vouchers (Dr item stock ledger / Cr Opening Balance Equity) for every item with a master opening quantity? Already-posted items are left untouched.">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                        <input type="hidden" name="action" value="backfill_inventory_opening">
+                        <button type="submit" class="button secondary" style="min-height:34px"><?= icon('reconcile') ?>Post missing opening-stock vouchers</button>
+                        <small style="color:var(--mbw-muted)">Items created before opening-stock GL posting existed have layers but no voucher — this backfills them (idempotent). Items valued at a zero purchase rate contribute nothing; set their rate first.</small>
+                    </form>
+                </td>
+            </tr>
+            <?php endif; ?>
             <tr>
                 <td>Fixed assets (NBV) → PPE net control</td>
                 <td class="is-numeric"><?= e($sym . number_format((float) $faOpen['total_nbv'], 2)) ?></td>

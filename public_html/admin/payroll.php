@@ -136,6 +136,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/payroll.php');
     }
 
+    if ($action === 'delete_run') {
+        // Delete a salary sheet outright. Only runs with NOTHING in the books:
+        // draft/calculated (never approved) or cancelled — an approved/posted/
+        // paid run must be reopened first, which reverses its vouchers and
+        // loan recoveries and lands it back here as 'calculated'.
+        if (!in_array((string) $runRow['status'], ['draft', 'calculated', 'cancelled'], true)) {
+            flash('error', 'Only a draft, calculated or cancelled salary sheet can be deleted. Reopen a posted run for correction first — that reverses its vouchers, then it can be deleted.');
+            redirect('admin/payroll.php?run=' . $runId);
+        }
+        if ((int) ($runRow['accrual_voucher_id'] ?? 0) > 0 || (int) ($runRow['payment_voucher_id'] ?? 0) > 0) {
+            flash('error', 'This run still has posted vouchers — reopen it for correction first.');
+            redirect('admin/payroll.php?run=' . $runId);
+        }
+        db()->prepare('DELETE FROM payroll_run_lines WHERE run_id = :id')->execute(['id' => $runId]);
+        db()->prepare('DELETE FROM payroll_runs WHERE id = :id AND company_id = :cid')->execute(['id' => $runId, 'cid' => $companyId]);
+        log_activity('payroll_run', $runId, 'deleted', 'Salary sheet ' . (string) $runRow['period_label'] . ' deleted (' . (string) $runRow['status'] . ').', $userId);
+        security_event('payroll_run_deleted', 'warning', 'Payroll run #' . $runId . ' (' . (string) $runRow['period_label'] . ') deleted.', $companyId, $userId);
+        flash('success', 'Salary sheet deleted.');
+        redirect('admin/payroll.php');
+    }
+
     if ($action === 'reopen_run') {
         $reason = trim((string) ($_POST['reopen_reason'] ?? ''));
         $result = payroll_reopen_run($runId, $userId, $reason);
@@ -345,6 +366,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <input type="hidden" name="action" value="cancel_run">
                     <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
                     <button type="submit" class="button secondary">Cancel Run</button>
+                </form>
+                <form method="post" style="display:inline" data-confirm="DELETE salary sheet <?= e($run['period_label']) ?> and all its calculated lines? This cannot be undone.">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="delete_run">
+                    <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
+                    <button type="submit" class="button secondary" style="color:#a33">Delete Sheet</button>
+                </form>
+            <?php elseif ((string) $run['status'] === 'cancelled'): ?>
+                <span class="mbw-pill tone-amber">Cancelled</span>
+                <form method="post" style="display:inline" data-confirm="DELETE cancelled salary sheet <?= e($run['period_label']) ?> permanently?">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="delete_run">
+                    <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
+                    <button type="submit" class="button secondary" style="color:#a33">Delete Sheet</button>
                 </form>
             <?php elseif (in_array((string) $run['status'], ['approved', 'posted'], true)): ?>
                 <form method="post" style="display:inline" data-confirm="Record the salary payment for <?= e($run['period_label']) ?>? This posts a bank payment voucher for the total net pay.">
