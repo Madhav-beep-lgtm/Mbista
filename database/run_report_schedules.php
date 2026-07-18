@@ -109,21 +109,36 @@ foreach ($due as $schedule) {
         if ($format === 'csv' || $format === 'both') {
             $attachments[] = ['name' => $reportKey . '-' . $from . '-to-' . $to . '.csv', 'mime' => 'text/csv', 'content' => $csv];
         }
-        $body = ($format === 'csv') ? '<p>The scheduled report is attached as CSV.</p>' . $html : $html;
+        $inner = ($format === 'csv') ? '<p>The scheduled report is attached as CSV.</p>' . $html : $html;
+        $body = function_exists('branded_email_html') ? branded_email_html($reportLabel, $inner) : $inner;
 
         $subject = $reportLabel . ' · ' . $companyName . ' · ' . date('d M Y', strtotime($from)) . ' - ' . date('d M Y', strtotime($to));
         $result = send_app_email((string) $schedule['recipient_email'], $subject, $body, $attachments);
-        $status = $result['ok']
-            ? 'Sent ' . date('Y-m-d H:i') . ' via ' . $result['transport']
-            : 'Failed: ' . ($result['error'] ?? 'unknown error');
+        if (!empty($result['ok']) && ($result['transport'] ?? '') === 'log') {
+            // "log" transport means SMTP is not configured — it did NOT reach the
+            // recipient. Report it honestly; advancing is fine (a config issue,
+            // not transient) so the same period is not retried forever.
+            $status = 'Not sent: email is in log mode — configure SMTP in Settings > Notifications (written to storage/mail).';
+            $advance = true;
+        } elseif (!empty($result['ok'])) {
+            $status = 'Sent ' . date('Y-m-d H:i') . ' via ' . $result['transport'];
+            $advance = true;
+        } else {
+            $status = 'Failed: ' . ($result['error'] ?? 'unknown error');
+            $advance = false; // transient — keep next_run_on so the next cron retries
+        }
         echo "#{$scheduleId} {$reportKey} -> {$schedule['recipient_email']}: {$status}\n";
     } catch (Throwable $exception) {
         $status = 'Failed: ' . substr($exception->getMessage(), 0, 200);
+        $advance = false;
         fwrite(STDERR, "#{$scheduleId} error: {$exception->getMessage()}\n");
     }
 
-    db()->prepare('UPDATE report_schedules SET last_run_at = NOW(), last_run_status = :status, next_run_on = :next_run WHERE id = :id')
-        ->execute(['status' => substr($status, 0, 255), 'next_run' => $nextRun, 'id' => $scheduleId]);
+    db()->prepare('UPDATE report_schedules SET last_run_at = NOW(), last_run_status = :status'
+            . ($advance ? ', next_run_on = :next_run' : '') . ' WHERE id = :id')
+        ->execute($advance
+            ? ['status' => substr($status, 0, 255), 'next_run' => $nextRun, 'id' => $scheduleId]
+            : ['status' => substr($status, 0, 255), 'id' => $scheduleId]);
 }
 
 echo "Done.\n";

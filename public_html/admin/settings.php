@@ -571,6 +571,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'notification_reply_to_email' => $notificationReplyToEmail,
         'notification_footer_text' => trim((string) ($_POST['notification_footer_text'] ?? '')),
 
+        // Outgoing email (SMTP) — used by the mailer to actually send.
+        'smtp_host' => trim((string) ($_POST['smtp_host'] ?? '')),
+        'smtp_port' => (string) max(1, min(65535, (int) ($_POST['smtp_port'] ?? 587))),
+        'smtp_username' => trim((string) ($_POST['smtp_username'] ?? '')),
+        'smtp_password' => trim((string) ($_POST['smtp_password'] ?? '')) !== ''
+            ? trim((string) $_POST['smtp_password'])
+            : (string) setting('smtp_password', ''),
+        'smtp_encryption' => in_array((string) ($_POST['smtp_encryption'] ?? 'tls'), ['tls', 'ssl', 'none'], true) ? (string) $_POST['smtp_encryption'] : 'tls',
+        'mail_from_address' => trim((string) ($_POST['mail_from_address'] ?? '')),
+        'mail_from_name' => trim((string) ($_POST['mail_from_name'] ?? '')),
+
         'sync_client_portal' => isset($_POST['sync_client_portal']) ? '1' : '0',
         'sync_home_page' => isset($_POST['sync_home_page']) ? '1' : '0',
         'security_session_timeout' => (string) max(5, min(1440, (int) ($_POST['security_session_timeout'] ?? 120))),
@@ -999,6 +1010,20 @@ if (table_exists('company_shareholdings')) {
             <label>From email<input type="email" name="notification_from_email" value="<?= e($settings['notification_from_email'] ?? '') ?>"></label>
             <label>Reply-to email<input type="email" name="notification_reply_to_email" value="<?= e($settings['notification_reply_to_email'] ?? '') ?>"></label>
             <label class="frm-span-2" style="grid-column:span 2">Email footer text<input type="text" name="notification_footer_text" value="<?= e($settings['notification_footer_text'] ?? '') ?>"></label>
+            <?php require_once __DIR__ . '/../../app/mailer.php'; ?>
+            <div style="grid-column:1/-1;border-top:1px solid var(--mbw-border);margin-top:6px;padding-top:12px">
+                <strong style="color:var(--mbw-heading)"><?= icon('messages') ?> Outgoing email (SMTP)</strong>
+                <p style="margin:4px 0 0;font-size:12.5px;color:var(--mbw-muted)">Enter your company mailbox's SMTP details to actually send password resets, invoices, contracts, ledgers and scheduled reports. Status:
+                    <strong style="color:<?= mail_is_configured() ? 'var(--mbw-green)' : 'var(--mbw-amber)' ?>"><?= mail_is_configured() ? 'Configured (' . e(mail_transport()) . ')' : 'Not configured — emails are only logged, not sent' ?></strong>
+                </p>
+            </div>
+            <label>SMTP host<input type="text" name="smtp_host" value="<?= e($settings['smtp_host'] ?? '') ?>" placeholder="mail.yourdomain.com" autocomplete="off"></label>
+            <label>SMTP port<input type="number" name="smtp_port" value="<?= e($settings['smtp_port'] ?? '587') ?>" placeholder="587"></label>
+            <label>Encryption<select name="smtp_encryption"><?php foreach (['tls' => 'TLS (587)', 'ssl' => 'SSL (465)', 'none' => 'None'] as $encVal => $encLabel): ?><option value="<?= e($encVal) ?>" <?= ($settings['smtp_encryption'] ?? 'tls') === $encVal ? 'selected' : '' ?>><?= e($encLabel) ?></option><?php endforeach; ?></select></label>
+            <label>From name<input type="text" name="mail_from_name" value="<?= e($settings['mail_from_name'] ?? '') ?>" placeholder="M.Bista &amp; Associates"></label>
+            <label>SMTP username<input type="text" name="smtp_username" value="<?= e($settings['smtp_username'] ?? '') ?>" placeholder="you@yourdomain.com" autocomplete="off"></label>
+            <label>SMTP password<input type="password" name="smtp_password" value="" placeholder="<?= trim((string) ($settings['smtp_password'] ?? '')) !== '' ? '•••••••• (leave blank to keep)' : 'mailbox / app password' ?>" autocomplete="new-password"></label>
+            <label>From email (blank = username)<input type="email" name="mail_from_address" value="<?= e($settings['mail_from_address'] ?? '') ?>" placeholder="you@yourdomain.com"></label>
             <?php foreach ([['notify_admin_email', 'Admin alerts'], ['notify_staff_email', 'Staff alerts'], ['notify_client_email', 'Client alerts'], ['notify_payment_email', 'Payment alerts'], ['notify_task_email', 'Task alerts']] as [$notifyKey, $notifyLabel]): ?>
                 <label class="frm-toggle-wrap"><?= e($notifyLabel) ?>
                     <span class="frm-toggle"><input type="checkbox" name="<?= e($notifyKey) ?>" value="1"<?= $checked($notifyKey, '1') ?>><i></i></span>

@@ -1948,6 +1948,27 @@ function request_password_reset(string $email, ?string $requestIp = null): ?stri
 
     log_activity('user', (int) $user['id'], 'password_reset_requested', 'Password reset requested.', null);
 
+    // Email the reset link. In log mode (no SMTP configured) this writes an .eml
+    // to storage/mail/ instead of sending; once SMTP is set it goes out for real.
+    if (!function_exists('send_app_email') && is_file(__DIR__ . '/mailer.php')) {
+        require_once __DIR__ . '/mailer.php';
+    }
+    if (function_exists('send_app_email')) {
+        $resetUrl = url('reset-password.php') . '?token=' . $token;
+        $safeUrl = htmlspecialchars($resetUrl, ENT_QUOTES, 'UTF-8');
+        $name = htmlspecialchars((string) ($user['name'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $inner = '<p>Hello ' . ($name !== '' ? $name : 'there') . ',</p>'
+            . '<p>We received a request to reset your password. Click the button below to choose a new one — this link expires in 1 hour.</p>'
+            . '<p style="margin:22px 0"><a href="' . $safeUrl . '" style="background:#0b1c36;color:#ffffff;text-decoration:none;padding:11px 22px;border-radius:8px;font-weight:bold;display:inline-block">Reset my password</a></p>'
+            . '<p style="font-size:12px;color:#66748c">Or paste this link into your browser:<br>' . $safeUrl . '</p>'
+            . '<p style="font-size:12px;color:#66748c">If you did not request this, you can safely ignore this email.</p>';
+        try {
+            send_app_email((string) $user['email'], 'Reset your password', branded_email_html('Password reset', $inner));
+        } catch (Throwable $mailError) {
+            // never let a mail failure break the reset-request flow
+        }
+    }
+
     return $token;
 }
 

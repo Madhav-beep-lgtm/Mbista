@@ -546,6 +546,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $error = 'Failed to convert invoice or invalid state';
         }
+        } elseif ($postAction === 'email_invoice') {
+            require_once __DIR__ . '/../../app/mailer.php';
+            $emailInvoice = get_invoice($invoiceId);
+            $emailTo = trim((string) ($emailInvoice['client_email'] ?? ''));
+            if (!$emailInvoice) {
+                flash('error', 'Invoice not found.');
+            } elseif ($emailTo === '') {
+                flash('error', 'This invoice has no client email on file.');
+            } else {
+                $emailSubject = (($emailInvoice['invoice_category'] ?? '') === 'tax' ? 'Tax Invoice ' : 'Invoice ') . $emailInvoice['invoice_no'];
+                $emailTotal = (float) (($emailInvoice['total_amount'] ?? 0) > 0 ? $emailInvoice['total_amount'] : ($emailInvoice['amount'] ?? 0));
+                $emailInner = '<p>Dear ' . e((string) ($emailInvoice['client_name'] ?? 'Client')) . ',</p>'
+                    . '<p>Please find your invoice <b>' . e((string) $emailInvoice['invoice_no']) . '</b> for '
+                    . e(site_currency_symbol()) . e(number_format($emailTotal, 2)) . ' attached. You can also sign in to your portal to view and pay it.</p>';
+                $emailResult = send_app_email($emailTo, $emailSubject, branded_email_html($emailSubject, $emailInner), [
+                    ['name' => preg_replace('/[^A-Za-z0-9._-]+/', '-', (string) $emailInvoice['invoice_no']) . '.html', 'mime' => 'text/html', 'content' => export_invoice_html($emailInvoice)],
+                ]);
+                flash($emailResult['ok'] ? 'success' : 'error', $emailResult['ok']
+                    ? 'Invoice emailed to ' . $emailTo . ((($emailResult['transport'] ?? '') === 'log') ? ' — but email is in LOG mode; configure SMTP in Settings > Notifications to actually send.' : '.')
+                    : 'Could not send the invoice email: ' . ($emailResult['error'] ?? 'unknown error'));
+            }
+            redirect('admin/invoice.php?action=view&id=' . $invoiceId);
         } elseif ($postAction === 'update_invoice') {
         $invoiceNo = $_POST['invoice_no'] ?? null;
         $amount = (float) ($_POST['amount'] ?? 0);
@@ -1319,6 +1341,12 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php endif; ?>
                     <button onclick="showPaymentModal(<?php echo (int) $invoice['id']; ?>)" class="btn btn-primary">Request Payment</button>
                     <a href="<?php echo e(url('admin/accounting-parties.php?panel=payment&invoice_id=' . (int) $invoice['id'])); ?>" class="btn btn-success">Record Payment</a>
+                    <form method="post" action="" style="display:inline" data-confirm="Email this invoice to <?php echo e($invoice['client_email'] ?? 'the client'); ?>?">
+                        <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
+                        <input type="hidden" name="action" value="email_invoice">
+                        <input type="hidden" name="invoice_id" value="<?php echo (int) $invoice['id']; ?>">
+                        <button type="submit" class="btn btn-secondary">✉ Email to Client</button>
+                    </form>
                     <a href="<?php echo e(url('admin/reports-center.php?report=collections-register')); ?>" class="btn btn-secondary">Receipt Register</a>
                     <a href="<?php echo e(url('admin/export-invoice.php?id=' . $invoice['id'] . '&format=pdf')); ?>" class="btn btn-secondary" target="_blank">📄 Export PDF</a>
                     <a href="<?php echo e(url('admin/export-invoice.php?id=' . $invoice['id'] . '&format=excel')); ?>" class="btn btn-secondary">📊 Export Excel</a>

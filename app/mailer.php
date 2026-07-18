@@ -11,12 +11,28 @@ declare(strict_types=1);
  *   otherwise                -> log (writes .eml files to storage/mail/)
  */
 
+/**
+ * Mail config value, preferring the in-app Settings table (so the admin can
+ * configure SMTP from Settings -> Notifications) and falling back to the .env
+ * key. Lets the app send mail without editing .env on the server.
+ */
+function mail_cfg(string $settingKey, string $envKey, string $default = ''): string
+{
+    if (function_exists('setting')) {
+        $value = trim((string) setting($settingKey, ''));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+    return (string) env($envKey, $default);
+}
+
 function mail_transport(): string
 {
-    if ((string) env('MAIL_HOST', '') !== '') {
+    if (mail_cfg('smtp_host', 'MAIL_HOST', '') !== '') {
         return 'smtp';
     }
-    $transport = strtolower((string) env('MAIL_TRANSPORT', 'log'));
+    $transport = strtolower(mail_cfg('mail_transport', 'MAIL_TRANSPORT', 'log'));
     return in_array($transport, ['mail', 'log'], true) ? $transport : 'log';
 }
 
@@ -27,12 +43,13 @@ function mail_is_configured(): bool
 
 function mail_from_address(): string
 {
-    return (string) env('MAIL_FROM_ADDRESS', env('MAIL_USERNAME', 'no-reply@' . (parse_url(APP_URL ?: 'https://localhost', PHP_URL_HOST) ?: 'localhost')));
+    $fallback = mail_cfg('smtp_username', 'MAIL_USERNAME', 'no-reply@' . (parse_url(APP_URL ?: 'https://localhost', PHP_URL_HOST) ?: 'localhost'));
+    return mail_cfg('mail_from_address', 'MAIL_FROM_ADDRESS', $fallback);
 }
 
 function mail_from_name(): string
 {
-    return (string) env('MAIL_FROM_NAME', APP_NAME);
+    return mail_cfg('mail_from_name', 'MAIL_FROM_NAME', APP_NAME);
 }
 
 /**
@@ -130,11 +147,11 @@ function send_app_email(string $to, string $subject, string $htmlBody, array $at
  */
 function smtp_send(string $to, string $subject, array $headers, string $mimeBody): array
 {
-    $host = (string) env('MAIL_HOST', '');
-    $port = (int) (env('MAIL_PORT', '587') ?? 587);
-    $username = (string) env('MAIL_USERNAME', '');
-    $password = (string) env('MAIL_PASSWORD', '');
-    $encryption = strtolower((string) env('MAIL_ENCRYPTION', 'tls'));
+    $host = mail_cfg('smtp_host', 'MAIL_HOST', '');
+    $port = (int) mail_cfg('smtp_port', 'MAIL_PORT', '587');
+    $username = mail_cfg('smtp_username', 'MAIL_USERNAME', '');
+    $password = mail_cfg('smtp_password', 'MAIL_PASSWORD', '');
+    $encryption = strtolower(mail_cfg('smtp_encryption', 'MAIL_ENCRYPTION', 'tls'));
     $timeout = 20;
 
     $remote = ($encryption === 'ssl' ? 'ssl://' : '') . $host;
