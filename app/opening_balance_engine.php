@@ -508,6 +508,30 @@ function ob_lock_batch(int $batchId, ?int $actorId = null): array
 }
 
 /**
+ * Unlock a locked batch (locked -> finalized) so authorised corrections can be
+ * made again through adjustments. Requires a mandatory reason (>= 10 chars),
+ * mirroring the fiscal-year reopen control, and keeps the full audit trail — the
+ * original lock record is never deleted.
+ */
+function ob_unlock_batch(int $batchId, string $reason, ?int $actorId = null): array
+{
+    $reason = trim($reason);
+    if (mb_strlen($reason) < 10) {
+        return ['ok' => false, 'error' => 'A reason of at least 10 characters is required to unlock finalized opening balances.'];
+    }
+    $batch = db()->query('SELECT * FROM opening_balance_batches WHERE id = ' . (int) $batchId)->fetch(PDO::FETCH_ASSOC);
+    if (!$batch) {
+        return ['ok' => false, 'error' => 'Batch not found.'];
+    }
+    if ((string) $batch['status'] !== 'locked') {
+        return ['ok' => false, 'error' => 'Only a locked batch can be unlocked.'];
+    }
+    db()->prepare("UPDATE opening_balance_batches SET status = 'finalized', locked_at = NULL WHERE id = :id")->execute(['id' => $batchId]);
+    ob_write_audit((int) $batch['company_id'], $batchId, null, (int) $batch['fiscal_year_id'], 'unlock', ['status' => 'locked'], ['status' => 'finalized'], $reason, $actorId);
+    return ['ok' => true];
+}
+
+/**
  * Sub-ledger reconciliation: the sum of each party's own opening (its dedicated
  * receivable / payable ledger) must equal the Trade Receivable / Payable control
  * opening. Because every party posts to its own ledger under those groups, they

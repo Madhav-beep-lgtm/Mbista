@@ -52,6 +52,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash($res['ok'] ? 'success' : 'error', $res['ok'] ? 'Opening balances locked.' : (string) $res['error']);
         redirect('admin/opening-balances.php');
     }
+    if ($action === 'unlock') {
+        require_permission('opening_balance', 'finalize');
+        $batch = ob_get_batch($companyId, $postFyId);
+        $res = $batch ? ob_unlock_batch((int) $batch['id'], (string) ($_POST['reason'] ?? ''), $userId) : ['ok' => false, 'error' => 'No opening batch to unlock.'];
+        flash($res['ok'] ? 'success' : 'error', $res['ok'] ? 'Opening balances unlocked — corrections can be made through adjustments, then re-lock.' : (string) $res['error']);
+        redirect('admin/opening-balances.php');
+    }
     if ($action === 'adjust') {
         require_permission('opening_balance', 'adjust');
         $batch = ob_get_batch($companyId, $postFyId);
@@ -168,6 +175,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <button type="submit" class="button secondary"><?= icon('key') ?>Lock</button>
         </form>
         <?php endif; ?>
+        <?php if ($canFinalize && $batch && $status === 'locked'): ?>
+        <details class="pr-adjust">
+            <summary class="button secondary" style="display:inline-flex;align-items:center;gap:6px"><?= icon('key') ?>Unlock</summary>
+            <form method="post" class="pr-adjust-form" style="min-width:260px">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="unlock">
+                <input type="hidden" name="fiscal_year_id" value="<?= e($fiscalYearId) ?>">
+                <label>Reason for unlocking (required, min 10 chars)<input type="text" name="reason" minlength="10" required placeholder="e.g. Prior-year audit adjustment received"></label>
+                <button type="submit">Unlock opening balances</button>
+                <small>Returns the batch to finalized so corrections can be made through adjustments; the lock/unlock is audited and re-lockable.</small>
+            </form>
+        </details>
+        <?php endif; ?>
     </div>
     <?php if (!$prevFy): ?>
         <p class="muted" style="margin-top:10px">This is the entity's first fiscal year — there is no previous year to carry forward. Enter initial opening balances as authorised adjustments (or via each ledger's opening-balance field); the temporary Opening Balance Adjustments account holds any difference until the initial set is balanced.</p>
@@ -222,8 +242,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 $shown++;
             ?>
                 <tr>
-                    <td><?= e((string) ($l['ledger_id'] ? '' : '') ) ?><?php
-                        // Ledger code lookup for display.
+                    <td><?php
                         $lcode = '';
                         if ($l['ledger_id']) { $cs = db()->prepare('SELECT code FROM ledgers WHERE id = :id'); $cs->execute(['id' => (int) $l['ledger_id']]); $lcode = (string) ($cs->fetchColumn() ?: ''); }
                         echo e($lcode);

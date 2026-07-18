@@ -293,6 +293,18 @@ $regenBlocked = ob_generate_batch($cid, $fy2['id'], $userId);
 ok(!$regenBlocked['ok'], 'A finalized batch refuses destructive regeneration (corrections go via adjustment)');
 $lock = ob_lock_batch((int) ob_get_batch($cid, $fy2['id'])['id'], $userId);
 ok($lock['ok'] && (string) ob_get_batch($cid, $fy2['id'])['status'] === 'locked', 'Finalized batch locks');
+// Unlock feature.
+$adjWhileLocked = ob_apply_adjustment((int) ob_get_batch($cid, $fy2['id'])['id'], (int) $line['id'], 90000, 0, 'Attempt while locked', '', $userId);
+ok(!$adjWhileLocked['ok'], 'A locked batch refuses adjustments');
+$noReasonUnlock = ob_unlock_batch((int) ob_get_batch($cid, $fy2['id'])['id'], 'short', $userId);
+ok(!$noReasonUnlock['ok'], 'Unlock requires a reason of at least 10 characters');
+$unlock = ob_unlock_batch((int) ob_get_batch($cid, $fy2['id'])['id'], 'Prior-year audit adjustment received', $userId);
+ok($unlock['ok'] && (string) ob_get_batch($cid, $fy2['id'])['status'] === 'finalized', 'Locked batch unlocks back to finalized');
+$unlockAudit = (int) db()->query("SELECT COUNT(*) FROM opening_balance_audit_logs WHERE company_id = $cid AND action='unlock'")->fetchColumn();
+ok($unlockAudit >= 1, 'Unlock is captured in the audit trail (original lock record preserved)');
+$freshLine = $lineByLedger(ob_get_lines((int) ob_get_batch($cid, $fy2['id'])['id']), $lCash); // ids change on regenerate
+$adjAfterUnlock = ob_apply_adjustment((int) ob_get_batch($cid, $fy2['id'])['id'], (int) $freshLine['id'], 100000, 0, 'Correcting after unlock per audit', '', $userId);
+ok($adjAfterUnlock['ok'], 'After unlock, adjustments are permitted again');
 
 // ---------------------------------------------------------------------------
 // Cleanup
