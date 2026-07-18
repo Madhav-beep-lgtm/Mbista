@@ -104,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'cancel_run') {
         if (!in_array((string) $runRow['status'], ['draft', 'calculated'], true)) {
-            flash('error', 'Approved/posted runs cannot be cancelled - post a reversal voucher instead.');
+            flash('error', 'Approved/posted runs cannot be cancelled - reopen the run for correction (which reverses its vouchers) or post a reversal voucher instead.');
         } else {
             db()->prepare("UPDATE payroll_runs SET status = 'cancelled' WHERE id = :id")->execute(['id' => $runId]);
             log_activity('payroll_run', $runId, 'cancelled', 'Payroll run cancelled before approval.', $userId);
@@ -112,6 +112,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', 'Run cancelled.');
         }
         redirect('admin/payroll.php');
+    }
+
+    if ($action === 'reopen_run') {
+        $reason = trim((string) ($_POST['reopen_reason'] ?? ''));
+        $result = payroll_reopen_run($runId, $userId, $reason);
+        if ($result['ok']) {
+            log_activity('payroll_run', $runId, 'reopened', 'Payroll run reopened for correction (' . (int) $result['reversed_vouchers'] . ' voucher(s) reversed): ' . $reason, $userId);
+            security_event('payroll_run_reopened', 'warning', 'Payroll run #' . $runId . ' reopened for correction; ' . (int) $result['reversed_vouchers'] . ' voucher(s) reversed.', $companyId, $userId);
+            $message = 'Run reopened for correction.'
+                . ((int) $result['reversed_vouchers'] > 0 ? ' ' . (int) $result['reversed_vouchers'] . ' voucher(s) reversed and advance recoveries restored.' : '')
+                . ' Edit the salary sheet, then Approve & Post again.';
+            if ((int) ($result['later_posted'] ?? 0) > 0) {
+                $message .= ' Note: ' . (int) $result['later_posted'] . ' later posted run(s) this year used this run’s tax as their year-to-date base — recalculate and repost them after this correction.';
+            }
+            flash('success', $message);
+        } else {
+            flash('error', (string) $result['error']);
+        }
+        redirect('admin/payroll.php?run=' . $runId);
     }
 }
 
@@ -286,8 +305,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <input type="date" name="payment_date" value="<?= e(date('Y-m-d')) ?>" style="min-height:36px">
                     <button type="submit"><?= icon('bank') ?>Record Payment</button>
                 </form>
+                <?php include __DIR__ . '/../../app/views/partials/_payroll_reopen.php'; ?>
             <?php elseif ((string) $run['status'] === 'paid'): ?>
                 <span class="mbw-pill tone-green">Paid<?= $run['paid_at'] ? ' ' . e(date('d M Y', strtotime((string) $run['paid_at']))) : '' ?></span>
+                <?php include __DIR__ . '/../../app/views/partials/_payroll_reopen.php'; ?>
             <?php endif; ?>
         </div>
     </div>
@@ -305,7 +326,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     }
     .pr-adjust-form label { display: grid; gap: 3px; font-size: 12px; font-weight: 600; color: var(--mbw-ink, #12261f); }
     .pr-adjust-form input { min-height: 34px; }
+    .pr-adjust-form textarea { width: 100%; min-height: 60px; font: inherit; padding: 6px 8px;
+        border: 1px solid var(--mbw-line, rgba(0,0,0,.16)); border-radius: 8px; color: var(--mbw-ink, #12261f); resize: vertical; }
     .pr-adjust-form small { color: var(--mbw-muted, #5b6b64); font-weight: 400; font-size: 11px; }
+    .pr-reopen { margin-left: 4px; }
+    .pr-reopen > summary { color: var(--mbw-ink, #12261f); }
+    .pr-reopen .pr-adjust-form { width: 288px; }
     </style>
     <div style="overflow-x:auto">
     <table class="pr-table">

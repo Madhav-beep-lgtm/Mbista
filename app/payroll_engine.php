@@ -853,3 +853,113 @@ function payroll_record_payment(int $runId, int $userId, string $paymentDate = '
             ? 'This run already has a payment voucher.' : $exception->getMessage()];
     }
 }
+
+/**
+ * Reopen an approved / posted / paid run back to 'calculated' so its salary
+ * sheet can be corrected, then re-approved and re-posted. This is the controlled
+ * counterpart to posting — the payroll module's own reversal, the very thing the
+ * cancel path tells posted runs to use. In one transaction it:
+ *   1. reverses the advance/loan recoveries this run made (adds the recovered
+ *      amount back, reactivates settled loans) and deletes the recovery ledger
+ *      rows, so a later re-post never double-recovers;
+ *   2. deletes the run's payment and accrual vouchers — their entries cascade on
+ *      the FK, which also frees the uniq_vouchers_source / voucher_no keys so the
+ *      corrected re-post reuses the same numbers cleanly;
+ *   3. resets the run header to an editable calculated state.
+ * Every existing posting guard still applies first: a reconciled bank entry, a
+ * locked period or a closed fiscal year blocks the reopen with the voucher
+ * engine's own message. A correction reason (>= 10 chars) is required for audit.
+ * Returns ['ok'=>bool, 'error'=>?string, 'reversed_vouchers'=>int, 'later_posted'=>int].
+ */
+function payroll_reopen_run(int $runId, int $userId, string $reason): array
+{
+    $run = payroll_run($runId);
+    if (!$run) {
+        return ['ok' => false, 'error' => 'Run not found.'];
+    }
+    if (!in_array((string) $run['status'], ['approved', 'posted', 'paid'], true)) {
+        return ['ok' => false, 'error' => 'Only an approved, posted or paid run can be reopened. Draft and calculated runs are already editable.'];
+    }
+    $reason = trim($reason);
+    if (mb_strlen($reason) < 10) {
+        return ['ok' => false, 'error' => 'Give a correction reason of at least 10 characters — it is kept in the audit trail.'];
+    }
+    $companyId = (int) $run['company_id'];
+
+    // Gather the vouchers this run posted (payment first, then accrual) and run
+    // every one through the shared mutation guard BEFORE touching anything, so a
+    // reconciled / period-locked / year-closed voucher aborts the whole reopen
+    // cleanly rather than half-reversing it.
+    $voucherIds = [];
+    foreach (['payment_voucher_id', 'accrual_voucher_id'] as $column) {
+        $voucherId = (int) ($run[$column] ?? 0);
+        if ($voucherId <= 0) {
+            continue;
+        }
+        $vStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :cid LIMIT 1');
+        $vStmt->execute(['id' => $voucherId, 'cid' => $companyId]);
+        $voucher = $vStmt->fetch();
+        if (!$voucher) {
+            continue; // already gone — tolerate and keep going
+        }
+        $blocker = voucher_mutation_blocker((array) $voucher);
+        if ($blocker !== null) {
+            return ['ok' => false, 'error' => $blocker];
+        }
+        $voucherIds[] = $voucherId;
+    }
+
+    // Later posted runs in the same year withheld tax on top of THIS run's figures
+    // (year-to-date base), so they should be recalculated after the correction.
+    // This is a warning, not a blocker.
+    $laterStmt = db()->prepare("SELECT COUNT(*) FROM payroll_runs
+        WHERE company_id = :cid AND fiscal_year_id = :fy AND period_no > :p
+          AND status IN ('approved', 'posted', 'paid')");
+    $laterStmt->execute(['cid' => $companyId, 'fy' => (int) $run['fiscal_year_id'], 'p' => (int) $run['period_no']]);
+    $laterPosted = (int) $laterStmt->fetchColumn();
+
+    $pdo = db();
+    $ownsTransaction = !$pdo->inTransaction();
+    if ($ownsTransaction) {
+        $pdo->beginTransaction();
+    }
+    try {
+        // 1. Reverse this run's advance/loan recoveries: return each recovered
+        //    amount to its loan and reactivate a loan that the recovery had
+        //    settled, then delete the recovery rows so re-posting recovers once.
+        $recStmt = $pdo->prepare("SELECT loan_id, amount FROM payroll_loan_txns
+            WHERE run_id = :run AND txn_type = 'recovery'");
+        $recStmt->execute(['run' => $runId]);
+        foreach ($recStmt->fetchAll(PDO::FETCH_ASSOC) as $recovery) {
+            $pdo->prepare("UPDATE payroll_loans
+                    SET balance = balance + :amt, status = IF(status = 'settled', 'active', status)
+                    WHERE id = :id")
+                ->execute(['amt' => (float) $recovery['amount'], 'id' => (int) $recovery['loan_id']]);
+        }
+        $pdo->prepare("DELETE FROM payroll_loan_txns WHERE run_id = :run AND txn_type = 'recovery'")
+            ->execute(['run' => $runId]);
+
+        // 2. Delete the run's vouchers (entries cascade; frees the source-unique
+        //    and voucher_no keys for a clean corrected re-post).
+        foreach ($voucherIds as $voucherId) {
+            $pdo->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
+                ->execute(['id' => $voucherId, 'cid' => $companyId]);
+        }
+
+        // 3. Reset the run header to an editable calculated state.
+        $pdo->prepare("UPDATE payroll_runs SET status = 'calculated',
+                approved_by = NULL, approved_at = NULL, accrual_voucher_id = NULL, posted_at = NULL,
+                payment_voucher_id = NULL, paid_at = NULL
+            WHERE id = :id")->execute(['id' => $runId]);
+
+        if ($ownsTransaction) {
+            $pdo->commit();
+        }
+        return ['ok' => true, 'reversed_vouchers' => count($voucherIds), 'later_posted' => $laterPosted];
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return ['ok' => false, 'error' => $exception->getMessage()];
+    }
+}
