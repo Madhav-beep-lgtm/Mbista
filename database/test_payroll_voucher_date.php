@@ -92,6 +92,22 @@ $av2 = (int) ($ap2['voucher_id'] ?? 0);
 $avDate2 = (string) db()->query("SELECT voucher_date FROM vouchers WHERE id=$av2")->fetchColumn();
 ok($avDate2 === '2026-09-28', "Accrual posted on the pay_date (got $avDate2)");
 
+echo "\nPay date AFTER fiscal-year end -> accrual clamps into the year (the bug)\n";
+// Period 12 (Ashadh) paid a few days into the next year: pay_date 2027-07-20 is
+// past the FY end 2027-07-15. Before the fix the accrual was rejected ("no
+// fiscal year covers this date"); now it must clamp to the FY end and post.
+db()->prepare('INSERT INTO payroll_runs (company_id,fiscal_year_id,period_no,period_label,pay_date,voucher_date,created_by) VALUES (:cid,:fy,12,:l,:pay,NULL,:by)')
+    ->execute(['cid'=>$cid,'fy'=>$fyId,'l'=>payroll_bs_month_name(12),'pay'=>'2027-07-20','by'=>$uid]);
+$runId3=(int) db()->lastInsertId();
+$run3 = payroll_run($runId3);
+ok(payroll_run_voucher_date($run3) === '2027-07-15', 'Out-of-year pay date clamps to the fiscal-year end');
+payroll_calculate_run($runId3);
+$ap3 = payroll_approve_and_post($runId3, $uid + 1);
+$av3 = (int) ($ap3['voucher_id'] ?? 0);
+ok(!empty($ap3['ok']) && $av3 > 0, 'Accrual posts despite the out-of-year pay date');
+$avDate3 = (string) db()->query("SELECT voucher_date FROM vouchers WHERE id=$av3")->fetchColumn();
+ok($avDate3 === '2027-07-15', "Accrual posted on the fiscal-year end (got $avDate3)");
+
 vd_cleanup();
 echo "\n----------------------------------------\nPASS: $pass   FAIL: $fail\n";
 exit($fail === 0 ? 0 : 1);

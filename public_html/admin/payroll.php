@@ -36,6 +36,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $payDate = (string) ($_POST['pay_date'] ?? date('Y-m-d'));
         $voucherDate = trim((string) ($_POST['voucher_date'] ?? ''));
         $voucherDate = ($voucherDate !== '') ? $voucherDate : null;
+        // An explicit voucher date must sit inside the run's fiscal year — the
+        // engine would clamp it anyway, but silently "fixing" a typo hides it.
+        if ($voucherDate !== null && (($fiscalYear['start_date'] ?? '') !== '' && ($voucherDate < $fiscalYear['start_date'] || $voucherDate > $fiscalYear['end_date']))) {
+            flash('error', 'Voucher date ' . $voucherDate . ' is outside fiscal year ' . ($fiscalYear['label'] ?? '') . ' (' . $fiscalYear['start_date'] . ' to ' . $fiscalYear['end_date'] . '). Leave it blank to use the pay date, or pick a date inside the year.');
+            redirect('admin/payroll.php');
+        }
         $dup = db()->prepare("SELECT id FROM payroll_runs WHERE company_id = :cid AND fiscal_year_id = :fy AND period_no = :p AND status <> 'cancelled' LIMIT 1");
         $dup->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'p' => $periodNo]);
         if ($dup->fetchColumn()) {
@@ -181,8 +187,28 @@ $departments = array_values(array_unique(array_filter(array_map(static fn (array
 
 $taxVersion = payroll_active_tax_version($companyId, $fiscalYearId);
 $validation = $run ? payroll_validate_run($run, $settings, $userId) : ['errors' => [], 'warnings' => []];
-$journalPreview = ($run && in_array((string) $run['status'], ['calculated', 'approved', 'posted', 'paid'], true) && $validation['errors'] === [])
-    ? payroll_accrual_entries($run, $settings) : [];
+// Journal section. A run whose accrual IS posted shows the voucher's real
+// entries straight from the books — the source of truth. (It must NOT be gated
+// on $validation: payroll_validate_run checks approval READINESS, so it always
+// "errors" with "Run must be calculated" on approved/posted/paid runs, which
+// used to blank the journal on every posted run.) An unposted run computes a
+// live preview, validated as-if calculated so ledger-mapping problems still
+// hide a would-be-garbage preview without the status false-positive.
+$journalPreview = [];
+if ($run && (int) ($run['accrual_voucher_id'] ?? 0) > 0) {
+    $journalStmt = db()->prepare("SELECT ledger_id, entry_type, amount, memo FROM voucher_entries
+        WHERE voucher_id = :vid ORDER BY entry_type = 'credit', id");
+    $journalStmt->execute(['vid' => (int) $run['accrual_voucher_id']]);
+    $journalPreview = array_map(static fn (array $e): array => [
+        'ledger_id' => (int) $e['ledger_id'], 'entry_type' => (string) $e['entry_type'],
+        'amount' => (float) $e['amount'], 'memo' => (string) ($e['memo'] ?? ''),
+    ], $journalStmt->fetchAll(PDO::FETCH_ASSOC));
+} elseif ($run && in_array((string) $run['status'], ['calculated', 'approved', 'posted', 'paid'], true)) {
+    $previewValidation = payroll_validate_run(array_merge($run, ['status' => 'calculated']), $settings, 0);
+    if ($previewValidation['errors'] === []) {
+        $journalPreview = payroll_accrual_entries($run, $settings);
+    }
+}
 $ledgerNames = [];
 if ($journalPreview !== []) {
     $ledgerIds = array_values(array_unique(array_map(static fn (array $entry): int => (int) $entry['ledger_id'], $journalPreview)));

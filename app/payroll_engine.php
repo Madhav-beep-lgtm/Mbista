@@ -276,14 +276,43 @@ function payroll_bs_month_name(int $periodNo): string
     return $months[max(1, min(12, $periodNo))] ?? ('Month ' . $periodNo);
 }
 
-/** The date a run's accrual should post on: its explicit voucher date, else pay date. */
+/**
+ * The date a run's accrual voucher should post on.
+ *
+ * Priority: the explicit custom voucher_date, else the pay date, else today.
+ * The salary EXPENSE is earned in the run's own fiscal year, but a last-period
+ * run (Ashadh) is usually paid a few days into the NEXT year — so a raw pay
+ * date can fall outside the run's fiscal year and the posting engine rightly
+ * refuses it ("no fiscal year covers this date"), which is exactly why the
+ * accrual silently failed to post. We therefore clamp the resolved date into
+ * the run's fiscal-year range so the accrual always lands in the period it was
+ * earned. (The cash PAYMENT voucher keeps its true pay date and may fall in the
+ * next year — that is correct; only the accrual is anchored to its own year.)
+ */
 function payroll_run_voucher_date(array $run): string
 {
-    $voucherDate = (string) ($run['voucher_date'] ?? '');
-    if ($voucherDate !== '') {
-        return $voucherDate;
+    $date = trim((string) ($run['voucher_date'] ?? ''));
+    if ($date === '') {
+        $date = trim((string) ($run['pay_date'] ?? ''));
     }
-    return (string) ($run['pay_date'] ?? date('Y-m-d'));
+    if ($date === '') {
+        $date = date('Y-m-d');
+    }
+    $fyId = (int) ($run['fiscal_year_id'] ?? 0);
+    if ($fyId > 0 && function_exists('fiscal_year_by_id')) {
+        $fy = fiscal_year_by_id($fyId);
+        if ($fy) {
+            $start = (string) ($fy['start_date'] ?? '');
+            $end = (string) ($fy['end_date'] ?? '');
+            if ($start !== '' && $date < $start) {
+                $date = $start;
+            }
+            if ($end !== '' && $date > $end) {
+                $date = $end;
+            }
+        }
+    }
+    return $date;
 }
 
 /**
@@ -790,6 +819,7 @@ function payroll_accrual_entries(array $run, array $settings): array
     $retEmployer = $sum('retirement_employer_month');
     $advance = $sum('advance_deduction');
     $otherDeduction = $sum('other_deduction');
+    $adjDeduction = $sum('adj_deduction');
     $net = $sum('net_pay');
 
     $entries = [];
@@ -806,9 +836,13 @@ function payroll_accrual_entries(array $run, array $settings): array
     if ($advance > 0) {
         $entries[] = ['ledger_id' => (int) $settings['advance_ledger_id'], 'entry_type' => 'credit', 'amount' => $advance, 'memo' => 'Employee advance recovered'];
     }
-    if ($otherDeduction > 0) {
-        // Other deductions stay in salary payable until remitted separately.
-        $net = round($net + $otherDeduction, 2);
+    if ($otherDeduction + $adjDeduction > 0) {
+        // Other deductions AND manual adjustment deductions stay in salary
+        // payable until remitted separately. Both are post-tax employee
+        // deductions subtracted from net_pay; omitting adj_deduction here
+        // left the journal unbalanced by exactly that amount, so any run
+        // with an "Extra deduction" could never post its accrual.
+        $net = round($net + $otherDeduction + $adjDeduction, 2);
     }
     $entries[] = ['ledger_id' => (int) $settings['salary_payable_ledger_id'], 'entry_type' => 'credit', 'amount' => $net, 'memo' => 'Net salary payable'];
     return array_values(array_filter($entries, static fn (array $entry): bool => $entry['amount'] > 0.004));
@@ -950,6 +984,27 @@ function payroll_post_accrual(int $runId, int $userId): array
     if (abs($debits - $credits) > 0.011) {
         return ['ok' => false, 'error' => 'Accrual journal does not balance (Dr ' . number_format($debits, 2) . ' vs Cr ' . number_format($credits, 2) . ').', 'voucher_id' => 0];
     }
+    $pdo = db();
+    // Self-heal: adopt an orphan accrual voucher left by a previous partial
+    // failure (voucher committed, run row never stamped). Without this, the
+    // idempotency guard above never fires and every retry dies on the
+    // uniq_vouchers_source key with a cryptic SQLSTATE[23000].
+    $orphanStmt = $pdo->prepare("SELECT id FROM vouchers
+        WHERE source_type = 'payroll_run' AND source_id = :rid AND company_id = :cid LIMIT 1");
+    $orphanStmt->execute(['rid' => $runId, 'cid' => (int) $run['company_id']]);
+    $orphanId = (int) ($orphanStmt->fetchColumn() ?: 0);
+    if ($orphanId > 0) {
+        $pdo->prepare("UPDATE payroll_runs SET accrual_voucher_id = :vid, posted_at = COALESCE(posted_at, NOW()),
+                status = IF(status = 'approved', 'posted', status) WHERE id = :id")
+            ->execute(['vid' => $orphanId, 'id' => $runId]);
+        return ['ok' => true, 'error' => null, 'voucher_id' => $orphanId];
+    }
+    // Voucher + run stamp commit together so a mid-flight failure can never
+    // strand a voucher the run does not know about.
+    $ownsTransaction = !$pdo->inTransaction();
+    if ($ownsTransaction) {
+        $pdo->beginTransaction();
+    }
     try {
         $voucherId = create_voucher_with_entries([
             'company_id' => (int) $run['company_id'],
@@ -964,11 +1019,17 @@ function payroll_post_accrual(int $runId, int $userId): array
             'status' => 'posted',
             'posted_by' => $userId,
         ], $entries);
-        db()->prepare("UPDATE payroll_runs SET accrual_voucher_id = :vid, posted_at = COALESCE(posted_at, NOW()),
+        $pdo->prepare("UPDATE payroll_runs SET accrual_voucher_id = :vid, posted_at = COALESCE(posted_at, NOW()),
                 status = IF(status = 'approved', 'posted', status) WHERE id = :id")
             ->execute(['vid' => $voucherId, 'id' => $runId]);
+        if ($ownsTransaction) {
+            $pdo->commit();
+        }
         return ['ok' => true, 'error' => null, 'voucher_id' => $voucherId];
     } catch (Throwable $exception) {
+        if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         return ['ok' => false, 'error' => $exception->getMessage(), 'voucher_id' => 0];
     }
 }
@@ -992,6 +1053,14 @@ function payroll_record_payment(int $runId, int $userId, string $paymentDate = '
         return ['ok' => false, 'error' => 'Nothing payable on this run.'];
     }
     $paymentDate = $paymentDate !== '' ? $paymentDate : date('Y-m-d');
+    // The cash truly moves on the payment date, so it is NEVER clamped into the
+    // run's fiscal year (unlike the accrual) — but a last-period (Ashadh) run is
+    // usually paid a few days into the NEXT Nepali year, which may not be set up
+    // yet. Catch that here with an actionable message instead of the posting
+    // engine's generic refusal.
+    if (!fiscal_year_for_date((int) $run['company_id'], $paymentDate)) {
+        return ['ok' => false, 'error' => 'The payment date ' . $paymentDate . ' is not inside any fiscal year of this company — a last-month salary is usually paid in the NEXT fiscal year. Create/open that fiscal year first (Accounting → Fiscal Years), or pick a payment date inside an existing year.'];
+    }
     try {
         $voucherId = create_voucher_with_entries([
             'company_id' => (int) $run['company_id'],

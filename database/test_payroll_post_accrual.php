@@ -80,6 +80,66 @@ ok(near($salExpDr, 50000), 'Salary expense debited with gross 50,000');
 $dup = payroll_post_accrual($runId, $uid);
 ok(empty($dup['ok']) && str_contains((string)($dup['error'] ?? ''), 'already'), 'Second post_accrual is rejected (idempotent)');
 
+echo "\nJournal display: a posted accrual renders from the books, not the preview\n";
+// The page's journal query for a posted run — must return the real entries even
+// though payroll_validate_run() reports "Run must be calculated" on paid runs
+// (the approval-readiness false-positive that used to blank the journal).
+$disp = db()->prepare("SELECT ledger_id, entry_type, amount, memo FROM voucher_entries
+    WHERE voucher_id = :vid ORDER BY entry_type = 'credit', id");
+$disp->execute(['vid' => $av]);
+$dispRows = $disp->fetchAll(PDO::FETCH_ASSOC);
+$dispDr = 0.0; $dispCr = 0.0;
+foreach ($dispRows as $r) { if ($r['entry_type'] === 'debit') { $dispDr += (float) $r['amount']; } else { $dispCr += (float) $r['amount']; } }
+ok($dispRows !== [] && near($dispDr, $dispCr) && $dispDr > 0, 'Posted-run journal query returns balanced, non-empty entries');
+$val = payroll_validate_run(payroll_run($runId), payroll_settings($cid), $uid);
+ok($val['errors'] !== [], 'Approval validation DOES error on a paid run (why the journal must not depend on it)');
+$pageSrc = (string) file_get_contents(__DIR__ . '/../public_html/admin/payroll.php');
+ok(strpos($pageSrc, "accrual_voucher_id'] ?? 0) > 0") !== false && strpos($pageSrc, 'FROM voucher_entries') !== false,
+    'UI: journal section reads voucher_entries when the accrual voucher exists');
+ok(strpos($pageSrc, "\$validation['errors'] === [])\n    ? payroll_accrual_entries") === false,
+    'UI: journal is no longer gated on the approval-readiness validation');
+
+echo "\nOrphan accrual voucher: post_accrual adopts it instead of dying on the unique key\n";
+// Simulate the historical partial failure: voucher exists, run row unstamped.
+db()->prepare('UPDATE payroll_runs SET accrual_voucher_id = NULL, posted_at = NULL WHERE id = :id')->execute(['id' => $runId]);
+$adopt = payroll_post_accrual($runId, $uid);
+ok(!empty($adopt['ok']) && (int) $adopt['voucher_id'] === $av, 'Orphan accrual is ADOPTED (same voucher, no duplicate insert)');
+ok((int) (payroll_run($runId)['accrual_voucher_id'] ?? 0) === $av, 'Run is re-stamped with the orphan voucher id');
+$vCount = (int) db()->query("SELECT COUNT(*) FROM vouchers WHERE source_type='payroll_run' AND source_id=$runId")->fetchColumn();
+ok($vCount === 1, 'Exactly one accrual voucher exists after adoption');
+
+echo "\nAdjustment 'Extra deduction' keeps the accrual balanced\n";
+// A second run with a manual Extra deduction on its line: previously the
+// journal lost the adj_deduction from the Salary Payable credit and the run
+// could NEVER post ('Accrual journal does not balance').
+db()->prepare('INSERT INTO payroll_runs (company_id,fiscal_year_id,period_no,period_label,pay_date,created_by) VALUES (:cid,:fy,2,:l,:pay,:by)')
+    ->execute(['cid'=>$cid,'fy'=>$fyId,'l'=>'PA M2','pay'=>'2026-08-30','by'=>$uid]);
+$runId2 = (int) db()->lastInsertId();
+payroll_calculate_run($runId2);
+$line2 = payroll_run_lines($runId2)[0];
+$adj = payroll_set_line_adjustment($runId2, (int) $line2['id'], 0.0, 5000.0, 'Canteen recovery');
+ok(!empty($adj['ok']), 'Extra deduction of 5,000 saved on the line');
+$run2 = payroll_run($runId2);
+$settings2 = payroll_settings($cid);
+$entries2 = payroll_accrual_entries($run2, $settings2);
+$dr2 = 0.0; $cr2 = 0.0;
+foreach ($entries2 as $e2) { if ($e2['entry_type'] === 'debit') { $dr2 += $e2['amount']; } else { $cr2 += $e2['amount']; } }
+ok(near($dr2, $cr2) && $dr2 > 0, "Accrual entries balance WITH an Extra deduction (Dr $dr2 vs Cr $cr2)");
+$ap2 = payroll_approve_and_post($runId2, $uid);
+ok(!empty($ap2['ok']), 'Run with an Extra deduction now approves (was: does not balance)');
+$pa2 = payroll_post_accrual($runId2, $uid);
+ok(!empty($pa2['ok']) && (int) $pa2['voucher_id'] > 0, 'Accrual with an Extra deduction posts to the books');
+// The 5,000 stays in Salary Payable until remitted: payable credit = net + other + adj.
+$sp2 = 0.0;
+foreach ($entries2 as $e2) { if ($e2['entry_type'] === 'credit' && (int) $e2['ledger_id'] === $lSP) { $sp2 = $e2['amount']; } }
+$netSum2 = (float) db()->query("SELECT COALESCE(SUM(net_pay),0) FROM payroll_run_lines WHERE run_id=$runId2")->fetchColumn();
+ok(near($sp2, $netSum2 + 5000), 'Salary Payable credit includes the withheld 5,000 (remitted separately)');
+
+echo "\nPayment date in a fiscal year that does not exist yet -> actionable error\n";
+$noFy = payroll_record_payment($runId2, $uid, '2028-01-15');
+ok(empty($noFy['ok']) && str_contains((string) ($noFy['error'] ?? ''), 'fiscal year'), 'record_payment explains the missing fiscal year instead of a cryptic engine error');
+ok((string) payroll_run($runId2)['status'] !== 'paid', 'Run is NOT marked paid when the payment voucher cannot post');
+
 pa_cleanup();
 echo "\n----------------------------------------\nPASS: $pass   FAIL: $fail\n";
 exit($fail === 0 ? 0 : 1);
