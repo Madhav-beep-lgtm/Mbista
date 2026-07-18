@@ -132,7 +132,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <link rel="stylesheet" href="/assets/css/portal.css?v=20260718h">
     <link rel="stylesheet" href="/assets/css/theme-brown.css?v=20260718h">
     <link rel="stylesheet" href="/assets/css/theme-sahakari-green.css?v=20260718h">
-    <link rel="stylesheet" href="/assets/css/text-contrast-only.css?v=20260718q">
+    <link rel="stylesheet" href="/assets/css/text-contrast-only.css?v=20260718r">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">

@@ -115,6 +115,29 @@ body:is(.theme-dark,.admin-dark) :is(.button.primary,button.primary,button[type=
   -webkit-text-fill-color: #ffffff !important;
 }
 
+/* Header dropdown menus are WHITE panels even though they live inside .site-header
+   (whose chrome rule paints descendant text white). Re-assert dark ink on them at
+   higher specificity than the chrome rule, placed last, so dropdown links are not
+   white-on-white. */
+body:not(.theme-dark):not(.admin-dark) :is(.site-header,.header-nav-bar) :is(.dropdown-menu,.nav-dropdown-menu,.dropdown-panel,[role="menu"]) :is(a,li,span,strong,small,button,p,h1,h2,h3,h4,h5,h6),
+body:is(.theme-dark,.admin-dark) :is(.site-header,.header-nav-bar) :is(.dropdown-menu,.nav-dropdown-menu,.dropdown-panel,[role="menu"]) :is(a,li,span,strong,small,button,p,h1,h2,h3,h4,h5,h6) {
+  color: #102a22 !important;
+  -webkit-text-fill-color: #102a22 !important;
+  opacity: 1 !important;
+}
+
+/* The mobile slide-in navigation is a white surface panel (background:var(--surface))
+   only at the mobile breakpoint. On mobile its links must be dark ink; on desktop
+   the nav bar is dark-green chrome and keeps white text (handled above). */
+@media (max-width: 992px) {
+  body:not(.theme-dark):not(.admin-dark) .site-header .main-navigation :is(a,li,span,strong,small,button,p,h1,h2,h3,h4,h5,h6),
+  body:is(.theme-dark,.admin-dark) .site-header .main-navigation :is(a,li,span,strong,small,button,p,h1,h2,h3,h4,h5,h6) {
+    color: #102a22 !important;
+    -webkit-text-fill-color: #102a22 !important;
+    opacity: 1 !important;
+  }
+}
+
 @media print {
   body, body * { color: #000 !important; -webkit-text-fill-color: #000 !important; }
 }
