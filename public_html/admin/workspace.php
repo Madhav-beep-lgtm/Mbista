@@ -1326,6 +1326,19 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/workspace.php?view=tasks');
     }
 
+    if ($action === 'record_advance') {
+        require_once __DIR__ . '/../../app/advance_engine.php';
+        $advTaskId = (int) ($_POST['task_id'] ?? 0);
+        $advAmount = round((float) ($_POST['advance_amount'] ?? 0), 2);
+        $advMethod = trim((string) ($_POST['advance_method'] ?? 'Cash'));
+        $advDate = trim((string) ($_POST['advance_date'] ?? date('Y-m-d')));
+        $advResult = record_task_advance($companyId, $advTaskId, $advAmount, $advMethod !== '' ? $advMethod : 'Cash', $advDate !== '' ? $advDate : date('Y-m-d'), (int) (current_user()['id'] ?? 0));
+        flash($advResult['ok'] ? 'success' : 'error', $advResult['ok']
+            ? 'Advance of ' . site_currency_symbol() . number_format($advAmount, 2) . ' recorded — it will be applied against this task\'s next invoice, and the client sees a mirror entry to approve.'
+            : (string) ($advResult['error'] ?? 'Could not record the advance.'));
+        redirect('admin/workspace.php?view=invoices');
+    }
+
     if ($action === 'issue_invoice') {
         $taskId = (int) ($_POST['task_id'] ?? 0);
         $stageId = (int) ($_POST['stage_id'] ?? 0);
@@ -2844,6 +2857,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                             <a class="button secondary" href="<?= e(url('admin/workspace.php?view=tasks&terminate_task_id=' . (int) $task['id'])) ?>#terminate-task">Terminate</a>
                                         <?php endif; ?>
                                     <?php endif; ?>
+                                    <details style="position:relative">
+                                        <summary class="button secondary" style="cursor:pointer;list-style:none">Record advance</summary>
+                                        <form method="post" style="position:absolute;right:0;z-index:40;width:230px;display:grid;gap:7px;padding:12px;text-align:left;background:var(--mbw-surface,#fff);color:var(--mbw-ink,#12261f);border:1px solid var(--mbw-border,rgba(0,0,0,.16));border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.22)">
+                                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                            <input type="hidden" name="action" value="record_advance">
+                                            <input type="hidden" name="task_id" value="<?= e((int) $task['id']) ?>">
+                                            <label style="font-size:12px;font-weight:600">Advance amount<input type="number" step="0.01" min="0.01" name="advance_amount" required style="min-height:32px"></label>
+                                            <label style="font-size:12px;font-weight:600">Method<input type="text" name="advance_method" value="Cash" style="min-height:32px"></label>
+                                            <label style="font-size:12px;font-weight:600">Received on<input type="date" name="advance_date" value="<?= e(date('Y-m-d')) ?>" style="min-height:32px"></label>
+                                            <button type="submit">Record advance</button>
+                                            <small style="font-size:11px;color:var(--mbw-muted,#5b6b64);font-weight:400">Posts Dr Bank / Cr Advances-from-Customers, mirrors to the client, and offsets the task's next invoice.</small>
+                                        </form>
+                                    </details>
                                 </div>
                             </td>
                         </tr>

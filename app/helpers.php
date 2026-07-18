@@ -3629,6 +3629,15 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): ?
 
     auto_post_client_mirror_invoice($invoiceId, $actorId);
 
+    // Offset any advance the client paid before the task started, so the
+    // receivable this invoice creates is shown net of the advance.
+    if (is_file(__DIR__ . '/advance_engine.php')) {
+        require_once __DIR__ . '/advance_engine.php';
+        if (function_exists('apply_task_advance_to_invoice')) {
+            apply_task_advance_to_invoice($invoiceId, $actorId);
+        }
+    }
+
     return null;
 }
 
@@ -3862,6 +3871,11 @@ function client_mirror_ledger(int $booksCompanyId, string $kind, ?string $provid
         if ($mapped) {
             return $mapped;
         }
+    } elseif ($kind === 'advance_to_provider') {
+        $mapped = get_mapped_ledger($booksCompanyId, 'mirror_advance_to_provider');
+        if ($mapped) {
+            return $mapped;
+        }
     } else {
         return null;
     }
@@ -3915,6 +3929,11 @@ function client_mirror_ledger(int $booksCompanyId, string $kind, ?string $provid
             $groupId = $findGroup('indirect_income', 'IND-INC', 'Indirect Incomes');
 
             return $ensureLedger($groupId, 'Discount Received', 'revenue');
+        }
+        if ($kind === 'advance_to_provider') {
+            $groupId = $findGroup('current_asset', 'ADV-PREPAY', 'Advances & Prepayments');
+
+            return $ensureLedger($groupId, ($providerName ?: 'Service Provider') . ' (Advance Paid)', 'asset');
         }
     } catch (Throwable $exception) {
         return null;
