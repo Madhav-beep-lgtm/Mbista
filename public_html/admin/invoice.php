@@ -278,7 +278,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $vatAmount = round(array_sum(array_map(static fn (array $line): float => (float) $line['vat_amount'], $lineItems)), 2);
                     $totalAmount = round($amount + $exciseAmount + $vatAmount, 2);
 
-                    $prefix = match ($invoiceSourceType) {
+                    // Prefer the configured Invoice-Settings prefix (PRO / TAX) by
+                    // category; fall back to the source-type prefix when unset.
+                    $categoryPrefix = $invoiceCategory === 'tax'
+                        ? trim((string) setting('tax_invoice_prefix', ''))
+                        : trim((string) setting('proforma_invoice_prefix', ''));
+                    $prefix = $categoryPrefix !== '' ? $categoryPrefix : match ($invoiceSourceType) {
                         'inventory' => 'INV-STK',
                         'manufacturing' => 'INV-MFG',
                         'other' => 'INV-OTH',

@@ -5039,14 +5039,22 @@ function export_invoice_html(array $invoice): string
             . '</tr>';
     }
 
-    $docTitle = $isTax ? 'TAX<br>INVOICE' : 'PROFORMA<br>INVOICE';
+    // Invoice-tab settings drive the title / tax label / note / terms / footer;
+    // each falls back to the previous hardcoded default when left blank.
+    $titleSetting = trim((string) setting($isTax ? 'tax_invoice_title' : 'proforma_invoice_title', ''));
+    $docTitle = $titleSetting !== '' ? nl2br(e($titleSetting)) : ($isTax ? 'TAX<br>INVOICE' : 'PROFORMA<br>INVOICE');
     $docSubtitle = $isTax ? 'कर बिजक (Tax Invoice)' : 'प्रोफर्मा बिल (Estimate Only)';
     $docBadge = $isTax
         ? '<span class="doc-badge is-valid">VALID TAX DOCUMENT — VAT ACT 2052</span>'
         : '<span class="doc-badge">NOT A VALID TAX DOCUMENT</span>';
-    $footNote = $isTax
+    $footerSetting = trim((string) setting($isTax ? 'tax_invoice_footer' : 'proforma_invoice_footer', ''));
+    $footNote = $footerSetting !== '' ? $footerSetting : ($isTax
         ? 'TAX INVOICE — Issued in accordance with the Nepal Value Added Tax Act, 2052 and VAT Rules, 2053. Please retain this document for your records.'
-        : 'PROFORMA INVOICE — This is an estimate only and NOT a valid tax document. A formal Tax Invoice will be issued upon confirmation.';
+        : 'PROFORMA INVOICE — This is an estimate only and NOT a valid tax document. A formal Tax Invoice will be issued upon confirmation.');
+    $invoiceNoteSetting = trim((string) setting($isTax ? 'tax_invoice_note' : 'proforma_invoice_note', ''));
+    $invoiceTermsSetting = trim((string) setting($isTax ? 'tax_invoice_terms' : 'proforma_invoice_terms', ''));
+    $taxLabelSetting = trim((string) setting('tax_invoice_tax_label', 'VAT'));
+    if ($taxLabelSetting === '') { $taxLabelSetting = 'VAT'; }
 
     $logoHtml = $logoPath !== ''
         ? '<img class="logo" src="' . e(url($logoPath)) . '" alt="Logo">'
@@ -5195,7 +5203,7 @@ function export_invoice_html(array $invoice): string
             ' . ($discountAmount > 0 ? '<tr class="sep"><td class="label">Discount (छुट)</td><td class="value">- ' . e(number_format($discountAmount, 2)) . '</td></tr>' : '') . '
             <tr class="sep"><td class="label">Taxable Amount</td><td class="value">' . e(number_format($taxableAmount, 2)) . '</td></tr>
             ' . ($showExcise ? '<tr class="sep"><td class="label">Excise Duty @ ' . e(number_format($exciseRate, 2)) . '% (अन्तःशुल्क)</td><td class="value">' . e(number_format($exciseAmount, 2)) . '</td></tr>' : '') . '
-            <tr class="sep"><td class="label">VAT @ ' . e(rtrim(rtrim(number_format($vatRate, 2), '0'), '.')) . '% (मूल्य अभिवृद्धि कर)</td><td class="value">' . e(number_format($vatAmount, 2)) . '</td></tr>
+            <tr class="sep"><td class="label">' . e($taxLabelSetting) . ' @ ' . e(rtrim(rtrim(number_format($vatRate, 2), '0'), '.')) . '% (मूल्य अभिवृद्धि कर)</td><td class="value">' . e(number_format($vatAmount, 2)) . '</td></tr>
             <tr class="grand"><td class="label">Grand Total (जम्मा रकम)</td><td class="value">NPR ' . e(number_format($totalAmount, 2)) . '</td></tr>
         </table>
 
@@ -5211,6 +5219,10 @@ function export_invoice_html(array $invoice): string
             </div>
         </div>
 
+        ' . (($invoiceNoteSetting !== '' || $invoiceTermsSetting !== '') ? '<div class="notes-terms" style="margin-top:14px;font-size:11px;line-height:1.5">'
+            . ($invoiceNoteSetting !== '' ? '<div style="margin-bottom:6px"><b>NOTE:</b> ' . nl2br(e($invoiceNoteSetting)) . '</div>' : '')
+            . ($invoiceTermsSetting !== '' ? '<div><b>TERMS &amp; CONDITIONS:</b> ' . nl2br(e($invoiceTermsSetting)) . '</div>' : '')
+            . '</div>' : '') . '
         <div class="foot">' . e($footNote) . '</div>
     </div>
     <button class="print-button" onclick="window.print()">Print / Save as PDF</button>
