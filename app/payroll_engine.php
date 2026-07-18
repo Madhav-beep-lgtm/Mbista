@@ -263,9 +263,64 @@ function payroll_tax_withheld_ytd(int $employeeId, int $fiscalYearId, int $exclu
  * Calculate one employee's line for a run. Returns the values plus the full
  * trace; does not write anything.
  */
+/**
+ * Calendar date range for a run's period: the fiscal-year start plus the period
+ * offset (period 1 = FY start month, etc.). Used to count leave inside the run.
+ * Returns ['', ''] when the fiscal year is unknown.
+ */
+function payroll_period_range(int $fiscalYearId, int $periodNo): array
+{
+    static $starts = [];
+    if (!array_key_exists($fiscalYearId, $starts)) {
+        $stmt = db()->prepare('SELECT start_date FROM fiscal_years WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $fiscalYearId]);
+        $starts[$fiscalYearId] = (string) ($stmt->fetchColumn() ?: '');
+    }
+    $start = $starts[$fiscalYearId];
+    if ($start === '') {
+        return ['', ''];
+    }
+    $periodNo = max(1, min(12, $periodNo));
+    $periodStart = date('Y-m-d', strtotime($start . ' +' . ($periodNo - 1) . ' months'));
+    $periodEnd = date('Y-m-d', strtotime($start . ' +' . $periodNo . ' months -1 day'));
+    return [$periodStart, $periodEnd];
+}
+
 function payroll_calculate_line(array $employee, array $run, array $taxVersion, array $adjustments = []): array
 {
     $basic = round((float) $employee['basic_salary'], 2);
+    $originalBasic = $basic;
+
+    // Unpaid-leave salary cut: reduce basic by (basic / working-days) * approved
+    // unpaid-leave days falling in this run's period. Reducing basic makes gross,
+    // tax and net all drop like a real absence and keeps the accrual balanced
+    // (it posts off gross). Driven by payroll_settings + leave_types.deduct_salary.
+    $unpaidLeaveDays = 0.0;
+    $unpaidLeaveDeduction = 0.0;
+    $payrollSettings = payroll_settings((int) $run['company_id']);
+    if ((int) ($payrollSettings['deduct_unpaid_leave'] ?? 1) === 1
+        && (int) ($employee['user_id'] ?? 0) > 0
+        && table_exists('leave_requests') && table_exists('leave_types')
+        && column_exists('leave_types', 'deduct_salary')) {
+        [$periodStart, $periodEnd] = payroll_period_range((int) $run['fiscal_year_id'], (int) $run['period_no']);
+        if ($periodStart !== '' && $periodEnd !== '') {
+            $leaveStmt = db()->prepare("SELECT COALESCE(SUM(DATEDIFF(LEAST(lr.end_date, :pend), GREATEST(lr.start_date, :pstart)) + 1), 0)
+                FROM leave_requests lr INNER JOIN leave_types lt ON lt.id = lr.leave_type_id
+                WHERE lr.company_id = :cid AND lr.staff_user_id = :uid AND lr.status = 'approved' AND lt.deduct_salary = 1
+                  AND lr.start_date <= :pend2 AND lr.end_date >= :pstart2");
+            $leaveStmt->execute([
+                'cid' => (int) $run['company_id'], 'uid' => (int) $employee['user_id'],
+                'pend' => $periodEnd, 'pstart' => $periodStart, 'pend2' => $periodEnd, 'pstart2' => $periodStart,
+            ]);
+            $unpaidLeaveDays = max(0.0, (float) $leaveStmt->fetchColumn());
+            if ($unpaidLeaveDays > 0) {
+                $workingDays = max(1.0, (float) ($payrollSettings['standard_working_days'] ?? 30));
+                $unpaidLeaveDeduction = min($originalBasic, round($originalBasic / $workingDays * $unpaidLeaveDays, 2));
+                $basic = round($originalBasic - $unpaidLeaveDeduction, 2);
+            }
+        }
+    }
+
     $componentLines = payroll_employee_component_lines($employee);
 
     // Per-period manual adjustments entered on THIS run's salary sheet. The extra
@@ -398,6 +453,8 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         'retirement_employer_month' => $retEmployerMonth,
         'advance_deduction' => $advanceDeduction,
         'other_deduction' => round($otherDeduction, 2),
+        'unpaid_leave_days' => round($unpaidLeaveDays, 2),
+        'unpaid_leave_deduction' => round($unpaidLeaveDeduction, 2),
         'adj_earning' => $adjEarning,
         'adj_deduction' => $adjDeduction,
         'adj_remark' => $adjRemark,
@@ -419,6 +476,7 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
             ],
             'slabs' => $slabBreakdown,
             'first_slab_exempt' => $firstSlabExempt,
+            'unpaid_leave' => ['days' => round($unpaidLeaveDays, 2), 'deduction' => round($unpaidLeaveDeduction, 2), 'original_basic' => $originalBasic],
             'withholding' => [
                 'method' => $periodNo >= 12 ? 'final-period adjustment' : 'regular (remaining months)',
                 'period_no' => $periodNo,
@@ -469,12 +527,12 @@ function payroll_calculate_run(int $runId): array
                 run_id, payroll_employee_id, basic, allowances, overtime, benefits, gross,
                 assessable_annual, retirement_deduction_annual, taxable_annual, annual_tax,
                 tax_ytd_before, tax_month, retirement_employee_month, retirement_employer_month,
-                advance_deduction, other_deduction, adj_earning, adj_deduction, adj_remark, net_pay, trace, line_status, warnings
+                advance_deduction, other_deduction, unpaid_leave_days, unpaid_leave_deduction, adj_earning, adj_deduction, adj_remark, net_pay, trace, line_status, warnings
             ) VALUES (
                 :run_id, :pe, :basic, :allowances, :overtime, :benefits, :gross,
                 :assessable, :ret_ded, :taxable, :annual_tax,
                 :ytd, :tax_month, :ret_emp, :ret_er,
-                :advance, :other_ded, :adj_earning, :adj_deduction, :adj_remark, :net, :trace, :line_status, :warnings
+                :advance, :other_ded, :leave_days, :leave_ded, :adj_earning, :adj_deduction, :adj_remark, :net, :trace, :line_status, :warnings
             )');
         $totals = ['gross' => 0.0, 'tax' => 0.0, 'deductions' => 0.0, 'employer' => 0.0, 'net' => 0.0];
         foreach ($employees as $employee) {
@@ -497,6 +555,8 @@ function payroll_calculate_run(int $runId): array
                 'ret_er' => $calc['retirement_employer_month'],
                 'advance' => $calc['advance_deduction'],
                 'other_ded' => $calc['other_deduction'],
+                'leave_days' => $calc['unpaid_leave_days'],
+                'leave_ded' => $calc['unpaid_leave_deduction'],
                 'adj_earning' => $calc['adj_earning'],
                 'adj_deduction' => $calc['adj_deduction'],
                 'adj_remark' => $calc['adj_remark'] !== '' ? $calc['adj_remark'] : null,
@@ -576,6 +636,7 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
                 annual_tax = :annual_tax, tax_ytd_before = :ytd, tax_month = :tax_month,
                 retirement_employee_month = :ret_emp, retirement_employer_month = :ret_er,
                 advance_deduction = :advance, other_deduction = :other_ded,
+                unpaid_leave_days = :leave_days, unpaid_leave_deduction = :leave_ded,
                 adj_earning = :adj_earning, adj_deduction = :adj_deduction, adj_remark = :adj_remark,
                 net_pay = :net, trace = :trace, line_status = :line_status, warnings = :warnings
             WHERE id = :id AND run_id = :run')
@@ -586,6 +647,7 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
                 'annual_tax' => $calc['annual_tax'], 'ytd' => $calc['tax_ytd_before'], 'tax_month' => $calc['tax_month'],
                 'ret_emp' => $calc['retirement_employee_month'], 'ret_er' => $calc['retirement_employer_month'],
                 'advance' => $calc['advance_deduction'], 'other_ded' => $calc['other_deduction'],
+                'leave_days' => $calc['unpaid_leave_days'], 'leave_ded' => $calc['unpaid_leave_deduction'],
                 'adj_earning' => $calc['adj_earning'], 'adj_deduction' => $calc['adj_deduction'],
                 'adj_remark' => $calc['adj_remark'] !== '' ? $calc['adj_remark'] : null,
                 'net' => $calc['net_pay'], 'trace' => json_encode($calc['trace'], JSON_UNESCAPED_UNICODE),

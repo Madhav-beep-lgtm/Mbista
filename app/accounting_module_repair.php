@@ -693,5 +693,20 @@ function accounting_module_repair_database(): array
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     });
 
+    $run('Payroll unpaid-leave deduction (migration 055)', static function (): void {
+        if (accounting_repair_table_exists('payroll_run_lines')) {
+            accounting_repair_add_column('payroll_run_lines', 'unpaid_leave_days', "`unpaid_leave_days` DECIMAL(6,2) NOT NULL DEFAULT 0.00 AFTER `other_deduction`");
+            accounting_repair_add_column('payroll_run_lines', 'unpaid_leave_deduction', "`unpaid_leave_deduction` DECIMAL(14,2) NOT NULL DEFAULT 0.00 AFTER `unpaid_leave_days`");
+        }
+        if (accounting_repair_table_exists('payroll_settings')) {
+            accounting_repair_add_column('payroll_settings', 'standard_working_days', "`standard_working_days` DECIMAL(5,2) NOT NULL DEFAULT 30.00");
+            accounting_repair_add_column('payroll_settings', 'deduct_unpaid_leave', "`deduct_unpaid_leave` TINYINT(1) NOT NULL DEFAULT 1");
+        }
+        if (accounting_repair_table_exists('leave_types')) {
+            accounting_repair_add_column('leave_types', 'deduct_salary', "`deduct_salary` TINYINT(1) NOT NULL DEFAULT 0");
+            db()->exec("UPDATE leave_types SET deduct_salary = 1 WHERE deduct_salary = 0 AND (LOWER(name) LIKE '%unpaid%' OR LOWER(name) LIKE '%without pay%' OR LOWER(name) LIKE '%lwp%')");
+        }
+    });
+
     return $errors;
 }

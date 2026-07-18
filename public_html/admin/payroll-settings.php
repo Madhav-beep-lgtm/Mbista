@@ -29,7 +29,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 salary_expense_ledger_id = :se, employer_contrib_expense_ledger_id = :ee,
                 tds_payable_ledger_id = :tds, retirement_payable_ledger_id = :rp,
                 salary_payable_ledger_id = :sp, advance_ledger_id = :adv, bank_ledger_id = :bank,
-                enforce_sod = :sod, auto_post = :ap
+                enforce_sod = :sod, auto_post = :ap,
+                standard_working_days = :wd, deduct_unpaid_leave = :dul
             WHERE company_id = :cid')
             ->execute([
                 'se' => (int) ($_POST['salary_expense_ledger_id'] ?? 0) ?: null,
@@ -41,6 +42,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'bank' => (int) ($_POST['bank_ledger_id'] ?? 0) ?: null,
                 'sod' => isset($_POST['enforce_sod']) ? 1 : 0,
                 'ap' => isset($_POST['auto_post']) ? 1 : 0,
+                'wd' => max(1, min(31, (int) ($_POST['standard_working_days'] ?? 30))),
+                'dul' => isset($_POST['deduct_unpaid_leave']) ? 1 : 0,
                 'cid' => $companyId,
             ]);
         payroll_settings($companyId); // ensures the row exists even on a fresh company
@@ -253,6 +256,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <label>Bank / cash for salary payment<?= $ledgerSelect('bank_ledger_id', (int) ($settings['bank_ledger_id'] ?? 0)) ?></label>
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="auto_post" <?= (int) ($settings['auto_post'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Auto-post accrual voucher on approval</label>
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="enforce_sod" <?= (int) ($settings['enforce_sod'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Segregation of duties (preparer cannot approve)</label>
+        <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="deduct_unpaid_leave" <?= (int) ($settings['deduct_unpaid_leave'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Deduct salary for approved unpaid leave (from Attendance/HR)</label>
+        <label>Working days per month (for the leave day-rate)<input type="number" step="0.5" min="1" max="31" name="standard_working_days" value="<?= e((string) ($settings['standard_working_days'] ?? '30')) ?>"></label>
         <div class="workspace-span-2"><button type="submit"><?= icon('settings') ?>Save Settings</button></div>
     </form>
 </section>
