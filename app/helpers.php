@@ -2997,6 +2997,8 @@ function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []
         'invoice_payment_request' => 'the Invoicing module (the payment would keep showing paid with no cash in the books)',
         'invoice_discount' => 'the Invoicing module (the invoice totals already reflect this discount — removing its voucher would desync the receivable)',
         'party_opening' => 'the Parties module (the party opening balance would silently vanish from the books)',
+        'task_advance' => 'the Advances workflow (deleting it would strand the client advance and leave any applied amount pointing at nothing)',
+        'advance_applied' => 'the Advances workflow (the invoice would keep showing an advance payment with no backing voucher)',
     ];
     $voucherSourceType = (string) ($voucher['source_type'] ?? '');
     if (isset($moduleSourceTypes[$voucherSourceType]) && !in_array($voucherSourceType, $allowModuleSources, true)) {

@@ -400,16 +400,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stockPostingNotes = invoice_issue_inventory_stock($newInvoiceId, $adminId);
 
                         if ($status === 'paid') {
-                            $requestId = create_payment_request($newInvoiceId, (int) $currentCompany['id'], $adminId, $totalAmount, 'manual', 'Auto-created for paid invoice.');
-                            if ($requestId) {
-                                db()->prepare('UPDATE invoice_payment_requests SET status = :status, payment_received_on = :payment_received_on, payment_amount = :payment_amount WHERE id = :id')
-                                    ->execute([
-                                        'status' => 'paid',
-                                        'payment_received_on' => $issuedOn,
-                                        'payment_amount' => $totalAmount,
-                                        'id' => $requestId,
-                                    ]);
-                                auto_post_invoice_payment_voucher((int) $requestId, $adminId);
+                            // Any client advance was already auto-applied by
+                            // auto_post_task_invoice_voucher above, so charge only the
+                            // RESIDUAL (total minus advance) — not the full total, which
+                            // would double-count the advance and drive the receivable negative.
+                            require_once __DIR__ . '/../../app/advance_engine.php';
+                            $paidResidual = function_exists('invoice_amount_after_advance') ? invoice_amount_after_advance($newInvoiceId) : $totalAmount;
+                            if ($paidResidual > 0) {
+                                $requestId = create_payment_request($newInvoiceId, (int) $currentCompany['id'], $adminId, $paidResidual, 'manual', 'Auto-created for paid invoice.');
+                                if ($requestId) {
+                                    db()->prepare('UPDATE invoice_payment_requests SET status = :status, payment_received_on = :payment_received_on, payment_amount = :payment_amount WHERE id = :id')
+                                        ->execute([
+                                            'status' => 'paid',
+                                            'payment_received_on' => $issuedOn,
+                                            'payment_amount' => $paidResidual,
+                                            'id' => $requestId,
+                                        ]);
+                                    auto_post_invoice_payment_voucher((int) $requestId, $adminId);
+                                }
                             }
                         }
                     }

@@ -200,17 +200,10 @@ function apply_task_advance_to_invoice(int $invoiceId, ?int $userId = null): voi
     }
     $companyId = (int) $invoice['company_id'];
     $taskId = (int) $invoice['task_id'];
-    $available = task_advance_available($companyId, $taskId);
-    if ($available <= 0) {
+    // Cheap pre-check: no advance on this task -> nothing to do (avoid opening a tx).
+    if (task_advance_posted($companyId, $taskId) <= 0) {
         return;
     }
-    $total = round((float) (($invoice['total_amount'] ?? 0) > 0 ? $invoice['total_amount'] : ($invoice['amount'] ?? 0)), 2);
-    $outstanding = round($total - (float) $invoice['paid_amount'], 2);
-    $apply = min($available, $outstanding);
-    if ($apply <= 0) {
-        return;
-    }
-
     $advanceLedgerId = ensure_customer_advance_ledger($companyId);
     $fiscalYearId = current_fiscal_year_id() ?: (int) (($def = resolve_default_company_and_fiscal_year()) ? $def['fiscal_year']['id'] : 0);
     if ($advanceLedgerId <= 0 || $fiscalYearId <= 0) {
@@ -229,20 +222,52 @@ function apply_task_advance_to_invoice(int $invoiceId, ?int $userId = null): voi
     if ($receivableLedgerId <= 0) {
         return;
     }
+    // Match the sales voucher's period so both legs land in the same fiscal year,
+    // and a lock on an unrelated current period cannot block the offset.
+    $voucherDate = (string) ($invoice['issued_on'] ?? '') !== '' ? (string) $invoice['issued_on'] : date('Y-m-d');
 
-    $status = $apply >= $outstanding ? 'paid' : 'partial';
     $pdo = db();
     $ownsTx = !$pdo->inTransaction();
     if ($ownsTx) {
         $pdo->beginTransaction();
     }
     try {
+        // Serialize concurrent applications for this task's advance: two invoices
+        // issued at once must not both read the full available balance. Locking the
+        // task_advance voucher row first makes the second caller block until the
+        // first commits, then re-read the (now larger) applied total below.
+        $lock = $pdo->prepare("SELECT id FROM vouchers WHERE company_id = :cid AND source_type = 'task_advance' AND source_id = :tid FOR UPDATE");
+        $lock->execute(['cid' => $companyId, 'tid' => $taskId]);
+        if (!$lock->fetch()) {
+            if ($ownsTx) { $pdo->commit(); }
+            return;
+        }
+        // Re-assert (under lock) that this invoice was not already settled by an advance.
+        $dup2 = $pdo->prepare("SELECT id FROM vouchers WHERE source_type = 'advance_applied' AND source_id = :id LIMIT 1");
+        $dup2->execute(['id' => $invoiceId]);
+        if ($dup2->fetch()) {
+            if ($ownsTx) { $pdo->commit(); }
+            return;
+        }
+        // Recompute available + the invoice outstanding UNDER the lock.
+        $available = task_advance_available($companyId, $taskId);
+        $paidStmt = $pdo->prepare("SELECT COALESCE(SUM(payment_amount),0) FROM invoice_payment_requests WHERE invoice_id = :id AND status IN ('paid','partial')");
+        $paidStmt->execute(['id' => $invoiceId]);
+        $paid = round((float) $paidStmt->fetchColumn(), 2);
+        $total = round((float) (($invoice['total_amount'] ?? 0) > 0 ? $invoice['total_amount'] : ($invoice['amount'] ?? 0)), 2);
+        $outstanding = round($total - $paid, 2);
+        $apply = min($available, $outstanding);
+        if ($apply <= 0) {
+            if ($ownsTx) { $pdo->commit(); }
+            return;
+        }
+        $status = $apply >= $outstanding ? 'paid' : 'partial';
         $pdo->prepare('INSERT INTO invoice_payment_requests
                 (invoice_id, company_id, requested_by, amount_requested, payment_method, status, payment_received_on, payment_amount, notes)
             VALUES (:iid, :cid, :by, :amt, :method, :status, :on, :amt2, :notes)')
             ->execute([
                 'iid' => $invoiceId, 'cid' => $companyId, 'by' => $userId ?: null, 'amt' => $apply,
-                'method' => 'Advance applied', 'status' => $status, 'on' => date('Y-m-d'), 'amt2' => $apply,
+                'method' => 'Advance applied', 'status' => $status, 'on' => $voucherDate, 'amt2' => $apply,
                 'notes' => 'Client advance applied to this invoice.',
             ]);
         create_voucher_with_entries([
@@ -253,7 +278,7 @@ function apply_task_advance_to_invoice(int $invoiceId, ?int $userId = null): voi
             'source_type' => 'advance_applied',
             'source_id' => $invoiceId,
             'reference_no' => $invoice['invoice_no'] ?? null,
-            'voucher_date' => date('Y-m-d'),
+            'voucher_date' => $voucherDate,
             'narration' => 'Client advance applied to invoice ' . ($invoice['invoice_no'] ?? ('#' . $invoiceId)),
             'total_amount' => $apply,
             'status' => 'posted',
@@ -273,5 +298,32 @@ function apply_task_advance_to_invoice(int $invoiceId, ?int $userId = null): voi
         if ($ownsTx && $pdo->inTransaction()) {
             $pdo->rollBack();
         }
+        // Surface a stranded advance rather than swallowing it silently.
+        if (function_exists('log_activity')) {
+            log_activity('task_invoice', $invoiceId, 'advance_apply_failed', 'Client advance could not be applied: ' . $exception->getMessage(), $userId);
+        }
     }
+}
+
+/**
+ * Residual invoice amount a caller should collect after any client advance has
+ * been auto-applied — so a "mark paid on issue" shortcut doesn't charge the full
+ * total on top of the advance (which would drive the receivable negative).
+ */
+function invoice_amount_after_advance(int $invoiceId): float
+{
+    if ($invoiceId <= 0 || !table_exists('task_invoices')) {
+        return 0.0;
+    }
+    $stmt = db()->prepare("SELECT ti.total_amount, ti.amount,
+            COALESCE((SELECT SUM(COALESCE(pr.payment_amount,0)) FROM invoice_payment_requests pr
+                      WHERE pr.invoice_id = ti.id AND pr.status IN ('paid','partial')), 0) AS paid_amount
+        FROM task_invoices ti WHERE ti.id = :id LIMIT 1");
+    $stmt->execute(['id' => $invoiceId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return 0.0;
+    }
+    $total = round((float) (($row['total_amount'] ?? 0) > 0 ? $row['total_amount'] : ($row['amount'] ?? 0)), 2);
+    return round(max(0.0, $total - (float) $row['paid_amount']), 2);
 }

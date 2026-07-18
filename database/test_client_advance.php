@@ -119,6 +119,24 @@ auto_post_task_invoice_voucher($invId, $uid);
 $applied2 = (float) db()->query("SELECT COALESCE(SUM(payment_amount),0) FROM invoice_payment_requests WHERE invoice_id=$invId AND payment_method='Advance applied'")->fetchColumn();
 ok(near($applied2, 5000), 'Re-posting is idempotent (advance applied once, still 5,000)');
 
+// ---------------------------------------------------------------------------
+// Review fixes
+// ---------------------------------------------------------------------------
+echo "\nReview fixes\n";
+// Fix 2: advance_applied voucher dated to the invoice's issued_on (2026-07-25), not today.
+$advAppDate = (string) db()->query("SELECT voucher_date FROM vouchers WHERE source_type='advance_applied' AND source_id=$invId LIMIT 1")->fetchColumn();
+ok($advAppDate === '2026-07-25', "advance_applied voucher dated to the invoice's issued_on, not today ($advAppDate)");
+
+// Fix 3: the paid-at-issuance shortcut must charge only the residual, not the full total.
+ok(near(invoice_amount_after_advance($invId), 3000), 'invoice_amount_after_advance = residual 3,000 (paid shortcut charges only this, no double-count)');
+
+// Fix 4: advance vouchers are guarded against deletion from the voucher UI.
+$advVid = (int) db()->query("SELECT id FROM vouchers WHERE source_type='task_advance' AND source_id=$taskId LIMIT 1")->fetchColumn();
+$del1 = delete_voucher_with_entries($advVid, $cid, $uid);
+ok(empty($del1['ok']) && stripos((string) ($del1['error'] ?? ''), 'advance') !== false, 'Deleting the task_advance voucher is blocked (mutation guard)');
+$advAppVid = (int) db()->query("SELECT id FROM vouchers WHERE source_type='advance_applied' AND source_id=$invId LIMIT 1")->fetchColumn();
+ok(empty(delete_voucher_with_entries($advAppVid, $cid, $uid)['ok']), 'Deleting the advance_applied voucher is blocked (mutation guard)');
+
 adv_cleanup();
 echo "\n----------------------------------------\n";
 echo "PASS: $pass   FAIL: $fail\n";
