@@ -533,7 +533,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($postAction === 'convert_to_tax') {
         if (convert_to_tax_invoice($invoiceId, $adminId)) {
-            $message = 'Invoice converted to tax invoice successfully';
+            // Redirect-after-POST so the view re-fetches and shows the updated
+            // "Tax Invoice / Issued" state instead of the stale pre-convert data
+            // (which looked like the invoice hadn't changed / stayed a draft).
+            flash('success', 'Invoice converted to tax invoice successfully.');
+            redirect('admin/invoice.php?action=view&id=' . $invoiceId);
         } else {
             $error = 'Failed to convert invoice or invalid state';
         }
@@ -855,15 +859,15 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
 
                         <div>
                             <label>Amount before VAT</label>
-                            <input type="number" min="0" step="0.01" name="amount" placeholder="Leave 0 when using line items">
+                            <input type="number" min="0" step="0.01" name="amount" id="invoice-amount-input" placeholder="Auto-fills from the task/stage fee">
                         </div>
 
                         <div id="task-field" class="<?php echo $showTaskFields ? '' : 'is-hidden'; ?>">
                             <label>Task</label>
-                            <select name="task_id">
+                            <select name="task_id" id="invoice-task-select">
                                 <option value="">Select task</option>
                                 <?php foreach ($taskOptions as $task): ?>
-                                    <option value="<?php echo e((int) $task['id']); ?>">
+                                    <option value="<?php echo e((int) $task['id']); ?>" data-fee="<?php echo e(number_format((float) ($task['quoted_fee'] ?? 0), 2, '.', '')); ?>">
                                         #<?php echo e((int) $task['id']); ?> - <?php echo e($task['title']); ?> (<?php echo e($task['organization_name'] ?? 'No client'); ?>)
                                     </option>
                                 <?php endforeach; ?>
@@ -881,10 +885,10 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
 
                         <div id="stage-field" class="<?php echo $showTaskFields ? '' : 'is-hidden'; ?>">
                             <label>Stage (required for stage invoice)</label>
-                            <select name="stage_id">
-                                <option value="0">No stage selected</option>
+                            <select name="stage_id" id="invoice-stage-select">
+                                <option value="0" data-fee="">No stage selected</option>
                                 <?php foreach ($stageOptions as $stage): ?>
-                                    <option value="<?php echo e((int) $stage['id']); ?>">
+                                    <option value="<?php echo e((int) $stage['id']); ?>" data-task="<?php echo e((int) $stage['task_id']); ?>" data-fee="<?php echo e(number_format((float) ($stage['stage_fee'] ?? 0), 2, '.', '')); ?>">
                                         #<?php echo e((int) $stage['task_id']); ?> - <?php echo e($stage['stage_name']); ?> (<?php echo e($stage['status']); ?>)
                                     </option>
                                 <?php endforeach; ?>
@@ -986,6 +990,33 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                             <button type="submit" class="btn btn-success">Create Invoice</button>
                         </div>
                     </form>
+                    <script>
+                    (function () {
+                        var amount = document.getElementById('invoice-amount-input');
+                        var taskSel = document.getElementById('invoice-task-select');
+                        var stageSel = document.getElementById('invoice-stage-select');
+                        var typeSel = document.getElementById('invoice_type');
+                        if (!amount) { return; }
+                        function selectedFee(sel) {
+                            if (!sel) { return null; }
+                            var opt = sel.options[sel.selectedIndex];
+                            if (!opt) { return null; }
+                            var fee = opt.getAttribute('data-fee');
+                            return (fee === null || fee === '') ? null : parseFloat(fee);
+                        }
+                        function autofill() {
+                            // Stage invoice -> stage fee; task/termination invoice -> task quoted fee.
+                            var type = typeSel ? typeSel.value : 'stage';
+                            var fee = (type === 'stage') ? selectedFee(stageSel) : selectedFee(taskSel);
+                            if (fee !== null && !isNaN(fee) && fee > 0) {
+                                amount.value = fee.toFixed(2);
+                            }
+                        }
+                        [taskSel, stageSel, typeSel].forEach(function (el) {
+                            if (el) { el.addEventListener('change', autofill); }
+                        });
+                    })();
+                    </script>
                     <?php if ($taskOptions === []): ?>
                         <p style="margin-bottom: 0; color: var(--mbw-muted);">No tasks available yet. Create a task in Work Portal first, then return here to issue invoices.</p>
                     <?php endif; ?>
