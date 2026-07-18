@@ -123,6 +123,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = 'Run reopened for correction.'
                 . ((int) $result['reversed_vouchers'] > 0 ? ' ' . (int) $result['reversed_vouchers'] . ' voucher(s) reversed and advance recoveries restored.' : '')
                 . ' Edit the salary sheet, then Approve & Post again.';
+            if (!empty($result['was_paid'])) {
+                $message .= ' Because this run was already paid, Record Payment again after re-posting so the bank payout is booked once.';
+            }
             if ((int) ($result['later_posted'] ?? 0) > 0) {
                 $message .= ' Note: ' . (int) $result['later_posted'] . ' later posted run(s) this year used this run’s tax as their year-to-date base — recalculate and repost them after this correction.';
             }

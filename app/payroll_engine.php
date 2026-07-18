@@ -240,14 +240,22 @@ function payroll_employee_component_lines(array $employee): array
     return $lines;
 }
 
-/** Tax already withheld for this employee in earlier posted/paid runs of the FY. */
-function payroll_tax_withheld_ytd(int $employeeId, int $fiscalYearId, int $excludeRunId = 0): float
+/**
+ * Tax already withheld for this employee in EARLIER posted/paid runs of the FY.
+ * The period bound is a no-op during normal forward processing (later periods
+ * are not posted yet), but it is essential once a mid-year run is reopened for
+ * correction and recalculated while later runs remain posted: without it, those
+ * later runs' tax would pollute this run's year-to-date base and silently
+ * under-withhold (or zero) the corrected period's TDS.
+ */
+function payroll_tax_withheld_ytd(int $employeeId, int $fiscalYearId, int $excludeRunId = 0, int $beforePeriodNo = 13): float
 {
     $stmt = db()->prepare("SELECT COALESCE(SUM(l.tax_month), 0)
         FROM payroll_run_lines l INNER JOIN payroll_runs r ON r.id = l.run_id
         WHERE l.payroll_employee_id = :pe AND r.fiscal_year_id = :fy
-          AND r.status IN ('approved', 'posted', 'paid') AND r.id <> :run");
-    $stmt->execute(['pe' => $employeeId, 'fy' => $fiscalYearId, 'run' => $excludeRunId]);
+          AND r.status IN ('approved', 'posted', 'paid') AND r.id <> :run
+          AND r.period_no < :period");
+    $stmt->execute(['pe' => $employeeId, 'fy' => $fiscalYearId, 'run' => $excludeRunId, 'period' => $beforePeriodNo]);
     return (float) $stmt->fetchColumn();
 }
 
@@ -340,7 +348,7 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     // over the remaining periods; the final period absorbs rounding drift.
     $periodNo = max(1, min(12, (int) $run['period_no']));
     $monthsRemaining = 12 - $periodNo + 1;
-    $taxYtdBefore = payroll_tax_withheld_ytd((int) $employee['id'], (int) $run['fiscal_year_id'], (int) ($run['id'] ?? 0));
+    $taxYtdBefore = payroll_tax_withheld_ytd((int) $employee['id'], (int) $run['fiscal_year_id'], (int) ($run['id'] ?? 0), $periodNo);
     $rounding = (string) $taxVersion['rounding'];
     $taxMonth = $periodNo >= 12
         ? max(0.0, round($annualTax - $taxYtdBefore, 2))
@@ -777,15 +785,27 @@ function payroll_approve_and_post(int $runId, int $approverId): array
                 if ($loanId <= 0 || $amount <= 0) {
                     continue;
                 }
-                // SET clauses apply left to right, so the status check below
-                // sees the already-reduced balance.
-                $pdo->prepare("UPDATE payroll_loans SET balance = GREATEST(0, balance - :amt),
-                        status = IF(balance <= 0.004, 'settled', status) WHERE id = :id")
-                    ->execute(['amt' => $amount, 'id' => $loanId]);
+                // Lock the loan row and record the ACTUALLY-APPLIED reduction,
+                // not the (possibly stale) planned amount: a plan calculated
+                // before an earlier run depleted the balance could exceed what
+                // remains. Storing the real delta keeps the recovery txn honest
+                // so a later reopen reverses exactly what was taken and never
+                // over-restores the balance.
+                $balStmt = $pdo->prepare('SELECT balance FROM payroll_loans WHERE id = :id FOR UPDATE');
+                $balStmt->execute(['id' => $loanId]);
+                $balanceBefore = round((float) ($balStmt->fetchColumn() ?: 0), 2);
+                $applied = round(min($amount, max(0.0, $balanceBefore)), 2);
+                if ($applied <= 0) {
+                    continue;
+                }
+                $newBalance = round($balanceBefore - $applied, 2);
+                $pdo->prepare("UPDATE payroll_loans SET balance = :nb,
+                        status = IF(:nb2 <= 0.004, 'settled', status) WHERE id = :id")
+                    ->execute(['nb' => $newBalance, 'nb2' => $newBalance, 'id' => $loanId]);
                 $pdo->prepare('INSERT INTO payroll_loan_txns (loan_id, run_id, txn_type, amount, txn_date, voucher_id, notes)
                         VALUES (:loan, :run, \'recovery\', :amt, :dt, :vid, :notes)')
                     ->execute([
-                        'loan' => $loanId, 'run' => $runId, 'amt' => $amount,
+                        'loan' => $loanId, 'run' => $runId, 'amt' => $applied,
                         'dt' => (string) ($run['pay_date'] ?? date('Y-m-d')),
                         'vid' => $voucherId ?: null,
                         'notes' => 'Recovered in payroll ' . $run['period_label'],
@@ -924,15 +944,29 @@ function payroll_reopen_run(int $runId, int $userId, string $reason): array
         $pdo->beginTransaction();
     }
     try {
+        // Re-read the run under a row lock so a concurrent double-submit cannot
+        // reverse the same recoveries or delete the same vouchers twice: the
+        // second caller blocks here, then sees 'calculated' and aborts.
+        $lockStmt = $pdo->prepare('SELECT status FROM payroll_runs WHERE id = :id FOR UPDATE');
+        $lockStmt->execute(['id' => $runId]);
+        $lockedStatus = (string) ($lockStmt->fetchColumn() ?: '');
+        if (!in_array($lockedStatus, ['approved', 'posted', 'paid'], true)) {
+            if ($ownsTransaction) {
+                $pdo->rollBack();
+            }
+            return ['ok' => false, 'error' => 'This run was already reopened or changed by another action. Reload the page and try again.'];
+        }
+
         // 1. Reverse this run's advance/loan recoveries: return each recovered
-        //    amount to its loan and reactivate a loan that the recovery had
-        //    settled, then delete the recovery rows so re-posting recovers once.
+        //    amount to its loan (capped at the loan principal as a safety net for
+        //    legacy over-recorded rows) and reactivate a loan that the recovery
+        //    had settled, then delete the recovery rows so re-posting recovers once.
         $recStmt = $pdo->prepare("SELECT loan_id, amount FROM payroll_loan_txns
             WHERE run_id = :run AND txn_type = 'recovery'");
         $recStmt->execute(['run' => $runId]);
         foreach ($recStmt->fetchAll(PDO::FETCH_ASSOC) as $recovery) {
             $pdo->prepare("UPDATE payroll_loans
-                    SET balance = balance + :amt, status = IF(status = 'settled', 'active', status)
+                    SET balance = LEAST(principal, balance + :amt), status = IF(status = 'settled', 'active', status)
                     WHERE id = :id")
                 ->execute(['amt' => (float) $recovery['amount'], 'id' => (int) $recovery['loan_id']]);
         }
@@ -955,7 +989,8 @@ function payroll_reopen_run(int $runId, int $userId, string $reason): array
         if ($ownsTransaction) {
             $pdo->commit();
         }
-        return ['ok' => true, 'reversed_vouchers' => count($voucherIds), 'later_posted' => $laterPosted];
+        return ['ok' => true, 'reversed_vouchers' => count($voucherIds), 'later_posted' => $laterPosted,
+            'was_paid' => (string) $run['status'] === 'paid'];
     } catch (Throwable $exception) {
         if ($ownsTransaction && $pdo->inTransaction()) {
             $pdo->rollBack();

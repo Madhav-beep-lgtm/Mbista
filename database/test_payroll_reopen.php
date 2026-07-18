@@ -121,9 +121,11 @@ foreach ([[0, 500000, 1], [500000, 700000, 10], [700000, 1000000, 20], [1000000,
 }
 
 // Two employees on existing user rows; E001 (SSF + an advance), E002 (no scheme).
-$userIds = db()->query('SELECT id FROM users ORDER BY id ASC LIMIT 2')->fetchAll(PDO::FETCH_COLUMN);
+$userIds = array_map('intval', db()->query('SELECT id FROM users ORDER BY id ASC LIMIT 4')->fetchAll(PDO::FETCH_COLUMN));
 if (count($userIds) < 2) { exit("Need at least 2 users in the DB to run this test.\n"); }
-[$uidA, $uidB] = array_map('intval', $userIds);
+[$uidA, $uidB] = [$userIds[0], $userIds[1]];
+$uidC = $userIds[2] ?? null;
+$uidD = $userIds[3] ?? null;
 $empInsert = db()->prepare('INSERT INTO payroll_employees (company_id, user_id, employee_code, department, designation,
         pan_no, bank_name, bank_account, marital_status, retirement_scheme, retirement_id,
         retirement_employee_rate, retirement_employer_rate, basic_salary, status, joined_on)
@@ -250,6 +252,78 @@ $reDr = (float) db()->query("SELECT COALESCE(SUM(CASE WHEN entry_type='debit' TH
 $reCr = (float) db()->query("SELECT COALESCE(SUM(CASE WHEN entry_type='credit' THEN amount ELSE 0 END),0) FROM voucher_entries WHERE voucher_id = $newAccrualVid")->fetchColumn();
 ok(near($reDr, $reCr) && $reDr > 0, 'Re-posted accrual voucher balances (Dr = Cr)');
 ok(near($reDr, 85000 + 2000 + (55000 * 0.20)), 'Re-posted gross reflects the +2,000 adjustment');
+
+// ---------------------------------------------------------------------------
+// Finding 1/3: reopening a mid-year run must NOT pull LATER runs' tax into its
+// year-to-date base. Post P5,P6,P7; reopen P6 and recalc; its tax must be
+// unchanged (YTD = P5 only, never P5+P7).
+// ---------------------------------------------------------------------------
+echo "\nYTD tax period bound (reopen mid-year run)\n";
+if ($uidC !== null) {
+    $empInsert->execute(['cid' => $cid, 'uid' => $uidC, 'code' => 'E003', 'dept' => 'Tax', 'desig' => 'Manager',
+        'pan' => '601112223', 'bname' => 'NIC', 'bacc' => '0150010099999', 'marital' => 'individual', 'scheme' => 'none',
+        'rid' => null, 'rer' => 0, 'rerr' => 0, 'basic' => 80000, 'joined' => '2026-07-16']);
+    $empC = (int) db()->lastInsertId();
+    // Realistic forward flow: post each period BEFORE calculating the next, so
+    // P6's original tax already reflects P5's withholding as its YTD base.
+    $ytdRuns = [];
+    foreach ([5, 6, 7] as $p) {
+        db()->prepare('INSERT INTO payroll_runs (company_id, fiscal_year_id, period_no, period_label, pay_date, created_by)
+                VALUES (:cid, :fy, :p, :label, :pay, :by)')
+            ->execute(['cid' => $cid, 'fy' => $fyId, 'p' => $p, 'label' => "PR M$p", 'pay' => $payDate, 'by' => $actorId]);
+        $rid = (int) db()->lastInsertId();
+        payroll_calculate_run($rid);
+        payroll_approve_and_post($rid, $actorId + 1);
+        $ytdRuns[$p] = $rid;
+    }
+    $p6 = $ytdRuns[6];
+    $origTax = (float) db()->query("SELECT tax_month FROM payroll_run_lines WHERE run_id = $p6 AND payroll_employee_id = $empC")->fetchColumn();
+    ok($origTax > 0, 'P6 has a positive monthly tax to test against');
+    $reP6 = payroll_reopen_run($p6, $actorId, 'Reopening mid-year run to test YTD base isolation.');
+    ok($reP6['ok'] && (int) $reP6['later_posted'] === 1, 'P6 reopened; reports 1 later posted run (P7)');
+    payroll_calculate_run($p6);
+    $newTax = (float) db()->query("SELECT tax_month FROM payroll_run_lines WHERE run_id = $p6 AND payroll_employee_id = $empC")->fetchColumn();
+    ok(near($origTax, $newTax), "P6 tax unchanged after reopen+recalc (YTD stays P5 only): orig=$origTax new=$newTax");
+    $ytdBounded = payroll_tax_withheld_ytd($empC, $fyId, $p6, 6);
+    $ytdAll = payroll_tax_withheld_ytd($empC, $fyId, $p6, 13);
+    ok($ytdAll > $ytdBounded + 0.01, 'Unbounded YTD would have wrongly included later run P7 (bound is doing real work)');
+} else { echo "  SKIP  YTD test (needs a 3rd DB user)\n"; }
+
+// ---------------------------------------------------------------------------
+// Finding 2: a stale second run whose planned recovery exceeds the depleted
+// balance must record the ACTUALLY-APPLIED amount, so reopening it restores
+// exactly what was taken (never over-restores).
+// ---------------------------------------------------------------------------
+echo "\nLoan recovery clamp + symmetric reopen (stale second run)\n";
+if ($uidD !== null) {
+    $empInsert->execute(['cid' => $cid, 'uid' => $uidD, 'code' => 'E004', 'dept' => 'Ops', 'desig' => 'Officer',
+        'pan' => '604445556', 'bname' => 'NABIL', 'bacc' => '0150010088888', 'marital' => 'individual', 'scheme' => 'none',
+        'rid' => null, 'rer' => 0, 'rerr' => 0, 'basic' => 40000, 'joined' => '2026-07-16']);
+    $empD = (int) db()->lastInsertId();
+    db()->prepare("INSERT INTO payroll_loans (company_id, payroll_employee_id, title, principal, balance, monthly_installment, status, issued_on)
+            VALUES (:cid, :pe, 'Large advance', 30000, 30000, 20000, 'active', :dt)")
+        ->execute(['cid' => $cid, 'pe' => $empD, 'dt' => '2026-07-01']);
+    $loanD = (int) db()->lastInsertId();
+    // Calculate BOTH runs before either posts, so both plan to recover 20,000.
+    $twoRuns = [];
+    foreach ([8, 9] as $p) {
+        db()->prepare('INSERT INTO payroll_runs (company_id, fiscal_year_id, period_no, period_label, pay_date, created_by)
+                VALUES (:cid, :fy, :p, :label, :pay, :by)')
+            ->execute(['cid' => $cid, 'fy' => $fyId, 'p' => $p, 'label' => "PR M$p", 'pay' => $payDate, 'by' => $actorId]);
+        $rid = (int) db()->lastInsertId();
+        payroll_calculate_run($rid);
+        $twoRuns[$p] = $rid;
+    }
+    payroll_approve_and_post($twoRuns[8], $actorId + 1);
+    ok(near($loanBalance($loanD), 10000), 'P8 recovered planned 20,000 (balance 30,000 -> 10,000)');
+    payroll_approve_and_post($twoRuns[9], $actorId + 1);
+    ok(near($loanBalance($loanD), 0), 'P9 stale plan clamped to remaining balance (balance -> 0, not negative)');
+    $p9txn = (float) db()->query("SELECT amount FROM payroll_loan_txns WHERE run_id = {$twoRuns[9]} AND loan_id = $loanD AND txn_type='recovery'")->fetchColumn();
+    ok(near($p9txn, 10000), 'P9 recovery txn records the APPLIED 10,000, not the planned 20,000');
+    $reP9 = payroll_reopen_run($twoRuns[9], $actorId, 'Reopen stale second run to verify symmetric loan restore.');
+    ok($reP9['ok'], 'Stale run P9 reopened');
+    ok(near($loanBalance($loanD), 10000), 'Reopen restores exactly 10,000 (balance -> 10,000, NOT over-restored to 20,000)');
+} else { echo "  SKIP  loan clamp test (needs a 4th DB user)\n"; }
 
 // ---------------------------------------------------------------------------
 // Cleanup
