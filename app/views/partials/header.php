@@ -48,7 +48,7 @@ if ($navSection === '') {
     <link rel="stylesheet" href="/assets/css/style.css?v=20260718h">
     <link rel="stylesheet" href="/assets/css/theme-brown.css?v=20260718h">
     <link rel="stylesheet" href="/assets/css/theme-sahakari-green.css?v=20260718h">
-    <link rel="stylesheet" href="/assets/css/text-contrast-only.css?v=20260718r">
+    <link rel="stylesheet" href="/assets/css/text-contrast-only.css?v=20260718s">
 </head>
 <body class="<?= e($bodyClass) ?>">
 <?php if ($headerSupportPhone !== '' || $headerSupportEmail !== ''): ?>

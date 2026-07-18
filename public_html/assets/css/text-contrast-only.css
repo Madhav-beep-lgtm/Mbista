@@ -138,6 +138,39 @@ body:is(.theme-dark,.admin-dark) :is(.site-header,.header-nav-bar) :is(.dropdown
   }
 }
 
+/* Light-background CONTROLS nested inside dark-green chrome must keep dark ink /
+   dark icons. The chrome rule (and the primary-button rule) paint descendant
+   text + stroke=currentColor icons white, but these controls carry their OWN
+   white/pale background (topbar icon buttons background:var(--mbw-card)=#fff, the
+   search glyph, the company context chip/icon), so white-on-white made their
+   icons invisible. Higher specificity than the chrome rule + placed last. */
+body:not(.theme-dark):not(.admin-dark) :is(.utility-bar,.site-header,.header-nav-bar,.admin-topbar,.portal-topbar,.admin-topbar-actions,.hero,.mbca-hero,.portal-selector-hero,.company-pin-showcase,.auth2-panel,.auth-panel) :is(.admin-icon-button,.mbw-search-glyph,.admin-context-chip,.admin-context-icon),
+body:not(.theme-dark):not(.admin-dark) :is(.utility-bar,.site-header,.header-nav-bar,.admin-topbar,.portal-topbar,.admin-topbar-actions,.hero,.mbca-hero,.portal-selector-hero,.company-pin-showcase,.auth2-panel,.auth-panel) :is(.admin-icon-button,.mbw-search-glyph,.admin-context-chip,.admin-context-icon) :is(a,span,strong,small,button,i,em,b,p,svg,path,circle,rect,line,polyline,polygon,.ui-icon),
+body:is(.theme-dark,.admin-dark) :is(.utility-bar,.site-header,.header-nav-bar,.admin-topbar,.portal-topbar,.admin-topbar-actions,.hero,.mbca-hero,.portal-selector-hero,.company-pin-showcase,.auth2-panel,.auth-panel) :is(.admin-icon-button,.mbw-search-glyph,.admin-context-chip,.admin-context-icon),
+body:is(.theme-dark,.admin-dark) :is(.utility-bar,.site-header,.header-nav-bar,.admin-topbar,.portal-topbar,.admin-topbar-actions,.hero,.mbca-hero,.portal-selector-hero,.company-pin-showcase,.auth2-panel,.auth-panel) :is(.admin-icon-button,.mbw-search-glyph,.admin-context-chip,.admin-context-icon) :is(a,span,strong,small,button,i,em,b,p,svg,path,circle,rect,line,polyline,polygon,.ui-icon) {
+  color: #12261f !important;
+  -webkit-text-fill-color: #12261f !important;
+  stroke: #12261f !important;
+  opacity: 1 !important;
+}
+
+/* Pills / badges / chips inside chrome keep their tonal ink (not white) on their
+   pale fills. The solid notification-count badge stays white-on-red (excluded). */
+body:not(.theme-dark):not(.admin-dark) :is(.utility-bar,.site-header,.header-nav-bar,.admin-topbar,.portal-topbar,.admin-topbar-actions,.admin-sidebar,.portal-sidebar,.staff-sidebar,.client-sidebar,.hero,.mbca-hero,.portal-selector-hero,.company-pin-showcase,.rpt-bar) :is(.mbw-pill,.badge,.chip,.tag):not(.attn-count):not(.tone-solid),
+body:not(.theme-dark):not(.admin-dark) :is(.utility-bar,.site-header,.header-nav-bar,.admin-topbar,.portal-topbar,.admin-topbar-actions,.admin-sidebar,.portal-sidebar,.staff-sidebar,.client-sidebar,.hero,.mbca-hero,.portal-selector-hero,.company-pin-showcase,.rpt-bar) :is(.mbw-pill,.badge,.chip,.tag):not(.attn-count):not(.tone-solid) :is(span,strong,small,b) {
+  color: #0d3b28 !important;
+  -webkit-text-fill-color: #0d3b28 !important;
+}
+body:not(.theme-dark):not(.admin-dark) :is(.admin-topbar,.portal-topbar,.site-header,.admin-sidebar,.portal-sidebar,.staff-sidebar,.client-sidebar) :is(.mbw-pill.tone-amber,.mbw-pill.tone-gold,.badge.warning,.badge.tone-amber) {
+  color: #8a5200 !important; -webkit-text-fill-color: #8a5200 !important;
+}
+body:not(.theme-dark):not(.admin-dark) :is(.admin-topbar,.portal-topbar,.site-header,.admin-sidebar,.portal-sidebar,.staff-sidebar,.client-sidebar) :is(.mbw-pill.tone-red,.badge.danger,.badge.tone-red) {
+  color: #a31515 !important; -webkit-text-fill-color: #a31515 !important;
+}
+body:not(.theme-dark):not(.admin-dark) :is(.admin-topbar,.portal-topbar,.site-header,.admin-sidebar,.portal-sidebar,.staff-sidebar,.client-sidebar) :is(.mbw-pill.tone-green,.mbw-pill.tone-blue,.mbw-pill.tone-teal,.badge.success,.badge.tone-green) {
+  color: #0f5a30 !important; -webkit-text-fill-color: #0f5a30 !important;
+}
+
 @media print {
   body, body * { color: #000 !important; -webkit-text-fill-color: #000 !important; }
 }
