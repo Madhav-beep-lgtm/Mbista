@@ -1313,6 +1313,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         <button onclick="convertToTax(<?php echo (int) $invoice['id']; ?>)" class="btn btn-success">Convert to Tax Invoice</button>
                     <?php endif; ?>
                     <button onclick="showPaymentModal(<?php echo (int) $invoice['id']; ?>)" class="btn btn-primary">Request Payment</button>
+                    <a href="<?php echo e(url('admin/accounting-parties.php?panel=payment&invoice_id=' . (int) $invoice['id'])); ?>" class="btn btn-success">Record Payment</a>
                     <a href="<?php echo e(url('admin/reports-center.php?report=collections-register')); ?>" class="btn btn-secondary">Receipt Register</a>
                     <a href="<?php echo e(url('admin/export-invoice.php?id=' . $invoice['id'] . '&format=pdf')); ?>" class="btn btn-secondary" target="_blank">📄 Export PDF</a>
                     <a href="<?php echo e(url('admin/export-invoice.php?id=' . $invoice['id'] . '&format=excel')); ?>" class="btn btn-secondary">📊 Export Excel</a>

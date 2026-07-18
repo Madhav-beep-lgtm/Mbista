@@ -1030,6 +1030,7 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
         </form>
     </section>
 <?php elseif ($panel === 'payment'): ?>
+    <?php $prefillInvoiceId = (int) ($_GET['invoice_id'] ?? 0); ?>
     <section id="panel-forms" class="mbw-card reference-panel-card">
         <div class="mbw-card-head"><h2>Record a Customer Payment</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(parties_page_url(['panel' => null])) ?>">Close</a></div></div>
         <form method="post" class="reference-party-form">
@@ -1041,7 +1042,7 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
                     <option value="">Select invoice</option>
                     <?php foreach ($documents as $document): ?>
                         <?php if ((float) $document['outstanding_amount'] > 0): ?>
-                            <option value="<?= e((int) $document['id']) ?>"><?= e($document['voucher_no'] . ' · ' . $document['party_name'] . ' · due ' . site_currency_symbol() . number_format((float) $document['outstanding_amount'], 2)) ?></option>
+                            <option value="<?= e((int) $document['id']) ?>" <?= $prefillInvoiceId === (int) $document['id'] ? 'selected' : '' ?>><?= e($document['voucher_no'] . ' · ' . $document['party_name'] . ' · due ' . site_currency_symbol() . number_format((float) $document['outstanding_amount'], 2)) ?></option>
                         <?php endif; ?>
                     <?php endforeach; ?>
                 </select>
