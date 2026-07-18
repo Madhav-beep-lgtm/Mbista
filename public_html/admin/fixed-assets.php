@@ -1896,7 +1896,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </span>
                 </div>
 
-                <form method="post" class="workspace-form-grid">
+                <form method="post" class="workspace-form-grid fa-class-form">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="save_measurement_model">
                     <input type="hidden" name="asset_class" value="<?= e($classKey) ?>">

@@ -6157,6 +6157,17 @@ body.theme-dark.fixed-assets-page .fa-approval-card {
 .fa-checkbox-field small { margin-top: 3px; color: var(--mbw-muted); }
 .fa-model-meta { border-top: 1px solid var(--mbw-border); padding-top: 12px; }
 .fa-model-meta span { color: var(--mbw-muted); font-size: 12px; }
+/* Class-model cards: keep the short Measurement model + Effective date on one
+   row and let the checkbox / policy note / meta run full width, so the fields
+   line up across cards instead of a tall textarea sitting beside short inputs. */
+body.admin-layout .fa-class-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+}
+body.admin-layout .fa-class-form .workspace-span-2 { grid-column: 1 / -1; }
+@media (max-width: 560px) {
+    body.admin-layout .fa-class-form { grid-template-columns: minmax(0, 1fr); }
+}
 .fa-model-rules { margin-top: 18px; }
 .fa-rule-grid,
 .fa-policy-status-grid {
