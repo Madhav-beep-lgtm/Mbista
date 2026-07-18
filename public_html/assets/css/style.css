@@ -24,10 +24,10 @@
 
   --text-primary: #231f1c;
   --text-secondary: #665b54;
-  --text-muted: #81736a;
+  --text-muted: #6d857b;
 
   --border-color: #e4dad3;
-  --border-dark: #cdbbaf;
+  --border-dark: #b8d5c4;
 
   --success: #189a55;
   --warning: #087a57;
@@ -86,7 +86,7 @@ body.theme-dark {
 
   --text-primary: #fffaf7;
   --text-secondary: #d6c5ba;
-  --text-muted: #81736a;
+  --text-muted: #6d857b;
 
   --border-color: rgba(240,213,140, 0.18);
   --border-dark: rgba(240,213,140, 0.30);
@@ -4430,9 +4430,9 @@ body.home-page .cta-band {
   --surface-soft: #faf7f4;
   --text-primary: #231f1c;
   --text-secondary: #665b54;
-  --text-muted: #81736a;
+  --text-muted: #6d857b;
   --border-color: #e4dad3;
-  --border-dark: #cdbbaf;
+  --border-dark: #b8d5c4;
   --shadow-sm: 0 8px 24px rgba(8,99,74, 0.07);
   --shadow-md: 0 16px 42px rgba(8,99,74, 0.11);
   --shadow-lg: 0 24px 70px rgba(8,99,74, 0.16);
@@ -5323,7 +5323,7 @@ body.accounting-module-page .admin-content {
 .accent-green .stat-icon { background: #eaf8ef; color: #139652; }
 .accent-red .stat-icon { background: #fff0ee; color: #e2372f; }
 .accent-blue .stat-icon { background: #e4f5ea; color: #087a57; }
-.accent-purple .stat-icon { background: #e4f5ea; color: #8a43e6; }
+.accent-purple .stat-icon { background: #e4f5ea; color: #087a57; }
 .accent-orange .stat-icon { background: #fff4e8; color: #34a66f; }
 
 .accounting-toolbar {
@@ -6551,7 +6551,7 @@ body.accounting-reference-layout .admin-content {
 .reference-stat.accent-green span { background: #eaf8ef; color: #159653; }
 .reference-stat.accent-red span { background: #fff0ee; color: #f04438; }
 .reference-stat.accent-blue span { background: #e4f5ea; color: #087a57; }
-.reference-stat.accent-purple span { background: #e4f5ea; color: #8a43e6; }
+.reference-stat.accent-purple span { background: #e4f5ea; color: #087a57; }
 .reference-stat.accent-orange span { background: #fff4e8; color: #34a66f; }
 
 .reference-toolbar {
@@ -7713,7 +7713,7 @@ body.accounting-reference-layout .badge {
 .mbw-command-strip article:nth-child(2n) span,
 .coa-module-grid article:nth-child(2n) span { background: #eaf8ef; color: #148b50; }
 .mbw-command-strip article:nth-child(3n) span,
-.coa-module-grid article:nth-child(3n) span { background: #e4f5ea; color: #7542d8; }
+.coa-module-grid article:nth-child(3n) span { background: #e4f5ea; color: #087a57; }
 .mbw-command-strip article:nth-child(4n) span { background: #fff3e8; color: #087a57; }
 
 .mbw-command-strip strong,
@@ -7834,7 +7834,7 @@ body.accounting-reference-layout .badge {
 
 .tree-node {
   margin-bottom: 6px;
-  border-left: 2px solid #f4ece7;
+  border-left: 2px solid #eaf5ef;
 }
 
 .tree-node details {
@@ -7967,7 +7967,7 @@ body.accounting-reference-layout .badge {
 }
 
 .inventory-process-grid article:nth-child(3n) > span { background: #e4f5ea; color: #087a57; }
-.inventory-process-grid article:nth-child(4n) > span { background: #f4edff; color: #7440d4; }
+.inventory-process-grid article:nth-child(4n) > span { background: #e4f5ea; color: #087a57; }
 .inventory-process-grid article:nth-child(6n) > span { background: #fff1e8; color: #087a57; }
 
 .inventory-type-grid {
@@ -7984,7 +7984,7 @@ body.accounting-reference-layout .badge {
 
 .inventory-type-grid article:nth-child(2) { border-left-color: #087a57; }
 .inventory-type-grid article:nth-child(3) { border-left-color: #34a66f; }
-.inventory-type-grid article:nth-child(4) { border-left-color: #8a43e6; }
+.inventory-type-grid article:nth-child(4) { border-left-color: #16a34a; }
 
 .manufacturing-flow {
   grid-template-columns: repeat(7, minmax(90px, 1fr));
@@ -8586,7 +8586,7 @@ body.theme-dark .icon-stat-body strong {
 
 body.theme-dark .affiliate-mark {
   border-color: rgba(228,245,234, 0.4);
-  color: #f4ece7;
+  color: #eaf5ef;
 }
 
 /* ==========================================================================
@@ -8671,7 +8671,7 @@ body.theme-dark .dropdown-menu a:hover {
 }
 
 body.theme-dark .dropdown-heading {
-  color: #cdbbaf;
+  color: #b8d5c4;
 }
 
 /* Buttons: premium sets a navy gradient; give them light text and a
@@ -8695,7 +8695,7 @@ body.theme-dark .button.secondary,
 body.theme-dark .button.outline,
 body.theme-dark button.secondary,
 body.theme-dark input[type="submit"].secondary {
-  color: #f4ece7;
+  color: #eaf5ef;
   border-color: rgba(205,187,175, 0.32);
   background: #064e3b;
   box-shadow: none;

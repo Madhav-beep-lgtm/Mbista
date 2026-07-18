@@ -35,7 +35,7 @@ body.admin-layout {
   --mbw-sidebar: #064e3b;
   --mbw-sidebar-deep: #064e3b;
   --mbw-sidebar-line: rgba(228,245,234, 0.20);
-  --mbw-sidebar-text: #f4ece7;
+  --mbw-sidebar-text: #eaf5ef;
   --mbw-sidebar-active: #08634a;
   --mbw-gold: #e3a13c;
   --mbw-shadow: 0 1px 2px rgba(8,99,74, 0.06), 0 4px 14px rgba(8,99,74, 0.05);
@@ -75,7 +75,7 @@ body.admin-layout.admin-dark {
   --mbw-border: rgba(240,213,140, 0.18);
   --mbw-border-soft: rgba(240,213,140, 0.10);
   --mbw-heading: #faf7f4;
-  --mbw-text: #f4ece7;
+  --mbw-text: #eaf5ef;
   --mbw-muted: #d6c5ba;
   --mbw-primary: #d6ad52;
   --mbw-primary-soft: rgba(214,173,82, 0.16);
@@ -171,7 +171,7 @@ body.admin-layout .admin-sidebar .brand strong {
 
 body.admin-layout .admin-sidebar .brand small {
   display: block;
-  color: #cdbbaf;
+  color: #b8d5c4;
   font-size: 11px;
   font-weight: 500;
 }
@@ -187,7 +187,7 @@ body.admin-layout .admin-sidebar-context {
 }
 
 body.admin-layout .admin-sidebar-context strong {
-  color: #f4ece7;
+  color: #eaf5ef;
   font-size: 12px;
 }
 
@@ -4777,7 +4777,7 @@ body.admin-layout .uw-avatar-tone-1 {
 
 body.admin-layout .uw-avatar-tone-2 {
   background: rgba(52,166,111, 0.13);
-  color: #7c3aed;
+  color: #087a57;
 }
 
 body.admin-layout .uw-user-details {

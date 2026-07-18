@@ -45,9 +45,9 @@ if ($navSection === '') {
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#064e3b">
     <link rel="manifest" href="/site.webmanifest">
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260713g">
-    <link rel="stylesheet" href="/assets/css/theme-brown.css?v=20260718g">
-    <link rel="stylesheet" href="/assets/css/theme-sahakari-green.css?v=20260718d">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20260718h">
+    <link rel="stylesheet" href="/assets/css/theme-brown.css?v=20260718h">
+    <link rel="stylesheet" href="/assets/css/theme-sahakari-green.css?v=20260718h">
 </head>
 <body class="<?= e($bodyClass) ?>">
 <?php if ($headerSupportPhone !== '' || $headerSupportEmail !== ''): ?>

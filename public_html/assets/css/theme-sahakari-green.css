@@ -43,6 +43,22 @@
   --mbw-green: #168447;
   --mbw-red: var(--sg-red);
   --mbw-amber: var(--sg-amber);
+  /* Neutralize the leftover brown/tan tokens theme-brown.css still paints the
+     admin/staff/client portals with (backgrounds, table headers, borders, muted
+     text). Redefined here because this file loads last, so every var(--brown-*)
+     / var(--app-*) in theme-brown.css's !important rules resolves to green. */
+  --brown-50: #f3fbf6;
+  --brown-100: #dcf7e7;
+  --app-text: #102a22;
+  --app-muted: #526b61;
+  --app-border: #d4e7dc;
+  --app-border-strong: #b8d5c4;
+  /* These four still resolved to brown/beige (headings, soft primary/grey fills,
+     soft borders) because the green theme never redefined them. */
+  --mbw-heading: var(--sg-ink);
+  --mbw-primary-soft: #e4f5ea;
+  --mbw-gray-soft: #eef4f0;
+  --mbw-border-soft: #e6f0ea;
 }
 
 html { accent-color: var(--sg-700); }
