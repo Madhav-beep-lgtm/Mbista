@@ -213,18 +213,25 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <label>To<input type="date" name="to" value="<?= e($to) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
         <label>Search (code / name)<input type="search" name="q" value="<?= e($filters['search']) ?>" placeholder="ITM- or name"></label>
         <label>Item types
-            <select name="types[]" multiple size="4" class="no-search" title="Ctrl-click for multiple">
-                <?php foreach (sr_item_type_labels() as $typeKey => $typeLabel): if ($typeKey === 'service') { continue; } ?>
-                    <option value="<?= e($typeKey) ?>" <?= in_array($typeKey, $filters['types'], true) ? 'selected' : '' ?>><?= e($typeLabel) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <details class="ssr-msel">
+                <summary><?= $filters['types'] === [] ? 'All types' : count($filters['types']) . ' selected' ?></summary>
+                <div class="ssr-msel-list" data-msel-all="All types">
+                    <?php foreach (sr_item_type_labels() as $typeKey => $typeLabel): if ($typeKey === 'service') { continue; } ?>
+                        <label><input type="checkbox" name="types[]" value="<?= e($typeKey) ?>" <?= in_array($typeKey, $filters['types'], true) ? 'checked' : '' ?>> <?= e($typeLabel) ?></label>
+                    <?php endforeach; ?>
+                </div>
+            </details>
         </label>
         <label>Locations / warehouses
-            <select name="warehouses[]" multiple size="4" class="no-search" title="Ctrl-click for multiple; empty = all">
-                <?php foreach ($warehouses as $wh): ?>
-                    <option value="<?= (int) $wh['id'] ?>" <?= in_array((int) $wh['id'], $filters['warehouse_ids'], true) ? 'selected' : '' ?>><?= e((string) $wh['name']) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <details class="ssr-msel">
+                <summary><?= $filters['warehouse_ids'] === [] ? 'All locations' : count($filters['warehouse_ids']) . ' selected' ?></summary>
+                <div class="ssr-msel-list" data-msel-all="All locations">
+                    <?php if ($warehouses === []): ?><small style="color:var(--mbw-muted)">No warehouses defined — everything reports company-wide.</small><?php endif; ?>
+                    <?php foreach ($warehouses as $wh): ?>
+                        <label><input type="checkbox" name="warehouses[]" value="<?= (int) $wh['id'] ?>" <?= in_array((int) $wh['id'], $filters['warehouse_ids'], true) ? 'checked' : '' ?>> <?= e((string) $wh['name']) ?></label>
+                    <?php endforeach; ?>
+                </div>
+            </details>
         </label>
         <label>Valuation method
             <select name="valuation">
@@ -396,6 +403,36 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <style>
+/* Compact multi-select popovers: uniform 38px fields like every other input,
+   options in an anchored checklist instead of a tall scrolling list box. */
+.ssr-msel { position: relative; }
+.ssr-msel > summary {
+    list-style: none; cursor: pointer; min-height: 38px; display: flex; align-items: center;
+    padding: 8px 32px 8px 12px; border: 1px solid var(--mbw-line, rgba(0,0,0,.2)); border-radius: 8px;
+    background: var(--mbw-card, #fff); color: var(--mbw-ink, #12261f); font: inherit; font-weight: 500;
+}
+.ssr-msel > summary::-webkit-details-marker { display: none; }
+.ssr-msel > summary::after { content: '▾'; position: absolute; right: 12px; color: var(--mbw-muted, #5b6b64); }
+.ssr-msel[open] > summary { outline: 2px solid var(--mbw-accent, #2f7fb8); outline-offset: 1px; }
+.ssr-msel-list {
+    position: absolute; left: 0; right: 0; top: 100%; z-index: 60; margin-top: 4px; max-height: 240px; overflow: auto;
+    display: grid; gap: 2px; padding: 10px 12px; background: var(--mbw-card, #fff); color: var(--mbw-ink, #12261f);
+    border: 1px solid var(--mbw-line, rgba(0,0,0,.16)); border-radius: 10px; box-shadow: 0 14px 34px rgba(0,0,0,.22);
+}
+.ssr-msel-list label { display: flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 500; }
+.ssr-msel-list input[type="checkbox"] { width: auto; min-height: auto; }
+/* Columns… popover (same look, was missing these styles on this page) */
+.pr-adjust { position: relative; display: inline-block; }
+.pr-adjust > summary { list-style: none; cursor: pointer; }
+.pr-adjust > summary::-webkit-details-marker { display: none; }
+.pr-adjust-form {
+    position: absolute; right: 0; z-index: 60; margin-top: 6px; display: grid; gap: 8px; padding: 12px; text-align: left;
+    background: var(--mbw-card, #fff); color: var(--mbw-ink, #12261f); border: 1px solid var(--mbw-line, rgba(0,0,0,.16));
+    border-radius: 10px; box-shadow: 0 14px 34px rgba(0,0,0,.22);
+}
+.pr-adjust-form label { display: flex; gap: 8px; align-items: center; font-size: 12.5px; font-weight: 500; }
+.pr-adjust-form input[type="checkbox"] { width: auto; min-height: auto; }
+.pr-adjust-form small { color: var(--mbw-muted, #5b6b64); font-weight: 400; font-size: 11px; }
 .ssr-table { border-collapse: separate; border-spacing: 0; min-width: 1700px; font-size: 12.5px; }
 .ssr-table th, .ssr-table td { padding: 6px 8px; border-bottom: 1px solid var(--mbw-line, rgba(0,0,0,.1)); background: var(--mbw-card, #fff); }
 .ssr-table thead th { position: sticky; z-index: 5; background: var(--mbw-soft, #eef5f0); color: var(--mbw-ink, #12261f); }
@@ -410,6 +447,24 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 .ssr-table .is-numeric { text-align: right; font-variant-numeric: tabular-nums; }
 </style>
 <script>
+(function () {
+    // Multi-select popovers: live "N selected" summaries + close on outside click.
+    document.querySelectorAll('.ssr-msel').forEach(function (msel) {
+        var summary = msel.querySelector('summary');
+        var list = msel.querySelector('.ssr-msel-list');
+        function sync() {
+            var n = list.querySelectorAll('input:checked').length;
+            summary.textContent = n === 0 ? (list.dataset.mselAll || 'All') : n + ' selected';
+        }
+        list.addEventListener('change', sync);
+        sync();
+    });
+    document.addEventListener('click', function (ev) {
+        document.querySelectorAll('.ssr-msel[open]').forEach(function (msel) {
+            if (!msel.contains(ev.target)) { msel.removeAttribute('open'); }
+        });
+    });
+})();
 (function () {
     var KEY = 'ssr-columns';
     var boxes = document.querySelectorAll('#ssrColumnChooser input[data-col-group]');
