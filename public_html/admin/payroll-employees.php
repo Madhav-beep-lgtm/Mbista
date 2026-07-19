@@ -116,20 +116,123 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Employee, principal, and monthly installment are required for an advance.');
             redirect('admin/payroll-employees.php');
         }
-        db()->prepare("INSERT INTO payroll_loans (company_id, payroll_employee_id, title, principal, balance, monthly_installment, status, issued_on, notes)
-                VALUES (:cid, :pe, :title, :principal, :principal2, :inst, 'active', :issued, :notes)")
-            ->execute([
-                'cid' => $companyId, 'pe' => $employeeId,
-                'title' => trim((string) ($_POST['title'] ?? '')) ?: 'Staff advance',
-                'principal' => $principal, 'principal2' => $principal, 'inst' => $installment,
-                'issued' => trim((string) ($_POST['issued_on'] ?? '')) ?: date('Y-m-d'),
-                'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
-            ]);
-        $loanId = (int) db()->lastInsertId();
-        db()->prepare("INSERT INTO payroll_loan_txns (loan_id, txn_type, amount, txn_date, notes) VALUES (:loan, 'disbursement', :amt, :dt, 'Advance disbursed')")
-            ->execute(['loan' => $loanId, 'amt' => $principal, 'dt' => trim((string) ($_POST['issued_on'] ?? '')) ?: date('Y-m-d')]);
-        log_activity('payroll_loan', $loanId, 'created', 'Advance of ' . number_format($principal, 2) . ' recorded.', $userId);
-        flash('success', 'Advance recorded. It will be recovered at ' . $sym . number_format($installment, 2) . '/month through payroll.');
+        $issuedOn = trim((string) ($_POST['issued_on'] ?? '')) ?: date('Y-m-d');
+        $glNote = '';
+        try {
+            db()->beginTransaction();
+            db()->prepare("INSERT INTO payroll_loans (company_id, payroll_employee_id, title, principal, balance, monthly_installment, status, issued_on, notes)
+                    VALUES (:cid, :pe, :title, :principal, :principal2, :inst, 'active', :issued, :notes)")
+                ->execute([
+                    'cid' => $companyId, 'pe' => $employeeId,
+                    'title' => trim((string) ($_POST['title'] ?? '')) ?: 'Staff advance',
+                    'principal' => $principal, 'principal2' => $principal, 'inst' => $installment,
+                    'issued' => $issuedOn,
+                    'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
+                ]);
+            $loanId = (int) db()->lastInsertId();
+            db()->prepare("INSERT INTO payroll_loan_txns (loan_id, txn_type, amount, txn_date, notes) VALUES (:loan, 'disbursement', :amt, :dt, 'Advance disbursed')")
+                ->execute(['loan' => $loanId, 'amt' => $principal, 'dt' => $issuedOn]);
+            $disbTxnId = (int) db()->lastInsertId();
+            // A simple advance is money OUT of the bank into the employee-advance
+            // asset — post it the moment it is given (Dr Advance / Cr Bank).
+            // Recovery comes back either through payroll (accrual credits the
+            // advance ledger) or the manual repayment below.
+            $advSettings = payroll_settings($companyId);
+            $advLedger = (int) ($advSettings['advance_ledger_id'] ?? 0);
+            $bankLedger = (int) ($advSettings['bank_ledger_id'] ?? 0);
+            if ($advLedger > 0 && $bankLedger > 0) {
+                $advVoucherId = create_voucher_with_entries([
+                    'company_id' => $companyId,
+                    'fiscal_year_id' => null,
+                    'voucher_no' => 'ADV-' . $loanId,
+                    'voucher_type' => 'payment',
+                    'voucher_date' => $issuedOn,
+                    'source_type' => 'payroll_advance',
+                    'source_id' => $loanId,
+                    'total_amount' => $principal,
+                    'narration' => 'Staff advance disbursed — ' . number_format($principal, 2) . ' (recovered at ' . number_format($installment, 2) . '/month).',
+                    'status' => 'posted',
+                    'posted_by' => $userId,
+                ], [
+                    ['ledger_id' => $advLedger, 'entry_type' => 'debit', 'amount' => $principal, 'memo' => 'Employee advance given'],
+                    ['ledger_id' => $bankLedger, 'entry_type' => 'credit', 'amount' => $principal, 'memo' => 'Advance paid from bank'],
+                ]);
+                db()->prepare('UPDATE payroll_loan_txns SET voucher_id = :vid WHERE id = :id')->execute(['vid' => $advVoucherId, 'id' => $disbTxnId]);
+                $glNote = ' Voucher ADV-' . $loanId . ' posted (Dr Advance / Cr Bank).';
+            } else {
+                $glNote = ' NOT posted to the books — map the Employee advance and Bank ledgers in Payroll Settings first.';
+            }
+            db()->commit();
+        } catch (Throwable $advException) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            flash('error', 'Could not record the advance: ' . $advException->getMessage());
+            redirect('admin/payroll-employees.php');
+        }
+        log_activity('payroll_loan', $loanId, 'created', 'Advance of ' . number_format($principal, 2) . ' recorded.' . $glNote, $userId);
+        flash('success', 'Advance recorded. It will be recovered at ' . $sym . number_format($installment, 2) . '/month through payroll.' . $glNote);
+        redirect('admin/payroll-employees.php');
+    }
+
+    if ($action === 'repay_loan') {
+        // Manual recovery outside payroll: the employee returns cash/bank money
+        // directly. Dr Bank / Cr Employee Advance, balance reduced, settled at 0.
+        $loanId = (int) ($_POST['loan_id'] ?? 0);
+        $amount = max(0.0, round((float) ($_POST['amount'] ?? 0), 2));
+        $repayDate = trim((string) ($_POST['repay_date'] ?? '')) ?: date('Y-m-d');
+        try {
+            db()->beginTransaction();
+            $loanStmt = db()->prepare("SELECT * FROM payroll_loans WHERE id = :id AND company_id = :cid AND status IN ('active', 'paused') FOR UPDATE");
+            $loanStmt->execute(['id' => $loanId, 'cid' => $companyId]);
+            $loan = $loanStmt->fetch();
+            if (!$loan || $amount <= 0) {
+                throw new RuntimeException('Active advance and a positive amount are required.');
+            }
+            $balance = round((float) $loan['balance'], 2);
+            $applied = min($amount, $balance);
+            if ($applied <= 0) {
+                throw new RuntimeException('Nothing left to recover on this advance.');
+            }
+            $newBalance = round($balance - $applied, 2);
+            db()->prepare("UPDATE payroll_loans SET balance = :nb, status = IF(:nb2 <= 0.004, 'settled', status) WHERE id = :id")
+                ->execute(['nb' => $newBalance, 'nb2' => $newBalance, 'id' => $loanId]);
+            db()->prepare("INSERT INTO payroll_loan_txns (loan_id, txn_type, amount, txn_date, notes) VALUES (:loan, 'recovery', :amt, :dt, 'Manual repayment (outside payroll)')")
+                ->execute(['loan' => $loanId, 'amt' => $applied, 'dt' => $repayDate]);
+            $repayTxnId = (int) db()->lastInsertId();
+            $advSettings = payroll_settings($companyId);
+            $advLedger = (int) ($advSettings['advance_ledger_id'] ?? 0);
+            $bankLedger = (int) ($advSettings['bank_ledger_id'] ?? 0);
+            $glNote = ' NOT posted — map the Employee advance and Bank ledgers in Payroll Settings.';
+            if ($advLedger > 0 && $bankLedger > 0) {
+                $repVoucherId = create_voucher_with_entries([
+                    'company_id' => $companyId,
+                    'fiscal_year_id' => null,
+                    'voucher_no' => 'ADV-REC-' . $repayTxnId,
+                    'voucher_type' => 'receipt',
+                    'voucher_date' => $repayDate,
+                    'source_type' => 'payroll_advance_repay',
+                    'source_id' => $repayTxnId,
+                    'total_amount' => $applied,
+                    'narration' => 'Advance repaid by employee — ' . (string) $loan['title'] . '.',
+                    'status' => 'posted',
+                    'posted_by' => $userId,
+                ], [
+                    ['ledger_id' => $bankLedger, 'entry_type' => 'debit', 'amount' => $applied, 'memo' => 'Advance repaid into bank'],
+                    ['ledger_id' => $advLedger, 'entry_type' => 'credit', 'amount' => $applied, 'memo' => 'Employee advance recovered'],
+                ]);
+                db()->prepare('UPDATE payroll_loan_txns SET voucher_id = :vid WHERE id = :id')->execute(['vid' => $repVoucherId, 'id' => $repayTxnId]);
+                $glNote = ' Voucher ADV-REC-' . $repayTxnId . ' posted (Dr Bank / Cr Advance).';
+            }
+            db()->commit();
+            log_activity('payroll_loan', $loanId, 'repaid', 'Manual repayment ' . number_format($applied, 2) . '.' . $glNote, $userId);
+            flash('success', 'Repayment of ' . $sym . number_format($applied, 2) . ' recorded. Remaining balance: ' . $sym . number_format($newBalance, 2) . '.' . $glNote);
+        } catch (Throwable $repayException) {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+            flash('error', 'Could not record the repayment: ' . $repayException->getMessage());
+        }
         redirect('admin/payroll-employees.php');
     }
 
@@ -273,7 +376,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td class="is-numeric"><?= e(number_format((float) $employee['basic_salary'], 2)) ?></td>
                     <td><?= e($employee['pan_no'] ?? '') !== '' ? e($employee['pan_no']) : '<span class="mbw-pill tone-amber">Missing</span>' ?></td>
                     <td><span class="mbw-pill <?= $employee['status'] === 'active' ? 'tone-green' : 'tone-red' ?>"><?= e(ucfirst((string) $employee['status'])) ?></span></td>
-                    <td><a class="button secondary" href="<?= e(url('admin/payroll-employees.php?edit=' . (int) $employee['id'])) ?>">Edit</a></td>
+                    <td style="white-space:nowrap"><a class="button secondary" href="<?= e(url('admin/payroll-employees.php?edit=' . (int) $employee['id'])) ?>">Edit</a>
+                        <a class="button secondary" href="<?= e(url('admin/payroll-employee-sheet.php?employee=' . (int) $employee['id'])) ?>" title="Month-by-month salary record with payslips">Salary sheet</a></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
@@ -281,6 +385,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
+<style>
+.pr-adjust{position:relative}
+.pr-adjust>summary{list-style:none;cursor:pointer}.pr-adjust>summary::-webkit-details-marker{display:none}
+.pr-adjust-form{position:absolute;right:0;z-index:40;margin-top:6px;display:grid;gap:8px;padding:12px;text-align:left;
+    background:var(--mbw-card,#fff);color:var(--mbw-ink,#12261f);border:1px solid var(--mbw-line,rgba(0,0,0,.16));border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.22)}
+.pr-adjust-form label{display:grid;gap:3px;font-size:12px;font-weight:600}
+.pr-adjust-form input{min-height:34px}.pr-adjust-form small{color:var(--mbw-muted,#5b6b64);font-weight:400;font-size:11px}
+</style>
 <section class="mbw-card" aria-label="Advances and loans">
     <div class="mbw-card-head"><h2>Advances / Loans</h2></div>
     <form method="post" class="workspace-form-grid" style="margin-bottom:14px">
@@ -313,7 +425,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td class="is-numeric"><strong><?= e(number_format((float) $loan['balance'], 2)) ?></strong></td>
                     <td class="is-numeric"><?= e(number_format((float) $loan['monthly_installment'], 2)) ?></td>
                     <td><span class="mbw-pill <?= $loan['status'] === 'active' ? 'tone-green' : ($loan['status'] === 'settled' ? 'tone-blue' : 'tone-amber') ?>"><?= e(ucfirst((string) $loan['status'])) ?></span></td>
-                    <td>
+                    <td style="white-space:nowrap">
                         <?php if (in_array((string) $loan['status'], ['active', 'paused'], true)): ?>
                             <form method="post" style="display:inline">
                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -321,6 +433,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <input type="hidden" name="loan_id" value="<?= e((int) $loan['id']) ?>">
                                 <button type="submit" class="button secondary"><?= $loan['status'] === 'paused' ? 'Resume' : 'Pause' ?></button>
                             </form>
+                            <details class="pr-adjust" style="display:inline-block">
+                                <summary class="button secondary" style="display:inline-flex;align-items:center">Repay…</summary>
+                                <form method="post" class="pr-adjust-form" style="width:250px" data-confirm="Record a manual repayment against this advance? Dr Bank / Cr Employee Advance is posted.">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="repay_loan">
+                                    <input type="hidden" name="loan_id" value="<?= e((int) $loan['id']) ?>">
+                                    <label>Amount (max <?= e(number_format((float) $loan['balance'], 2)) ?>)<input type="number" step="0.01" min="0.01" max="<?= e(number_format((float) $loan['balance'], 2, '.', '')) ?>" name="amount" required></label>
+                                    <label>Date<input type="date" name="repay_date" value="<?= e(date('Y-m-d')) ?>"></label>
+                                    <button type="submit">Record repayment</button>
+                                    <small>For cash returned outside payroll. Payroll runs keep recovering the installment automatically.</small>
+                                </form>
+                            </details>
                         <?php else: ?>–<?php endif; ?>
                     </td>
                 </tr>

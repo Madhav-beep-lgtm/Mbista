@@ -450,6 +450,10 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     $slabs = payroll_tax_slabs((int) $taxVersion['id'], $category);
     $firstSlabExempt = (bool) $taxVersion['ssf_first_slab_exempt'] && (string) $employee['retirement_scheme'] === 'ssf';
     [$annualTax, $slabBreakdown] = payroll_slab_tax($taxableAnnual, $slabs, $firstSlabExempt);
+    // Nepal splits the withholding: the FIRST slab (1%, or 0% under SSF) is
+    // Social Security Tax — a separate revenue head from the remuneration tax
+    // of the higher slabs. The monthly withholding keeps the same annual mix.
+    $sstAnnual = round((float) ($slabBreakdown[0]['tax'] ?? 0), 2);
 
     // Monthly withholding, regular method: remaining annual liability spread
     // over the remaining periods; the final period absorbs rounding drift.
@@ -476,6 +480,9 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     }
     $advanceDeduction = round($advanceDeduction, 2);
 
+    $sstMonth = $annualTax > 0.004 ? round($taxMonth * ($sstAnnual / $annualTax), 2) : 0.0;
+    $sstMonth = min($sstMonth, $taxMonth);
+
     $netPay = round($gross - $retEmployeeMonth - $taxMonth - $advanceDeduction - $otherDeduction - $adjDeduction, 2);
 
     $warnings = [];
@@ -501,6 +508,7 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         'annual_tax' => $annualTax,
         'tax_ytd_before' => round($taxYtdBefore, 2),
         'tax_month' => $taxMonth,
+        'sst_month' => $sstMonth,
         'retirement_employee_month' => $retEmployeeMonth,
         'retirement_employer_month' => $retEmployerMonth,
         'advance_deduction' => $advanceDeduction,
@@ -541,6 +549,24 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     ];
 }
 
+/**
+ * The payroll_employees ids a run is scoped to — [] means every active
+ * employee (a normal full-company run). Stored as a JSON array on the run so
+ * a single-staff / subset run keeps its scope through every recalculation.
+ */
+function payroll_run_scope_ids(array $run): array
+{
+    $raw = trim((string) ($run['employee_scope'] ?? ''));
+    if ($raw === '') {
+        return [];
+    }
+    $ids = json_decode($raw, true);
+    if (!is_array($ids)) {
+        return [];
+    }
+    return array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
+}
+
 /** (Re)calculate every line of a draft/calculated run inside a transaction. */
 function payroll_calculate_run(int $runId): array
 {
@@ -555,6 +581,15 @@ function payroll_calculate_run(int $runId): array
     $employees = payroll_company_employees((int) $run['company_id']);
     if ($employees === []) {
         return ['ok' => false, 'error' => 'No active payroll employees. Enrol staff/clients in Payroll Employees first.'];
+    }
+    // A scoped run (single staff or a selected subset) calculates ONLY the
+    // employees stored on the run — the scope survives every recalculation.
+    $scopeIds = payroll_run_scope_ids($run);
+    if ($scopeIds !== []) {
+        $employees = array_values(array_filter($employees, static fn (array $e): bool => in_array((int) $e['id'], $scopeIds, true)));
+        if ($employees === []) {
+            return ['ok' => false, 'error' => 'None of this run\'s selected employees are active any more. Edit the roster or delete the run.'];
+        }
     }
 
     $pdo = db();
@@ -578,12 +613,12 @@ function payroll_calculate_run(int $runId): array
         $insert = $pdo->prepare('INSERT INTO payroll_run_lines (
                 run_id, payroll_employee_id, basic, allowances, overtime, benefits, gross,
                 assessable_annual, retirement_deduction_annual, taxable_annual, annual_tax,
-                tax_ytd_before, tax_month, retirement_employee_month, retirement_employer_month,
+                tax_ytd_before, tax_month, sst_month, retirement_employee_month, retirement_employer_month,
                 advance_deduction, other_deduction, unpaid_leave_days, unpaid_leave_deduction, adj_earning, adj_deduction, adj_remark, net_pay, trace, line_status, warnings
             ) VALUES (
                 :run_id, :pe, :basic, :allowances, :overtime, :benefits, :gross,
                 :assessable, :ret_ded, :taxable, :annual_tax,
-                :ytd, :tax_month, :ret_emp, :ret_er,
+                :ytd, :tax_month, :sst_month, :ret_emp, :ret_er,
                 :advance, :other_ded, :leave_days, :leave_ded, :adj_earning, :adj_deduction, :adj_remark, :net, :trace, :line_status, :warnings
             )');
         $totals = ['gross' => 0.0, 'tax' => 0.0, 'deductions' => 0.0, 'employer' => 0.0, 'net' => 0.0];
@@ -603,6 +638,7 @@ function payroll_calculate_run(int $runId): array
                 'annual_tax' => $calc['annual_tax'],
                 'ytd' => $calc['tax_ytd_before'],
                 'tax_month' => $calc['tax_month'],
+                'sst_month' => $calc['sst_month'],
                 'ret_emp' => $calc['retirement_employee_month'],
                 'ret_er' => $calc['retirement_employer_month'],
                 'advance' => $calc['advance_deduction'],
@@ -689,6 +725,7 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
                 retirement_employee_month = :ret_emp, retirement_employer_month = :ret_er,
                 advance_deduction = :advance, other_deduction = :other_ded,
                 unpaid_leave_days = :leave_days, unpaid_leave_deduction = :leave_ded,
+                sst_month = :sst_month,
                 adj_earning = :adj_earning, adj_deduction = :adj_deduction, adj_remark = :adj_remark,
                 net_pay = :net, trace = :trace, line_status = :line_status, warnings = :warnings
             WHERE id = :id AND run_id = :run')
@@ -697,6 +734,7 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
                 'benefits' => $calc['benefits'], 'gross' => $calc['gross'], 'assessable' => $calc['assessable_annual'],
                 'ret_ded' => $calc['retirement_deduction_annual'], 'taxable' => $calc['taxable_annual'],
                 'annual_tax' => $calc['annual_tax'], 'ytd' => $calc['tax_ytd_before'], 'tax_month' => $calc['tax_month'],
+                'sst_month' => $calc['sst_month'],
                 'ret_emp' => $calc['retirement_employee_month'], 'ret_er' => $calc['retirement_employer_month'],
                 'advance' => $calc['advance_deduction'], 'other_ded' => $calc['other_deduction'],
                 'leave_days' => $calc['unpaid_leave_days'], 'leave_ded' => $calc['unpaid_leave_deduction'],
@@ -820,6 +858,7 @@ function payroll_accrual_entries(array $run, array $settings): array
     $advance = $sum('advance_deduction');
     $otherDeduction = $sum('other_deduction');
     $adjDeduction = $sum('adj_deduction');
+    $sst = $sum('sst_month');
     $net = $sum('net_pay');
 
     $entries = [];
@@ -828,7 +867,19 @@ function payroll_accrual_entries(array $run, array $settings): array
         $entries[] = ['ledger_id' => (int) $settings['employer_contrib_expense_ledger_id'], 'entry_type' => 'debit', 'amount' => $retEmployer, 'memo' => 'Employer retirement contribution'];
     }
     if ($tax > 0) {
-        $entries[] = ['ledger_id' => (int) $settings['tds_payable_ledger_id'], 'entry_type' => 'credit', 'amount' => $tax, 'memo' => 'Income tax (TDS) withheld'];
+        // Nepal's withholding posts as TWO heads: the 1% first-slab Social
+        // Security Tax and the remuneration tax of the higher slabs. When no
+        // separate SST ledger is mapped both legs credit the same ledger, but
+        // the memos still show the statutory split.
+        $sst = round(min($sst, $tax), 2);
+        $remuneration = round($tax - $sst, 2);
+        $sstLedgerId = (int) ($settings['sst_payable_ledger_id'] ?? 0) ?: (int) $settings['tds_payable_ledger_id'];
+        if ($sst > 0) {
+            $entries[] = ['ledger_id' => $sstLedgerId, 'entry_type' => 'credit', 'amount' => $sst, 'memo' => 'Social Security Tax withheld (1% slab)'];
+        }
+        if ($remuneration > 0) {
+            $entries[] = ['ledger_id' => (int) $settings['tds_payable_ledger_id'], 'entry_type' => 'credit', 'amount' => $remuneration, 'memo' => 'Remuneration tax withheld'];
+        }
     }
     if ($retEmployee + $retEmployer > 0) {
         $entries[] = ['ledger_id' => (int) $settings['retirement_payable_ledger_id'], 'entry_type' => 'credit', 'amount' => round($retEmployee + $retEmployer, 2), 'memo' => 'Retirement fund payable (employee + employer)'];

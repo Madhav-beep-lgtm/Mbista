@@ -375,6 +375,16 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <?php endif; ?>
             <?php if (date_mode() !== 'ad'): ?><span class="mbw-pill tone-amber" title="Bikram Sambat (today)" style="align-self:center"><?= e(bs_format(date('Y-m-d'))) ?> BS</span><?php endif; ?>
             <div class="admin-topbar-actions">
+                <form method="get" class="no-search" style="align-self:center;margin:0" title="Language / भाषा">
+                    <?php foreach ($_GET as $langKeepKey => $langKeepValue): if ($langKeepKey === 'lang' || !is_scalar($langKeepValue)) { continue; } ?>
+                        <input type="hidden" name="<?= e((string) $langKeepKey) ?>" value="<?= e((string) $langKeepValue) ?>">
+                    <?php endforeach; ?>
+                    <select name="lang" onchange="this.form.submit()" style="cursor:pointer">
+                        <?php foreach (APP_LANGS as $langCode => $langLabel): ?>
+                            <option value="<?= e($langCode) ?>" <?= app_lang() === $langCode ? 'selected' : '' ?>><?= e($langLabel) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </form>
                 <form method="post" action="<?= e(url('set-date-mode.php')) ?>" style="align-self:center;margin:0">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="return" value="<?= e($_SERVER['REQUEST_URI'] ?? '') ?>">

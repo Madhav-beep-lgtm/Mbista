@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save_mappings') {
         db()->prepare('UPDATE payroll_settings SET
                 salary_expense_ledger_id = :se, employer_contrib_expense_ledger_id = :ee,
-                tds_payable_ledger_id = :tds, retirement_payable_ledger_id = :rp,
+                tds_payable_ledger_id = :tds, sst_payable_ledger_id = :sst, retirement_payable_ledger_id = :rp,
                 salary_payable_ledger_id = :sp, advance_ledger_id = :adv, bank_ledger_id = :bank,
                 enforce_sod = :sod, auto_post = :ap,
                 standard_working_days = :wd, deduct_unpaid_leave = :dul
@@ -36,6 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'se' => (int) ($_POST['salary_expense_ledger_id'] ?? 0) ?: null,
                 'ee' => (int) ($_POST['employer_contrib_expense_ledger_id'] ?? 0) ?: null,
                 'tds' => (int) ($_POST['tds_payable_ledger_id'] ?? 0) ?: null,
+                'sst' => (int) ($_POST['sst_payable_ledger_id'] ?? 0) ?: null,
                 'rp' => (int) ($_POST['retirement_payable_ledger_id'] ?? 0) ?: null,
                 'sp' => (int) ($_POST['salary_payable_ledger_id'] ?? 0) ?: null,
                 'adv' => (int) ($_POST['advance_ledger_id'] ?? 0) ?: null,
@@ -178,7 +179,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $settings = payroll_settings($companyId);
-$ledgers = db()->prepare("SELECT id, code, name, type FROM ledgers WHERE company_id = :cid AND status = 'active' ORDER BY code ASC");
+$ledgers = db()->prepare("SELECT l.id, l.code, l.name, l.type, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank
+    FROM ledgers l LEFT JOIN ledger_groups g ON g.id = l.group_id
+    WHERE l.company_id = :cid AND l.status = 'active' ORDER BY l.code ASC");
 $ledgers->execute(['cid' => $companyId]);
 $ledgers = $ledgers->fetchAll();
 
@@ -227,10 +230,23 @@ foreach ($components as $componentRow) {
     }
 }
 
-$ledgerSelect = static function (string $name, int $selected) use ($ledgers): string {
-    $html = '<select name="' . e($name) . '"><option value="0">Not mapped</option>';
+// Each mapping shows only the ledgers that can legally sit there (expense
+// mappings list expense ledgers, payables list liabilities, the payment
+// account lists cash/bank-group ledgers) — the currently-mapped ledger is
+// always kept even if misfiled, so an old mapping stays visible/fixable.
+$ledgerSelect = static function (string $name, int $selected, array $types = [], bool $cashBankOnly = false) use ($ledgers): string {
+    $html = '<select name="' . e($name) . '" class="js-searchable"><option value="0">Not mapped</option>';
     foreach ($ledgers as $ledger) {
-        $html .= '<option value="' . (int) $ledger['id'] . '"' . ($selected === (int) $ledger['id'] ? ' selected' : '') . '>'
+        $isSelected = $selected === (int) $ledger['id'];
+        if (!$isSelected) {
+            if ($cashBankOnly && (int) ($ledger['is_cash_or_bank'] ?? 0) !== 1) {
+                continue;
+            }
+            if (!$cashBankOnly && $types !== [] && !in_array((string) $ledger['type'], $types, true)) {
+                continue;
+            }
+        }
+        $html .= '<option value="' . (int) $ledger['id'] . '"' . ($isSelected ? ' selected' : '') . '>'
             . e($ledger['code'] . ' - ' . $ledger['name']) . '</option>';
     }
     return $html . '</select>';
@@ -247,13 +263,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <form method="post" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="save_mappings">
-        <label>Salary expense (Dr)<?= $ledgerSelect('salary_expense_ledger_id', (int) ($settings['salary_expense_ledger_id'] ?? 0)) ?></label>
-        <label>Employer contribution expense (Dr)<?= $ledgerSelect('employer_contrib_expense_ledger_id', (int) ($settings['employer_contrib_expense_ledger_id'] ?? 0)) ?></label>
-        <label>Income tax / TDS payable (Cr)<?= $ledgerSelect('tds_payable_ledger_id', (int) ($settings['tds_payable_ledger_id'] ?? 0)) ?></label>
-        <label>Retirement fund payable (Cr)<?= $ledgerSelect('retirement_payable_ledger_id', (int) ($settings['retirement_payable_ledger_id'] ?? 0)) ?></label>
-        <label>Salary payable (Cr)<?= $ledgerSelect('salary_payable_ledger_id', (int) ($settings['salary_payable_ledger_id'] ?? 0)) ?></label>
-        <label>Employee advance ledger<?= $ledgerSelect('advance_ledger_id', (int) ($settings['advance_ledger_id'] ?? 0)) ?></label>
-        <label>Bank / cash for salary payment<?= $ledgerSelect('bank_ledger_id', (int) ($settings['bank_ledger_id'] ?? 0)) ?></label>
+        <label>Salary expense (Dr)<?= $ledgerSelect('salary_expense_ledger_id', (int) ($settings['salary_expense_ledger_id'] ?? 0), ['expense']) ?></label>
+        <label>Employer contribution expense (Dr)<?= $ledgerSelect('employer_contrib_expense_ledger_id', (int) ($settings['employer_contrib_expense_ledger_id'] ?? 0), ['expense']) ?></label>
+        <label>Remuneration tax (TDS) payable (Cr)<?= $ledgerSelect('tds_payable_ledger_id', (int) ($settings['tds_payable_ledger_id'] ?? 0), ['liability']) ?></label>
+        <label>Social Security Tax payable (Cr) <span class="frm-optional">1% first slab — falls back to the TDS ledger</span><?= $ledgerSelect('sst_payable_ledger_id', (int) ($settings['sst_payable_ledger_id'] ?? 0), ['liability']) ?></label>
+        <label>Retirement fund payable (Cr)<?= $ledgerSelect('retirement_payable_ledger_id', (int) ($settings['retirement_payable_ledger_id'] ?? 0), ['liability']) ?></label>
+        <label>Salary payable (Cr)<?= $ledgerSelect('salary_payable_ledger_id', (int) ($settings['salary_payable_ledger_id'] ?? 0), ['liability']) ?></label>
+        <label>Employee advance ledger<?= $ledgerSelect('advance_ledger_id', (int) ($settings['advance_ledger_id'] ?? 0), ['asset']) ?></label>
+        <label>Bank / cash for salary payment<?= $ledgerSelect('bank_ledger_id', (int) ($settings['bank_ledger_id'] ?? 0), [], true) ?></label>
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="auto_post" <?= (int) ($settings['auto_post'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Auto-post accrual voucher on approval</label>
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="enforce_sod" <?= (int) ($settings['enforce_sod'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Segregation of duties (preparer cannot approve)</label>
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="deduct_unpaid_leave" <?= (int) ($settings['deduct_unpaid_leave'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Deduct salary for approved unpaid leave (from Attendance/HR)</label>

@@ -714,5 +714,17 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Payroll SST split + single-staff run scope (migration 057)', static function (): void {
+        if (accounting_repair_table_exists('payroll_run_lines')) {
+            accounting_repair_add_column('payroll_run_lines', 'sst_month', "`sst_month` DECIMAL(14,2) NOT NULL DEFAULT 0 AFTER `tax_month`");
+        }
+        if (accounting_repair_table_exists('payroll_settings')) {
+            accounting_repair_add_column('payroll_settings', 'sst_payable_ledger_id', "`sst_payable_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `tds_payable_ledger_id`");
+        }
+        if (accounting_repair_table_exists('payroll_runs')) {
+            accounting_repair_add_column('payroll_runs', 'employee_scope', "`employee_scope` TEXT DEFAULT NULL AFTER `voucher_date`");
+        }
+    });
+
     return $errors;
 }

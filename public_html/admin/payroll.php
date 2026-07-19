@@ -42,15 +42,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Voucher date ' . $voucherDate . ' is outside fiscal year ' . ($fiscalYear['label'] ?? '') . ' (' . $fiscalYear['start_date'] . ' to ' . $fiscalYear['end_date'] . '). Leave it blank to use the pay date, or pick a date inside the year.');
             redirect('admin/payroll.php');
         }
-        $dup = db()->prepare("SELECT id FROM payroll_runs WHERE company_id = :cid AND fiscal_year_id = :fy AND period_no = :p AND status <> 'cancelled' LIMIT 1");
-        $dup->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'p' => $periodNo]);
-        if ($dup->fetchColumn()) {
-            flash('error', 'A payroll run for ' . payroll_bs_month_name($periodNo) . ' of this fiscal year already exists. Cancel it first to redo it.');
+        // Optional employee scope: a run for a single staff member (or subset).
+        // Chosen ids are validated against the roster, stored on the run, and
+        // guarded so nobody is paid twice for the same period.
+        $scopeIds = array_values(array_unique(array_filter(array_map('intval', (array) ($_POST['employee_ids'] ?? [])), static fn (int $i): bool => $i > 0)));
+        if ($scopeIds !== []) {
+            $own = db()->prepare('SELECT id FROM payroll_employees WHERE company_id = ? AND id IN (' . implode(',', array_fill(0, count($scopeIds), '?')) . ')');
+            $own->execute(array_merge([$companyId], $scopeIds));
+            $scopeIds = array_map('intval', $own->fetchAll(PDO::FETCH_COLUMN));
+        }
+        // Period-overlap guard: a full-company run occupies the whole period;
+        // scoped runs may coexist as long as their employee sets don't overlap.
+        $periodRuns = db()->prepare("SELECT id, period_label, employee_scope FROM payroll_runs
+            WHERE company_id = :cid AND fiscal_year_id = :fy AND period_no = :p AND status <> 'cancelled'");
+        $periodRuns->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'p' => $periodNo]);
+        $occupied = [];
+        foreach ($periodRuns->fetchAll(PDO::FETCH_ASSOC) as $existingRun) {
+            $existingScope = payroll_run_scope_ids((array) $existingRun);
+            if ($existingScope === []) {
+                flash('error', 'A full-company payroll run (' . $existingRun['period_label'] . ') already exists for ' . payroll_bs_month_name($periodNo) . '. Cancel or reopen it first.');
+                redirect('admin/payroll.php');
+            }
+            $occupied = array_merge($occupied, $existingScope);
+        }
+        if ($occupied !== [] && $scopeIds === []) {
+            flash('error', 'Single-staff run(s) already exist for ' . payroll_bs_month_name($periodNo) . '. A full-company run would pay those employees twice — select only the remaining employees.');
             redirect('admin/payroll.php');
         }
-        db()->prepare('INSERT INTO payroll_runs (company_id, fiscal_year_id, period_no, period_label, pay_date, voucher_date, created_by)
-                VALUES (:cid, :fy, :p, :label, :pay, :vdate, :by)')
-            ->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'p' => $periodNo, 'label' => $periodLabel, 'pay' => $payDate, 'vdate' => $voucherDate, 'by' => $userId]);
+        $overlap = array_intersect($scopeIds, $occupied);
+        if ($overlap !== []) {
+            $codes = db()->prepare('SELECT employee_code FROM payroll_employees WHERE id IN (' . implode(',', array_fill(0, count($overlap), '?')) . ')');
+            $codes->execute(array_values($overlap));
+            flash('error', 'Already on another run for ' . payroll_bs_month_name($periodNo) . ': ' . implode(', ', $codes->fetchAll(PDO::FETCH_COLUMN)) . '. Remove them from the selection.');
+            redirect('admin/payroll.php');
+        }
+        db()->prepare('INSERT INTO payroll_runs (company_id, fiscal_year_id, period_no, period_label, pay_date, voucher_date, employee_scope, created_by)
+                VALUES (:cid, :fy, :p, :label, :pay, :vdate, :scope, :by)')
+            ->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'p' => $periodNo, 'label' => $periodLabel, 'pay' => $payDate, 'vdate' => $voucherDate,
+                'scope' => $scopeIds !== [] ? json_encode(array_values($scopeIds)) : null, 'by' => $userId]);
         $newRunId = (int) db()->lastInsertId();
         log_activity('payroll_run', $newRunId, 'created', 'Payroll run ' . $periodLabel . ' created.', $userId);
         security_event('payroll_run_created', 'success', 'Payroll run #' . $newRunId . ' created.', $companyId, $userId);
@@ -191,6 +220,7 @@ $runsStmt = db()->prepare('SELECT r.*, fy.label AS fy_label FROM payroll_runs r
 $runsStmt->execute(['cid' => $companyId, 'fy' => $fiscalYearId]);
 $runs = $runsStmt->fetchAll();
 
+$rosterForRun = payroll_company_employees($companyId);
 $selectedRunId = (int) ($_GET['run'] ?? 0);
 $run = $selectedRunId > 0 ? payroll_run($selectedRunId) : null;
 if ($run && (int) $run['company_id'] !== $companyId) {
@@ -300,6 +330,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Label <span class="pr-hint">(optional)</span><input type="text" name="period_label" placeholder="defaults to month name" maxlength="60"></label>
             <label>Pay date<input type="date" name="pay_date" value="<?= e(date('Y-m-d')) ?>"></label>
             <label>Voucher date <span class="pr-hint">(optional)</span><input type="date" name="voucher_date" title="Accounting date for the payroll postings. Leave blank to use the pay date."></label>
+            <details class="pr-adjust">
+                <summary class="button secondary" style="min-height:38px;display:inline-flex;align-items:center">Employees: all</summary>
+                <div class="pr-adjust-form" style="width:280px;max-height:280px;overflow:auto">
+                    <small>Tick employees for a single-staff / subset run. Leave all unticked to run the whole company. Employees already on another run of the same month are refused.</small>
+                    <?php foreach ($rosterForRun as $rosterEmp): ?>
+                        <label style="display:flex;gap:8px;align-items:center;font-weight:500">
+                            <input type="checkbox" name="employee_ids[]" value="<?= (int) $rosterEmp['id'] ?>" onchange="var d=this.closest('details'),n=d.querySelectorAll('input:checked').length;d.querySelector('summary').textContent='Employees: '+(n===0?'all':n+' selected');">
+                            <?= e($rosterEmp['employee_code'] . ' — ' . ($rosterEmp['person_name'] ?? $rosterEmp['name'] ?? '')) ?>
+                        </label>
+                    <?php endforeach; ?>
+                </div>
+            </details>
             <button type="submit"><?= icon('plus') ?>New Run + Calculate</button>
         </form>
     </div>
@@ -345,8 +387,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <div class="pr-workspace">
 <section class="mbw-card pr-sheet" aria-label="Payroll worksheet">
     <div class="mbw-card-head">
-        <?php $wsMonth = payroll_bs_month_name((int) $run['period_no']); $wsLabel = trim((string) $run['period_label']); ?>
-        <h2>Worksheet — <?= e($wsMonth) ?><?php if ($wsLabel !== '' && $wsLabel !== $wsMonth): ?> <span class="pr-sub">(<?= e($wsLabel) ?>)</span><?php endif; ?></h2>
+        <?php $wsMonth = payroll_bs_month_name((int) $run['period_no']); $wsLabel = trim((string) $run['period_label']); $wsScope = payroll_run_scope_ids($run); ?>
+        <h2>Worksheet — <?= e($wsMonth) ?><?php if ($wsLabel !== '' && $wsLabel !== $wsMonth): ?> <span class="pr-sub">(<?= e($wsLabel) ?>)</span><?php endif; ?>
+            <?php if ($wsScope !== []): ?><span class="mbw-pill tone-blue" title="This run pays only the selected employees"><?= count($wsScope) ?> selected employee<?= count($wsScope) === 1 ? '' : 's' ?></span><?php endif; ?></h2>
         <div class="mbw-card-tools">
             <?php if (in_array((string) $run['status'], ['draft', 'calculated'], true)): ?>
                 <form method="post" style="display:inline">

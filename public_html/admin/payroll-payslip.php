@@ -81,27 +81,37 @@ $fmt = static fn (float $n): string => number_format($n, 2);
         <thead><tr><th>Earnings</th><th class="num">Amount (<?= e($sym) ?>)</th><th>Deductions</th><th class="num">Amount (<?= e($sym) ?>)</th></tr></thead>
         <tbody>
             <?php
+            $sstMonth = (float) ($line['sst_month'] ?? 0);
+            $remunerationMonth = round((float) $line['tax_month'] - $sstMonth, 2);
             $earnings = [
                 ['Basic Salary', (float) $line['basic']],
                 ['Allowances', (float) $line['allowances']],
                 ['Overtime', (float) $line['overtime']],
                 ['Other Benefits', (float) $line['benefits']],
             ];
+            if ((float) ($line['adj_earning'] ?? 0) > 0) {
+                $earnings[] = ['Extra Earning (adjustment)', (float) $line['adj_earning']];
+            }
             $deductions = [
-                ['Income Tax (TDS)', (float) $line['tax_month']],
+                ['Social Security Tax (1% slab)', $sstMonth],
+                ['Remuneration Tax', $remunerationMonth],
                 ['Retirement Contribution (employee)', (float) $line['retirement_employee_month']],
                 ['Advance / Loan Recovery', (float) $line['advance_deduction']],
                 ['Other Deductions', (float) $line['other_deduction']],
             ];
-            for ($i = 0; $i < 4; $i++): ?>
+            if ((float) ($line['adj_deduction'] ?? 0) > 0) {
+                $deductions[] = ['Extra Deduction (adjustment)', (float) $line['adj_deduction']];
+            }
+            $rowCount = max(count($earnings), count($deductions));
+            for ($i = 0; $i < $rowCount; $i++): ?>
                 <tr>
-                    <td><?= e($earnings[$i][0]) ?></td><td class="num"><?= $fmt($earnings[$i][1]) ?></td>
-                    <td><?= e($deductions[$i][0]) ?></td><td class="num"><?= $fmt($deductions[$i][1]) ?></td>
+                    <td><?= e($earnings[$i][0] ?? '') ?></td><td class="num"><?= isset($earnings[$i]) ? $fmt($earnings[$i][1]) : '' ?></td>
+                    <td><?= e($deductions[$i][0] ?? '') ?></td><td class="num"><?= isset($deductions[$i]) ? $fmt($deductions[$i][1]) : '' ?></td>
                 </tr>
             <?php endfor; ?>
             <tr class="total">
                 <td>Gross Earnings</td><td class="num"><?= $fmt((float) $line['gross']) ?></td>
-                <td>Total Deductions</td><td class="num"><?= $fmt((float) $line['tax_month'] + (float) $line['retirement_employee_month'] + (float) $line['advance_deduction'] + (float) $line['other_deduction']) ?></td>
+                <td>Total Deductions</td><td class="num"><?= $fmt((float) $line['tax_month'] + (float) $line['retirement_employee_month'] + (float) $line['advance_deduction'] + (float) $line['other_deduction'] + (float) ($line['adj_deduction'] ?? 0)) ?></td>
             </tr>
             <tr class="net"><td colspan="3">NET PAYABLE</td><td class="num"><?= $fmt((float) $line['net_pay']) ?></td></tr>
         </tbody>
@@ -118,6 +128,8 @@ $fmt = static fn (float $n): string => number_format($n, 2);
             <tr class="total"><td>Annual tax</td><td class="num"><?= $fmt((float) $line['annual_tax']) ?></td></tr>
             <tr><td>Tax withheld earlier this fiscal year</td><td class="num">(<?= $fmt((float) $line['tax_ytd_before']) ?>)</td></tr>
             <tr class="total"><td>Tax this month</td><td class="num"><?= $fmt((float) $line['tax_month']) ?></td></tr>
+            <tr><td style="padding-left:20px">of which Social Security Tax (1% slab)</td><td class="num"><?= $fmt($sstMonth) ?></td></tr>
+            <tr><td style="padding-left:20px">of which Remuneration Tax</td><td class="num"><?= $fmt($remunerationMonth) ?></td></tr>
         </tbody>
     </table>
     <p class="ps-note">

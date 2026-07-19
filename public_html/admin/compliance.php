@@ -56,8 +56,27 @@ if (table_exists('compliance_types')) {
 }
 $activeComplianceTypes = array_filter($complianceTypes, static fn (array $t): bool => (int) $t['is_active'] === 1);
 
+require_once __DIR__ . '/../../app/tax_fines_engine.php';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
+
+    if (($_POST['action'] ?? '') === 'post_fine' && $role === 'admin') {
+        // The calculator below only CALCULATES — this is the explicit admin
+        // step that puts the charge into the books.
+        require_permission('accounting', 'post');
+        $fineResult = fines_post_voucher(
+            $companyId,
+            (int) ($_POST['fine_ledger_id'] ?? 0),
+            (float) ($_POST['fine_amount'] ?? 0),
+            trim((string) ($_POST['fine_narration'] ?? '')) ?: 'Government interest/fine on late payment',
+            $userId
+        );
+        flash($fineResult['ok'] ? 'success' : 'error', $fineResult['ok']
+            ? 'Fine/interest voucher #' . $fineResult['voucher_id'] . ' posted (Dr Government Fines & Interest / Cr tax payable).'
+            : (string) $fineResult['error']);
+        redirect('admin/compliance.php');
+    }
     $action = (string) ($_POST['action'] ?? '');
 
     if ($action === 'create_compliance_type' && $role === 'admin') {
@@ -542,4 +561,104 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
         </div>
     </section>
 <?php endif; ?>
+
+<?php
+// ---------------------------------------------------------------------------
+// Government interest & fines calculator (Nepali-month based). CALCULATES
+// ONLY — the books change only when an admin presses "Post to books".
+// ---------------------------------------------------------------------------
+$dutyLedgers = fines_duty_tax_ledgers($companyId);
+$calcLedgerId = (int) ($_GET['calc_ledger'] ?? 0);
+$calcType = (string) ($_GET['calc_type'] ?? 'vat') === 'duties' ? 'duties' : 'vat';
+$calcAmount = round((float) ($_GET['calc_amount'] ?? 0), 2);
+$calcDue = trim((string) ($_GET['calc_due'] ?? ''));
+$calcAsOf = trim((string) ($_GET['calc_asof'] ?? '')) ?: date('Y-m-d');
+$calcResult = null;
+if ($calcAmount > 0 && $calcDue !== '') {
+    $calcResult = $calcType === 'vat'
+        ? fines_vat_charges($calcAmount, $calcDue, $calcAsOf)
+        : fines_duties_interest($calcAmount, $calcDue, $calcAsOf);
+}
+$overdueStmt = db()->prepare("SELECT cd.statutory_due_date, ct.name AS type_name
+    FROM compliance_deadlines cd INNER JOIN compliance_types ct ON ct.id = cd.compliance_type_id
+    WHERE cd.company_id = :cid AND cd.statutory_due_date < CURDATE()
+      AND cd.status NOT IN ('filed', 'completed', 'not_applicable')
+    ORDER BY cd.statutory_due_date DESC LIMIT 12");
+$overdueStmt->execute(['cid' => $companyId]);
+$overdueDeadlines = $overdueStmt->fetchAll();
+?>
+<section class="mbw-card" aria-label="Government interest and fines calculator">
+    <div class="mbw-card-head">
+        <h2><?= icon('analytics') ?>Government Interest &amp; Fines (calculator)</h2>
+        <div class="mbw-card-tools"><span class="mbw-pill tone-amber">Calculates only — posts nothing until an admin does</span></div>
+    </div>
+    <form method="get" class="workspace-form-grid">
+        <label>Charge type
+            <select name="calc_type">
+                <option value="vat" <?= $calcType === 'vat' ? 'selected' : '' ?>>VAT late payment (15% p.a. by BS month + 10% p.a. additional, daily)</option>
+                <option value="duties" <?= $calcType === 'duties' ? 'selected' : '' ?>>SST / other Duties &amp; Taxes (15% p.a. by BS month)</option>
+            </select>
+        </label>
+        <label>Tax ledger (Duties &amp; Taxes)
+            <select name="calc_ledger" class="js-searchable" onchange="var o=this.options[this.selectedIndex];var a=this.form.querySelector('[name=calc_amount]');if(o.dataset.bal&&(!a.value||parseFloat(a.value)<=0)){a.value=o.dataset.bal;}">
+                <option value="0">— pick or enter amount manually —</option>
+                <?php foreach ($dutyLedgers as $dl): ?>
+                    <option value="<?= (int) $dl['id'] ?>" data-bal="<?= e(number_format(max(0.0, (float) $dl['credit_balance']), 2, '.', '')) ?>" <?= $calcLedgerId === (int) $dl['id'] ? 'selected' : '' ?>>
+                        <?= e($dl['code'] . ' — ' . $dl['name'] . ' (balance ' . number_format((float) $dl['credit_balance'], 2) . ')') ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>Unpaid amount<input type="number" step="0.01" min="0" name="calc_amount" value="<?= $calcAmount > 0 ? e(number_format($calcAmount, 2, '.', '')) : '' ?>" required></label>
+        <label>Due date (statutory)
+            <input type="date" name="calc_due" value="<?= e($calcDue) ?>" required list="overdue-deadlines">
+            <datalist id="overdue-deadlines">
+                <?php foreach ($overdueDeadlines as $od): ?>
+                    <option value="<?= e((string) $od['statutory_due_date']) ?>"><?= e((string) $od['type_name']) ?></option>
+                <?php endforeach; ?>
+            </datalist>
+        </label>
+        <label>As of<input type="date" name="calc_asof" value="<?= e($calcAsOf) ?>"></label>
+        <div><button type="submit" class="button secondary"><?= icon('analytics') ?>Calculate</button></div>
+    </form>
+    <?php if ($overdueDeadlines !== []): ?>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Overdue on the calendar: <?php foreach (array_slice($overdueDeadlines, 0, 4) as $od): ?><span class="mbw-pill tone-red" style="margin-right:4px"><?= e($od['type_name'] . ' · due ' . $od['statutory_due_date']) ?></span><?php endforeach; ?> — pick the due date from the list in the Due date field.</p>
+    <?php endif; ?>
+    <?php if ($calcResult !== null): ?>
+        <div style="margin-top:14px;overflow-x:auto">
+        <table>
+            <thead><tr><th>Charge</th><th>Basis</th><th class="is-numeric">Amount</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>Interest 15% p.a. (simple)</td>
+                    <td><?= (int) $calcResult['months'] ?> Nepali month<?= $calcResult['months'] === 1 ? '' : 's' ?> (month or part of month, BS calendar)</td>
+                    <td class="is-numeric"><?= e(number_format($calcResult['interest_15'], 2)) ?></td>
+                </tr>
+                <?php if ($calcType === 'vat'): ?>
+                <tr>
+                    <td>Additional duty 10% p.a. (simple, daily)</td>
+                    <td><?= (int) $calcResult['days'] ?> day<?= $calcResult['days'] === 1 ? '' : 's' ?> late</td>
+                    <td class="is-numeric"><?= e(number_format($calcResult['additional_10'], 2)) ?></td>
+                </tr>
+                <?php endif; ?>
+                <tr style="font-weight:700"><td colspan="2">Total charge on <?= e(number_format($calcAmount, 2)) ?> unpaid (due <?= e($calcDue) ?>, as of <?= e($calcAsOf) ?>)</td>
+                    <td class="is-numeric"><?= e(number_format($calcResult['total'], 2)) ?></td></tr>
+            </tbody>
+        </table>
+        </div>
+        <?php if ($role === 'admin' && $calcResult['total'] > 0): ?>
+            <form method="post" style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"
+                  data-confirm="Post <?= e(number_format($calcResult['total'], 2)) ?> to the books now? Dr Government Fines &amp; Interest / Cr the selected tax ledger. Until you confirm, nothing is posted.">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="post_fine">
+                <input type="hidden" name="fine_ledger_id" value="<?= (int) $calcLedgerId ?>">
+                <input type="hidden" name="fine_amount" value="<?= e(number_format($calcResult['total'], 2, '.', '')) ?>">
+                <input type="hidden" name="fine_narration" value="<?= e(($calcType === 'vat' ? 'VAT late-payment interest 15% (' . $calcResult['months'] . ' BS months) + additional 10% (' . $calcResult['days'] . ' days)' : 'Late-payment interest 15% (' . $calcResult['months'] . ' BS months)') . ' on ' . number_format($calcAmount, 2) . ' due ' . $calcDue) ?>">
+                <button type="submit" <?= $calcLedgerId > 0 ? '' : 'disabled title="Pick the tax ledger above first — the credit must land on the right payable"' ?>><?= icon('badge-check') ?>Post to books (admin)</button>
+                <small style="color:var(--mbw-muted)">Dr Government Fines &amp; Interest (expense, auto-created) / Cr <?= e($calcLedgerId > 0 ? 'the selected tax ledger' : '— select a ledger') ?>.</small>
+            </form>
+        <?php endif; ?>
+    <?php endif; ?>
+    <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">VAT: 15% p.a. simple interest per started Nepali month PLUS 10% p.a. additional duty counted daily. SST and other Duties &amp; Taxes heads: 15% p.a. simple interest per started Nepali month. Month counting follows the Bikram Sambat calendar ("a month or part of a month" counts in full).</p>
+</section>
 <?php include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_footer' : 'staff_footer') . '.php'; ?>

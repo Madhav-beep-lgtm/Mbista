@@ -3003,6 +3003,8 @@ function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []
         'manufacturing_order_start' => 'the Manufacturing module (it carries the order\'s materials into WIP — complete or cancel the order instead)',
         'payroll_run' => 'the Payroll module (the run would keep claiming its accrual is posted — reopen the run for correction instead)',
         'payroll_payment' => 'the Payroll module (the run would keep showing paid with no cash in the books — reopen the run for correction instead)',
+        'payroll_advance' => 'the Payroll module (the advance register would keep a disbursement the books no longer show)',
+        'payroll_advance_repay' => 'the Payroll module (the advance balance already reflects this repayment)',
     ];
     $voucherSourceType = (string) ($voucher['source_type'] ?? '');
     if (isset($moduleSourceTypes[$voucherSourceType]) && !in_array($voucherSourceType, $allowModuleSources, true)) {
