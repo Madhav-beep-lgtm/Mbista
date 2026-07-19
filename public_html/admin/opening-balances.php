@@ -286,7 +286,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td>
                         <?= e((string) $l['line_label']) ?>
                         <?php if ($l['ledger_id']): ?>
-                            <a class="muted" style="font-size:11px" href="<?= e(url('admin/ledgers.php?ledger=' . (int) $l['ledger_id'])) ?>" title="Open ledger">↗ ledger</a>
+                            <a class="muted" style="font-size:11px" href="<?= e(url('admin/ledgers.php?ledger_id=' . (int) $l['ledger_id'])) ?>" title="Open ledger">↗ ledger</a>
                         <?php endif; ?>
                     </td>
                     <td><?= e(ucfirst((string) $l['account_type'])) ?></td>
@@ -369,7 +369,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <tbody>
                                 <?php foreach (($reconRow['control_ledgers'] ?? []) as $cl): ?>
                                 <tr>
-                                    <td><a href="<?= e(url('admin/ledgers.php?ledger=' . (int) $cl['ledger_id'])) ?>"><?= e($cl['name']) ?></a></td>
+                                    <td><a href="<?= e(url('admin/ledgers.php?ledger_id=' . (int) $cl['ledger_id'])) ?>"><?= e($cl['name']) ?></a></td>
                                     <td class="is-numeric"><?= e($sym . number_format((float) $cl['opening'], 2)) ?></td>
                                     <td><?= $cl['party'] !== null ? e($cl['party']) : '<span class="mbw-pill tone-amber">not linked</span>' ?></td>
                                     <td style="font-size:12px;color:var(--mbw-muted)"><?= $cl['party'] !== null

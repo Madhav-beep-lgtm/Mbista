@@ -108,8 +108,14 @@ $filters = [
     'stock_status' => in_array((string) ($_GET['status'] ?? ''), ['positive', 'zero', 'negative'], true) ? (string) $_GET['status'] : '',
     'zero_movement' => !isset($_GET['applied']) || isset($_GET['zero_movement']),
     'zero_closing' => !isset($_GET['applied']) || isset($_GET['zero_closing']),
-    'group_by' => in_array((string) ($_GET['group_by'] ?? ''), ['type', 'valuation'], true) ? (string) $_GET['group_by'] : '',
+    'group_by' => in_array((string) ($_GET['group_by'] ?? ''), ['type', 'valuation', 'ledger'], true) ? (string) $_GET['group_by'] : '',
+    'ledger_id' => (int) ($_GET['ledger'] ?? 0),
 ];
+// Arriving from a GL ledger ("items behind this balance") groups by ledger so
+// the subtotal that must equal the trial-balance line is immediately visible.
+if ($filters['ledger_id'] > 0 && $filters['group_by'] === '') {
+    $filters['group_by'] = 'ledger';
+}
 
 $report = sr_stock_summary($companyId, $filters);
 $rows = $report['rows'];
@@ -134,6 +140,7 @@ $qs = http_build_query(array_filter([
     'zero_movement' => $filters['zero_movement'] ? 1 : null,
     'zero_closing' => $filters['zero_closing'] ? 1 : null,
     'group_by' => $filters['group_by'] ?: null,
+    'ledger' => $filters['ledger_id'] ?: null,
     'applied' => 1,
 ], static fn ($v): bool => $v !== null));
 
@@ -148,7 +155,7 @@ if ($export !== '') {
         'Inward Qty', 'Inward Rate', 'Inward Amount',
         'Outward Qty', 'Outward Rate', 'Outward Amount',
         'Damage Qty', 'Damage Rate', 'Damage Amount',
-        'Closing Qty', 'Closing Rate', 'Closing Amount', 'Valuation Method'];
+        'Closing Qty', 'Closing Rate', 'Closing Amount', 'GL Ledger', 'Valuation Method'];
     $data = [
         [(string) $company['name']],
         ['Stock Summary Report'],
@@ -167,11 +174,12 @@ if ($export !== '') {
             $r['out_qty'], $r['out_rate'], $r['out_amount'],
             $r['damage_qty'], $r['damage_rate'], $r['damage_amount'],
             $r['closing_qty'], $r['closing_rate'], $r['closing_amount'],
+            $r['ledger_code'] !== '' ? $r['ledger_code'] : 'not mapped',
             strtoupper(str_replace('_', ' ', $r['valuation_method']))];
     }
     $data[] = [];
     $data[] = ['TOTALS', '', '', '', '', '', '', '', $totals['opening_amount'], '', '', $totals['in_amount'],
-        '', '', $totals['out_amount'], '', '', $totals['damage_amount'], '', '', $totals['closing_amount'], ''];
+        '', '', $totals['out_amount'], '', '', $totals['damage_amount'], '', '', $totals['closing_amount'], '', ''];
     security_event('report_exported', 'success', 'Stock summary export (' . $export . ').', $companyId, $userId);
     if ($export === 'csv' || $export === 'excel') {
         export_csv('stock-summary-' . $company['code'] . '-' . $from . '-to-' . $to . ($export === 'excel' ? '.xls.csv' : '.csv'), $data);
@@ -235,6 +243,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <h2><?= icon('inventory') ?>Stock Summary Report</h2>
         <div class="mbw-card-tools">
             <span class="mbw-pill tone-blue"><?= e((string) $fiscalYear['label']) ?> · <?= e($from) ?> → <?= e($to) ?></span>
+            <?php if ($filters['ledger_id'] > 0): ?>
+                <?php $filterLedgerStmt = db()->prepare('SELECT code, name FROM ledgers WHERE id = :id AND company_id = :cid'); $filterLedgerStmt->execute(['id' => $filters['ledger_id'], 'cid' => $companyId]); $filterLedger = $filterLedgerStmt->fetch(); ?>
+                <span class="mbw-pill tone-amber">Ledger: <?= e((string) ($filterLedger['code'] ?? ('#' . $filters['ledger_id']))) ?>
+                    <a href="<?= e(url('admin/stock-summary-report.php')) ?>" style="margin-left:4px" title="Clear the ledger filter">✕</a></span>
+            <?php endif; ?>
             <a class="mbw-view-all" href="<?= e(url('admin/stock-summary-report.php?' . $qs)) ?>" title="Refresh with the same filters">&#8635; Refresh</a>
         </div>
     </div>
@@ -285,8 +298,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <option value="">Item (code order)</option>
                 <option value="type" <?= $filters['group_by'] === 'type' ? 'selected' : '' ?>>Item type</option>
                 <option value="valuation" <?= $filters['group_by'] === 'valuation' ? 'selected' : '' ?>>Valuation method</option>
+                <option value="ledger" <?= $filters['group_by'] === 'ledger' ? 'selected' : '' ?>>GL ledger (ties to trial balance)</option>
             </select>
         </label>
+        <?php if ($filters['ledger_id'] > 0): ?>
+            <input type="hidden" name="ledger" value="<?= (int) $filters['ledger_id'] ?>">
+        <?php endif; ?>
         <label style="flex-direction:row;display:flex;align-items:center;gap:8px"><input type="checkbox" name="zero_movement" <?= $filters['zero_movement'] ? 'checked' : '' ?> style="width:auto;min-height:auto"> Include zero-movement items</label>
         <label style="flex-direction:row;display:flex;align-items:center;gap:8px"><input type="checkbox" name="zero_closing" <?= $filters['zero_closing'] ? 'checked' : '' ?> style="width:auto;min-height:auto"> Include zero closing balance</label>
         <label>Rows per page
@@ -338,7 +355,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <th colspan="3" class="grp-out">Sold / Consumed / Outward</th>
                 <th colspan="3" class="grp-dmg">Damage / Write-off</th>
                 <th colspan="3" class="grp-close">Closing Balance</th>
-                <th colspan="2" class="grp-other">Other</th>
+                <th colspan="3" class="grp-other">Other</th>
             </tr>
             <tr class="ssr-h2">
                 <th>S.N.</th><th class="ssr-sticky-1">Item Code</th><th class="ssr-sticky-2">Item Name</th><th>Type</th><th>Location</th><th>UOM</th>
@@ -347,16 +364,39 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <th class="is-numeric grp-out">Qty</th><th class="is-numeric grp-out">Rate</th><th class="is-numeric grp-out">Amount</th>
                 <th class="is-numeric grp-dmg">Qty</th><th class="is-numeric grp-dmg">Rate</th><th class="is-numeric grp-dmg">Amount</th>
                 <th class="is-numeric grp-close">Qty</th><th class="is-numeric grp-close">Rate</th><th class="is-numeric grp-close">Amount</th>
-                <th class="grp-other">Valuation</th><th class="grp-other">Action</th>
+                <th class="grp-other">GL Ledger</th><th class="grp-other">Valuation</th><th class="grp-other">Action</th>
             </tr>
         </thead>
         <tbody>
             <?php if ($pageRows === []): ?>
-                <tr><td colspan="23" style="text-align:center;color:var(--mbw-muted);padding:24px">No items match the filters for <?= e($from) ?> → <?= e($to) ?>.</td></tr>
+                <tr><td colspan="24" style="text-align:center;color:var(--mbw-muted);padding:24px">No items match the filters for <?= e($from) ?> → <?= e($to) ?>.</td></tr>
             <?php endif; ?>
-            <?php $sn = ($page - 1) * $perPage; foreach ($pageRows as $r): $sn++;
+            <?php
+            // Per-GL-ledger subtotals when grouped by ledger — each subtotal is
+            // the figure that must equal that ledger's line on the trial balance.
+            $ledgerSubtotals = [];
+            if ($filters['group_by'] === 'ledger') {
+                foreach ($rows as $lr) {
+                    $key = (int) $lr['ledger_id'];
+                    $ledgerSubtotals[$key]['label'] = $lr['ledger_code'] !== '' ? $lr['ledger_code'] . ' — ' . $lr['ledger_name'] : 'Not mapped to any GL ledger';
+                    $ledgerSubtotals[$key]['closing'] = ($ledgerSubtotals[$key]['closing'] ?? 0.0) + $lr['closing_amount'];
+                    $ledgerSubtotals[$key]['count'] = ($ledgerSubtotals[$key]['count'] ?? 0) + 1;
+                }
+            }
+            $prevLedgerKey = null;
+            $sn = ($page - 1) * $perPage; foreach ($pageRows as $r): $sn++;
                 $ledgerUrl = url('admin/stock-ledger.php?item=' . $r['item_id'] . '&return=' . urlencode($qs . '&page=' . $page . '&per_page=' . $perPage) . '&' . $qs);
+                if ($filters['group_by'] === 'ledger' && $prevLedgerKey !== (int) $r['ledger_id']):
+                    $prevLedgerKey = (int) $r['ledger_id'];
+                    $sub = $ledgerSubtotals[$prevLedgerKey];
             ?>
+                <tr style="background:var(--mbw-soft,#eef5f0);font-weight:700">
+                    <td colspan="21"><?= icon('contracts') ?> <?= e($sub['label']) ?> — <?= (int) $sub['count'] ?> item(s)
+                        <?php if ((int) $r['ledger_id'] > 0): ?><a class="mbw-view-all" style="margin-left:8px" href="<?= e(url('admin/ledgers.php?ledger_id=' . (int) $r['ledger_id'])) ?>">open GL ledger →</a><?php endif; ?></td>
+                    <td class="is-numeric grp-close" colspan="1"><?= e($sym . number_format($sub['closing'], 2)) ?></td>
+                    <td colspan="2" class="grp-other" style="font-weight:500;color:var(--mbw-muted)">= trial-balance line</td>
+                </tr>
+            <?php endif; ?>
                 <tr>
                     <td><?= $sn ?></td>
                     <td class="ssr-sticky-1"><a href="<?= e($ledgerUrl) ?>"><strong><?= e($r['sku']) ?></strong></a></td>
@@ -369,6 +409,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <td class="is-numeric <?= $grp ?>"><?= $r[$qk] > 0.0005 || $r[$rk] > 0 ? e(number_format($r[$rk], 2)) : '–' ?></td>
                         <td class="is-numeric <?= $grp ?><?= $r[$ak] < 0 ? ' ssr-neg' : '' ?>"><?= e(number_format($r[$ak], 2)) ?></td>
                     <?php endforeach; ?>
+                    <td class="grp-other" style="white-space:nowrap"><?= (int) $r['ledger_id'] > 0
+                        ? '<a href="' . e(url('admin/ledgers.php?ledger_id=' . (int) $r['ledger_id'])) . '" title="' . e($r['ledger_name']) . '">' . e($r['ledger_code']) . '</a>'
+                        : '<span class="mbw-pill tone-amber" title="Map the item\'s stock ledger so its value reaches the books">not mapped</span>' ?></td>
                     <td class="grp-other"><?= e(strtoupper(str_replace('_', ' ', $r['valuation_method']))) ?></td>
                     <td class="grp-other"><a class="button secondary" style="min-height:28px;padding:2px 8px;white-space:nowrap" href="<?= e($ledgerUrl) ?>">View Stock Ledger</a></td>
                 </tr>
@@ -381,7 +424,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <td colspan="2" class="grp-out"></td><td class="is-numeric grp-out"><?= e($sym . number_format($totals['out_amount'], 2)) ?></td>
                 <td colspan="2" class="grp-dmg"></td><td class="is-numeric grp-dmg"><?= e($sym . number_format($totals['damage_amount'], 2)) ?></td>
                 <td colspan="2" class="grp-close"></td><td class="is-numeric grp-close"><?= e($sym . number_format($totals['closing_amount'], 2)) ?></td>
-                <td colspan="2" class="grp-other"></td>
+                <td colspan="3" class="grp-other"></td>
             </tr>
             <?php endif; ?>
         </tbody>

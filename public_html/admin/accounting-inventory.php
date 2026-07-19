@@ -1698,6 +1698,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a class="mbw-tab <?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('cart') ?>Items &amp; Transactions</a>
     <a class="mbw-tab <?= $invView === 'valuation' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=valuation')) ?>"><?= icon('reports') ?>Valuation &amp; NRV</a>
     <?php if ($inventoryProfile['show_manufacturing']): ?><a class="mbw-tab <?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('layers') ?>Manufacturing</a><?php endif; ?>
+    <a class="mbw-tab" href="<?= e(url('admin/stock-summary-report.php')) ?>" title="Item-wise movement and valuation, wired to the GL ledgers"><?= icon('reports') ?>Stock Summary Report</a>
 </nav>
 
 <?php if ($invView === 'valuation'): ?>

@@ -130,6 +130,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <h2><?= $selectedLedger ? 'Ledger Statement — ' . e($selectedLedger['code'] . ' · ' . $selectedLedger['name']) : 'Ledger Balances' ?></h2>
         <div class="mbw-card-tools">
             <?php if ($selectedLedger): ?>
+                <?php
+                // An inventory-designated ledger's balance is made of ITEMS —
+                // wire it straight to the Stock Summary grouped by this ledger.
+                require_once __DIR__ . '/../../app/stock_report_engine.php';
+                if (in_array($selectedLedgerId, sr_inventory_ledger_ids((int) $company['id']), true)): ?>
+                    <a class="mbw-view-all" href="<?= e(url('admin/stock-summary-report.php?ledger=' . $selectedLedgerId . '&applied=1')) ?>" title="The item-wise stock that makes up this GL balance"><?= icon('box') ?>Items behind this balance</a>
+                <?php endif; ?>
                 <a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php?edit_id=' . $selectedLedgerId)) ?>">Edit / Reclassify</a>
                 <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . $selectedLedgerId . '&fy=' . $fiscalYearId)) ?>">Reports Center view</a>
                 <a class="mbw-view-all" href="<?= e(url('admin/ledgers.php')) ?>">All ledgers</a>

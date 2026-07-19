@@ -319,6 +319,22 @@ function sr_stock_summary(int $companyId, array $f): array
             continue;
         }
 
+        // The GL stock ledger this item's value posts to — the wire between a
+        // trial-balance inventory line and the items behind it.
+        static $ledgerNameCache = null;
+        if ($ledgerNameCache === null) {
+            $lnStmt = db()->prepare('SELECT id, code, name FROM ledgers WHERE company_id = :cid');
+            $lnStmt->execute(['cid' => $companyId]);
+            $ledgerNameCache = [];
+            foreach ($lnStmt->fetchAll(PDO::FETCH_ASSOC) as $ln) {
+                $ledgerNameCache[(int) $ln['id']] = ['code' => (string) $ln['code'], 'name' => (string) $ln['name']];
+            }
+        }
+        $stockLedgerId = inv_item_stock_ledger_id($companyId, $item);
+        if ((int) ($f['ledger_id'] ?? 0) > 0 && $stockLedgerId !== (int) $f['ledger_id']) {
+            continue;
+        }
+
         $warehouseLabel = '';
         if ($singleWarehouse !== null) {
             static $whNames = null;
@@ -343,6 +359,9 @@ function sr_stock_summary(int $companyId, array $f): array
             'location' => $warehouseLabel,
             'unit' => (string) $item['unit'],
             'valuation_method' => $method,
+            'ledger_id' => $stockLedgerId,
+            'ledger_code' => $stockLedgerId > 0 ? ($ledgerNameCache[$stockLedgerId]['code'] ?? '') : '',
+            'ledger_name' => $stockLedgerId > 0 ? ($ledgerNameCache[$stockLedgerId]['name'] ?? '') : 'not mapped',
             'opening_qty' => $opening['qty'],
             'opening_rate' => sr_rate($opening['amount'], $opening['qty']),
             'opening_amount' => inv_round_money($opening['amount']),
@@ -375,6 +394,8 @@ function sr_stock_summary(int $companyId, array $f): array
         usort($rows, static fn (array $a, array $b): int => [$a['item_type'], $a['sku']] <=> [$b['item_type'], $b['sku']]);
     } elseif ($groupBy === 'valuation') {
         usort($rows, static fn (array $a, array $b): int => [$a['valuation_method'], $a['sku']] <=> [$b['valuation_method'], $b['sku']]);
+    } elseif ($groupBy === 'ledger') {
+        usort($rows, static fn (array $a, array $b): int => [$a['ledger_code'], $a['sku']] <=> [$b['ledger_code'], $b['sku']]);
     }
 
     return ['rows' => $rows, 'totals' => $totals, 'item_count' => count($rows)];
@@ -560,8 +581,12 @@ function sr_post_missing_movement_vouchers(int $companyId, int $userId): array
     return $result;
 }
 
-/** Posted-GL balance of every inventory-designated ledger (item links + global stock mappings). */
-function sr_inventory_gl_total(int $companyId, ?string $asAt = null): float
+/**
+ * The GL ledgers that carry ITEM stock value (item links + global stock
+ * mappings). 'wip' is deliberately excluded — the item subledger can never
+ * carry in-process value, so WIP is compared alongside, never inside.
+ */
+function sr_inventory_ledger_ids(int $companyId): array
 {
     $ledgerIds = [];
     $itemLedgers = db()->prepare('SELECT DISTINCT ledger_id FROM inventory_items WHERE company_id = :cid AND ledger_id IS NOT NULL');
@@ -569,9 +594,6 @@ function sr_inventory_gl_total(int $companyId, ?string $asAt = null): float
     foreach ($itemLedgers->fetchAll(PDO::FETCH_COLUMN) as $lid) {
         $ledgerIds[(int) $lid] = true;
     }
-    // NOTE: the 'wip' purpose is deliberately EXCLUDED — the item subledger
-    // can never carry work-in-process value (consumed items have left item
-    // stock), so WIP is reported alongside, never inside, this comparison.
     if (table_exists('inventory_ledger_mappings')) {
         $mp = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND purpose IN ('inventory_asset','raw_material','finished_goods','scrap_inventory')");
         $mp->execute(['cid' => $companyId]);
@@ -584,6 +606,13 @@ function sr_inventory_gl_total(int $companyId, ?string $asAt = null): float
             unset($ledgerIds[(int) $lid]);
         }
     }
+    return array_keys($ledgerIds);
+}
+
+/** Posted-GL balance of every inventory-designated ledger (item links + global stock mappings). */
+function sr_inventory_gl_total(int $companyId, ?string $asAt = null): float
+{
+    $ledgerIds = array_fill_keys(sr_inventory_ledger_ids($companyId), true);
     if ($ledgerIds === []) {
         return 0.0;
     }
