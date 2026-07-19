@@ -1677,10 +1677,16 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             // links + global inventory mappings) from posted vouchers up to $to.
             $ledgerIds = [];
             foreach ($itemRows as $it) { if ((int) ($it['ledger_id'] ?? 0) > 0) { $ledgerIds[(int) $it['ledger_id']] = true; } }
+            // WIP is excluded from the comparison set — the ITEM subledger can
+            // never carry in-process value; WIP is reported separately below.
+            $wipLedgerIds = [];
             if (table_exists('inventory_ledger_mappings')) {
-                $mp = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND scope='global' AND purpose IN ('inventory_asset','raw_material','wip','finished_goods','scrap_inventory')");
+                $mp = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND purpose IN ('inventory_asset','raw_material','finished_goods','scrap_inventory')");
                 $mp->execute(['cid' => $scopeCompanyId]);
                 foreach ($mp->fetchAll(PDO::FETCH_COLUMN) as $lid) { $ledgerIds[(int) $lid] = true; }
+                $wp = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND purpose = 'wip'");
+                $wp->execute(['cid' => $scopeCompanyId]);
+                foreach ($wp->fetchAll(PDO::FETCH_COLUMN) as $lid) { $wipLedgerIds[(int) $lid] = true; unset($ledgerIds[(int) $lid]); }
             }
             $rows = [];
             $glTotal = 0.0;
@@ -1703,8 +1709,19 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 }
             }
             $diff = round($subledger - $glTotal, 2);
+            if ($wipLedgerIds !== []) {
+                $wph = implode(',', array_fill(0, count($wipLedgerIds), '?'));
+                $wq = db()->prepare("SELECT COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0)
+                    FROM voucher_entries ve JOIN vouchers v ON v.id=ve.voucher_id
+                    WHERE ve.ledger_id IN ($wph) AND v.status='posted' AND v.company_id = ? AND (v.voucher_date IS NULL OR v.voucher_date <= ?)");
+                $wq->execute(array_merge(array_keys($wipLedgerIds), [$scopeCompanyId, $to]));
+                $wipBal = round((float) $wq->fetchColumn(), 2);
+                if (abs($wipBal) >= 0.005) {
+                    $rows[] = ['', 'Work in Progress ledger (in-process value — outside the item subledger by design)', 'Info', rc_fmt($wipBal)];
+                }
+            }
             $rows[] = ['', 'Stock subledger at replayed cost (as at date)', 'Subledger', rc_fmt($subledger)];
-            $rows[] = ['', 'General-ledger inventory balance', 'GL', rc_fmt($glTotal)];
+            $rows[] = ['', 'General-ledger inventory balance (excl. WIP)', 'GL', rc_fmt($glTotal)];
             $rows[] = ['', 'DIFFERENCE (subledger − GL)', abs($diff) < 0.005 ? 'Reconciled' : 'Investigate', rc_fmt($diff)];
             // EXPLAIN the difference: what has value in stock but no voucher in
             // the GL, and where the one-click fixes live.

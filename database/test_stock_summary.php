@@ -63,10 +63,10 @@ $mkItem = static function (string $sku, string $type, string $method, float $ope
         ->execute(['cid' => $cid, 'sku' => $sku, 'n' => $sku . ' item', 't' => $type, 'm' => $method, 'r' => $rate, 'oq' => $openQty, 'wh' => $wh]);
     return (int) db()->lastInsertId();
 };
-$txn = static function (int $itemId, string $type, string $date, float $in, float $out, float $rate, ?int $wh = null, ?int $toWh = null) use ($cid, $fy): int {
-    db()->prepare('INSERT INTO inventory_transactions (company_id, fiscal_year_id, item_id, transaction_type, transaction_date, warehouse_id, to_warehouse_id, qty_in, qty_out, rate, amount)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-        ->execute([$cid, (int) $fy['id'], $itemId, $type, $date, $wh, $toWh, $in, $out, $rate, round(($in ?: $out) * $rate, 2)]);
+$txn = static function (int $itemId, string $type, string $date, float $in, float $out, float $rate, ?int $wh = null, ?int $toWh = null, ?string $ref = null) use ($cid, $fy): int {
+    db()->prepare('INSERT INTO inventory_transactions (company_id, fiscal_year_id, item_id, transaction_type, transaction_date, warehouse_id, to_warehouse_id, qty_in, qty_out, rate, amount, ref_no)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+        ->execute([$cid, (int) $fy['id'], $itemId, $type, $date, $wh, $toWh, $in, $out, $rate, round(($in ?: $out) * $rate, 2), $ref]);
     return (int) db()->lastInsertId();
 };
 
@@ -95,9 +95,9 @@ $txn($itXfer, 'warehouse_transfer', '2026-08-05', 8, 0, 200, $whB, $whA); // int
 
 $itMfg = $mkItem('STK-MFG-RM', 'raw_material', 'fifo', 0, 0, $whA);
 $txn($itMfg, 'purchase', '2026-08-01', 30, 0, 10, $whA);
-$txn($itMfg, 'consume', '2026-08-06', 0, 12, 10, $whA);         // manufacturing consumption -> outward
+$txn($itMfg, 'consume', '2026-08-06', 0, 12, 10, $whA, null, 'MO-T1');         // manufacturing consumption -> outward
 $itFg = $mkItem('STK-MFG-FG', 'finished_good', 'fifo', 0, 0, $whA);
-$txn($itFg, 'produce', '2026-08-06', 4, 0, 55, $whA);           // production receipt -> inward
+$txn($itFg, 'produce', '2026-08-06', 4, 0, 55, $whA, null, 'MO-T1');           // production receipt -> inward
 
 $itZero = $mkItem('STK-ZERO', 'stock', 'fifo', 0, 0, $whA);
 $txn($itZero, 'purchase', '2026-08-01', 5, 0, 20, $whA);
@@ -286,6 +286,29 @@ $repAfter = sr_stock_summary($cid, $baseFilters);
 $fifoAfter = $find($repAfter['rows'], 'STK-FIFO');
 ok(near($glFifo, (float) $fifoAfter['closing_amount']),
     'GL inventory ledger for STK-FIFO equals its stock closing value — subledger ties to trial balance (' . number_format($glFifo, 2) . ' == ' . number_format((float) $fifoAfter['closing_amount'], 2) . ')');
+
+echo "\nFull reconcile: ONE action makes stock == GL\n";
+// Map opening equity so item-opening vouchers credit a mapped contra.
+$lOEQ2 = $mkL($mkG('equity', 'STK-E', 'Equity'), 'STK-OEQ', 'Opening Equity', 'equity');
+$mapIns->execute([$cid, 'opening_equity', $lOEQ2]);
+$adminUid = (int) db()->query("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1")->fetchColumn();
+// Orphan consumption: materials issued to an order whose produce side posted
+// elsewhere — must credit stock at replay cost and debit WIP/loss, not skip.
+$itOrph = $mkItem('STK-ORPH', 'raw_material', 'fifo', 0, 0, $whA);
+$txn($itOrph, 'purchase', '2026-08-01', 8, 0, 25, $whA);
+$txn($itOrph, 'consume', '2026-08-04', 0, 3, 25, $whA, null, 'MO-ORPHAN');
+$recRun = sr_reconcile_stock_to_gl($cid, $adminUid, true);
+ok($recRun['openings']['posted'] > 0, 'Reconcile posted the opening-stock voucher(s) (' . $recRun['openings']['posted'] . ')');
+$orphVoucher = (float) db()->query("SELECT v.total_amount FROM vouchers v JOIN inventory_transactions t ON t.voucher_id=v.id
+    WHERE t.item_id=$itOrph AND t.transaction_type='consume' LIMIT 1")->fetchColumn();
+ok(near($orphVoucher, 75), 'Orphan consume posted at replay cost 75 (3 @ 25), not skipped');
+ok($recRun['production']['posted'] === 2 && $recRun['production']['skipped'] === [],
+    'Reconcile posted the retro production journal AND the orphan consume (2 posted, none skipped)');
+ok($recRun['reconciled'] === true,
+    'RECONCILED: stock ' . number_format($recRun['after']['subledger'], 2) . ' == GL ' . number_format($recRun['after']['gl'], 2) . ' (difference ' . number_format($recRun['difference'], 2) . ')');
+$recRun2 = sr_reconcile_stock_to_gl($cid, $adminUid, true);
+ok($recRun2['openings']['posted'] === 0 && $recRun2['movements']['posted'] === 0 && $recRun2['production']['posted'] === 0 && $recRun2['reconciled'] === true,
+    'Second reconcile run posts nothing and stays reconciled (idempotent)');
 
 echo "\nTenant isolation\n";
 $otherRep = sr_stock_summary(999999, $baseFilters);

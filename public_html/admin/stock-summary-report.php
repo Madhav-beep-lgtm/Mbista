@@ -26,23 +26,35 @@ $fyEnd = (string) $fiscalYear['end_date'];
 // ---------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
-    if (($_POST['action'] ?? '') === 'backfill_movement_vouchers') {
-        // Retro-post GL vouchers for stock movements recorded without one, at
-        // replayed historical cost — the missing link that makes the stock
-        // subledger tie to the inventory control ledgers and trial balance.
+    if (($_POST['action'] ?? '') === 'reconcile_stock_gl') {
+        // ONE action that makes the stock subledger and the inventory GL
+        // equal: opening vouchers -> movement vouchers at replayed cost ->
+        // retro production journals -> (opt-in) zero duplicate direct
+        // openings. Everything is posted through the normal choke point on
+        // historical dates; every step is reported back.
         require_permission('accounting', 'post');
-        $bf = sr_post_missing_movement_vouchers($companyId, $userId);
-        $msg = $bf['posted'] . ' movement voucher(s) posted (' . $sym . number_format($bf['posted_value'], 2) . ').';
-        if ($bf['manufacturing'] > 0) {
-            $msg .= ' ' . $bf['manufacturing'] . ' manufacturing row(s) skipped — re-post their order from Inventory & Manufacturing.';
+        $rec = sr_reconcile_stock_to_gl($companyId, $userId, isset($_POST['zero_direct_openings']));
+        $msg = 'Reconciliation run — before: stock ' . $sym . number_format($rec['before']['subledger'], 2) . ' vs GL ' . $sym . number_format($rec['before']['gl'], 2)
+            . ' · after: stock ' . $sym . number_format($rec['after']['subledger'], 2) . ' vs GL ' . $sym . number_format($rec['after']['gl'], 2) . '. '
+            . 'Posted: ' . $rec['openings']['posted'] . ' opening voucher(s), '
+            . $rec['movements']['posted'] . ' movement voucher(s) (' . $sym . number_format($rec['movements']['posted_value'], 2) . '), '
+            . $rec['production']['posted'] . ' production journal(s)'
+            . ($rec['direct_openings']['zeroed'] > 0 ? ', zeroed ' . $rec['direct_openings']['zeroed'] . ' duplicate direct opening(s) (' . $sym . number_format($rec['direct_openings']['value'], 2) . ')' : '') . '.';
+        $issues = array_merge(
+            $rec['openings']['notes'],
+            array_map(static fn (array $s): string => $s['sku'] . '#' . $s['txn'] . ': ' . $s['reason'], $rec['movements']['skipped']),
+            array_map(static fn (array $s): string => $s['ref'] . ': ' . $s['reason'], $rec['production']['skipped']),
+            $rec['direct_openings']['notes']
+        );
+        if ($issues !== []) {
+            $msg .= ' Remaining issues: ' . implode(' | ', array_slice($issues, 0, 4)) . (count($issues) > 4 ? ' +' . (count($issues) - 4) . ' more' : '') . '.';
         }
-        if ($bf['skipped'] !== []) {
-            $skTxt = array_map(static fn (array $s): string => $s['sku'] . '#' . $s['txn'] . ' (' . $s['reason'] . ')', array_slice($bf['skipped'], 0, 5));
-            $msg .= ' Skipped: ' . implode('; ', $skTxt) . (count($bf['skipped']) > 5 ? ' +' . (count($bf['skipped']) - 5) . ' more' : '') . '.';
-        }
-        log_activity('inventory_item', $companyId, 'movement_backfill', $msg, $userId);
-        security_event('inventory_movement_posted', 'success', 'Movement voucher backfill: ' . $bf['posted'] . ' posted.', $companyId, $userId);
-        flash($bf['skipped'] === [] ? 'success' : 'error', $msg);
+        $msg .= $rec['reconciled']
+            ? ' ✔ RECONCILED — stock and GL now match.'
+            : ' Remaining difference ' . $sym . number_format($rec['difference'], 2) . ' — open Reports Center → Inventory-to-GL Reconciliation for the cause rows.';
+        log_activity('inventory_item', $companyId, 'stock_gl_reconcile', $msg, $userId);
+        security_event('inventory_movement_posted', 'success', 'Stock-to-GL reconciliation run.', $companyId, $userId);
+        flash($rec['reconciled'] ? 'success' : 'error', $msg);
         redirect('admin/stock-summary-report.php?' . http_build_query(array_diff_key($_GET, ['lang' => ''])));
     }
     if (($_POST['action'] ?? '') === 'set_location_type') {
@@ -293,18 +305,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <a class="button secondary" href="?<?= e($qs) ?>&amp;export=excel"><?= icon('reports') ?>Excel</a>
             <a class="button secondary" target="_blank" href="?<?= e($qs) ?>&amp;export=print"><?= icon('reports') ?>Print / PDF</a>
         <?php endif; ?>
-        <?php if (user_can_do('accounting', 'post')): $glGap = sr_unposted_summary($companyId); ?>
-            <?php if ($glGap['movements'] > 0 || $glGap['openings'] > 0): ?>
-                <form method="post" style="display:inline" data-confirm="Post the missing GL vouchers for <?= (int) $glGap['movements'] ?> stock movement(s) worth <?= e(number_format($glGap['movements_value'], 2)) ?>? Each posts on its own historical date at replayed inventory cost — this is what ties the stock report to the trial balance.">
-                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                    <input type="hidden" name="action" value="backfill_movement_vouchers">
-                    <button type="submit" class="button secondary" <?= $glGap['movements'] === 0 ? 'disabled title="No unposted movements with a GL plan"' : '' ?>><?= icon('badge-check') ?>Post missing movement vouchers (<?= (int) $glGap['movements'] ?>)</button>
-                </form>
-                <?php if ($glGap['openings'] > 0): ?>
-                    <a class="button secondary" href="<?= e(url('admin/opening-balances.php')) ?>" title="<?= (int) $glGap['openings'] ?> item(s) have opening stock with no GL voucher — post them there"><?= icon('reconcile') ?>Opening stock unposted: <?= (int) $glGap['openings'] ?> item(s)</a>
-                <?php endif; ?>
-            <?php endif; ?>
-        <?php endif; ?>
         <details class="pr-adjust" style="margin-left:auto">
             <summary class="button secondary">Columns…</summary>
             <div class="pr-adjust-form" style="width:230px" id="ssrColumnChooser">
@@ -400,6 +400,47 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         Warehouse-scoped amounts value exact per-location quantities at company-level carrying cost (transfers never re-cost stock).
     </p>
 </section>
+
+<?php if (user_can_do('accounting', 'post')):
+    $glGap = sr_unposted_summary($companyId);
+    $glNow = sr_inventory_gl_total($companyId);
+    // Whole-history totals: equality must hold over everything ever recorded.
+    $wholeSummary = sr_stock_summary($companyId, ['from' => '2999-12-31', 'to' => '2999-12-31']);
+    $subNow = (float) $wholeSummary['totals']['closing_amount'];
+    $glDiff = round($subNow - $glNow, 2);
+?>
+<section class="mbw-card" aria-label="Reconcile stock to general ledger">
+    <div class="mbw-card-head">
+        <h2><?= icon('reconcile') ?>Reconcile Stock ↔ General Ledger</h2>
+        <div class="mbw-card-tools">
+            <span class="mbw-pill <?= abs($glDiff) < 0.01 ? 'tone-green' : 'tone-red' ?>">
+                Stock <?= e($sym . number_format($subNow, 2)) ?> vs GL <?= e($sym . number_format($glNow, 2)) ?><?= abs($glDiff) < 0.01 ? ' — matched' : ' — off by ' . e($sym . number_format($glDiff, 2)) ?>
+            </span>
+        </div>
+    </div>
+    <?php if (abs($glDiff) < 0.01 && $glGap['movements'] === 0 && $glGap['openings'] === 0): ?>
+        <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">The stock subledger and the inventory GL ledgers agree. Every report (Stock Summary, Inventory Summary, Trial Balance inventory lines) reads the same rupees.</p>
+    <?php else: ?>
+        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
+            One click posts everything the stock subledger has that the books don't, in the right order and at historical replayed cost:
+            <?= (int) $glGap['openings'] ?> opening-stock voucher(s) worth <?= e($sym . number_format($glGap['openings_value'], 2)) ?> ·
+            <?= (int) $glGap['movements'] ?> movement voucher(s) worth <?= e($sym . number_format($glGap['movements_value'], 2)) ?> ·
+            <?= (int) $glGap['manufacturing'] ?> manufacturing row(s) via retro production journal.
+        </p>
+        <form method="post" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"
+              data-confirm="Run the full stock-to-GL reconciliation now? All vouchers post through the normal engine on their historical dates and appear in the register/audit trail. This is the supported way to make the stock reports and the trial balance equal.">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="reconcile_stock_gl">
+            <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;font-weight:500">
+                <input type="checkbox" name="zero_direct_openings" style="width:auto;min-height:auto">
+                Also zero DIRECT ledger openings typed straight on inventory GL ledgers (they duplicate the item-level opening vouchers; audited, reversible from Opening Balances)
+            </label>
+            <button type="submit"><?= icon('badge-check') ?>Reconcile now</button>
+        </form>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Anything that still cannot post (unmapped ledgers, locked periods) is listed afterwards with its reason, and Reports Center → Inventory-to-GL Reconciliation shows the cause rows for any remainder.</p>
+    <?php endif; ?>
+</section>
+<?php endif; ?>
 
 <section class="mbw-card" aria-label="Location-specific item types">
     <div class="mbw-card-head"><h2><?= icon('sliders') ?>Item type by department / location</h2></div>

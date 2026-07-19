@@ -560,6 +560,272 @@ function sr_post_missing_movement_vouchers(int $companyId, int $userId): array
     return $result;
 }
 
+/** Posted-GL balance of every inventory-designated ledger (item links + global stock mappings). */
+function sr_inventory_gl_total(int $companyId, ?string $asAt = null): float
+{
+    $ledgerIds = [];
+    $itemLedgers = db()->prepare('SELECT DISTINCT ledger_id FROM inventory_items WHERE company_id = :cid AND ledger_id IS NOT NULL');
+    $itemLedgers->execute(['cid' => $companyId]);
+    foreach ($itemLedgers->fetchAll(PDO::FETCH_COLUMN) as $lid) {
+        $ledgerIds[(int) $lid] = true;
+    }
+    // NOTE: the 'wip' purpose is deliberately EXCLUDED — the item subledger
+    // can never carry work-in-process value (consumed items have left item
+    // stock), so WIP is reported alongside, never inside, this comparison.
+    if (table_exists('inventory_ledger_mappings')) {
+        $mp = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND purpose IN ('inventory_asset','raw_material','finished_goods','scrap_inventory')");
+        $mp->execute(['cid' => $companyId]);
+        foreach ($mp->fetchAll(PDO::FETCH_COLUMN) as $lid) {
+            $ledgerIds[(int) $lid] = true;
+        }
+        $wipStmt = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND purpose = 'wip'");
+        $wipStmt->execute(['cid' => $companyId]);
+        foreach ($wipStmt->fetchAll(PDO::FETCH_COLUMN) as $lid) {
+            unset($ledgerIds[(int) $lid]);
+        }
+    }
+    if ($ledgerIds === []) {
+        return 0.0;
+    }
+    $ph = implode(',', array_fill(0, count($ledgerIds), '?'));
+    $q = db()->prepare("SELECT COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0)
+        FROM voucher_entries ve JOIN vouchers v ON v.id = ve.voucher_id
+        WHERE ve.ledger_id IN ($ph) AND v.status='posted' AND v.company_id = ?" . ($asAt !== null ? ' AND (v.voucher_date IS NULL OR v.voucher_date <= ?)' : ''));
+    $q->execute(array_merge(array_keys($ledgerIds), [$companyId], $asAt !== null ? [$asAt] : []));
+    return round((float) $q->fetchColumn(), 2);
+}
+
+/**
+ * Retro-post production journals for manufacturing consume/produce rows that
+ * never got one. Grouped by ref_no (the order number): Dr the finished item's
+ * stock ledger at the produce txn value (what the stock subledger carries),
+ * Cr each input's stock ledger at REPLAYED consume cost, and any conversion
+ * difference goes to the mapped overhead/gain/loss ledger as a memo'd costing
+ * variance — so the GL lands exactly where the stock subledger is. Anchored
+ * source inventory_movement/<produce txn id> for idempotency.
+ */
+function sr_post_missing_production_journals(int $companyId, int $userId): array
+{
+    $result = ['posted' => 0, 'posted_value' => 0.0, 'skipped' => []];
+    $stmt = db()->prepare("SELECT t.*, i.sku FROM inventory_transactions t
+        JOIN inventory_items i ON i.id = t.item_id
+        WHERE t.company_id = :cid AND t.voucher_id IS NULL AND t.transaction_type IN ('consume', 'produce')
+        ORDER BY t.transaction_date ASC, t.id ASC");
+    $stmt->execute(['cid' => $companyId]);
+    $groups = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
+        $groups[(string) ($t['ref_no'] ?? '') ?: ('txn-' . $t['id'])][] = $t;
+    }
+    foreach ($groups as $refNo => $rows) {
+        $produceRows = array_values(array_filter($rows, static fn (array $r): bool => $r['transaction_type'] === 'produce'));
+        if ($produceRows === []) {
+            // Orphan consumption (its produce side was posted separately or the
+            // order is still in progress): the materials HAVE left item stock,
+            // so credit the stock ledger at replayed cost and debit Work in
+            // Progress when mapped (value stays on the balance sheet until the
+            // order completes), else Inventory Loss.
+            foreach ($rows as $t) {
+                $cItem = null;
+                $cStmt = db()->prepare('SELECT * FROM inventory_items WHERE id = :id AND company_id = :cid');
+                $cStmt->execute(['id' => (int) $t['item_id'], 'cid' => $companyId]);
+                $cItem = $cStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                $cLedger = $cItem ? inv_item_stock_ledger_id($companyId, $cItem) : 0;
+                $drRow = inv_resolve_mapping($companyId, 'wip') ?: inv_resolve_mapping($companyId, 'inventory_loss');
+                if (!$cItem || $cLedger <= 0 || !$drRow) {
+                    $result['skipped'][] = ['ref' => $refNo, 'reason' => 'orphan consumption needs the item stock ledger and a WIP or Inventory Loss mapping'];
+                    continue;
+                }
+                $cCosts = sr_txn_costs($companyId, $cItem);
+                $cost = round((float) ($cCosts[(int) $t['id']]['value'] ?? 0), 2);
+                if ($cost <= 0.004) {
+                    continue;
+                }
+                try {
+                    $vid = (int) create_voucher_with_entries([
+                        'company_id' => $companyId,
+                        'fiscal_year_id' => (int) ($t['fiscal_year_id'] ?? 0) ?: null,
+                        'voucher_no' => 'MFG-RETRO-' . (int) $t['id'],
+                        'voucher_type' => 'journal',
+                        'voucher_date' => (string) $t['transaction_date'],
+                        'source_type' => 'inventory_movement',
+                        'source_id' => (int) $t['id'],
+                        'total_amount' => $cost,
+                        'narration' => 'Retro: materials consumed into production (' . ($t['sku'] ?? '') . ') at replayed cost — orphan consume row.',
+                        'status' => 'posted',
+                        'posted_by' => $userId,
+                    ], [
+                        ['ledger_id' => (int) $drRow['id'], 'entry_type' => 'debit', 'amount' => $cost, 'memo' => 'Materials into production (retro)'],
+                        ['ledger_id' => $cLedger, 'entry_type' => 'credit', 'amount' => $cost, 'memo' => 'Materials consumed at replayed cost (retro)'],
+                    ]);
+                    db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id')->execute(['vid' => $vid, 'id' => (int) $t['id']]);
+                    $result['posted']++;
+                    $result['posted_value'] += $cost;
+                } catch (Throwable $e) {
+                    $result['skipped'][] = ['ref' => $refNo, 'reason' => $e->getMessage()];
+                }
+            }
+            continue;
+        }
+        $itemCache = [];
+        $loadItem = static function (int $itemId) use (&$itemCache, $companyId): ?array {
+            if (!isset($itemCache[$itemId])) {
+                $s = db()->prepare('SELECT * FROM inventory_items WHERE id = :id AND company_id = :cid');
+                $s->execute(['id' => $itemId, 'cid' => $companyId]);
+                $itemCache[$itemId] = $s->fetch(PDO::FETCH_ASSOC) ?: null;
+            }
+            return $itemCache[$itemId];
+        };
+        $entries = [];
+        $fgTotal = 0.0;
+        $inputTotal = 0.0;
+        $bad = null;
+        foreach ($produceRows as $p) {
+            $fgItem = $loadItem((int) $p['item_id']);
+            $fgLedger = $fgItem ? inv_item_stock_ledger_id($companyId, $fgItem) : 0;
+            if ($fgLedger <= 0) {
+                $bad = 'finished item ' . ($fgItem['sku'] ?? '#' . $p['item_id']) . ' has no stock ledger — map it first';
+                break;
+            }
+            $value = round((float) $p['amount'] ?: ((float) $p['qty_in'] * (float) $p['rate']), 2);
+            $entries[] = ['ledger_id' => $fgLedger, 'entry_type' => 'debit', 'amount' => $value, 'memo' => 'Finished goods received (retro)'];
+            $fgTotal += $value;
+        }
+        foreach ($rows as $t) {
+            if ($t['transaction_type'] !== 'consume' || $bad !== null) {
+                continue;
+            }
+            $inItem = $loadItem((int) $t['item_id']);
+            $inLedger = $inItem ? inv_item_stock_ledger_id($companyId, $inItem) : 0;
+            if ($inLedger <= 0) {
+                $bad = 'input item ' . ($inItem['sku'] ?? '#' . $t['item_id']) . ' has no stock ledger — map it first';
+                break;
+            }
+            $costs = sr_txn_costs($companyId, $inItem);
+            $cost = round((float) ($costs[(int) $t['id']]['value'] ?? 0), 2);
+            if ($cost > 0.004) {
+                $entries[] = ['ledger_id' => $inLedger, 'entry_type' => 'credit', 'amount' => $cost, 'memo' => 'Materials consumed at replayed cost (retro)'];
+                $inputTotal += $cost;
+            }
+        }
+        if ($bad !== null) {
+            $result['skipped'][] = ['ref' => $refNo, 'reason' => $bad];
+            continue;
+        }
+        $variance = round($fgTotal - $inputTotal, 2);
+        if (abs($variance) > 0.004) {
+            $vLedger = inv_resolve_mapping($companyId, 'overhead_absorbed')
+                ?: inv_resolve_mapping($companyId, $variance > 0 ? 'inventory_gain' : 'inventory_loss');
+            if (!$vLedger) {
+                $result['skipped'][] = ['ref' => $refNo, 'reason' => 'conversion variance ' . number_format($variance, 2) . ' needs an Overhead Absorbed or Inventory Gain/Loss mapping'];
+                continue;
+            }
+            $entries[] = ['ledger_id' => (int) $vLedger['id'], 'entry_type' => $variance > 0 ? 'credit' : 'debit', 'amount' => abs($variance), 'memo' => 'Conversion cost / costing variance (retro production journal)'];
+        }
+        $anchorTxn = (int) $produceRows[0]['id'];
+        try {
+            $voucherId = (int) create_voucher_with_entries([
+                'company_id' => $companyId,
+                'fiscal_year_id' => (int) ($produceRows[0]['fiscal_year_id'] ?? 0) ?: null,
+                'voucher_no' => 'MFG-RETRO-' . $anchorTxn,
+                'voucher_type' => 'journal',
+                'voucher_date' => (string) $produceRows[0]['transaction_date'],
+                'source_type' => 'inventory_movement',
+                'source_id' => $anchorTxn,
+                'total_amount' => round($fgTotal, 2),
+                'narration' => 'Retro production journal ' . $refNo . ': finished goods at stock value, materials at replayed cost.',
+                'status' => 'posted',
+                'posted_by' => $userId,
+            ], $entries);
+            $ids = implode(',', array_map(static fn (array $r): int => (int) $r['id'], $rows));
+            db()->exec("UPDATE inventory_transactions SET voucher_id = $voucherId WHERE id IN ($ids)");
+            $result['posted']++;
+            $result['posted_value'] += $fgTotal;
+        } catch (Throwable $e) {
+            $result['skipped'][] = ['ref' => $refNo, 'reason' => $e->getMessage()];
+        }
+    }
+    $result['posted_value'] = inv_round_money($result['posted_value']);
+    return $result;
+}
+
+/**
+ * ONE action that makes the stock subledger and the inventory GL equal:
+ *   1. post missing opening-stock vouchers (item master openings),
+ *   2. post missing movement vouchers at replayed historical cost,
+ *   3. post retro production journals for orphan consume/produce groups,
+ *   4. optionally zero DIRECT ledger-opening vouchers on inventory ledgers
+ *      (they duplicate the item-level openings posted in step 1).
+ * Returns a step-by-step log plus before/after subledger-vs-GL totals.
+ */
+function sr_reconcile_stock_to_gl(int $companyId, int $userId, bool $zeroDirectOpenings = false): array
+{
+    // Whole-history comparison: total stock value vs total GL, no date cap —
+    // equality must hold over everything ever recorded.
+    $horizon = '2999-12-31';
+    $summaryBefore = sr_stock_summary($companyId, ['from' => $horizon, 'to' => $horizon]);
+    $log = ['before' => ['subledger' => (float) $summaryBefore['totals']['closing_amount'], 'gl' => sr_inventory_gl_total($companyId)]];
+
+    // 1. Opening-stock vouchers.
+    $openings = ['posted' => 0, 'value' => 0.0, 'notes' => []];
+    $items = db()->prepare('SELECT * FROM inventory_items WHERE company_id = :cid AND opening_qty > 0');
+    $items->execute(['cid' => $companyId]);
+    foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
+        $before = (int) db()->query('SELECT COALESCE((SELECT id FROM vouchers WHERE source_type=\'inventory_opening\' AND source_id=' . (int) $item['id'] . ' LIMIT 1),0)')->fetchColumn();
+        $res = inv_post_item_opening_voucher($companyId, $item, $userId);
+        if (($res['note'] ?? '') !== '') {
+            $openings['notes'][] = $item['sku'] . ': ' . $res['note'];
+        } elseif ((int) $res['voucher_id'] > 0 && (int) $res['voucher_id'] !== $before) {
+            $openings['posted']++;
+            $openings['value'] += (float) $item['opening_qty'] * (float) $item['purchase_rate'];
+        }
+    }
+    $log['openings'] = $openings;
+
+    // 2 + 3. Movements and production journals.
+    $log['movements'] = sr_post_missing_movement_vouchers($companyId, $userId);
+    $log['production'] = sr_post_missing_production_journals($companyId, $userId);
+
+    // 4. Duplicate direct openings (explicit opt-in — deletes OB-L vouchers on
+    //    inventory ledgers via the audited replace-with-zero path).
+    $log['direct_openings'] = ['zeroed' => 0, 'value' => 0.0, 'notes' => []];
+    if ($zeroDirectOpenings && function_exists('post_ledger_opening_balance')) {
+        $ledgerIds = [];
+        $itemLedgers = db()->prepare('SELECT DISTINCT ledger_id FROM inventory_items WHERE company_id = :cid AND ledger_id IS NOT NULL');
+        $itemLedgers->execute(['cid' => $companyId]);
+        foreach ($itemLedgers->fetchAll(PDO::FETCH_COLUMN) as $lid) {
+            $ledgerIds[(int) $lid] = true;
+        }
+        if (table_exists('inventory_ledger_mappings')) {
+            $mp = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND purpose IN ('inventory_asset','raw_material','wip','finished_goods','scrap_inventory')");
+            $mp->execute(['cid' => $companyId]);
+            foreach ($mp->fetchAll(PDO::FETCH_COLUMN) as $lid) {
+                $ledgerIds[(int) $lid] = true;
+            }
+        }
+        foreach (array_keys($ledgerIds) as $lid) {
+            $ob = db()->prepare("SELECT v.id, v.total_amount FROM vouchers v WHERE v.company_id = :cid AND v.source_type = 'ledger_opening' AND v.source_id = :lid LIMIT 1");
+            $ob->execute(['cid' => $companyId, 'lid' => $lid]);
+            $obRow = $ob->fetch(PDO::FETCH_ASSOC);
+            if (!$obRow) {
+                continue;
+            }
+            $err = post_ledger_opening_balance($companyId, (int) $lid, 0.0, 'debit', $userId);
+            if ($err === null) {
+                $log['direct_openings']['zeroed']++;
+                $log['direct_openings']['value'] += (float) $obRow['total_amount'];
+            } else {
+                $log['direct_openings']['notes'][] = 'ledger #' . $lid . ': ' . $err;
+            }
+        }
+    }
+
+    $summaryAfter = sr_stock_summary($companyId, ['from' => $horizon, 'to' => $horizon]);
+    $log['after'] = ['subledger' => (float) $summaryAfter['totals']['closing_amount'], 'gl' => sr_inventory_gl_total($companyId)];
+    $log['difference'] = round($log['after']['subledger'] - $log['after']['gl'], 2);
+    $log['reconciled'] = abs($log['difference']) < 0.01;
+    return $log;
+}
+
 /**
  * Stock Ledger drill-down: every movement of one item up to $to with running
  * quantity/value/rate from the same replay. Rows before $from are collapsed
