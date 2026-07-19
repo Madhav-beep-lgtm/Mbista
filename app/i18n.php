@@ -16,9 +16,12 @@ declare(strict_types=1);
 
 const APP_LANGS = ['en' => 'English', 'ne' => 'नेपाली', 'hi' => 'हिन्दी'];
 
-function app_lang(): string
+function app_lang(bool $refresh = false): string
 {
     static $lang = null;
+    if ($refresh) {
+        $lang = null; // re-read session/cookie (tests, mid-request switches)
+    }
     if ($lang !== null) {
         return $lang;
     }

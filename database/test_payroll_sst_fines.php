@@ -154,9 +154,11 @@ ok($hasFineDr && $hasTaxCr, 'Dr Government Fines & Interest / Cr the tax payable
 
 echo "\ni18n\n";
 $_SESSION['app_lang'] = 'ne';
+app_lang(true);
 ok(t('Dashboard') === 'ड्यासबोर्ड', "t('Dashboard') in Nepali");
 ok(t('A totally unknown sentence') === 'A totally unknown sentence', 'Unknown key falls back to English');
 $_SESSION['app_lang'] = 'en';
+app_lang(true);
 
 sf_cleanup();
 db()->exec("DELETE FROM users WHERE email='ssttest2@test.local'");
