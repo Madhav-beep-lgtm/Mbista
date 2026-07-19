@@ -235,6 +235,17 @@ $ledgerSrc = (string) file_get_contents(__DIR__ . '/../public_html/admin/stock-l
 ok(str_contains($ledgerSrc, "require_permission('inventory', 'view')"), 'Ledger page gated by inventory.view');
 ok(str_contains($ledgerSrc, 'Back to Stock Summary'), 'Drill-down returns to the report with filters kept');
 
+echo "\nReports Center agreement\n";
+require_once __DIR__ . '/../app/reports_engine.php';
+$rcReport = rc_generate('inventory-summary', $cid, '2026-08-01', '2027-07-16', ['currency' => 'Rs.']);
+$rcTotal = 0.0;
+foreach ($rcReport['rows'] as $rcRow) { $rcTotal += (float) str_replace(',', '', (string) end($rcRow)); }
+ok(near($rcTotal, $rep['totals']['closing_amount']),
+    'Reports Center Inventory Summary total equals the Stock Summary page total (same replay engine)');
+$rcSrc = (string) file_get_contents(__DIR__ . '/../app/reports_engine.php');
+ok(str_contains($rcSrc, 'sr_stock_summary($scopeCompanyId'),
+    'inventory-summary case is wired to sr_stock_summary, not qty x purchase_rate');
+
 echo "\nTenant isolation\n";
 $otherRep = sr_stock_summary(999999, $baseFilters);
 ok($otherRep['rows'] === [], 'Another company id sees none of these items');

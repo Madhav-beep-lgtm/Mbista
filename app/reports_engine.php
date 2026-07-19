@@ -1166,39 +1166,30 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             if (!table_exists('inventory_items')) {
                 return ['subtitle' => 'Inventory module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
             }
-            $stmt = db()->prepare("
-                SELECT i.sku, i.name, i.unit, i.item_type, i.opening_qty, i.purchase_rate,
-                       COALESCE(SUM(CASE WHEN t.transaction_date BETWEEN :f1 AND :t1 AND COALESCE(t.transaction_type, '') NOT LIKE '%adjust%' THEN t.qty_in ELSE 0 END), 0) AS qty_in,
-                       COALESCE(SUM(CASE WHEN t.transaction_date BETWEEN :f2 AND :t2 AND COALESCE(t.transaction_type, '') NOT LIKE '%adjust%' THEN t.qty_out ELSE 0 END), 0) AS qty_out,
-                       COALESCE(SUM(CASE WHEN t.transaction_date BETWEEN :f3 AND :t3 AND COALESCE(t.transaction_type, '') LIKE '%adjust%' THEN t.qty_in - t.qty_out ELSE 0 END), 0) AS qty_adjust,
-                       COALESCE(SUM(CASE WHEN t.transaction_date <= :t4 THEN t.qty_in - t.qty_out ELSE 0 END), 0) AS net_to_date
-                FROM inventory_items i
-                LEFT JOIN inventory_transactions t ON t.item_id = i.id
-                WHERE i.company_id = :company_id
-                GROUP BY i.id
-                ORDER BY i.sku ASC
-            ");
-            $stmt->execute(['f1' => $from, 't1' => $to, 'f2' => $from, 't2' => $to, 'f3' => $from, 't3' => $to, 't4' => $to, 'company_id' => $scopeCompanyId]);
+            // Same replay engine as the Stock Summary Report page, so the two
+            // always agree to the paisa. Closing value is the item's ACTUAL
+            // cost-flow valuation (FIFO / weighted average history), never
+            // closing qty x today's purchase rate — old posted movements keep
+            // their historical cost.
+            require_once __DIR__ . '/stock_report_engine.php';
+            $summary = sr_stock_summary($scopeCompanyId, ['from' => $from, 'to' => $to]);
             $rows = [];
-            $totals = ['opening' => 0.0, 'in' => 0.0, 'out' => 0.0, 'adjust' => 0.0, 'closing' => 0.0, 'value' => 0.0];
-            foreach ($stmt->fetchAll() as $item) {
-                $closing = (float) $item['opening_qty'] + (float) $item['net_to_date'];
-                $rate = (float) $item['purchase_rate'];
-                $value = $closing * $rate;
+            $totals = ['opening' => 0.0, 'in' => 0.0, 'out' => 0.0, 'damage' => 0.0, 'closing' => 0.0, 'value' => 0.0];
+            foreach ($summary['rows'] as $item) {
                 $rows[] = [
-                    (string) $item['sku'], (string) $item['name'],
-                    ucfirst(str_replace('_', ' ', (string) $item['item_type'])), (string) $item['unit'],
-                    number_format((float) $item['opening_qty'], 0), number_format((float) $item['qty_in'], 0),
-                    number_format((float) $item['qty_out'], 0),
-                    (float) $item['qty_adjust'] == 0.0 ? '–' : '(' . number_format(abs((float) $item['qty_adjust']), 0) . ')',
-                    number_format($closing, 0), rc_fmt($rate), rc_fmt($value),
+                    $item['sku'], $item['name'],
+                    $item['item_type_label'], $item['unit'],
+                    number_format($item['opening_qty'], 0), number_format($item['in_qty'], 0),
+                    number_format($item['out_qty'], 0),
+                    $item['damage_qty'] == 0.0 ? '–' : '(' . number_format($item['damage_qty'], 0) . ')',
+                    number_format($item['closing_qty'], 0), rc_fmt($item['closing_rate']), rc_fmt($item['closing_amount']),
                 ];
-                $totals['opening'] += (float) $item['opening_qty'];
-                $totals['in'] += (float) $item['qty_in'];
-                $totals['out'] += (float) $item['qty_out'];
-                $totals['adjust'] += (float) $item['qty_adjust'];
-                $totals['closing'] += $closing;
-                $totals['value'] += $value;
+                $totals['opening'] += $item['opening_qty'];
+                $totals['in'] += $item['in_qty'];
+                $totals['out'] += $item['out_qty'];
+                $totals['damage'] += $item['damage_qty'];
+                $totals['closing'] += $item['closing_qty'];
+                $totals['value'] += $item['closing_amount'];
             }
             return [
                 'number' => '7',
@@ -1207,11 +1198,11 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 'subtitle' => 'Stock summary by item as at ' . date('d M Y', strtotime($to)) . '.',
                 'columns' => [
                     ['Item Code', 'left', ''], ['Item Name', 'left', ''], ['Category', 'left', ''], ['Unit', 'left', ''],
-                    ['Opening Qty', 'right', ''], ['In Qty', 'right', ''], ['Out Qty', 'right', ''], ['Adjust Qty', 'right', ''],
+                    ['Opening Qty', 'right', ''], ['In Qty', 'right', ''], ['Out Qty', 'right', ''], ['Damage Qty', 'right', ''],
                     ['Closing Qty', 'right', ''], ['Rate (' . $sym . ')', 'right', ''], ['Value (' . $sym . ')', 'right', ''],
                 ],
                 'rows' => $rows,
-                'totals' => ['', 'Total', '', '', number_format($totals['opening'], 0), number_format($totals['in'], 0), number_format($totals['out'], 0), $totals['adjust'] == 0.0 ? '–' : '(' . number_format(abs($totals['adjust']), 0) . ')', number_format($totals['closing'], 0), '', rc_fmt($totals['value'])],
+                'totals' => ['', 'Total', '', '', number_format($totals['opening'], 0), number_format($totals['in'], 0), number_format($totals['out'], 0), $totals['damage'] == 0.0 ? '–' : '(' . number_format(abs($totals['damage']), 0) . ')', number_format($totals['closing'], 0), '', rc_fmt($totals['value'])],
             ];
         }
 
