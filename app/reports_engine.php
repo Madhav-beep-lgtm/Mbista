@@ -1665,11 +1665,14 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             if (!table_exists('inventory_items') || !function_exists('inv_company_valuation')) {
                 return ['subtitle' => 'Inventory module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
             }
-            // Subledger: perpetual cost-layer value of all items.
-            $items = db()->prepare('SELECT *, opening_qty AS on_hand FROM inventory_items WHERE company_id = :cid');
+            // Subledger: the SAME historical replay the Stock Summary uses,
+            // valued as at $to (not today's layer state).
+            require_once __DIR__ . '/stock_report_engine.php';
+            $srAsAt = sr_stock_summary($scopeCompanyId, ['from' => $to, 'to' => $to]);
+            $subledger = (float) $srAsAt['totals']['closing_amount'];
+            $items = db()->prepare('SELECT * FROM inventory_items WHERE company_id = :cid');
             $items->execute(['cid' => $scopeCompanyId]);
             $itemRows = $items->fetchAll(PDO::FETCH_ASSOC);
-            $subledger = inv_company_valuation($scopeCompanyId, $itemRows)['cost'];
             // GL: closing balance of every ledger designated as inventory (item
             // links + global inventory mappings) from posted vouchers up to $to.
             $ledgerIds = [];
@@ -1700,9 +1703,24 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 }
             }
             $diff = round($subledger - $glTotal, 2);
-            $rows[] = ['', 'Perpetual stock subledger (cost layers)', 'Subledger', rc_fmt($subledger)];
+            $rows[] = ['', 'Stock subledger at replayed cost (as at date)', 'Subledger', rc_fmt($subledger)];
             $rows[] = ['', 'General-ledger inventory balance', 'GL', rc_fmt($glTotal)];
             $rows[] = ['', 'DIFFERENCE (subledger − GL)', abs($diff) < 0.005 ? 'Reconciled' : 'Investigate', rc_fmt($diff)];
+            // EXPLAIN the difference: what has value in stock but no voucher in
+            // the GL, and where the one-click fixes live.
+            if (abs($diff) >= 0.005) {
+                $gap = sr_unposted_summary($scopeCompanyId);
+                if ($gap['openings'] > 0) {
+                    $rows[] = ['', $gap['openings'] . ' item(s) with master opening stock but NO opening voucher — post them from Opening Balances → "Post missing opening-stock vouchers"', 'Cause', rc_fmt($gap['openings_value'])];
+                }
+                if ($gap['movements'] > 0) {
+                    $rows[] = ['', $gap['movements'] . ' stock movement(s) recorded without a GL voucher — post them from Stock Summary → "Post missing movement vouchers"', 'Cause', rc_fmt($gap['movements_value'])];
+                }
+                if ($gap['manufacturing'] > 0) {
+                    $rows[] = ['', $gap['manufacturing'] . ' manufacturing consume/produce row(s) whose production journal never posted — complete/re-post the order in Inventory & Manufacturing', 'Cause', '–'];
+                }
+                $rows[] = ['', 'Any remainder is usually a DIRECT opening/journal typed straight on an inventory GL ledger (not item-backed) — compare and adjust it from Opening Balances', 'Note', '–'];
+            }
             return [
                 'title' => 'Inventory-to-GL Reconciliation', 'as_at' => true,
                 'subtitle' => 'Perpetual cost-layer subledger vs general-ledger inventory as at ' . date('d M Y', strtotime($to)) . '. Any difference is shown, never hidden.',

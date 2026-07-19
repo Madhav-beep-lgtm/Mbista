@@ -30,8 +30,13 @@ function ss_cleanup(): void
         db()->exec("DELETE FROM inventory_item_location_types WHERE company_id=$s");
         db()->exec("DELETE FROM inventory_cost_layers WHERE company_id=$s");
         db()->exec("DELETE FROM inventory_transactions WHERE company_id=$s");
+        db()->exec("DELETE FROM inventory_ledger_mappings WHERE company_id=$s");
         db()->exec("DELETE FROM inventory_items WHERE company_id=$s");
         db()->exec("DELETE FROM warehouses WHERE company_id=$s");
+        db()->exec("DELETE ve FROM voucher_entries ve JOIN vouchers v ON v.id=ve.voucher_id WHERE v.company_id=$s");
+        db()->exec("DELETE FROM vouchers WHERE company_id=$s");
+        db()->exec("DELETE FROM ledgers WHERE company_id=$s");
+        db()->exec("DELETE FROM ledger_groups WHERE company_id=$s");
         db()->exec("DELETE FROM fiscal_years WHERE company_id=$s");
         db()->exec("DELETE FROM companies WHERE id=$s");
     }
@@ -245,6 +250,42 @@ ok(near($rcTotal, $rep['totals']['closing_amount']),
 $rcSrc = (string) file_get_contents(__DIR__ . '/../app/reports_engine.php');
 ok(str_contains($rcSrc, 'sr_stock_summary($scopeCompanyId'),
     'inventory-summary case is wired to sr_stock_summary, not qty x purchase_rate');
+
+echo "\nGL backfill: subledger ties to the general ledger\n";
+// Map GL ledgers, then retro-post the vouchers for STK-FIFO's unposted
+// movements and prove GL inventory balance == the report's closing amount.
+$mkG = static function (string $m, string $c, string $n) use ($cid): int { db()->prepare('INSERT INTO ledger_groups (company_id,master_key,code,name) VALUES (?,?,?,?)')->execute([$cid,$m,$c,$n]); return (int) db()->lastInsertId(); };
+$mkL = static function (int $g, string $c, string $n, string $t) use ($cid): int { db()->prepare("INSERT INTO ledgers (company_id,group_id,code,name,type,status) VALUES (?,?,?,?,?, 'active')")->execute([$cid,$g,$c,$n,$t]); return (int) db()->lastInsertId(); };
+$gA2 = $mkG('current_asset', 'STK-A', 'Inventories'); $gL2 = $mkG('current_liability', 'STK-L', 'Clearing'); $gX2 = $mkG('direct_expense', 'STK-X', 'COGS');
+$lINV = $mkL($gA2, 'STK-INV', 'Inventory Control', 'asset');
+$lCLR = $mkL($gL2, 'STK-CLR', 'Purchase Clearing', 'liability');
+$lCOGS = $mkL($gX2, 'STK-COGS', 'Cost of Goods Sold', 'expense');
+$lLOSS = $mkL($gX2, 'STK-LOSS', 'Inventory Loss', 'expense');
+$lGAIN = $mkL($gX2, 'STK-GAIN', 'Inventory Gain', 'revenue');
+$mapIns = db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, category, item_id, purpose, ledger_id) VALUES (?, 'global', NULL, NULL, ?, ?)");
+foreach (['inventory_asset' => $lINV, 'purchase_clearing' => $lCLR, 'cogs' => $lCOGS, 'inventory_loss' => $lLOSS, 'inventory_gain' => $lGAIN] as $purpose => $lid) { $mapIns->execute([$cid, $purpose, $lid]); }
+
+$gapBefore = sr_unposted_summary($cid);
+ok($gapBefore['movements'] > 0, 'Unposted-summary sees planned movements without vouchers (' . $gapBefore['movements'] . ')');
+$bf = sr_post_missing_movement_vouchers($cid, (int) db()->query("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1")->fetchColumn());
+ok($bf['posted'] > 0 && $bf['skipped'] === [], 'Backfill posts every planned movement (' . $bf['posted'] . ' vouchers), none skipped');
+$fifoItemRow = db()->query("SELECT * FROM inventory_items WHERE id=$itFifo")->fetch(PDO::FETCH_ASSOC);
+$saleTxnCost = sr_txn_costs($cid, $fifoItemRow);
+$saleVoucherAmt = (float) db()->query("SELECT v.total_amount FROM vouchers v JOIN inventory_transactions t ON t.voucher_id=v.id
+    WHERE t.item_id=$itFifo AND t.transaction_type='sale' LIMIT 1")->fetchColumn();
+ok(near($saleVoucherAmt, 1280), 'Retro-posted sale voucher carries the replayed COST 1,280 (never the 500 selling rate)');
+$bf2 = sr_post_missing_movement_vouchers($cid, 1);
+ok($bf2['posted'] === 0, 'Second backfill run posts nothing (idempotent via the source unique key)');
+ok($bf['manufacturing'] > 0, 'Manufacturing consume/produce rows are skipped for the production journal, not force-posted');
+// GL tie-out for STK-FIFO alone: its movements all touch $lINV.
+$glFifo = (float) db()->query("SELECT COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0)
+    FROM voucher_entries ve JOIN vouchers v ON v.id=ve.voucher_id
+    JOIN inventory_transactions t ON t.voucher_id=v.id AND t.item_id=$itFifo
+    WHERE ve.ledger_id=$lINV AND v.status='posted'")->fetchColumn();
+$repAfter = sr_stock_summary($cid, $baseFilters);
+$fifoAfter = $find($repAfter['rows'], 'STK-FIFO');
+ok(near($glFifo, (float) $fifoAfter['closing_amount']),
+    'GL inventory ledger for STK-FIFO equals its stock closing value — subledger ties to trial balance (' . number_format($glFifo, 2) . ' == ' . number_format((float) $fifoAfter['closing_amount'], 2) . ')');
 
 echo "\nTenant isolation\n";
 $otherRep = sr_stock_summary(999999, $baseFilters);

@@ -404,6 +404,163 @@ function sr_snapshot(array $state, bool $warehouseFilterOn, float $scopedQty, fl
 }
 
 /**
+ * Per-transaction historical values for one item from a single replay:
+ * [txn_id => ['type', 'direction', 'value', 'date']] where inward value is
+ * qty x entry rate and outward value is the replayed cost-flow COST at that
+ * point in the sequence — exactly what a retro-posted voucher must carry.
+ */
+function sr_txn_costs(int $companyId, array $item): array
+{
+    $stmt = db()->prepare('SELECT id, transaction_type, transaction_date, qty_in, qty_out, rate
+        FROM inventory_transactions WHERE company_id = :cid AND item_id = :iid
+        ORDER BY transaction_date ASC, id ASC');
+    $stmt->execute(['cid' => $companyId, 'iid' => (int) $item['id']]);
+    $state = sr_replay_new((string) ($item['valuation_method'] ?? 'weighted_average'));
+    if ((float) ($item['opening_qty'] ?? 0) > INV_EPSILON) {
+        sr_replay_in($state, (float) $item['opening_qty'], (float) ($item['purchase_rate'] ?? 0));
+    }
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
+        $type = (string) $t['transaction_type'];
+        if (in_array($type, SR_LOCATION_TYPES, true)) {
+            continue;
+        }
+        $qtyIn = (float) $t['qty_in'];
+        $qtyOut = (float) $t['qty_out'];
+        if ($qtyIn > INV_EPSILON) {
+            sr_replay_in($state, $qtyIn, (float) $t['rate']);
+            $out[(int) $t['id']] = ['type' => $type, 'direction' => 'in', 'value' => inv_round_money($qtyIn * (float) $t['rate']), 'date' => (string) $t['transaction_date']];
+        } elseif ($qtyOut > INV_EPSILON) {
+            $cost = sr_replay_out($state, $qtyOut);
+            $out[(int) $t['id']] = ['type' => $type, 'direction' => 'out', 'value' => $cost, 'date' => (string) $t['transaction_date']];
+        }
+    }
+    return $out;
+}
+
+/**
+ * What is missing between the stock subledger and the GL, so the
+ * reconciliation report can EXPLAIN its difference instead of just showing it:
+ * unposted movements that have a posting plan (with their replayed values),
+ * manufacturing rows whose order never posted, and items whose master opening
+ * stock has no INV-OPEN voucher yet.
+ */
+function sr_unposted_summary(int $companyId): array
+{
+    $result = ['movements' => 0, 'movements_value' => 0.0, 'manufacturing' => 0, 'openings' => 0, 'openings_value' => 0.0];
+    $stmt = db()->prepare('SELECT t.id, t.item_id, t.transaction_type, t.qty_in, t.qty_out
+        FROM inventory_transactions t WHERE t.company_id = :cid AND t.voucher_id IS NULL');
+    $stmt->execute(['cid' => $companyId]);
+    $byItem = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
+        $type = (string) $t['transaction_type'];
+        if (in_array($type, SR_LOCATION_TYPES, true) || $type === 'opening') {
+            continue;
+        }
+        $direction = (float) $t['qty_in'] > 0 ? 'in' : 'out';
+        if (inv_movement_posting_plan($type, $direction) === null) {
+            if (in_array($type, ['consume', 'produce'], true)) {
+                $result['manufacturing']++;
+            }
+            continue;
+        }
+        $byItem[(int) $t['item_id']][] = (int) $t['id'];
+    }
+    if ($byItem !== []) {
+        $ph = implode(',', array_fill(0, count($byItem), '?'));
+        $items = db()->prepare("SELECT * FROM inventory_items WHERE company_id = ? AND id IN ($ph)");
+        $items->execute(array_merge([$companyId], array_keys($byItem)));
+        foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
+            $costs = sr_txn_costs($companyId, $item);
+            foreach ($byItem[(int) $item['id']] as $txnId) {
+                if (isset($costs[$txnId])) {
+                    $result['movements']++;
+                    $result['movements_value'] += $costs[$txnId]['value'];
+                }
+            }
+        }
+    }
+    $open = db()->prepare("SELECT COUNT(*), COALESCE(SUM(opening_qty * purchase_rate), 0) FROM inventory_items i
+        WHERE i.company_id = :cid AND i.opening_qty > 0
+          AND NOT EXISTS (SELECT 1 FROM vouchers v WHERE v.source_type = 'inventory_opening' AND v.source_id = i.id AND v.company_id = i.company_id)");
+    $open->execute(['cid' => $companyId]);
+    [$result['openings'], $result['openings_value']] = array_map('floatval', $open->fetch(PDO::FETCH_NUM) ?: [0, 0]);
+    $result['openings'] = (int) $result['openings'];
+    $result['movements_value'] = inv_round_money($result['movements_value']);
+    $result['openings_value'] = inv_round_money($result['openings_value']);
+    return $result;
+}
+
+/**
+ * Retro-post the GL vouchers for stock movements recorded WITHOUT one
+ * (mappings were missing at entry time, or legacy/seeded data). Each voucher
+ * follows the normal posting matrix on the movement's own date, with outward
+ * legs valued at the REPLAYED historical cost — never today's rate. Idempotent
+ * (uniq inventory_movement/txn); rows that still cannot post (unmapped
+ * ledgers, no fiscal year covers the date, locked period) are skipped WITH
+ * the reason. Manufacturing consume/produce rows belong to their order's
+ * production journal and are never posted here.
+ * Returns ['posted'=>int, 'posted_value'=>float, 'skipped'=>[[txn,sku,reason]], 'manufacturing'=>int].
+ */
+function sr_post_missing_movement_vouchers(int $companyId, int $userId): array
+{
+    $result = ['posted' => 0, 'posted_value' => 0.0, 'skipped' => [], 'manufacturing' => 0];
+    $stmt = db()->prepare('SELECT t.*, i.sku FROM inventory_transactions t
+        JOIN inventory_items i ON i.id = t.item_id
+        WHERE t.company_id = :cid AND t.voucher_id IS NULL
+        ORDER BY t.item_id, t.transaction_date ASC, t.id ASC');
+    $stmt->execute(['cid' => $companyId]);
+    $txns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $itemCache = [];
+    $costCache = [];
+    foreach ($txns as $t) {
+        $type = (string) $t['transaction_type'];
+        if (in_array($type, SR_LOCATION_TYPES, true) || $type === 'opening') {
+            continue;
+        }
+        if (in_array($type, ['consume', 'produce'], true)) {
+            $result['manufacturing']++;
+            continue;
+        }
+        $direction = (float) $t['qty_in'] > 0 ? 'in' : 'out';
+        if (inv_movement_posting_plan($type, $direction) === null) {
+            continue;
+        }
+        $itemId = (int) $t['item_id'];
+        if (!isset($itemCache[$itemId])) {
+            $itemStmt = db()->prepare('SELECT * FROM inventory_items WHERE id = :id AND company_id = :cid');
+            $itemStmt->execute(['id' => $itemId, 'cid' => $companyId]);
+            $itemCache[$itemId] = $itemStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            $costCache[$itemId] = $itemCache[$itemId] ? sr_txn_costs($companyId, $itemCache[$itemId]) : [];
+        }
+        $item = $itemCache[$itemId];
+        $txnId = (int) $t['id'];
+        $value = (float) ($costCache[$itemId][$txnId]['value'] ?? 0);
+        if (!$item || $value <= 0.004) {
+            continue; // zero-value rows have no GL impact
+        }
+        try {
+            $voucherId = inv_post_movement_voucher($companyId, (int) ($t['fiscal_year_id'] ?? 0) ?: null, $txnId, $type, $item, $direction, $value, (string) $t['transaction_date'], $userId);
+            if ($voucherId > 0) {
+                db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
+                    ->execute(['vid' => $voucherId, 'id' => $txnId, 'cid' => $companyId]);
+                $result['posted']++;
+                $result['posted_value'] += $value;
+            }
+        } catch (RuntimeException $mapEx) {
+            $reason = str_starts_with($mapEx->getMessage(), 'MAP_MISSING:')
+                ? 'map ' . substr($mapEx->getMessage(), 12) . ' first'
+                : $mapEx->getMessage();
+            $result['skipped'][] = ['txn' => $txnId, 'sku' => (string) $t['sku'], 'reason' => $reason];
+        } catch (Throwable $e) {
+            $result['skipped'][] = ['txn' => $txnId, 'sku' => (string) $t['sku'], 'reason' => $e->getMessage()];
+        }
+    }
+    $result['posted_value'] = inv_round_money($result['posted_value']);
+    return $result;
+}
+
+/**
  * Stock Ledger drill-down: every movement of one item up to $to with running
  * quantity/value/rate from the same replay. Rows before $from are collapsed
  * into the opening line.

@@ -26,6 +26,25 @@ $fyEnd = (string) $fiscalYear['end_date'];
 // ---------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
+    if (($_POST['action'] ?? '') === 'backfill_movement_vouchers') {
+        // Retro-post GL vouchers for stock movements recorded without one, at
+        // replayed historical cost — the missing link that makes the stock
+        // subledger tie to the inventory control ledgers and trial balance.
+        require_permission('accounting', 'post');
+        $bf = sr_post_missing_movement_vouchers($companyId, $userId);
+        $msg = $bf['posted'] . ' movement voucher(s) posted (' . $sym . number_format($bf['posted_value'], 2) . ').';
+        if ($bf['manufacturing'] > 0) {
+            $msg .= ' ' . $bf['manufacturing'] . ' manufacturing row(s) skipped — re-post their order from Inventory & Manufacturing.';
+        }
+        if ($bf['skipped'] !== []) {
+            $skTxt = array_map(static fn (array $s): string => $s['sku'] . '#' . $s['txn'] . ' (' . $s['reason'] . ')', array_slice($bf['skipped'], 0, 5));
+            $msg .= ' Skipped: ' . implode('; ', $skTxt) . (count($bf['skipped']) > 5 ? ' +' . (count($bf['skipped']) - 5) . ' more' : '') . '.';
+        }
+        log_activity('inventory_item', $companyId, 'movement_backfill', $msg, $userId);
+        security_event('inventory_movement_posted', 'success', 'Movement voucher backfill: ' . $bf['posted'] . ' posted.', $companyId, $userId);
+        flash($bf['skipped'] === [] ? 'success' : 'error', $msg);
+        redirect('admin/stock-summary-report.php?' . http_build_query(array_diff_key($_GET, ['lang' => ''])));
+    }
     if (($_POST['action'] ?? '') === 'set_location_type') {
         require_permission('inventory', 'edit');
         $mapItemId = (int) ($_POST['map_item_id'] ?? 0);
@@ -273,6 +292,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <a class="button secondary" href="?<?= e($qs) ?>&amp;export=csv"><?= icon('reports') ?>CSV</a>
             <a class="button secondary" href="?<?= e($qs) ?>&amp;export=excel"><?= icon('reports') ?>Excel</a>
             <a class="button secondary" target="_blank" href="?<?= e($qs) ?>&amp;export=print"><?= icon('reports') ?>Print / PDF</a>
+        <?php endif; ?>
+        <?php if (user_can_do('accounting', 'post')): $glGap = sr_unposted_summary($companyId); ?>
+            <?php if ($glGap['movements'] > 0 || $glGap['openings'] > 0): ?>
+                <form method="post" style="display:inline" data-confirm="Post the missing GL vouchers for <?= (int) $glGap['movements'] ?> stock movement(s) worth <?= e(number_format($glGap['movements_value'], 2)) ?>? Each posts on its own historical date at replayed inventory cost — this is what ties the stock report to the trial balance.">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="backfill_movement_vouchers">
+                    <button type="submit" class="button secondary" <?= $glGap['movements'] === 0 ? 'disabled title="No unposted movements with a GL plan"' : '' ?>><?= icon('badge-check') ?>Post missing movement vouchers (<?= (int) $glGap['movements'] ?>)</button>
+                </form>
+                <?php if ($glGap['openings'] > 0): ?>
+                    <a class="button secondary" href="<?= e(url('admin/opening-balances.php')) ?>" title="<?= (int) $glGap['openings'] ?> item(s) have opening stock with no GL voucher — post them there"><?= icon('reconcile') ?>Opening stock unposted: <?= (int) $glGap['openings'] ?> item(s)</a>
+                <?php endif; ?>
+            <?php endif; ?>
         <?php endif; ?>
         <details class="pr-adjust" style="margin-left:auto">
             <summary class="button secondary">Columns…</summary>
