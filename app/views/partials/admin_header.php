@@ -49,6 +49,7 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
     // These shared accounting links are identical for admin, staff and client books.
     ['Inventory & Manufacturing', 'admin/accounting-inventory.php', 'box', $headerScript === 'accounting-inventory.php'],
+    ['Stock Summary', 'admin/stock-summary-report.php', 'reports', in_array($headerScript, ['stock-summary-report.php', 'stock-ledger.php'], true)],
     // Models / revaluation / categories live on the Fixed Assets page's own
     // tab bar — the sidebar keeps only the two entry points.
     ['Fixed Asset Register', 'admin/fixed-assets.php', 'tag',

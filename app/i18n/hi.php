@@ -243,4 +243,19 @@ return [
     'Whole year' => 'पूरा वर्ष',
     'Employees: all' => 'कर्मचारी: सभी',
     'English' => 'English',
+
+    // ---- Stock summary report ----
+    'Stock Summary' => 'स्टॉक सारांश',
+    'Stock Summary Report' => 'स्टॉक सारांश रिपोर्ट',
+    'Stock Ledger' => 'स्टॉक खाता',
+    'View Stock Ledger' => 'स्टॉक खाता देखें',
+    'Apply Filters' => 'फ़िल्टर लागू करें',
+    'Reset' => 'रीसेट',
+    'Item Code' => 'वस्तु कोड',
+    'Item Name' => 'वस्तु का नाम',
+    'Location' => 'स्थान',
+    'Damage / Write-off' => 'क्षति / बट्टे खाते',
+    'Purchase / Inward' => 'खरीद / आवक',
+    'Sold / Consumed / Outward' => 'बिक्री / खपत / जावक',
+    'Basic Item Information' => 'वस्तु की मूल जानकारी',
 ];

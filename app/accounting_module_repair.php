@@ -714,6 +714,26 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Stock summary: location-specific item types (migration 058)', static function (): void {
+        if (!accounting_repair_table_exists('inventory_item_location_types') && accounting_repair_table_exists('inventory_items')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `inventory_item_location_types` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `item_id` INT UNSIGNED NOT NULL,
+                `warehouse_id` INT UNSIGNED NOT NULL,
+                `item_type` VARCHAR(30) NOT NULL,
+                `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_item_location_type` (`item_id`, `warehouse_id`),
+                KEY `idx_item_location_types_company` (`company_id`),
+                KEY `idx_item_location_types_warehouse` (`warehouse_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+    });
+
     $run('Payroll SST split + single-staff run scope (migration 057)', static function (): void {
         if (accounting_repair_table_exists('payroll_run_lines')) {
             accounting_repair_add_column('payroll_run_lines', 'sst_month', "`sst_month` DECIMAL(14,2) NOT NULL DEFAULT 0 AFTER `tax_month`");
