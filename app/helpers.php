@@ -3000,6 +3000,7 @@ function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []
         'task_advance' => 'the Advances workflow (deleting it would strand the client advance and leave any applied amount pointing at nothing)',
         'advance_applied' => 'the Advances workflow (the invoice would keep showing an advance payment with no backing voucher)',
         'inventory_opening' => 'the Inventory module (the item\'s master opening stock backs it — change the opening on the item instead)',
+        'inventory_opening_adj' => 'the Inventory opening (adjust the item\'s opening on the Opening Balances page instead)',
         'manufacturing_order_start' => 'the Manufacturing module (it carries the order\'s materials into WIP — complete or cancel the order instead)',
         'payroll_run' => 'the Payroll module (the run would keep claiming its accrual is posted — reopen the run for correction instead)',
         'payroll_payment' => 'the Payroll module (the run would keep showing paid with no cash in the books — reopen the run for correction instead)',

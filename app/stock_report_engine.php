@@ -168,7 +168,7 @@ function sr_stock_summary(int $companyId, array $f): array
     $includeZeroMovement = (bool) ($f['zero_movement'] ?? true);
     $includeZeroClosing = (bool) ($f['zero_closing'] ?? true);
 
-    $itemSql = "SELECT id, sku, name, item_type, valuation_method, unit, purchase_rate, opening_qty, default_warehouse_id
+    $itemSql = "SELECT id, sku, name, item_type, valuation_method, unit, purchase_rate, opening_qty, opening_amount, default_warehouse_id
         FROM inventory_items WHERE company_id = :cid AND item_type <> 'service'";
     $params = ['cid' => $companyId];
     if ($search !== '') {
@@ -216,7 +216,7 @@ function sr_stock_summary(int $companyId, array $f): array
         $masterOpeningQty = (float) $item['opening_qty'];
         $masterInScope = !$warehouseFilterOn || in_array((int) ($item['default_warehouse_id'] ?? 0), $warehouseIds, true);
         if ($masterOpeningQty > INV_EPSILON) {
-            sr_replay_in($state, $masterOpeningQty, (float) $item['purchase_rate']);
+            sr_replay_in($state, $masterOpeningQty, inv_item_opening_unit_cost($item));
         }
 
         $scopedQty = $masterInScope ? $masterOpeningQty : 0.0; // qty in the warehouse lens
@@ -438,7 +438,7 @@ function sr_txn_costs(int $companyId, array $item): array
     $stmt->execute(['cid' => $companyId, 'iid' => (int) $item['id']]);
     $state = sr_replay_new((string) ($item['valuation_method'] ?? 'weighted_average'));
     if ((float) ($item['opening_qty'] ?? 0) > INV_EPSILON) {
-        sr_replay_in($state, (float) $item['opening_qty'], (float) ($item['purchase_rate'] ?? 0));
+        sr_replay_in($state, (float) $item['opening_qty'], inv_item_opening_unit_cost($item));
     }
     $out = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
@@ -501,7 +501,7 @@ function sr_unposted_summary(int $companyId): array
             }
         }
     }
-    $open = db()->prepare("SELECT COUNT(*), COALESCE(SUM(opening_qty * purchase_rate), 0) FROM inventory_items i
+    $open = db()->prepare("SELECT COUNT(*), COALESCE(SUM(CASE WHEN opening_amount > 0 THEN opening_amount ELSE opening_qty * purchase_rate END), 0) FROM inventory_items i
         WHERE i.company_id = :cid AND i.opening_qty > 0
           AND NOT EXISTS (SELECT 1 FROM vouchers v WHERE v.source_type = 'inventory_opening' AND v.source_id = i.id AND v.company_id = i.company_id)");
     $open->execute(['cid' => $companyId]);
@@ -805,7 +805,7 @@ function sr_reconcile_stock_to_gl(int $companyId, int $userId, bool $zeroDirectO
             $openings['notes'][] = $item['sku'] . ': ' . $res['note'];
         } elseif ((int) $res['voucher_id'] > 0 && (int) $res['voucher_id'] !== $before) {
             $openings['posted']++;
-            $openings['value'] += (float) $item['opening_qty'] * (float) $item['purchase_rate'];
+            $openings['value'] += (float) $item['opening_qty'] * inv_item_opening_unit_cost($item);
         }
     }
     $log['openings'] = $openings;
@@ -853,6 +853,211 @@ function sr_reconcile_stock_to_gl(int $companyId, int $userId, bool $zeroDirectO
     $log['difference'] = round($log['after']['subledger'] - $log['after']['gl'], 2);
     $log['reconciled'] = abs($log['difference']) < 0.01;
     return $log;
+}
+
+// ---------------------------------------------------------------------------
+// Per-fiscal-year INVENTORY OPENING — exactly like the accounting opening
+// balances: qty + AMOUNT only (no rate), generated (carried) from the
+// previous year's replayed closing, adjustable with a reason, and governed by
+// the SAME opening-balance batch lifecycle (finalize / lock / unlock).
+// ---------------------------------------------------------------------------
+
+/** The accounting opening-balance batch status for a year ('' = none yet). */
+function inv_ob_batch_status(int $companyId, int $fiscalYearId): string
+{
+    if (!table_exists('opening_balance_batches')) {
+        return '';
+    }
+    $stmt = db()->prepare('SELECT status FROM opening_balance_batches WHERE company_id = :cid AND fiscal_year_id = :fy LIMIT 1');
+    $stmt->execute(['cid' => $companyId, 'fy' => $fiscalYearId]);
+    return (string) ($stmt->fetchColumn() ?: '');
+}
+
+/**
+ * Generate (or refresh) the year's per-item opening rows.
+ * Previous year exists -> carry each item's REPLAYED closing qty+amount at the
+ * previous year end; first year -> seed from the item master opening. Rows an
+ * admin already adjusted are preserved, mirroring ob_generate_batch. Refused
+ * while the accounting opening-balance batch is locked.
+ */
+function inv_ob_generate(int $companyId, int $fiscalYearId, int $userId): array
+{
+    if (inv_ob_batch_status($companyId, $fiscalYearId) === 'locked') {
+        return ['ok' => false, 'error' => 'Opening balances for this year are locked. Unlock them first — the inventory opening follows the same lock.'];
+    }
+    $fyStmt = db()->prepare('SELECT * FROM fiscal_years WHERE id = :id AND company_id = :cid');
+    $fyStmt->execute(['id' => $fiscalYearId, 'cid' => $companyId]);
+    $fy = $fyStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$fy) {
+        return ['ok' => false, 'error' => 'Fiscal year not found for this company.'];
+    }
+    $prevStmt = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = :cid AND end_date < :start ORDER BY end_date DESC LIMIT 1');
+    $prevStmt->execute(['cid' => $companyId, 'start' => (string) $fy['start_date']]);
+    $prevFy = $prevStmt->fetch(PDO::FETCH_ASSOC);
+
+    $adjusted = [];
+    $adjStmt = db()->prepare("SELECT item_id FROM inventory_opening_balances WHERE company_id = :cid AND fiscal_year_id = :fy AND source = 'adjusted'");
+    $adjStmt->execute(['cid' => $companyId, 'fy' => $fiscalYearId]);
+    foreach ($adjStmt->fetchAll(PDO::FETCH_COLUMN) as $iid) {
+        $adjusted[(int) $iid] = true;
+    }
+
+    $upsert = db()->prepare("INSERT INTO inventory_opening_balances (company_id, fiscal_year_id, item_id, qty, amount, source)
+        VALUES (:cid, :fy, :iid, :qty, :amt, :src)
+        ON DUPLICATE KEY UPDATE qty = VALUES(qty), amount = VALUES(amount), source = VALUES(source), adjust_reason = NULL, adjusted_by = NULL, adjusted_at = NULL");
+    $written = 0;
+    if ($prevFy) {
+        $closing = sr_stock_summary($companyId, ['from' => (string) $prevFy['end_date'], 'to' => (string) $prevFy['end_date']]);
+        foreach ($closing['rows'] as $r) {
+            if (isset($adjusted[(int) $r['item_id']])) {
+                continue; // keep admin adjustments, like the accounting generate
+            }
+            $upsert->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'iid' => (int) $r['item_id'],
+                'qty' => $r['closing_qty'], 'amt' => $r['closing_amount'], 'src' => 'carried']);
+            $written++;
+        }
+    } else {
+        $items = db()->prepare("SELECT id, opening_qty, opening_amount, purchase_rate FROM inventory_items WHERE company_id = :cid AND item_type <> 'service'");
+        $items->execute(['cid' => $companyId]);
+        foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
+            if (isset($adjusted[(int) $item['id']])) {
+                continue;
+            }
+            $qty = (float) $item['opening_qty'];
+            $amount = (float) $item['opening_amount'] > 0.004 ? (float) $item['opening_amount'] : round($qty * (float) $item['purchase_rate'], 2);
+            $upsert->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'iid' => (int) $item['id'],
+                'qty' => $qty, 'amt' => $amount, 'src' => 'initial']);
+            $written++;
+        }
+    }
+    return ['ok' => true, 'error' => null, 'written' => $written, 'carried' => (bool) $prevFy];
+}
+
+/** The year's opening rows with item info (qty + amount only — rate is never stored). */
+function inv_ob_rows(int $companyId, int $fiscalYearId): array
+{
+    if (!table_exists('inventory_opening_balances')) {
+        return [];
+    }
+    $stmt = db()->prepare('SELECT ob.*, i.sku, i.name, i.unit, i.item_type
+        FROM inventory_opening_balances ob
+        INNER JOIN inventory_items i ON i.id = ob.item_id
+        WHERE ob.company_id = :cid AND ob.fiscal_year_id = :fy
+        ORDER BY i.sku ASC');
+    $stmt->execute(['cid' => $companyId, 'fy' => $fiscalYearId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Adjust one item's opening for the year (qty + amount, reason required) —
+ * refused while the batch is locked, mirroring ob_apply_adjustment.
+ * First year (no previous data): the ITEM MASTER opening is synced, layers
+ * rebuilt, and the INV-OPEN voucher replaced, so subledger and GL follow.
+ * Later years: the difference vs the carried (replayed) amount posts as a
+ * replaceable adjustment journal against Opening Balance Adjustments.
+ */
+function inv_ob_adjust(int $companyId, int $fiscalYearId, int $itemId, float $qty, float $amount, string $reason, int $userId): array
+{
+    $reason = trim($reason);
+    if (mb_strlen($reason) < 10) {
+        return ['ok' => false, 'error' => 'Give a reason of at least 10 characters — it is kept with the opening row.'];
+    }
+    if (inv_ob_batch_status($companyId, $fiscalYearId) === 'locked') {
+        return ['ok' => false, 'error' => 'Opening balances for this year are locked. Unlock them first (Opening Balances page) — the inventory opening follows the same lock.'];
+    }
+    $qty = max(0.0, round($qty, 3));
+    $amount = max(0.0, round($amount, 2));
+    $itemStmt = db()->prepare('SELECT * FROM inventory_items WHERE id = :id AND company_id = :cid');
+    $itemStmt->execute(['id' => $itemId, 'cid' => $companyId]);
+    $item = $itemStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$item) {
+        return ['ok' => false, 'error' => 'Item not found for this company.'];
+    }
+    $fyStmt = db()->prepare('SELECT * FROM fiscal_years WHERE id = :id AND company_id = :cid');
+    $fyStmt->execute(['id' => $fiscalYearId, 'cid' => $companyId]);
+    $fy = $fyStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$fy) {
+        return ['ok' => false, 'error' => 'Fiscal year not found.'];
+    }
+    $prevStmt = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = :cid AND end_date < :start ORDER BY end_date DESC LIMIT 1');
+    $prevStmt->execute(['cid' => $companyId, 'start' => (string) $fy['start_date']]);
+    $prevFy = $prevStmt->fetch(PDO::FETCH_ASSOC);
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("INSERT INTO inventory_opening_balances (company_id, fiscal_year_id, item_id, qty, amount, source, adjust_reason, adjusted_by, adjusted_at)
+            VALUES (:cid, :fy, :iid, :qty, :amt, 'adjusted', :reason, :by, NOW())
+            ON DUPLICATE KEY UPDATE qty = VALUES(qty), amount = VALUES(amount), source = 'adjusted', adjust_reason = VALUES(adjust_reason), adjusted_by = VALUES(adjusted_by), adjusted_at = NOW()")
+            ->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'iid' => $itemId, 'qty' => $qty, 'amt' => $amount, 'reason' => $reason, 'by' => $userId]);
+
+        if (!$prevFy) {
+            // First year: the master opening IS this opening — sync it so the
+            // layers and the INV-OPEN voucher tell the same story.
+            $pdo->prepare('UPDATE inventory_items SET opening_qty = :q, opening_amount = :a WHERE id = :id AND company_id = :cid')
+                ->execute(['q' => $qty, 'a' => $amount, 'id' => $itemId, 'cid' => $companyId]);
+            $item['opening_qty'] = $qty;
+            $item['opening_amount'] = $amount;
+            inv_rebuild_layers($companyId, $itemId, (string) $item['valuation_method'], $qty, $qty > 0 ? round($amount / $qty, 6) : 0.0);
+            $voucherResult = inv_post_item_opening_voucher($companyId, $item, $userId);
+            $note = (string) ($voucherResult['note'] ?? '');
+        } else {
+            // Later year: the books already carry the replayed closing of the
+            // previous year — post/replace the DIFFERENCE as an adjustment
+            // journal so the GL follows the adjusted opening.
+            $carried = sr_stock_summary($companyId, ['from' => (string) $prevFy['end_date'], 'to' => (string) $prevFy['end_date']]);
+            $carriedAmount = 0.0;
+            foreach ($carried['rows'] as $cr) {
+                if ((int) $cr['item_id'] === $itemId) {
+                    $carriedAmount = (float) $cr['closing_amount'];
+                }
+            }
+            $delta = round($amount - $carriedAmount, 2);
+            $rowId = (int) $pdo->query('SELECT id FROM inventory_opening_balances WHERE fiscal_year_id = ' . $fiscalYearId . ' AND item_id = ' . $itemId)->fetchColumn();
+            $existing = $pdo->prepare("SELECT * FROM vouchers WHERE company_id = :cid AND source_type = 'inventory_opening_adj' AND source_id = :sid LIMIT 1");
+            $existing->execute(['cid' => $companyId, 'sid' => $rowId]);
+            $existingVoucher = $existing->fetch(PDO::FETCH_ASSOC);
+            if ($existingVoucher) {
+                $blocker = voucher_mutation_blocker($existingVoucher, ['inventory_opening_adj']);
+                if ($blocker !== null) {
+                    throw new RuntimeException('The previous opening adjustment cannot be replaced: ' . $blocker);
+                }
+                $pdo->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')->execute(['id' => (int) $existingVoucher['id'], 'cid' => $companyId]);
+            }
+            $note = '';
+            if (abs($delta) > 0.004) {
+                $stockLedgerId = inv_item_stock_ledger_id($companyId, $item);
+                $contraId = function_exists('opening_balance_ledger_id') ? opening_balance_ledger_id($companyId) : 0;
+                if ($stockLedgerId <= 0 || $contraId <= 0) {
+                    throw new RuntimeException('Map the item stock ledger (and Opening Balance Adjustments) before adjusting a carried opening.');
+                }
+                create_voucher_with_entries([
+                    'company_id' => $companyId,
+                    'fiscal_year_id' => $fiscalYearId,
+                    'voucher_no' => 'INV-OB-ADJ-' . $rowId,
+                    'voucher_type' => 'journal',
+                    'voucher_date' => (string) $fy['start_date'],
+                    'source_type' => 'inventory_opening_adj',
+                    'source_id' => $rowId,
+                    'total_amount' => abs($delta),
+                    'narration' => 'Inventory opening adjustment — ' . $item['sku'] . ' (' . $reason . ')',
+                    'status' => 'posted',
+                    'posted_by' => $userId,
+                ], [
+                    ['ledger_id' => $stockLedgerId, 'entry_type' => $delta > 0 ? 'debit' : 'credit', 'amount' => abs($delta), 'memo' => 'Opening stock adjusted'],
+                    ['ledger_id' => $contraId, 'entry_type' => $delta > 0 ? 'credit' : 'debit', 'amount' => abs($delta), 'memo' => 'Opening adjustment contra — ' . $item['sku']],
+                ]);
+                $note = 'Adjustment journal of ' . number_format(abs($delta), 2) . ' posted at the fiscal-year start.';
+            }
+        }
+        $pdo->commit();
+        return ['ok' => true, 'error' => null, 'note' => $note];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return ['ok' => false, 'error' => $e->getMessage()];
+    }
 }
 
 /**
@@ -965,7 +1170,7 @@ function sr_stock_ledger(int $companyId, int $itemId, string $from, string $to, 
 
     $state = sr_replay_new((string) $item['valuation_method']);
     if ((float) $item['opening_qty'] > INV_EPSILON) {
-        sr_replay_in($state, (float) $item['opening_qty'], (float) $item['purchase_rate']);
+        sr_replay_in($state, (float) $item['opening_qty'], inv_item_opening_unit_cost($item));
     }
     $warehouseFilterOn = $warehouseIds !== [];
     $rows = [];

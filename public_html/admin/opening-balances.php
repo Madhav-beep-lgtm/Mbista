@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/opening_balance_engine.php';
 require_once __DIR__ . '/../../app/inventory_valuation.php';
+require_once __DIR__ . '/../../app/stock_report_engine.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -85,6 +86,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg .= ' Skipped (no Inventory Asset / Opening Equity mapping): ' . implode(', ', array_slice($skipped, 0, 8)) . (count($skipped) > 8 ? ' +' . (count($skipped) - 8) . ' more' : '') . ' — map their ledgers on the item, then run this again.';
         }
         flash($skipped === [] ? 'success' : 'error', $msg);
+        redirect('admin/opening-balances.php');
+    }
+
+    if ($action === 'inv_ob_generate') {
+        // Inventory opening rows: carried from the previous year's replayed
+        // closing (or the item masters in the first year). Same lifecycle as
+        // the accounting opening — refused while the batch is locked.
+        require_permission('opening_balance', 'generate');
+        $res = inv_ob_generate($companyId, $postFyId, $userId);
+        flash($res['ok'] ? 'success' : 'error', $res['ok']
+            ? ($res['written'] . ' inventory opening row(s) ' . ($res['carried'] ? 'carried from the previous year\'s closing.' : 'seeded from the item masters (first year).') . ' Adjusted rows were preserved.')
+            : (string) $res['error']);
+        redirect('admin/opening-balances.php');
+    }
+    if ($action === 'inv_ob_adjust') {
+        require_permission('opening_balance', 'adjust');
+        $res = inv_ob_adjust($companyId, $postFyId, (int) ($_POST['item_id'] ?? 0),
+            (float) ($_POST['ob_qty'] ?? 0), (float) ($_POST['ob_amount'] ?? 0),
+            (string) ($_POST['reason'] ?? ''), $userId);
+        flash($res['ok'] ? 'success' : 'error', $res['ok']
+            ? 'Inventory opening adjusted.' . (($res['note'] ?? '') !== '' ? ' ' . $res['note'] : '')
+            : (string) $res['error']);
         redirect('admin/opening-balances.php');
     }
 
@@ -421,6 +444,74 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </table>
     </div>
     <p class="muted" style="margin-top:8px;font-size:12px">Each party posts to its own dedicated ledger, so the sub-ledger totals equal the control-account openings by construction. Inventory and fixed-asset openings are derived read-only from the perpetual sub-ledgers as at the fiscal-year start and reconciled to the general ledger.</p>
+</section>
+
+<?php $invObRows = inv_ob_rows($companyId, $fiscalYearId); $invObTotal = 0.0; foreach ($invObRows as $ior) { $invObTotal += (float) $ior['amount']; } ?>
+<section class="mbw-card" aria-label="Inventory opening balances">
+    <div class="mbw-card-head">
+        <h2><?= icon('box') ?>Inventory Opening (per item)</h2>
+        <div class="mbw-card-tools">
+            <span class="mbw-pill <?= $status === 'locked' ? 'tone-green' : 'tone-blue' ?>"><?= e($status === 'not_generated' ? 'Follows the batch above' : 'Batch: ' . ucfirst(str_replace('_', ' ', $status))) ?></span>
+            <?php if ($canGenerate && $status !== 'locked'): ?>
+            <form method="post" style="display:inline" data-confirm="Generate the inventory opening rows? Previous year exists → each item carries its REPLAYED closing (qty + amount); first year → seeded from the item masters. Rows you already adjusted are preserved.">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="inv_ob_generate">
+                <input type="hidden" name="fiscal_year_id" value="<?= e($fiscalYearId) ?>">
+                <button type="submit" class="button secondary"><?= icon('reconcile') ?><?= $invObRows === [] ? 'Generate from previous year' : 'Regenerate (keeps adjustments)' ?></button>
+            </form>
+            <?php endif; ?>
+        </div>
+    </div>
+    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
+        Exactly like the accounting opening balances: <strong>quantity + amount only — no rate</strong> (rate is never stored, so a later purchase-rate change can never re-value an opening).
+        Carried from the previous year's replayed closing, adjustable with a reason, locked/unlocked together with the batch above.
+    </p>
+    <div style="overflow-x:auto">
+    <table>
+        <thead><tr>
+            <th>Item</th><th>Type</th><th>Unit</th>
+            <th class="is-numeric">Opening Qty</th><th class="is-numeric">Opening Amount</th>
+            <th>Source</th><th>Reason</th><?php if ($canAdjustNow): ?><th></th><?php endif; ?>
+        </tr></thead>
+        <tbody>
+            <?php if ($invObRows === []): ?>
+                <tr><td colspan="8" class="muted">No inventory opening rows yet for <?= e((string) ($fiscalYear['label'] ?? '')) ?> — press “Generate from previous year”.</td></tr>
+            <?php endif; ?>
+            <?php foreach ($invObRows as $ior): ?>
+                <tr>
+                    <td><strong><?= e((string) $ior['sku']) ?></strong> <?= e((string) $ior['name']) ?></td>
+                    <td><?= e(ucfirst(str_replace('_', ' ', (string) $ior['item_type']))) ?></td>
+                    <td><?= e((string) $ior['unit']) ?></td>
+                    <td class="is-numeric"><?= e(number_format((float) $ior['qty'], 3)) ?></td>
+                    <td class="is-numeric"><strong><?= e($sym . number_format((float) $ior['amount'], 2)) ?></strong></td>
+                    <td><span class="mbw-pill <?= $ior['source'] === 'adjusted' ? 'tone-amber' : 'tone-blue' ?>"><?= e(ucfirst((string) $ior['source'])) ?></span></td>
+                    <td style="font-size:11px"><?= e((string) ($ior['adjust_reason'] ?? '')) ?></td>
+                    <?php if ($canAdjustNow): ?>
+                    <td>
+                        <details class="pr-adjust">
+                            <summary class="button secondary" style="padding:4px 10px">Adjust</summary>
+                            <form method="post" class="pr-adjust-form" style="min-width:250px">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="inv_ob_adjust">
+                                <input type="hidden" name="fiscal_year_id" value="<?= e($fiscalYearId) ?>">
+                                <input type="hidden" name="item_id" value="<?= (int) $ior['item_id'] ?>">
+                                <label>Opening quantity<input type="number" step="0.001" min="0" name="ob_qty" value="<?= e(number_format((float) $ior['qty'], 3, '.', '')) ?>"></label>
+                                <label>Opening amount<input type="number" step="0.01" min="0" name="ob_amount" value="<?= e(number_format((float) $ior['amount'], 2, '.', '')) ?>"></label>
+                                <label>Reason (required, min 10 chars)<input type="text" name="reason" minlength="10" required></label>
+                                <button type="submit">Save opening</button>
+                                <small>First year syncs the item master, layers and opening voucher; later years post the amount difference as an adjustment journal at year start.</small>
+                            </form>
+                        </details>
+                    </td>
+                    <?php endif; ?>
+                </tr>
+            <?php endforeach; ?>
+            <?php if ($invObRows !== []): ?>
+                <tr style="font-weight:700"><td colspan="4">Total opening amount</td><td class="is-numeric"><?= e($sym . number_format($invObTotal, 2)) ?></td><td colspan="3"></td></tr>
+            <?php endif; ?>
+        </tbody>
+    </table>
+    </div>
 </section>
 
 <?php if ($auditLogs !== []): ?>

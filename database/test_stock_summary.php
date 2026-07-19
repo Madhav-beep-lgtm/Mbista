@@ -17,6 +17,7 @@ if (PHP_SAPI !== 'cli') { exit('CLI only.'); }
 require __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/accounting_module_repair.php';
 require_once __DIR__ . '/../app/stock_report_engine.php';
+require_once __DIR__ . '/../app/opening_balance_engine.php';
 accounting_module_repair_database();
 
 $pass = 0; $fail = 0;
@@ -28,6 +29,10 @@ function ss_cleanup(): void
     foreach (db()->query("SELECT id FROM companies WHERE code='STKTESTA'")->fetchAll(PDO::FETCH_COLUMN) as $s) {
         $s = (int) $s;
         db()->exec("DELETE FROM inventory_item_location_types WHERE company_id=$s");
+        db()->exec("DELETE FROM inventory_opening_balances WHERE company_id=$s");
+        db()->exec("DELETE FROM opening_balance_audit_logs WHERE company_id=$s");
+        db()->exec("DELETE obl FROM opening_balance_lines obl JOIN opening_balance_batches b ON b.id=obl.batch_id WHERE b.company_id=$s");
+        db()->exec("DELETE FROM opening_balance_batches WHERE company_id=$s");
         db()->exec("DELETE FROM inventory_cost_layers WHERE company_id=$s");
         db()->exec("DELETE FROM inventory_transactions WHERE company_id=$s");
         db()->exec("DELETE FROM inventory_ledger_mappings WHERE company_id=$s");
@@ -328,6 +333,61 @@ ok($find($repPurged['rows'], 'SMP-DEMO') === null && $find($repPurged['rows'], '
     'Report loses ONLY the sample row — real module data untouched');
 $recPost = sr_reconcile_stock_to_gl($cid, $adminUid, false);
 ok($recPost['reconciled'] === true, 'Stock and GL still reconcile after the purge (vouchers left with their stock)');
+
+echo "\nInventory opening = qty + FROZEN amount (no rate drift)\n";
+ok(db()->query("SHOW COLUMNS FROM inventory_items LIKE 'opening_amount'")->fetchAll() !== [], 'inventory_items.opening_amount exists (migration 059)');
+ok(table_exists('inventory_opening_balances'), 'inventory_opening_balances table exists');
+$itFrozen = $mkItem('STK-FROZEN', 'stock', 'fifo', 0, 0, $whA);
+db()->prepare('UPDATE inventory_items SET opening_qty = 10, opening_amount = 800, purchase_rate = 80 WHERE id = ?')->execute([$itFrozen]);
+$frozenRow = db()->query("SELECT * FROM inventory_items WHERE id=$itFrozen")->fetch(PDO::FETCH_ASSOC);
+ok(near(inv_item_opening_unit_cost($frozenRow), 80.0), 'Opening unit cost = amount/qty (800/10 = 80)');
+db()->prepare('UPDATE inventory_items SET purchase_rate = 999 WHERE id = ?')->execute([$itFrozen]);
+$frozenRow = db()->query("SELECT * FROM inventory_items WHERE id=$itFrozen")->fetch(PDO::FETCH_ASSOC);
+ok(near(inv_item_opening_unit_cost($frozenRow), 80.0), 'Changing the purchase rate to 999 does NOT re-value the opening (still 80)');
+$repFrozen = sr_stock_summary($cid, $baseFilters + ['search' => 'FROZEN']);
+ok(count($repFrozen['rows']) === 1 && near($repFrozen['rows'][0]['opening_amount'], 800) && near($repFrozen['rows'][0]['closing_amount'], 800),
+    'Report values the opening at the frozen 800, not 10 x 999');
+
+echo "\nPer-FY inventory opening: generate, adjust, lock\n";
+$fyId1 = (int) $fy['id'];
+$gen1 = inv_ob_generate($cid, $fyId1, $adminUid);
+ok(!empty($gen1['ok']) && $gen1['carried'] === false && $gen1['written'] > 0, 'First year generates from item masters (' . (int) $gen1['written'] . ' rows)');
+$obRows = inv_ob_rows($cid, $fyId1);
+$frozenOb = null;
+foreach ($obRows as $or) { if ((int) $or['item_id'] === $itFrozen) { $frozenOb = $or; } }
+ok($frozenOb !== null && near((float) $frozenOb['qty'], 10) && near((float) $frozenOb['amount'], 800), 'Row carries qty 10 + amount 800 (no rate column anywhere)');
+// Next fiscal year: carried from the previous year's REPLAYED closing.
+$fy2 = create_fiscal_year($cid, 'STK FY2', '2027-07-17', '2028-07-15', false);
+db()->prepare("UPDATE fiscal_years SET status='open' WHERE id=?")->execute([$fy2['id']]);
+$fyId2 = (int) $fy2['id'];
+$gen2 = inv_ob_generate($cid, $fyId2, $adminUid);
+ok(!empty($gen2['ok']) && $gen2['carried'] === true, 'Second year generates CARRIED rows from previous-year replayed closing');
+$ob2 = inv_ob_rows($cid, $fyId2);
+$fifoOb2 = null;
+foreach ($ob2 as $or) { if ((int) $or['item_id'] === $itFifo) { $fifoOb2 = $or; } }
+ok($fifoOb2 !== null && near((float) $fifoOb2['qty'], 6) && near((float) $fifoOb2['amount'], 840),
+    'Carried opening for STK-FIFO = previous closing 6 / 840');
+// Adjust a carried row: difference posts as an opening adjustment journal.
+$adj = inv_ob_adjust($cid, $fyId2, $itFifo, 6, 900, 'Physical count valuation correction', $adminUid);
+ok(!empty($adj['ok']), 'Carried opening adjusts (qty 6, amount 900)');
+$adjVoucher = db()->query("SELECT * FROM vouchers WHERE company_id=$cid AND source_type='inventory_opening_adj' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+ok($adjVoucher !== false && near((float) $adjVoucher['total_amount'], 60), 'Adjustment journal posts the 60 difference (900 - 840) at year start');
+$shortReason = inv_ob_adjust($cid, $fyId2, $itFifo, 6, 900, 'short', $adminUid);
+ok(empty($shortReason['ok']), 'Adjustment without a proper reason is refused');
+// Lock the accounting batch -> inventory opening follows the SAME lock.
+ob_generate_batch($cid, $fyId1, $adminUid);
+$batchId = (int) ob_get_batch($cid, $fyId1)['id'];
+ob_finalize_batch($batchId, $adminUid);
+ob_lock_batch($batchId, $adminUid);
+$lockedGen = inv_ob_generate($cid, $fyId1, $adminUid);
+$lockedAdj = inv_ob_adjust($cid, $fyId1, $itFrozen, 10, 850, 'Trying while batch is locked', $adminUid);
+ok(empty($lockedGen['ok']) && empty($lockedAdj['ok']) && str_contains((string) $lockedAdj['error'], 'locked'),
+    'Locked batch blocks BOTH generate and adjust (same lifecycle as accounting)');
+ob_unlock_batch($batchId, 'Unlock for inventory opening test', $adminUid);
+$unlockedAdj = inv_ob_adjust($cid, $fyId1, $itFrozen, 10, 850, 'Adjust after unlocking the batch', $adminUid);
+ok(!empty($unlockedAdj['ok']), 'Unlocking the batch re-enables inventory opening adjustments');
+$masterAfter = db()->query("SELECT opening_qty, opening_amount FROM inventory_items WHERE id=$itFrozen")->fetch(PDO::FETCH_ASSOC);
+ok(near((float) $masterAfter['opening_amount'], 850), 'First-year adjustment syncs the item master amount (850)');
 
 echo "\nTenant isolation\n";
 $otherRep = sr_stock_summary(999999, $baseFilters);

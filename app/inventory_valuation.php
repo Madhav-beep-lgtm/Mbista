@@ -282,6 +282,25 @@ function inv_nrv(
 /**
  * Load a company item's open FIFO/specific layers, oldest first.
  */
+/**
+ * The unit cost of an item's MASTER opening stock. Openings are qty + AMOUNT
+ * (frozen, like the accounting opening balances) — never qty x the CURRENT
+ * purchase rate, which would silently re-value history when the rate changes.
+ * Legacy rows without an amount fall back to the purchase rate once.
+ */
+function inv_item_opening_unit_cost(array $item): float
+{
+    $qty = (float) ($item['opening_qty'] ?? 0);
+    if ($qty <= INV_EPSILON) {
+        return 0.0;
+    }
+    $amount = (float) ($item['opening_amount'] ?? 0);
+    if ($amount > 0.004) {
+        return inv_round_cost($amount / $qty);
+    }
+    return (float) ($item['purchase_rate'] ?? 0);
+}
+
 function inv_load_open_layers(int $companyId, int $itemId): array
 {
     if (!table_exists('inventory_cost_layers')) {
@@ -502,7 +521,7 @@ function inv_post_item_opening_voucher(int $companyId, array $item, ?int $userId
     if ($itemId <= 0) {
         return ['voucher_id' => 0, 'note' => ''];
     }
-    $value = inv_round_money((float) ($item['opening_qty'] ?? 0) * (float) ($item['purchase_rate'] ?? 0));
+    $value = inv_round_money((float) ($item['opening_qty'] ?? 0) * inv_item_opening_unit_cost($item));
 
     $existingStmt = db()->prepare("SELECT * FROM vouchers WHERE source_type = 'inventory_opening' AND source_id = :iid AND company_id = :cid LIMIT 1");
     $existingStmt->execute(['iid' => $itemId, 'cid' => $companyId]);
@@ -547,7 +566,7 @@ function inv_post_item_opening_voucher(int $companyId, array $item, ?int $userId
         'source_type' => 'inventory_opening',
         'source_id' => $itemId,
         'total_amount' => $value,
-        'narration' => 'Opening stock — ' . ($item['sku'] ?? '') . ' ' . ($item['name'] ?? '') . ' (' . number_format((float) ($item['opening_qty'] ?? 0), 3) . ' @ ' . number_format((float) ($item['purchase_rate'] ?? 0), 2) . ')',
+        'narration' => 'Opening stock — ' . ($item['sku'] ?? '') . ' ' . ($item['name'] ?? '') . ' (' . number_format((float) ($item['opening_qty'] ?? 0), 3) . ' @ ' . number_format(inv_item_opening_unit_cost($item), 2) . ')',
         'status' => 'posted',
         'posted_by' => $userId,
     ], [
@@ -654,13 +673,13 @@ function inv_rebuild_layers(int $companyId, int $itemId, string $method, float $
  */
 function inv_rebuild_item(int $companyId, int $itemId): void
 {
-    $stmt = db()->prepare('SELECT valuation_method, opening_qty, purchase_rate FROM inventory_items WHERE id = :id AND company_id = :cid LIMIT 1');
+    $stmt = db()->prepare('SELECT valuation_method, opening_qty, opening_amount, purchase_rate FROM inventory_items WHERE id = :id AND company_id = :cid LIMIT 1');
     $stmt->execute(['id' => $itemId, 'cid' => $companyId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$row) {
         return;
     }
-    inv_rebuild_layers($companyId, $itemId, (string) ($row['valuation_method'] ?? 'weighted_average'), (float) ($row['opening_qty'] ?? 0), (float) ($row['purchase_rate'] ?? 0));
+    inv_rebuild_layers($companyId, $itemId, (string) ($row['valuation_method'] ?? 'weighted_average'), (float) ($row['opening_qty'] ?? 0), inv_item_opening_unit_cost($row));
 }
 
 /**
@@ -682,7 +701,7 @@ function inv_ensure_layers(int $companyId, array $item): void
     $txn = db()->prepare('SELECT COUNT(*) FROM inventory_transactions WHERE company_id = :cid AND item_id = :iid');
     $txn->execute(['cid' => $companyId, 'iid' => $itemId]);
     if ($hasOpening || (int) $txn->fetchColumn() > 0) {
-        inv_rebuild_layers($companyId, $itemId, (string) ($item['valuation_method'] ?? 'weighted_average'), (float) ($item['opening_qty'] ?? 0), (float) ($item['purchase_rate'] ?? 0));
+        inv_rebuild_layers($companyId, $itemId, (string) ($item['valuation_method'] ?? 'weighted_average'), (float) ($item['opening_qty'] ?? 0), inv_item_opening_unit_cost($item));
     }
 }
 

@@ -1486,6 +1486,7 @@ CREATE TABLE IF NOT EXISTS `inventory_items` (
   `sales_rate` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   `purchase_rate` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   `opening_qty` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+  `opening_amount` DECIMAL(14,2) NOT NULL DEFAULT 0,
   `reorder_level` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
   `min_stock` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
   `max_stock` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
@@ -2020,6 +2021,24 @@ CREATE TABLE IF NOT EXISTS `inventory_nrv_assessments` (
   CONSTRAINT `fk_inv_nrv_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_inv_nrv_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_inv_nrv_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `inventory_opening_balances` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `company_id` INT UNSIGNED NOT NULL,
+  `fiscal_year_id` INT UNSIGNED NOT NULL,
+  `item_id` INT UNSIGNED NOT NULL,
+  `qty` DECIMAL(14,3) NOT NULL DEFAULT 0,
+  `amount` DECIMAL(14,2) NOT NULL DEFAULT 0,
+  `source` ENUM('carried','initial','adjusted') NOT NULL DEFAULT 'carried',
+  `adjust_reason` VARCHAR(255) DEFAULT NULL,
+  `adjusted_by` INT UNSIGNED DEFAULT NULL,
+  `adjusted_at` TIMESTAMP NULL DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_inv_ob_fy_item` (`fiscal_year_id`, `item_id`),
+  KEY `idx_inv_ob_company` (`company_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `inventory_item_location_types` (

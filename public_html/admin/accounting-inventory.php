@@ -285,12 +285,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'sales_rate' => max(0.0, round((float) ($_POST['sales_rate'] ?? 0), 2)),
             'purchase_rate' => max(0.0, round((float) ($_POST['purchase_rate'] ?? 0), 2)),
             'opening_qty' => max(0.0, round((float) ($_POST['opening_qty'] ?? 0), 3)),
+            // Opening VALUE is stored, never derived from the current purchase
+            // rate later — like the accounting opening balances (qty + amount).
+            'opening_amount' => max(0.0, round((float) ($_POST['opening_amount'] ?? 0), 2)),
             'reorder_level' => max(0.0, round((float) ($_POST['reorder_level'] ?? 0), 3)),
             'default_warehouse_id' => inventory_company_warehouse_id((int) ($_POST['default_warehouse_id'] ?? 0), $companyId),
             'status' => $status,
             'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
         ];
 
+        if ($params['opening_amount'] <= 0 && $params['opening_qty'] > 0) {
+            // Legacy convenience: an omitted value defaults ONCE to qty x the
+            // purchase rate typed NOW — after that it stays frozen.
+            $params['opening_amount'] = round($params['opening_qty'] * $params['purchase_rate'], 2);
+        }
+        $openingUnitCost = $params['opening_qty'] > 0 ? round($params['opening_amount'] / $params['opening_qty'], 6) : 0.0;
         try {
             // One transaction: inv_rebuild_layers() below DELETEs the item's cost
             // layers before replaying them, so a failure part-way through an
@@ -304,12 +313,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     SET ledger_id = :ledger_id, sku = :sku, name = :name, category = :category, item_type = :item_type,
                         valuation_method = :valuation_method, unit = :unit,
                         hs_code = :hs_code, tax_rate = :tax_rate, sales_rate = :sales_rate, purchase_rate = :purchase_rate,
-                        opening_qty = :opening_qty, reorder_level = :reorder_level, default_warehouse_id = :default_warehouse_id,
+                        opening_qty = :opening_qty, opening_amount = :opening_amount, reorder_level = :reorder_level, default_warehouse_id = :default_warehouse_id,
                         status = :status, notes = :notes
                     WHERE id = :id AND company_id = :company_id
                 ')->execute($params);
                 // Opening qty/rate or method may have changed — rebuild layers.
-                inv_rebuild_layers($companyId, $itemId, $valuationMethod, (float) $params['opening_qty'], (float) $params['purchase_rate']);
+                inv_rebuild_layers($companyId, $itemId, $valuationMethod, (float) $params['opening_qty'], $openingUnitCost);
                 log_activity('inventory_item', $itemId, 'updated', 'Inventory item updated.', $userId);
                 $savedItemId = $itemId;
                 flash('success', 'Item updated.');
@@ -317,16 +326,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 db()->prepare('
                     INSERT INTO inventory_items (
                         company_id, ledger_id, sku, name, category, item_type, valuation_method, unit, hs_code, tax_rate,
-                        sales_rate, purchase_rate, opening_qty, reorder_level, default_warehouse_id, status, notes
+                        sales_rate, purchase_rate, opening_qty, opening_amount, reorder_level, default_warehouse_id, status, notes
                     ) VALUES (
                         :company_id, :ledger_id, :sku, :name, :category, :item_type, :valuation_method, :unit, :hs_code, :tax_rate,
-                        :sales_rate, :purchase_rate, :opening_qty, :reorder_level, :default_warehouse_id, :status, :notes
+                        :sales_rate, :purchase_rate, :opening_qty, :opening_amount, :reorder_level, :default_warehouse_id, :status, :notes
                     )
                 ')->execute($params);
                 $newItemId = (int) db()->lastInsertId();
                 // Seed the opening cost layer so valuation is correct from day one.
                 if ((float) $params['opening_qty'] > 0) {
-                    inv_add_layer($companyId, $newItemId, (float) $params['opening_qty'], (float) $params['purchase_rate'], '2000-01-01');
+                    inv_add_layer($companyId, $newItemId, (float) $params['opening_qty'], $openingUnitCost, '2000-01-01');
                 }
                 log_activity('inventory_item', $newItemId, 'created', 'Inventory item created.', $userId);
                 $savedItemId = $newItemId;
@@ -1887,6 +1896,8 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             <label>Sales rate<input type="number" step="0.01" name="sales_rate" value="<?= e($editItem['sales_rate'] ?? '0.00') ?>"></label>
             <label>Purchase rate<input type="number" step="0.01" name="purchase_rate" value="<?= e($editItem['purchase_rate'] ?? '0.00') ?>"></label>
             <label>Opening qty<input type="number" step="0.001" name="opening_qty" value="<?= e($editItem['opening_qty'] ?? '0.000') ?>"></label>
+            <label>Opening value <span class="frm-optional">total amount — frozen, like an accounting opening balance</span>
+                <input type="number" step="0.01" min="0" name="opening_amount" value="<?= e($editItem['opening_amount'] ?? '0.00') ?>" placeholder="qty × cost at opening"></label>
             <label>Reorder level<input type="number" step="0.001" name="reorder_level" value="<?= e($editItem['reorder_level'] ?? '0.000') ?>"></label>
             <label>Default warehouse<select name="default_warehouse_id"><option value="0">— none —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>" <?= (int) ($editItem['default_warehouse_id'] ?? 0) === (int) $warehouse['id'] ? 'selected' : '' ?>><?= e($warehouse['name'] . ($warehouse['code'] ? ' (' . $warehouse['code'] . ')' : '')) ?></option><?php endforeach; ?></select></label>
             <?php
