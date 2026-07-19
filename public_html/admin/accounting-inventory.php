@@ -222,6 +222,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
 
+    if ($action === 'purge_sample_inventory') {
+        // Remove the seeded SMP-* demo inventory (items, movements, layers,
+        // their vouchers, sample manufacturing orders) in one consistent
+        // sweep so reports show only stock recorded through this module.
+        require_permission('accounting', 'post');
+        if ((string) (current_user()['role'] ?? '') !== 'admin') {
+            flash('error', 'Only an admin can remove the sample data.');
+            redirect('admin/accounting-inventory.php');
+        }
+        require_once __DIR__ . '/../../app/stock_report_engine.php';
+        $purge = sr_purge_sample_inventory($companyId, $userId);
+        log_activity('inventory_item', $companyId, 'sample_purged', 'Sample inventory removed: ' . $purge['items'] . ' items, ' . $purge['transactions'] . ' movements, ' . $purge['vouchers'] . ' vouchers, ' . $purge['orders'] . ' orders.', $userId);
+        flash('success', 'Sample data removed: ' . $purge['items'] . ' item(s), ' . $purge['transactions'] . ' movement(s), ' . $purge['vouchers'] . ' voucher(s), ' . $purge['orders'] . ' manufacturing order(s). The Stock Summary now shows only stock recorded through Inventory & Manufacturing.');
+        redirect('admin/accounting-inventory.php');
+    }
+
     if ($action === 'save_item') {
         require_permission('inventory', 'create');
         $itemId = (int) ($_POST['item_id'] ?? 0);
@@ -1700,6 +1716,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php if ($inventoryProfile['show_manufacturing']): ?><a class="mbw-tab <?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('layers') ?>Manufacturing</a><?php endif; ?>
     <a class="mbw-tab" href="<?= e(url('admin/stock-summary-report.php')) ?>" title="Item-wise movement and valuation, wired to the GL ledgers"><?= icon('reports') ?>Stock Summary Report</a>
 </nav>
+<?php
+$sampleCountStmt = db()->prepare("SELECT COUNT(*) FROM inventory_items WHERE company_id = :cid AND sku LIKE 'SMP-%'");
+$sampleCountStmt->execute(['cid' => $companyId]);
+$sampleCount = (int) $sampleCountStmt->fetchColumn();
+if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && user_can_do('accounting', 'post')): ?>
+<div class="notice" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
+    <span><strong><?= $sampleCount ?> sample item(s)</strong> (SMP-…) from the demo seed are mixed into your inventory and its reports.</span>
+    <form method="post" style="margin:0" data-confirm="Remove ALL sample inventory data (SMP-… items, their movements, cost layers, stock vouchers, and sample manufacturing orders)? Real data is not touched. This cannot be undone.">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="purge_sample_inventory">
+        <button type="submit" class="button secondary" style="color:#a33">Remove sample data</button>
+    </form>
+</div>
+<?php endif; ?>
 
 <?php if ($invView === 'valuation'): ?>
     <?php

@@ -310,6 +310,25 @@ $recRun2 = sr_reconcile_stock_to_gl($cid, $adminUid, true);
 ok($recRun2['openings']['posted'] === 0 && $recRun2['movements']['posted'] === 0 && $recRun2['production']['posted'] === 0 && $recRun2['reconciled'] === true,
     'Second reconcile run posts nothing and stays reconciled (idempotent)');
 
+echo "\nSample-data purge (report derives ONLY from real module data)\n";
+$itSample = $mkItem('SMP-DEMO', 'stock', 'fifo', 0, 0, $whA);
+$txn($itSample, 'purchase', '2026-08-02', 6, 0, 40, $whA);
+db()->prepare("INSERT INTO manufacturing_orders (company_id, fiscal_year_id, order_no, finished_item_id, quantity, status, started_on) VALUES (?,?,?,?,?, 'completed', '2026-08-02')")
+    ->execute([$cid, (int) $fy['id'], 'SMP-MO-T1', $itSample, 1]);
+sr_post_missing_movement_vouchers($cid, $adminUid); // give the sample txn a voucher
+$sampleVouchers = (int) db()->query("SELECT COUNT(*) FROM vouchers v JOIN inventory_transactions t ON t.voucher_id=v.id WHERE t.item_id=$itSample")->fetchColumn();
+ok($sampleVouchers > 0, 'Fixture: sample item has a posted stock voucher');
+$purge = sr_purge_sample_inventory($cid, $adminUid);
+ok($purge['items'] === 1 && $purge['transactions'] === 1 && $purge['vouchers'] >= 1 && $purge['orders'] === 1,
+    'Purge removes the sample item, its movement, its voucher, and the sample order together');
+ok((int) db()->query("SELECT COUNT(*) FROM inventory_items WHERE company_id=$cid AND sku LIKE 'SMP-%'")->fetchColumn() === 0,
+    'No sample items remain');
+$repPurged = sr_stock_summary($cid, $baseFilters);
+ok($find($repPurged['rows'], 'SMP-DEMO') === null && $find($repPurged['rows'], 'STK-FIFO') !== null,
+    'Report loses ONLY the sample row — real module data untouched');
+$recPost = sr_reconcile_stock_to_gl($cid, $adminUid, false);
+ok($recPost['reconciled'] === true, 'Stock and GL still reconcile after the purge (vouchers left with their stock)');
+
 echo "\nTenant isolation\n";
 $otherRep = sr_stock_summary(999999, $baseFilters);
 ok($otherRep['rows'] === [], 'Another company id sees none of these items');

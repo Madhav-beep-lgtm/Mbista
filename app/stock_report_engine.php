@@ -856,6 +856,92 @@ function sr_reconcile_stock_to_gl(int $companyId, int $userId, bool $zeroDirectO
 }
 
 /**
+ * Purge SEEDED SAMPLE inventory data (items whose SKU starts with the sample
+ * prefix) so the Stock Summary shows only stock genuinely recorded through
+ * Inventory & Manufacturing. Everything an item touched goes together —
+ * transactions, cost layers, location types, its stock vouchers (movement /
+ * opening / retro / production) and sample manufacturing orders — so the GL
+ * and the subledger stay consistent (both drop by the same rupees; nothing
+ * strands in the books). Real (non-sample) data is never touched.
+ * Returns counts of everything removed.
+ */
+function sr_purge_sample_inventory(int $companyId, int $userId, string $skuPrefix = 'SMP-'): array
+{
+    $out = ['items' => 0, 'transactions' => 0, 'vouchers' => 0, 'orders' => 0];
+    $itemsStmt = db()->prepare('SELECT id, sku FROM inventory_items WHERE company_id = :cid AND sku LIKE :pre');
+    $itemsStmt->execute(['cid' => $companyId, 'pre' => $skuPrefix . '%']);
+    $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($items === []) {
+        return $out;
+    }
+    $itemIds = array_map(static fn (array $i): int => (int) $i['id'], $items);
+    $ph = implode(',', array_fill(0, count($itemIds), '?'));
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        // Vouchers linked to the items' movements, plus their opening vouchers.
+        $voucherIds = [];
+        $vq = $pdo->prepare("SELECT DISTINCT voucher_id FROM inventory_transactions WHERE company_id = ? AND item_id IN ($ph) AND voucher_id IS NOT NULL");
+        $vq->execute(array_merge([$companyId], $itemIds));
+        foreach ($vq->fetchAll(PDO::FETCH_COLUMN) as $vid) {
+            $voucherIds[(int) $vid] = true;
+        }
+        $ovq = $pdo->prepare("SELECT id FROM vouchers WHERE company_id = ? AND source_type = 'inventory_opening' AND source_id IN ($ph)");
+        $ovq->execute(array_merge([$companyId], $itemIds));
+        foreach ($ovq->fetchAll(PDO::FETCH_COLUMN) as $vid) {
+            $voucherIds[(int) $vid] = true;
+        }
+        // Sample manufacturing orders (same prefix) and their vouchers.
+        if (table_exists('manufacturing_orders')) {
+            $moq = $pdo->prepare('SELECT id, order_no FROM manufacturing_orders WHERE company_id = :cid AND order_no LIKE :pre');
+            $moq->execute(['cid' => $companyId, 'pre' => $skuPrefix . '%']);
+            foreach ($moq->fetchAll(PDO::FETCH_ASSOC) as $mo) {
+                $mvq = $pdo->prepare("SELECT id FROM vouchers WHERE company_id = ? AND source_type IN ('manufacturing_order', 'manufacturing_order_start') AND source_id = ?");
+                $mvq->execute([$companyId, (int) $mo['id']]);
+                foreach ($mvq->fetchAll(PDO::FETCH_COLUMN) as $vid) {
+                    $voucherIds[(int) $vid] = true;
+                }
+                $pdo->prepare('DELETE FROM manufacturing_order_inputs WHERE manufacturing_order_id = :id')->execute(['id' => (int) $mo['id']]);
+                $pdo->prepare('DELETE FROM manufacturing_orders WHERE id = :id')->execute(['id' => (int) $mo['id']]);
+                $out['orders']++;
+            }
+        }
+        if ($voucherIds !== []) {
+            $vph = implode(',', array_fill(0, count($voucherIds), '?'));
+            $del = $pdo->prepare("DELETE FROM vouchers WHERE company_id = ? AND id IN ($vph)");
+            $del->execute(array_merge([$companyId], array_keys($voucherIds)));
+            $out['vouchers'] = $del->rowCount();
+        }
+        $txnDel = $pdo->prepare("DELETE FROM inventory_transactions WHERE company_id = ? AND item_id IN ($ph)");
+        $txnDel->execute(array_merge([$companyId], $itemIds));
+        $out['transactions'] = $txnDel->rowCount();
+        $pdo->prepare("DELETE FROM inventory_cost_layers WHERE company_id = ? AND item_id IN ($ph)")->execute(array_merge([$companyId], $itemIds));
+        if (table_exists('inventory_item_location_types')) {
+            $pdo->prepare("DELETE FROM inventory_item_location_types WHERE company_id = ? AND item_id IN ($ph)")->execute(array_merge([$companyId], $itemIds));
+        }
+        if (table_exists('inventory_ledger_mappings')) {
+            $pdo->prepare("DELETE FROM inventory_ledger_mappings WHERE company_id = ? AND scope = 'item' AND item_id IN ($ph)")->execute(array_merge([$companyId], $itemIds));
+        }
+        $itemDel = $pdo->prepare("DELETE FROM inventory_items WHERE company_id = ? AND id IN ($ph)");
+        $itemDel->execute(array_merge([$companyId], $itemIds));
+        $out['items'] = $itemDel->rowCount();
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+    if (function_exists('security_event')) {
+        security_event('inventory_movement_reversed', 'warning',
+            'Sample inventory purge (' . $skuPrefix . '*): ' . $out['items'] . ' items, ' . $out['transactions'] . ' movements, '
+            . $out['vouchers'] . ' vouchers, ' . $out['orders'] . ' manufacturing orders removed.', $companyId, $userId);
+    }
+    return $out;
+}
+
+/**
  * Stock Ledger drill-down: every movement of one item up to $to with running
  * quantity/value/rate from the same replay. Rows before $from are collapsed
  * into the opening line.

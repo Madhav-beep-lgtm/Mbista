@@ -251,6 +251,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <a class="mbw-view-all" href="<?= e(url('admin/stock-summary-report.php?' . $qs)) ?>" title="Refresh with the same filters">&#8635; Refresh</a>
         </div>
     </div>
+    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px"><?= icon('layers') ?>
+        Derived 100% from <a href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory &amp; Manufacturing</a> records —
+        every item, stock movement, and manufacturing order recorded there appears here instantly; this report keeps no data of its own.</p>
     <form method="get" class="workspace-form-grid">
         <input type="hidden" name="applied" value="1">
         <label>From (inside <?= e((string) $fiscalYear['label']) ?>)<input type="date" name="from" value="<?= e($from) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
