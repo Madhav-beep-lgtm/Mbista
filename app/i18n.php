@@ -25,12 +25,18 @@ function app_lang(): string
     $requested = (string) ($_GET['lang'] ?? '');
     if (isset(APP_LANGS[$requested])) {
         $_SESSION['app_lang'] = $requested;
-        setcookie('app_lang', $requested, [
-            'expires' => time() + 31536000,
-            'path' => '/',
-            'httponly' => false,
-            'samesite' => 'Lax',
-        ]);
+        // bootstrap.php resolves the language BEFORE any output, so the cookie
+        // normally goes out fine; if a stray late call gets here after output
+        // started, skip the cookie (the session already carries the choice)
+        // instead of spraying a headers-already-sent warning into the page.
+        if (!headers_sent()) {
+            setcookie('app_lang', $requested, [
+                'expires' => time() + 31536000,
+                'path' => '/',
+                'httponly' => false,
+                'samesite' => 'Lax',
+            ]);
+        }
         $lang = $requested;
         return $lang;
     }
