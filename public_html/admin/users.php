@@ -62,6 +62,39 @@ if (
     redirect('admin/users.php#role-matrix');
 }
 
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST'
+    && (string) ($_POST['action'] ?? '') === 'reset_role_matrix'
+) {
+    verify_csrf();
+
+    try {
+        reset_access_level_capabilities($companyId);
+
+        security_event(
+            'role_matrix_updated',
+            'success',
+            'Access-level capability matrix reset to defaults.',
+            $companyId,
+            (int) ($currentAdmin['id'] ?? 0)
+        );
+
+        log_activity(
+            'company',
+            $companyId,
+            'role_matrix_updated',
+            'Role and responsibility matrix reset to defaults.',
+            (int) ($currentAdmin['id'] ?? 0)
+        );
+
+        flash('success', 'Role permissions restored to the standard defaults.');
+    } catch (Throwable $exception) {
+        flash('error', 'Could not reset role permissions: ' . $exception->getMessage());
+    }
+
+    redirect('admin/users.php#role-matrix');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'] ?? ''), $staffWorkflowActions, true)) {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
@@ -840,6 +873,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </span>
         </div>
     </form>
+
+    <form method="post" onsubmit="return confirm('Restore the standard permission matrix? Custom changes for this company will be discarded.');">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="reset_role_matrix">
+        <div class="actions" style="margin-top:8px;">
+            <button type="submit" class="button secondary">Reset to defaults</button>
+            <span class="muted">Use this if roles ever end up with no permissions (all boxes unchecked).</span>
+        </div>
+    </form>
 </details>
 <section class="mbw-kpi-grid uw-summary-grid">
     <a class="mbw-kpi" href="<?= e(url('admin/users.php')) ?>">
@@ -892,7 +934,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         && $roleFilter === 'all'
         && $statusFilter === 'all'
         && $sort === 'created_desc'
-        && $perPage === 10
+        && $perPage === 20
     ) ? 'hidden' : '' ?>
 >
     <div class="mbw-card-head">
@@ -960,7 +1002,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         || $roleFilter !== 'all'
         || $statusFilter !== 'all'
         || $sort !== 'created_desc'
-        || $perPage !== 10
+        || $perPage !== 20
     ) ? 'true' : 'false' ?>"
     onclick="
         const panel = document.getElementById('users-filters-panel');
@@ -1011,7 +1053,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     $uwInitials = '';
 
     foreach (array_slice($uwNameParts, 0, 2) as $uwNamePart) {
-        $uwInitials .= strtoupper(substr($uwNamePart, 0, 1));
+        // mb_* keeps multibyte names (e.g. Devanagari) from producing broken bytes.
+        $uwInitials .= mb_strtoupper(mb_substr($uwNamePart, 0, 1, 'UTF-8'), 'UTF-8');
     }
 
     if ($uwInitials === '') {

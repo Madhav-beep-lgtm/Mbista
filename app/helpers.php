@@ -4675,6 +4675,20 @@ function save_access_level_capabilities(
         throw new InvalidArgumentException('A valid company is required.');
     }
 
+    // An entirely-empty submission would strip every capability (even "view")
+    // from every editable role and lock all non-super-admin users out of the
+    // whole app. That is never intentional — treat it as a bad request.
+    $hasAnyGrant = false;
+    foreach ($submitted as $levelCaps) {
+        if (is_array($levelCaps) && array_filter($levelCaps) !== []) {
+            $hasAnyGrant = true;
+            break;
+        }
+    }
+    if (!$hasAnyGrant) {
+        throw new InvalidArgumentException('No permissions were ticked, so nothing was saved. Use "Reset to defaults" to restore the standard matrix.');
+    }
+
     ensure_role_capability_schema();
 
     $levels = array_keys(ACCESS_LEVELS);
@@ -4724,6 +4738,24 @@ function save_access_level_capabilities(
         throw $exception;
     }
 }
+
+/**
+ * Removes every stored override for the company so the matrix falls back to
+ * default_access_level_capabilities(). Recovery path for a broken matrix
+ * (e.g. one saved with everything unchecked by an older version).
+ */
+function reset_access_level_capabilities(int $companyId): void
+{
+    if ($companyId <= 0) {
+        throw new InvalidArgumentException('A valid company is required.');
+    }
+
+    ensure_role_capability_schema();
+
+    db()->prepare('DELETE FROM role_capability_overrides WHERE company_id = :company_id')
+        ->execute(['company_id' => $companyId]);
+}
+
 function current_access_level(): string
 {
     $user = current_user();
