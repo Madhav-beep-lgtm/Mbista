@@ -18,6 +18,9 @@ declare(strict_types=1);
  *   (source_type, source_id) key keeps posting idempotent.
  */
 
+require_once __DIR__ . '/payroll_overtime.php';
+require_once __DIR__ . '/payroll_service_charge.php';
+
 function payroll_settings(int $companyId): array
 {
     $stmt = db()->prepare('SELECT * FROM payroll_settings WHERE company_id = :cid LIMIT 1');
@@ -203,19 +206,84 @@ function payroll_round(float $amount, string $mode): float
 /** Active payroll employees with user names for a company. */
 function payroll_company_employees(int $companyId, bool $activeOnly = true): array
 {
-    $sql = 'SELECT pe.*, u.name AS person_name, u.email AS person_email, u.role AS person_role
-        FROM payroll_employees pe INNER JOIN users u ON u.id = pe.user_id
-        WHERE pe.company_id = :cid' . ($activeOnly ? " AND pe.status = 'active'" : '') . '
+    $sql = "SELECT pe.*, COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name,
+            COALESCE(u.email, pe.email) AS person_email, COALESCE(u.role, 'employee') AS person_role
+        FROM payroll_employees pe LEFT JOIN users u ON u.id = pe.user_id
+        WHERE pe.company_id = :cid" . ($activeOnly ? " AND pe.status = 'active'" : '') . '
         ORDER BY pe.employee_code ASC';
     $stmt = db()->prepare($sql);
     $stmt->execute(['cid' => $companyId]);
     return $stmt->fetchAll();
 }
 
-/** Component amounts for one employee: assigned overrides, else defaults. */
-function payroll_employee_component_lines(array $employee): array
+/** All pay components of a company with their accounting mappings. */
+function payroll_component_catalog(int $companyId, bool $activeOnly = true): array
 {
-    $stmt = db()->prepare("SELECT c.*, pec.amount AS override_amount
+    $stmt = db()->prepare('SELECT * FROM payroll_components WHERE company_id = :cid'
+        . ($activeOnly ? ' AND active = 1' : '') . ' ORDER BY sort_order ASC, code ASC');
+    $stmt->execute(['cid' => $companyId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Effective posting behaviour of a component. 'category_default' resolves by
+ * category so legacy components (031 schema) keep posting exactly as before.
+ */
+function payroll_component_behaviour(array $component): string
+{
+    $behaviour = (string) ($component['posting_behaviour'] ?? 'category_default');
+    if ($behaviour !== 'category_default') {
+        return $behaviour;
+    }
+    $category = (string) ($component['category'] ?? 'allowance');
+    // Legacy employer-paid deduction = an employer cost, not employee pay.
+    if ($category === 'deduction' && (int) ($component['employer_paid'] ?? 0) === 1) {
+        return 'employer_contribution';
+    }
+    return match ($category) {
+        'deduction' => 'deduction_liability',
+        'employer_contribution' => 'employer_contribution',
+        'reimbursement' => 'reimbursement',
+        'advance_recovery' => 'advance_recovery',
+        'tax' => 'deduction_liability',
+        'info' => 'non_posting',
+        default => 'earning_expense', // allowance / overtime / benefit / earnings
+    };
+}
+
+/**
+ * Is the component in force for the run's period? Effective dates must COVER
+ * the period end (open-ended when NULL). $refDate '' = always in force.
+ */
+function payroll_component_in_force(array $row, string $refDate): bool
+{
+    if ($refDate === '') {
+        return true;
+    }
+    $from = trim((string) ($row['effective_from'] ?? ''));
+    $to = trim((string) ($row['effective_to'] ?? ''));
+    if ($from !== '' && $refDate < $from) {
+        return false;
+    }
+    if ($to !== '' && $refDate > $to) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Component SUGGESTIONS for one employee: the assignment (or master default)
+ * produces a suggested amount only — payroll preparation may accept, change,
+ * zero or remove it per period. Returns rows of
+ * ['component' => master row, 'assignment' => ?row, 'amount' => suggestion,
+ *  'taxable' => bool] ordered by sort order. $refDate filters master AND
+ * assignment effective-date ranges (pass the run period end, '' = no filter).
+ */
+function payroll_employee_component_lines(array $employee, string $refDate = ''): array
+{
+    $stmt = db()->prepare("SELECT c.*, pec.id AS assignment_id, pec.amount AS override_amount,
+            pec.percentage AS override_percentage, pec.taxable_override, pec.active AS assignment_active,
+            pec.effective_from AS a_from, pec.effective_to AS a_to, pec.remarks AS assignment_remarks
         FROM payroll_components c
         LEFT JOIN payroll_employee_components pec
                ON pec.component_id = c.id AND pec.payroll_employee_id = :pe
@@ -224,20 +292,180 @@ function payroll_employee_component_lines(array $employee): array
     $stmt->execute(['pe' => (int) $employee['id'], 'cid' => (int) $employee['company_id']]);
     $lines = [];
     foreach ($stmt->fetchAll() as $component) {
-        $amount = $component['override_amount'] !== null
+        if (!payroll_component_in_force($component, $refDate)) {
+            continue;
+        }
+        $hasAssignment = $component['assignment_id'] !== null;
+        if ($hasAssignment) {
+            if ((int) ($component['assignment_active'] ?? 1) !== 1) {
+                continue; // assignment switched off for this employee
+            }
+            if (!payroll_component_in_force(['effective_from' => $component['a_from'], 'effective_to' => $component['a_to']], $refDate)) {
+                continue;
+            }
+        }
+        $calcType = (string) $component['calc_type'];
+        // Overtime / service-charge amounts come from their own workflows, and
+        // pure-manual components have no suggestion — they enter per period.
+        if (in_array($calcType, ['overtime_hours', 'service_charge'], true)) {
+            continue;
+        }
+        $percent = $hasAssignment && $component['override_percentage'] !== null
+            ? (float) $component['override_percentage']
+            : (float) ($component['percentage'] ?? 0);
+        if ($calcType === 'percent_basic' && $percent <= 0) {
+            $percent = (float) $component['default_value']; // legacy: % stored in default_value
+        }
+        $amount = $hasAssignment && $component['override_amount'] !== null && (float) $component['override_amount'] != 0.0
             ? (float) $component['override_amount']
-            : ((string) $component['calc_type'] === 'percent_basic'
-                ? round((float) $employee['basic_salary'] * (float) $component['default_value'] / 100, 2)
+            : ($calcType === 'percent_basic'
+                ? round((float) $employee['basic_salary'] * $percent / 100, 2)
                 : (float) $component['default_value']);
-        if ($component['override_amount'] === null && (float) $component['default_value'] == 0.0) {
+        if (!$hasAssignment && (float) $component['default_value'] == 0.0 && !($calcType === 'percent_basic' && $percent > 0)) {
             continue; // no default and no assignment -> not part of this employee's pay
         }
         if ($amount == 0.0) {
-            continue;
+            continue; // zero suggestion: enters only via an explicit period entry
         }
-        $lines[] = ['component' => $component, 'amount' => $amount];
+        $taxable = $component['taxable_override'] !== null
+            ? (int) $component['taxable_override'] === 1
+            : (int) $component['taxable'] === 1;
+        $lines[] = ['component' => $component, 'assignment_id' => $component['assignment_id'], 'amount' => $amount, 'taxable' => $taxable];
     }
     return $lines;
+}
+
+/** Stored per-run component lines (the ACTUAL approved amounts + snapshots). */
+function payroll_run_component_rows(int $runId, int $employeeId = 0): array
+{
+    $sql = 'SELECT * FROM payroll_run_components WHERE run_id = :run'
+        . ($employeeId > 0 ? ' AND payroll_employee_id = :pe' : '')
+        . ' ORDER BY payroll_employee_id ASC, component_code ASC';
+    $stmt = db()->prepare($sql);
+    $params = ['run' => $runId];
+    if ($employeeId > 0) {
+        $params['pe'] = $employeeId;
+    }
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Sync one employee's payroll_run_components rows with the current suggestions
+ * and return the effective rows for calculation. Rules:
+ * - a row the preparer touched (override_reason / updated_by) keeps its ACTUAL
+ *   amount; only its suggestion refreshes;
+ * - one-time / overtime / service-charge rows are never regenerated here;
+ * - untouched standard rows follow the suggestion; stale ones are removed.
+ * The snapshot columns (identity + ledger mapping) refresh while the run is
+ * still editable; they freeze naturally once the run is approved/posted
+ * because calculation is no longer allowed.
+ */
+function payroll_sync_run_components(array $run, array $employee, array $componentLines): array
+{
+    $runId = (int) ($run['id'] ?? 0);
+    if ($runId <= 0 || !table_exists('payroll_run_components')) {
+        // No persisted run context (e.g. ad-hoc preview): map suggestions only.
+        return array_map(static fn (array $line): array => payroll_component_snapshot_row($line['component'], [
+            'suggested_amount' => $line['amount'],
+            'amount' => $line['amount'],
+            'taxable' => $line['taxable'],
+            'source' => 'standard',
+        ]), $componentLines);
+    }
+    $employeeId = (int) $employee['id'];
+    $existing = [];
+    foreach (payroll_run_component_rows($runId, $employeeId) as $row) {
+        $existing[(string) $row['component_code']] = $row;
+    }
+
+    $pdo = db();
+    $upsert = $pdo->prepare('INSERT INTO payroll_run_components (
+            run_id, payroll_employee_id, component_id, component_code, component_name, category,
+            posting_behaviour, taxable, include_in_gross, include_in_net, calc_method,
+            debit_ledger_id, credit_ledger_id, employer_expense_ledger_id, contribution_payable_ledger_id,
+            suggested_amount, amount, source
+        ) VALUES (
+            :run_id, :pe, :component_id, :code, :name, :category,
+            :behaviour, :taxable, :in_gross, :in_net, :calc_method,
+            :dr, :cr, :er_exp, :er_pay,
+            :suggested, :amount, :source
+        ) ON DUPLICATE KEY UPDATE
+            component_id = VALUES(component_id), component_name = VALUES(component_name),
+            category = VALUES(category), posting_behaviour = VALUES(posting_behaviour),
+            taxable = VALUES(taxable), include_in_gross = VALUES(include_in_gross),
+            include_in_net = VALUES(include_in_net), calc_method = VALUES(calc_method),
+            debit_ledger_id = VALUES(debit_ledger_id), credit_ledger_id = VALUES(credit_ledger_id),
+            employer_expense_ledger_id = VALUES(employer_expense_ledger_id),
+            contribution_payable_ledger_id = VALUES(contribution_payable_ledger_id),
+            suggested_amount = VALUES(suggested_amount), amount = VALUES(amount)');
+
+    $seenCodes = [];
+    foreach ($componentLines as $line) {
+        $component = $line['component'];
+        $code = (string) $component['code'];
+        $seenCodes[] = $code;
+        $existingRow = $existing[$code] ?? null;
+        $isTouched = $existingRow !== null
+            && ((string) ($existingRow['override_reason'] ?? '') !== '' || (int) ($existingRow['updated_by'] ?? 0) > 0);
+        $amount = $isTouched ? (float) $existingRow['amount'] : (float) $line['amount'];
+        $upsert->execute([
+            'run_id' => $runId, 'pe' => $employeeId,
+            'component_id' => (int) $component['id'],
+            'code' => $code, 'name' => (string) $component['name'],
+            'category' => (string) $component['category'],
+            'behaviour' => payroll_component_behaviour($component),
+            'taxable' => $line['taxable'] ? 1 : 0,
+            'in_gross' => (int) ($component['include_in_gross'] ?? 1),
+            'in_net' => (int) ($component['include_in_net'] ?? 1),
+            'calc_method' => (string) $component['calc_type'],
+            'dr' => (int) ($component['debit_ledger_id'] ?? 0) ?: null,
+            'cr' => (int) ($component['credit_ledger_id'] ?? 0) ?: null,
+            'er_exp' => (int) ($component['employer_expense_ledger_id'] ?? 0) ?: null,
+            'er_pay' => (int) ($component['contribution_payable_ledger_id'] ?? 0) ?: null,
+            'suggested' => (float) $line['amount'],
+            'amount' => $amount,
+            'source' => 'standard',
+        ]);
+    }
+
+    // Remove standard rows whose component is no longer suggested and which the
+    // preparer never touched (touched rows and workflow rows stay).
+    foreach ($existing as $code => $row) {
+        if ((string) $row['source'] !== 'standard' || in_array($code, $seenCodes, true)) {
+            continue;
+        }
+        $isTouched = (string) ($row['override_reason'] ?? '') !== '' || (int) ($row['updated_by'] ?? 0) > 0;
+        if (!$isTouched) {
+            $pdo->prepare('DELETE FROM payroll_run_components WHERE id = :id')->execute(['id' => (int) $row['id']]);
+        }
+    }
+
+    return payroll_run_component_rows($runId, $employeeId);
+}
+
+/** Normalize a master component + values into the run-component row shape. */
+function payroll_component_snapshot_row(array $component, array $values): array
+{
+    return [
+        'component_id' => (int) ($component['id'] ?? 0),
+        'component_code' => (string) ($component['code'] ?? ''),
+        'component_name' => (string) ($component['name'] ?? ''),
+        'category' => (string) ($component['category'] ?? 'allowance'),
+        'posting_behaviour' => payroll_component_behaviour($component),
+        'taxable' => !empty($values['taxable']) ? 1 : 0,
+        'include_in_gross' => (int) ($component['include_in_gross'] ?? 1),
+        'include_in_net' => (int) ($component['include_in_net'] ?? 1),
+        'calc_method' => (string) ($component['calc_type'] ?? 'manual'),
+        'debit_ledger_id' => (int) ($component['debit_ledger_id'] ?? 0) ?: null,
+        'credit_ledger_id' => (int) ($component['credit_ledger_id'] ?? 0) ?: null,
+        'employer_expense_ledger_id' => (int) ($component['employer_expense_ledger_id'] ?? 0) ?: null,
+        'contribution_payable_ledger_id' => (int) ($component['contribution_payable_ledger_id'] ?? 0) ?: null,
+        'suggested_amount' => $values['suggested_amount'] ?? null,
+        'amount' => (float) ($values['amount'] ?? 0),
+        'override_reason' => (string) ($values['override_reason'] ?? '') ?: null,
+        'source' => (string) ($values['source'] ?? 'standard'),
+    ];
 }
 
 /**
@@ -338,7 +566,7 @@ function payroll_period_range(int $fiscalYearId, int $periodNo): array
     return [$periodStart, $periodEnd];
 }
 
-function payroll_calculate_line(array $employee, array $run, array $taxVersion, array $adjustments = []): array
+function payroll_calculate_line(array $employee, array $run, array $taxVersion, array $adjustments = [], ?array $runComponents = null): array
 {
     $basic = round((float) $employee['basic_salary'], 2);
     $originalBasic = $basic;
@@ -373,7 +601,15 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         }
     }
 
-    $componentLines = payroll_employee_component_lines($employee);
+    // The ACTUAL component amounts for this line. A persisted run keeps them in
+    // payroll_run_components (suggestions synced, period overrides preserved);
+    // an ad-hoc calculation (run id 0) falls back to pure suggestions.
+    if ($runComponents === null) {
+        [, $periodEndRef] = payroll_period_range((int) ($run['fiscal_year_id'] ?? 0), (int) ($run['period_no'] ?? 1));
+        $refDate = $periodEndRef !== '' ? $periodEndRef : trim((string) ($run['pay_date'] ?? ''));
+        $suggestions = payroll_employee_component_lines($employee, $refDate);
+        $runComponents = payroll_sync_run_components($run, $employee, $suggestions);
+    }
 
     // Per-period manual adjustments entered on THIS run's salary sheet. The extra
     // earning is taxable remuneration (into gross + assessable income); the extra
@@ -386,38 +622,53 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     $overtime = 0.0;
     $benefits = 0.0;
     $otherDeduction = 0.0;
+    $reimbursementNet = 0.0;        // paid with salary but kept out of gross
+    $componentEmployerContrib = 0.0; // employer cost only — never employee pay
     $taxableMonthly = $basic; // basic salary is always assessable
     $traceComponents = [['label' => 'Basic Salary', 'category' => 'basic', 'amount' => $basic, 'taxable' => true]];
 
-    foreach ($componentLines as $line) {
-        $component = $line['component'];
-        $amount = $line['amount'];
-        $category = (string) $component['category'];
-        if ($category === 'deduction') {
-            // Employee-borne deductions reduce net pay. Employer-paid deductions
-            // are an employer cost, NOT employee earnings — they must fall in this
-            // branch (not the allowances "else"), or they would inflate gross and,
-            // being excluded from otherDeduction, raise net pay by their full value.
-            if (!(int) $component['employer_paid']) {
-                $otherDeduction += $amount;
+    foreach ($runComponents as $row) {
+        $amount = round((float) ($row['amount'] ?? 0), 2);
+        $category = (string) ($row['category'] ?? 'allowance');
+        $behaviour = (string) ($row['posting_behaviour'] ?? 'category_default');
+        $rowTaxable = (int) ($row['taxable'] ?? 1) === 1;
+        $inGross = (int) ($row['include_in_gross'] ?? 1) === 1;
+        $inNet = (int) ($row['include_in_net'] ?? 1) === 1;
+        $isDeductionFamily = in_array($behaviour, ['deduction_liability', 'advance_recovery'], true)
+            || in_array($category, ['deduction', 'tax', 'advance_recovery'], true);
+
+        if ($amount != 0.0 && $behaviour !== 'non_posting' && $category !== 'info') {
+            if ($behaviour === 'employer_contribution') {
+                $componentEmployerContrib += $amount;
+            } elseif ($isDeductionFamily) {
+                if ($inNet) {
+                    $otherDeduction += $amount;
+                }
+            } elseif ($category === 'overtime') {
+                $overtime += $amount;
+            } elseif (!$inGross) {
+                if ($inNet) {
+                    $reimbursementNet += $amount; // e.g. expense reimbursement
+                }
+            } elseif ($category === 'benefit' || $category === 'reimbursement') {
+                $benefits += $amount;
+            } else {
+                $allowances += $amount;
             }
-        } elseif ($category === 'overtime') {
-            $overtime += $amount;
-        } elseif ($category === 'benefit') {
-            $benefits += $amount;
-        } else {
-            $allowances += $amount;
-        }
-        if ((int) $component['taxable'] && $category !== 'deduction') {
-            $taxableMonthly += $amount;
+            if ($rowTaxable && !$isDeductionFamily && $behaviour !== 'employer_contribution') {
+                $taxableMonthly += $amount;
+            }
         }
         $traceComponents[] = [
-            'label' => (string) $component['name'],
-            'code' => (string) $component['code'],
+            'label' => (string) ($row['component_name'] ?? ''),
+            'code' => (string) ($row['component_code'] ?? ''),
             'category' => $category,
             'amount' => $amount,
-            'taxable' => (bool) $component['taxable'],
-            'employer_paid' => (bool) $component['employer_paid'],
+            'suggested' => isset($row['suggested_amount']) && $row['suggested_amount'] !== null ? (float) $row['suggested_amount'] : null,
+            'taxable' => $rowTaxable,
+            'source' => (string) ($row['source'] ?? 'standard'),
+            'override_reason' => (string) ($row['override_reason'] ?? ''),
+            'behaviour' => $behaviour,
         ];
     }
 
@@ -483,7 +734,7 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     $sstMonth = $annualTax > 0.004 ? round($taxMonth * ($sstAnnual / $annualTax), 2) : 0.0;
     $sstMonth = min($sstMonth, $taxMonth);
 
-    $netPay = round($gross - $retEmployeeMonth - $taxMonth - $advanceDeduction - $otherDeduction - $adjDeduction, 2);
+    $netPay = round($gross + $reimbursementNet - $retEmployeeMonth - $taxMonth - $advanceDeduction - $otherDeduction - $adjDeduction, 2);
 
     $warnings = [];
     if ($netPay < 0) {
@@ -518,6 +769,8 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         'adj_earning' => $adjEarning,
         'adj_deduction' => $adjDeduction,
         'adj_remark' => $adjRemark,
+        'reimbursement_net' => round($reimbursementNet, 2),
+        'component_employer_contrib' => round($componentEmployerContrib, 2),
         'net_pay' => $netPay,
         'line_status' => $netPay < 0 ? 'error' : ($warnings !== [] ? 'warning' : 'ok'),
         'warnings' => $warnings,
@@ -609,6 +862,12 @@ function payroll_calculate_run(int $runId): array
 
     $pdo->beginTransaction();
     try {
+        // Refresh this run's weekly-overtime claim before the lines calculate,
+        // so each employee's OT run component carries the period's approved
+        // overtime exactly once (claims stamp run_id — no double payment).
+        if (table_exists('payroll_run_components')) {
+            payroll_ot_inject_run($run, payroll_settings((int) $run['company_id']));
+        }
         $pdo->prepare('DELETE FROM payroll_run_lines WHERE run_id = :run')->execute(['run' => $runId]);
         $insert = $pdo->prepare('INSERT INTO payroll_run_lines (
                 run_id, payroll_employee_id, basic, allowances, overtime, benefits, gross,
@@ -656,8 +915,15 @@ function payroll_calculate_run(int $runId): array
             $totals['gross'] += $calc['gross'];
             $totals['tax'] += $calc['tax_month'];
             $totals['deductions'] += $calc['retirement_employee_month'] + $calc['advance_deduction'] + $calc['other_deduction'] + $calc['adj_deduction'];
-            $totals['employer'] += $calc['retirement_employer_month'];
+            $totals['employer'] += $calc['retirement_employer_month'] + $calc['component_employer_contrib'];
             $totals['net'] += $calc['net_pay'];
+        }
+        // Component rows for employees no longer on this run are stale.
+        if (table_exists('payroll_run_components')) {
+            $keepIds = array_map(static fn (array $e): int => (int) $e['id'], $employees);
+            $pdo->prepare('DELETE FROM payroll_run_components WHERE run_id = ?'
+                . ' AND payroll_employee_id NOT IN (' . implode(',', array_fill(0, count($keepIds), '?')) . ')')
+                ->execute(array_merge([$runId], $keepIds));
         }
         $pdo->prepare("UPDATE payroll_runs SET status = 'calculated', tax_version_id = :tv,
                 total_gross = :g, total_tax = :t, total_deductions = :d,
@@ -772,6 +1038,119 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
     }
 }
 
+/**
+ * Period entry: set the ACTUAL amount of one component for one employee on a
+ * draft/calculated run. Covers accept-as-is, change, change-to-zero, one-time
+ * add ($oneTime) and remove ($remove). A change away from the suggestion
+ * requires a reason; every touch records who and when, and the employee's
+ * whole line (tax, net) recalculates. Returns ['ok'=>bool, 'error'=>?string].
+ */
+function payroll_set_run_component(int $runId, int $employeeId, int $componentId, float $amount, string $reason, int $userId, bool $oneTime = false, bool $remove = false): array
+{
+    $run = payroll_run($runId);
+    if (!$run || !in_array((string) $run['status'], ['draft', 'calculated'], true)) {
+        return ['ok' => false, 'error' => 'Component amounts can only change while the run is draft or calculated.'];
+    }
+    $empStmt = db()->prepare('SELECT * FROM payroll_employees WHERE id = :id AND company_id = :cid LIMIT 1');
+    $empStmt->execute(['id' => $employeeId, 'cid' => (int) $run['company_id']]);
+    $employee = $empStmt->fetch();
+    if (!$employee) {
+        return ['ok' => false, 'error' => 'Employee is not on this company\'s payroll.'];
+    }
+    $compStmt = db()->prepare('SELECT * FROM payroll_components WHERE id = :id AND company_id = :cid LIMIT 1');
+    $compStmt->execute(['id' => $componentId, 'cid' => (int) $run['company_id']]);
+    $component = $compStmt->fetch();
+    if (!$component) {
+        return ['ok' => false, 'error' => 'Component not found for this company.'];
+    }
+    if ($oneTime && (int) $component['active'] !== 1) {
+        return ['ok' => false, 'error' => 'An inactive component cannot be added to payroll.'];
+    }
+    $amount = round($amount, 2);
+    if ($amount < 0) {
+        return ['ok' => false, 'error' => 'Component amounts cannot be negative — use a deduction component instead.'];
+    }
+    if ($amount == 0.0 && !$remove && (int) ($component['allow_zero'] ?? 1) !== 1) {
+        return ['ok' => false, 'error' => 'This component does not allow a zero amount. Remove it from the month instead.'];
+    }
+    if (!$remove && !$oneTime && (int) ($component['allow_period_override'] ?? 1) !== 1) {
+        return ['ok' => false, 'error' => 'This component does not allow per-month overrides.'];
+    }
+
+    $code = (string) $component['code'];
+    $rowStmt = db()->prepare('SELECT * FROM payroll_run_components WHERE run_id = :run AND payroll_employee_id = :pe AND component_code = :code LIMIT 1');
+    $rowStmt->execute(['run' => $runId, 'pe' => $employeeId, 'code' => $code]);
+    $row = $rowStmt->fetch();
+
+    if ($remove) {
+        if ($row) {
+            db()->prepare('DELETE FROM payroll_run_components WHERE id = :id')->execute(['id' => (int) $row['id']]);
+            log_activity('payroll_run', $runId, 'component_removed', $code . ' removed for employee #' . $employeeId . ($reason !== '' ? ' — ' . $reason : ''), $userId);
+        }
+    } else {
+        $suggested = $row ? ($row['suggested_amount'] !== null ? (float) $row['suggested_amount'] : null) : null;
+        $changed = $suggested === null || abs($amount - $suggested) > 0.004;
+        if ($changed && trim($reason) === '') {
+            return ['ok' => false, 'error' => 'Give a short reason when the amount differs from the suggested value — it is kept in the audit trail.'];
+        }
+        if ($row) {
+            db()->prepare('UPDATE payroll_run_components SET amount = :amount, override_reason = :reason, updated_by = :by WHERE id = :id')
+                ->execute(['amount' => $amount, 'reason' => $changed ? trim($reason) : null, 'by' => $userId, 'id' => (int) $row['id']]);
+        } else {
+            $snapshot = payroll_component_snapshot_row($component, [
+                'suggested_amount' => null,
+                'amount' => $amount,
+                'taxable' => (int) $component['taxable'] === 1,
+                'override_reason' => trim($reason),
+                'source' => 'one_time',
+            ]);
+            db()->prepare('INSERT INTO payroll_run_components (
+                    run_id, payroll_employee_id, component_id, component_code, component_name, category,
+                    posting_behaviour, taxable, include_in_gross, include_in_net, calc_method,
+                    debit_ledger_id, credit_ledger_id, employer_expense_ledger_id, contribution_payable_ledger_id,
+                    suggested_amount, amount, override_reason, source, created_by, updated_by
+                ) VALUES (:run_id, :pe, :component_id, :code, :name, :category, :behaviour, :taxable, :in_gross,
+                    :in_net, :calc_method, :dr, :cr, :er_exp, :er_pay, :suggested, :amount, :reason, :source, :by, :by2)')
+                ->execute([
+                    'run_id' => $runId, 'pe' => $employeeId,
+                    'component_id' => (int) $component['id'], 'code' => $snapshot['component_code'],
+                    'name' => $snapshot['component_name'], 'category' => $snapshot['category'],
+                    'behaviour' => $snapshot['posting_behaviour'], 'taxable' => $snapshot['taxable'],
+                    'in_gross' => $snapshot['include_in_gross'], 'in_net' => $snapshot['include_in_net'],
+                    'calc_method' => $snapshot['calc_method'],
+                    'dr' => $snapshot['debit_ledger_id'], 'cr' => $snapshot['credit_ledger_id'],
+                    'er_exp' => $snapshot['employer_expense_ledger_id'], 'er_pay' => $snapshot['contribution_payable_ledger_id'],
+                    'suggested' => null, 'amount' => $amount, 'reason' => $snapshot['override_reason'],
+                    'source' => 'one_time', 'by' => $userId, 'by2' => $userId,
+                ]);
+        }
+        log_activity('payroll_run', $runId, 'component_override',
+            $code . ' for employee #' . $employeeId . ' set to ' . number_format($amount, 2)
+            . ($suggested !== null ? ' (suggested ' . number_format($suggested, 2) . ')' : ' (one-time)')
+            . ($reason !== '' ? ' — ' . $reason : ''), $userId);
+    }
+
+    return payroll_recalculate_employee_line($runId, $employeeId);
+}
+
+/** Recalculate ONE employee's stored line + the run totals (component edits). */
+function payroll_recalculate_employee_line(int $runId, int $employeeId): array
+{
+    $run = payroll_run($runId);
+    if (!$run) {
+        return ['ok' => false, 'error' => 'Run not found.'];
+    }
+    $lineStmt = db()->prepare('SELECT id, adj_earning, adj_deduction, adj_remark FROM payroll_run_lines WHERE run_id = :run AND payroll_employee_id = :pe LIMIT 1');
+    $lineStmt->execute(['run' => $runId, 'pe' => $employeeId]);
+    $line = $lineStmt->fetch();
+    if (!$line) {
+        // No line yet (employee added mid-preparation) — full recalc covers it.
+        $calc = payroll_calculate_run($runId);
+        return $calc['ok'] ? ['ok' => true] : $calc;
+    }
+    return payroll_set_line_adjustment($runId, (int) $line['id'], (float) $line['adj_earning'], (float) $line['adj_deduction'], (string) ($line['adj_remark'] ?? ''));
+}
+
 function payroll_run(int $runId): ?array
 {
     $stmt = db()->prepare('SELECT * FROM payroll_runs WHERE id = :id LIMIT 1');
@@ -781,12 +1160,13 @@ function payroll_run(int $runId): ?array
 
 function payroll_run_lines(int $runId): array
 {
-    $stmt = db()->prepare('SELECT l.*, pe.employee_code, pe.department, pe.pan_no, pe.bank_account,
-            pe.marital_status, pe.retirement_scheme, u.name AS person_name
+    $stmt = db()->prepare("SELECT l.*, pe.employee_code, pe.department, pe.pan_no, pe.bank_account,
+            pe.marital_status, pe.retirement_scheme,
+            COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name
         FROM payroll_run_lines l
         INNER JOIN payroll_employees pe ON pe.id = l.payroll_employee_id
-        INNER JOIN users u ON u.id = pe.user_id
-        WHERE l.run_id = :run ORDER BY pe.employee_code ASC');
+        LEFT JOIN users u ON u.id = pe.user_id
+        WHERE l.run_id = :run ORDER BY pe.employee_code ASC");
     $stmt->execute(['run' => $runId]);
     return $stmt->fetchAll();
 }
@@ -843,10 +1223,179 @@ function payroll_validate_run(array $run, array $settings, int $approverId): arr
     if ((int) ($settings['enforce_sod'] ?? 0) === 1 && (int) $run['created_by'] === $approverId) {
         $errors[] = 'Segregation of duties: the preparer of this run cannot approve it.';
     }
+    // Component-level mapping problems block POSTING (this gate), never
+    // preparation — the sheet stays editable while mappings are completed.
+    foreach (payroll_missing_component_mappings($run, $settings) as $missingMapping) {
+        $errors[] = 'Component mapping: ' . $missingMapping;
+    }
     return ['errors' => $errors, 'warnings' => $warnings];
 }
 
-/** The accrual journal entries for a calculated run (preview + posting). */
+/**
+ * Resolve a stored run-component row's behaviour (legacy snapshots may still
+ * carry 'category_default').
+ */
+function payroll_row_behaviour(array $row): string
+{
+    $behaviour = (string) ($row['posting_behaviour'] ?? 'category_default');
+    if ($behaviour !== 'category_default') {
+        return $behaviour;
+    }
+    return match ((string) ($row['category'] ?? 'allowance')) {
+        'deduction', 'tax' => 'deduction_liability',
+        'employer_contribution' => 'employer_contribution',
+        'reimbursement' => 'reimbursement',
+        'advance_recovery' => 'advance_recovery',
+        'info' => 'non_posting',
+        default => 'earning_expense',
+    };
+}
+
+/**
+ * Component-level posting plan for a run: how each stored run-component line
+ * maps to ledgers, given its snapshot mapping with the general control
+ * ledgers as fallback. Returns:
+ *   ['earning_moves' => [ledger => amt], 'extra_debits' => [ledger => amt],
+ *    'ded_credits' => [ledger => amt], 'ded_reallocated' => float,
+ *    'earning_reallocated' => float, 'er_debits' => [ledger => amt],
+ *    'er_credits' => [ledger => amt], 'custom' => [[dr, cr, amt, name]],
+ *    'missing' => [error strings], 'names' => [ledger => [component names]]]
+ */
+function payroll_component_posting_plan(array $run, array $settings): array
+{
+    $plan = [
+        'earning_moves' => [], 'extra_debits' => [], 'ded_credits' => [],
+        'er_debits' => [], 'er_credits' => [], 'custom' => [],
+        'earning_reallocated' => 0.0, 'ded_reallocated' => 0.0,
+        'missing' => [], 'names' => [],
+    ];
+    if (!table_exists('payroll_run_components')) {
+        return $plan;
+    }
+    $salaryExpense = (int) ($settings['salary_expense_ledger_id'] ?? 0);
+    $tdsLedger = (int) ($settings['tds_payable_ledger_id'] ?? 0);
+    $advanceLedger = (int) ($settings['advance_ledger_id'] ?? 0);
+    $erExpense = (int) ($settings['employer_contrib_expense_ledger_id'] ?? 0);
+    $erPayable = (int) ($settings['retirement_payable_ledger_id'] ?? 0);
+
+    $add = static function (array &$bucket, int $ledgerId, float $amount): void {
+        $bucket[$ledgerId] = round(($bucket[$ledgerId] ?? 0.0) + $amount, 2);
+    };
+    $name = static function (array &$names, int $ledgerId, string $componentName): void {
+        $names[$ledgerId][$componentName] = true;
+    };
+
+    foreach (payroll_run_component_rows((int) $run['id']) as $row) {
+        $amount = round((float) $row['amount'], 2);
+        if ($amount <= 0.004) {
+            continue; // zero amounts never create accounting lines
+        }
+        $behaviour = payroll_row_behaviour($row);
+        $label = (string) $row['component_name'];
+        $inGross = (int) ($row['include_in_gross'] ?? 1) === 1;
+        $inNet = (int) ($row['include_in_net'] ?? 1) === 1;
+        $ownDr = (int) ($row['debit_ledger_id'] ?? 0);
+        $ownCr = (int) ($row['credit_ledger_id'] ?? 0);
+
+        switch ($behaviour) {
+            case 'non_posting':
+                break;
+            case 'earning_expense':
+            case 'reimbursement':
+                if (!$inGross && !$inNet) {
+                    break; // informational only
+                }
+                $dr = $ownDr ?: $salaryExpense;
+                if ($dr <= 0) {
+                    $plan['missing'][] = $label . ': no expense ledger (map the component or the Salary expense control ledger).';
+                    break;
+                }
+                if ($inGross) {
+                    // Already inside the gross salary-expense debit — move it to
+                    // its own ledger only when one is mapped.
+                    if ($ownDr > 0 && $ownDr !== $salaryExpense) {
+                        $add($plan['earning_moves'], $ownDr, $amount);
+                        $plan['earning_reallocated'] = round($plan['earning_reallocated'] + $amount, 2);
+                        $name($plan['names'], $ownDr, $label);
+                    }
+                } else {
+                    // Outside gross but paid with the salary (e.g. reimbursement):
+                    // its own debit on top; the net-salary credit already grew.
+                    $add($plan['extra_debits'], $dr, $amount);
+                    $name($plan['names'], $dr, $label);
+                }
+                break;
+            case 'deduction_liability':
+                if (!$inNet) {
+                    break;
+                }
+                $cr = $ownCr ?: ((string) $row['category'] === 'tax' ? $tdsLedger : 0);
+                if ((string) $row['category'] === 'tax' && $cr <= 0) {
+                    $plan['missing'][] = $label . ': no tax payable ledger (map the component or the TDS control ledger).';
+                    break;
+                }
+                if ($cr > 0) {
+                    // Credit its own liability ledger instead of parking the
+                    // amount inside Salary Payable.
+                    $add($plan['ded_credits'], $cr, $amount);
+                    $plan['ded_reallocated'] = round($plan['ded_reallocated'] + $amount, 2);
+                    $name($plan['names'], $cr, $label);
+                }
+                // No own ledger: the withheld amount stays in Salary Payable
+                // until remitted — deliberate control-account treatment.
+                break;
+            case 'advance_recovery':
+                if (!$inNet) {
+                    break;
+                }
+                $cr = $ownCr ?: $advanceLedger;
+                if ($cr <= 0) {
+                    $plan['missing'][] = $label . ': no advance ledger (map the component or the Employee advance control ledger).';
+                    break;
+                }
+                $add($plan['ded_credits'], $cr, $amount);
+                $plan['ded_reallocated'] = round($plan['ded_reallocated'] + $amount, 2);
+                $name($plan['names'], $cr, $label);
+                break;
+            case 'employer_contribution':
+                $drE = (int) ($row['employer_expense_ledger_id'] ?? 0) ?: ($ownDr ?: $erExpense);
+                $crP = (int) ($row['contribution_payable_ledger_id'] ?? 0) ?: ($ownCr ?: $erPayable);
+                if ($drE <= 0 || $crP <= 0) {
+                    $plan['missing'][] = $label . ': employer contribution needs an expense AND a payable ledger (component mapping or the control ledgers).';
+                    break;
+                }
+                $add($plan['er_debits'], $drE, $amount);
+                $add($plan['er_credits'], $crP, $amount);
+                $name($plan['names'], $drE, $label);
+                $name($plan['names'], $crP, $label);
+                break;
+            case 'custom':
+                if ($ownDr <= 0 || $ownCr <= 0) {
+                    $plan['missing'][] = $label . ': custom posting needs BOTH a debit and a credit ledger on the component.';
+                    break;
+                }
+                $plan['custom'][] = ['dr' => $ownDr, 'cr' => $ownCr, 'amount' => $amount, 'name' => $label];
+                break;
+        }
+    }
+    return $plan;
+}
+
+/**
+ * Blocking list of component-mapping problems for a run — empty means every
+ * used component can post. Never silently substitutes an unrelated ledger.
+ */
+function payroll_missing_component_mappings(array $run, array $settings): array
+{
+    return payroll_component_posting_plan($run, $settings)['missing'];
+}
+
+/**
+ * The accrual journal entries for a calculated run (preview + posting).
+ * Component-mapped: each pay component posts through its own ledgers when
+ * mapped, with the general payroll control ledgers as the documented
+ * fallback. Lines are consolidated per ledger; a memo names the components.
+ */
 function payroll_accrual_entries(array $run, array $settings): array
 {
     $lines = payroll_run_lines((int) $run['id']);
@@ -861,10 +1410,28 @@ function payroll_accrual_entries(array $run, array $settings): array
     $sst = $sum('sst_month');
     $net = $sum('net_pay');
 
+    $plan = payroll_component_posting_plan($run, $settings);
+    $memoFor = static function (int $ledgerId, string $fallback) use ($plan): string {
+        $names = array_keys($plan['names'][$ledgerId] ?? []);
+        return $names === [] ? $fallback : implode(', ', $names);
+    };
+
     $entries = [];
-    $entries[] = ['ledger_id' => (int) $settings['salary_expense_ledger_id'], 'entry_type' => 'debit', 'amount' => $gross, 'memo' => 'Gross earnings'];
+    // Gross earnings stay one debit on the salary-expense control ledger MINUS
+    // whatever moved to component-specific expense ledgers.
+    $genericGross = round($gross - $plan['earning_reallocated'], 2);
+    $entries[] = ['ledger_id' => (int) $settings['salary_expense_ledger_id'], 'entry_type' => 'debit', 'amount' => $genericGross, 'memo' => 'Gross earnings'];
+    foreach ($plan['earning_moves'] as $ledgerId => $amount) {
+        $entries[] = ['ledger_id' => (int) $ledgerId, 'entry_type' => 'debit', 'amount' => $amount, 'memo' => $memoFor((int) $ledgerId, 'Component earnings')];
+    }
+    foreach ($plan['extra_debits'] as $ledgerId => $amount) {
+        $entries[] = ['ledger_id' => (int) $ledgerId, 'entry_type' => 'debit', 'amount' => $amount, 'memo' => $memoFor((int) $ledgerId, 'Reimbursements paid with salary')];
+    }
     if ($retEmployer > 0) {
         $entries[] = ['ledger_id' => (int) $settings['employer_contrib_expense_ledger_id'], 'entry_type' => 'debit', 'amount' => $retEmployer, 'memo' => 'Employer retirement contribution'];
+    }
+    foreach ($plan['er_debits'] as $ledgerId => $amount) {
+        $entries[] = ['ledger_id' => (int) $ledgerId, 'entry_type' => 'debit', 'amount' => $amount, 'memo' => $memoFor((int) $ledgerId, 'Employer contribution')];
     }
     if ($tax > 0) {
         // Nepal's withholding posts as TWO heads: the 1% first-slab Social
@@ -887,16 +1454,42 @@ function payroll_accrual_entries(array $run, array $settings): array
     if ($advance > 0) {
         $entries[] = ['ledger_id' => (int) $settings['advance_ledger_id'], 'entry_type' => 'credit', 'amount' => $advance, 'memo' => 'Employee advance recovered'];
     }
-    if ($otherDeduction + $adjDeduction > 0) {
-        // Other deductions AND manual adjustment deductions stay in salary
-        // payable until remitted separately. Both are post-tax employee
-        // deductions subtracted from net_pay; omitting adj_deduction here
-        // left the journal unbalanced by exactly that amount, so any run
-        // with an "Extra deduction" could never post its accrual.
-        $net = round($net + $otherDeduction + $adjDeduction, 2);
+    foreach ($plan['ded_credits'] as $ledgerId => $amount) {
+        $entries[] = ['ledger_id' => (int) $ledgerId, 'entry_type' => 'credit', 'amount' => $amount, 'memo' => $memoFor((int) $ledgerId, 'Component deduction withheld')];
     }
+    foreach ($plan['er_credits'] as $ledgerId => $amount) {
+        $entries[] = ['ledger_id' => (int) $ledgerId, 'entry_type' => 'credit', 'amount' => $amount, 'memo' => $memoFor((int) $ledgerId, 'Employer contribution payable')];
+    }
+    foreach ($plan['custom'] as $pair) {
+        $entries[] = ['ledger_id' => (int) $pair['dr'], 'entry_type' => 'debit', 'amount' => $pair['amount'], 'memo' => $pair['name']];
+        $entries[] = ['ledger_id' => (int) $pair['cr'], 'entry_type' => 'credit', 'amount' => $pair['amount'], 'memo' => $pair['name']];
+    }
+    // Other deductions AND manual adjustment deductions stay in salary payable
+    // until remitted separately — EXCEPT the portion a component maps to its
+    // own liability/recovery ledger (credited above).
+    $net = round($net + $otherDeduction + $adjDeduction - $plan['ded_reallocated'], 2);
     $entries[] = ['ledger_id' => (int) $settings['salary_payable_ledger_id'], 'entry_type' => 'credit', 'amount' => $net, 'memo' => 'Net salary payable'];
-    return array_values(array_filter($entries, static fn (array $entry): bool => $entry['amount'] > 0.004));
+
+    // Consolidate per (ledger, side) so one ledger shows one line.
+    $consolidated = [];
+    foreach ($entries as $entry) {
+        if ($entry['amount'] <= 0.004) {
+            continue;
+        }
+        $key = $entry['entry_type'] . ':' . $entry['ledger_id'];
+        if (!isset($consolidated[$key])) {
+            $consolidated[$key] = $entry;
+            continue;
+        }
+        $consolidated[$key]['amount'] = round($consolidated[$key]['amount'] + $entry['amount'], 2);
+        if (!str_contains($consolidated[$key]['memo'], $entry['memo'])) {
+            $consolidated[$key]['memo'] .= '; ' . $entry['memo'];
+        }
+    }
+    // Debits first, then credits — the conventional voucher order.
+    $ordered = array_values($consolidated);
+    usort($ordered, static fn (array $a, array $b): int => strcmp($a['entry_type'], $b['entry_type']));
+    return $ordered;
 }
 
 /**

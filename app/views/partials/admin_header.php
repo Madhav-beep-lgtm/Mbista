@@ -84,10 +84,11 @@ $headerPageIcons = [
     'hr.php' => 'attendance', 'manage-clients.php' => 'handshake', 'client-books.php' => 'accounting',
     'search.php' => 'search', 'export-ledger.php' => 'reports', 'budgets.php' => 'pie',
     'payroll.php' => 'card', 'payroll-employees.php' => 'teams', 'payroll-settings.php' => 'sliders',
+    'payroll-overtime.php' => 'attendance', 'payroll-service-charge.php' => 'handshake',
     'payment-gateways.php' => 'card',
     'insights.php' => 'insights',
 ];
-$headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php'];
+$headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php', 'payroll-overtime.php', 'payroll-service-charge.php'];
 $headerPayrollActive = in_array($headerScript, $headerPayrollScripts, true);
 if ($pageBreadcrumb === null) {
     $headerTrailHome = [['Home', 'admin/index.php']];
@@ -179,6 +180,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <?php endforeach; ?>
                 </div>
             </div>
+            <span class="admin-nav-group">Payroll</span>
+            <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('teams') ?>Employees &amp; Advances</a>
+            <a class="<?= $headerScript === 'payroll-overtime.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-overtime.php')) ?>"><?= icon('attendance') ?>Overtime Review</a>
+            <a class="<?= $headerScript === 'payroll-service-charge.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-service-charge.php')) ?>"><?= icon('handshake') ?>Service Charge</a>
             <span class="admin-nav-group">Reports</span>
             <a class="<?= $headerScript === 'reports-center.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <span class="admin-nav-group">System</span>
@@ -264,9 +269,12 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </a>
                 <div class="mbw-subnav">
                     <a class="<?= $headerScript === 'payroll.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll.php')) ?>"><?= icon('card') ?>Payroll Processing</a>
-                    <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('teams') ?>Employees &amp; Advances</a>
+                    <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('teams') ?>Employees &amp; Pay Structure</a>
+                    <a class="<?= $headerScript === 'payroll-overtime.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-overtime.php')) ?>"><?= icon('attendance') ?>Overtime Review</a>
+                    <a class="<?= $headerScript === 'payroll-service-charge.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-service-charge.php')) ?>"><?= icon('handshake') ?>Service Charge</a>
                     <a class="<?= $headerScript === 'payroll-settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-settings.php')) ?>"><?= icon('sliders') ?>Payroll Settings</a>
-                    <a href="<?= e(url('admin/reports-center.php?report=salary-sheet')) ?>"><?= icon('analytics') ?>Salary Sheet Report</a>
+                    <a href="<?= e(url('admin/payroll-settings.php#components')) ?>"><?= icon('layers') ?>Pay Components</a>
+                    <a href="<?= e(url('admin/reports-center.php?report=salary-sheet')) ?>"><?= icon('analytics') ?>Payroll Reports</a>
                 </div>
             </div>
 

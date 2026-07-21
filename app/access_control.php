@@ -866,7 +866,7 @@ function rbac_modules(): array
         'purchases'  => ['label' => 'Purchases',             'actions' => ['view', 'create', 'edit', 'export']],
         'receipts'   => ['label' => 'Receipts & Payments',   'actions' => ['view', 'create', 'edit', 'export']],
         'inventory'  => ['label' => 'Inventory',             'actions' => ['view', 'create', 'edit', 'export']],
-        'payroll'    => ['label' => 'Payroll',               'actions' => ['view', 'create', 'post', 'export']],
+        'payroll'    => ['label' => 'Payroll',               'actions' => ['view', 'create', 'adjust', 'approve', 'post', 'export']],
         'reports'    => ['label' => 'Reports',               'actions' => ['view', 'export']],
         'documents'  => ['label' => 'Documents',             'actions' => ['view', 'create', 'edit']],
         'compliance' => ['label' => 'Compliance',            'actions' => ['view', 'edit']],
@@ -889,13 +889,16 @@ function rbac_action_labels(): array
 /**
  * All granted "module.action" keys for a user (empty array = unconfigured).
  */
-function staff_permission_keys(int $userId): array
+function staff_permission_keys(int $userId, bool $refresh = false): array
 {
     if ($userId <= 0 || !table_exists('staff_permissions')) {
         return [];
     }
 
     static $cache = [];
+    if ($refresh) {
+        unset($cache[$userId]);
+    }
     if (isset($cache[$userId])) {
         return $cache[$userId];
     }
@@ -1026,4 +1029,7 @@ function set_staff_permissions(int $userId, array $grants, ?int $grantedBy = nul
             $ins->execute(['uid' => $userId, 'm' => $module, 'a' => $action, 'by' => $grantedBy]);
         }
     }
+    // Drop the per-request cache so a permission check later in THIS request
+    // sees the new grant set instead of the stale one.
+    staff_permission_keys($userId, true);
 }

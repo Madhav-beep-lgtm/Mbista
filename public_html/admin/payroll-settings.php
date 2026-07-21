@@ -56,18 +56,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $componentId = (int) ($_POST['component_id'] ?? 0);
         $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
-        $category = in_array((string) ($_POST['category'] ?? ''), ['allowance', 'overtime', 'benefit', 'deduction'], true) ? (string) $_POST['category'] : 'allowance';
-        $calcType = (string) ($_POST['calc_type'] ?? 'fixed') === 'percent_basic' ? 'percent_basic' : 'fixed';
+        $categories = ['allowance', 'overtime', 'benefit', 'deduction', 'employer_contribution', 'reimbursement', 'advance_recovery', 'tax', 'info'];
+        $category = in_array((string) ($_POST['category'] ?? ''), $categories, true) ? (string) $_POST['category'] : 'allowance';
+        $behaviours = ['category_default', 'earning_expense', 'deduction_liability', 'employer_contribution', 'reimbursement', 'advance_recovery', 'non_posting', 'custom'];
+        $behaviour = in_array((string) ($_POST['posting_behaviour'] ?? ''), $behaviours, true) ? (string) $_POST['posting_behaviour'] : 'category_default';
+        $calcTypes = ['manual', 'fixed', 'percent_basic', 'overtime_hours', 'service_charge'];
+        $calcType = in_array((string) ($_POST['calc_type'] ?? ''), $calcTypes, true) ? (string) $_POST['calc_type'] : 'manual';
         if ($code === '' || $name === '') {
             flash('error', 'Component code and name are required.');
+            redirect('admin/payroll-settings.php');
+        }
+        // Required ledger mappings depend on the behaviour — validated here so
+        // a custom component can never save half-mapped.
+        $debitLedgerId = (int) ($_POST['debit_ledger_id'] ?? 0) ?: null;
+        $creditLedgerId = (int) ($_POST['credit_ledger_id'] ?? 0) ?: null;
+        $erExpenseLedgerId = (int) ($_POST['employer_expense_ledger_id'] ?? 0) ?: null;
+        $erPayableLedgerId = (int) ($_POST['contribution_payable_ledger_id'] ?? 0) ?: null;
+        if ($behaviour === 'custom' && ($debitLedgerId === null || $creditLedgerId === null)) {
+            flash('error', 'Custom posting needs BOTH a debit and a credit ledger.');
+            redirect('admin/payroll-settings.php');
+        }
+        $effectiveFrom = trim((string) ($_POST['effective_from'] ?? '')) ?: null;
+        $effectiveTo = trim((string) ($_POST['effective_to'] ?? '')) ?: null;
+        if ($effectiveFrom !== null && $effectiveTo !== null && $effectiveTo < $effectiveFrom) {
+            flash('error', 'The component effective-to date cannot be before effective-from.');
             redirect('admin/payroll-settings.php');
         }
         $params = [
             'company_id' => $companyId, 'code' => $code, 'name' => $name,
             'name_np' => trim((string) ($_POST['name_np'] ?? '')) ?: null,
-            'category' => $category, 'calc_type' => $calcType,
+            'description' => trim((string) ($_POST['description'] ?? '')) ?: null,
+            'category' => $category, 'posting_behaviour' => $behaviour, 'calc_type' => $calcType,
             'default_value' => max(0.0, round((float) ($_POST['default_value'] ?? 0), 2)),
+            'percentage' => (float) ($_POST['percentage'] ?? 0) > 0 ? round((float) $_POST['percentage'], 4) : null,
+            'calc_basis' => trim((string) ($_POST['calc_basis'] ?? '')) ?: null,
+            'debit_ledger_id' => $debitLedgerId,
+            'credit_ledger_id' => $creditLedgerId,
+            'employer_expense_ledger_id' => $erExpenseLedgerId,
+            'contribution_payable_ledger_id' => $erPayableLedgerId,
             'taxable' => isset($_POST['taxable']) ? 1 : 0,
+            'include_in_gross' => isset($_POST['include_in_gross']) ? 1 : 0,
+            'include_in_net' => isset($_POST['include_in_net']) ? 1 : 0,
+            'retirement_basis' => isset($_POST['retirement_basis']) ? 1 : 0,
+            'overtime_basis' => isset($_POST['overtime_basis']) ? 1 : 0,
+            'service_charge_basis' => isset($_POST['service_charge_basis']) ? 1 : 0,
+            'allow_employee_override' => isset($_POST['allow_employee_override']) ? 1 : 0,
+            'allow_period_override' => isset($_POST['allow_period_override']) ? 1 : 0,
+            'allow_zero' => isset($_POST['allow_zero']) ? 1 : 0,
+            'effective_from' => $effectiveFrom,
+            'effective_to' => $effectiveTo,
             'employer_paid' => isset($_POST['employer_paid']) ? 1 : 0,
             'active' => isset($_POST['active']) ? 1 : 0,
             'sort_order' => (int) ($_POST['sort_order'] ?? 0),
@@ -75,19 +112,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             if ($componentId > 0) {
                 $params['id'] = $componentId;
+                $params['updated_by'] = $userId;
                 db()->prepare('UPDATE payroll_components SET code = :code, name = :name, name_np = :name_np,
-                        category = :category, calc_type = :calc_type, default_value = :default_value,
-                        taxable = :taxable, employer_paid = :employer_paid, active = :active, sort_order = :sort_order
+                        description = :description, category = :category, posting_behaviour = :posting_behaviour,
+                        calc_type = :calc_type, default_value = :default_value, percentage = :percentage, calc_basis = :calc_basis,
+                        debit_ledger_id = :debit_ledger_id, credit_ledger_id = :credit_ledger_id,
+                        employer_expense_ledger_id = :employer_expense_ledger_id, contribution_payable_ledger_id = :contribution_payable_ledger_id,
+                        taxable = :taxable, include_in_gross = :include_in_gross, include_in_net = :include_in_net,
+                        retirement_basis = :retirement_basis, overtime_basis = :overtime_basis, service_charge_basis = :service_charge_basis,
+                        allow_employee_override = :allow_employee_override, allow_period_override = :allow_period_override, allow_zero = :allow_zero,
+                        effective_from = :effective_from, effective_to = :effective_to,
+                        employer_paid = :employer_paid, active = :active, sort_order = :sort_order, updated_by = :updated_by
                     WHERE id = :id AND company_id = :company_id')->execute($params);
+                log_activity('payroll_component', $componentId, 'updated', 'Pay component ' . $code . ' updated.', $userId);
             } else {
-                db()->prepare('INSERT INTO payroll_components (company_id, code, name, name_np, category, calc_type, default_value, taxable, employer_paid, active, sort_order)
-                    VALUES (:company_id, :code, :name, :name_np, :category, :calc_type, :default_value, :taxable, :employer_paid, :active, :sort_order)')->execute($params);
+                $params['created_by'] = $userId;
+                db()->prepare('INSERT INTO payroll_components (company_id, code, name, name_np, description, category, posting_behaviour,
+                        calc_type, default_value, percentage, calc_basis, debit_ledger_id, credit_ledger_id,
+                        employer_expense_ledger_id, contribution_payable_ledger_id, taxable, include_in_gross, include_in_net,
+                        retirement_basis, overtime_basis, service_charge_basis, allow_employee_override, allow_period_override, allow_zero,
+                        effective_from, effective_to, employer_paid, active, sort_order, created_by)
+                    VALUES (:company_id, :code, :name, :name_np, :description, :category, :posting_behaviour,
+                        :calc_type, :default_value, :percentage, :calc_basis, :debit_ledger_id, :credit_ledger_id,
+                        :employer_expense_ledger_id, :contribution_payable_ledger_id, :taxable, :include_in_gross, :include_in_net,
+                        :retirement_basis, :overtime_basis, :service_charge_basis, :allow_employee_override, :allow_period_override, :allow_zero,
+                        :effective_from, :effective_to, :employer_paid, :active, :sort_order, :created_by)')->execute($params);
+                log_activity('payroll_component', (int) db()->lastInsertId(), 'created', 'Pay component ' . $code . ' created.', $userId);
             }
             flash('success', 'Component saved.');
         } catch (Throwable $exception) {
-            flash('error', (string) $exception->getCode() === '23000' ? 'Component code already exists.' : 'Could not save component.');
+            flash('error', (string) $exception->getCode() === '23000' ? 'Component code already exists.' : 'Could not save component: ' . $exception->getMessage());
         }
         redirect('admin/payroll-settings.php');
+    }
+
+    if ($action === 'save_ot_sc_settings') {
+        $weekStart = max(0, min(6, (int) ($_POST['ot_week_start'] ?? 0)));
+        db()->prepare('UPDATE payroll_settings SET
+                ot_weekly_threshold = :thr, ot_week_start = :ws, ot_component_id = :otc,
+                ot_rate_source = :src, ot_monthly_hours = :mh, ot_multiplier = :mult,
+                ot_rounding = :rnd, ot_require_approval = :appr,
+                sc_component_id = :scc, sc_employee_pct = :sce, sc_employer_pct = :scr
+            WHERE company_id = :cid')
+            ->execute([
+                'thr' => max(0.0, round((float) ($_POST['ot_weekly_threshold'] ?? 40), 2)),
+                'ws' => $weekStart,
+                'otc' => (int) ($_POST['ot_component_id'] ?? 0) ?: null,
+                'src' => (string) ($_POST['ot_rate_source'] ?? '') === 'fixed_rate' ? 'fixed_rate' : 'salary_derived',
+                'mh' => max(1.0, round((float) ($_POST['ot_monthly_hours'] ?? 208), 2)),
+                'mult' => max(0.0, round((float) ($_POST['ot_multiplier'] ?? 1.5), 3)),
+                'rnd' => in_array((string) ($_POST['ot_rounding'] ?? ''), ['none', 'nearest', 'down'], true) ? (string) $_POST['ot_rounding'] : 'nearest',
+                'appr' => isset($_POST['ot_require_approval']) ? 1 : 0,
+                'scc' => (int) ($_POST['sc_component_id'] ?? 0) ?: null,
+                'sce' => max(0.0, min(100.0, round((float) ($_POST['sc_employee_pct'] ?? 68), 2))),
+                'scr' => max(0.0, min(100.0, round((float) ($_POST['sc_employer_pct'] ?? 32), 2))),
+                'cid' => $companyId,
+            ]);
+        flash('success', 'Overtime and service-charge settings saved.');
+        redirect('admin/payroll-settings.php#otsc');
     }
 
     if ($action === 'save_tax_version') {
@@ -279,33 +361,65 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
 </section>
 
-<section class="mbw-card" aria-label="Pay components">
+<section class="mbw-card" aria-label="Pay components" id="components">
     <div class="mbw-card-head"><h2>Pay Components</h2></div>
+    <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
+        Every pay head is a component with its OWN accounting treatment. Amounts are suggestions only — payroll
+        preparation may accept, change, zero, add or remove them per employee and month (with an audited reason).
+        Ledger mappings here take priority; the general control ledgers above are the documented fallback.
+    </p>
     <form method="post" class="workspace-form-grid" style="margin-bottom:14px">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="save_component">
         <input type="hidden" name="component_id" value="<?= e((int) ($editComponent['id'] ?? 0)) ?>">
-        <label>Code<input type="text" name="code" maxlength="40" value="<?= e($editComponent['code'] ?? '') ?>" required placeholder="DA"></label>
-        <label>Name<input type="text" name="name" maxlength="120" value="<?= e($editComponent['name'] ?? '') ?>" required placeholder="Dearness Allowance"></label>
+        <label>Code<input type="text" name="code" maxlength="40" value="<?= e($editComponent['code'] ?? '') ?>" required placeholder="HOUSING"></label>
+        <label>Name<input type="text" name="name" maxlength="120" value="<?= e($editComponent['name'] ?? '') ?>" required placeholder="Housing Allowance"></label>
         <label>Name (Nepali)<input type="text" name="name_np" maxlength="120" value="<?= e($editComponent['name_np'] ?? '') ?>"></label>
+        <label>Description<input type="text" name="description" maxlength="255" value="<?= e($editComponent['description'] ?? '') ?>" placeholder="Optional"></label>
         <label>Category
             <select name="category">
-                <?php foreach (['allowance' => 'Allowance (earning)', 'overtime' => 'Overtime', 'benefit' => 'Other benefit', 'deduction' => 'Deduction'] as $categoryValue => $categoryLabel): ?>
+                <?php foreach (['allowance' => 'Allowance (earning)', 'overtime' => 'Overtime', 'benefit' => 'Other benefit / earning', 'reimbursement' => 'Reimbursement', 'deduction' => 'Deduction', 'tax' => 'Tax deduction', 'advance_recovery' => 'Advance recovery', 'employer_contribution' => 'Employer contribution', 'info' => 'Informational (non-posting)'] as $categoryValue => $categoryLabel): ?>
                     <option value="<?= e($categoryValue) ?>" <?= ($editComponent['category'] ?? '') === $categoryValue ? 'selected' : '' ?>><?= e($categoryLabel) ?></option>
                 <?php endforeach; ?>
             </select>
         </label>
-        <label>Calculation
-            <select name="calc_type">
-                <option value="fixed" <?= ($editComponent['calc_type'] ?? '') === 'fixed' ? 'selected' : '' ?>>Fixed monthly amount</option>
-                <option value="percent_basic" <?= ($editComponent['calc_type'] ?? '') === 'percent_basic' ? 'selected' : '' ?>>% of basic salary</option>
+        <label>Posting behaviour
+            <select name="posting_behaviour">
+                <?php foreach (['category_default' => 'Follow category (default)', 'earning_expense' => 'Earning expense (Dr expense)', 'deduction_liability' => 'Deduction liability (Cr liability)', 'employer_contribution' => 'Employer contribution (Dr expense / Cr payable)', 'reimbursement' => 'Reimbursement (Dr expense, paid with salary)', 'advance_recovery' => 'Advance recovery (Cr advance asset)', 'non_posting' => 'Non-posting (display only)', 'custom' => 'Custom debit and credit'] as $behaviourValue => $behaviourLabel): ?>
+                    <option value="<?= e($behaviourValue) ?>" <?= ($editComponent['posting_behaviour'] ?? 'category_default') === $behaviourValue ? 'selected' : '' ?>><?= e($behaviourLabel) ?></option>
+                <?php endforeach; ?>
             </select>
         </label>
-        <label>Default value (amount or %)<input type="number" step="0.01" min="0" name="default_value" value="<?= e(number_format((float) ($editComponent['default_value'] ?? 0), 2, '.', '')) ?>"></label>
+        <label>Debit ledger <span class="frm-optional">earnings / reimbursement / custom</span><?= $ledgerSelect('debit_ledger_id', (int) ($editComponent['debit_ledger_id'] ?? 0)) ?></label>
+        <label>Credit ledger <span class="frm-optional">deductions / recovery / custom</span><?= $ledgerSelect('credit_ledger_id', (int) ($editComponent['credit_ledger_id'] ?? 0)) ?></label>
+        <label>Employer contribution expense <span class="frm-optional">employer contributions</span><?= $ledgerSelect('employer_expense_ledger_id', (int) ($editComponent['employer_expense_ledger_id'] ?? 0), ['expense']) ?></label>
+        <label>Contribution payable <span class="frm-optional">employer contributions</span><?= $ledgerSelect('contribution_payable_ledger_id', (int) ($editComponent['contribution_payable_ledger_id'] ?? 0), ['liability']) ?></label>
+        <label>Suggested calculation
+            <select name="calc_type">
+                <option value="manual" <?= ($editComponent['calc_type'] ?? 'manual') === 'manual' ? 'selected' : '' ?>>Manual amount (no suggestion)</option>
+                <option value="fixed" <?= ($editComponent['calc_type'] ?? '') === 'fixed' ? 'selected' : '' ?>>Fixed default suggestion</option>
+                <option value="percent_basic" <?= ($editComponent['calc_type'] ?? '') === 'percent_basic' ? 'selected' : '' ?>>% of basic salary suggestion</option>
+                <option value="overtime_hours" <?= ($editComponent['calc_type'] ?? '') === 'overtime_hours' ? 'selected' : '' ?>>Overtime (from weekly attendance)</option>
+                <option value="service_charge" <?= ($editComponent['calc_type'] ?? '') === 'service_charge' ? 'selected' : '' ?>>Service charge (from allocation)</option>
+            </select>
+        </label>
+        <label>Default amount (or legacy %)<input type="number" step="0.01" min="0" name="default_value" value="<?= e(number_format((float) ($editComponent['default_value'] ?? 0), 2, '.', '')) ?>"></label>
+        <label>Percentage <span class="frm-optional">for % suggestions</span><input type="number" step="0.0001" min="0" name="percentage" value="<?= ($editComponent['percentage'] ?? null) !== null ? e(number_format((float) $editComponent['percentage'], 4, '.', '')) : '' ?>"></label>
+        <label>Calculation basis <span class="frm-optional">note, e.g. "basic"</span><input type="text" name="calc_basis" maxlength="40" value="<?= e($editComponent['calc_basis'] ?? '') ?>"></label>
+        <label>Effective from<input type="date" name="effective_from" value="<?= e($editComponent['effective_from'] ?? '') ?>"></label>
+        <label>Effective to<input type="date" name="effective_to" value="<?= e($editComponent['effective_to'] ?? '') ?>"></label>
         <label>Sort order<input type="number" name="sort_order" value="<?= e((int) ($editComponent['sort_order'] ?? 0)) ?>"></label>
-        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <div class="workspace-span-2" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="taxable" <?= (int) ($editComponent['taxable'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Taxable</label>
-            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="employer_paid" <?= (int) ($editComponent['employer_paid'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Employer-paid</label>
+            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="include_in_gross" <?= (int) ($editComponent['include_in_gross'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> In gross pay</label>
+            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="include_in_net" <?= (int) ($editComponent['include_in_net'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> In net pay</label>
+            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="retirement_basis" <?= (int) ($editComponent['retirement_basis'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Retirement basis</label>
+            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="overtime_basis" <?= (int) ($editComponent['overtime_basis'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Overtime-rate basis</label>
+            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="service_charge_basis" <?= (int) ($editComponent['service_charge_basis'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Service-charge basis</label>
+            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="allow_employee_override" <?= (int) ($editComponent['allow_employee_override'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Employee override</label>
+            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="allow_period_override" <?= (int) ($editComponent['allow_period_override'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Period override</label>
+            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="allow_zero" <?= (int) ($editComponent['allow_zero'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Zero allowed</label>
+            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="employer_paid" <?= (int) ($editComponent['employer_paid'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Employer-paid (legacy)</label>
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="active" <?= (int) ($editComponent['active'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Active</label>
         </div>
         <div class="workspace-span-2"><button type="submit"><?= icon('plus') ?><?= $editComponent ? 'Update Component' : 'Add Component' ?></button>
@@ -313,25 +427,81 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
     <div style="overflow-x:auto">
     <table>
-        <thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Calc</th><th class="is-numeric">Default</th><th>Taxable</th><th>Paid by</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Posting</th><th>Suggestion</th><th>Dr / Cr ledger</th><th>Taxable</th><th>Effective</th><th>Status</th><th></th></tr></thead>
         <tbody>
-            <?php if ($components === []): ?><tr><td colspan="9">No components yet. Add allowances, overtime, benefits, and deductions here.</td></tr><?php endif; ?>
+            <?php if ($components === []): ?><tr><td colspan="10">No components yet. Add allowances, overtime, service charge, reimbursements, and deductions here.</td></tr><?php endif; ?>
+            <?php $ledgerNameById = []; foreach ($ledgers as $ledgerRow) { $ledgerNameById[(int) $ledgerRow['id']] = (string) $ledgerRow['code']; } ?>
             <?php foreach ($components as $component): ?>
                 <tr>
                     <td><strong><?= e($component['code']) ?></strong></td>
                     <td><?= e($component['name']) ?><?= $component['name_np'] ? ' <small>(' . e($component['name_np']) . ')</small>' : '' ?></td>
-                    <td><?= e(ucfirst((string) $component['category'])) ?></td>
-                    <td><?= $component['calc_type'] === 'percent_basic' ? '% of basic' : 'Fixed' ?></td>
-                    <td class="is-numeric"><?= e(number_format((float) $component['default_value'], 2)) ?><?= $component['calc_type'] === 'percent_basic' ? '%' : '' ?></td>
+                    <td><?= e(ucwords(str_replace('_', ' ', (string) $component['category']))) ?></td>
+                    <td><small><?= e(str_replace('_', ' ', (string) ($component['posting_behaviour'] ?? 'category_default'))) ?></small></td>
+                    <td class="is-numeric"><?php
+                        $calcType = (string) $component['calc_type'];
+                        if ($calcType === 'percent_basic') {
+                            echo e(number_format((float) (($component['percentage'] ?? null) !== null && (float) $component['percentage'] > 0 ? $component['percentage'] : $component['default_value']), 2)) . '% of basic';
+                        } elseif ($calcType === 'fixed') {
+                            echo e(number_format((float) $component['default_value'], 2));
+                        } else {
+                            echo e(ucwords(str_replace('_', ' ', $calcType)));
+                        }
+                    ?></td>
+                    <td><small><?= e(($ledgerNameById[(int) ($component['debit_ledger_id'] ?? 0)] ?? '—') . ' / ' . ($ledgerNameById[(int) ($component['credit_ledger_id'] ?? 0)] ?? '—')) ?></small></td>
                     <td><?= (int) $component['taxable'] ? 'Yes' : '<span class="mbw-pill tone-blue">No</span>' ?></td>
-                    <td><?= (int) $component['employer_paid'] ? 'Employer' : 'Employee pay' ?></td>
+                    <td><small><?= e(($component['effective_from'] ?? '') !== '' && $component['effective_from'] !== null ? $component['effective_from'] : 'always') ?><?= ($component['effective_to'] ?? null) ? ' → ' . e($component['effective_to']) : '' ?></small></td>
                     <td><span class="mbw-pill <?= (int) $component['active'] ? 'tone-green' : 'tone-red' ?>"><?= (int) $component['active'] ? 'Active' : 'Inactive' ?></span></td>
-                    <td><a class="button secondary" href="<?= e(url('admin/payroll-settings.php?component=' . (int) $component['id'])) ?>">Edit</a></td>
+                    <td><a class="button secondary" href="<?= e(url('admin/payroll-settings.php?component=' . (int) $component['id'] . '#components')) ?>">Edit</a></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
     </div>
+</section>
+
+<section class="mbw-card" aria-label="Overtime and service charge" id="otsc">
+    <div class="mbw-card-head"><h2>Overtime &amp; Service Charge</h2></div>
+    <form method="post" class="workspace-form-grid">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="save_ot_sc_settings">
+        <?php $componentSelect = static function (string $name, int $selected, array $componentsList): string {
+            $html = '<select name="' . e($name) . '"><option value="0">Not mapped</option>';
+            foreach ($componentsList as $componentOption) {
+                $html .= '<option value="' . (int) $componentOption['id'] . '"' . ($selected === (int) $componentOption['id'] ? ' selected' : '') . '>'
+                    . e($componentOption['code'] . ' — ' . $componentOption['name']) . '</option>';
+            }
+            return $html . '</select>';
+        }; ?>
+        <label>Weekly overtime threshold (hours)<input type="number" step="0.25" min="0" name="ot_weekly_threshold" value="<?= e(number_format((float) ($settings['ot_weekly_threshold'] ?? 40), 2, '.', '')) ?>"></label>
+        <label>Week starts on
+            <select name="ot_week_start">
+                <?php foreach (['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as $dowIndex => $dowLabel): ?>
+                    <option value="<?= $dowIndex ?>" <?= (int) ($settings['ot_week_start'] ?? 0) === $dowIndex ? 'selected' : '' ?>><?= e($dowLabel) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>Overtime pay component<?= $componentSelect('ot_component_id', (int) ($settings['ot_component_id'] ?? 0), $components) ?></label>
+        <label>Overtime rate source
+            <select name="ot_rate_source">
+                <option value="salary_derived" <?= (string) ($settings['ot_rate_source'] ?? 'salary_derived') === 'salary_derived' ? 'selected' : '' ?>>Derived from basic salary / monthly hours</option>
+                <option value="fixed_rate" <?= (string) ($settings['ot_rate_source'] ?? '') === 'fixed_rate' ? 'selected' : '' ?>>Fixed per-employee hourly rate only</option>
+            </select>
+        </label>
+        <label>Monthly hours for the derived rate<input type="number" step="0.5" min="1" name="ot_monthly_hours" value="<?= e(number_format((float) ($settings['ot_monthly_hours'] ?? 208), 2, '.', '')) ?>"></label>
+        <label>Overtime multiplier<input type="number" step="0.001" min="0" name="ot_multiplier" value="<?= e(number_format((float) ($settings['ot_multiplier'] ?? 1.5), 3, '.', '')) ?>"></label>
+        <label>Overtime rounding
+            <select name="ot_rounding">
+                <?php foreach (['nearest' => 'Nearest rupee', 'down' => 'Round down', 'none' => 'Two decimals'] as $roundValue => $roundLabel): ?>
+                    <option value="<?= e($roundValue) ?>" <?= (string) ($settings['ot_rounding'] ?? 'nearest') === $roundValue ? 'selected' : '' ?>><?= e($roundLabel) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="ot_require_approval" <?= (int) ($settings['ot_require_approval'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Overtime needs approval before payroll picks it up</label>
+        <label>Service charge pay component<?= $componentSelect('sc_component_id', (int) ($settings['sc_component_id'] ?? 0), $components) ?></label>
+        <label>Employee share % of declared total<input type="number" step="0.01" min="0" max="100" name="sc_employee_pct" value="<?= e(number_format((float) ($settings['sc_employee_pct'] ?? 68), 2, '.', '')) ?>"></label>
+        <label>Employer share %<input type="number" step="0.01" min="0" max="100" name="sc_employer_pct" value="<?= e(number_format((float) ($settings['sc_employer_pct'] ?? 32), 2, '.', '')) ?>"></label>
+        <div class="workspace-span-2"><button type="submit"><?= icon('settings') ?>Save Overtime &amp; Service Charge Settings</button></div>
+    </form>
 </section>
 
 <section class="mbw-card" aria-label="Income tax configuration" id="tax">

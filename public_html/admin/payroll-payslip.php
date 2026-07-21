@@ -11,16 +11,16 @@ if (!$currentUser) {
     redirect('login.php');
 }
 $lineId = (int) ($_GET['line'] ?? 0);
-$stmt = db()->prepare('SELECT l.*, r.period_label, r.pay_date, r.status AS run_status, r.company_id,
+$stmt = db()->prepare("SELECT l.*, r.period_label, r.pay_date, r.status AS run_status, r.company_id,
         pe.employee_code, pe.department, pe.designation, pe.pan_no, pe.bank_name, pe.bank_account,
         pe.marital_status, pe.retirement_scheme, pe.user_id AS employee_user_id,
-        u.name AS person_name, c.name AS company_name
+        COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name, c.name AS company_name
     FROM payroll_run_lines l
     INNER JOIN payroll_runs r ON r.id = l.run_id
     INNER JOIN payroll_employees pe ON pe.id = l.payroll_employee_id
-    INNER JOIN users u ON u.id = pe.user_id
+    LEFT JOIN users u ON u.id = pe.user_id
     INNER JOIN companies c ON c.id = r.company_id
-    WHERE l.id = :id LIMIT 1');
+    WHERE l.id = :id LIMIT 1");
 $stmt->execute(['id' => $lineId]);
 $line = $stmt->fetch();
 
@@ -83,22 +83,57 @@ $fmt = static fn (float $n): string => number_format($n, 2);
             <?php
             $sstMonth = (float) ($line['sst_month'] ?? 0);
             $remunerationMonth = round((float) $line['tax_month'] - $sstMonth, 2);
-            $earnings = [
-                ['Basic Salary', (float) $line['basic']],
-                ['Allowances', (float) $line['allowances']],
-                ['Overtime', (float) $line['overtime']],
-                ['Other Benefits', (float) $line['benefits']],
-            ];
+            // Itemize every pay component from the line's snapshot trace — each
+            // allowance on its own line, never one combined "Allowances" figure.
+            $earnings = [];
+            $deductions = [];
+            $employerContributions = [];
+            foreach ((array) ($trace['components'] ?? []) as $traceComponent) {
+                $componentAmount = (float) ($traceComponent['amount'] ?? 0);
+                if ($componentAmount == 0.0) {
+                    continue;
+                }
+                $componentCategory = (string) ($traceComponent['category'] ?? 'allowance');
+                $componentBehaviour = (string) ($traceComponent['behaviour'] ?? '');
+                $componentLabel = (string) ($traceComponent['label'] ?? '');
+                $componentSource = (string) ($traceComponent['source'] ?? '');
+                if ($componentSource === 'overtime') {
+                    $componentLabel .= ' (weekly overtime)';
+                } elseif ($componentSource === 'service_charge') {
+                    $componentLabel .= ' (service charge)';
+                }
+                if (!empty($traceComponent['taxable']) === false && $componentCategory !== 'basic'
+                    && !in_array($componentCategory, ['deduction', 'tax', 'advance_recovery'], true)) {
+                    $componentLabel .= ' (non-taxable)';
+                }
+                if ($componentBehaviour === 'employer_contribution' || $componentCategory === 'employer_contribution'
+                    || (!empty($traceComponent['employer_paid']) && $componentCategory === 'deduction')) {
+                    $employerContributions[] = [$componentLabel, $componentAmount];
+                } elseif (in_array($componentCategory, ['deduction', 'tax', 'advance_recovery'], true)) {
+                    $deductions[] = [$componentLabel, $componentAmount];
+                } elseif ($componentBehaviour === 'non_posting' || $componentCategory === 'info') {
+                    continue; // informational — shown nowhere on the money columns
+                } else {
+                    $earnings[] = [$componentLabel, $componentAmount];
+                }
+            }
+            if ($earnings === []) { // very old lines without a component trace
+                $earnings = [
+                    ['Basic Salary', (float) $line['basic']],
+                    ['Allowances', (float) $line['allowances']],
+                    ['Overtime', (float) $line['overtime']],
+                    ['Other Benefits', (float) $line['benefits']],
+                ];
+            }
             if ((float) ($line['adj_earning'] ?? 0) > 0) {
                 $earnings[] = ['Extra Earning (adjustment)', (float) $line['adj_earning']];
             }
-            $deductions = [
+            $deductions = array_merge([
                 ['Social Security Tax (1% slab)', $sstMonth],
                 ['Remuneration Tax', $remunerationMonth],
                 ['Retirement Contribution (employee)', (float) $line['retirement_employee_month']],
                 ['Advance / Loan Recovery', (float) $line['advance_deduction']],
-                ['Other Deductions', (float) $line['other_deduction']],
-            ];
+            ], $deductions);
             if ((float) ($line['adj_deduction'] ?? 0) > 0) {
                 $deductions[] = ['Extra Deduction (adjustment)', (float) $line['adj_deduction']];
             }
@@ -132,8 +167,25 @@ $fmt = static fn (float $n): string => number_format($n, 2);
             <tr><td style="padding-left:20px">of which Remuneration Tax</td><td class="num"><?= $fmt($remunerationMonth) ?></td></tr>
         </tbody>
     </table>
+    <?php if ($employerContributions !== [] || (float) $line['retirement_employer_month'] > 0): ?>
+        <table style="margin-top:12px">
+            <thead><tr><th colspan="2">Employer contributions (employer cost — never deducted from take-home pay)</th></tr></thead>
+            <tbody>
+                <?php if ((float) $line['retirement_employer_month'] > 0): ?>
+                    <tr><td>Retirement contribution (employer)</td><td class="num"><?= $fmt((float) $line['retirement_employer_month']) ?></td></tr>
+                <?php endif; ?>
+                <?php foreach ($employerContributions as $employerContribution): ?>
+                    <tr><td><?= e($employerContribution[0]) ?></td><td class="num"><?= $fmt($employerContribution[1]) ?></td></tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    <?php endif; ?>
+    <?php
+    $taxableRemuneration = round((float) $line['assessable_annual'] / 12, 2);
+    ?>
     <p class="ps-note">
-        Employer retirement contribution this month: <?= e($sym) ?><?= $fmt((float) $line['retirement_employer_month']) ?> (employer expense — not deducted from take-home pay).
+        Taxable remuneration this month: <?= e($sym) ?><?= $fmt($taxableRemuneration) ?> (assessable annual ÷ 12).
+        Run status: <?= e(ucfirst((string) $line['run_status'])) ?>.
         Calculated under rule version: <?= e((string) ($trace['tax_version_label'] ?? '-')) ?>. This is a system-generated payslip.
     </p>
 </div>

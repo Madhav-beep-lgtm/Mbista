@@ -153,10 +153,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/payroll.php?run=' . $runId);
     }
 
+    if ($action === 'edit_component') {
+        $componentId = (int) ($_POST['component_id'] ?? 0);
+        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        $amount = (float) ($_POST['amount'] ?? 0);
+        $reason = trim((string) ($_POST['override_reason'] ?? ''));
+        $remove = (string) ($_POST['remove'] ?? '') === '1';
+        $oneTime = (string) ($_POST['one_time'] ?? '') === '1';
+        $result = payroll_set_run_component($runId, $employeeId, $componentId, $amount, $reason, $userId, $oneTime, $remove);
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? ($remove ? 'Component removed for this month — line recalculated.' : 'Component amount saved — tax and net pay recalculated.')
+            : (string) ($result['error'] ?? 'Could not update the component.'));
+        redirect('admin/payroll.php?run=' . $runId . '#components');
+    }
+
+    if ($action === 'sync_overtime') {
+        [$periodStart, $periodEnd] = payroll_period_range((int) $runRow['fiscal_year_id'], (int) $runRow['period_no']);
+        if ($periodStart === '') {
+            flash('error', 'Could not resolve the run period dates.');
+        } else {
+            $weeks = payroll_ot_sync_period($companyId, $periodStart, $periodEnd);
+            $calc = payroll_calculate_run($runId);
+            flash($calc['ok'] ? 'success' : 'error', $calc['ok']
+                ? 'Attendance scanned: ' . $weeks . ' week(s) with overtime. Approve them in Overtime Review, then Recalculate to pull the amounts in.'
+                : (string) ($calc['error'] ?? ''));
+        }
+        redirect('admin/payroll.php?run=' . $runId);
+    }
+
     if ($action === 'cancel_run') {
         if (!in_array((string) $runRow['status'], ['draft', 'calculated'], true)) {
             flash('error', 'Approved/posted runs cannot be cancelled - reopen the run for correction (which reverses its vouchers) or post a reversal voucher instead.');
         } else {
+            payroll_ot_release_run($runId); // freed hours can be paid by another run
             db()->prepare("UPDATE payroll_runs SET status = 'cancelled' WHERE id = :id")->execute(['id' => $runId]);
             log_activity('payroll_run', $runId, 'cancelled', 'Payroll run cancelled before approval.', $userId);
             security_event('payroll_run_cancelled', 'success', 'Payroll run #' . $runId . ' cancelled.', $companyId, $userId);
@@ -178,6 +207,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'This run still has posted vouchers — reopen it for correction first.');
             redirect('admin/payroll.php?run=' . $runId);
         }
+        payroll_ot_release_run($runId); // freed hours can be paid by another run
         db()->prepare('DELETE FROM payroll_run_lines WHERE run_id = :id')->execute(['id' => $runId]);
         db()->prepare('DELETE FROM payroll_runs WHERE id = :id AND company_id = :cid')->execute(['id' => $runId, 'cid' => $companyId]);
         log_activity('payroll_run', $runId, 'deleted', 'Salary sheet ' . (string) $runRow['period_label'] . ' deleted (' . (string) $runRow['status'] . ').', $userId);
@@ -235,6 +265,24 @@ if ($deptFilter !== '') {
     $lines = array_values(array_filter($lines, static fn (array $l): bool => (string) $l['department'] === $deptFilter));
 }
 $departments = array_values(array_unique(array_filter(array_map(static fn (array $l): string => (string) ($l['department'] ?? ''), $run ? payroll_run_lines((int) $run['id']) : []))));
+
+// Per-employee component lines of this run (the dynamic matrix) + the master
+// catalog for one-time additions.
+$runComponentsByEmployee = [];
+$matrixCodes = [];
+if ($run && table_exists('payroll_run_components')) {
+    foreach (payroll_run_component_rows((int) $run['id']) as $componentRow) {
+        $runComponentsByEmployee[(int) $componentRow['payroll_employee_id']][] = $componentRow;
+        $matrixCodes[(string) $componentRow['component_code']] = (string) $componentRow['component_name'];
+    }
+    ksort($matrixCodes);
+}
+$componentCatalog = payroll_component_catalog($companyId);
+$componentIdByCode = [];
+foreach ($componentCatalog as $catalogRow) {
+    $componentIdByCode[(string) $catalogRow['code']] = (int) $catalogRow['id'];
+}
+$scSummary = $run ? payroll_sc_get((int) $run['id']) : null;
 
 $taxVersion = payroll_active_tax_version($companyId, $fiscalYearId);
 $validation = $run ? payroll_validate_run($run, $settings, $userId) : ['errors' => [], 'warnings' => []];
@@ -296,6 +344,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <h2>Payroll Run</h2>
         <div class="mbw-card-tools">
             <a class="mbw-view-all" href="<?= e(url('admin/payroll-employees.php')) ?>">Employees &#8594;</a>
+            <a class="mbw-view-all" href="<?= e(url('admin/payroll-overtime.php' . ($run ? '?run=' . (int) $run['id'] : ''))) ?>">Overtime Review &#8594;</a>
+            <a class="mbw-view-all" href="<?= e(url('admin/payroll-service-charge.php' . ($run ? '?run=' . (int) $run['id'] : ''))) ?>">Service Charge &#8594;</a>
             <a class="mbw-view-all" href="<?= e(url('admin/payroll-settings.php')) ?>">Settings &#8594;</a>
             <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=salary-sheet' . ($run ? '&payroll_run=' . (int) $run['id'] : ''))) ?>">Salary Sheet report &#8594;</a>
         </div>
@@ -501,7 +551,60 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td class="is-numeric"><strong><?= e(number_format((float) $line['net_pay'], 2)) ?></strong></td>
                     <td class="pr-actions" onclick="event.stopPropagation()">
                         <a class="button secondary" target="_blank" href="<?= e(url('admin/payroll-payslip.php?line=' . (int) $line['id'])) ?>" title="Open payslip">Payslip</a>
+                        <?php $lineComponents = $runComponentsByEmployee[(int) $line['payroll_employee_id']] ?? []; ?>
                         <?php if (in_array((string) $run['status'], ['draft', 'calculated'], true)): ?>
+                        <details class="pr-adjust">
+                            <summary class="button secondary">Components<?= $lineComponents !== [] ? ' (' . count($lineComponents) . ')' : '' ?></summary>
+                            <div class="pr-adjust-form" style="width:330px;max-height:420px;overflow:auto">
+                                <?php foreach ($lineComponents as $componentRow): ?>
+                                    <?php $isOverridden = (string) ($componentRow['override_reason'] ?? '') !== '' || (int) ($componentRow['updated_by'] ?? 0) > 0; ?>
+                                    <form method="post" style="display:grid;gap:4px;border-bottom:1px dashed var(--mbw-line,rgba(0,0,0,.12));padding-bottom:8px;margin:0">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="edit_component">
+                                        <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
+                                        <input type="hidden" name="employee_id" value="<?= e((int) $line['payroll_employee_id']) ?>">
+                                        <input type="hidden" name="component_id" value="<?= e((int) ($componentIdByCode[(string) $componentRow['component_code']] ?? (int) $componentRow['component_id'])) ?>">
+                                        <label style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:600">
+                                            <span><?= e($componentRow['component_name']) ?>
+                                                <?php if ((string) $componentRow['source'] !== 'standard'): ?><span class="mbw-pill tone-blue"><?= e(str_replace('_', ' ', (string) $componentRow['source'])) ?></span><?php endif; ?>
+                                                <?php if ($isOverridden): ?><span class="mbw-pill tone-amber" title="<?= e((string) ($componentRow['override_reason'] ?? '')) ?>">edited</span><?php endif; ?>
+                                            </span>
+                                            <small><?= $componentRow['suggested_amount'] !== null ? 'suggested ' . e(number_format((float) $componentRow['suggested_amount'], 2)) : 'no suggestion' ?></small>
+                                        </label>
+                                        <div style="display:flex;gap:6px;align-items:center">
+                                            <input type="number" step="0.01" min="0" name="amount" value="<?= e(number_format((float) $componentRow['amount'], 2, '.', '')) ?>" style="max-width:110px" <?= in_array((string) $componentRow['source'], ['overtime', 'service_charge'], true) ? 'readonly title="Managed by its own workflow"' : '' ?>>
+                                            <input type="text" name="override_reason" maxlength="255" placeholder="Reason if changed" value="<?= e((string) ($componentRow['override_reason'] ?? '')) ?>" style="flex:1">
+                                            <?php if (!in_array((string) $componentRow['source'], ['overtime', 'service_charge'], true)): ?>
+                                                <button type="submit" class="button secondary" style="min-height:32px;padding:4px 8px">Save</button>
+                                                <button type="submit" name="remove" value="1" class="button secondary" style="min-height:32px;padding:4px 8px;color:#a33" title="Remove for this month">&times;</button>
+                                            <?php endif; ?>
+                                        </div>
+                                    </form>
+                                <?php endforeach; ?>
+                                <?php if ($componentCatalog !== []): ?>
+                                    <form method="post" style="display:grid;gap:4px;margin:0">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="edit_component">
+                                        <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
+                                        <input type="hidden" name="employee_id" value="<?= e((int) $line['payroll_employee_id']) ?>">
+                                        <input type="hidden" name="one_time" value="1">
+                                        <label style="font-weight:600">Add one-time component for this month</label>
+                                        <div style="display:flex;gap:6px;align-items:center">
+                                            <select name="component_id" style="flex:1;min-height:32px">
+                                                <?php foreach ($componentCatalog as $catalogRow): ?>
+                                                    <?php if (in_array((string) $catalogRow['calc_type'], ['overtime_hours', 'service_charge'], true)) { continue; } ?>
+                                                    <option value="<?= (int) $catalogRow['id'] ?>"><?= e($catalogRow['code'] . ' — ' . $catalogRow['name']) ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                            <input type="number" step="0.01" min="0" name="amount" placeholder="Amount" style="max-width:100px" required>
+                                        </div>
+                                        <input type="text" name="override_reason" maxlength="255" placeholder="Reason (required)" required>
+                                        <button type="submit" class="button secondary" style="min-height:32px">Add for this month</button>
+                                    </form>
+                                <?php endif; ?>
+                                <small>Zero keeps the row visible without pay or posting. Overtime and service-charge lines change in their own workflows.</small>
+                            </div>
+                        </details>
                         <details class="pr-adjust">
                             <summary class="button secondary">Adjust</summary>
                             <form method="post" class="pr-adjust-form">
@@ -531,6 +634,68 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div id="prInspectorBody"><p style="color:var(--mbw-muted);font-size:12.5px">Select an employee row to see the annualized income, retirement limit applied, slab-wise tax and withholding method — including the exact tax configuration version used.</p></div>
 </aside>
 </div>
+
+<section class="mbw-card" aria-label="Component matrix" id="components">
+    <div class="mbw-card-head">
+        <h2>Component Matrix — who gets what this month</h2>
+        <div class="mbw-card-tools">
+            <?php if (in_array((string) $run['status'], ['draft', 'calculated'], true)): ?>
+                <form method="post" style="display:inline">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="sync_overtime">
+                    <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
+                    <button type="submit" class="button secondary" title="Scan attendance for Sunday-Saturday weeks over the threshold"><?= icon('reconcile') ?>Scan attendance for overtime</button>
+                </form>
+            <?php endif; ?>
+            <?php if ($scSummary): ?>
+                <span class="mbw-pill <?= (string) $scSummary['status'] === 'approved' ? 'tone-green' : 'tone-amber' ?>">
+                    Service charge <?= e((string) $scSummary['status']) ?>: <?= e($sym . number_format((float) $scSummary['employee_pool'], 2)) ?> to employees
+                </span>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php if ($matrixCodes === []): ?>
+        <p style="color:var(--mbw-muted);font-size:12.5px;margin:0">No component lines yet — assign components to employees (Employees &rarr; pay structure), then Recalculate. Use the per-row "Components" button above to add one-time items.</p>
+    <?php else: ?>
+        <div style="overflow-x:auto">
+        <table class="pr-table">
+            <thead><tr>
+                <th>Employee</th>
+                <?php foreach ($matrixCodes as $matrixCode => $matrixName): ?>
+                    <th class="is-numeric" title="<?= e($matrixName) ?>"><?= e($matrixCode) ?></th>
+                <?php endforeach; ?>
+            </tr></thead>
+            <tbody>
+                <?php foreach ($lines as $line): ?>
+                    <?php
+                    $cellByCode = [];
+                    foreach ($runComponentsByEmployee[(int) $line['payroll_employee_id']] ?? [] as $componentRow) {
+                        $cellByCode[(string) $componentRow['component_code']] = $componentRow;
+                    }
+                    ?>
+                    <tr>
+                        <td><strong><?= e($line['employee_code']) ?></strong> <?= e($line['person_name']) ?></td>
+                        <?php foreach ($matrixCodes as $matrixCode => $matrixName): ?>
+                            <?php $cell = $cellByCode[$matrixCode] ?? null; ?>
+                            <td class="is-numeric">
+                                <?php if ($cell === null): ?>
+                                    <span style="color:var(--mbw-muted)">–</span>
+                                <?php else: ?>
+                                    <?php $cellOverridden = (string) ($cell['override_reason'] ?? '') !== '' || (int) ($cell['updated_by'] ?? 0) > 0; ?>
+                                    <span<?= $cellOverridden ? ' class="mbw-pill tone-amber" title="' . e('Suggested ' . number_format((float) ($cell['suggested_amount'] ?? 0), 2) . ($cell['override_reason'] ? ' — ' . $cell['override_reason'] : '')) . '"' : '' ?>>
+                                        <?= e(number_format((float) $cell['amount'], 2)) ?>
+                                    </span>
+                                <?php endif; ?>
+                            </td>
+                        <?php endforeach; ?>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+        <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">Amber cells were edited for this month (hover shows the suggested value and reason). Edit amounts via each row's "Components" button in the worksheet above.</p>
+    <?php endif; ?>
+</section>
 
 <section class="mbw-card" aria-label="Journal preview">
     <div class="mbw-card-head">

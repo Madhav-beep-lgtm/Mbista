@@ -33,7 +33,11 @@ function rc_report_registry(): array
         'fixed-asset-register' => ['Fixed Asset Register', 'Detailed register with cost, depreciation and carrying amount', 'companies'],
         'depreciation-schedule' => ['Depreciation Schedule', 'Posted depreciation by asset and period', 'download'],
         'asset-gl-reconciliation' => ['Asset-to-GL Reconciliation', 'Fixed-asset register carrying amount vs general ledger', 'reconcile'],
-        'salary-sheet' => ['Salary Sheet', 'Payroll register: earnings, deductions, tax and net pay per employee', 'wallet'],
+        'salary-sheet' => ['Salary Sheet', 'Payroll register: every pay component, deductions, tax and net pay per employee', 'wallet'],
+        'payroll-components' => ['Component-wise Payroll', 'Each pay component across runs: who received what, taxable status, totals', 'layers'],
+        'overtime-report' => ['Overtime Report', 'Sunday-Saturday weekly overtime: hours, threshold split, rates and approvals', 'attendance'],
+        'service-charge-report' => ['Service Charge Allocation', 'Declared totals, 68% employee pool, 32% employer share and per-employee distribution', 'handshake'],
+        'payroll-posting' => ['Payroll Posting Report', 'Component-to-ledger accounting detail behind each payroll voucher', 'reconcile'],
         'financial-ratios' => ['Financial Ratios', 'Key financial ratios analysis', 'dashboard'],
     ];
 }
@@ -1510,45 +1514,302 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                     'totals' => null,
                 ];
             }
-            $lineStmt = db()->prepare('SELECT l.*, pe.employee_code, pe.department, pe.pan_no, u.name AS person_name
+            $lineStmt = db()->prepare("SELECT l.*, pe.employee_code, pe.department, pe.pan_no,
+                    COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name
                 FROM payroll_run_lines l
                 INNER JOIN payroll_employees pe ON pe.id = l.payroll_employee_id
-                INNER JOIN users u ON u.id = pe.user_id
-                WHERE l.run_id = :run ORDER BY pe.employee_code ASC');
+                LEFT JOIN users u ON u.id = pe.user_id
+                WHERE l.run_id = :run ORDER BY pe.employee_code ASC");
             $lineStmt->execute(['run' => (int) $payrollRun['id']]);
-            $rows = [];
-            $totals = array_fill(0, 11, 0.0);
-            foreach ($lineStmt->fetchAll() as $payLine) {
-                $values = [
-                    (float) $payLine['basic'], (float) $payLine['allowances'], (float) $payLine['overtime'],
-                    (float) $payLine['benefits'], (float) $payLine['gross'],
-                    (float) $payLine['retirement_employee_month'], (float) $payLine['retirement_employer_month'],
-                    (float) $payLine['tax_month'], (float) $payLine['advance_deduction'],
-                    (float) $payLine['other_deduction'], (float) $payLine['net_pay'],
-                ];
-                foreach ($values as $index => $value) {
-                    $totals[$index] += $value;
+            $payLines = $lineStmt->fetchAll();
+
+            // Dynamic component columns: one per pay component actually used in
+            // this run (falls back to the aggregate layout for legacy runs).
+            $componentCodes = [];
+            $componentByEmployee = [];
+            if (table_exists('payroll_run_components')) {
+                $prcStmt = db()->prepare('SELECT payroll_employee_id, component_code, component_name, category, posting_behaviour, amount
+                    FROM payroll_run_components WHERE run_id = :run ORDER BY component_code ASC');
+                $prcStmt->execute(['run' => (int) $payrollRun['id']]);
+                foreach ($prcStmt->fetchAll() as $prcRow) {
+                    $behaviour = (string) $prcRow['posting_behaviour'];
+                    $category = (string) $prcRow['category'];
+                    if ($behaviour === 'non_posting' || $category === 'info') {
+                        continue;
+                    }
+                    $componentCodes[(string) $prcRow['component_code']] = (string) $prcRow['component_name'];
+                    $componentByEmployee[(int) $prcRow['payroll_employee_id']][(string) $prcRow['component_code']] = (float) $prcRow['amount'];
                 }
-                $rows[] = array_merge(
-                    [$payLine['employee_code'], $payLine['person_name'] . ((string) ($payLine['department'] ?? '') !== '' ? ' (' . $payLine['department'] . ')' : '')],
-                    array_map('rc_fmt', $values)
-                );
+                ksort($componentCodes);
             }
-            return [
-                'title' => 'Salary Sheet — ' . $payrollRun['period_label'],
-                'subtitle' => 'Payroll register for ' . $payrollRun['period_label'] . ' — status ' . str_replace('_', ' ', ucfirst((string) $payrollRun['status']))
-                    . ($payrollRun['pay_date'] ? ', pay date ' . date('d M Y', strtotime((string) $payrollRun['pay_date'])) : '')
-                    . '. Employer retirement contribution is an employer expense and does not reduce net pay.',
-                'columns' => [
+
+            $rows = [];
+            if ($componentCodes !== []) {
+                $codeList = array_keys($componentCodes);
+                $fixedTail = 7; // gross, taxable, ret emp, ret er, tax, advance, net
+                $totals = array_fill(0, 1 + count($codeList) + $fixedTail, 0.0);
+                foreach ($payLines as $payLine) {
+                    $employeeComponents = $componentByEmployee[(int) $payLine['payroll_employee_id']] ?? [];
+                    $values = [(float) $payLine['basic']];
+                    foreach ($codeList as $code) {
+                        $values[] = (float) ($employeeComponents[$code] ?? 0);
+                    }
+                    $values[] = (float) $payLine['gross'];
+                    $values[] = round((float) $payLine['assessable_annual'] / 12, 2);
+                    $values[] = (float) $payLine['retirement_employee_month'];
+                    $values[] = (float) $payLine['retirement_employer_month'];
+                    $values[] = (float) $payLine['tax_month'];
+                    $values[] = (float) $payLine['advance_deduction'];
+                    $values[] = (float) $payLine['net_pay'];
+                    foreach ($values as $index => $value) {
+                        $totals[$index] += $value;
+                    }
+                    $rows[] = array_merge(
+                        [$payLine['employee_code'], $payLine['person_name'] . ((string) ($payLine['department'] ?? '') !== '' ? ' (' . $payLine['department'] . ')' : '')],
+                        array_map('rc_fmt', $values)
+                    );
+                }
+                $columns = [['Code', 'left', ''], ['Employee', 'left', ''], ['Basic (' . $sym . ')', 'right', '']];
+                foreach ($codeList as $code) {
+                    $columns[] = [$componentCodes[$code] . ' (' . $sym . ')', 'right', ''];
+                }
+                foreach (['Gross', 'Taxable Rem.', 'Retirement Emp.', 'Retirement Emplr.', 'Income Tax', 'Advance', 'Net Pay'] as $tailLabel) {
+                    $columns[] = [$tailLabel . ' (' . $sym . ')', 'right', ''];
+                }
+            } else {
+                $totals = array_fill(0, 11, 0.0);
+                foreach ($payLines as $payLine) {
+                    $values = [
+                        (float) $payLine['basic'], (float) $payLine['allowances'], (float) $payLine['overtime'],
+                        (float) $payLine['benefits'], (float) $payLine['gross'],
+                        (float) $payLine['retirement_employee_month'], (float) $payLine['retirement_employer_month'],
+                        (float) $payLine['tax_month'], (float) $payLine['advance_deduction'],
+                        (float) $payLine['other_deduction'], (float) $payLine['net_pay'],
+                    ];
+                    foreach ($values as $index => $value) {
+                        $totals[$index] += $value;
+                    }
+                    $rows[] = array_merge(
+                        [$payLine['employee_code'], $payLine['person_name'] . ((string) ($payLine['department'] ?? '') !== '' ? ' (' . $payLine['department'] . ')' : '')],
+                        array_map('rc_fmt', $values)
+                    );
+                }
+                $columns = [
                     ['Code', 'left', ''], ['Employee', 'left', ''],
                     ['Basic (' . $sym . ')', 'right', ''], ['Allowances (' . $sym . ')', 'right', ''], ['Overtime (' . $sym . ')', 'right', ''],
                     ['Benefits (' . $sym . ')', 'right', ''], ['Gross (' . $sym . ')', 'right', ''],
                     ['Retirement Emp. (' . $sym . ')', 'right', ''], ['Retirement Emplr. (' . $sym . ')', 'right', ''],
                     ['Income Tax (' . $sym . ')', 'right', ''], ['Advance (' . $sym . ')', 'right', ''],
                     ['Other Ded. (' . $sym . ')', 'right', ''], ['Net Pay (' . $sym . ')', 'right', ''],
-                ],
+                ];
+            }
+            return [
+                'title' => 'Salary Sheet — ' . $payrollRun['period_label'],
+                'subtitle' => 'Payroll register for ' . $payrollRun['period_label'] . ' — status ' . str_replace('_', ' ', ucfirst((string) $payrollRun['status']))
+                    . ($payrollRun['pay_date'] ? ', pay date ' . date('d M Y', strtotime((string) $payrollRun['pay_date'])) : '')
+                    . '. Employer retirement contribution is an employer expense and does not reduce net pay.',
+                'columns' => $columns,
                 'rows' => $rows,
                 'totals' => array_merge(['', 'Total (' . count($rows) . ' employees)'], array_map('rc_fmt', $totals)),
+            ];
+        }
+
+        case 'payroll-components': {
+            if (!table_exists('payroll_run_components')) {
+                return ['subtitle' => 'Component payroll data not available yet.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            // Every component line of the period's non-cancelled runs, grouped
+            // by component with per-employee detail.
+            $stmt = db()->prepare("SELECT c.component_code, c.component_name, c.category, c.taxable, c.amount, c.source,
+                    c.override_reason, r.period_label, r.status AS run_status,
+                    pe.employee_code, pe.department,
+                    COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name
+                FROM payroll_run_components c
+                INNER JOIN payroll_runs r ON r.id = c.run_id
+                INNER JOIN payroll_employees pe ON pe.id = c.payroll_employee_id
+                LEFT JOIN users u ON u.id = pe.user_id
+                WHERE r.company_id = :cid AND r.status <> 'cancelled'
+                  AND (r.pay_date BETWEEN :f AND :t OR r.pay_date IS NULL)
+                ORDER BY c.component_code ASC, r.period_no ASC, pe.employee_code ASC");
+            $stmt->execute(['cid' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+            $rows = [];
+            $grand = 0.0;
+            $currentCode = null;
+            $componentTotal = 0.0;
+            $flushComponent = static function () use (&$rows, &$currentCode, &$componentTotal): void {
+                if ($currentCode !== null) {
+                    $rows[] = rc_row(['Total — ' . $currentCode, '', '', '', '', rc_fmt($componentTotal)], 'bold');
+                }
+            };
+            foreach ($stmt->fetchAll() as $componentLine) {
+                $code = (string) $componentLine['component_code'];
+                if ($code !== $currentCode) {
+                    $flushComponent();
+                    $currentCode = $code;
+                    $componentTotal = 0.0;
+                    $rows[] = rc_row([$componentLine['component_name'] . ' (' . $code . ') — '
+                        . ucwords(str_replace('_', ' ', (string) $componentLine['category']))
+                        . ((int) $componentLine['taxable'] === 1 ? ', taxable' : ', non-taxable'), '', '', '', '', ''], 'section');
+                }
+                $componentTotal += (float) $componentLine['amount'];
+                $grand += (float) $componentLine['amount'];
+                $rows[] = [
+                    '', $componentLine['employee_code'] . ' — ' . $componentLine['person_name'],
+                    (string) ($componentLine['department'] ?? '') ?: '–',
+                    $componentLine['period_label'] . ' (' . $componentLine['run_status'] . ')',
+                    (string) $componentLine['source'] . ((string) ($componentLine['override_reason'] ?? '') !== '' ? ' — ' . $componentLine['override_reason'] : ''),
+                    rc_fmt((float) $componentLine['amount']),
+                ];
+            }
+            $flushComponent();
+            return [
+                'title' => 'Component-wise Payroll Report',
+                'subtitle' => 'Every pay-component line of the period\'s payroll runs, grouped by component. Override reasons and one-time additions are shown in the Source column.',
+                'columns' => [['Component', 'left', ''], ['Employee', 'left', ''], ['Department', 'left', ''], ['Payroll Run', 'left', ''], ['Source / Reason', 'left', ''], ['Amount (' . $sym . ')', 'right', '']],
+                'rows' => $rows,
+                'totals' => ['Grand total', '', '', '', '', rc_fmt($grand)],
+            ];
+        }
+
+        case 'overtime-report': {
+            if (!table_exists('payroll_overtime_weeks')) {
+                return ['subtitle' => 'Overtime data not available yet.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $stmt = db()->prepare("SELECT w.*, pe.employee_code,
+                    COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name,
+                    (SELECT GROUP_CONCAT(DISTINCT r.period_label SEPARATOR ', ') FROM payroll_overtime_entries e
+                       INNER JOIN payroll_runs r ON r.id = e.run_id
+                       WHERE e.payroll_employee_id = w.payroll_employee_id AND e.week_start = w.week_start) AS paid_in
+                FROM payroll_overtime_weeks w
+                INNER JOIN payroll_employees pe ON pe.id = w.payroll_employee_id
+                LEFT JOIN users u ON u.id = pe.user_id
+                WHERE w.company_id = :cid AND w.week_end >= :f AND w.week_start <= :t
+                ORDER BY w.week_start ASC, pe.employee_code ASC");
+            $stmt->execute(['cid' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+            $rows = [];
+            $totalHours = 0.0;
+            $totalAmount = 0.0;
+            foreach ($stmt->fetchAll() as $week) {
+                $final = $week['approved_amount'] !== null ? (float) $week['approved_amount'] : (float) $week['calculated_amount'];
+                $totalHours += (float) $week['overtime_hours'];
+                $totalAmount += $final;
+                $rows[] = [
+                    $week['employee_code'] . ' — ' . $week['person_name'],
+                    $week['week_start'] . ' → ' . $week['week_end'],
+                    rc_fmt((float) $week['total_hours']), rc_fmt((float) $week['regular_hours']), rc_fmt((float) $week['overtime_hours']),
+                    rc_fmt((float) $week['hourly_rate']) . ' ×' . number_format((float) $week['multiplier'], 2),
+                    rc_fmt((float) $week['calculated_amount']),
+                    rc_fmt($final) . ((string) ($week['adjust_reason'] ?? '') !== '' ? ' (' . $week['adjust_reason'] . ')' : ''),
+                    ucfirst((string) $week['status']) . ((string) ($week['paid_in'] ?? '') !== '' ? ' — paid in ' . $week['paid_in'] : ''),
+                ];
+            }
+            return [
+                'title' => 'Overtime Report (Weekly)',
+                'subtitle' => 'Sunday-to-Saturday weeks whose cumulative worked hours crossed the threshold. Hours below the threshold stay regular; only the excess is overtime, dated on the day it was worked.',
+                'columns' => [['Employee', 'left', ''], ['Week', 'left', ''], ['Total h', 'right', ''], ['Regular h', 'right', ''], ['OT h', 'right', ''], ['Rate', 'right', ''], ['Calculated (' . $sym . ')', 'right', ''], ['Approved (' . $sym . ')', 'right', ''], ['Status', 'left', '']],
+                'rows' => $rows,
+                'totals' => ['Total', '', '', '', rc_fmt($totalHours), '', '', rc_fmt($totalAmount), ''],
+            ];
+        }
+
+        case 'service-charge-report': {
+            if (!table_exists('payroll_service_charge_runs')) {
+                return ['subtitle' => 'Service charge data not available yet.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            require_once __DIR__ . '/payroll_engine.php'; // payroll_sc_allocations
+            $stmt = db()->prepare("SELECT sc.*, r.period_label, r.status AS run_status,
+                    approver.name AS approver_name
+                FROM payroll_service_charge_runs sc
+                INNER JOIN payroll_runs r ON r.id = sc.run_id
+                LEFT JOIN users approver ON approver.id = sc.approved_by
+                WHERE sc.company_id = :cid AND (r.pay_date BETWEEN :f AND :t OR r.pay_date IS NULL)
+                ORDER BY r.period_no ASC");
+            $stmt->execute(['cid' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+            $rows = [];
+            $totalDeclared = 0.0;
+            $totalPool = 0.0;
+            $totalEmployer = 0.0;
+            foreach ($stmt->fetchAll() as $scRun) {
+                $totalDeclared += (float) $scRun['declared_total'];
+                $totalPool += (float) $scRun['employee_pool'];
+                $totalEmployer += (float) $scRun['employer_share'];
+                $rows[] = rc_row([
+                    $scRun['period_label'] . ' — declared ' . rc_fmt((float) $scRun['declared_total'])
+                    . ' | employees ' . number_format((float) $scRun['employee_pct'], 0) . '% = ' . rc_fmt((float) $scRun['employee_pool'])
+                    . ' | employer ' . number_format((float) $scRun['employer_pct'], 0) . '% = ' . rc_fmt((float) $scRun['employer_share'])
+                    . ' | ' . str_replace('_', ' ', (string) $scRun['allocation_method'])
+                    . ' | ' . ucfirst((string) $scRun['status'])
+                    . ($scRun['approver_name'] ? ' by ' . $scRun['approver_name'] . ' at ' . $scRun['approved_at'] : '')
+                    . ' | payroll ' . $scRun['run_status'],
+                    '', '', '',
+                ], 'section');
+                foreach (payroll_sc_allocations((int) $scRun['id']) as $allocation) {
+                    $rows[] = [
+                        $allocation['employee_code'] . ' — ' . $allocation['person_name'],
+                        $allocation['eligible_days'] !== null ? number_format((float) $allocation['eligible_days'], 0) . ' days' : '–',
+                        rc_fmt((float) $allocation['amount']),
+                        'taxable',
+                    ];
+                }
+            }
+            return [
+                'title' => 'Service Charge Allocation Report',
+                'subtitle' => 'Employer-declared service charge per payroll period: the employee pool distributes through payroll as taxable remuneration; the employer share is reporting-only and never enters employee pay or Salary Payable.',
+                'columns' => [['Period / Employee', 'left', ''], ['Eligible days', 'left', ''], ['Allocated (' . $sym . ')', 'right', ''], ['Tax status', 'left', '']],
+                'rows' => $rows,
+                'totals' => ['Declared ' . rc_fmt($totalDeclared) . ' — employees ' . rc_fmt($totalPool) . ', employer ' . rc_fmt($totalEmployer), '', '', ''],
+            ];
+        }
+
+        case 'payroll-posting': {
+            if (!table_exists('payroll_run_components')) {
+                return ['subtitle' => 'Component posting data not available yet.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            // Ledger-mapped detail behind each posted payroll voucher: every
+            // component line with its snapshot mapping plus the voucher header.
+            $stmt = db()->prepare("SELECT c.component_code, c.component_name, c.posting_behaviour, c.category, c.amount,
+                    dr.code AS dr_code, dr.name AS dr_name, cr.code AS cr_code, cr.name AS cr_name,
+                    pe.employee_code,
+                    COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name,
+                    r.period_label, r.accrual_voucher_id, v.voucher_no, v.voucher_date
+                FROM payroll_run_components c
+                INNER JOIN payroll_runs r ON r.id = c.run_id
+                INNER JOIN payroll_employees pe ON pe.id = c.payroll_employee_id
+                LEFT JOIN users u ON u.id = pe.user_id
+                LEFT JOIN ledgers dr ON dr.id = c.debit_ledger_id
+                LEFT JOIN ledgers cr ON cr.id = c.credit_ledger_id
+                LEFT JOIN vouchers v ON v.id = r.accrual_voucher_id
+                WHERE r.company_id = :cid AND r.status <> 'cancelled'
+                  AND (r.pay_date BETWEEN :f AND :t OR r.pay_date IS NULL)
+                  AND c.amount > 0.004
+                ORDER BY r.period_no ASC, c.component_code ASC, pe.employee_code ASC");
+            $stmt->execute(['cid' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+            $rows = [];
+            $total = 0.0;
+            foreach ($stmt->fetchAll() as $postingLine) {
+                $behaviour = (string) $postingLine['posting_behaviour'];
+                $isCredit = in_array($behaviour, ['deduction_liability', 'advance_recovery'], true)
+                    || in_array((string) $postingLine['category'], ['deduction', 'tax', 'advance_recovery'], true);
+                $total += (float) $postingLine['amount'];
+                $rows[] = [
+                    $postingLine['component_code'] . ' — ' . $postingLine['component_name'],
+                    $postingLine['employee_code'] . ' — ' . $postingLine['person_name'],
+                    str_replace('_', ' ', $behaviour),
+                    (string) ($postingLine['dr_code'] ?? '') !== '' ? $postingLine['dr_code'] . ' ' . $postingLine['dr_name'] : ($isCredit ? '–' : 'control (Salary expense)'),
+                    (string) ($postingLine['cr_code'] ?? '') !== '' ? $postingLine['cr_code'] . ' ' . $postingLine['cr_name'] : ($isCredit ? 'control (per behaviour)' : '– (via Salary Payable)'),
+                    $isCredit ? '–' : rc_fmt((float) $postingLine['amount']),
+                    $isCredit ? rc_fmt((float) $postingLine['amount']) : '–',
+                    (string) ($postingLine['voucher_no'] ?? '') !== ''
+                        ? $postingLine['voucher_no'] . ($postingLine['voucher_date'] ? ' (' . $postingLine['voucher_date'] . ')' : '')
+                        : $postingLine['period_label'] . ' — not posted',
+                ];
+            }
+            return [
+                'title' => 'Payroll Accounting Posting Report',
+                'subtitle' => 'Component-level detail behind the payroll vouchers: each line\'s snapshot ledger mapping (blank = the general control ledger), consolidated in the actual voucher. Zero-amount lines never post.',
+                'columns' => [['Component', 'left', ''], ['Employee', 'left', ''], ['Behaviour', 'left', ''], ['Debit ledger', 'left', ''], ['Credit ledger', 'left', ''], ['Debit (' . $sym . ')', 'right', ''], ['Credit (' . $sym . ')', 'right', ''], ['Voucher', 'left', '']],
+                'rows' => $rows,
+                'totals' => ['Total component amount', '', '', '', '', '', rc_fmt($total), ''],
             ];
         }
 

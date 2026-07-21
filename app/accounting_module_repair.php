@@ -778,5 +778,223 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Payroll employees without a login (migration 060)', static function (): void {
+        // An employee may exist purely for payroll — no user account. The link
+        // becomes optional and identity fields live on the payroll row itself.
+        if (!accounting_repair_table_exists('payroll_employees')) {
+            return;
+        }
+        $nullableStmt = db()->prepare("SELECT IS_NULLABLE FROM information_schema.columns
+            WHERE table_schema = :db_name AND table_name = 'payroll_employees' AND column_name = 'user_id'");
+        $nullableStmt->execute(['db_name' => DB_NAME]);
+        if ((string) $nullableStmt->fetchColumn() === 'NO') {
+            db()->exec('ALTER TABLE `payroll_employees` MODIFY COLUMN `user_id` INT UNSIGNED DEFAULT NULL');
+        }
+        accounting_repair_add_column('payroll_employees', 'full_name', '`full_name` VARCHAR(160) DEFAULT NULL AFTER `user_id`');
+        accounting_repair_add_column('payroll_employees', 'email', '`email` VARCHAR(190) DEFAULT NULL AFTER `full_name`');
+        accounting_repair_add_column('payroll_employees', 'phone', '`phone` VARCHAR(60) DEFAULT NULL AFTER `email`');
+    });
+
+    $run('Flexible pay components + service charge + weekly overtime (migration 061)', static function (): void {
+        if (!accounting_repair_table_exists('payroll_components')) {
+            return; // payroll module not provisioned yet (031 creates it on demand)
+        }
+
+        // Widen the category / calc_type enums exactly once.
+        $columnType = static function (string $table, string $column): string {
+            $stmt = db()->prepare('SELECT COLUMN_TYPE FROM information_schema.columns
+                WHERE table_schema = :db_name AND table_name = :table_name AND column_name = :column_name');
+            $stmt->execute(['db_name' => DB_NAME, 'table_name' => $table, 'column_name' => $column]);
+            return (string) $stmt->fetchColumn();
+        };
+        if (!str_contains($columnType('payroll_components', 'category'), 'employer_contribution')) {
+            db()->exec("ALTER TABLE `payroll_components` MODIFY COLUMN `category` ENUM('allowance','overtime','benefit','deduction','employer_contribution','reimbursement','advance_recovery','tax','info') NOT NULL DEFAULT 'allowance'");
+        }
+        if (!str_contains($columnType('payroll_components', 'calc_type'), 'overtime_hours')) {
+            db()->exec("ALTER TABLE `payroll_components` MODIFY COLUMN `calc_type` ENUM('fixed','percent_basic','manual','overtime_hours','service_charge') NOT NULL DEFAULT 'manual'");
+        }
+
+        accounting_repair_add_column('payroll_components', 'description', "`description` VARCHAR(255) DEFAULT NULL AFTER `name_np`");
+        accounting_repair_add_column('payroll_components', 'posting_behaviour', "`posting_behaviour` ENUM('category_default','earning_expense','deduction_liability','employer_contribution','reimbursement','advance_recovery','non_posting','custom') NOT NULL DEFAULT 'category_default' AFTER `category`");
+        accounting_repair_add_column('payroll_components', 'debit_ledger_id', '`debit_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `posting_behaviour`');
+        accounting_repair_add_column('payroll_components', 'credit_ledger_id', '`credit_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `debit_ledger_id`');
+        accounting_repair_add_column('payroll_components', 'employer_expense_ledger_id', '`employer_expense_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `credit_ledger_id`');
+        accounting_repair_add_column('payroll_components', 'contribution_payable_ledger_id', '`contribution_payable_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `employer_expense_ledger_id`');
+        accounting_repair_add_column('payroll_components', 'include_in_gross', '`include_in_gross` TINYINT(1) NOT NULL DEFAULT 1 AFTER `taxable`');
+        accounting_repair_add_column('payroll_components', 'include_in_net', '`include_in_net` TINYINT(1) NOT NULL DEFAULT 1 AFTER `include_in_gross`');
+        accounting_repair_add_column('payroll_components', 'retirement_basis', '`retirement_basis` TINYINT(1) NOT NULL DEFAULT 0 AFTER `include_in_net`');
+        accounting_repair_add_column('payroll_components', 'overtime_basis', '`overtime_basis` TINYINT(1) NOT NULL DEFAULT 0 AFTER `retirement_basis`');
+        accounting_repair_add_column('payroll_components', 'service_charge_basis', '`service_charge_basis` TINYINT(1) NOT NULL DEFAULT 0 AFTER `overtime_basis`');
+        accounting_repair_add_column('payroll_components', 'percentage', '`percentage` DECIMAL(9,4) DEFAULT NULL AFTER `default_value`');
+        accounting_repair_add_column('payroll_components', 'calc_basis', '`calc_basis` VARCHAR(40) DEFAULT NULL AFTER `percentage`');
+        accounting_repair_add_column('payroll_components', 'allow_employee_override', '`allow_employee_override` TINYINT(1) NOT NULL DEFAULT 1 AFTER `service_charge_basis`');
+        accounting_repair_add_column('payroll_components', 'allow_period_override', '`allow_period_override` TINYINT(1) NOT NULL DEFAULT 1 AFTER `allow_employee_override`');
+        accounting_repair_add_column('payroll_components', 'allow_zero', '`allow_zero` TINYINT(1) NOT NULL DEFAULT 1 AFTER `allow_period_override`');
+        accounting_repair_add_column('payroll_components', 'effective_from', '`effective_from` DATE DEFAULT NULL AFTER `allow_zero`');
+        accounting_repair_add_column('payroll_components', 'effective_to', '`effective_to` DATE DEFAULT NULL AFTER `effective_from`');
+        accounting_repair_add_column('payroll_components', 'created_by', '`created_by` INT UNSIGNED DEFAULT NULL AFTER `sort_order`');
+        accounting_repair_add_column('payroll_components', 'updated_by', '`updated_by` INT UNSIGNED DEFAULT NULL AFTER `created_by`');
+        accounting_repair_add_constraint('payroll_components', 'fk_payroll_components_dr', '`fk_payroll_components_dr` FOREIGN KEY (`debit_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE RESTRICT');
+        accounting_repair_add_constraint('payroll_components', 'fk_payroll_components_cr', '`fk_payroll_components_cr` FOREIGN KEY (`credit_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE RESTRICT');
+        accounting_repair_add_constraint('payroll_components', 'fk_payroll_components_er_exp', '`fk_payroll_components_er_exp` FOREIGN KEY (`employer_expense_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE RESTRICT');
+        accounting_repair_add_constraint('payroll_components', 'fk_payroll_components_er_pay', '`fk_payroll_components_er_pay` FOREIGN KEY (`contribution_payable_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE RESTRICT');
+
+        accounting_repair_add_column('payroll_employee_components', 'effective_from', '`effective_from` DATE DEFAULT NULL AFTER `amount`');
+        accounting_repair_add_column('payroll_employee_components', 'effective_to', '`effective_to` DATE DEFAULT NULL AFTER `effective_from`');
+        accounting_repair_add_column('payroll_employee_components', 'percentage', '`percentage` DECIMAL(9,4) DEFAULT NULL AFTER `effective_to`');
+        accounting_repair_add_column('payroll_employee_components', 'taxable_override', '`taxable_override` TINYINT(1) DEFAULT NULL AFTER `percentage`');
+        accounting_repair_add_column('payroll_employee_components', 'active', '`active` TINYINT(1) NOT NULL DEFAULT 1 AFTER `taxable_override`');
+        accounting_repair_add_column('payroll_employee_components', 'remarks', '`remarks` VARCHAR(255) DEFAULT NULL AFTER `active`');
+        accounting_repair_add_column('payroll_employee_components', 'created_by', '`created_by` INT UNSIGNED DEFAULT NULL AFTER `remarks`');
+        accounting_repair_add_column('payroll_employee_components', 'updated_by', '`updated_by` INT UNSIGNED DEFAULT NULL AFTER `created_by`');
+
+        if (!accounting_repair_table_exists('payroll_run_components')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `payroll_run_components` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `run_id` INT UNSIGNED NOT NULL,
+                `payroll_employee_id` INT UNSIGNED NOT NULL,
+                `component_id` INT UNSIGNED DEFAULT NULL,
+                `component_code` VARCHAR(40) NOT NULL,
+                `component_name` VARCHAR(120) NOT NULL,
+                `category` VARCHAR(30) NOT NULL,
+                `posting_behaviour` VARCHAR(30) NOT NULL DEFAULT 'category_default',
+                `taxable` TINYINT(1) NOT NULL DEFAULT 1,
+                `include_in_gross` TINYINT(1) NOT NULL DEFAULT 1,
+                `include_in_net` TINYINT(1) NOT NULL DEFAULT 1,
+                `calc_method` VARCHAR(30) NOT NULL DEFAULT 'manual',
+                `debit_ledger_id` INT UNSIGNED DEFAULT NULL,
+                `credit_ledger_id` INT UNSIGNED DEFAULT NULL,
+                `employer_expense_ledger_id` INT UNSIGNED DEFAULT NULL,
+                `contribution_payable_ledger_id` INT UNSIGNED DEFAULT NULL,
+                `suggested_amount` DECIMAL(14,2) DEFAULT NULL,
+                `amount` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `override_reason` VARCHAR(255) DEFAULT NULL,
+                `source` ENUM('standard','one_time','overtime','service_charge') NOT NULL DEFAULT 'standard',
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `updated_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_run_component_line` (`run_id`, `payroll_employee_id`, `component_code`),
+                KEY `idx_prc_component` (`component_id`),
+                KEY `idx_prc_employee` (`payroll_employee_id`),
+                CONSTRAINT `fk_prc_run` FOREIGN KEY (`run_id`) REFERENCES `payroll_runs` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_prc_employee` FOREIGN KEY (`payroll_employee_id`) REFERENCES `payroll_employees` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_prc_component` FOREIGN KEY (`component_id`) REFERENCES `payroll_components` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        if (!accounting_repair_table_exists('payroll_service_charge_runs')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `payroll_service_charge_runs` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `run_id` INT UNSIGNED NOT NULL,
+                `declared_total` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `employee_pct` DECIMAL(5,2) NOT NULL DEFAULT 68.00,
+                `employer_pct` DECIMAL(5,2) NOT NULL DEFAULT 32.00,
+                `employee_pool` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `employer_share` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `allocation_method` ENUM('equal','days_worked','manual') NOT NULL DEFAULT 'equal',
+                `component_id` INT UNSIGNED DEFAULT NULL,
+                `status` ENUM('draft','approved') NOT NULL DEFAULT 'draft',
+                `notes` VARCHAR(255) DEFAULT NULL,
+                `approved_by` INT UNSIGNED DEFAULT NULL,
+                `approved_at` TIMESTAMP NULL DEFAULT NULL,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `updated_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_sc_run` (`run_id`),
+                KEY `idx_sc_company` (`company_id`),
+                CONSTRAINT `fk_sc_runs_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_sc_runs_run` FOREIGN KEY (`run_id`) REFERENCES `payroll_runs` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_sc_runs_component` FOREIGN KEY (`component_id`) REFERENCES `payroll_components` (`id`) ON DELETE RESTRICT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!accounting_repair_table_exists('payroll_service_charge_allocations')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `payroll_service_charge_allocations` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `sc_run_id` INT UNSIGNED NOT NULL,
+                `payroll_employee_id` INT UNSIGNED NOT NULL,
+                `eligible_days` DECIMAL(6,2) DEFAULT NULL,
+                `amount` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_sc_alloc_employee` (`sc_run_id`, `payroll_employee_id`),
+                CONSTRAINT `fk_sc_alloc_run` FOREIGN KEY (`sc_run_id`) REFERENCES `payroll_service_charge_runs` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_sc_alloc_employee` FOREIGN KEY (`payroll_employee_id`) REFERENCES `payroll_employees` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        if (!accounting_repair_table_exists('payroll_overtime_weeks')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `payroll_overtime_weeks` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `payroll_employee_id` INT UNSIGNED NOT NULL,
+                `week_start` DATE NOT NULL,
+                `week_end` DATE NOT NULL,
+                `total_hours` DECIMAL(7,2) NOT NULL DEFAULT 0.00,
+                `regular_hours` DECIMAL(7,2) NOT NULL DEFAULT 0.00,
+                `overtime_hours` DECIMAL(7,2) NOT NULL DEFAULT 0.00,
+                `hourly_rate` DECIMAL(14,4) NOT NULL DEFAULT 0.0000,
+                `multiplier` DECIMAL(6,3) NOT NULL DEFAULT 1.000,
+                `calculated_amount` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `approved_amount` DECIMAL(14,2) DEFAULT NULL,
+                `adjust_reason` VARCHAR(255) DEFAULT NULL,
+                `daily_json` TEXT DEFAULT NULL,
+                `status` ENUM('calculated','approved') NOT NULL DEFAULT 'calculated',
+                `approved_by` INT UNSIGNED DEFAULT NULL,
+                `approved_at` TIMESTAMP NULL DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_ot_week` (`payroll_employee_id`, `week_start`),
+                KEY `idx_ot_weeks_company` (`company_id`, `week_start`),
+                CONSTRAINT `fk_ot_weeks_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_ot_weeks_employee` FOREIGN KEY (`payroll_employee_id`) REFERENCES `payroll_employees` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!accounting_repair_table_exists('payroll_overtime_entries')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `payroll_overtime_entries` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `payroll_employee_id` INT UNSIGNED NOT NULL,
+                `week_start` DATE NOT NULL,
+                `ot_date` DATE NOT NULL,
+                `hours` DECIMAL(6,2) NOT NULL DEFAULT 0.00,
+                `amount` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `run_id` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_ot_entry_date` (`payroll_employee_id`, `ot_date`),
+                KEY `idx_ot_entries_week` (`payroll_employee_id`, `week_start`),
+                KEY `idx_ot_entries_run` (`run_id`),
+                CONSTRAINT `fk_ot_entries_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_ot_entries_employee` FOREIGN KEY (`payroll_employee_id`) REFERENCES `payroll_employees` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_ot_entries_run` FOREIGN KEY (`run_id`) REFERENCES `payroll_runs` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        accounting_repair_add_column('payroll_settings', 'ot_weekly_threshold', '`ot_weekly_threshold` DECIMAL(5,2) NOT NULL DEFAULT 40.00');
+        accounting_repair_add_column('payroll_settings', 'ot_week_start', '`ot_week_start` TINYINT NOT NULL DEFAULT 0');
+        accounting_repair_add_column('payroll_settings', 'ot_component_id', '`ot_component_id` INT UNSIGNED DEFAULT NULL');
+        accounting_repair_add_column('payroll_settings', 'ot_rate_source', "`ot_rate_source` ENUM('salary_derived','fixed_rate') NOT NULL DEFAULT 'salary_derived'");
+        accounting_repair_add_column('payroll_settings', 'ot_monthly_hours', '`ot_monthly_hours` DECIMAL(6,2) NOT NULL DEFAULT 208.00');
+        accounting_repair_add_column('payroll_settings', 'ot_multiplier', '`ot_multiplier` DECIMAL(6,3) NOT NULL DEFAULT 1.500');
+        accounting_repair_add_column('payroll_settings', 'ot_rounding', "`ot_rounding` ENUM('none','nearest','down') NOT NULL DEFAULT 'nearest'");
+        accounting_repair_add_column('payroll_settings', 'ot_require_approval', '`ot_require_approval` TINYINT(1) NOT NULL DEFAULT 1');
+        accounting_repair_add_column('payroll_settings', 'sc_component_id', '`sc_component_id` INT UNSIGNED DEFAULT NULL');
+        accounting_repair_add_column('payroll_settings', 'sc_employee_pct', '`sc_employee_pct` DECIMAL(5,2) NOT NULL DEFAULT 68.00');
+        accounting_repair_add_column('payroll_settings', 'sc_employer_pct', '`sc_employer_pct` DECIMAL(5,2) NOT NULL DEFAULT 32.00');
+        accounting_repair_add_constraint('payroll_settings', 'fk_payroll_settings_ot_comp', '`fk_payroll_settings_ot_comp` FOREIGN KEY (`ot_component_id`) REFERENCES `payroll_components` (`id`) ON DELETE SET NULL');
+        accounting_repair_add_constraint('payroll_settings', 'fk_payroll_settings_sc_comp', '`fk_payroll_settings_sc_comp` FOREIGN KEY (`sc_component_id`) REFERENCES `payroll_components` (`id`) ON DELETE SET NULL');
+
+        accounting_repair_add_column('payroll_employees', 'ot_hourly_rate', '`ot_hourly_rate` DECIMAL(14,4) DEFAULT NULL AFTER `basic_salary`');
+        accounting_repair_add_column('payroll_employees', 'sc_eligible', '`sc_eligible` TINYINT(1) NOT NULL DEFAULT 1 AFTER `ot_hourly_rate`');
+    });
+
     return $errors;
 }
