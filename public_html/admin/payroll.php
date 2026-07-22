@@ -167,6 +167,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/payroll.php?run=' . $runId . '#components');
     }
 
+    if ($action === 'edit_tax_override') {
+        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        $clear = (string) ($_POST['clear'] ?? '') === '1';
+        $amountRaw = trim((string) ($_POST['approved_tax'] ?? ''));
+        $result = payroll_set_tax_override(
+            $runId,
+            $employeeId,
+            $clear || $amountRaw === '' ? null : (float) $amountRaw,
+            trim((string) ($_POST['override_reason'] ?? '')),
+            $userId
+        );
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? ($clear ? 'Tax override cleared — system calculation restored.' : 'Tax override applied — the system figure stays visible in the breakdown.')
+            : (string) ($result['error'] ?? 'Could not update the tax override.'));
+        redirect('admin/payroll.php?run=' . $runId);
+    }
+
     if ($action === 'sync_overtime') {
         [$periodStart, $periodEnd] = payroll_period_range((int) $runRow['fiscal_year_id'], (int) $runRow['period_no']);
         if ($periodStart === '') {
@@ -619,6 +636,24 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <small>Set both to 0 to clear. Tax and net pay recompute; the value survives Recalculate.</small>
                             </form>
                         </details>
+                        <details class="pr-adjust">
+                            <summary class="button secondary">Tax<?= ($line['tax_override'] ?? null) !== null ? ' *' : '' ?></summary>
+                            <form method="post" class="pr-adjust-form" style="width:260px">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="edit_tax_override">
+                                <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
+                                <input type="hidden" name="employee_id" value="<?= e((int) $line['payroll_employee_id']) ?>">
+                                <label>System-calculated tax
+                                    <input type="text" value="<?= e(number_format((float) ($line['tax_override'] !== null ? (json_decode((string) $line['trace'], true)['withholding']['system_tax'] ?? $line['tax_month']) : $line['tax_month']), 2)) ?>" readonly></label>
+                                <label>Approved (override) tax<input type="number" step="0.01" min="0" name="approved_tax" value="<?= ($line['tax_override'] ?? null) !== null ? e(number_format((float) $line['tax_override'], 2, '.', '')) : '' ?>"></label>
+                                <label>Reason (required)<input type="text" name="override_reason" maxlength="255" value="<?= e((string) ($line['tax_override_reason'] ?? '')) ?>"></label>
+                                <button type="submit">Apply override</button>
+                                <?php if (($line['tax_override'] ?? null) !== null): ?>
+                                    <button type="submit" name="clear" value="1" class="button secondary">Clear — restore system tax</button>
+                                <?php endif; ?>
+                                <small>The system figure stays stored and visible; the override is audited.</small>
+                            </form>
+                        </details>
                         <?php endif; ?>
                     </td>
                 </tr>
@@ -756,6 +791,38 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 html += '<div class="pr-ins-row"><span>' + c.label + (c.taxable ? '' : ' (non-taxable)') + '</span><b>' + fmt(c.amount) + '</b></div>';
             });
             html += '<div class="pr-ins-sub">Annualization</div><div class="pr-ins-note">' + (trace.annualization || '') + '</div>';
+            var proj = trace.projection;
+            if (proj) {
+                html += '<div class="pr-ins-sub">Projected annual tax (employment periods ' + proj.start_period + '–' + proj.end_period + ')</div>';
+                html += '<div class="pr-ins-row"><span>Actual regular income to date</span><b>' + fmt(proj.actual_regular_to_date) + '</b></div>';
+                html += '<div class="pr-ins-row"><span>Actual irregular income to date</span><b>' + fmt(proj.actual_irregular_to_date) + '</b></div>';
+                html += '<div class="pr-ins-row"><span>Current period — regular</span><b>' + fmt(proj.current_regular) + '</b></div>';
+                html += '<div class="pr-ins-row"><span>Current period — irregular (earned only)</span><b>' + fmt(proj.current_irregular) + '</b></div>';
+                html += '<div class="pr-ins-row"><span>Projected future REGULAR income</span><b>' + fmt(proj.projected_future_regular) + '</b></div>';
+                if (proj.manual_projected > 0) {
+                    html += '<div class="pr-ins-row"><span>Approved manual projections</span><b>' + fmt(proj.manual_projected) + '</b></div>';
+                }
+                if (proj.prior_employment_income > 0) {
+                    html += '<div class="pr-ins-row"><span>Prior employment income (approved)</span><b>' + fmt(proj.prior_employment_income) + '</b></div>';
+                }
+                html += '<div class="pr-ins-row"><span>Estimated annual taxable (assessable)</span><b>' + fmt(proj.estimated_annual_taxable) + '</b></div>';
+                if (proj.projected_periods && proj.projected_periods.length) {
+                    html += '<details style="margin:4px 0"><summary style="cursor:pointer;font-size:12px">Period-by-period projection (' + proj.projected_periods.length + ' future months)</summary>';
+                    proj.projected_periods.forEach(function (pp) {
+                        html += '<div class="pr-ins-row"><span>Period ' + pp.period + ' (basic ' + fmt(pp.basic) + ')</span><b>' + fmt(pp.assessable) + '</b></div>';
+                    });
+                    html += '</details>';
+                }
+                html += '<div class="pr-ins-row"><span>Remaining periods (incl. current)</span><b>' + proj.remaining_periods + '</b></div>';
+                html += '<div class="pr-ins-row"><span>Remaining tax to withhold</span><b>' + fmt(proj.remaining_tax) + '</b></div>';
+                if (proj.excess_tax > 0) {
+                    html += '<div class="pr-ins-row" style="color:#c0392b"><span>EXCESS tax already deducted</span><b>' + fmt(proj.excess_tax) + '</b></div>';
+                    html += '<div class="pr-ins-note">Treatment: ' + (proj.excess_treatment || 'offset') + ' — see Payroll Settings.</div>';
+                }
+                if (trace.withholding && trace.withholding.tax_override !== null && trace.withholding.tax_override !== undefined) {
+                    html += '<div class="pr-ins-row" style="color:#b9770e"><span>Approved override (system ' + fmt(trace.withholding.system_tax) + ')</span><b>' + fmt(trace.withholding.tax_override) + '</b></div>';
+                }
+            }
             if (trace.retirement && trace.retirement.scheme !== 'none') {
                 html += '<div class="pr-ins-sub">Retirement deduction (' + trace.retirement.scheme.toUpperCase() + ')</div>';
                 html += '<div class="pr-ins-row"><span>Annual contribution</span><b>' + fmt(trace.retirement.annual_contribution) + '</b></div>';

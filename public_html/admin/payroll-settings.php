@@ -30,9 +30,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 tds_payable_ledger_id = :tds, sst_payable_ledger_id = :sst, retirement_payable_ledger_id = :rp,
                 salary_payable_ledger_id = :sp, advance_ledger_id = :adv, bank_ledger_id = :bank,
                 enforce_sod = :sod, auto_post = :ap,
-                standard_working_days = :wd, deduct_unpaid_leave = :dul
+                standard_working_days = :wd, deduct_unpaid_leave = :dul,
+                excess_tax_treatment = :ext
             WHERE company_id = :cid')
             ->execute([
+                'ext' => in_array((string) ($_POST['excess_tax_treatment'] ?? ''), ['offset', 'refund', 'carry_forward', 'manual'], true)
+                    ? (string) $_POST['excess_tax_treatment'] : 'offset',
                 'se' => (int) ($_POST['salary_expense_ledger_id'] ?? 0) ?: null,
                 'ee' => (int) ($_POST['employer_contrib_expense_ledger_id'] ?? 0) ?: null,
                 'tds' => (int) ($_POST['tds_payable_ledger_id'] ?? 0) ?: null,
@@ -82,11 +85,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'The component effective-to date cannot be before effective-from.');
             redirect('admin/payroll-settings.php');
         }
+        $projectionMethods = ['regular', 'actual_only', 'guaranteed', 'manual', 'excluded'];
+        $projectionMethod = in_array((string) ($_POST['tax_projection_method'] ?? ''), $projectionMethods, true)
+            ? (string) $_POST['tax_projection_method']
+            : (in_array($calcType, ['overtime_hours', 'service_charge', 'manual'], true) ? 'actual_only' : 'regular');
         $params = [
             'company_id' => $companyId, 'code' => $code, 'name' => $name,
             'name_np' => trim((string) ($_POST['name_np'] ?? '')) ?: null,
             'description' => trim((string) ($_POST['description'] ?? '')) ?: null,
             'category' => $category, 'posting_behaviour' => $behaviour, 'calc_type' => $calcType,
+            'tax_projection_method' => $projectionMethod,
             'default_value' => max(0.0, round((float) ($_POST['default_value'] ?? 0), 2)),
             'percentage' => (float) ($_POST['percentage'] ?? 0) > 0 ? round((float) $_POST['percentage'], 4) : null,
             'calc_basis' => trim((string) ($_POST['calc_basis'] ?? '')) ?: null,
@@ -115,7 +123,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $params['updated_by'] = $userId;
                 db()->prepare('UPDATE payroll_components SET code = :code, name = :name, name_np = :name_np,
                         description = :description, category = :category, posting_behaviour = :posting_behaviour,
-                        calc_type = :calc_type, default_value = :default_value, percentage = :percentage, calc_basis = :calc_basis,
+                        calc_type = :calc_type, tax_projection_method = :tax_projection_method,
+                        default_value = :default_value, percentage = :percentage, calc_basis = :calc_basis,
                         debit_ledger_id = :debit_ledger_id, credit_ledger_id = :credit_ledger_id,
                         employer_expense_ledger_id = :employer_expense_ledger_id, contribution_payable_ledger_id = :contribution_payable_ledger_id,
                         taxable = :taxable, include_in_gross = :include_in_gross, include_in_net = :include_in_net,
@@ -128,12 +137,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $params['created_by'] = $userId;
                 db()->prepare('INSERT INTO payroll_components (company_id, code, name, name_np, description, category, posting_behaviour,
-                        calc_type, default_value, percentage, calc_basis, debit_ledger_id, credit_ledger_id,
+                        calc_type, tax_projection_method, default_value, percentage, calc_basis, debit_ledger_id, credit_ledger_id,
                         employer_expense_ledger_id, contribution_payable_ledger_id, taxable, include_in_gross, include_in_net,
                         retirement_basis, overtime_basis, service_charge_basis, allow_employee_override, allow_period_override, allow_zero,
                         effective_from, effective_to, employer_paid, active, sort_order, created_by)
                     VALUES (:company_id, :code, :name, :name_np, :description, :category, :posting_behaviour,
-                        :calc_type, :default_value, :percentage, :calc_basis, :debit_ledger_id, :credit_ledger_id,
+                        :calc_type, :tax_projection_method, :default_value, :percentage, :calc_basis, :debit_ledger_id, :credit_ledger_id,
                         :employer_expense_ledger_id, :contribution_payable_ledger_id, :taxable, :include_in_gross, :include_in_net,
                         :retirement_basis, :overtime_basis, :service_charge_basis, :allow_employee_override, :allow_period_override, :allow_zero,
                         :effective_from, :effective_to, :employer_paid, :active, :sort_order, :created_by)')->execute($params);
@@ -357,6 +366,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="enforce_sod" <?= (int) ($settings['enforce_sod'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Segregation of duties (preparer cannot approve)</label>
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="deduct_unpaid_leave" <?= (int) ($settings['deduct_unpaid_leave'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Deduct salary for approved unpaid leave (from Attendance/HR)</label>
         <label>Working days per month (for the leave day-rate)<input type="number" step="0.5" min="1" max="31" name="standard_working_days" value="<?= e((string) ($settings['standard_working_days'] ?? '30')) ?>"></label>
+        <label>Excess tax withheld — treatment
+            <select name="excess_tax_treatment" title="What happens when the revised annual tax estimate is below the tax already deducted">
+                <?php foreach (['offset' => 'Offset against future payroll tax', 'refund' => 'Refund through payroll (approved)', 'carry_forward' => 'Carry forward to final settlement', 'manual' => 'Manual settlement after approval'] as $extValue => $extLabel): ?>
+                    <option value="<?= e($extValue) ?>" <?= (string) ($settings['excess_tax_treatment'] ?? 'offset') === $extValue ? 'selected' : '' ?>><?= e($extLabel) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
         <div class="workspace-span-2"><button type="submit"><?= icon('settings') ?>Save Settings</button></div>
     </form>
 </section>
@@ -394,6 +410,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <label>Credit ledger <span class="frm-optional">deductions / recovery / custom</span><?= $ledgerSelect('credit_ledger_id', (int) ($editComponent['credit_ledger_id'] ?? 0)) ?></label>
         <label>Employer contribution expense <span class="frm-optional">employer contributions</span><?= $ledgerSelect('employer_expense_ledger_id', (int) ($editComponent['employer_expense_ledger_id'] ?? 0), ['expense']) ?></label>
         <label>Contribution payable <span class="frm-optional">employer contributions</span><?= $ledgerSelect('contribution_payable_ledger_id', (int) ($editComponent['contribution_payable_ledger_id'] ?? 0), ['liability']) ?></label>
+        <label>Tax projection
+            <select name="tax_projection_method" title="How the projected annual tax treats this component">
+                <?php foreach (['regular' => 'Regular — project for future months', 'actual_only' => 'Actual only — count when earned (OT, service charge, bonus)', 'guaranteed' => 'Guaranteed annual amount', 'manual' => 'Manual projection only', 'excluded' => 'Excluded from tax estimation'] as $projValue => $projLabel): ?>
+                    <option value="<?= e($projValue) ?>" <?= (string) ($editComponent['tax_projection_method'] ?? 'regular') === $projValue ? 'selected' : '' ?>><?= e($projLabel) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
         <label>Suggested calculation
             <select name="calc_type">
                 <option value="manual" <?= ($editComponent['calc_type'] ?? 'manual') === 'manual' ? 'selected' : '' ?>>Manual amount (no suggestion)</option>

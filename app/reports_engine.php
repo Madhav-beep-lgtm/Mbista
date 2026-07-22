@@ -34,6 +34,9 @@ function rc_report_registry(): array
         'depreciation-schedule' => ['Depreciation Schedule', 'Posted depreciation by asset and period', 'download'],
         'asset-gl-reconciliation' => ['Asset-to-GL Reconciliation', 'Fixed-asset register carrying amount vs general ledger', 'reconcile'],
         'salary-sheet' => ['Salary Sheet', 'Payroll register: every pay component, deductions, tax and net pay per employee', 'wallet'],
+        'consolidated-salary-sheet' => ['Consolidated Salary Sheet', 'Multi-period payroll: period detail, employee and component totals, grand total', 'layers'],
+        'employee-ytd-statement' => ['Employee YTD Salary Statement', 'Per-employee months, earnings, tax deducted, and the projected annual estimate', 'profile'],
+        'consolidated-tax-report' => ['Consolidated Payroll Tax', 'Projected annual tax per employee: actual + projected income, deducted, remaining, excess', 'compliance'],
         'payroll-components' => ['Component-wise Payroll', 'Each pay component across runs: who received what, taxable status, totals', 'layers'],
         'overtime-report' => ['Overtime Report', 'Sunday-Saturday weekly overtime: hours, threshold split, rates and approvals', 'attendance'],
         'service-charge-report' => ['Service Charge Allocation', 'Declared totals, 68% employee pool, 32% employer share and per-employee distribution', 'handshake'],
@@ -1810,6 +1813,251 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 'columns' => [['Component', 'left', ''], ['Employee', 'left', ''], ['Behaviour', 'left', ''], ['Debit ledger', 'left', ''], ['Credit ledger', 'left', ''], ['Debit (' . $sym . ')', 'right', ''], ['Credit (' . $sym . ')', 'right', ''], ['Voucher', 'left', '']],
                 'rows' => $rows,
                 'totals' => ['Total component amount', '', '', '', '', '', rc_fmt($total), ''],
+            ];
+        }
+
+        case 'consolidated-salary-sheet': {
+            if (!table_exists('payroll_runs')) {
+                return ['subtitle' => 'Payroll module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            // Every non-cancelled run whose pay date (or, failing that, period)
+            // falls in the report range: period detail, then employee-wise and
+            // component-wise consolidations, then the grand total.
+            $runsStmt = db()->prepare("SELECT * FROM payroll_runs
+                WHERE company_id = :cid AND status <> 'cancelled' AND (pay_date BETWEEN :f AND :t OR pay_date IS NULL)
+                ORDER BY period_no ASC, id ASC");
+            $runsStmt->execute(['cid' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+            $csRuns = $runsStmt->fetchAll();
+            if ($csRuns === []) {
+                return ['title' => 'Consolidated Salary Sheet', 'subtitle' => 'No payroll runs in the selected range.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            $runIds = array_map(static fn (array $r): int => (int) $r['id'], $csRuns);
+            $idList = implode(',', $runIds);
+            $lineStmt = db()->query("SELECT l.*, r.period_no, r.period_label, r.status AS run_status, r.payment_voucher_id, r.accrual_voucher_id,
+                    pe.employee_code, pe.department, pe.designation, pe.joined_on,
+                    COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name
+                FROM payroll_run_lines l
+                INNER JOIN payroll_runs r ON r.id = l.run_id
+                INNER JOIN payroll_employees pe ON pe.id = l.payroll_employee_id
+                LEFT JOIN users u ON u.id = pe.user_id
+                WHERE l.run_id IN ($idList) ORDER BY r.period_no ASC, pe.employee_code ASC");
+            $csLines = $lineStmt->fetchAll();
+            $componentCells = [];
+            $componentCodes = [];
+            if (table_exists('payroll_run_components')) {
+                foreach (db()->query("SELECT run_id, payroll_employee_id, component_code, component_name, posting_behaviour, category, amount
+                        FROM payroll_run_components WHERE run_id IN ($idList)")->fetchAll() as $prc) {
+                    if ((string) $prc['posting_behaviour'] === 'non_posting' || (string) $prc['category'] === 'info') {
+                        continue;
+                    }
+                    $componentCodes[(string) $prc['component_code']] = (string) $prc['component_name'];
+                    $componentCells[(int) $prc['run_id']][(int) $prc['payroll_employee_id']][(string) $prc['component_code']] = (float) $prc['amount'];
+                }
+                ksort($componentCodes);
+            }
+            $codeList = array_keys($componentCodes);
+            $tailLabels = ['Gross', 'Taxable Rem.', 'Total Ded.', 'Net Pay', 'Employer Contrib.', 'Tax Deducted'];
+            $columns = [['Period / Employee', 'left', ''], ['Basic (' . $sym . ')', 'right', '']];
+            foreach ($codeList as $code) {
+                $columns[] = [$code . ' (' . $sym . ')', 'right', ''];
+            }
+            foreach ($tailLabels as $tailLabel) {
+                $columns[] = [$tailLabel . ' (' . $sym . ')', 'right', ''];
+            }
+            $width = count($columns);
+            $emptyVector = static fn (): array => array_fill(0, 1 + count($codeList) + 6, 0.0);
+            $lineVector = static function (array $line, array $cells) use ($codeList): array {
+                $v = [(float) $line['basic']];
+                foreach ($codeList as $code) {
+                    $v[] = (float) ($cells[$code] ?? 0);
+                }
+                $ded = (float) $line['tax_month'] + (float) $line['retirement_employee_month'] + (float) $line['advance_deduction']
+                    + (float) $line['other_deduction'] + (float) ($line['adj_deduction'] ?? 0);
+                $v[] = (float) $line['gross'];
+                $v[] = (float) ($line['assessable_month'] ?? 0) ?: round((float) $line['assessable_annual'] / 12, 2);
+                $v[] = $ded;
+                $v[] = (float) $line['net_pay'];
+                $v[] = (float) $line['retirement_employer_month'];
+                $v[] = (float) $line['tax_month'];
+                return $v;
+            };
+            $rows = [];
+            $grand = $emptyVector();
+            $employeeTotals = [];
+            $currentRunId = 0;
+            foreach ($csLines as $line) {
+                if ((int) $line['run_id'] !== $currentRunId) {
+                    $currentRunId = (int) $line['run_id'];
+                    $rows[] = rc_row(array_merge([
+                        $line['period_label'] . ' — ' . ucfirst((string) $line['run_status'])
+                        . ((int) $line['payment_voucher_id'] > 0 ? ', paid' : '')
+                        . ((int) $line['accrual_voucher_id'] > 0 ? ', posted' : ', not posted'),
+                    ], array_fill(0, $width - 1, '')), 'section');
+                }
+                $cells = $componentCells[(int) $line['run_id']][(int) $line['payroll_employee_id']] ?? [];
+                $vector = $lineVector($line, $cells);
+                foreach ($vector as $i => $value) {
+                    $grand[$i] += $value;
+                }
+                $employeeKey = $line['employee_code'] . ' — ' . $line['person_name'];
+                if (!isset($employeeTotals[$employeeKey])) {
+                    $employeeTotals[$employeeKey] = $emptyVector();
+                }
+                foreach ($vector as $i => $value) {
+                    $employeeTotals[$employeeKey][$i] += $value;
+                }
+                $rows[] = array_merge([
+                    $line['employee_code'] . ' — ' . $line['person_name']
+                    . ((string) ($line['department'] ?? '') !== '' ? ' (' . $line['department'] . ')' : ''),
+                ], array_map('rc_fmt', $vector));
+            }
+            if (count($csRuns) > 1) {
+                $rows[] = rc_row(array_merge(['Employee-wise consolidated totals'], array_fill(0, $width - 1, '')), 'section');
+                foreach ($employeeTotals as $employeeKey => $vector) {
+                    $rows[] = rc_row(array_merge([$employeeKey], array_map('rc_fmt', $vector)), 'bold');
+                }
+            }
+            return [
+                'title' => 'Consolidated Salary Sheet',
+                'subtitle' => count($csRuns) . ' payroll run(s) from ' . date('d M Y', strtotime($from)) . ' to ' . date('d M Y', strtotime($to))
+                    . '. Dynamic columns show every pay component used; employee totals consolidate across periods.',
+                'columns' => $columns,
+                'rows' => $rows,
+                'totals' => array_merge(['Grand total (' . count($csLines) . ' lines)'], array_map('rc_fmt', $grand)),
+            ];
+        }
+
+        case 'employee-ytd-statement': {
+            if (!table_exists('payroll_runs')) {
+                return ['subtitle' => 'Payroll module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            // Month-by-month actuals per employee for the range, closed by the
+            // PROJECTED annual estimate from the latest stored tax snapshot —
+            // estimates are clearly marked and kept apart from actuals.
+            $stmt = db()->prepare("SELECT l.*, r.period_no, r.period_label, r.status AS run_status,
+                    pe.id AS employee_id, pe.employee_code, pe.department, pe.joined_on, pe.terminated_on,
+                    COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name
+                FROM payroll_run_lines l
+                INNER JOIN payroll_runs r ON r.id = l.run_id
+                INNER JOIN payroll_employees pe ON pe.id = l.payroll_employee_id
+                LEFT JOIN users u ON u.id = pe.user_id
+                WHERE r.company_id = :cid AND r.status <> 'cancelled' AND (r.pay_date BETWEEN :f AND :t OR r.pay_date IS NULL)
+                ORDER BY pe.employee_code ASC, r.period_no ASC");
+            $stmt->execute(['cid' => $scopeCompanyId, 'f' => $from, 't' => $to]);
+            $rows = [];
+            $currentEmployee = 0;
+            $cumTax = 0.0;
+            $cumNet = 0.0;
+            $latestCalcStmt = table_exists('payroll_tax_calculations')
+                ? db()->prepare('SELECT * FROM payroll_tax_calculations WHERE payroll_employee_id = :pe ORDER BY period_no DESC, id DESC LIMIT 1')
+                : null;
+            $closeEmployee = static function (int $employeeId) use (&$rows, $latestCalcStmt, $sym): void {
+                if ($employeeId <= 0 || $latestCalcStmt === null) {
+                    return;
+                }
+                $latestCalcStmt->execute(['pe' => $employeeId]);
+                $tc = $latestCalcStmt->fetch();
+                if ($tc) {
+                    $rows[] = rc_row(['PROJECTED: estimated annual taxable ' . rc_fmt((float) $tc['estimated_annual_taxable_income'])
+                        . ' | estimated annual tax ' . rc_fmt((float) $tc['estimated_annual_tax'])
+                        . ' | projected future regular income ' . rc_fmt((float) $tc['projected_regular_income'])
+                        . ' | remaining tax ' . rc_fmt((float) $tc['remaining_tax'])
+                        . ((float) $tc['excess_tax'] > 0 ? ' | EXCESS deducted ' . rc_fmt((float) $tc['excess_tax']) : '')
+                        . ' (periods left ' . (int) $tc['remaining_periods'] . ')', '', '', '', '', '', ''], 'bold');
+                }
+            };
+            foreach ($stmt->fetchAll() as $line) {
+                if ((int) $line['employee_id'] !== $currentEmployee) {
+                    $closeEmployee($currentEmployee);
+                    $currentEmployee = (int) $line['employee_id'];
+                    $cumTax = 0.0;
+                    $cumNet = 0.0;
+                    $rows[] = rc_row([
+                        $line['employee_code'] . ' — ' . $line['person_name']
+                        . ((string) ($line['department'] ?? '') !== '' ? ' (' . $line['department'] . ')' : '')
+                        . ' | joined ' . ($line['joined_on'] ?? '-')
+                        . ($line['terminated_on'] ? ', left ' . $line['terminated_on'] : ''),
+                        '', '', '', '', '', '',
+                    ], 'section');
+                }
+                $cumTax = round($cumTax + (float) $line['tax_month'], 2);
+                $cumNet = round($cumNet + (float) $line['net_pay'], 2);
+                $taxableMonth = (float) ($line['assessable_month'] ?? 0) ?: round((float) $line['assessable_annual'] / 12, 2);
+                $rows[] = [
+                    $line['period_label'] . ' (' . $line['run_status'] . ')',
+                    rc_fmt((float) $line['gross']),
+                    rc_fmt($taxableMonth),
+                    rc_fmt((float) $line['tax_month']),
+                    rc_fmt($cumTax),
+                    rc_fmt((float) $line['net_pay']),
+                    rc_fmt((float) $line['retirement_employer_month']),
+                ];
+            }
+            $closeEmployee($currentEmployee);
+            return [
+                'title' => 'Employee Year-to-Date Salary Statement',
+                'subtitle' => 'Actual figures per payroll period; each employee closes with the PROJECTED annual estimate from the latest stored tax calculation (clearly marked).',
+                'columns' => [['Employee / Period', 'left', ''], ['Gross (' . $sym . ')', 'right', ''], ['Taxable (' . $sym . ')', 'right', ''], ['Tax (' . $sym . ')', 'right', ''], ['Cumulative Tax (' . $sym . ')', 'right', ''], ['Net (' . $sym . ')', 'right', ''], ['Employer Contrib. (' . $sym . ')', 'right', '']],
+                'rows' => $rows,
+                'totals' => null,
+            ];
+        }
+
+        case 'consolidated-tax-report': {
+            if (!table_exists('payroll_tax_calculations')) {
+                return ['subtitle' => 'Projected tax data not available yet — calculate a payroll run first.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
+            }
+            // Latest stored calculation per employee: the projection exists for
+            // estimation/reporting only and never reaches accounting vouchers.
+            $stmt = db()->prepare("SELECT tc.*, pe.employee_code, pe.marital_status, pe.joined_on, pe.terminated_on,
+                    COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name,
+                    r.period_label, r.status AS run_status
+                FROM payroll_tax_calculations tc
+                INNER JOIN payroll_employees pe ON pe.id = tc.payroll_employee_id
+                LEFT JOIN users u ON u.id = pe.user_id
+                INNER JOIN payroll_runs r ON r.id = tc.run_id
+                WHERE tc.company_id = :cid
+                  AND tc.id = (SELECT tc2.id FROM payroll_tax_calculations tc2
+                               WHERE tc2.payroll_employee_id = tc.payroll_employee_id AND tc2.company_id = tc.company_id
+                               ORDER BY tc2.period_no DESC, tc2.id DESC LIMIT 1)
+                ORDER BY pe.employee_code ASC");
+            $stmt->execute(['cid' => $scopeCompanyId]);
+            $rows = [];
+            $totals = ['actual' => 0.0, 'projected' => 0.0, 'annual' => 0.0, 'current' => 0.0, 'cum' => 0.0, 'excess' => 0.0, 'remaining' => 0.0];
+            foreach ($stmt->fetchAll() as $tc) {
+                $actual = round((float) $tc['actual_regular_to_date'] + (float) $tc['actual_irregular_to_date']
+                    + (float) $tc['current_regular'] + (float) $tc['current_irregular'], 2);
+                $cumulative = round((float) $tc['tax_withheld_before_period'] + (float) $tc['current_tax'], 2);
+                $totals['actual'] += $actual;
+                $totals['projected'] += (float) $tc['projected_regular_income'];
+                $totals['annual'] += (float) $tc['estimated_annual_tax'];
+                $totals['current'] += (float) $tc['current_tax'];
+                $totals['cum'] += $cumulative;
+                $totals['excess'] += (float) $tc['excess_tax'];
+                $totals['remaining'] += max(0.0, round((float) $tc['remaining_tax'] - (float) $tc['current_tax'], 2));
+                $settlement = (int) $tc['remaining_periods'] <= 1 ? 'Final period — settles balance'
+                    : ((float) $tc['excess_tax'] > 0 ? 'Excess — needs treatment' : 'On track');
+                $rows[] = [
+                    $tc['employee_code'] . ' — ' . $tc['person_name'],
+                    ucfirst((string) $tc['marital_status']) . ' | ' . ($tc['employment_start_used'] ?? '-'),
+                    rc_fmt($actual),
+                    rc_fmt((float) $tc['projected_regular_income'] + (float) $tc['manual_projected_income']),
+                    rc_fmt((float) $tc['estimated_annual_taxable_income']),
+                    rc_fmt((float) $tc['estimated_annual_tax']),
+                    (float) $tc['prior_employment_income'] > 0 ? rc_fmt((float) $tc['prior_employment_income']) . ' / ' . rc_fmt((float) $tc['prior_employer_tax']) : '–',
+                    rc_fmt((float) $tc['current_tax']) . ($tc['tax_override'] !== null ? ' *ovr' : ''),
+                    rc_fmt($cumulative),
+                    rc_fmt(max(0.0, round((float) $tc['remaining_tax'] - (float) $tc['current_tax'], 2))),
+                    (float) $tc['excess_tax'] > 0 ? rc_fmt((float) $tc['excess_tax']) : '–',
+                    $settlement . ' (' . $tc['period_label'] . ')',
+                ];
+            }
+            return [
+                'title' => 'Consolidated Payroll Tax Report',
+                'subtitle' => 'Latest projected-tax calculation per employee. Projected income exists for estimation and reporting only — it is never posted to accounting vouchers.',
+                'columns' => [['Employee', 'left', ''], ['Category / Start', 'left', ''], ['Actual Taxable To Date (' . $sym . ')', 'right', ''], ['Projected Income (' . $sym . ')', 'right', ''], ['Est. Annual Taxable (' . $sym . ')', 'right', ''], ['Est. Annual Tax (' . $sym . ')', 'right', ''], ['Prior Income / Tax (' . $sym . ')', 'right', ''], ['Current Tax (' . $sym . ')', 'right', ''], ['Cumulative Tax (' . $sym . ')', 'right', ''], ['Remaining (' . $sym . ')', 'right', ''], ['Excess (' . $sym . ')', 'right', ''], ['Status', 'left', '']],
+                'rows' => $rows,
+                'totals' => ['Totals', '', rc_fmt($totals['actual']), rc_fmt($totals['projected']), '', rc_fmt($totals['annual']), '', rc_fmt($totals['current']), rc_fmt($totals['cum']), rc_fmt($totals['remaining']), rc_fmt($totals['excess']), ''],
             ];
         }
 

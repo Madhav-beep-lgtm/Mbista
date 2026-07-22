@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/payroll_overtime.php';
 require_once __DIR__ . '/payroll_service_charge.php';
+require_once __DIR__ . '/payroll_tax_projection.php';
 
 function payroll_settings(int $companyId): array
 {
@@ -382,18 +383,19 @@ function payroll_sync_run_components(array $run, array $employee, array $compone
     $pdo = db();
     $upsert = $pdo->prepare('INSERT INTO payroll_run_components (
             run_id, payroll_employee_id, component_id, component_code, component_name, category,
-            posting_behaviour, taxable, include_in_gross, include_in_net, calc_method,
+            posting_behaviour, taxable, tax_projection_method, include_in_gross, include_in_net, calc_method,
             debit_ledger_id, credit_ledger_id, employer_expense_ledger_id, contribution_payable_ledger_id,
             suggested_amount, amount, source
         ) VALUES (
             :run_id, :pe, :component_id, :code, :name, :category,
-            :behaviour, :taxable, :in_gross, :in_net, :calc_method,
+            :behaviour, :taxable, :projection, :in_gross, :in_net, :calc_method,
             :dr, :cr, :er_exp, :er_pay,
             :suggested, :amount, :source
         ) ON DUPLICATE KEY UPDATE
             component_id = VALUES(component_id), component_name = VALUES(component_name),
             category = VALUES(category), posting_behaviour = VALUES(posting_behaviour),
-            taxable = VALUES(taxable), include_in_gross = VALUES(include_in_gross),
+            taxable = VALUES(taxable), tax_projection_method = VALUES(tax_projection_method),
+            include_in_gross = VALUES(include_in_gross),
             include_in_net = VALUES(include_in_net), calc_method = VALUES(calc_method),
             debit_ledger_id = VALUES(debit_ledger_id), credit_ledger_id = VALUES(credit_ledger_id),
             employer_expense_ledger_id = VALUES(employer_expense_ledger_id),
@@ -416,6 +418,7 @@ function payroll_sync_run_components(array $run, array $employee, array $compone
             'category' => (string) $component['category'],
             'behaviour' => payroll_component_behaviour($component),
             'taxable' => $line['taxable'] ? 1 : 0,
+            'projection' => payroll_tax_treatment($component),
             'in_gross' => (int) ($component['include_in_gross'] ?? 1),
             'in_net' => (int) ($component['include_in_net'] ?? 1),
             'calc_method' => (string) $component['calc_type'],
@@ -454,6 +457,7 @@ function payroll_component_snapshot_row(array $component, array $values): array
         'category' => (string) ($component['category'] ?? 'allowance'),
         'posting_behaviour' => payroll_component_behaviour($component),
         'taxable' => !empty($values['taxable']) ? 1 : 0,
+        'tax_projection_method' => payroll_tax_treatment($component),
         'include_in_gross' => (int) ($component['include_in_gross'] ?? 1),
         'include_in_net' => (int) ($component['include_in_net'] ?? 1),
         'calc_method' => (string) ($component['calc_type'] ?? 'manual'),
@@ -625,7 +629,9 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     $reimbursementNet = 0.0;        // paid with salary but kept out of gross
     $componentEmployerContrib = 0.0; // employer cost only — never employee pay
     $taxableMonthly = $basic; // basic salary is always assessable
-    $traceComponents = [['label' => 'Basic Salary', 'category' => 'basic', 'amount' => $basic, 'taxable' => true]];
+    $regularTaxable = $basic;   // predictable recurring income (projectable)
+    $irregularTaxable = 0.0;    // earned-only income: OT, service charge, one-time
+    $traceComponents = [['label' => 'Basic Salary', 'category' => 'basic', 'amount' => $basic, 'taxable' => true, 'projection' => 'regular']];
 
     foreach ($runComponents as $row) {
         $amount = round((float) ($row['amount'] ?? 0), 2);
@@ -636,6 +642,9 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         $inNet = (int) ($row['include_in_net'] ?? 1) === 1;
         $isDeductionFamily = in_array($behaviour, ['deduction_liability', 'advance_recovery'], true)
             || in_array($category, ['deduction', 'tax', 'advance_recovery'], true);
+        $rowTreatment = in_array((string) ($row['source'] ?? ''), ['overtime', 'service_charge', 'one_time'], true)
+            ? 'actual_only' // workflow amounts and one-time additions are earned-only by nature
+            : payroll_tax_treatment($row);
 
         if ($amount != 0.0 && $behaviour !== 'non_posting' && $category !== 'info') {
             if ($behaviour === 'employer_contribution') {
@@ -657,6 +666,11 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
             }
             if ($rowTaxable && !$isDeductionFamily && $behaviour !== 'employer_contribution') {
                 $taxableMonthly += $amount;
+                if (in_array($rowTreatment, ['actual_only', 'manual'], true)) {
+                    $irregularTaxable += $amount;
+                } else {
+                    $regularTaxable += $amount;
+                }
             }
         }
         $traceComponents[] = [
@@ -669,25 +683,75 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
             'source' => (string) ($row['source'] ?? 'standard'),
             'override_reason' => (string) ($row['override_reason'] ?? ''),
             'behaviour' => $behaviour,
+            'projection' => $rowTaxable ? $rowTreatment : 'non-taxable',
         ];
     }
 
-    // The adjustment earning is assessable, so fold it into taxable pay too.
+    // A manual sheet adjustment is one-time income: assessable but NEVER
+    // projected into future months.
     $taxableMonthly += $adjEarning;
+    $irregularTaxable += $adjEarning;
     $gross = round($basic + $allowances + $overtime + $benefits + $adjEarning, 2);
 
     // Retirement contributions (monthly, % of basic per employee profile).
     $retEmployeeMonth = round($basic * (float) $employee['retirement_employee_rate'] / 100, 2);
     $retEmployerMonth = round($basic * (float) $employee['retirement_employer_rate'] / 100, 2);
 
-    // Annualization: recurring monthly amounts x 12. Employer retirement
-    // contribution is assessable under Nepali practice (added to remuneration),
-    // then deductible within the configured retirement limit.
-    $assessableAnnual = round(($taxableMonthly + $retEmployerMonth) * 12, 2);
+    // ------------------------------------------------------------------
+    // PROJECTED annual tax (v2). NOT "current month x 12": the estimate is
+    //   actual assessable income earned so far this fiscal year
+    //   + this period's actual assessable income
+    //   + predictable REGULAR income for the remaining employment periods
+    //   + approved prior-employment income / opening adjustments
+    //   + approved manual projections.
+    // Irregular income (overtime, service charge, one-time payments) counts
+    // only when earned. Employer retirement contribution stays assessable
+    // under Nepali practice.
+    // ------------------------------------------------------------------
+    $periodNo = max(1, min(12, (int) $run['period_no']));
+    [$startPeriod, $endPeriod, $employmentStartUsed, $employmentEndUsed] = payroll_employment_span($employee, $run);
+    $warnings = [];
+    if ($periodNo < $startPeriod) {
+        $warnings[] = 'Run period is before the joining date (' . $employmentStartUsed . ') - check the roster.';
+        $startPeriod = $periodNo;
+    }
+    if ($periodNo > $endPeriod) {
+        $warnings[] = 'Run period is after the employment end (' . $employmentEndUsed . ') - check the roster.';
+        $endPeriod = $periodNo;
+    }
+    // The divisor INCLUDES the current period and is never zero: the final
+    // employment month divides by 1 and settles the whole balance.
+    $remainingPeriods = max(1, $endPeriod - $periodNo + 1);
 
-    // Eligible retirement deduction: employee + employer contribution, capped
-    // by the version's percent-of-assessable and absolute cap.
-    $retirementAnnualContribution = round(($retEmployeeMonth + $retEmployerMonth) * 12, 2);
+    [$actualRegularToDate, $actualIrregularToDate, $retEmpToDate, $retErToDate] =
+        payroll_actuals_to_date((int) $employee['id'], (int) $run['fiscal_year_id'], (int) ($run['id'] ?? 0), $periodNo);
+    [$projectedFutureRegular, $retEmpFuture, $retErFuture, $projectionPerPeriod] =
+        payroll_projected_future_regular($employee, $run, $periodNo, $endPeriod);
+    [$manualProjected, $manualProjectionDetail] =
+        payroll_manual_projected_income((int) $employee['id'], (int) $run['fiscal_year_id'], $periodNo, $endPeriod);
+    $taxProfile = payroll_tax_profile((int) $employee['id'], (int) $run['fiscal_year_id']);
+    $priorEmploymentIncome = round((float) ($taxProfile['prior_employment_income'] ?? 0)
+        + (float) ($taxProfile['opening_income_adjustment'] ?? 0), 2);
+    $priorEmployerTax = round((float) ($taxProfile['prior_tax_withheld'] ?? 0)
+        + (float) ($taxProfile['opening_tax_adjustment'] ?? 0), 2);
+
+    $currentAssessable = round($taxableMonthly + $retEmployerMonth, 2);
+    $assessableAnnual = round(
+        $actualRegularToDate + $actualIrregularToDate
+        + $currentAssessable
+        + $projectedFutureRegular + $manualProjected
+        + $priorEmploymentIncome,
+        2
+    );
+
+    // Eligible retirement deduction: actual contributions to date + current +
+    // projected future, capped by the version's percent-of-assessable and cap.
+    $retirementAnnualContribution = round(
+        $retEmpToDate + $retErToDate
+        + $retEmployeeMonth + $retEmployerMonth
+        + $retEmpFuture + $retErFuture,
+        2
+    );
     $limitPct = round($assessableAnnual * (float) $taxVersion['retirement_limit_pct'] / 100, 2);
     $limitCap = (float) $taxVersion['retirement_limit_cap'];
     $retirementDeductionAnnual = (string) $employee['retirement_scheme'] === 'none'
@@ -706,15 +770,22 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     // of the higher slabs. The monthly withholding keeps the same annual mix.
     $sstAnnual = round((float) ($slabBreakdown[0]['tax'] ?? 0), 2);
 
-    // Monthly withholding, regular method: remaining annual liability spread
-    // over the remaining periods; the final period absorbs rounding drift.
-    $periodNo = max(1, min(12, (int) $run['period_no']));
-    $monthsRemaining = 12 - $periodNo + 1;
+    // Remaining balance spread over the remaining EMPLOYMENT periods; the
+    // final period takes the whole remainder. Excess withholding is surfaced,
+    // never silently zeroed away.
     $taxYtdBefore = payroll_tax_withheld_ytd((int) $employee['id'], (int) $run['fiscal_year_id'], (int) ($run['id'] ?? 0), $periodNo);
+    $totalWithheldBefore = round($taxYtdBefore + $priorEmployerTax, 2);
+    $remainingTax = round($annualTax - $totalWithheldBefore, 2);
     $rounding = (string) $taxVersion['rounding'];
-    $taxMonth = $periodNo >= 12
-        ? max(0.0, round($annualTax - $taxYtdBefore, 2))
-        : max(0.0, payroll_round(($annualTax - $taxYtdBefore) / $monthsRemaining, $rounding));
+    $systemTax = $remainingPeriods <= 1
+        ? max(0.0, round($remainingTax, 2))
+        : max(0.0, payroll_round($remainingTax / $remainingPeriods, $rounding));
+    $excessTax = max(0.0, round(-$remainingTax, 2));
+    // An approver may override the current period's tax (audited); the system
+    // figure stays stored beside it.
+    $taxOverride = array_key_exists('tax_override', $adjustments) && $adjustments['tax_override'] !== null && $adjustments['tax_override'] !== ''
+        ? round((float) $adjustments['tax_override'], 2) : null;
+    $taxMonth = $taxOverride !== null ? $taxOverride : $systemTax;
 
     // Advance/loan recovery: active loans, installment capped by balance.
     $advanceDeduction = 0.0;
@@ -736,7 +807,6 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
 
     $netPay = round($gross + $reimbursementNet - $retEmployeeMonth - $taxMonth - $advanceDeduction - $otherDeduction - $adjDeduction, 2);
 
-    $warnings = [];
     if ($netPay < 0) {
         $warnings[] = 'Negative net pay - reduce deductions or review salary.';
     }
@@ -746,6 +816,9 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     if ((string) ($employee['bank_account'] ?? '') === '') {
         $warnings[] = 'Bank account missing.';
     }
+    if ($excessTax > 0) {
+        $warnings[] = 'Excess tax already withheld: ' . number_format($excessTax, 2) . ' - review the year-end settlement.';
+    }
 
     return [
         'basic' => $basic,
@@ -753,12 +826,20 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         'overtime' => round($overtime, 2),
         'benefits' => round($benefits, 2),
         'gross' => $gross,
+        'assessable_month' => $currentAssessable,
+        'regular_month' => round($regularTaxable + $retEmployerMonth, 2),
+        'irregular_month' => round($irregularTaxable, 2),
         'assessable_annual' => $assessableAnnual,
         'retirement_deduction_annual' => round($retirementDeductionAnnual, 2),
         'taxable_annual' => $taxableAnnual,
         'annual_tax' => $annualTax,
         'tax_ytd_before' => round($taxYtdBefore, 2),
         'tax_month' => $taxMonth,
+        'system_tax' => $systemTax,
+        'tax_override' => $taxOverride,
+        'tax_override_reason' => $taxOverride !== null ? trim((string) ($adjustments['tax_override_reason'] ?? '')) : '',
+        'tax_override_by' => $taxOverride !== null ? (int) ($adjustments['tax_override_by'] ?? 0) : 0,
+        'excess_tax' => $excessTax,
         'sst_month' => $sstMonth,
         'retirement_employee_month' => $retEmployeeMonth,
         'retirement_employer_month' => $retEmployerMonth,
@@ -777,9 +858,35 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         'trace' => [
             'tax_version_id' => (int) $taxVersion['id'],
             'tax_version_label' => (string) $taxVersion['label'],
+            'tax_method' => 'fy-projection v2',
             'category' => $category,
             'components' => $traceComponents,
-            'annualization' => 'monthly taxable ' . number_format($taxableMonthly, 2) . ' x 12 + employer retirement ' . number_format($retEmployerMonth, 2) . ' x 12',
+            'annualization' => 'actual to date ' . number_format($actualRegularToDate + $actualIrregularToDate, 2)
+                . ' + current ' . number_format($currentAssessable, 2)
+                . ' + projected regular ' . number_format($projectedFutureRegular + $manualProjected, 2)
+                . ' + prior employment ' . number_format($priorEmploymentIncome, 2),
+            'projection' => [
+                'method' => 'fy-projection v2',
+                'start_period' => $startPeriod,
+                'end_period' => $endPeriod,
+                'remaining_periods' => $remainingPeriods,
+                'employment_start_used' => $employmentStartUsed,
+                'employment_end_used' => $employmentEndUsed,
+                'actual_regular_to_date' => $actualRegularToDate,
+                'actual_irregular_to_date' => $actualIrregularToDate,
+                'current_regular' => round($regularTaxable + $retEmployerMonth, 2),
+                'current_irregular' => round($irregularTaxable, 2),
+                'projected_future_regular' => $projectedFutureRegular,
+                'projected_periods' => $projectionPerPeriod,
+                'manual_projected' => $manualProjected,
+                'manual_projections' => $manualProjectionDetail,
+                'prior_employment_income' => $priorEmploymentIncome,
+                'prior_employer_tax' => $priorEmployerTax,
+                'estimated_annual_taxable' => $assessableAnnual,
+                'remaining_tax' => $remainingTax,
+                'excess_tax' => $excessTax,
+                'excess_treatment' => (string) ($payrollSettings['excess_tax_treatment'] ?? 'offset'),
+            ],
             'retirement' => [
                 'scheme' => (string) $employee['retirement_scheme'],
                 'annual_contribution' => $retirementAnnualContribution,
@@ -791,10 +898,12 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
             'first_slab_exempt' => $firstSlabExempt,
             'unpaid_leave' => ['days' => round($unpaidLeaveDays, 2), 'deduction' => round($unpaidLeaveDeduction, 2), 'original_basic' => $originalBasic],
             'withholding' => [
-                'method' => $periodNo >= 12 ? 'final-period adjustment' : 'regular (remaining months)',
+                'method' => $remainingPeriods <= 1 ? 'final-period settlement' : 'remaining balance / remaining employment periods',
                 'period_no' => $periodNo,
-                'months_remaining' => $monthsRemaining,
+                'months_remaining' => $remainingPeriods,
                 'ytd_withheld' => round($taxYtdBefore, 2),
+                'system_tax' => $systemTax,
+                'tax_override' => $taxOverride,
             ],
             'loans' => $loanPlan,
             'adjustment' => ['earning' => $adjEarning, 'deduction' => $adjDeduction, 'remark' => $adjRemark],
@@ -847,16 +956,20 @@ function payroll_calculate_run(int $runId): array
 
     $pdo = db();
 
-    // Preserve any per-period manual adjustments already entered on this run's
-    // lines, so recalculating from the employee master never wipes them.
+    // Preserve any per-period manual adjustments AND approved tax overrides
+    // already entered on this run's lines, so recalculating from the employee
+    // master never wipes them.
     $existingAdj = [];
-    $adjStmt = $pdo->prepare('SELECT payroll_employee_id, adj_earning, adj_deduction, adj_remark FROM payroll_run_lines WHERE run_id = :run');
+    $adjStmt = $pdo->prepare('SELECT payroll_employee_id, adj_earning, adj_deduction, adj_remark, tax_override, tax_override_reason, tax_override_by FROM payroll_run_lines WHERE run_id = :run');
     $adjStmt->execute(['run' => $runId]);
     foreach ($adjStmt->fetchAll(PDO::FETCH_ASSOC) as $adjRow) {
         $existingAdj[(int) $adjRow['payroll_employee_id']] = [
             'earning' => (float) $adjRow['adj_earning'],
             'deduction' => (float) $adjRow['adj_deduction'],
             'remark' => (string) ($adjRow['adj_remark'] ?? ''),
+            'tax_override' => $adjRow['tax_override'],
+            'tax_override_reason' => (string) ($adjRow['tax_override_reason'] ?? ''),
+            'tax_override_by' => (int) ($adjRow['tax_override_by'] ?? 0),
         ];
     }
 
@@ -871,13 +984,17 @@ function payroll_calculate_run(int $runId): array
         $pdo->prepare('DELETE FROM payroll_run_lines WHERE run_id = :run')->execute(['run' => $runId]);
         $insert = $pdo->prepare('INSERT INTO payroll_run_lines (
                 run_id, payroll_employee_id, basic, allowances, overtime, benefits, gross,
+                assessable_month, regular_month, irregular_month,
                 assessable_annual, retirement_deduction_annual, taxable_annual, annual_tax,
-                tax_ytd_before, tax_month, sst_month, retirement_employee_month, retirement_employer_month,
+                tax_ytd_before, tax_month, tax_override, tax_override_reason, tax_override_by,
+                sst_month, retirement_employee_month, retirement_employer_month,
                 advance_deduction, other_deduction, unpaid_leave_days, unpaid_leave_deduction, adj_earning, adj_deduction, adj_remark, net_pay, trace, line_status, warnings
             ) VALUES (
                 :run_id, :pe, :basic, :allowances, :overtime, :benefits, :gross,
+                :assess_m, :reg_m, :irr_m,
                 :assessable, :ret_ded, :taxable, :annual_tax,
-                :ytd, :tax_month, :sst_month, :ret_emp, :ret_er,
+                :ytd, :tax_month, :tax_ovr, :tax_ovr_reason, :tax_ovr_by,
+                :sst_month, :ret_emp, :ret_er,
                 :advance, :other_ded, :leave_days, :leave_ded, :adj_earning, :adj_deduction, :adj_remark, :net, :trace, :line_status, :warnings
             )');
         $totals = ['gross' => 0.0, 'tax' => 0.0, 'deductions' => 0.0, 'employer' => 0.0, 'net' => 0.0];
@@ -891,12 +1008,18 @@ function payroll_calculate_run(int $runId): array
                 'overtime' => $calc['overtime'],
                 'benefits' => $calc['benefits'],
                 'gross' => $calc['gross'],
+                'assess_m' => $calc['assessable_month'],
+                'reg_m' => $calc['regular_month'],
+                'irr_m' => $calc['irregular_month'],
                 'assessable' => $calc['assessable_annual'],
                 'ret_ded' => $calc['retirement_deduction_annual'],
                 'taxable' => $calc['taxable_annual'],
                 'annual_tax' => $calc['annual_tax'],
                 'ytd' => $calc['tax_ytd_before'],
                 'tax_month' => $calc['tax_month'],
+                'tax_ovr' => $calc['tax_override'],
+                'tax_ovr_reason' => $calc['tax_override'] !== null && $calc['tax_override_reason'] !== '' ? $calc['tax_override_reason'] : null,
+                'tax_ovr_by' => $calc['tax_override'] !== null && (int) $calc['tax_override_by'] > 0 ? (int) $calc['tax_override_by'] : null,
                 'sst_month' => $calc['sst_month'],
                 'ret_emp' => $calc['retirement_employee_month'],
                 'ret_er' => $calc['retirement_employer_month'],
@@ -912,6 +1035,7 @@ function payroll_calculate_run(int $runId): array
                 'line_status' => $calc['line_status'],
                 'warnings' => $calc['warnings'] === [] ? null : implode(' | ', $calc['warnings']),
             ]);
+            payroll_store_tax_snapshot($run, $employee, $calc);
             $totals['gross'] += $calc['gross'];
             $totals['tax'] += $calc['tax_month'];
             $totals['deductions'] += $calc['retirement_employee_month'] + $calc['advance_deduction'] + $calc['other_deduction'] + $calc['adj_deduction'];
@@ -962,9 +1086,10 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
     if (!$taxVersion) {
         return ['ok' => false, 'error' => 'No published tax configuration for this fiscal year.'];
     }
-    $lineStmt = db()->prepare('SELECT payroll_employee_id FROM payroll_run_lines WHERE id = :id AND run_id = :run LIMIT 1');
+    $lineStmt = db()->prepare('SELECT payroll_employee_id, tax_override, tax_override_reason, tax_override_by FROM payroll_run_lines WHERE id = :id AND run_id = :run LIMIT 1');
     $lineStmt->execute(['id' => $lineId, 'run' => $runId]);
-    $employeeId = (int) ($lineStmt->fetchColumn() ?: 0);
+    $lineRow = $lineStmt->fetch();
+    $employeeId = (int) ($lineRow['payroll_employee_id'] ?? 0);
     if ($employeeId <= 0) {
         return ['ok' => false, 'error' => 'That salary line is not part of this run.'];
     }
@@ -979,6 +1104,9 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
         'earning' => max(0.0, round($adjEarning, 2)),
         'deduction' => max(0.0, round($adjDeduction, 2)),
         'remark' => $remark,
+        'tax_override' => $lineRow['tax_override'] ?? null,
+        'tax_override_reason' => (string) ($lineRow['tax_override_reason'] ?? ''),
+        'tax_override_by' => (int) ($lineRow['tax_override_by'] ?? 0),
     ]);
 
     $pdo = db();
@@ -986,6 +1114,7 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
     try {
         $pdo->prepare('UPDATE payroll_run_lines SET
                 basic = :basic, allowances = :allowances, overtime = :overtime, benefits = :benefits, gross = :gross,
+                assessable_month = :assess_m, regular_month = :reg_m, irregular_month = :irr_m,
                 assessable_annual = :assessable, retirement_deduction_annual = :ret_ded, taxable_annual = :taxable,
                 annual_tax = :annual_tax, tax_ytd_before = :ytd, tax_month = :tax_month,
                 retirement_employee_month = :ret_emp, retirement_employer_month = :ret_er,
@@ -997,7 +1126,9 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
             WHERE id = :id AND run_id = :run')
             ->execute([
                 'basic' => $calc['basic'], 'allowances' => $calc['allowances'], 'overtime' => $calc['overtime'],
-                'benefits' => $calc['benefits'], 'gross' => $calc['gross'], 'assessable' => $calc['assessable_annual'],
+                'benefits' => $calc['benefits'], 'gross' => $calc['gross'],
+                'assess_m' => $calc['assessable_month'], 'reg_m' => $calc['regular_month'], 'irr_m' => $calc['irregular_month'],
+                'assessable' => $calc['assessable_annual'],
                 'ret_ded' => $calc['retirement_deduction_annual'], 'taxable' => $calc['taxable_annual'],
                 'annual_tax' => $calc['annual_tax'], 'ytd' => $calc['tax_ytd_before'], 'tax_month' => $calc['tax_month'],
                 'sst_month' => $calc['sst_month'],
@@ -1010,6 +1141,7 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
                 'line_status' => $calc['line_status'], 'warnings' => $calc['warnings'] === [] ? null : implode(' | ', $calc['warnings']),
                 'id' => $lineId, 'run' => $runId,
             ]);
+        payroll_store_tax_snapshot($run, $employee, $calc);
 
         // Re-sync the run header totals from all its lines.
         $sum = $pdo->prepare('SELECT
@@ -1106,16 +1238,17 @@ function payroll_set_run_component(int $runId, int $employeeId, int $componentId
             ]);
             db()->prepare('INSERT INTO payroll_run_components (
                     run_id, payroll_employee_id, component_id, component_code, component_name, category,
-                    posting_behaviour, taxable, include_in_gross, include_in_net, calc_method,
+                    posting_behaviour, taxable, tax_projection_method, include_in_gross, include_in_net, calc_method,
                     debit_ledger_id, credit_ledger_id, employer_expense_ledger_id, contribution_payable_ledger_id,
                     suggested_amount, amount, override_reason, source, created_by, updated_by
-                ) VALUES (:run_id, :pe, :component_id, :code, :name, :category, :behaviour, :taxable, :in_gross,
+                ) VALUES (:run_id, :pe, :component_id, :code, :name, :category, :behaviour, :taxable, :projection, :in_gross,
                     :in_net, :calc_method, :dr, :cr, :er_exp, :er_pay, :suggested, :amount, :reason, :source, :by, :by2)')
                 ->execute([
                     'run_id' => $runId, 'pe' => $employeeId,
                     'component_id' => (int) $component['id'], 'code' => $snapshot['component_code'],
                     'name' => $snapshot['component_name'], 'category' => $snapshot['category'],
                     'behaviour' => $snapshot['posting_behaviour'], 'taxable' => $snapshot['taxable'],
+                    'projection' => $snapshot['tax_projection_method'],
                     'in_gross' => $snapshot['include_in_gross'], 'in_net' => $snapshot['include_in_net'],
                     'calc_method' => $snapshot['calc_method'],
                     'dr' => $snapshot['debit_ledger_id'], 'cr' => $snapshot['credit_ledger_id'],

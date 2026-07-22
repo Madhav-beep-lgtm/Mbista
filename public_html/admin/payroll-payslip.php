@@ -167,6 +167,25 @@ $fmt = static fn (float $n): string => number_format($n, 2);
             <tr><td style="padding-left:20px">of which Remuneration Tax</td><td class="num"><?= $fmt($remunerationMonth) ?></td></tr>
         </tbody>
     </table>
+    <?php $projection = (array) ($trace['projection'] ?? []); ?>
+    <?php if ($projection !== []): ?>
+        <table style="margin-top:12px">
+            <thead><tr><th colspan="2">Projected tax summary (estimated figures)</th></tr></thead>
+            <tbody>
+                <tr><td>Taxable earnings this period (actual)</td><td class="num"><?= $fmt((float) ($projection['current_regular'] ?? 0) + (float) ($projection['current_irregular'] ?? 0)) ?></td></tr>
+                <tr><td>Estimated annual taxable income <em>(projected)</em></td><td class="num"><?= $fmt((float) ($projection['estimated_annual_taxable'] ?? 0)) ?></td></tr>
+                <tr><td>Estimated annual tax <em>(projected)</em></td><td class="num"><?= $fmt((float) $line['annual_tax']) ?></td></tr>
+                <tr><td>Tax deducted in earlier periods</td><td class="num"><?= $fmt((float) $line['tax_ytd_before']) ?></td></tr>
+                <tr><td>Tax this period</td><td class="num"><?= $fmt((float) $line['tax_month']) ?></td></tr>
+                <tr><td>Estimated tax remaining after this period <em>(projected)</em></td><td class="num"><?= $fmt(max(0.0, (float) ($projection['remaining_tax'] ?? 0) - (float) $line['tax_month'])) ?></td></tr>
+                <?php if ((float) ($projection['excess_tax'] ?? 0) > 0): ?>
+                    <tr><td><strong>Excess tax already deducted</strong> (treatment: <?= e(str_replace('_', ' ', (string) ($projection['excess_treatment'] ?? 'offset'))) ?>)</td><td class="num"><strong><?= $fmt((float) $projection['excess_tax']) ?></strong></td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+        <p class="ps-note">Estimated figures use actual income earned to date plus predictable regular income for the remaining
+            employment months only. Overtime, service charge, and one-time payments count only when actually earned.</p>
+    <?php endif; ?>
     <?php if ($employerContributions !== [] || (float) $line['retirement_employer_month'] > 0): ?>
         <table style="margin-top:12px">
             <thead><tr><th colspan="2">Employer contributions (employer cost — never deducted from take-home pay)</th></tr></thead>

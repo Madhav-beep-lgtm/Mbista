@@ -142,7 +142,10 @@ $runAfter = payroll_run($run);
 $lineS3 = null;
 foreach (payroll_run_lines($run) as $l) { if ((int) $l['payroll_employee_id'] === $s3) { $lineS3 = $l; } }
 ok(near((float) $lineS3['gross'], 30000 + 680.00), 'Employee gross grew by exactly the 68% allocation');
-ok(near((float) $lineS3['assessable_annual'], (30000 + 680.00) * 12), 'Assessable (taxable) income includes the service charge');
+// Projected-tax rule: service charge is ACTUAL-ONLY income. The estimate is
+// basic projected for the year PLUS the allocation counted once — never
+// (basic + service charge) x 12.
+ok(near((float) $lineS3['assessable_annual'], 30000 * 12 + 680.00), 'Assessable income = projected basic + service charge counted ONCE (not annualized)');
 ok(near((float) $runAfter['total_gross'], $grossBefore + 680.00), 'Run gross grew by the employee pool ONLY — never the employer 32%');
 $entries = payroll_accrual_entries($runAfter, payroll_settings($cid));
 $scDr = 0.0; $spCr = 0.0; $dr = 0.0; $cr = 0.0;

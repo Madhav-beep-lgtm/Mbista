@@ -148,6 +148,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'sc_eligible' => isset($_POST['sc_eligible']) ? 1 : 0,
             'status' => $status,
             'joined_on' => trim((string) ($_POST['joined_on'] ?? '')) ?: null,
+            'terminated_on' => trim((string) ($_POST['terminated_on'] ?? '')) ?: null,
+            'contract_end_date' => trim((string) ($_POST['contract_end_date'] ?? '')) ?: null,
             'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
         ];
         try {
@@ -160,16 +162,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         retirement_scheme = :retirement_scheme, retirement_id = :retirement_id,
                         retirement_employee_rate = :retirement_employee_rate, retirement_employer_rate = :retirement_employer_rate,
                         basic_salary = :basic_salary, ot_hourly_rate = :ot_hourly_rate, sc_eligible = :sc_eligible,
-                        status = :status, joined_on = :joined_on, notes = :notes
+                        status = :status, joined_on = :joined_on, terminated_on = :terminated_on, contract_end_date = :contract_end_date, notes = :notes
                     WHERE id = :id AND company_id = :company_id')->execute($params);
                 log_activity('payroll_employee', $employeeId, 'updated', 'Payroll profile updated.', $userId);
             } else {
                 db()->prepare('INSERT INTO payroll_employees (company_id, user_id, full_name, email, phone, employee_code, department, designation,
                         pan_no, bank_name, bank_account, marital_status, retirement_scheme, retirement_id,
-                        retirement_employee_rate, retirement_employer_rate, basic_salary, ot_hourly_rate, sc_eligible, status, joined_on, notes)
+                        retirement_employee_rate, retirement_employer_rate, basic_salary, ot_hourly_rate, sc_eligible, status, joined_on, terminated_on, contract_end_date, notes)
                     VALUES (:company_id, :user_id, :full_name, :email, :phone, :employee_code, :department, :designation,
                         :pan_no, :bank_name, :bank_account, :marital_status, :retirement_scheme, :retirement_id,
-                        :retirement_employee_rate, :retirement_employer_rate, :basic_salary, :ot_hourly_rate, :sc_eligible, :status, :joined_on, :notes)')->execute($params);
+                        :retirement_employee_rate, :retirement_employer_rate, :basic_salary, :ot_hourly_rate, :sc_eligible, :status, :joined_on, :terminated_on, :contract_end_date, :notes)')->execute($params);
                 $employeeId = (int) db()->lastInsertId();
                 log_activity('payroll_employee', $employeeId, 'created', 'Payroll profile created.', $userId);
             }
@@ -217,6 +219,146 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 : 'Could not save: ' . $exception->getMessage());
         }
         redirect('admin/payroll-employees.php');
+    }
+
+    if ($action === 'save_tax_profile') {
+        // Prior-employment income/tax and opening adjustments feed the annual
+        // tax estimate — entry is admin-only and requires separate approval.
+        if (!$isAdmin) {
+            flash('error', 'Only an administrator can record prior-employment tax figures.');
+            redirect('admin/payroll-employees.php');
+        }
+        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        $empCheck = db()->prepare('SELECT id FROM payroll_employees WHERE id = :id AND company_id = :cid');
+        $empCheck->execute(['id' => $employeeId, 'cid' => $companyId]);
+        if (!$empCheck->fetchColumn()) {
+            flash('error', 'Employee not found in this company.');
+            redirect('admin/payroll-employees.php');
+        }
+        db()->prepare('INSERT INTO payroll_employee_tax_profiles
+                (company_id, payroll_employee_id, fiscal_year_id, prior_employment_income, prior_tax_withheld,
+                 prior_employer_details, document_reference, opening_income_adjustment, opening_tax_adjustment,
+                 remarks, entered_by, entered_at, approved_by, approved_at)
+            VALUES (:cid, :pe, :fy, :inc, :tax, :det, :doc, :oinc, :otax, :rem, :by, NOW(), NULL, NULL)
+            ON DUPLICATE KEY UPDATE prior_employment_income = VALUES(prior_employment_income),
+                prior_tax_withheld = VALUES(prior_tax_withheld), prior_employer_details = VALUES(prior_employer_details),
+                document_reference = VALUES(document_reference), opening_income_adjustment = VALUES(opening_income_adjustment),
+                opening_tax_adjustment = VALUES(opening_tax_adjustment), remarks = VALUES(remarks),
+                entered_by = VALUES(entered_by), entered_at = NOW(), approved_by = NULL, approved_at = NULL')
+            ->execute([
+                'cid' => $companyId, 'pe' => $employeeId, 'fy' => (int) $fiscalYear['id'],
+                'inc' => max(0.0, round((float) ($_POST['prior_employment_income'] ?? 0), 2)),
+                'tax' => max(0.0, round((float) ($_POST['prior_tax_withheld'] ?? 0), 2)),
+                'det' => trim((string) ($_POST['prior_employer_details'] ?? '')) ?: null,
+                'doc' => trim((string) ($_POST['document_reference'] ?? '')) ?: null,
+                'oinc' => round((float) ($_POST['opening_income_adjustment'] ?? 0), 2),
+                'otax' => round((float) ($_POST['opening_tax_adjustment'] ?? 0), 2),
+                'rem' => trim((string) ($_POST['tax_profile_remarks'] ?? '')) ?: null,
+                'by' => $userId,
+            ]);
+        log_activity('payroll_employee', $employeeId, 'tax_profile_saved', 'Tax profile (prior employment / opening adjustments) saved — awaiting approval.', $userId);
+        flash('success', 'Tax profile saved. It affects the tax estimate only AFTER approval.');
+        redirect('admin/payroll-employees.php?edit=' . $employeeId . '#taxprofile');
+    }
+
+    if ($action === 'approve_tax_profile') {
+        require_permission('payroll', 'approve');
+        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        db()->prepare('UPDATE payroll_employee_tax_profiles SET approved_by = :by, approved_at = NOW()
+                WHERE payroll_employee_id = :pe AND fiscal_year_id = :fy AND company_id = :cid')
+            ->execute(['by' => $userId, 'pe' => $employeeId, 'fy' => (int) $fiscalYear['id'], 'cid' => $companyId]);
+        log_activity('payroll_employee', $employeeId, 'tax_profile_approved', 'Tax profile approved — prior-employment figures now count in the annual estimate.', $userId);
+        flash('success', 'Tax profile approved. Recalculate open payroll runs to apply it.');
+        redirect('admin/payroll-employees.php?edit=' . $employeeId . '#taxprofile');
+    }
+
+    if ($action === 'add_salary_revision') {
+        if (!$isAdmin) {
+            flash('error', 'Only an administrator can record salary revisions.');
+            redirect('admin/payroll-employees.php');
+        }
+        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        $effectiveFrom = trim((string) ($_POST['revision_effective_from'] ?? ''));
+        $newBasic = round((float) ($_POST['revision_basic'] ?? 0), 2);
+        $empCheck = db()->prepare('SELECT id FROM payroll_employees WHERE id = :id AND company_id = :cid');
+        $empCheck->execute(['id' => $employeeId, 'cid' => $companyId]);
+        if (!$empCheck->fetchColumn() || $effectiveFrom === '' || $newBasic <= 0) {
+            flash('error', 'A valid employee, effective date, and new basic salary are required.');
+            redirect('admin/payroll-employees.php' . ($employeeId > 0 ? '?edit=' . $employeeId : ''));
+        }
+        db()->prepare('INSERT INTO payroll_salary_revisions (company_id, payroll_employee_id, effective_from, basic_salary, reason, created_by)
+                VALUES (:cid, :pe, :ef, :basic, :reason, :by)
+                ON DUPLICATE KEY UPDATE basic_salary = VALUES(basic_salary), reason = VALUES(reason), created_by = VALUES(created_by)')
+            ->execute(['cid' => $companyId, 'pe' => $employeeId, 'ef' => $effectiveFrom, 'basic' => $newBasic,
+                'reason' => trim((string) ($_POST['revision_reason'] ?? '')) ?: null, 'by' => $userId]);
+        log_activity('payroll_employee', $employeeId, 'salary_revision', 'Salary revision to ' . number_format($newBasic, 2) . ' effective ' . $effectiveFrom . '.', $userId);
+        flash('success', 'Salary revision recorded — future tax projection uses it from its effective date.');
+        redirect('admin/payroll-employees.php?edit=' . $employeeId . '#taxprofile');
+    }
+
+    if ($action === 'delete_salary_revision') {
+        if (!$isAdmin) {
+            flash('error', 'Only an administrator can remove salary revisions.');
+            redirect('admin/payroll-employees.php');
+        }
+        $revisionId = (int) ($_POST['revision_id'] ?? 0);
+        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        db()->prepare('DELETE FROM payroll_salary_revisions WHERE id = :id AND company_id = :cid')
+            ->execute(['id' => $revisionId, 'cid' => $companyId]);
+        flash('success', 'Salary revision removed.');
+        redirect('admin/payroll-employees.php?edit=' . $employeeId . '#taxprofile');
+    }
+
+    if ($action === 'add_manual_projection') {
+        // An explicit, audited estimate of future irregular income — never
+        // created automatically (spec: uncertain income is actual-only).
+        if (!$isAdmin) {
+            flash('error', 'Only an administrator can add manual income projections.');
+            redirect('admin/payroll-employees.php');
+        }
+        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        $label = trim((string) ($_POST['projection_label'] ?? ''));
+        $amount = round((float) ($_POST['projection_amount'] ?? 0), 2);
+        $periodFrom = max(1, min(12, (int) ($_POST['projection_period_from'] ?? 1)));
+        $periodTo = max($periodFrom, min(12, (int) ($_POST['projection_period_to'] ?? 12)));
+        $reason = trim((string) ($_POST['projection_reason'] ?? ''));
+        $empCheck = db()->prepare('SELECT id FROM payroll_employees WHERE id = :id AND company_id = :cid');
+        $empCheck->execute(['id' => $employeeId, 'cid' => $companyId]);
+        if (!$empCheck->fetchColumn() || $label === '' || $amount <= 0 || $reason === '') {
+            flash('error', 'Employee, label, a positive amount, and a reason are required for a manual projection.');
+            redirect('admin/payroll-employees.php' . ($employeeId > 0 ? '?edit=' . $employeeId : ''));
+        }
+        db()->prepare('INSERT INTO payroll_manual_projections (company_id, payroll_employee_id, fiscal_year_id, label, amount, period_from, period_to, reason, prepared_by)
+                VALUES (:cid, :pe, :fy, :label, :amount, :pf, :pt, :reason, :by)')
+            ->execute(['cid' => $companyId, 'pe' => $employeeId, 'fy' => (int) $fiscalYear['id'],
+                'label' => $label, 'amount' => $amount, 'pf' => $periodFrom, 'pt' => $periodTo, 'reason' => $reason, 'by' => $userId]);
+        log_activity('payroll_employee', $employeeId, 'manual_projection', 'Manual projection "' . $label . '" ' . number_format($amount, 2) . ' (periods ' . $periodFrom . '-' . $periodTo . ') — awaiting approval.', $userId);
+        flash('success', 'Manual projection saved — it counts only after approval.');
+        redirect('admin/payroll-employees.php?edit=' . $employeeId . '#taxprofile');
+    }
+
+    if ($action === 'approve_manual_projection') {
+        require_permission('payroll', 'approve');
+        $projectionId = (int) ($_POST['projection_id'] ?? 0);
+        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        db()->prepare('UPDATE payroll_manual_projections SET approved_by = :by, approved_at = NOW() WHERE id = :id AND company_id = :cid')
+            ->execute(['by' => $userId, 'id' => $projectionId, 'cid' => $companyId]);
+        log_activity('payroll_employee', $employeeId, 'manual_projection_approved', 'Manual projection #' . $projectionId . ' approved.', $userId);
+        flash('success', 'Manual projection approved.');
+        redirect('admin/payroll-employees.php?edit=' . $employeeId . '#taxprofile');
+    }
+
+    if ($action === 'delete_manual_projection') {
+        if (!$isAdmin) {
+            flash('error', 'Only an administrator can remove manual projections.');
+            redirect('admin/payroll-employees.php');
+        }
+        $projectionId = (int) ($_POST['projection_id'] ?? 0);
+        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        db()->prepare('DELETE FROM payroll_manual_projections WHERE id = :id AND company_id = :cid')
+            ->execute(['id' => $projectionId, 'cid' => $companyId]);
+        flash('success', 'Manual projection removed.');
+        redirect('admin/payroll-employees.php?edit=' . $employeeId . '#taxprofile');
     }
 
     if ($action === 'save_loan') {
@@ -370,6 +512,30 @@ if ($editId > 0) {
     $stmt->execute(['id' => $editId, 'cid' => $companyId]);
     $editEmployee = $stmt->fetch() ?: null;
 }
+// Tax profile, salary revisions and manual projections for the edited employee.
+$editTaxProfile = null;
+$editRevisions = [];
+$editProjections = [];
+if ($editEmployee ?? null) {
+    if (table_exists('payroll_employee_tax_profiles')) {
+        $tpStmt = db()->prepare('SELECT p.*, eu.name AS entered_name, au.name AS approved_name FROM payroll_employee_tax_profiles p
+            LEFT JOIN users eu ON eu.id = p.entered_by LEFT JOIN users au ON au.id = p.approved_by
+            WHERE p.payroll_employee_id = :pe AND p.fiscal_year_id = :fy LIMIT 1');
+        $tpStmt->execute(['pe' => (int) $editEmployee['id'], 'fy' => (int) $fiscalYear['id']]);
+        $editTaxProfile = $tpStmt->fetch() ?: null;
+    }
+    if (table_exists('payroll_salary_revisions')) {
+        $revStmt = db()->prepare('SELECT * FROM payroll_salary_revisions WHERE payroll_employee_id = :pe ORDER BY effective_from ASC');
+        $revStmt->execute(['pe' => (int) $editEmployee['id']]);
+        $editRevisions = $revStmt->fetchAll();
+    }
+    if (table_exists('payroll_manual_projections')) {
+        $mpStmt = db()->prepare('SELECT * FROM payroll_manual_projections WHERE payroll_employee_id = :pe AND fiscal_year_id = :fy ORDER BY period_from ASC');
+        $mpStmt->execute(['pe' => (int) $editEmployee['id'], 'fy' => (int) $fiscalYear['id']]);
+        $editProjections = $mpStmt->fetchAll();
+    }
+}
+
 $editAssignments = [];
 if ($editEmployee) {
     $ecStmt = db()->prepare('SELECT * FROM payroll_employee_components WHERE payroll_employee_id = :pe');
@@ -480,7 +646,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <label>Scheme ID<input type="text" name="retirement_id" maxlength="60" value="<?= e($editEmployee['retirement_id'] ?? '') ?>"></label>
         <label>Employee contribution % of basic<input type="number" step="0.01" min="0" name="retirement_employee_rate" value="<?= e(number_format((float) ($editEmployee['retirement_employee_rate'] ?? 0), 2, '.', '')) ?>" placeholder="e.g. 11"></label>
         <label>Employer contribution % of basic<input type="number" step="0.01" min="0" name="retirement_employer_rate" value="<?= e(number_format((float) ($editEmployee['retirement_employer_rate'] ?? 0), 2, '.', '')) ?>" placeholder="e.g. 20"></label>
-        <label>Joined on<input type="date" name="joined_on" value="<?= e($editEmployee['joined_on'] ?? '') ?>"></label>
+        <label>Joined on <small>(bounds the tax projection)</small><input type="date" name="joined_on" value="<?= e($editEmployee['joined_on'] ?? '') ?>"></label>
+        <label>Terminated on <small>(optional — stops projection)</small><input type="date" name="terminated_on" value="<?= e($editEmployee['terminated_on'] ?? '') ?>"></label>
+        <label>Contract end <small>(optional — stops projection)</small><input type="date" name="contract_end_date" value="<?= e($editEmployee['contract_end_date'] ?? '') ?>"></label>
         <label>Status
             <select name="status">
                 <option value="active" <?= ($editEmployee['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>Active</option>
@@ -548,6 +716,132 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     })();
     </script>
 </section>
+
+<?php if (($editEmployee ?? null) && $isAdmin): ?>
+<section class="mbw-card" aria-label="Tax profile and projections" id="taxprofile">
+    <div class="mbw-card-head"><h2>Tax Profile &amp; Projections — <?= e($editEmployee['employee_code']) ?> (<?= e($fiscalYear['label'] ?? '') ?>)</h2></div>
+    <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
+        These figures feed the PROJECTED annual tax only — they never post to accounting or Salary Payable.
+        Prior-employment figures and manual projections count only after approval.
+    </p>
+    <div class="workspace-form-grid">
+        <div>
+            <strong style="font-size:13px;color:var(--mbw-heading)">Prior employment &amp; opening adjustments
+                <?php if ($editTaxProfile && $editTaxProfile['approved_by']): ?>
+                    <span class="mbw-pill tone-green">Approved by <?= e($editTaxProfile['approved_name'] ?? '') ?></span>
+                <?php elseif ($editTaxProfile): ?>
+                    <span class="mbw-pill tone-amber">Awaiting approval</span>
+                <?php endif; ?>
+            </strong>
+            <form method="post" style="display:grid;gap:8px;margin-top:8px">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="save_tax_profile">
+                <input type="hidden" name="employee_id" value="<?= e((int) $editEmployee['id']) ?>">
+                <label>Previous employer taxable income (this FY)<input type="number" step="0.01" min="0" name="prior_employment_income" value="<?= e(number_format((float) ($editTaxProfile['prior_employment_income'] ?? 0), 2, '.', '')) ?>"></label>
+                <label>Previous employer tax deducted<input type="number" step="0.01" min="0" name="prior_tax_withheld" value="<?= e(number_format((float) ($editTaxProfile['prior_tax_withheld'] ?? 0), 2, '.', '')) ?>"></label>
+                <label>Previous employer details<input type="text" name="prior_employer_details" maxlength="255" value="<?= e($editTaxProfile['prior_employer_details'] ?? '') ?>"></label>
+                <label>Supporting document reference<input type="text" name="document_reference" maxlength="255" value="<?= e($editTaxProfile['document_reference'] ?? '') ?>"></label>
+                <label>Opening taxable-income adjustment (+/-)<input type="number" step="0.01" name="opening_income_adjustment" value="<?= e(number_format((float) ($editTaxProfile['opening_income_adjustment'] ?? 0), 2, '.', '')) ?>"></label>
+                <label>Opening tax-withholding adjustment (+/-)<input type="number" step="0.01" name="opening_tax_adjustment" value="<?= e(number_format((float) ($editTaxProfile['opening_tax_adjustment'] ?? 0), 2, '.', '')) ?>"></label>
+                <label>Remarks<input type="text" name="tax_profile_remarks" maxlength="255" value="<?= e($editTaxProfile['remarks'] ?? '') ?>"></label>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button type="submit">Save (needs approval)</button>
+                </div>
+            </form>
+            <?php if ($editTaxProfile && !$editTaxProfile['approved_by']): ?>
+                <form method="post" style="margin-top:8px" data-confirm="Approve the prior-employment figures? They will count in the annual tax estimate.">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="approve_tax_profile">
+                    <input type="hidden" name="employee_id" value="<?= e((int) $editEmployee['id']) ?>">
+                    <button type="submit" class="button secondary"><?= icon('badge-check') ?>Approve tax profile</button>
+                </form>
+            <?php endif; ?>
+        </div>
+        <div>
+            <strong style="font-size:13px;color:var(--mbw-heading)">Future salary revisions (effective-dated projection)</strong>
+            <form method="post" style="display:grid;gap:8px;margin-top:8px">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="add_salary_revision">
+                <input type="hidden" name="employee_id" value="<?= e((int) $editEmployee['id']) ?>">
+                <label>Effective from<input type="date" name="revision_effective_from" required></label>
+                <label>New basic salary<input type="number" step="0.01" min="0.01" name="revision_basic" required></label>
+                <label>Reason<input type="text" name="revision_reason" maxlength="255" placeholder="Promotion, contract change…"></label>
+                <button type="submit">Add revision</button>
+            </form>
+            <?php if ($editRevisions !== []): ?>
+                <table style="margin-top:8px">
+                    <thead><tr><th>Effective</th><th class="is-numeric">Basic</th><th>Reason</th><th></th></tr></thead>
+                    <tbody>
+                        <?php foreach ($editRevisions as $revision): ?>
+                            <tr>
+                                <td><?= e($revision['effective_from']) ?></td>
+                                <td class="is-numeric"><?= e(number_format((float) $revision['basic_salary'], 2)) ?></td>
+                                <td><small><?= e($revision['reason'] ?? '') ?></small></td>
+                                <td>
+                                    <form method="post" style="display:inline" data-confirm="Remove this salary revision?">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="delete_salary_revision">
+                                        <input type="hidden" name="revision_id" value="<?= e((int) $revision['id']) ?>">
+                                        <input type="hidden" name="employee_id" value="<?= e((int) $editEmployee['id']) ?>">
+                                        <button type="submit" class="button secondary" style="color:#a33">&times;</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+            <strong style="font-size:13px;color:var(--mbw-heading);display:block;margin-top:14px">Manual irregular-income projections</strong>
+            <form method="post" style="display:grid;gap:8px;margin-top:8px">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="add_manual_projection">
+                <input type="hidden" name="employee_id" value="<?= e((int) $editEmployee['id']) ?>">
+                <label>Label<input type="text" name="projection_label" maxlength="120" required placeholder="Expected commission"></label>
+                <label>Total amount (for the period range)<input type="number" step="0.01" min="0.01" name="projection_amount" required></label>
+                <div style="display:flex;gap:8px">
+                    <label style="flex:1">Period from<input type="number" min="1" max="12" name="projection_period_from" value="1"></label>
+                    <label style="flex:1">Period to<input type="number" min="1" max="12" name="projection_period_to" value="12"></label>
+                </div>
+                <label>Reason (required)<input type="text" name="projection_reason" maxlength="255" required></label>
+                <button type="submit">Add projection (needs approval)</button>
+            </form>
+            <?php if ($editProjections !== []): ?>
+                <table style="margin-top:8px">
+                    <thead><tr><th>Label</th><th class="is-numeric">Amount</th><th>Periods</th><th>Status</th><th></th></tr></thead>
+                    <tbody>
+                        <?php foreach ($editProjections as $projection): ?>
+                            <tr>
+                                <td><?= e($projection['label']) ?><br><small style="color:var(--mbw-muted)"><?= e($projection['reason'] ?? '') ?></small></td>
+                                <td class="is-numeric"><?= e(number_format((float) $projection['amount'], 2)) ?></td>
+                                <td><?= e((int) $projection['period_from'] . '–' . (int) $projection['period_to']) ?></td>
+                                <td><?= $projection['approved_by'] ? '<span class="mbw-pill tone-green">Approved</span>' : '<span class="mbw-pill tone-amber">Pending</span>' ?></td>
+                                <td style="white-space:nowrap">
+                                    <?php if (!$projection['approved_by']): ?>
+                                        <form method="post" style="display:inline">
+                                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                            <input type="hidden" name="action" value="approve_manual_projection">
+                                            <input type="hidden" name="projection_id" value="<?= e((int) $projection['id']) ?>">
+                                            <input type="hidden" name="employee_id" value="<?= e((int) $editEmployee['id']) ?>">
+                                            <button type="submit" class="button secondary">Approve</button>
+                                        </form>
+                                    <?php endif; ?>
+                                    <form method="post" style="display:inline" data-confirm="Remove this projection?">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="delete_manual_projection">
+                                        <input type="hidden" name="projection_id" value="<?= e((int) $projection['id']) ?>">
+                                        <input type="hidden" name="employee_id" value="<?= e((int) $editEmployee['id']) ?>">
+                                        <button type="submit" class="button secondary" style="color:#a33">&times;</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+    </div>
+</section>
+<?php endif; ?>
 
 <section class="mbw-card" aria-label="Enrolled employees">
     <div class="mbw-card-head"><h2>Enrolled Employees (<?= count($employees) ?>)</h2></div>

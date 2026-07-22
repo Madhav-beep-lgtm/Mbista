@@ -996,5 +996,141 @@ function accounting_module_repair_database(): array
         accounting_repair_add_column('payroll_employees', 'sc_eligible', '`sc_eligible` TINYINT(1) NOT NULL DEFAULT 1 AFTER `ot_hourly_rate`');
     });
 
+    $run('Projected annual payroll tax (migration 062)', static function (): void {
+        if (!accounting_repair_table_exists('payroll_components')) {
+            return;
+        }
+        $projectionIsNew = !accounting_repair_column_exists('payroll_components', 'tax_projection_method');
+        accounting_repair_add_column('payroll_components', 'tax_projection_method', "`tax_projection_method` ENUM('regular','actual_only','guaranteed','manual','excluded') DEFAULT NULL AFTER `taxable`");
+        if ($projectionIsNew) {
+            db()->exec("UPDATE payroll_components SET tax_projection_method = CASE
+                    WHEN calc_type IN ('overtime_hours','service_charge','manual') THEN 'actual_only' ELSE 'regular' END
+                WHERE tax_projection_method IS NULL");
+        }
+        accounting_repair_add_column('payroll_run_components', 'tax_projection_method', '`tax_projection_method` VARCHAR(20) DEFAULT NULL AFTER `taxable`');
+        accounting_repair_add_column('payroll_run_lines', 'assessable_month', '`assessable_month` DECIMAL(14,2) NOT NULL DEFAULT 0.00 AFTER `gross`');
+        accounting_repair_add_column('payroll_run_lines', 'regular_month', '`regular_month` DECIMAL(14,2) NOT NULL DEFAULT 0.00 AFTER `assessable_month`');
+        accounting_repair_add_column('payroll_run_lines', 'irregular_month', '`irregular_month` DECIMAL(14,2) NOT NULL DEFAULT 0.00 AFTER `regular_month`');
+        accounting_repair_add_column('payroll_run_lines', 'tax_override', '`tax_override` DECIMAL(14,2) DEFAULT NULL AFTER `tax_month`');
+        accounting_repair_add_column('payroll_run_lines', 'tax_override_reason', '`tax_override_reason` VARCHAR(255) DEFAULT NULL AFTER `tax_override`');
+        accounting_repair_add_column('payroll_run_lines', 'tax_override_by', '`tax_override_by` INT UNSIGNED DEFAULT NULL AFTER `tax_override_reason`');
+        accounting_repair_add_column('payroll_employees', 'contract_end_date', '`contract_end_date` DATE DEFAULT NULL AFTER `terminated_on`');
+        accounting_repair_add_column('payroll_settings', 'excess_tax_treatment', "`excess_tax_treatment` ENUM('offset','refund','carry_forward','manual') NOT NULL DEFAULT 'offset'");
+
+        if (!accounting_repair_table_exists('payroll_employee_tax_profiles')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `payroll_employee_tax_profiles` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `payroll_employee_id` INT UNSIGNED NOT NULL,
+                `fiscal_year_id` INT UNSIGNED NOT NULL,
+                `prior_employment_income` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `prior_tax_withheld` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `prior_employer_details` VARCHAR(255) DEFAULT NULL,
+                `document_reference` VARCHAR(255) DEFAULT NULL,
+                `opening_income_adjustment` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `opening_tax_adjustment` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `remarks` VARCHAR(255) DEFAULT NULL,
+                `entered_by` INT UNSIGNED DEFAULT NULL,
+                `entered_at` TIMESTAMP NULL DEFAULT NULL,
+                `approved_by` INT UNSIGNED DEFAULT NULL,
+                `approved_at` TIMESTAMP NULL DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_tax_profile` (`payroll_employee_id`, `fiscal_year_id`),
+                KEY `idx_tax_profiles_company` (`company_id`),
+                CONSTRAINT `fk_tax_profiles_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_tax_profiles_employee` FOREIGN KEY (`payroll_employee_id`) REFERENCES `payroll_employees` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_tax_profiles_fy` FOREIGN KEY (`fiscal_year_id`) REFERENCES `fiscal_years` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!accounting_repair_table_exists('payroll_salary_revisions')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `payroll_salary_revisions` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `payroll_employee_id` INT UNSIGNED NOT NULL,
+                `effective_from` DATE NOT NULL,
+                `basic_salary` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `reason` VARCHAR(255) DEFAULT NULL,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_salary_revision` (`payroll_employee_id`, `effective_from`),
+                KEY `idx_salary_revisions_company` (`company_id`),
+                CONSTRAINT `fk_salary_revisions_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_salary_revisions_employee` FOREIGN KEY (`payroll_employee_id`) REFERENCES `payroll_employees` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!accounting_repair_table_exists('payroll_manual_projections')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `payroll_manual_projections` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `payroll_employee_id` INT UNSIGNED NOT NULL,
+                `fiscal_year_id` INT UNSIGNED NOT NULL,
+                `component_id` INT UNSIGNED DEFAULT NULL,
+                `label` VARCHAR(120) NOT NULL,
+                `amount` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `period_from` TINYINT UNSIGNED NOT NULL DEFAULT 1,
+                `period_to` TINYINT UNSIGNED NOT NULL DEFAULT 12,
+                `reason` VARCHAR(255) DEFAULT NULL,
+                `prepared_by` INT UNSIGNED DEFAULT NULL,
+                `approved_by` INT UNSIGNED DEFAULT NULL,
+                `approved_at` TIMESTAMP NULL DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_manual_projections_employee` (`payroll_employee_id`, `fiscal_year_id`),
+                CONSTRAINT `fk_manual_projections_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_manual_projections_employee` FOREIGN KEY (`payroll_employee_id`) REFERENCES `payroll_employees` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_manual_projections_fy` FOREIGN KEY (`fiscal_year_id`) REFERENCES `fiscal_years` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_manual_projections_component` FOREIGN KEY (`component_id`) REFERENCES `payroll_components` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!accounting_repair_table_exists('payroll_tax_calculations')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `payroll_tax_calculations` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `run_id` INT UNSIGNED NOT NULL,
+                `payroll_employee_id` INT UNSIGNED NOT NULL,
+                `fiscal_year_id` INT UNSIGNED NOT NULL,
+                `period_no` TINYINT UNSIGNED NOT NULL DEFAULT 1,
+                `start_period` TINYINT UNSIGNED NOT NULL DEFAULT 1,
+                `end_period` TINYINT UNSIGNED NOT NULL DEFAULT 12,
+                `remaining_periods` TINYINT UNSIGNED NOT NULL DEFAULT 1,
+                `employment_start_used` DATE DEFAULT NULL,
+                `employment_end_used` DATE DEFAULT NULL,
+                `actual_regular_to_date` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `actual_irregular_to_date` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `current_regular` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `current_irregular` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `projected_regular_income` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `manual_projected_income` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `prior_employment_income` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `estimated_annual_taxable_income` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `retirement_deduction` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `taxable_annual` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `estimated_annual_tax` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `tax_withheld_before_period` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `prior_employer_tax` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `remaining_tax` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `system_tax` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `tax_override` DECIMAL(14,2) DEFAULT NULL,
+                `current_tax` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `excess_tax` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+                `calculation_version` TINYINT UNSIGNED NOT NULL DEFAULT 2,
+                `snapshot_json` TEXT DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_tax_calc_line` (`run_id`, `payroll_employee_id`),
+                KEY `idx_tax_calcs_employee` (`payroll_employee_id`, `fiscal_year_id`),
+                KEY `idx_tax_calcs_company` (`company_id`),
+                CONSTRAINT `fk_tax_calcs_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_tax_calcs_run` FOREIGN KEY (`run_id`) REFERENCES `payroll_runs` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_tax_calcs_employee` FOREIGN KEY (`payroll_employee_id`) REFERENCES `payroll_employees` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+    });
+
     return $errors;
 }
