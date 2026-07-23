@@ -2179,13 +2179,26 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                 <label>Overhead absorbed (normal capacity)<input type="number" step="0.01" min="0" name="overhead_absorbed" value="0.00"></label>
                 <label>By-product / scrap value<input type="number" step="0.01" min="0" name="byproduct_value" value="0.00"></label>
                 <label>Abnormal waste cost <small style="color:var(--mbw-muted)">(expensed, never inventoried)</small><input type="number" step="0.01" min="0" name="abnormal_waste_cost" value="0.00"></label>
-                <?php for ($i = 0; $i < 4; $i++): ?>
-                    <div class="workspace-span-2 workspace-form-grid">
-                        <label>Input item<select name="input_item_id[]"><option value="">Select input</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name'] . ' (on hand ' . number_format((float) $item['on_hand'], 3) . ')') ?></option><?php endforeach; ?></select></label>
-                        <label>Input qty<input type="number" step="0.001" min="0" name="input_quantity[]"></label>
-                        <label>Input rate<input type="number" step="0.01" min="0" name="input_rate[]" placeholder="Auto: purchase rate"></label>
+                <div class="workspace-span-2">
+                    <strong style="font-size:13px;color:var(--mbw-heading)">Input materials</strong>
+                    <p style="margin:4px 0 8px;color:var(--mbw-muted);font-size:12px">Add as many input lines as the order needs. Leave the rate blank to use the item's purchase rate automatically. Rows without an item are ignored.</p>
+                    <div style="overflow-x:auto">
+                    <table id="mo-input-lines">
+                        <thead><tr><th>Input item</th><th class="is-numeric" style="width:150px">Quantity</th><th class="is-numeric" style="width:170px">Rate</th><th style="width:44px"></th></tr></thead>
+                        <tbody>
+                            <?php for ($i = 0; $i < 4; $i++): ?>
+                                <tr>
+                                    <td><select name="input_item_id[]"><option value="">Select input</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name'] . ' (on hand ' . number_format((float) $item['on_hand'], 3) . ')') ?></option><?php endforeach; ?></select></td>
+                                    <td class="is-numeric"><input type="number" step="0.001" min="0" name="input_quantity[]"></td>
+                                    <td class="is-numeric"><input type="number" step="0.01" min="0" name="input_rate[]" placeholder="Auto: purchase rate"></td>
+                                    <td><button type="button" class="button secondary" style="min-height:32px;padding:3px 10px;color:#a33" title="Remove this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value='';});this.closest('tr').querySelector('select').selectedIndex=0;}">&times;</button></td>
+                                </tr>
+                            <?php endfor; ?>
+                        </tbody>
+                    </table>
                     </div>
-                <?php endfor; ?>
+                    <button type="button" class="button secondary" style="margin-top:6px" onclick="var t=document.querySelector('#mo-input-lines tbody');var r=t.rows[0].cloneNode(true);r.querySelectorAll('input').forEach(function(i){i.value='';});r.querySelector('select').selectedIndex=0;t.appendChild(r);">+ Add input row</button>
+                </div>
                 <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
                 <button type="submit"><?= icon('settings') ?>Save production order</button>
             </form>
@@ -2201,14 +2214,27 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                 <label>Output qty per batch<input type="number" step="0.001" min="0.001" name="output_qty" value="1.000" required></label>
                 <label>Std labour cost / batch<input type="number" step="0.01" min="0" name="std_labour_cost" value="0.00"></label>
                 <label>Std overhead / batch<input type="number" step="0.01" min="0" name="std_overhead_cost" value="0.00"></label>
-                <?php for ($i = 0; $i < 4; $i++): ?>
-                    <div class="workspace-span-2 workspace-form-grid">
-                        <label>Component<select name="bom_item_id[]"><option value="">Select component</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
-                        <label>Std qty / batch<input type="number" step="0.0001" min="0" name="bom_qty[]"></label>
-                        <label>Expected waste %<input type="number" step="0.001" min="0" name="bom_waste[]" value="0"></label>
-                        <label>Std rate<input type="number" step="0.000001" min="0" name="bom_rate[]" placeholder="Auto: purchase rate"></label>
+                <div class="workspace-span-2">
+                    <strong style="font-size:13px;color:var(--mbw-heading)">Components</strong>
+                    <p style="margin:4px 0 8px;color:var(--mbw-muted);font-size:12px">Add as many component lines as the recipe needs. Rows without a component are ignored.</p>
+                    <div style="overflow-x:auto">
+                    <table id="bom-component-lines">
+                        <thead><tr><th>Component</th><th class="is-numeric" style="width:150px">Std qty / batch</th><th class="is-numeric" style="width:150px">Expected waste %</th><th class="is-numeric" style="width:170px">Std rate</th><th style="width:44px"></th></tr></thead>
+                        <tbody>
+                            <?php for ($i = 0; $i < 4; $i++): ?>
+                                <tr>
+                                    <td><select name="bom_item_id[]"><option value="">Select component</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></td>
+                                    <td class="is-numeric"><input type="number" step="0.0001" min="0" name="bom_qty[]"></td>
+                                    <td class="is-numeric"><input type="number" step="0.001" min="0" name="bom_waste[]" value="0"></td>
+                                    <td class="is-numeric"><input type="number" step="0.000001" min="0" name="bom_rate[]" placeholder="Auto: purchase rate"></td>
+                                    <td><button type="button" class="button secondary" style="min-height:32px;padding:3px 10px;color:#a33" title="Remove this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value=i.name==='bom_waste[]'?'0':'';});this.closest('tr').querySelector('select').selectedIndex=0;}">&times;</button></td>
+                                </tr>
+                            <?php endfor; ?>
+                        </tbody>
+                    </table>
                     </div>
-                <?php endfor; ?>
+                    <button type="button" class="button secondary" style="margin-top:6px" onclick="var t=document.querySelector('#bom-component-lines tbody');var r=t.rows[0].cloneNode(true);r.querySelectorAll('input').forEach(function(i){i.value=i.name==='bom_waste[]'?'0':'';});r.querySelector('select').selectedIndex=0;t.appendChild(r);">+ Add component row</button>
+                </div>
                 <button type="submit"><?= icon('documents') ?>Save BOM</button>
             </form>
         </details>
