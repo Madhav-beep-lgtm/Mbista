@@ -109,6 +109,40 @@ if ($pageBreadcrumb === null) {
 // Client-books awareness: when the portal IS a client books space, the
 // Accounting Workspace points back home and the client submenu takes over.
 $headerIsClientBooks = (int) ($headerCompany['is_client_company'] ?? 0) === 1;
+// Hospitality Accounting appears ONLY inside a client's books, only when the
+// Super Admin activated it for that client, and only with the view permission.
+// It can never appear in the firm's own workspaces (they are not client books).
+$headerHospitality = false;
+if ($headerIsClientBooks) {
+    require_once dirname(__DIR__, 2) . '/hospitality_engine.php';
+    $headerHospitality = hospitality_enabled_for_company((int) ($headerCompany['id'] ?? 0)) && user_can_do('hospitality', 'view');
+}
+$headerHospitalityScripts = ['hospitality.php'];
+$headerHospitalityActive = in_array($headerScript, $headerHospitalityScripts, true);
+$headerHospitalityView = (string) ($_GET['view'] ?? '');
+$headerHospitalityMenu = '';
+if ($headerHospitality) {
+    $hospLinks = [
+        ['dashboard', 'Dashboard', 'dashboard'],
+        ['ingredients', 'Ingredients', 'box'],
+        ['menu-items', 'Menu Items', 'receipt-voucher'],
+        ['recipes', 'Recipes', 'journal'],
+        ['mapping', 'Sales Mapping', 'handshake'],
+        ['costing', 'Daily Costing', 'reconcile'],
+        ['gp', 'Estimated Gross Profit', 'analytics'],
+        ['reports', 'Reports', 'reports'],
+        ['settings', 'Settings', 'sliders'],
+    ];
+    $headerHospitalityMenu = '<div class="mbw-nav-parent' . ($headerHospitalityActive ? ' is-open' : '') . '" data-nav-parent="hospitality">'
+        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerHospitalityActive ? 'true' : 'false') . '" class="' . ($headerHospitalityActive ? 'is-active' : '') . '">'
+        . icon('services') . 'Hospitality Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
+    foreach ($hospLinks as [$hospView, $hospLabel, $hospIcon]) {
+        $isActive = $headerHospitalityActive && ($headerHospitalityView === $hospView || ($headerHospitalityView === '' && $hospView === 'dashboard'));
+        $headerHospitalityMenu .= '<a class="' . ($isActive ? 'is-active' : '') . '" href="' . e(url('admin/hospitality.php?view=' . $hospView)) . '">'
+            . icon($hospIcon) . e($hospLabel) . '</a>';
+    }
+    $headerHospitalityMenu .= '</div></div>';
+}
 // A customer login inside its own books gets a reduced, books-only nav.
 $headerIsCustomer = (string) ($currentUser['role'] ?? '') === 'customer';
 $headerClientBooksOptions = [];
@@ -184,6 +218,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('teams') ?>Employees &amp; Advances</a>
             <a class="<?= $headerScript === 'payroll-overtime.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-overtime.php')) ?>"><?= icon('attendance') ?>Overtime Review</a>
             <a class="<?= $headerScript === 'payroll-service-charge.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-service-charge.php')) ?>"><?= icon('handshake') ?>Service Charge</a>
+            <?php if ($headerHospitality): ?>
+                <span class="admin-nav-group">Hospitality</span>
+                <?= $headerHospitalityMenu ?>
+            <?php endif; ?>
             <span class="admin-nav-group">Reports</span>
             <a class="<?= $headerScript === 'reports-center.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <span class="admin-nav-group">System</span>
@@ -248,6 +286,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                         <?php endforeach; ?>
                     </div>
                 </div>
+                <?= $headerHospitality ? $headerHospitalityMenu : '' ?>
             <?php endif; ?>
 
             <span class="admin-nav-group">Reports &amp; Controls</span>

@@ -874,6 +874,11 @@ function rbac_modules(): array
         'messages'   => ['label' => 'Messages',              'actions' => ['view', 'create']],
         'tickets'    => ['label' => 'Support Tickets',       'actions' => ['view', 'create', 'edit']],
         'hr'         => ['label' => 'HR & Attendance',       'actions' => ['view', 'edit', 'approve']],
+        // Reference-only recipe costing for hospitality clients. view = pages
+        // and reports; edit = ingredients/menu items/recipes/mappings/settings;
+        // create = generate daily costing; adjust = controlled recalculation;
+        // export = report downloads.
+        'hospitality' => ['label' => 'Hospitality Costing',  'actions' => ['view', 'create', 'edit', 'adjust', 'export']],
     ];
 }
 
@@ -964,6 +969,9 @@ function user_can_do(string $module, string $action, ?array $user = null): bool
             'inventory' => ['view', 'create', 'edit', 'post', 'export'],
             'payroll' => ['view', 'create', 'post', 'export'],
             'reports' => ['view', 'export'],
+            // Client admins run their own hospitality costing (reference only;
+            // page gates additionally require the Super-Admin-set client flag).
+            'hospitality' => ['view', 'create', 'edit', 'adjust', 'export'],
         ];
 
         if (!$canApprove && in_array($action, ['approve', 'post'], true)) {
