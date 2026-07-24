@@ -5168,6 +5168,23 @@ function npr_amount_in_words(float $amount): string
     return trim($result) . ' Only';
 }
 
+/**
+ * The bank accounts a company shows on its invoices, default first. Each
+ * company keeps its own list; an empty list falls back to the legacy
+ * single-account settings at the call site.
+ */
+function company_bank_accounts(int $companyId, bool $invoiceOnly = true): array
+{
+    if ($companyId <= 0 || !table_exists('company_bank_accounts')) {
+        return [];
+    }
+    $stmt = db()->prepare('SELECT * FROM company_bank_accounts
+        WHERE company_id = :cid AND active = 1' . ($invoiceOnly ? ' AND show_on_invoice = 1' : '') . '
+        ORDER BY is_default DESC, sort_order ASC, id ASC');
+    $stmt->execute(['cid' => $companyId]);
+    return $stmt->fetchAll();
+}
+
 function export_invoice_html(array $invoice): string
 {
     $companyId = (int) ($invoice['company_id'] ?? 0);
@@ -5193,10 +5210,21 @@ function export_invoice_html(array $invoice): string
     $stampPath = $assetIfExists('company_stamp_path');
     $qrPath = $assetIfExists('company_qr_path');
 
-    $bankName = (string) setting('bank_name', '');
-    $bankAccountName = (string) setting('bank_account_name', $companyName);
-    $bankAccountNumber = (string) setting('bank_account_number', '');
-    $bankBranch = (string) setting('bank_branch', '');
+    // The ISSUING company's own bank accounts (it may keep several); legacy
+    // single-account settings remain the fallback when none are configured.
+    $bankAccounts = company_bank_accounts($companyId);
+    if ($bankAccounts === []) {
+        $legacyBankName = (string) setting('bank_name', '');
+        if ($legacyBankName !== '') {
+            $bankAccounts[] = [
+                'bank_name' => $legacyBankName,
+                'account_name' => (string) setting('bank_account_name', $companyName),
+                'account_number' => (string) setting('bank_account_number', ''),
+                'branch' => (string) setting('bank_branch', ''),
+                'swift_code' => '',
+            ];
+        }
+    }
 
     $invoiceNo = (string) ($invoice['invoice_no'] ?? 'N/A');
     $category = (string) ($invoice['invoice_category'] ?? 'proforma');
@@ -5438,10 +5466,22 @@ function export_invoice_html(array $invoice): string
                 <div class="pay-flex">
                     <div>
                         <h3>PAYMENT INFO</h3>
-                        ' . ($bankName !== '' ? '<div class="primary">' . e($bankName) . '</div>' : '<p>Payment details available on request.</p>') . '
-                        ' . ($bankAccountName !== '' && $bankName !== '' ? '<p>A/C Name: ' . e($bankAccountName) . '</p>' : '') . '
-                        ' . ($bankAccountNumber !== '' ? '<p>A/C No: ' . e($bankAccountNumber) . '</p>' : '') . '
-                        ' . ($bankBranch !== '' ? '<p>Branch: ' . e($bankBranch) . '</p>' : '') . '
+                        ' . ($bankAccounts === [] ? '<p>Payment details available on request.</p>' : implode('', array_map(static function (array $bankAccount): string {
+                            $html = '<div style="margin-bottom:6px"><div class="primary">' . e((string) $bankAccount['bank_name']) . '</div>';
+                            if ((string) ($bankAccount['account_name'] ?? '') !== '') {
+                                $html .= '<p>A/C Name: ' . e((string) $bankAccount['account_name']) . '</p>';
+                            }
+                            if ((string) ($bankAccount['account_number'] ?? '') !== '') {
+                                $html .= '<p>A/C No: ' . e((string) $bankAccount['account_number']) . '</p>';
+                            }
+                            if ((string) ($bankAccount['branch'] ?? '') !== '') {
+                                $html .= '<p>Branch: ' . e((string) $bankAccount['branch']) . '</p>';
+                            }
+                            if ((string) ($bankAccount['swift_code'] ?? '') !== '') {
+                                $html .= '<p>SWIFT: ' . e((string) $bankAccount['swift_code']) . '</p>';
+                            }
+                            return $html . '</div>';
+                        }, $bankAccounts))) . '
                     </div>
                     ' . $qrHtml . '
                 </div>
