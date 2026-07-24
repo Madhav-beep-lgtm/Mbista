@@ -171,8 +171,8 @@ function agreement_section_add(array $sa, array $data, int $userId): int
         'sort' => $sort,
         'title_en' => trim((string) ($data['title_en'] ?? '')) ?: null,
         'title_np' => trim((string) ($data['title_np'] ?? '')) ?: null,
-        'body_en' => trim((string) ($data['body_en'] ?? '')) ?: null,
-        'body_np' => trim((string) ($data['body_np'] ?? '')) ?: null,
+        'body_en' => agreement_sanitize_html(trim((string) ($data['body_en'] ?? ''))) ?: null,
+        'body_np' => agreement_sanitize_html(trim((string) ($data['body_np'] ?? ''))) ?: null,
         'note' => trim((string) ($data['drafting_note'] ?? '')) ?: null,
         'client_note' => trim((string) ($data['client_note'] ?? '')) ?: null,
         'mandatory' => (int) !empty($data['is_mandatory']),
@@ -206,8 +206,8 @@ function agreement_section_update(array $sa, int $sectionId, array $data, int $u
     $after = [
         'title_en' => trim((string) ($data['title_en'] ?? '')) ?: null,
         'title_np' => trim((string) ($data['title_np'] ?? '')) ?: null,
-        'body_en' => trim((string) ($data['body_en'] ?? '')) ?: null,
-        'body_np' => trim((string) ($data['body_np'] ?? '')) ?: null,
+        'body_en' => agreement_sanitize_html(trim((string) ($data['body_en'] ?? ''))) ?: null,
+        'body_np' => agreement_sanitize_html(trim((string) ($data['body_np'] ?? ''))) ?: null,
     ];
     db()->prepare('UPDATE agreement_sections SET section_type = :type, title_en = :title_en, title_np = :title_np,
             body_en = :body_en, body_np = :body_np, drafting_note = :note, client_note = :client_note,
@@ -434,6 +434,119 @@ function agreement_placeholder_map(array $sa): array
     ];
 }
 
+/**
+ * Whitelist sanitizer for rich-text section bodies (the Word-style editor).
+ * Keeps formatting Word understands — fonts, sizes, colors, alignment, lists,
+ * tables, bold/italic/underline — and strips everything executable: scripts,
+ * event handlers, javascript: URLs, iframes, forms. Runs on save AND on
+ * render, so even pre-sanitizer or hand-imported rows are safe to output.
+ */
+function agreement_sanitize_html(string $html): string
+{
+    if ($html === '' || strpos($html, '<') === false || !class_exists('DOMDocument')) {
+        return $html;
+    }
+    $allowedTags = ['p', 'br', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'sub', 'sup',
+        'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'hr', 'blockquote', 'font'];
+    $allowedStyles = ['font-family', 'font-size', 'color', 'background-color', 'text-align', 'text-decoration',
+        'font-weight', 'font-style', 'padding', 'margin-left', 'border', 'border-collapse', 'width', 'line-height'];
+
+    $doc = new DOMDocument('1.0', 'UTF-8');
+    libxml_use_internal_errors(true);
+    $doc->loadHTML('<?xml encoding="UTF-8"><div id="__sanitize_root">' . $html . '</div>',
+        LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD | LIBXML_NOERROR | LIBXML_NOWARNING);
+    libxml_clear_errors();
+    $root = $doc->getElementById('__sanitize_root');
+    if ($root === null) {
+        return e($html);
+    }
+
+    $filterStyle = static function (string $style) use ($allowedStyles): string {
+        $kept = [];
+        foreach (explode(';', $style) as $rule) {
+            $parts = explode(':', $rule, 2);
+            if (count($parts) !== 2) {
+                continue;
+            }
+            $prop = strtolower(trim($parts[0]));
+            $value = trim($parts[1]);
+            if (in_array($prop, $allowedStyles, true)
+                && !preg_match('/expression|javascript|url\s*\(|@import|behavior/i', $value)) {
+                $kept[] = $prop . ': ' . $value;
+            }
+        }
+        return implode('; ', $kept);
+    };
+
+    $walk = static function (DOMNode $node) use (&$walk, $allowedTags, $filterStyle): void {
+        for ($i = $node->childNodes->length - 1; $i >= 0; $i--) {
+            $child = $node->childNodes->item($i);
+            if (!$child instanceof DOMElement) {
+                continue;
+            }
+            $tag = strtolower($child->tagName);
+            if (in_array($tag, ['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'form', 'input', 'button', 'textarea', 'select', 'img', 'svg', 'audio', 'video'], true)) {
+                $node->removeChild($child); // Dangerous or unsupported: drop entirely.
+                continue;
+            }
+            if (!in_array($tag, $allowedTags, true)) {
+                // Unknown wrapper (a, section, …): keep the readable children.
+                while ($child->firstChild !== null) {
+                    $node->insertBefore($child->firstChild, $child);
+                }
+                $node->removeChild($child);
+                continue;
+            }
+            for ($a = $child->attributes->length - 1; $a >= 0; $a--) {
+                $attr = $child->attributes->item($a);
+                $name = strtolower($attr->name);
+                $keep = false;
+                if ($name === 'style') {
+                    $filtered = $filterStyle((string) $attr->value);
+                    if ($filtered !== '') {
+                        $child->setAttribute('style', $filtered);
+                        $keep = true;
+                    }
+                } elseif (in_array($name, ['colspan', 'rowspan'], true) && in_array($tag, ['td', 'th'], true)) {
+                    $keep = ctype_digit((string) $attr->value);
+                } elseif (in_array($name, ['color', 'face', 'size'], true) && $tag === 'font') {
+                    $keep = !preg_match('/[<>"\'&;]/', (string) $attr->value);
+                } elseif ($name === 'border' && $tag === 'table') {
+                    $keep = ctype_digit((string) $attr->value);
+                }
+                if (!$keep) {
+                    $child->removeAttributeNode($attr);
+                }
+            }
+            $walk($child);
+        }
+    };
+    $walk($root);
+
+    $out = '';
+    foreach ($root->childNodes as $child) {
+        $out .= $doc->saveHTML($child);
+    }
+    return $out;
+}
+
+/** True when a stored body is rich HTML rather than legacy plain text. */
+function agreement_body_is_rich(string $body): bool
+{
+    return (bool) preg_match('/<[a-z][a-z0-9]*(\s|>|\/)/i', $body);
+}
+
+/**
+ * Render one bilingual body for output: placeholders resolved, rich HTML
+ * sanitized and passed through (fonts, colors, alignment, tables reach the
+ * print/PDF/Word output), legacy plain text escaped with line breaks kept.
+ */
+function agreement_render_body(string $body, array $map): string
+{
+    $resolved = agreement_resolve_text($body, $map);
+    return agreement_body_is_rich($body) ? agreement_sanitize_html($resolved) : nl2br(e($resolved));
+}
+
 /** Resolve {{token}} markers for display/export; the stored text keeps them. */
 function agreement_resolve_text(string $text, array $map): string
 {
@@ -628,8 +741,8 @@ function agreement_validate(array $sa, string $targetState): array
         }
         $incomplete = 0;
         foreach ($flat as $section) {
-            $hasEn = trim((string) ($section['title_en'] ?? '') . (string) ($section['body_en'] ?? '')) !== '';
-            $hasNp = trim((string) ($section['title_np'] ?? '') . (string) ($section['body_np'] ?? '')) !== '';
+            $hasEn = trim((string) ($section['title_en'] ?? '') . strip_tags((string) ($section['body_en'] ?? ''))) !== '';
+            $hasNp = trim((string) ($section['title_np'] ?? '') . strip_tags((string) ($section['body_np'] ?? ''))) !== '';
             if ($hasEn !== $hasNp) {
                 $incomplete++;
             }
@@ -644,7 +757,7 @@ function agreement_validate(array $sa, string $targetState): array
     }
     if (in_array($targetState, ['approved', 'issued', 'active'], true)) {
         foreach ($flat as $section) {
-            if ((int) $section['is_mandatory'] === 1 && trim((string) ($section['body_en'] ?? '') . (string) ($section['body_np'] ?? '')) === '') {
+            if ((int) $section['is_mandatory'] === 1 && trim(strip_tags((string) ($section['body_en'] ?? '') . (string) ($section['body_np'] ?? ''))) === '') {
                 $errors[] = 'Mandatory section "' . ((string) ($section['title_en'] ?? $section['title_np'] ?? ('#' . $section['id']))) . '" is empty.';
             }
         }

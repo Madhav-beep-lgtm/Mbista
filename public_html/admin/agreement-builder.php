@@ -404,6 +404,24 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
     .ab-comment.is-resolved { opacity: .55; border-left-color: #16a34a; }
     details.ab-block { margin: 10px 0; }
     details.ab-block > summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+    /* Word-style rich text editor */
+    .ab-rt-wrap { border: 1px solid var(--mbw-border, #c8cddb); border-radius: 8px; overflow: hidden; background: #fff; }
+    .ab-rt-toolbar { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--mbw-border, #c8cddb); background: var(--mbw-card-bg, #f6f7fb); }
+    .ab-rt-toolbar button, .ab-rt-toolbar select { border: 1px solid transparent; background: transparent; border-radius: 5px; min-width: 26px; height: 26px; font-size: 13px; cursor: pointer; color: var(--mbw-heading, #223); display: inline-flex; align-items: center; justify-content: center; padding: 0 4px; }
+    .ab-rt-toolbar button:hover, .ab-rt-toolbar select:hover { background: rgba(59, 130, 246, .15); }
+    .ab-rt-toolbar button.is-on { background: rgba(59, 130, 246, .25); border-color: rgba(59, 130, 246, .4); }
+    .ab-rt-toolbar select { font-size: 12px; max-width: 160px; }
+    .ab-rt-toolbar .ab-sep { width: 1px; background: var(--mbw-border, #c8cddb); margin: 2px 4px; align-self: stretch; }
+    .ab-rt-toolbar .ab-color { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; width: 28px; height: 26px; border-radius: 5px; cursor: pointer; font-size: 12px; line-height: 1; }
+    .ab-rt-toolbar .ab-color:hover { background: rgba(59, 130, 246, .15); }
+    .ab-rt-toolbar .ab-color input[type=color] { width: 18px; height: 8px; border: 0; padding: 0; background: transparent; cursor: pointer; }
+    .ab-rt-editor { min-height: 170px; max-height: 440px; overflow-y: auto; padding: 10px 12px; font-family: 'Noto Sans Devanagari', 'Mangal', 'Kalimati', 'Times New Roman', serif; font-size: 13.5px; line-height: 1.7; color: #111; background: #fff; outline: none; }
+    .ab-rt-editor:focus { box-shadow: inset 0 0 0 2px rgba(59, 130, 246, .3); }
+    .ab-rt-editor[contenteditable="false"] { background: #f4f5f8; color: #333; }
+    .ab-rt-editor table { border-collapse: collapse; }
+    .ab-rt-editor td, .ab-rt-editor th { border: 1px solid #888; padding: 3px 8px; min-width: 40px; }
+    .ab-rt-editor ul, .ab-rt-editor ol { margin: 4px 0 4px 22px; }
+    .ab-rt-editor blockquote { margin: 6px 0 6px 14px; padding-left: 10px; border-left: 3px solid #bbb; }
 </style>
 
 <section class="mbw-card">
@@ -523,8 +541,8 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
                         </label>
                         <label>Title (English)<input type="text" name="title_en" maxlength="255" value="<?= e((string) ($selected['title_en'] ?? '')) ?>" <?= $editable && $canEdit ? '' : 'readonly' ?>></label>
                         <label>शीर्षक (नेपाली)<input type="text" name="title_np" maxlength="255" value="<?= e((string) ($selected['title_np'] ?? '')) ?>" <?= $editable && $canEdit ? '' : 'readonly' ?>></label>
-                        <label class="workspace-span-2">Content (English)<textarea name="body_en" rows="8" <?= $editable && $canEdit ? '' : 'readonly' ?>><?= e((string) ($selected['body_en'] ?? '')) ?></textarea></label>
-                        <label class="workspace-span-2">सामग्री (नेपाली)<textarea name="body_np" rows="8" <?= $editable && $canEdit ? '' : 'readonly' ?>><?= e((string) ($selected['body_np'] ?? '')) ?></textarea></label>
+                        <label class="workspace-span-2">Content (English)<textarea name="body_en" rows="8" class="ab-rich" <?= $editable && $canEdit ? '' : 'readonly' ?>><?= e((string) ($selected['body_en'] ?? '')) ?></textarea></label>
+                        <label class="workspace-span-2">सामग्री (नेपाली)<textarea name="body_np" rows="8" class="ab-rich" <?= $editable && $canEdit ? '' : 'readonly' ?>><?= e((string) ($selected['body_np'] ?? '')) ?></textarea></label>
                         <label class="workspace-span-2">Internal drafting note (never printed for the client)<textarea name="drafting_note" rows="2" <?= $editable && $canEdit ? '' : 'readonly' ?>><?= e((string) ($selected['drafting_note'] ?? '')) ?></textarea></label>
                         <label class="workspace-span-2">Client-visible note (optional)<textarea name="client_note" rows="2" <?= $editable && $canEdit ? '' : 'readonly' ?>><?= e((string) ($selected['client_note'] ?? '')) ?></textarea></label>
                         <label><input type="checkbox" name="is_mandatory" value="1" <?= (int) $selected['is_mandatory'] === 1 ? 'checked' : '' ?> <?= $editable && $canEdit ? '' : 'disabled' ?>> Mandatory clause</label>
@@ -545,7 +563,7 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
                             echo '<p style="margin:4px 0 2px ' . ($depth * 16) . 'px;font-size:13px"><strong>' . e((string) $node['number']) . '.</strong> ' . e($title) . '</p>';
                             $body = (string) ($node['body_en'] ?? '') !== '' ? (string) $node['body_en'] : (string) ($node['body_np'] ?? '');
                             if ($body !== '') {
-                                echo '<p style="margin:0 0 6px ' . (($depth + 1) * 16) . 'px;font-size:12px;color:var(--mbw-muted)">' . e(mb_strimwidth(agreement_resolve_text($body, $placeholderMap), 0, 220, '…')) . '</p>';
+                                echo '<p style="margin:0 0 6px ' . (($depth + 1) * 16) . 'px;font-size:12px;color:var(--mbw-muted)">' . e(mb_strimwidth(trim(strip_tags(agreement_resolve_text($body, $placeholderMap))), 0, 220, '…')) . '</p>';
                             }
                             if (!empty($node['children'])) {
                                 $preview($node['children'], $depth + 1);
@@ -784,22 +802,167 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
 </section>
 
 <script>
+// ---------------------------------------------------------------------------
+// Word-style rich text editor for section bodies (no external libraries).
+// Formatting is stored as HTML and sanitized server-side on save and render.
+// ---------------------------------------------------------------------------
+var abLastEditor = null;
+
+function abCmd(editor, command, value) {
+    editor.focus();
+    if (command === 'fontSize' || command === 'fontName' || command === 'foreColor' || command === 'hiliteColor') {
+        try { document.execCommand('styleWithCSS', false, true); } catch (e) {}
+    }
+    if (command === 'hiliteColor') {
+        // Older engines call it backColor.
+        if (!document.execCommand('hiliteColor', false, value)) { document.execCommand('backColor', false, value); }
+    } else {
+        document.execCommand(command, false, value || null);
+    }
+    editor.dispatchEvent(new Event('input'));
+}
+
+function abInsertTable(editor) {
+    var rows = parseInt(window.prompt('Rows?', '3'), 10);
+    var cols = parseInt(window.prompt('Columns?', '3'), 10);
+    if (!rows || !cols || rows < 1 || cols < 1 || rows > 50 || cols > 12) { return; }
+    var html = '<table style="border-collapse: collapse; width: 100%">';
+    for (var r = 0; r < rows; r++) {
+        html += '<tr>';
+        for (var c = 0; c < cols; c++) {
+            html += '<' + (r === 0 ? 'th' : 'td') + ' style="border: 1px solid #333; padding: 3px 8px">' + (r === 0 ? 'Head' : '&nbsp;') + '</' + (r === 0 ? 'th' : 'td') + '>';
+        }
+        html += '</tr>';
+    }
+    abCmd(editor, 'insertHTML', html + '</table><p><br></p>');
+}
+
+function abBuildToolbar(editor) {
+    var bar = document.createElement('div');
+    bar.className = 'ab-rt-toolbar';
+    var fonts = ['Noto Sans Devanagari', 'Mangal', 'Kalimati', 'Times New Roman', 'Arial', 'Calibri', 'Georgia', 'Verdana', 'Courier New'];
+    var sizes = [['1', '8pt'], ['2', '10pt'], ['3', '12pt'], ['4', '14pt'], ['5', '18pt'], ['6', '24pt'], ['7', '36pt']];
+
+    function btn(label, title, fn) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.innerHTML = label;
+        b.title = title;
+        b.addEventListener('mousedown', function (e) { e.preventDefault(); }); // keep the selection
+        b.addEventListener('click', function () { fn(); });
+        bar.appendChild(b);
+        return b;
+    }
+    function sep() { var s = document.createElement('span'); s.className = 'ab-sep'; bar.appendChild(s); }
+    function colorPicker(glyph, title, command) {
+        var wrap = document.createElement('label');
+        wrap.className = 'ab-color';
+        wrap.title = title;
+        wrap.innerHTML = '<span>' + glyph + '</span>';
+        var input = document.createElement('input');
+        input.type = 'color';
+        input.value = command === 'foreColor' ? '#c0392b' : '#ffff00';
+        input.addEventListener('input', function () { abCmd(editor, command, input.value); });
+        wrap.appendChild(input);
+        bar.appendChild(wrap);
+    }
+
+    var fontSel = document.createElement('select');
+    fontSel.title = 'Font family';
+    fontSel.innerHTML = '<option value="">Font</option>' + fonts.map(function (f) { return '<option style="font-family:\'' + f + '\'">' + f + '</option>'; }).join('');
+    fontSel.addEventListener('change', function () { if (fontSel.value) { abCmd(editor, 'fontName', fontSel.value); fontSel.selectedIndex = 0; } });
+    bar.appendChild(fontSel);
+
+    var sizeSel = document.createElement('select');
+    sizeSel.title = 'Font size';
+    sizeSel.innerHTML = '<option value="">Size</option>' + sizes.map(function (s) { return '<option value="' + s[0] + '">' + s[1] + '</option>'; }).join('');
+    sizeSel.addEventListener('change', function () { if (sizeSel.value) { abCmd(editor, 'fontSize', sizeSel.value); sizeSel.selectedIndex = 0; } });
+    bar.appendChild(sizeSel);
+
+    sep();
+    btn('<b>B</b>', 'Bold (Ctrl+B)', function () { abCmd(editor, 'bold'); });
+    btn('<i>I</i>', 'Italic (Ctrl+I)', function () { abCmd(editor, 'italic'); });
+    btn('<u>U</u>', 'Underline (Ctrl+U)', function () { abCmd(editor, 'underline'); });
+    btn('<s>S</s>', 'Strikethrough', function () { abCmd(editor, 'strikeThrough'); });
+    btn('x²', 'Superscript', function () { abCmd(editor, 'superscript'); });
+    btn('x₂', 'Subscript', function () { abCmd(editor, 'subscript'); });
+    sep();
+    colorPicker('A', 'Text colour', 'foreColor');
+    colorPicker('🖍', 'Highlight colour', 'hiliteColor');
+    sep();
+    btn('⯇', 'Align left', function () { abCmd(editor, 'justifyLeft'); });
+    btn('≡', 'Align centre', function () { abCmd(editor, 'justifyCenter'); });
+    btn('⯈', 'Align right', function () { abCmd(editor, 'justifyRight'); });
+    btn('☰', 'Justify', function () { abCmd(editor, 'justifyFull'); });
+    sep();
+    btn('•', 'Bulleted list', function () { abCmd(editor, 'insertUnorderedList'); });
+    btn('1.', 'Numbered list', function () { abCmd(editor, 'insertOrderedList'); });
+    btn('⇤', 'Decrease indent', function () { abCmd(editor, 'outdent'); });
+    btn('⇥', 'Increase indent', function () { abCmd(editor, 'indent'); });
+    sep();
+    btn('▦', 'Insert table', function () { abInsertTable(editor); });
+    btn('―', 'Horizontal rule', function () { abCmd(editor, 'insertHorizontalRule'); });
+    sep();
+    btn('⌫<small>fmt</small>', 'Clear formatting', function () { abCmd(editor, 'removeFormat'); });
+    btn('↶', 'Undo (Ctrl+Z)', function () { abCmd(editor, 'undo'); });
+    btn('↷', 'Redo (Ctrl+Y)', function () { abCmd(editor, 'redo'); });
+    return bar;
+}
+
+function abEscapeHtml(text) {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+(function abInitRich() {
+    document.querySelectorAll('textarea.ab-rich').forEach(function (textarea) {
+        var wrap = document.createElement('div');
+        wrap.className = 'ab-rt-wrap';
+        var editor = document.createElement('div');
+        editor.className = 'ab-rt-editor';
+        editor.contentEditable = textarea.readOnly ? 'false' : 'true';
+        var value = textarea.value;
+        // Legacy plain-text bodies become editable HTML with line breaks kept.
+        editor.innerHTML = /<[a-z][a-z0-9]*(\s|>|\/)/i.test(value) ? value : abEscapeHtml(value).replace(/\n/g, '<br>');
+        if (!textarea.readOnly) {
+            wrap.appendChild(abBuildToolbar(editor));
+        }
+        wrap.appendChild(editor);
+        textarea.style.display = 'none';
+        textarea.parentNode.insertBefore(wrap, textarea);
+        editor.addEventListener('focusin', function () { abLastEditor = editor; });
+        editor.addEventListener('input', function () { textarea.value = editor.innerHTML; });
+        var form = textarea.closest('form');
+        if (form) {
+            form.addEventListener('submit', function () { textarea.value = editor.innerHTML; });
+        }
+    });
+})();
+
 function abInsertToken(token) {
+    var text = '{{' + token + '}}';
+    var active = document.activeElement;
+    if (active && active.classList && active.classList.contains('ab-rt-editor') && active.contentEditable === 'true') {
+        abCmd(active, 'insertText', text);
+        return;
+    }
+    if (abLastEditor && abLastEditor.contentEditable === 'true') {
+        abCmd(abLastEditor, 'insertText', text);
+        return;
+    }
     var form = document.getElementById('ab-section-form');
     if (!form) { return; }
-    var active = document.activeElement;
-    var target = (active && (active.name === 'body_en' || active.name === 'body_np' || active.name === 'title_en' || active.name === 'title_np')) ? active : form.querySelector('[name="body_en"]');
+    var target = (active && (active.name === 'title_en' || active.name === 'title_np')) ? active : form.querySelector('textarea.ab-rich');
     if (!target || target.readOnly) { return; }
-    var text = '{{' + token + '}}';
     var start = target.selectionStart || target.value.length;
     target.value = target.value.slice(0, start) + text + target.value.slice(target.selectionEnd || start);
     target.dispatchEvent(new Event('input'));
     target.focus();
 }
-// Unsaved-change warning for the two big forms.
+
+// Unsaved-change warning (covers the rich editors too).
 (function () {
     var dirty = false;
-    document.querySelectorAll('#ab-section-form input, #ab-section-form textarea, #ab-section-form select').forEach(function (el) {
+    document.querySelectorAll('#ab-section-form input, #ab-section-form textarea, #ab-section-form select, #ab-section-form .ab-rt-editor').forEach(function (el) {
         el.addEventListener('input', function () { dirty = true; });
     });
     document.querySelectorAll('form').forEach(function (f) { f.addEventListener('submit', function () { dirty = false; }); });

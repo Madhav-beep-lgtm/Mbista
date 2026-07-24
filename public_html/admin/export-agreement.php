@@ -108,7 +108,7 @@ function agreement_builder_render(array $sa, array $flat, string $lang, string $
     $isDraftDoc = !agreement_is_frozen($sa) && $versionNo === 0;
 
     // Heading + body in the selected layout for one section node.
-    $sectionHtml = function (array $node, int $depth) use (&$sectionHtml, $showNp, $showEn, $sideBySide, $resolve, $isClientView): string {
+    $sectionHtml = function (array $node, int $depth) use (&$sectionHtml, $showNp, $showEn, $sideBySide, $resolve, $map, $isClientView): string {
         $type = (string) $node['section_type'];
         $titleN = trim((string) ($node['title_np'] ?? ''));
         $titleE = trim((string) ($node['title_en'] ?? ''));
@@ -139,18 +139,18 @@ function agreement_builder_render(array $sa, array $flat, string $lang, string $
         }
 
         if ($sideBySide && $showNp && $showEn && ($bodyN !== '' || $bodyE !== '')) {
-            $html .= '<div class="cols"><div class="col">' . ($bodyE !== '' ? nl2br(e($resolve($bodyE))) : '') . '</div>'
-                . '<div class="col">' . ($bodyN !== '' ? nl2br(e($resolve($bodyN))) : '') . '</div></div>';
+            $html .= '<div class="cols"><div class="col">' . ($bodyE !== '' ? agreement_render_body($bodyE, $map) : '') . '</div>'
+                . '<div class="col">' . ($bodyN !== '' ? agreement_render_body($bodyN, $map) : '') . '</div></div>';
         } else {
             if ($showEn && $bodyE !== '') {
-                $html .= '<p class="body-en">' . nl2br(e($resolve($bodyE))) . '</p>';
+                $html .= '<div class="body-en">' . agreement_render_body($bodyE, $map) . '</div>';
             }
             if ($showNp && $bodyN !== '') {
-                $html .= '<p class="body-np' . ($showEn ? ' alt' : '') . '">' . nl2br(e($resolve($bodyN))) . '</p>';
+                $html .= '<div class="body-np' . ($showEn ? ' alt' : '') . '">' . agreement_render_body($bodyN, $map) . '</div>';
             }
         }
         if ($clientNote !== '') {
-            $html .= '<p class="client-note">' . nl2br(e($resolve($clientNote))) . '</p>';
+            $html .= '<div class="client-note">' . agreement_render_body($clientNote, $map) . '</div>';
         }
         // Internal drafting notes are NEVER rendered, in any view.
         foreach ($node['children'] ?? [] as $child) {
@@ -185,8 +185,13 @@ function agreement_builder_render(array $sa, array $flat, string $lang, string $
         h4 { font-size: 12pt; margin: 12px 0 4px; }
         .en-inline { font-weight: 500; font-style: italic; color: #444; font-size: 10.5pt; }
         p { margin: 6px 0; text-align: justify; }
-        p.body-np.alt { font-size: 12.5pt; }
-        p.body-en { font-size: 11.5pt; }
+        .body-np, .body-en, .client-note { margin: 6px 0; text-align: justify; }
+        .body-np.alt { font-size: 12.5pt; }
+        .body-en { font-size: 11.5pt; }
+        .sec table { border-collapse: collapse; max-width: 100%; }
+        .sec table td, .sec table th { padding: 3px 8px; vertical-align: top; }
+        .sec ul, .sec ol { margin: 4px 0 4px 22px; padding: 0; }
+        .sec blockquote { margin: 6px 0 6px 18px; padding-left: 10px; border-left: 3px solid #bbb; }
         .cols { display: table; width: 100%; table-layout: fixed; border-collapse: collapse; }
         .cols .col { display: table-cell; width: 50%; vertical-align: top; padding: 2px 10px 2px 0; font-size: 11pt; text-align: justify; }
         .cols .col + .col { padding: 2px 0 2px 10px; border-left: 1px solid #ddd; font-size: 12pt; }

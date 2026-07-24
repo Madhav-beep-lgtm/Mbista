@@ -230,6 +230,32 @@ $emptySa = agreement_get($emptySaId, $coA);
 $deny = agreement_transition($emptySa, 'under_review', $maker, []);
 ok(!$deny['ok'] && str_contains((string) $deny['error'], 'client'), 'submission without a client blocked with a clear message');
 
+echo "== Rich text (Word-style formatting) ==\n";
+$evil = '<p style="text-align: center; color: red" onclick="alert(1)">Hello <strong>world</strong>'
+    . '<script>alert(2)</script><span style="font-family: Arial; background: url(javascript:x)">span</span>'
+    . '<a href="javascript:steal()">link text</a></p>'
+    . '<table border="1"><tr><td colspan="2" style="border: 1px solid #333">cell</td></tr></table>'
+    . '<font color="#c0392b" face="Calibri" size="4">coloured</font><iframe src="x"></iframe>';
+$clean = agreement_sanitize_html($evil);
+ok(!str_contains($clean, '<script') && !str_contains($clean, 'onclick') && !str_contains($clean, '<iframe') && !str_contains($clean, '<a '), 'sanitizer strips scripts, event handlers, iframes and links');
+ok(str_contains($clean, '<strong>world</strong>') && str_contains($clean, 'text-align: center') && str_contains($clean, 'color: red'), 'sanitizer keeps bold, alignment and colour');
+ok(str_contains($clean, 'link text') && str_contains($clean, 'span'), 'disallowed wrappers are unwrapped, their text kept');
+ok(!str_contains($clean, 'url('), 'style url()/javascript values dropped');
+ok(str_contains($clean, 'colspan="2"') && str_contains($clean, '<table border="1">'), 'tables survive with colspan and border');
+ok(str_contains($clean, '<font color="#c0392b" face="Calibri" size="4">'), 'font colour/face/size preserved for Word output');
+
+$richBody = '<p style="text-align: right"><span style="color: #1a5fb4">Fee {{currency}}{{monthly_fee}}</span></p>';
+$flatSa = agreement_get($flatSaId, $coA);
+$richSectionId = agreement_section_add($flatSa, ['section_type' => 'clause', 'title_en' => 'Rich clause', 'body_en' => $richBody . '<script>x()</script>'], $maker['id']);
+$storedRich = agreement_section_owned($richSectionId, $flatSaId);
+ok(!str_contains((string) $storedRich['body_en'], '<script'), 'section save sanitizes rich HTML');
+$rendered = agreement_render_body((string) $storedRich['body_en'], agreement_placeholder_map($flatSa));
+ok(str_contains($rendered, 'text-align: right') && str_contains($rendered, 'color: #1a5fb4') && str_contains($rendered, '35,000') === false, 'rich body renders formatting with placeholders resolved');
+$renderedMap = agreement_placeholder_map(array_merge($flatSa, ['fee_monthly' => 35000]));
+ok(str_contains(agreement_render_body((string) $storedRich['body_en'], $renderedMap), '35,000'), 'placeholder values flow into rich bodies');
+$plainRendered = agreement_render_body("a < b\nnext line", $renderedMap);
+ok(str_contains($plainRendered, 'a &lt; b') && str_contains($plainRendered, '<br'), 'legacy plain-text bodies stay escaped with line breaks');
+
 agb_cleanup();
 echo "\n$pass passed, $fail failed\n";
 exit($fail === 0 ? 0 : 1);
