@@ -30,9 +30,16 @@ $canCost = user_can_do('hospitality', 'create');
 $canRecalc = user_can_do('hospitality', 'adjust');
 $canExport = user_can_do('hospitality', 'export');
 
-$allowedViews = ['dashboard', 'ingredients', 'menu-items', 'recipes', 'mapping', 'costing', 'gp', 'reports', 'sales-upload', 'settings'];
+// Simplified layout: the Excel sales upload drives both posting and costing,
+// so the invoice-mapping flow keeps working under the hood but its tabs are
+// folded away. Old links keep landing somewhere sensible.
+$allowedViews = ['dashboard', 'ingredients', 'menu-items', 'recipes', 'reports', 'sales-upload', 'settings'];
+$legacyViews = ['mapping' => 'sales-upload', 'costing' => 'sales-upload', 'gp' => 'reports'];
 $view = (string) ($_GET['view'] ?? 'dashboard');
-if (!in_array($view, $allowedViews, true)) {
+if (isset($legacyViews[$view]) && !isset($_GET['export'])) {
+    redirect('admin/hospitality.php?view=' . $legacyViews[$view]);
+}
+if (!in_array($view, $allowedViews, true) && !isset($legacyViews[$view])) {
     $view = 'dashboard';
 }
 $canPost = user_can_do('hospitality', 'create');
@@ -588,6 +595,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/hospitality.php?view=sales-upload');
     }
 
+    // Reference-only costing generated from an uploaded sheet's rows: one
+    // daily run per sale date. Re-running snapshots the previous totals into
+    // hospitality_recalc_history first, so the cost history is never lost.
+    if ($action === 'run_upload_costing') {
+        require_permission('hospitality', 'create');
+        $uploadId = (int) ($_POST['upload_id'] ?? 0);
+        $result = hospitality_upload_costing($companyId, $fiscalYearId, $uploadId, $userId, trim((string) ($_POST['reason'] ?? '')));
+        if ($result['ok']) {
+            $message = 'Costing saved: ' . count($result['runs']) . ' day(s), ' . (int) $result['costed'] . '/' . (int) $result['lines'] . ' rows costed.';
+            if ($result['skipped_dates'] !== []) {
+                $message .= ' Skipped dates outside the fiscal year: ' . implode(', ', $result['skipped_dates']) . '.';
+            }
+            if ((int) $result['costed'] < (int) $result['lines']) {
+                $message .= ' Rows that could not be costed are listed under Reports → exceptions with the reason (missing item or recipe).';
+            }
+            flash('success', $message);
+        } else {
+            flash('error', (string) $result['error']);
+        }
+        redirect('admin/hospitality.php?view=sales-upload');
+    }
+
+    if ($action === 'delete_costing_run') {
+        require_permission('hospitality', 'adjust');
+        $runId = (int) ($_POST['run_id'] ?? 0);
+        if (hospitality_run_delete($companyId, $runId, $userId, trim((string) ($_POST['reason'] ?? '')))) {
+            flash('success', 'Costing run deleted — its last totals stay in the recalculation history.');
+        } else {
+            flash('error', 'Costing run not found for this company.');
+        }
+        redirect('admin/hospitality.php?view=sales-upload');
+    }
+
     if ($action === 'sales_upload_file') {
         require_permission('hospitality', 'create');
         $file = $_FILES['sales_file'] ?? null;
@@ -709,10 +749,15 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
 <nav class="mbw-tabbar" aria-label="Hospitality sections" style="flex-wrap:wrap">
     <?php foreach ([
-        'dashboard' => 'Dashboard', 'ingredients' => 'Ingredients', 'menu-items' => 'Menu Items', 'recipes' => 'Recipes',
-        'mapping' => 'Sales Mapping', 'costing' => 'Daily Costing', 'gp' => 'Estimated GP', 'reports' => 'Reports', 'sales-upload' => 'Sales Upload', 'settings' => 'Settings',
-    ] as $tabView => $tabLabel): ?>
-        <a class="mbw-tab <?= $view === $tabView ? 'is-active' : '' ?>" href="<?= e(url('admin/hospitality.php?view=' . $tabView)) ?>"><?= e($tabLabel) ?></a>
+        'dashboard' => ['Dashboard', 'home'],
+        'ingredients' => ['Ingredients', 'box'],
+        'menu-items' => ['Menu Items', 'receipt-voucher'],
+        'recipes' => ['Recipes', 'layers'],
+        'sales-upload' => ['Sales Upload', 'documents'],
+        'reports' => ['Reports', 'reports'],
+        'settings' => ['Settings', 'sliders'],
+    ] as $tabView => [$tabLabel, $tabIcon]): ?>
+        <a class="mbw-tab <?= $view === $tabView || (($legacyViews[$view] ?? '') === $tabView) ? 'is-active' : '' ?>" href="<?= e(url('admin/hospitality.php?view=' . $tabView)) ?>"><?= icon($tabIcon) ?> <?= e($tabLabel) ?></a>
     <?php endforeach; ?>
 </nav>
 
@@ -1599,10 +1644,11 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <section class="mbw-card">
         <div class="mbw-card-head"><h2>Upload History (<?= count($uploadHistory) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>#</th><th>File</th><th>Dates</th><th class="is-numeric">Rows</th><th class="is-numeric">Vouchers</th><th class="is-numeric">Gross</th><th class="is-numeric">Discount</th><th class="is-numeric">VAT</th><th class="is-numeric">Receivable</th><th>Status</th><th>Posted</th></tr></thead>
+            <thead><tr><th>#</th><th>File</th><th>Dates</th><th class="is-numeric">Rows</th><th class="is-numeric">Vouchers</th><th class="is-numeric">Gross</th><th class="is-numeric">Discount</th><th class="is-numeric">VAT</th><th class="is-numeric">Receivable</th><th>Status</th><th>Posted</th><th>Recipe costing</th></tr></thead>
             <tbody>
-                <?php if ($uploadHistory === []): ?><tr><td colspan="11">No sheets posted yet.</td></tr><?php endif; ?>
+                <?php if ($uploadHistory === []): ?><tr><td colspan="12">No sheets posted yet.</td></tr><?php endif; ?>
                 <?php foreach ($uploadHistory as $upload): ?>
+                    <?php $costSummary = hospitality_upload_costing_summary($companyId, (int) $upload['id']); ?>
                     <tr>
                         <td><?= (int) $upload['id'] ?></td>
                         <td><small><?= e($upload['file_name'] ?? '—') ?></small></td>
@@ -1615,11 +1661,78 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         <td class="is-numeric"><?= $fmt((float) $upload['receivable_amount']) ?></td>
                         <td><span class="mbw-pill <?= (string) $upload['status'] === 'posted' ? 'tone-green' : 'tone-amber' ?>"><?= e((string) $upload['status'] === 'posted' ? 'Posted' : 'Awaiting approval') ?></span></td>
                         <td><small><?= e(($upload['posted_at'] ?? '') . ($upload['posted_by_name'] ? ' · ' . $upload['posted_by_name'] : '')) ?></small></td>
+                        <td style="white-space:nowrap">
+                            <?php if ((int) $costSummary['run_count'] > 0): ?>
+                                <span class="mbw-pill <?= (int) $costSummary['costed_lines'] === (int) $costSummary['total_lines'] ? 'tone-green' : 'tone-amber' ?>"><?= (int) $costSummary['costed_lines'] ?>/<?= (int) $costSummary['total_lines'] ?> costed</span>
+                                <br><small>Est. GP <?= e($sym) ?><?= $fmt((float) $costSummary['est_gp']) ?></small>
+                            <?php else: ?>
+                                <span class="mbw-pill tone-gray">Not costed</span>
+                            <?php endif; ?>
+                            <?php if ($canCost): ?>
+                                <form method="post" style="margin-top:4px">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="run_upload_costing">
+                                    <input type="hidden" name="upload_id" value="<?= (int) $upload['id'] ?>">
+                                    <button type="submit" class="button secondary" style="min-height:28px;padding:2px 8px" title="Match each row's item to its recipe and save an estimated cost & GP report per day"><?= icon('reconcile') ?><?= (int) $costSummary['run_count'] > 0 ? 'Re-cost' : 'Run costing' ?></button>
+                                </form>
+                            <?php endif; ?>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table></div>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Vouchers are named HS-YYYYMMDD-…; find them in the Voucher Register filtered by type Sales. Wrong posting? Reverse it with a journal/credit note — uploads are never silently deleted.</p>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Vouchers are named HS-YYYYMMDD-…; find them in the Voucher Register filtered by type Sales. Wrong posting? Reverse it with a journal/credit note — uploads are never silently deleted. <strong>Run costing</strong> additionally saves a reference-only recipe cost &amp; estimated GP report per day (see Reports); re-running keeps every previous costing in the recalculation history.</p>
+    </section>
+
+    <?php
+    $savedRunsStmt = db()->prepare("SELECT r.id, r.costing_date, r.status, r.source, r.upload_id, r.generated_at, r.recalculated_at,
+            COUNT(l.id) AS line_count,
+            SUM(CASE WHEN l.status = 'costed' THEN 1 ELSE 0 END) AS costed_count,
+            COALESCE(SUM(CASE WHEN l.status = 'costed' THEN l.net_sales END), 0) AS net_sales,
+            COALESCE(SUM(CASE WHEN l.status = 'costed' THEN l.total_cost END), 0) AS est_cost,
+            COALESCE(SUM(CASE WHEN l.status = 'costed' THEN l.gross_profit END), 0) AS est_gp
+        FROM hospitality_costing_runs r
+        LEFT JOIN hospitality_costing_lines l ON l.run_id = r.id
+        WHERE r.company_id = :cid
+        GROUP BY r.id ORDER BY r.costing_date DESC LIMIT 30");
+    $savedRunsStmt->execute(['cid' => $companyId]);
+    $savedRuns = $savedRunsStmt->fetchAll();
+    ?>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2><?= icon('reports') ?> Saved Costing Runs (<?= count($savedRuns) ?>)</h2>
+            <a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=reports')) ?>">Open Reports →</a>
+        </div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Date</th><th>Source</th><th>Status</th><th class="is-numeric">Rows costed</th><th class="is-numeric">Net sales</th><th class="is-numeric">Est. cost</th><th class="is-numeric">Est. GP</th><th class="is-numeric">GP %</th><th>Generated</th><th></th></tr></thead>
+            <tbody>
+                <?php if ($savedRuns === []): ?><tr><td colspan="10">No costing runs yet — upload a sheet above and press Run costing.</td></tr><?php endif; ?>
+                <?php foreach ($savedRuns as $savedRun): ?>
+                    <?php $runNet = (float) $savedRun['net_sales']; ?>
+                    <tr>
+                        <td><strong><?= e((string) $savedRun['costing_date']) ?></strong></td>
+                        <td><span class="mbw-pill <?= (string) $savedRun['source'] === 'upload' ? 'tone-teal' : 'tone-blue' ?>"><?= (string) $savedRun['source'] === 'upload' ? 'Sheet #' . (int) $savedRun['upload_id'] : 'Invoices' ?></span></td>
+                        <td><span class="mbw-pill <?= (string) $savedRun['status'] === 'costed' ? 'tone-green' : ((string) $savedRun['status'] === 'partial' ? 'tone-amber' : 'tone-gray') ?>"><?= e(ucfirst((string) $savedRun['status'])) ?></span></td>
+                        <td class="is-numeric"><?= (int) $savedRun['costed_count'] ?>/<?= (int) $savedRun['line_count'] ?></td>
+                        <td class="is-numeric"><?= $fmt($runNet) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $savedRun['est_cost']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $savedRun['est_gp']) ?></td>
+                        <td class="is-numeric"><?= $runNet != 0.0 ? $fmt((float) $savedRun['est_gp'] / $runNet * 100) . '%' : '—' ?></td>
+                        <td><small><?= e((string) ($savedRun['recalculated_at'] ?? '') !== '' ? $savedRun['recalculated_at'] . ' (recalc)' : (string) $savedRun['generated_at']) ?></small></td>
+                        <td style="white-space:nowrap">
+                            <a class="button secondary" style="min-height:28px;padding:2px 8px" href="<?= e(url('admin/hospitality.php?view=reports&from=' . $savedRun['costing_date'] . '&to=' . $savedRun['costing_date'])) ?>"><?= icon('reports') ?>Report</a>
+                            <?php if ($canRecalc): ?>
+                                <form method="post" style="display:inline" data-confirm="Delete the costing run for <?= e((string) $savedRun['costing_date']) ?>? Its last totals stay in the recalculation history.">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="delete_costing_run">
+                                    <input type="hidden" name="run_id" value="<?= (int) $savedRun['id'] ?>">
+                                    <button type="submit" class="button secondary" style="min-height:28px;padding:2px 8px;color:#a33">Delete</button>
+                                </form>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
     </section>
 
     <?php else: ?>

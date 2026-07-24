@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * Hospitality Accounting engine — recipe costing and ESTIMATED gross profit.
+ * Hospitality Accounting engine â€” recipe costing and ESTIMATED gross profit.
  *
  * REFERENCE-ONLY by architecture: this file contains every hospitality
  * calculation and deliberately never calls (or includes anything that calls)
@@ -12,8 +12,8 @@ declare(strict_types=1);
  * hospitality_* reference tables. Every figure it produces is an estimate for
  * management and is labelled as such in the UI and exports.
  *
- * The module's one POSTING path — the daily sales Excel upload that creates
- * real sales vouchers — deliberately lives OUTSIDE this file, in
+ * The module's one POSTING path â€” the daily sales Excel upload that creates
+ * real sales vouchers â€” deliberately lives OUTSIDE this file, in
  * hospitality_sales_posting.php, so this costing engine stays pure.
  *
  * Tenant model: all data is scoped to the client's BOOKS company id, and the
@@ -44,7 +44,7 @@ function hospitality_client_profile_for_company(int $companyId): ?array
 /**
  * Is Hospitality Accounting active for this books company? False for every
  * non-client company (including the firm's own workspaces) and for clients
- * whose flag is off — routes, menus and queries all key off this.
+ * whose flag is off â€” routes, menus and queries all key off this.
  */
 function hospitality_enabled_for_company(int $companyId): bool
 {
@@ -95,7 +95,7 @@ function hospitality_settings(int $companyId): array
  *   base   = purchase cost / conversion factor
  *   +wastage: cost / (1 - wastage%)   (usable share is smaller)
  *   +yield:   cost / yield%           (only the yield share is usable)
- * Returns ['ok', 'unit_cost', 'error'] — never divides by zero.
+ * Returns ['ok', 'unit_cost', 'error'] â€” never divides by zero.
  */
 function hospitality_ingredient_unit_cost(array $ingredient, ?float $purchaseCost = null): array
 {
@@ -129,7 +129,7 @@ function hospitality_ingredient_unit_cost(array $ingredient, ?float $purchaseCos
  * The purchase-unit reference cost in force on a date: the latest history row
  * effective on/before the date; if the earliest recorded cost is dated AFTER
  * the requested date, that earliest known cost is used (never the possibly
- * newer master value — sale-date snapshots must not drift when later cost
+ * newer master value â€” sale-date snapshots must not drift when later cost
  * changes are recorded). Master cost is the last resort with no history.
  */
 function hospitality_ingredient_cost_on(array $ingredient, string $date): float
@@ -250,7 +250,7 @@ function hospitality_recipe_cost(int $recipeId, string $onDate = '', ?array $set
     }
     $perPortion = $portions > 0 ? $batchCost / $portions : 0.0;
 
-    // Setting-based overlays — shown separately, applied only when enabled.
+    // Setting-based overlays â€” shown separately, applied only when enabled.
     $overlay = ['kitchen_wastage' => 0.0, 'packaging' => 0.0, 'other_variable' => 0.0];
     if ((int) ($settings['include_kitchen_wastage'] ?? 0) === 1 && (float) $settings['kitchen_wastage_pct'] > 0 && (float) $settings['kitchen_wastage_pct'] < 100) {
         $overlay['kitchen_wastage'] = $perPortion / (1 - (float) $settings['kitchen_wastage_pct'] / 100) - $perPortion;
@@ -323,7 +323,7 @@ function hospitality_resolve_mapping(int $companyId, ?int $salesItemId, string $
 }
 
 // ---------------------------------------------------------------------------
-// Sales reading (READ ONLY — the source records are never modified)
+// Sales reading (READ ONLY â€” the source records are never modified)
 // ---------------------------------------------------------------------------
 
 /**
@@ -409,10 +409,10 @@ function hospitality_generate_costing(int $companyId, int $fiscalYearId, string 
         return ['ok' => false, 'error' => 'This date is already costed. Use Recalculate (with a reason) to redo it.', 'run_id' => (int) $existing['id']];
     }
     if ($recalc && !$existing) {
-        return ['ok' => false, 'error' => 'Nothing to recalculate — this date has not been costed yet.'];
+        return ['ok' => false, 'error' => 'Nothing to recalculate â€” this date has not been costed yet.'];
     }
     if ($recalc && trim($reason) === '') {
-        return ['ok' => false, 'error' => 'A reason is required for recalculation — it is kept in the audit trail.'];
+        return ['ok' => false, 'error' => 'A reason is required for recalculation â€” it is kept in the audit trail.'];
     }
 
     $settings = hospitality_settings($companyId);
@@ -531,7 +531,7 @@ function hospitality_generate_costing(int $companyId, int $fiscalYearId, string 
                                 ],
                             ], JSON_UNESCAPED_UNICODE);
                             if ($netQty < 0) {
-                                $warning = 'Net quantity is negative (returns exceed sales) — reversal applied consistently.';
+                                $warning = 'Net quantity is negative (returns exceed sales) â€” reversal applied consistently.';
                             }
                         }
                     }
@@ -588,7 +588,7 @@ function hospitality_generate_costing(int $companyId, int $fiscalYearId, string 
     log_activity('hospitality_costing', $runId, $recalc ? 'recalculated' : 'generated',
         ($recalc ? 'Hospitality costing recalculated for ' : 'Hospitality costing generated for ') . $date
         . ' (' . $lineCount . ' sales lines, ' . $costedCount . ' costed)'
-        . ($recalc ? ' — reason: ' . trim($reason) : '') . '. Reference estimate only; no accounting entry posted.', $userId);
+        . ($recalc ? ' â€” reason: ' . trim($reason) : '') . '. Reference estimate only; no accounting entry posted.', $userId);
 
     return ['ok' => true, 'run_id' => $runId, 'lines' => $lineCount, 'costed' => $costedCount, 'status' => $runStatus];
 }
@@ -599,7 +599,7 @@ function hospitality_generate_costing(int $companyId, int $fiscalYearId, string 
 
 /**
  * Consolidated summary over stored costing lines for a period. Valid costed
- * sales are kept apart from uncosted ones — missing cost is NEVER treated as
+ * sales are kept apart from uncosted ones â€” missing cost is NEVER treated as
  * zero cost, and completeness shows how much of the sales the estimate covers.
  */
 function hospitality_summary(int $companyId, string $from, string $to): array
@@ -677,7 +677,7 @@ function hospitality_summary(int $companyId, string $from, string $to): array
 function hospitality_grouped(int $companyId, string $from, string $to, string $groupBy): array
 {
     $key = match ($groupBy) {
-        'menu_item' => 'CONCAT(menu_item_code, \' — \', menu_item_name)',
+        'menu_item' => 'CONCAT(menu_item_code, \' â€” \', menu_item_name)',
         'period_day' => 'sale_date',
         'period_week' => "DATE_FORMAT(sale_date, '%x-W%v')",
         'period_month' => "DATE_FORMAT(sale_date, '%Y-%m')",
@@ -744,3 +744,235 @@ function hospitality_exceptions(int $companyId, string $from, string $to): array
     $stmt->execute(['cid' => $companyId, 'f' => $from, 't' => $to]);
     return $stmt->fetchAll();
 }
+
+// ---------------------------------------------------------------------------
+// Costing driven by the uploaded daily sales sheet. The upload itself (parse,
+// preview, voucher posting) lives in hospitality_sales_posting.php; the rows
+// it stores in hospitality_sales_upload_lines are re-used here to build the
+// reference-only daily costing runs — one sheet, both outcomes.
+// ---------------------------------------------------------------------------
+
+/** Exact case-insensitive match on active item name / code / Nepali name. */
+function hospitality_match_menu_item(int $companyId, string $name): ?array
+{
+    $stmt = db()->prepare('SELECT * FROM hospitality_menu_items
+        WHERE company_id = :cid AND active = 1
+          AND (LOWER(name) = :n1 OR LOWER(code) = :n2 OR LOWER(COALESCE(name_np, "")) = :n3) LIMIT 1');
+    $needle = mb_strtolower(trim($name));
+    $stmt->execute(['cid' => $companyId, 'n1' => $needle, 'n2' => $needle, 'n3' => $needle]);
+    return $stmt->fetch() ?: null;
+}
+
+/**
+ * Cost an uploaded sales sheet: one daily costing run per sale date. Item
+ * names are matched against menu items at costing time, so adding a missing
+ * item and re-running picks it up. A date that was already costed is
+ * REPLACED — its previous totals are snapshotted into
+ * hospitality_recalc_history first, so every earlier costing stays on record.
+ */
+function hospitality_upload_costing(int $companyId, int $fiscalYearId, int $uploadId, int $userId, string $reason = ''): array
+{
+    $fy = fiscal_year_by_id($fiscalYearId);
+    if (!$fy || (int) $fy['company_id'] !== $companyId) {
+        return ['ok' => false, 'error' => 'Fiscal year not found for this company.'];
+    }
+    $uploadStmt = db()->prepare('SELECT * FROM hospitality_sales_uploads WHERE id = :id AND company_id = :cid');
+    $uploadStmt->execute(['id' => $uploadId, 'cid' => $companyId]);
+    $upload = $uploadStmt->fetch();
+    if (!$upload) {
+        return ['ok' => false, 'error' => 'Upload not found.'];
+    }
+    $rowsStmt = db()->prepare('SELECT * FROM hospitality_sales_upload_lines WHERE upload_id = :up AND company_id = :cid ORDER BY sale_date ASC, id ASC');
+    $rowsStmt->execute(['up' => $uploadId, 'cid' => $companyId]);
+    $salesRows = $rowsStmt->fetchAll();
+    if ($salesRows === []) {
+        return ['ok' => false, 'error' => 'The upload has no rows.'];
+    }
+
+    $settings = hospitality_settings($companyId);
+    $byDate = [];
+    $skippedDates = [];
+    foreach ($salesRows as $row) {
+        $date = (string) $row['sale_date'];
+        if ($date < (string) $fy['start_date'] || $date > (string) $fy['end_date']) {
+            $skippedDates[$date] = true;
+            continue;
+        }
+        $byDate[$date][] = $row;
+    }
+    if ($byDate === []) {
+        return ['ok' => false, 'error' => 'Every sale date falls outside the selected fiscal year (' . $fy['start_date'] . ' to ' . $fy['end_date'] . ').'];
+    }
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $insert = $pdo->prepare('INSERT INTO hospitality_costing_lines (
+                run_id, company_id, fiscal_year_id, sale_date, invoice_id, invoice_no, line_id, sales_row_id, sales_item_id, description,
+                menu_item_id, menu_item_code, menu_item_name, category, recipe_id, recipe_version,
+                qty_sold, qty_returned, net_qty, gross_sales, discount, vat, net_sales,
+                unit_cost, total_cost, gross_profit, gp_pct, status, warning, snapshot_json, calculated_by
+            ) VALUES (
+                :run, :cid, :fy, :sd, NULL, NULL, NULL, :srow, NULL, :descr,
+                :mid, :mcode, :mname, :cat, :rid, :rver,
+                :qs, :qr, :nq, :gross, :disc, :vat, :net,
+                :ucost, :tcost, :gp, :gpp, :status, :warning, :snap, :by
+            )');
+
+        $runIds = [];
+        $costedCount = 0;
+        $lineCount = 0;
+        $matchCache = [];
+        foreach ($byDate as $date => $dateRows) {
+            $existing = hospitality_run_for_date($companyId, $date);
+            if ($existing) {
+                $oldTotals = hospitality_run_totals((int) $existing['id']);
+                $pdo->prepare('INSERT INTO hospitality_recalc_history (company_id, run_id, costing_date, old_totals_json, new_totals_json, reason, recalculated_by)
+                        VALUES (:cid, :run, :d, :old, NULL, :reason, :by)')
+                    ->execute([
+                        'cid' => $companyId, 'run' => (int) $existing['id'], 'd' => $date,
+                        'old' => json_encode($oldTotals, JSON_UNESCAPED_UNICODE),
+                        'reason' => $reason !== '' ? $reason : 'Re-costed from sales upload #' . $uploadId . ' (' . (string) ($upload['file_name'] ?? 'sheet') . ')',
+                        'by' => $userId,
+                    ]);
+                $pdo->prepare('DELETE FROM hospitality_costing_lines WHERE run_id = :run')->execute(['run' => (int) $existing['id']]);
+                $pdo->prepare("UPDATE hospitality_costing_runs SET source = 'upload', upload_id = :up, fiscal_year_id = :fy, recalculated_at = NOW() WHERE id = :id")
+                    ->execute(['up' => $uploadId, 'fy' => $fiscalYearId, 'id' => (int) $existing['id']]);
+                $runId = (int) $existing['id'];
+            } else {
+                $pdo->prepare("INSERT INTO hospitality_costing_runs (company_id, fiscal_year_id, costing_date, source, upload_id, generated_by, generated_at)
+                        VALUES (:cid, :fy, :d, 'upload', :up, :by, NOW())")
+                    ->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'd' => $date, 'up' => $uploadId, 'by' => $userId]);
+                $runId = (int) $pdo->lastInsertId();
+            }
+            $runIds[$date] = $runId;
+
+            $dateCosted = 0;
+            foreach ($dateRows as $row) {
+                $lineCount++;
+                $qty = (float) $row['qty'];
+                $qtySold = $qty > 0 ? $qty : 0.0;
+                $qtyReturned = $qty < 0 ? abs($qty) : 0.0;
+                $netQty = round($qtySold - $qtyReturned, 3);
+                $gross = (float) $row['gross_amount'];
+                $discount = (float) $row['discount'];
+                $vat = (float) $row['vat_amount'];
+                // The posting pipeline already netted discount and VAT out.
+                $netSales = (int) $settings['net_of_vat'] === 1
+                    ? (float) $row['taxable_amount']
+                    : round($gross - $discount, 2);
+
+                $itemKey = mb_strtolower(trim((string) $row['item_name']));
+                if (!array_key_exists($itemKey, $matchCache)) {
+                    $matchCache[$itemKey] = hospitality_match_menu_item($companyId, (string) $row['item_name']);
+                }
+                $menuItem = $matchCache[$itemKey];
+
+                $status = 'unmapped';
+                $warning = null;
+                $recipe = null;
+                $unitCost = null;
+                $totalCost = null;
+                $gp = null;
+                $gpPct = null;
+                $snapshot = null;
+
+                if ($menuItem === null) {
+                    $warning = 'No item matches "' . $row['item_name'] . '" — add it under Menu Items (same name), then Run costing again.';
+                } else {
+                    $recipe = hospitality_active_recipe((int) $menuItem['id'], (string) $date);
+                    if ($recipe === null) {
+                        $status = 'missing_recipe';
+                        $warning = 'No active recipe covers the sale date.';
+                    } else {
+                        $recipeCost = hospitality_recipe_cost((int) $recipe['id'], (string) $date, $settings);
+                        if (!$recipeCost['ok']) {
+                            $status = 'missing_cost';
+                            $warning = implode(' | ', array_slice($recipeCost['errors'], 0, 3));
+                        } else {
+                            $status = 'costed';
+                            $costedCount++;
+                            $dateCosted++;
+                            $unitCost = (float) $recipeCost['effective_cost_per_portion'];
+                            $totalCost = round($netQty * $unitCost, 2);
+                            $gp = round($netSales - $totalCost, 2);
+                            $gpPct = $netSales != 0.0 ? round($gp / $netSales * 100, 2) : null;
+                            $snapshot = json_encode([
+                                'source' => 'upload',
+                                'upload_id' => $uploadId,
+                                'recipe' => ['id' => (int) $recipe['id'], 'version' => (int) $recipe['version'], 'name' => (string) $recipe['name']],
+                                'lines' => $recipeCost['lines'],
+                                'cost_per_portion' => $recipeCost['cost_per_portion'],
+                                'effective_cost_per_portion' => $recipeCost['effective_cost_per_portion'],
+                            ], JSON_UNESCAPED_UNICODE);
+                        }
+                    }
+                }
+
+                $insert->execute([
+                    'run' => $runId, 'cid' => $companyId, 'fy' => $fiscalYearId, 'sd' => $date,
+                    'srow' => (int) $row['id'], 'descr' => (string) $row['item_name'],
+                    'mid' => $menuItem !== null ? (int) $menuItem['id'] : null,
+                    'mcode' => $menuItem !== null ? (string) $menuItem['code'] : null,
+                    'mname' => $menuItem !== null ? (string) $menuItem['name'] : null,
+                    'cat' => $menuItem !== null && (string) $menuItem['category'] !== ''
+                        ? (string) $menuItem['category']
+                        : ((string) ($row['category'] ?? '') ?: null),
+                    'rid' => $recipe !== null ? (int) $recipe['id'] : null,
+                    'rver' => $recipe !== null ? (int) $recipe['version'] : null,
+                    'qs' => $qtySold, 'qr' => $qtyReturned, 'nq' => $netQty,
+                    'gross' => $gross, 'disc' => $discount, 'vat' => $vat, 'net' => $netSales,
+                    'ucost' => $unitCost, 'tcost' => $totalCost, 'gp' => $gp, 'gpp' => $gpPct,
+                    'status' => $status, 'warning' => $warning, 'snap' => $snapshot, 'by' => $userId,
+                ]);
+            }
+            $pdo->prepare('UPDATE hospitality_costing_runs SET status = :s WHERE id = :id')
+                ->execute(['s' => $dateCosted === count($dateRows) ? 'costed' : ($dateCosted > 0 ? 'partial' : 'empty'), 'id' => $runId]);
+        }
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        $pdo->rollBack();
+        throw $exception;
+    }
+    log_activity('hospitality_upload', $uploadId, 'costed', 'Upload costed: ' . count($runIds) . ' day(s), ' . $costedCount . '/' . $lineCount . ' lines costed.', $userId);
+    return ['ok' => true, 'runs' => $runIds, 'lines' => $lineCount, 'costed' => $costedCount,
+        'skipped_dates' => array_keys($skippedDates)];
+}
+
+/** Costing state of each upload: runs generated, lines costed, totals. */
+function hospitality_upload_costing_summary(int $companyId, int $uploadId): array
+{
+    $stmt = db()->prepare("SELECT COUNT(DISTINCT r.id) AS run_count,
+            COALESCE(SUM(CASE WHEN l.status = 'costed' THEN 1 ELSE 0 END), 0) AS costed_lines,
+            COUNT(l.id) AS total_lines,
+            COALESCE(SUM(CASE WHEN l.status = 'costed' THEN l.net_sales END), 0) AS net_sales,
+            COALESCE(SUM(CASE WHEN l.status = 'costed' THEN l.total_cost END), 0) AS est_cost,
+            COALESCE(SUM(CASE WHEN l.status = 'costed' THEN l.gross_profit END), 0) AS est_gp
+        FROM hospitality_costing_runs r
+        LEFT JOIN hospitality_costing_lines l ON l.run_id = r.id
+        WHERE r.company_id = :cid AND r.source = 'upload' AND r.upload_id = :up");
+    $stmt->execute(['cid' => $companyId, 'up' => $uploadId]);
+    return $stmt->fetch() ?: ['run_count' => 0, 'costed_lines' => 0, 'total_lines' => 0, 'net_sales' => 0, 'est_cost' => 0, 'est_gp' => 0];
+}
+
+/** Delete one costing run; its final totals stay in the recalc history. */
+function hospitality_run_delete(int $companyId, int $runId, int $userId, string $reason = ''): bool
+{
+    $stmt = db()->prepare('SELECT id, costing_date FROM hospitality_costing_runs WHERE id = :id AND company_id = :cid');
+    $stmt->execute(['id' => $runId, 'cid' => $companyId]);
+    $run = $stmt->fetch();
+    if (!$run) {
+        return false;
+    }
+    $totals = hospitality_run_totals($runId);
+    db()->prepare('INSERT INTO hospitality_recalc_history (company_id, run_id, costing_date, old_totals_json, new_totals_json, reason, recalculated_by)
+            VALUES (:cid, :run, :d, :old, NULL, :reason, :by)')
+        ->execute(['cid' => $companyId, 'run' => $runId, 'd' => (string) $run['costing_date'],
+            'old' => json_encode($totals, JSON_UNESCAPED_UNICODE),
+            'reason' => 'Run deleted' . ($reason !== '' ? ': ' . $reason : ''), 'by' => $userId]);
+    db()->prepare('DELETE FROM hospitality_costing_lines WHERE run_id = :run')->execute(['run' => $runId]);
+    db()->prepare('DELETE FROM hospitality_costing_runs WHERE id = :id')->execute(['id' => $runId]);
+    log_activity('hospitality_run', $runId, 'deleted', 'Costing run for ' . $run['costing_date'] . ' deleted' . ($reason !== '' ? ' (' . $reason . ')' : '') . '.', $userId);
+    return true;
+}
+

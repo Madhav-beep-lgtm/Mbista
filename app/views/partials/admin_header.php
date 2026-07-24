@@ -127,9 +127,7 @@ if ($headerHospitality) {
         ['ingredients', 'Ingredients', 'box'],
         ['menu-items', 'Menu Items', 'receipt-voucher'],
         ['recipes', 'Recipes', 'journal'],
-        ['mapping', 'Sales Mapping', 'handshake'],
-        ['costing', 'Daily Costing', 'reconcile'],
-        ['gp', 'Estimated Gross Profit', 'analytics'],
+        ['sales-upload', 'Sales Upload & Costing', 'documents'],
         ['reports', 'Reports', 'reports'],
         ['settings', 'Settings', 'sliders'],
     ];

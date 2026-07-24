@@ -1361,6 +1361,44 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Hospitality upload-driven costing runs (migration 068)', static function (): void {
+        if (!accounting_repair_table_exists('hospitality_costing_runs') || !accounting_repair_table_exists('hospitality_costing_lines')) {
+            return;
+        }
+        accounting_repair_add_column('hospitality_costing_runs', 'source', "`source` ENUM('invoice','upload') NOT NULL DEFAULT 'invoice' AFTER `status`");
+        accounting_repair_add_column('hospitality_costing_runs', 'upload_id', '`upload_id` INT UNSIGNED DEFAULT NULL AFTER `source`');
+        accounting_repair_add_column('hospitality_costing_lines', 'sales_row_id', '`sales_row_id` INT UNSIGNED DEFAULT NULL AFTER `line_id`');
+        // Upload-sourced lines have no invoice behind them; relax once.
+        $nullable = db()->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'hospitality_costing_lines'
+              AND COLUMN_NAME IN ('invoice_id', 'line_id') AND IS_NULLABLE = 'NO'")->fetchAll(PDO::FETCH_COLUMN);
+        if (in_array('invoice_id', $nullable, true)) {
+            db()->exec('ALTER TABLE `hospitality_costing_lines` MODIFY `invoice_id` INT UNSIGNED DEFAULT NULL');
+        }
+        if (in_array('line_id', $nullable, true)) {
+            db()->exec('ALTER TABLE `hospitality_costing_lines` MODIFY `line_id` INT UNSIGNED DEFAULT NULL');
+        }
+        // Deleting a run must NOT erase its preserved totals: detach instead
+        // of cascading (one-time FK swap).
+        if (accounting_repair_table_exists('hospitality_recalc_history')) {
+            $cascade = db()->query("SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS
+                WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'hospitality_recalc_history'
+                  AND CONSTRAINT_NAME = 'fk_hosp_recalc_run'")->fetchColumn();
+            if ($cascade === 'CASCADE') {
+                db()->exec('ALTER TABLE `hospitality_recalc_history` DROP FOREIGN KEY `fk_hosp_recalc_run`');
+                db()->exec('ALTER TABLE `hospitality_recalc_history` MODIFY `run_id` INT UNSIGNED DEFAULT NULL');
+                db()->exec('ALTER TABLE `hospitality_recalc_history` ADD CONSTRAINT `fk_hosp_recalc_run` FOREIGN KEY (`run_id`) REFERENCES `hospitality_costing_runs` (`id`) ON DELETE SET NULL');
+            }
+        }
+        // A short-lived dev iteration created hospitality_sales_rows before the
+        // upload feature settled on hospitality_sales_upload_lines. Drop it
+        // only when it is provably unused.
+        if (accounting_repair_table_exists('hospitality_sales_rows')
+            && (int) db()->query('SELECT COUNT(*) FROM `hospitality_sales_rows`')->fetchColumn() === 0) {
+            db()->exec('DROP TABLE `hospitality_sales_rows`');
+        }
+    });
+
     $run('Hospitality accounting — recipe costing, reference-only (migration 063)', static function (): void {
         if (!accounting_repair_table_exists('client_profiles')) {
             return;
