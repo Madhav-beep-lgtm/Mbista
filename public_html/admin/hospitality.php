@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/hospitality_engine.php';
+require_once __DIR__ . '/../../app/hospitality_sales_posting.php';
 
 // Server-side gate: books access + company context + client feature flag +
 // hospitality.view. Direct URLs are denied when the flag is off — the hidden
@@ -29,10 +30,65 @@ $canCost = user_can_do('hospitality', 'create');
 $canRecalc = user_can_do('hospitality', 'adjust');
 $canExport = user_can_do('hospitality', 'export');
 
-$allowedViews = ['dashboard', 'ingredients', 'menu-items', 'recipes', 'mapping', 'costing', 'gp', 'reports', 'settings'];
+$allowedViews = ['dashboard', 'ingredients', 'menu-items', 'recipes', 'mapping', 'costing', 'gp', 'reports', 'sales-upload', 'settings'];
 $view = (string) ($_GET['view'] ?? 'dashboard');
 if (!in_array($view, $allowedViews, true)) {
     $view = 'dashboard';
+}
+$canPost = user_can_do('hospitality', 'create');
+$hasXlsx = class_exists('ZipArchive');
+
+// Uploaded day-sheets are held (web-inaccessible) between preview and post.
+$salesUploadDir = __DIR__ . '/../uploads/hospitality-sales';
+
+function hospitality_sales_prepare_dir(string $dir): void
+{
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+    }
+    $htaccess = $dir . '/.htaccess';
+    if (!is_file($htaccess)) {
+        file_put_contents($htaccess, "Require all denied\n");
+    }
+    foreach (glob($dir . '/*.{csv,xlsx}', GLOB_BRACE) ?: [] as $stale) {
+        if (filemtime($stale) < time() - 6 * 3600) {
+            @unlink($stale);
+        }
+    }
+}
+
+function hospitality_sales_stored_file(string $dir, string $token): ?array
+{
+    if (!preg_match('/^[a-f0-9]{40}$/', $token)) {
+        return null;
+    }
+    foreach (['xlsx', 'csv'] as $extension) {
+        $path = $dir . '/' . $token . '.' . $extension;
+        if (is_file($path)) {
+            return ['path' => $path, 'extension' => $extension];
+        }
+    }
+    return null;
+}
+
+// Template downloads for the daily sales sheet.
+if ($view === 'sales-upload' && isset($_GET['template'])) {
+    $template = (string) $_GET['template'];
+    if ($template === 'xlsx' && $hasXlsx) {
+        $bytes = hospitality_sales_template_xlsx();
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="daily-sales-template.xlsx"');
+        header('Content-Length: ' . strlen($bytes));
+        echo $bytes;
+        exit;
+    }
+    if ($template === 'csv') {
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="daily-sales-template.csv"');
+        echo hospitality_sales_template_csv();
+        exit;
+    }
+    redirect('admin/hospitality.php?view=sales-upload');
 }
 
 // Date filters are clamped into the selected fiscal year (rule 13).
@@ -458,6 +514,148 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/hospitality.php?view=settings');
     }
 
+    if ($action === 'save_posting_ledgers') {
+        require_permission('hospitality', 'edit');
+        $ledgerFields = [
+            'post_sales_ledger_id' => 'Default Sales ledger',
+            'post_vat_ledger_id' => 'VAT ledger',
+            'post_discount_ledger_id' => 'Discount ledger',
+            'post_receivable_ledger_id' => 'Receivable ledger',
+        ];
+        $ledgerValues = [];
+        foreach ($ledgerFields as $field => $label) {
+            $ledgerId = (int) ($_POST[$field] ?? 0);
+            if ($ledgerId > 0 && hospitality_posting_ledger($companyId, $ledgerId) === null) {
+                flash('error', $label . ' must be an active ledger of this company.');
+                redirect('admin/hospitality.php?view=sales-upload');
+            }
+            $ledgerValues[$field] = $ledgerId > 0 ? $ledgerId : null;
+        }
+        $old = $settings;
+        db()->prepare('UPDATE hospitality_settings SET post_sales_ledger_id = :sales, post_vat_ledger_id = :vat,
+                post_discount_ledger_id = :disc, post_receivable_ledger_id = :recv,
+                post_vat_rate = :rate, post_amount_includes_vat = :incl, updated_by = :by
+            WHERE company_id = :cid')
+            ->execute([
+                'sales' => $ledgerValues['post_sales_ledger_id'],
+                'vat' => $ledgerValues['post_vat_ledger_id'],
+                'disc' => $ledgerValues['post_discount_ledger_id'],
+                'recv' => $ledgerValues['post_receivable_ledger_id'],
+                'rate' => max(0.0, min(99.99, round((float) ($_POST['post_vat_rate'] ?? 13), 2))),
+                'incl' => isset($_POST['post_amount_includes_vat']) ? 1 : 0,
+                'by' => $userId, 'cid' => $companyId,
+            ]);
+        log_activity('hospitality_settings', $companyId, 'updated', 'Hospitality sales-posting ledger mapping updated.', $userId);
+        log_field_changes('hospitality_settings', $companyId, $old, hospitality_settings($companyId), $companyId, $userId);
+        flash('success', 'Posting ledgers saved. Uploaded day-sheets will post with this mapping.');
+        redirect('admin/hospitality.php?view=sales-upload');
+    }
+
+    if ($action === 'save_sales_ledger_map') {
+        require_permission('hospitality', 'edit');
+        $mapType = (string) ($_POST['map_type'] ?? 'category') === 'item' ? 'item' : 'category';
+        $matchDisplay = trim((string) ($_POST['match_value'] ?? ''));
+        $ledgerId = (int) ($_POST['sales_ledger_id'] ?? 0);
+        if ($matchDisplay === '' || hospitality_posting_ledger($companyId, $ledgerId) === null) {
+            flash('error', 'Give the ' . $mapType . ' name exactly as it appears in the sheet and pick an active ledger.');
+            redirect('admin/hospitality.php?view=sales-upload');
+        }
+        db()->prepare('INSERT INTO hospitality_sales_ledger_maps (company_id, map_type, match_value, display_value, sales_ledger_id, active, notes, created_by)
+                VALUES (:cid, :mt, :norm, :disp, :ledger, 1, :notes, :by)
+                ON DUPLICATE KEY UPDATE sales_ledger_id = VALUES(sales_ledger_id), display_value = VALUES(display_value),
+                    active = 1, notes = VALUES(notes)')
+            ->execute([
+                'cid' => $companyId, 'mt' => $mapType,
+                'norm' => hospitality_sales_norm($matchDisplay),
+                'disp' => mb_substr($matchDisplay, 0, 160),
+                'ledger' => $ledgerId,
+                'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
+                'by' => $userId,
+            ]);
+        log_activity('hospitality_ledger_map', $companyId, 'saved', 'Sales ledger mapping saved: ' . $mapType . ' "' . $matchDisplay . '" → ledger #' . $ledgerId . '.', $userId);
+        flash('success', ucfirst($mapType) . ' "' . $matchDisplay . '" will now post to its own sales ledger.');
+        redirect('admin/hospitality.php?view=sales-upload');
+    }
+
+    if ($action === 'toggle_sales_ledger_map') {
+        require_permission('hospitality', 'edit');
+        $mapId = (int) ($_POST['map_id'] ?? 0);
+        $target = (string) ($_POST['target'] ?? '') === 'activate' ? 1 : 0;
+        db()->prepare('UPDATE hospitality_sales_ledger_maps SET active = :a WHERE id = :id AND company_id = :cid')
+            ->execute(['a' => $target, 'id' => $mapId, 'cid' => $companyId]);
+        log_activity('hospitality_ledger_map', $mapId, $target === 1 ? 'activated' : 'deactivated', 'Sales ledger mapping #' . $mapId . ($target === 1 ? ' activated.' : ' deactivated.'), $userId);
+        flash('success', 'Mapping ' . ($target === 1 ? 'activated' : 'deactivated') . '.');
+        redirect('admin/hospitality.php?view=sales-upload');
+    }
+
+    if ($action === 'sales_upload_file') {
+        require_permission('hospitality', 'create');
+        $file = $_FILES['sales_file'] ?? null;
+        $errorCode = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        $size = (int) ($file['size'] ?? 0);
+        $extension = strtolower((string) pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
+        if ($errorCode !== UPLOAD_ERR_OK || $size <= 0) {
+            flash('error', 'Choose an Excel (.xlsx) or CSV day-sheet to upload.');
+            redirect('admin/hospitality.php?view=sales-upload');
+        }
+        if ($size > 10 * 1024 * 1024) {
+            flash('error', 'The file is larger than 10 MB.');
+            redirect('admin/hospitality.php?view=sales-upload');
+        }
+        if (!in_array($extension, ['xlsx', 'csv'], true)) {
+            flash('error', $extension === 'xls'
+                ? 'Legacy .xls files are not supported — open the file in Excel and save it as .xlsx or .csv.'
+                : 'Only .xlsx and .csv files can be uploaded.');
+            redirect('admin/hospitality.php?view=sales-upload');
+        }
+        if ($extension === 'xlsx' && !$hasXlsx) {
+            flash('error', 'This server cannot read .xlsx files (PHP zip extension missing). Save the sheet as .csv and upload that instead.');
+            redirect('admin/hospitality.php?view=sales-upload');
+        }
+        hospitality_sales_prepare_dir($salesUploadDir);
+        $token = bin2hex(random_bytes(20));
+        if (!move_uploaded_file((string) $file['tmp_name'], $salesUploadDir . '/' . $token . '.' . $extension)) {
+            flash('error', 'The uploaded file could not be stored. Try again.');
+            redirect('admin/hospitality.php?view=sales-upload');
+        }
+        // Original file name is kept beside the stored sheet for the audit batch.
+        @file_put_contents($salesUploadDir . '/' . $token . '.name', mb_substr((string) $file['name'], 0, 255));
+        redirect('admin/hospitality.php?view=sales-upload&token=' . $token);
+    }
+
+    if ($action === 'sales_upload_commit') {
+        require_permission('hospitality', 'create');
+        $token = (string) ($_POST['token'] ?? '');
+        $stored = hospitality_sales_stored_file($salesUploadDir, $token);
+        if ($stored === null) {
+            flash('error', 'The uploaded sheet has expired. Upload it again.');
+            redirect('admin/hospitality.php?view=sales-upload');
+        }
+        try {
+            $parsed = hospitality_sales_upload_parse($stored['path'], $stored['extension'], $companyId, $fiscalYearId, hospitality_settings($companyId));
+        } catch (Throwable $exception) {
+            flash('error', 'Could not read the sheet: ' . $exception->getMessage());
+            redirect('admin/hospitality.php?view=sales-upload');
+        }
+        if (!isset($parsed['error']) && (int) $parsed['error_count'] > 0 && (string) ($_POST['skip_invalid'] ?? '') !== '1') {
+            flash('error', (int) $parsed['error_count'] . ' row(s) still have errors. Fix them in the sheet and re-upload, or tick "Skip rows with errors".');
+            redirect('admin/hospitality.php?view=sales-upload&token=' . $token);
+        }
+        $fileName = trim((string) @file_get_contents($salesUploadDir . '/' . $token . '.name')) ?: ('sales-sheet.' . $stored['extension']);
+        $result = hospitality_post_sales_upload($companyId, $fiscalYearId, $parsed, $fileName, $userId,
+            (string) ($_POST['allow_duplicate_dates'] ?? '') === '1');
+        if (!$result['ok']) {
+            flash('error', (string) $result['error']);
+            redirect('admin/hospitality.php?view=sales-upload&token=' . $token);
+        }
+        @unlink($stored['path']);
+        @unlink($salesUploadDir . '/' . $token . '.name');
+        flash('success', (int) $result['rows'] . ' sales row(s) ' . ($result['needs_approval']
+            ? 'submitted — ' . (int) $result['vouchers'] . ' daily voucher(s) are awaiting approval.'
+            : 'posted as ' . (int) $result['vouchers'] . ' daily sales voucher(s). See them in the Voucher Register.'));
+        redirect('admin/hospitality.php?view=sales-upload');
+    }
+
     flash('error', 'Unsupported hospitality action.');
     redirect($back);
 }
@@ -496,19 +694,23 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 // Page data per view
 // ---------------------------------------------------------------------------
 $pageTitle = 'Hospitality Accounting';
-$pageSubtitle = 'Recipe costing and estimated gross profit — reference-only management tool. No accounting or inventory entry is ever posted.';
+$pageSubtitle = 'Recipe costing and estimated gross profit (reference-only), plus daily sales sheet upload that auto-posts to accounting.';
 $pageHero = ['icon' => 'services'];
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
 ?>
-<div class="notice" style="margin-bottom:14px"><strong>Reference only:</strong> <?= e($disclaimer) ?> Hospitality costing is an estimate based on configured recipes and reference ingredient costs. It does not post to accounting or inventory.</div>
+<?php if ($view === 'sales-upload'): ?>
+    <div class="notice" style="margin-bottom:14px"><strong>Posts to accounting:</strong> unlike the costing tabs, sheets posted here create real daily sales vouchers (receivable, sales per category ledger, VAT, discount) in the Voucher Register.</div>
+<?php else: ?>
+    <div class="notice" style="margin-bottom:14px"><strong>Reference only:</strong> <?= e($disclaimer) ?> Hospitality costing is an estimate based on configured recipes and reference ingredient costs. It does not post to accounting or inventory (daily sales posting lives in the Sales Upload tab).</div>
+<?php endif; ?>
 
 <nav class="mbw-tabbar" aria-label="Hospitality sections" style="flex-wrap:wrap">
     <?php foreach ([
         'dashboard' => 'Dashboard', 'ingredients' => 'Ingredients', 'menu-items' => 'Menu Items', 'recipes' => 'Recipes',
-        'mapping' => 'Sales Mapping', 'costing' => 'Daily Costing', 'gp' => 'Estimated GP', 'reports' => 'Reports', 'settings' => 'Settings',
+        'mapping' => 'Sales Mapping', 'costing' => 'Daily Costing', 'gp' => 'Estimated GP', 'reports' => 'Reports', 'sales-upload' => 'Sales Upload', 'settings' => 'Settings',
     ] as $tabView => $tabLabel): ?>
         <a class="mbw-tab <?= $view === $tabView ? 'is-active' : '' ?>" href="<?= e(url('admin/hospitality.php?view=' . $tabView)) ?>"><?= e($tabLabel) ?></a>
     <?php endforeach; ?>
@@ -1233,6 +1435,298 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <strong>Reference estimate only. This report does not represent posted Cost of Goods Sold and does not create or modify accounting entries.</strong>
         </p>
     </section>
+
+<?php elseif ($view === 'sales-upload'): ?>
+    <?php
+    $ledgerOptions = hospitality_posting_ledger_options($companyId);
+    $configErrors = hospitality_posting_config_errors($companyId, $settings);
+    $allMapsStmt = db()->prepare('SELECT m.*, l.name AS ledger_name, l.code AS ledger_code, l.status AS ledger_status
+        FROM hospitality_sales_ledger_maps m
+        LEFT JOIN ledgers l ON l.id = m.sales_ledger_id AND l.company_id = m.company_id
+        WHERE m.company_id = :cid ORDER BY m.map_type ASC, m.active DESC, m.display_value ASC');
+    $allMapsStmt->execute(['cid' => $companyId]);
+    $ledgerMapRows = $allMapsStmt->fetchAll();
+    $uploadHistory = hospitality_sales_uploads_history($companyId);
+
+    // Preview a stored sheet when a token is present. Problems render inline
+    // (the page header is already out, so flash() would only show next load).
+    $salesPreview = null;
+    $salesPreviewProblem = null;
+    $salesToken = (string) ($_GET['token'] ?? '');
+    if ($salesToken !== '') {
+        $storedSheet = hospitality_sales_stored_file($salesUploadDir, $salesToken);
+        if ($storedSheet === null) {
+            $salesToken = '';
+            $salesPreviewProblem = 'The uploaded sheet has expired. Upload it again.';
+        } else {
+            try {
+                $salesPreview = hospitality_sales_upload_parse($storedSheet['path'], $storedSheet['extension'], $companyId, $fiscalYearId, $settings);
+            } catch (Throwable $exception) {
+                @unlink($storedSheet['path']);
+                $salesToken = '';
+                $salesPreviewProblem = 'Could not read the sheet: ' . $exception->getMessage();
+            }
+            if ($salesPreview !== null && isset($salesPreview['error'])) {
+                @unlink($storedSheet['path']);
+                $salesPreviewProblem = (string) $salesPreview['error'];
+                $salesPreview = null;
+                $salesToken = '';
+            }
+        }
+    }
+
+    $ledgerSelect = static function (string $name, ?int $selected, bool $required = false) use ($ledgerOptions): string {
+        $html = '<select name="' . e($name) . '"' . ($required ? ' required' : '') . '>';
+        $html .= '<option value="">— not set —</option>';
+        foreach ($ledgerOptions as $ledgerOption) {
+            $html .= '<option value="' . (int) $ledgerOption['id'] . '"' . ((int) $ledgerOption['id'] === (int) $selected ? ' selected' : '') . '>'
+                . e($ledgerOption['name'] . ' (' . $ledgerOption['code'] . ') — ' . $ledgerOption['type']) . '</option>';
+        }
+        return $html . '</select>';
+    };
+    ?>
+
+    <?php if ($salesPreview === null): ?>
+    <?php if ($salesPreviewProblem !== null): ?>
+        <div class="notice error" style="margin-bottom:14px"><?= e($salesPreviewProblem) ?></div>
+    <?php endif; ?>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Posting Ledgers (Sales · VAT · Discount · Receivable)</h2></div>
+        <?php if (!$canEdit): ?><div class="notice">You have view-only access to this setup.</div><?php endif; ?>
+        <form method="post" class="workspace-form-grid" <?= $canEdit ? '' : 'style="pointer-events:none;opacity:.7"' ?>>
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_posting_ledgers">
+            <input type="hidden" name="back_view" value="sales-upload">
+            <label>Default Sales ledger (credit — fallback for unmapped categories)<?= $ledgerSelect('post_sales_ledger_id', (int) ($settings['post_sales_ledger_id'] ?? 0)) ?></label>
+            <label>Receivable ledger (debit — day's collectable amount)<?= $ledgerSelect('post_receivable_ledger_id', (int) ($settings['post_receivable_ledger_id'] ?? 0)) ?></label>
+            <label>VAT payable ledger (credit)<?= $ledgerSelect('post_vat_ledger_id', (int) ($settings['post_vat_ledger_id'] ?? 0)) ?></label>
+            <label>Discount ledger (debit — discount allowed)<?= $ledgerSelect('post_discount_ledger_id', (int) ($settings['post_discount_ledger_id'] ?? 0)) ?></label>
+            <label>VAT rate %<input type="number" step="0.01" min="0" max="99.99" name="post_vat_rate" value="<?= e(number_format((float) ($settings['post_vat_rate'] ?? 13), 2, '.', '')) ?>"></label>
+            <label class="checkbox-line" style="align-self:end"><input type="checkbox" name="post_amount_includes_vat" <?= (int) ($settings['post_amount_includes_vat'] ?? 1) === 1 ? 'checked' : '' ?>> Sheet amounts already include VAT (VAT is extracted out)</label>
+            <?php if ($canEdit): ?><div class="workspace-span-2"><button type="submit"><?= icon('settings') ?>Save Posting Ledgers</button></div><?php endif; ?>
+        </form>
+        <?php if ($configErrors !== []): ?>
+            <div class="notice error" style="margin-top:10px"><strong>Before posting:</strong> <?= e(implode(' ', $configErrors)) ?></div>
+        <?php endif; ?>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
+            Each day posts one balanced sales voucher: <strong>Dr</strong> Receivable (gross − discount) and Discount, <strong>Cr</strong> Sales ledger(s) per category/item and VAT.
+            A VAT column in the sheet, when filled, overrides the rate-based calculation.
+        </p>
+    </section>
+
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Category &amp; Item → Sales Ledger Mapping (<?= count($ledgerMapRows) ?>)</h2></div>
+        <?php if ($canEdit): ?>
+        <form method="post" class="workspace-form-grid">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_sales_ledger_map">
+            <input type="hidden" name="back_view" value="sales-upload">
+            <label>Map by
+                <select name="map_type">
+                    <option value="category">Category (as written in the sheet)</option>
+                    <option value="item">Item (overrides its category)</option>
+                </select>
+            </label>
+            <label>Category / item name<input type="text" name="match_value" maxlength="160" required placeholder="Beverage"></label>
+            <label>Post sales to ledger<?= $ledgerSelect('sales_ledger_id', 0, true) ?></label>
+            <label>Notes<input type="text" name="notes" maxlength="255"></label>
+            <div class="workspace-span-2"><button type="submit"><?= icon('plus') ?>Save Mapping</button></div>
+        </form>
+        <?php endif; ?>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Type</th><th>Matches</th><th>Sales ledger</th><th>Status</th><th>Notes</th><th></th></tr></thead>
+            <tbody>
+                <?php if ($ledgerMapRows === []): ?><tr><td colspan="6">No mappings yet — every category will post to the default Sales ledger. Add one row per category (e.g. Food, Beverage, Bar) to split them into different ledgers.</td></tr><?php endif; ?>
+                <?php foreach ($ledgerMapRows as $mapRow): ?>
+                    <tr>
+                        <td><span class="mbw-pill <?= (string) $mapRow['map_type'] === 'item' ? 'tone-purple' : 'tone-blue' ?>"><?= e(ucfirst((string) $mapRow['map_type'])) ?></span></td>
+                        <td><strong><?= e($mapRow['display_value']) ?></strong></td>
+                        <td><?= $mapRow['ledger_name'] !== null ? e($mapRow['ledger_name'] . ' (' . $mapRow['ledger_code'] . ')') : '<span class="mbw-pill tone-red">Ledger missing</span>' ?></td>
+                        <td><span class="mbw-pill <?= (int) $mapRow['active'] === 1 ? 'tone-green' : 'tone-gray' ?>"><?= (int) $mapRow['active'] === 1 ? 'Active' : 'Inactive' ?></span></td>
+                        <td><small><?= e($mapRow['notes'] ?? '') ?></small></td>
+                        <td>
+                            <?php if ($canEdit): ?>
+                            <form method="post" style="display:inline">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="toggle_sales_ledger_map">
+                                <input type="hidden" name="back_view" value="sales-upload">
+                                <input type="hidden" name="map_id" value="<?= (int) $mapRow['id'] ?>">
+                                <input type="hidden" name="target" value="<?= (int) $mapRow['active'] === 1 ? 'deactivate' : 'activate' ?>">
+                                <button type="submit" class="button secondary" style="min-height:30px;padding:3px 10px"><?= (int) $mapRow['active'] === 1 ? 'Deactivate' : 'Activate' ?></button>
+                            </form>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Matching ignores letter case and extra spaces. An item mapping wins over its category; anything unmapped falls back to the default Sales ledger above.</p>
+    </section>
+
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Upload Daily Sales Sheet</h2></div>
+        <?php if (!$canPost): ?>
+            <div class="notice error">You do not have permission to post sales (hospitality create permission needed).</div>
+        <?php else: ?>
+        <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="sales_upload_file">
+            <input type="hidden" name="back_view" value="sales-upload">
+            <label>Day-wise sales sheet (.xlsx or .csv, max 10 MB)
+                <input type="file" name="sales_file" accept=".xlsx,.csv" required>
+            </label>
+            <div style="align-self:end">
+                <button type="submit"><?= icon('upload') ?>Upload &amp; Preview</button>
+                <?php if ($hasXlsx): ?><a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=xlsx')) ?>">Excel template</a><?php endif; ?>
+                <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=csv')) ?>">CSV template</a>
+            </div>
+        </form>
+        <?php endif; ?>
+        <div style="overflow-x:auto;margin-top:10px"><table>
+            <thead><tr><th>Column</th><th>Required</th><th>What it takes</th></tr></thead>
+            <tbody>
+                <tr><td>Date (AD or BS)</td><td>Yes</td><td>YYYY-MM-DD — years 2064+ are read as Bikram Sambat; Excel date cells also work. Rows are grouped into one voucher per date.</td></tr>
+                <tr><td>Category</td><td>Yes</td><td>Sales category (Food, Beverage, Bar…). Decides the sales ledger via the mapping above.</td></tr>
+                <tr><td>Item</td><td>Yes</td><td>Item name. An item-level mapping, when present, overrides the category ledger.</td></tr>
+                <tr><td>Qty</td><td>Optional</td><td>Units sold (kept for the record; the amounts drive the posting).</td></tr>
+                <tr><td>Total Sales Amount</td><td>Yes</td><td>Row's sales value before discount<?= (int) ($settings['post_amount_includes_vat'] ?? 1) === 1 ? ', including VAT (extracted at ' . e(number_format((float) ($settings['post_vat_rate'] ?? 13), 2)) . '%)' : ' excluding VAT (added at ' . e(number_format((float) ($settings['post_vat_rate'] ?? 13), 2)) . '%)' ?>.</td></tr>
+                <tr><td>Discount</td><td>Optional</td><td>Discount given on the row — debited to the Discount ledger and deducted from the receivable.</td></tr>
+                <tr><td>VAT</td><td>Optional</td><td>Explicit VAT amount; when filled it overrides the rate-based calculation for that row.</td></tr>
+            </tbody>
+        </table></div>
+    </section>
+
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Upload History (<?= count($uploadHistory) ?>)</h2></div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>#</th><th>File</th><th>Dates</th><th class="is-numeric">Rows</th><th class="is-numeric">Vouchers</th><th class="is-numeric">Gross</th><th class="is-numeric">Discount</th><th class="is-numeric">VAT</th><th class="is-numeric">Receivable</th><th>Status</th><th>Posted</th></tr></thead>
+            <tbody>
+                <?php if ($uploadHistory === []): ?><tr><td colspan="11">No sheets posted yet.</td></tr><?php endif; ?>
+                <?php foreach ($uploadHistory as $upload): ?>
+                    <tr>
+                        <td><?= (int) $upload['id'] ?></td>
+                        <td><small><?= e($upload['file_name'] ?? '—') ?></small></td>
+                        <td><small><?= e($upload['date_from'] . ($upload['date_to'] !== $upload['date_from'] ? ' → ' . $upload['date_to'] : '')) ?></small></td>
+                        <td class="is-numeric"><?= (int) $upload['row_count'] ?></td>
+                        <td class="is-numeric"><a href="<?= e(url('admin/accounting.php')) ?>"><?= (int) $upload['voucher_count'] ?></a></td>
+                        <td class="is-numeric"><?= $fmt((float) $upload['gross_amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $upload['discount_amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $upload['vat_amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $upload['receivable_amount']) ?></td>
+                        <td><span class="mbw-pill <?= (string) $upload['status'] === 'posted' ? 'tone-green' : 'tone-amber' ?>"><?= e((string) $upload['status'] === 'posted' ? 'Posted' : 'Awaiting approval') ?></span></td>
+                        <td><small><?= e(($upload['posted_at'] ?? '') . ($upload['posted_by_name'] ? ' · ' . $upload['posted_by_name'] : '')) ?></small></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Vouchers are named HS-YYYYMMDD-…; find them in the Voucher Register filtered by type Sales. Wrong posting? Reverse it with a journal/credit note — uploads are never silently deleted.</p>
+    </section>
+
+    <?php else: ?>
+    <?php
+    $previewValid = (int) $salesPreview['valid_count'];
+    $previewErrors = (int) $salesPreview['error_count'];
+    $previewTotals = $salesPreview['totals'];
+    ?>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Preview — check before posting</h2><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Upload a different sheet</a></div>
+        <section class="mbw-kpi-grid" aria-label="Sheet summary">
+            <?php foreach ([
+                ['Rows ready', (string) $previewValid, 'tasks', 'tone-green'],
+                ['Rows with errors', (string) $previewErrors, 'search', $previewErrors > 0 ? 'tone-red' : 'tone-gray'],
+                ['Days (one voucher each)', (string) count($salesPreview['days']), 'calendar', 'tone-blue'],
+                ['Gross sales', $sym . $fmt((float) $previewTotals['gross']), 'wallet', 'tone-blue'],
+                ['Discount', $sym . $fmt((float) $previewTotals['discount']), 'tag', 'tone-amber'],
+                ['VAT', $sym . $fmt((float) $previewTotals['vat']), 'pie', 'tone-teal'],
+                ['Sales (taxable)', $sym . $fmt((float) $previewTotals['taxable']), 'analytics', 'tone-green'],
+                ['Receivable (Dr)', $sym . $fmt((float) $previewTotals['receivable']), 'reconcile', 'tone-green'],
+            ] as [$kpiLabel, $kpiValue, $kpiIcon, $kpiTone]): ?>
+                <article class="mbw-kpi"><div><span class="mbw-kpi-label"><?= e($kpiLabel) ?></span><div class="mbw-kpi-value" style="font-size:1.02rem"><?= e($kpiValue) ?></div></div><span class="mbw-chip <?= e($kpiTone) ?>"><?= icon($kpiIcon) ?></span></article>
+            <?php endforeach; ?>
+        </section>
+        <?php if ($salesPreview['config_errors'] !== []): ?>
+            <div class="notice error" style="margin-top:10px"><strong>Posting setup incomplete:</strong> <?= e(implode(' ', $salesPreview['config_errors'])) ?> Save the posting ledgers first, then re-open this preview.</div>
+        <?php endif; ?>
+        <?php if ($salesPreview['duplicate_dates'] !== []): ?>
+            <div class="notice error" style="margin-top:10px"><strong>Already posted dates:</strong> <?= e(implode(', ', $salesPreview['duplicate_dates'])) ?> — an earlier upload already posted sales for these days. Post anyway only if this sheet holds ADDITIONAL sales for them.</div>
+        <?php endif; ?>
+    </section>
+
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Voucher per Day</h2></div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Date</th><th class="is-numeric">Rows</th><th class="is-numeric">Dr Receivable</th><th class="is-numeric">Dr Discount</th><th>Cr Sales ledger(s)</th><th class="is-numeric">Cr VAT</th></tr></thead>
+            <tbody>
+                <?php if ($salesPreview['days'] === []): ?><tr><td colspan="6">No valid rows — fix the errors below.</td></tr><?php endif; ?>
+                <?php foreach ($salesPreview['days'] as $day): ?>
+                    <tr>
+                        <td><strong><?= e($day['date']) ?></strong><?php $bsDay = bs_format($day['date']); ?><?= $bsDay !== '' ? '<br><small>' . e($bsDay) . '</small>' : '' ?></td>
+                        <td class="is-numeric"><?= (int) $day['rows'] ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $day['receivable']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $day['discount']) ?></td>
+                        <td>
+                            <?php foreach ($day['ledgers'] as $dayLedger): ?>
+                                <div style="display:flex;justify-content:space-between;gap:14px"><small><?= e($dayLedger['label']) ?></small><small><?= $fmt((float) $dayLedger['taxable']) ?></small></div>
+                            <?php endforeach; ?>
+                        </td>
+                        <td class="is-numeric"><?= $fmt((float) $day['vat']) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+    </section>
+
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Rows (<?= count($salesPreview['rows']) ?>)</h2></div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Sheet row</th><th>Date</th><th>Category</th><th>Item</th><th class="is-numeric">Qty</th><th class="is-numeric">Amount</th><th class="is-numeric">Discount</th><th class="is-numeric">VAT</th><th class="is-numeric">Taxable</th><th>Sales ledger</th><th>Status</th></tr></thead>
+            <tbody>
+                <?php foreach ($salesPreview['rows'] as $previewRow): ?>
+                    <tr>
+                        <td><?= (int) $previewRow['n'] ?></td>
+                        <td><small><?= e($previewRow['date'] ?? $previewRow['date_raw']) ?></small></td>
+                        <td><?= e($previewRow['category']) ?></td>
+                        <td><?= e($previewRow['item']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['qty'], 3) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['gross']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['discount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['vat']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['taxable']) ?></td>
+                        <td><small><?= e((string) ($previewRow['ledger_label'] ?? '—')) ?><?= $previewRow['ledger_source'] !== null ? ' <span class="mbw-pill ' . ($previewRow['ledger_source'] === 'item' ? 'tone-purple' : ($previewRow['ledger_source'] === 'category' ? 'tone-blue' : 'tone-gray')) . '">' . e((string) $previewRow['ledger_source']) . '</span>' : '' ?></small></td>
+                        <td>
+                            <?php if ($previewRow['errors'] === []): ?>
+                                <span class="mbw-pill tone-green">✓ Ready</span>
+                            <?php else: ?>
+                                <span class="mbw-pill tone-red"><?= count($previewRow['errors']) ?> error(s)</span>
+                                <ul style="color:#b42318;font-size:.85rem;margin:4px 0 0;padding-left:16px"><?php foreach ($previewRow['errors'] as $rowError): ?><li><?= e($rowError) ?></li><?php endforeach; ?></ul>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+    </section>
+
+    <div class="mbw-card" style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
+        <form method="post" style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;width:100%">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="sales_upload_commit">
+            <input type="hidden" name="back_view" value="sales-upload">
+            <input type="hidden" name="token" value="<?= e($salesToken) ?>">
+            <?php if ($previewErrors > 0): ?>
+                <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" name="skip_invalid" value="1" checked> Skip the <?= $previewErrors ?> row(s) with errors</label>
+            <?php endif; ?>
+            <?php if ($salesPreview['duplicate_dates'] !== []): ?>
+                <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" name="allow_duplicate_dates" value="1"> Post anyway (dates already posted: <?= e(implode(', ', $salesPreview['duplicate_dates'])) ?>)</label>
+            <?php endif; ?>
+            <span style="flex:1"></span>
+            <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Cancel</a>
+            <?php if ($canPost && $previewValid > 0 && $salesPreview['config_errors'] === []): ?>
+                <button type="submit"><?= icon('chevron-right') ?>Post <?= count($salesPreview['days']) ?> Daily Voucher(s)</button>
+            <?php endif; ?>
+        </form>
+    </div>
+    <?php endif; ?>
 
 <?php elseif ($view === 'settings'): ?>
     <section class="mbw-card">

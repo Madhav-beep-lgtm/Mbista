@@ -12,6 +12,10 @@ declare(strict_types=1);
  * hospitality_* reference tables. Every figure it produces is an estimate for
  * management and is labelled as such in the UI and exports.
  *
+ * The module's one POSTING path — the daily sales Excel upload that creates
+ * real sales vouchers — deliberately lives OUTSIDE this file, in
+ * hospitality_sales_posting.php, so this costing engine stays pure.
+ *
  * Tenant model: all data is scoped to the client's BOOKS company id, and the
  * module unlocks only when the books company belongs to a client whose
  * client_profiles.hospitality_accounting_enabled = 1 (Super Admin controlled).
