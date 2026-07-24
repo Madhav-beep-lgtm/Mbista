@@ -1216,6 +1216,151 @@ function accounting_module_repair_database(): array
         accounting_repair_add_constraint('service_agreements', 'fk_agreements_contract', '`fk_agreements_contract` FOREIGN KEY (`contract_id`) REFERENCES `service_contracts` (`id`) ON DELETE SET NULL');
     });
 
+    $run('Structured agreement drafting engine (migration 066)', static function (): void {
+        if (!accounting_repair_table_exists('service_agreements')) {
+            return;
+        }
+        $needsBackfill = !accounting_repair_column_exists('service_agreements', 'workflow_status');
+        foreach ([
+            'structure_mode' => "`structure_mode` ENUM('classic','builder') NOT NULL DEFAULT 'classic' AFTER `status`",
+            'workflow_status' => "`workflow_status` VARCHAR(30) NOT NULL DEFAULT 'draft' AFTER `structure_mode`",
+            'language_mode' => "`language_mode` ENUM('np','en','both','both_seq') NOT NULL DEFAULT 'both' AFTER `workflow_status`",
+            'prevailing_language' => "`prevailing_language` ENUM('np','en') NOT NULL DEFAULT 'np' AFTER `language_mode`",
+            'template_id' => '`template_id` INT UNSIGNED DEFAULT NULL AFTER `prevailing_language`',
+            'owner_id' => '`owner_id` INT UNSIGNED DEFAULT NULL AFTER `template_id`',
+            'reviewer_id' => '`reviewer_id` INT UNSIGNED DEFAULT NULL AFTER `owner_id`',
+            'approver_id' => '`approver_id` INT UNSIGNED DEFAULT NULL AFTER `reviewer_id`',
+            'current_version' => '`current_version` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `approver_id`',
+            'approved_version' => '`approved_version` INT UNSIGNED DEFAULT NULL AFTER `current_version`',
+            'client_snapshot_json' => '`client_snapshot_json` TEXT DEFAULT NULL AFTER `approved_version`',
+            'submitted_by' => '`submitted_by` INT UNSIGNED DEFAULT NULL AFTER `client_snapshot_json`',
+            'submitted_at' => '`submitted_at` DATETIME DEFAULT NULL AFTER `submitted_by`',
+            'reviewed_by' => '`reviewed_by` INT UNSIGNED DEFAULT NULL AFTER `submitted_at`',
+            'reviewed_at' => '`reviewed_at` DATETIME DEFAULT NULL AFTER `reviewed_by`',
+            'approved_by' => '`approved_by` INT UNSIGNED DEFAULT NULL AFTER `reviewed_at`',
+            'approved_at' => '`approved_at` DATETIME DEFAULT NULL AFTER `approved_by`',
+            'issued_by' => '`issued_by` INT UNSIGNED DEFAULT NULL AFTER `approved_at`',
+            'issued_at' => '`issued_at` DATETIME DEFAULT NULL AFTER `issued_by`',
+            'accepted_at' => '`accepted_at` DATETIME DEFAULT NULL AFTER `issued_at`',
+            'accepted_by_user_id' => '`accepted_by_user_id` INT UNSIGNED DEFAULT NULL AFTER `accepted_at`',
+            'acceptance_note' => '`acceptance_note` VARCHAR(255) DEFAULT NULL AFTER `accepted_by_user_id`',
+            'acceptance_ip' => '`acceptance_ip` VARCHAR(45) DEFAULT NULL AFTER `acceptance_note`',
+            'signed_document_id' => '`signed_document_id` INT UNSIGNED DEFAULT NULL AFTER `acceptance_ip`',
+            'activated_at' => '`activated_at` DATETIME DEFAULT NULL AFTER `signed_document_id`',
+            'expiry_date' => '`expiry_date` DATE DEFAULT NULL AFTER `activated_at`',
+            'terminated_at' => '`terminated_at` DATETIME DEFAULT NULL AFTER `expiry_date`',
+            'termination_reason' => '`termination_reason` VARCHAR(255) DEFAULT NULL AFTER `terminated_at`',
+            'superseded_by_id' => '`superseded_by_id` INT UNSIGNED DEFAULT NULL AFTER `termination_reason`',
+            'archived_at' => '`archived_at` DATETIME DEFAULT NULL AFTER `superseded_by_id`',
+        ] as $column => $definition) {
+            accounting_repair_add_column('service_agreements', $column, $definition);
+        }
+        accounting_repair_add_index('service_agreements', 'idx_agreements_workflow', 'KEY `idx_agreements_workflow` (`company_id`, `workflow_status`)');
+        if ($needsBackfill) {
+            db()->exec("UPDATE `service_agreements` SET `workflow_status` = 'approved' WHERE `status` = 'final' AND `workflow_status` = 'draft'");
+        }
+
+        if (!accounting_repair_table_exists('agreement_sections')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `agreement_sections` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `agreement_id` INT UNSIGNED NOT NULL,
+                `parent_id` INT UNSIGNED DEFAULT NULL,
+                `section_type` ENUM('chapter','clause','schedule') NOT NULL DEFAULT 'clause',
+                `sort_order` INT NOT NULL DEFAULT 0,
+                `title_en` VARCHAR(255) DEFAULT NULL,
+                `title_np` VARCHAR(255) DEFAULT NULL,
+                `body_en` MEDIUMTEXT DEFAULT NULL,
+                `body_np` MEDIUMTEXT DEFAULT NULL,
+                `drafting_note` TEXT DEFAULT NULL,
+                `client_note` TEXT DEFAULT NULL,
+                `is_mandatory` TINYINT(1) NOT NULL DEFAULT 0,
+                `is_locked` TINYINT(1) NOT NULL DEFAULT 0,
+                `source_template_section_id` INT UNSIGNED DEFAULT NULL,
+                `status` ENUM('draft','final') NOT NULL DEFAULT 'draft',
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `updated_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_sections_tree` (`agreement_id`, `parent_id`, `sort_order`),
+                CONSTRAINT `fk_sections_agreement` FOREIGN KEY (`agreement_id`) REFERENCES `service_agreements` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!accounting_repair_table_exists('agreement_versions')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `agreement_versions` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `agreement_id` INT UNSIGNED NOT NULL,
+                `version_no` INT UNSIGNED NOT NULL,
+                `workflow_status` VARCHAR(30) NOT NULL DEFAULT 'draft',
+                `content_json` MEDIUMTEXT NOT NULL,
+                `change_summary` VARCHAR(255) DEFAULT NULL,
+                `change_reason` VARCHAR(255) DEFAULT NULL,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `approved_by` INT UNSIGNED DEFAULT NULL,
+                `approved_at` DATETIME DEFAULT NULL,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_agreement_version` (`agreement_id`, `version_no`),
+                CONSTRAINT `fk_versions_agreement` FOREIGN KEY (`agreement_id`) REFERENCES `service_agreements` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!accounting_repair_table_exists('agreement_task_links') && accounting_repair_table_exists('client_tasks')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `agreement_task_links` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `agreement_id` INT UNSIGNED NOT NULL,
+                `task_id` INT UNSIGNED NOT NULL,
+                `section_id` INT UNSIGNED DEFAULT NULL,
+                `note` VARCHAR(255) DEFAULT NULL,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_agreement_task` (`agreement_id`, `task_id`),
+                KEY `idx_task_links_task` (`task_id`),
+                CONSTRAINT `fk_task_links_agreement` FOREIGN KEY (`agreement_id`) REFERENCES `service_agreements` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_task_links_task` FOREIGN KEY (`task_id`) REFERENCES `client_tasks` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_task_links_section` FOREIGN KEY (`section_id`) REFERENCES `agreement_sections` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!accounting_repair_table_exists('agreement_templates')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `agreement_templates` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `name` VARCHAR(190) NOT NULL,
+                `description` VARCHAR(255) DEFAULT NULL,
+                `service_type` VARCHAR(120) DEFAULT NULL,
+                `sections_json` MEDIUMTEXT NOT NULL,
+                `defaults_json` TEXT DEFAULT NULL,
+                `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+                `archived` TINYINT(1) NOT NULL DEFAULT 0,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `updated_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_templates_company` (`company_id`, `archived`, `is_default`),
+                CONSTRAINT `fk_templates_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!accounting_repair_table_exists('agreement_comments')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `agreement_comments` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `agreement_id` INT UNSIGNED NOT NULL,
+                `section_id` INT UNSIGNED DEFAULT NULL,
+                `version_no` INT UNSIGNED DEFAULT NULL,
+                `comment` TEXT NOT NULL,
+                `status` ENUM('open','resolved') NOT NULL DEFAULT 'open',
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `resolved_by` INT UNSIGNED DEFAULT NULL,
+                `resolved_at` DATETIME DEFAULT NULL,
+                PRIMARY KEY (`id`),
+                KEY `idx_comments_agreement` (`agreement_id`, `status`),
+                CONSTRAINT `fk_comments_agreement` FOREIGN KEY (`agreement_id`) REFERENCES `service_agreements` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_comments_section` FOREIGN KEY (`section_id`) REFERENCES `agreement_sections` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+    });
+
     $run('Hospitality accounting — recipe costing, reference-only (migration 063)', static function (): void {
         if (!accounting_repair_table_exists('client_profiles')) {
             return;

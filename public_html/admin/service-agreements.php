@@ -2,15 +2,25 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/agreement_builder.php';
 
-require_admin();
-require_company_context();
+require_staff_or_admin();
+require_permission('agreements', 'view');
 accounting_module_repair_database();
 
-$company = current_company();
-$companyId = (int) ($company['id'] ?? 0);
 $currentUser = current_user();
 $userId = (int) ($currentUser['id'] ?? 0);
+if ((string) ($currentUser['role'] ?? '') === 'admin') {
+    require_company_context();
+    $company = current_company();
+} else {
+    $company = company_by_id((int) ($currentUser['company_id'] ?? 0));
+}
+$companyId = (int) ($company['id'] ?? 0);
+if ($companyId <= 0) {
+    flash('error', 'Select a company first.');
+    redirect('portal.php');
+}
 
 // The firm's standard bilingual service-scope catalogue (Annex-1 of the
 // standard agreement). New agreements start from this and are customised
@@ -85,7 +95,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
 
+    // ---- Structured agreements: create from a template snapshot ----
+    if ($action === 'create_builder') {
+        require_permission('agreements', 'create');
+        $templateId = (int) ($_POST['template_id'] ?? 0) ?: agreement_template_seed_default($companyId, $userId);
+        $master = [
+            'client_id' => (int) ($_POST['client_id'] ?? 0),
+            'contract_id' => (int) ($_POST['contract_id'] ?? 0),
+            'purpose_en' => trim((string) ($_POST['purpose_en'] ?? '')),
+            'purpose_np' => trim((string) ($_POST['purpose_np'] ?? '')),
+            'second_party_name_en' => (string) ($company['name'] ?? ''),
+        ];
+        // Prefill the first party from the client master; the contract (if
+        // any) contributes number, title, dates and a monthly-fee estimate.
+        if ($master['client_id'] > 0) {
+            $clientRow = agreement_client_snapshot_build($master['client_id']);
+            $master['first_party_name_en'] = (string) ($clientRow['organization_name'] ?? '');
+            $master['first_party_address'] = (string) ($clientRow['address'] ?? '');
+            $master['first_party_reg_no'] = (string) ($clientRow['pan_no'] ?? ($clientRow['registration_no'] ?? ''));
+            $master['first_party_signatory'] = (string) ($clientRow['authorized_signatory_name'] ?? '');
+            $master['first_party_position'] = (string) ($clientRow['authorized_person_position'] ?? '');
+        }
+        if ($master['contract_id'] > 0) {
+            $contractStmt = db()->prepare('SELECT * FROM service_contracts WHERE id = :id AND company_id = :cid');
+            $contractStmt->execute(['id' => $master['contract_id'], 'cid' => $companyId]);
+            $contractRow = $contractStmt->fetch();
+            if (!$contractRow) {
+                flash('error', 'Contract not found for this company.');
+                redirect('admin/workspace.php?view=contracts');
+            }
+            $linked = db()->prepare('SELECT id FROM service_agreements WHERE contract_id = :cid2');
+            $linked->execute(['cid2' => $master['contract_id']]);
+            if ((int) $linked->fetchColumn() > 0) {
+                flash('error', 'That contract already has an agreement.');
+                redirect('admin/workspace.php?view=contracts');
+            }
+            $master['agreement_no'] = (string) $contractRow['contract_no'];
+            $master['purpose_en'] = $master['purpose_en'] !== '' ? $master['purpose_en'] : (string) $contractRow['title'];
+            $master['client_id'] = $master['client_id'] ?: (int) $contractRow['client_id'];
+            $master['effective_date'] = (string) ($contractRow['start_date'] ?? '');
+            if (!empty($contractRow['start_date']) && !empty($contractRow['end_date'])) {
+                $master['duration_months'] = max(1, (int) round((strtotime((string) $contractRow['end_date']) - strtotime((string) $contractRow['start_date'])) / 86400 / 30.44));
+                if ((float) $contractRow['total_value'] > 0) {
+                    $master['fee_monthly'] = round((float) $contractRow['total_value'] / $master['duration_months'], 2);
+                }
+            }
+        }
+        $newId = agreement_create_from_template($companyId, $templateId, $master, $userId);
+        flash('success', 'Structured agreement drafted from the template. Customise the outline, then submit it for review.');
+        redirect('admin/agreement-builder.php?id=' . $newId);
+    }
+
+    // ---- Template management (manage permission) ----
+    if ($action === 'template_admin') {
+        require_permission('agreements', 'manage');
+        $templateId = (int) ($_POST['template_id'] ?? 0);
+        $op = (string) ($_POST['op'] ?? '');
+        $template = agreement_template_get($templateId, $companyId);
+        if (!$template) {
+            flash('error', 'Template not found.');
+            redirect('admin/service-agreements.php');
+        }
+        if ($op === 'set_default') {
+            db()->prepare('UPDATE agreement_templates SET is_default = 0 WHERE company_id = :cid')->execute(['cid' => $companyId]);
+            db()->prepare('UPDATE agreement_templates SET is_default = 1, archived = 0 WHERE id = :id')->execute(['id' => $templateId]);
+            flash('success', 'Default template set.');
+        } elseif ($op === 'archive' || $op === 'restore') {
+            db()->prepare('UPDATE agreement_templates SET archived = :a, is_default = IF(:a2 = 1, 0, is_default) WHERE id = :id')
+                ->execute(['a' => $op === 'archive' ? 1 : 0, 'a2' => $op === 'archive' ? 1 : 0, 'id' => $templateId]);
+            flash('success', 'Template ' . ($op === 'archive' ? 'archived (existing agreements keep their own copies)' : 'restored') . '.');
+        } elseif ($op === 'duplicate') {
+            db()->prepare('INSERT INTO agreement_templates (company_id, name, description, service_type, sections_json, created_by)
+                SELECT company_id, CONCAT(name, \' (copy)\'), description, service_type, sections_json, :uid FROM agreement_templates WHERE id = :id')
+                ->execute(['uid' => $userId, 'id' => $templateId]);
+            flash('success', 'Template duplicated.');
+        }
+        log_activity('agreement_template', $templateId, 'template_' . $op, 'Template "' . $template['name'] . '" ' . $op . '.', $userId);
+        redirect('admin/service-agreements.php');
+    }
+
     if ($action === 'save_agreement') {
+        require_permission('agreements', 'edit');
         $agreementId = (int) ($_POST['agreement_id'] ?? 0);
         $firstPartyEn = trim((string) ($_POST['first_party_name_en'] ?? ''));
         $secondPartyEn = trim((string) ($_POST['second_party_name_en'] ?? ''));
@@ -177,11 +267,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'status' => (string) ($_POST['status'] ?? 'draft') === 'final' ? 'final' : 'draft',
         ];
         if ($agreementId > 0) {
-            $own = db()->prepare('SELECT id FROM service_agreements WHERE id = :id AND company_id = :cid');
+            $own = db()->prepare('SELECT id, structure_mode, workflow_status FROM service_agreements WHERE id = :id AND company_id = :cid');
             $own->execute(['id' => $agreementId, 'cid' => $companyId]);
-            if (!$own->fetchColumn()) {
+            $ownRow = $own->fetch();
+            if (!$ownRow) {
                 flash('error', 'Agreement not found for this company.');
                 redirect('admin/service-agreements.php');
+            }
+            if ((string) $ownRow['structure_mode'] === 'builder') {
+                flash('error', 'Structured agreements are edited in the Agreement Builder.');
+                redirect('admin/agreement-builder.php?id=' . $agreementId);
+            }
+            if (in_array((string) $ownRow['workflow_status'], ['approved', 'issued', 'accepted', 'signed', 'active', 'expired', 'terminated', 'superseded', 'archived'], true)) {
+                flash('error', 'This agreement is ' . agreement_workflow_label((string) $ownRow['workflow_status']) . ' — content is locked.');
+                redirect('admin/service-agreements.php?edit=' . $agreementId);
             }
             $params['id'] = $agreementId;
             $params['updated_by'] = $userId;
@@ -256,8 +355,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'delete_agreement') {
+        require_permission('agreements', 'edit');
         $agreementId = (int) ($_POST['agreement_id'] ?? 0);
-        $own = db()->prepare("SELECT agreement_no FROM service_agreements WHERE id = :id AND company_id = :cid AND status = 'draft'");
+        $own = db()->prepare("SELECT agreement_no FROM service_agreements WHERE id = :id AND company_id = :cid AND status = 'draft' AND workflow_status IN ('draft', 'changes_requested')");
         $own->execute(['id' => $agreementId, 'cid' => $companyId]);
         $no = $own->fetchColumn();
         if ($no === false) {
@@ -281,6 +381,9 @@ if ($editId > 0) {
     $editStmt = db()->prepare('SELECT * FROM service_agreements WHERE id = :id AND company_id = :cid');
     $editStmt->execute(['id' => $editId, 'cid' => $companyId]);
     $edit = $editStmt->fetch() ?: null;
+    if ($edit !== null && (string) $edit['structure_mode'] === 'builder') {
+        redirect('admin/agreement-builder.php?id=' . $editId);
+    }
 }
 // Opened from the Work Portal contracts view: ?contract_id=N edits (or starts)
 // THE agreement of that contract, inheriting its client, number and terms.
@@ -337,12 +440,38 @@ foreach ($clients as $clientRow) {
 $services = $edit !== null ? (json_decode((string) ($edit['services_json'] ?? ''), true) ?: []) : sa_default_services();
 $witnesses = $edit !== null ? (json_decode((string) ($edit['witnesses_json'] ?? ''), true) ?: []) : [];
 
-$listStmt = db()->prepare('SELECT sa.*, cp.organization_name, sc.contract_no AS linked_contract_no FROM service_agreements sa
+// Filterable register.
+$filterStatus = (string) ($_GET['status'] ?? '');
+$filterClient = (int) ($_GET['client_id'] ?? 0);
+$filterQ = trim((string) ($_GET['q'] ?? ''));
+$listSql = 'SELECT sa.*, cp.organization_name, sc.contract_no AS linked_contract_no, u.name AS owner_name,
+        (SELECT COUNT(*) FROM agreement_task_links atl WHERE atl.agreement_id = sa.id) AS task_count
+    FROM service_agreements sa
     LEFT JOIN client_profiles cp ON cp.id = sa.client_id
     LEFT JOIN service_contracts sc ON sc.id = sa.contract_id
-    WHERE sa.company_id = :cid ORDER BY sa.id DESC LIMIT 100');
-$listStmt->execute(['cid' => $companyId]);
+    LEFT JOIN users u ON u.id = COALESCE(sa.owner_id, sa.created_by)
+    WHERE sa.company_id = :cid';
+$listParams = ['cid' => $companyId];
+if ($filterStatus !== '' && isset(agreements_workflow_states()[$filterStatus])) {
+    $listSql .= ' AND sa.workflow_status = :status';
+    $listParams['status'] = $filterStatus;
+}
+if ($filterClient > 0) {
+    $listSql .= ' AND sa.client_id = :fclient';
+    $listParams['fclient'] = $filterClient;
+}
+if ($filterQ !== '') {
+    $listSql .= ' AND (sa.agreement_no LIKE :q OR sa.purpose_en LIKE :q2 OR sa.first_party_name_en LIKE :q3)';
+    $listParams['q'] = '%' . $filterQ . '%';
+    $listParams['q2'] = '%' . $filterQ . '%';
+    $listParams['q3'] = '%' . $filterQ . '%';
+}
+$listStmt = db()->prepare($listSql . ' ORDER BY sa.id DESC LIMIT 200');
+$listStmt->execute($listParams);
 $agreements = $listStmt->fetchAll();
+
+agreement_template_seed_default($companyId, $userId);
+$agreementTemplates = agreement_templates_list($companyId, true);
 
 $pageTitle = 'Contract Agreements';
 $pageSubtitle = 'Each Work Portal contract carries one customised bilingual (नेपाली + English) agreement — cover page, table of contents, chapters, annexures and signatures, print-ready. Saving syncs the contract\'s period, value and status.';
@@ -350,8 +479,37 @@ $pageHero = ['icon' => 'contracts'];
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
+<?php if (user_can_do('agreements', 'create')): ?>
 <section class="mbw-card">
-    <div class="mbw-card-head"><h2><?= $edit ? 'Edit Agreement — ' . e((string) $edit['agreement_no']) : 'Draft New Agreement' ?><?= $linkedContract !== null ? ' <span class="mbw-pill tone-blue">Contract ' . e((string) $linkedContract['contract_no']) . '</span>' : '' ?></h2>
+    <div class="mbw-card-head"><h2>New Structured Agreement</h2></div>
+    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">Drafts a section-tree agreement from a template snapshot — outline editing, automatic clause numbering, bilingual side-by-side or sequential layouts, review/approval workflow, immutable versions, and task wiring. This is the standard drafting method; the single-form editor below remains only for pre-existing classic agreements.</p>
+    <form method="post" class="workspace-form-grid">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="create_builder">
+        <input type="hidden" name="contract_id" value="<?= $linkedContract !== null && $edit === null ? (int) $linkedContract['id'] : 0 ?>">
+        <label>Client
+            <select name="client_id" required>
+                <option value="">Select client…</option>
+                <?php foreach ($clients as $clientRow): ?>
+                    <option value="<?= (int) $clientRow['id'] ?>" <?= $prefillClientId === (int) $clientRow['id'] ? 'selected' : '' ?>><?= e($clientRow['organization_name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>Template
+            <select name="template_id">
+                <?php foreach ($agreementTemplates as $template): if ((int) $template['archived'] === 1) { continue; } ?>
+                    <option value="<?= (int) $template['id'] ?>" <?= (int) $template['is_default'] === 1 ? 'selected' : '' ?>><?= e($template['name']) ?><?= (int) $template['is_default'] === 1 ? ' (default)' : '' ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label>Purpose (English)<input type="text" name="purpose_en" placeholder="Bookkeeping / Internal Audit / Consulting…"></label>
+        <label>उद्देश्य (नेपाली)<input type="text" name="purpose_np" placeholder="लेखा तथा परामर्श सेवा"></label>
+        <div class="workspace-span-2"><button type="submit"><?= icon('contracts') ?>Draft structured agreement</button></div>
+    </form>
+</section>
+<?php endif; ?>
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2><?= $edit ? 'Edit Agreement — ' . e((string) $edit['agreement_no']) : 'Classic Single-Form Agreement (legacy)' ?><?= $linkedContract !== null ? ' <span class="mbw-pill tone-blue">Contract ' . e((string) $linkedContract['contract_no']) . '</span>' : '' ?></h2>
         <div class="mbw-card-tools">
             <?php if (!$edit && $clients !== []): ?>
                 <form method="get" style="display:flex;gap:6px;align-items:center">
@@ -465,24 +623,58 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <section class="mbw-card">
-    <div class="mbw-card-head"><h2>Agreements (<?= count($agreements) ?>)</h2></div>
+    <div class="mbw-card-head"><h2>Agreements Register (<?= count($agreements) ?>)</h2>
+        <div class="mbw-card-tools">
+            <form method="get" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <select name="status" style="min-height:34px">
+                    <option value="">All statuses</option>
+                    <?php foreach (agreements_workflow_states() as $stateKey => $stateDef): ?>
+                        <option value="<?= e($stateKey) ?>" <?= $filterStatus === $stateKey ? 'selected' : '' ?>><?= e($stateDef['label']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <select name="client_id" style="min-height:34px">
+                    <option value="0">All clients</option>
+                    <?php foreach ($clients as $clientRow): ?>
+                        <option value="<?= (int) $clientRow['id'] ?>" <?= $filterClient === (int) $clientRow['id'] ? 'selected' : '' ?>><?= e($clientRow['organization_name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <input type="text" name="q" value="<?= e($filterQ) ?>" placeholder="Number / title / party…" style="min-height:34px">
+                <button type="submit" class="button secondary" style="min-height:34px">Filter</button>
+            </form>
+        </div>
+    </div>
     <div style="overflow-x:auto">
     <table>
-        <thead><tr><th>No</th><th>First party (client)</th><th>Purpose</th><th>Date (BS)</th><th class="is-numeric">Monthly fee</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Number</th><th>Client</th><th>Title</th><th>Tasks</th><th>Effective</th><th>Expiry</th><th>Status</th><th>Ver.</th><th>Owner</th><th>Updated</th><th>Actions</th></tr></thead>
         <tbody>
-            <?php if ($agreements === []): ?><tr><td colspan="7">No agreements yet. Draft one for each client before work begins.</td></tr><?php endif; ?>
+            <?php if ($agreements === []): ?><tr><td colspan="11">No agreements match. Draft one for each client before work begins.</td></tr><?php endif; ?>
             <?php foreach ($agreements as $agreement): ?>
+                <?php
+                $isBuilder = (string) $agreement['structure_mode'] === 'builder';
+                $wfState = (string) ($agreement['workflow_status'] ?? 'draft');
+                $expiringSoon = (string) ($agreement['expiry_date'] ?? '') !== '' && in_array($wfState, ['active', 'issued', 'accepted', 'signed'], true)
+                    && strtotime((string) $agreement['expiry_date']) < strtotime('+60 days');
+                $tone = in_array($wfState, ['approved', 'accepted', 'signed', 'active'], true) ? 'tone-green'
+                    : (in_array($wfState, ['draft', 'changes_requested'], true) ? 'tone-amber'
+                    : (in_array($wfState, ['under_review', 'reviewed', 'pending_approval', 'issued'], true) ? 'tone-blue' : 'tone-grey'));
+                ?>
                 <tr>
-                    <td><strong><?= e((string) $agreement['agreement_no']) ?></strong><?= $agreement['linked_contract_no'] !== null ? '<br><small style="color:var(--mbw-muted)">Contract ' . e((string) $agreement['linked_contract_no']) . '</small>' : '' ?></td>
-                    <td><?= e($agreement['first_party_name_en']) ?><?= $agreement['organization_name'] ? ' <small style="color:var(--mbw-muted)">(' . e($agreement['organization_name']) . ')</small>' : '' ?></td>
-                    <td><?= e($agreement['purpose_en']) ?></td>
-                    <td><?= e($agreement['agreement_date_bs'] ?? '—') ?></td>
-                    <td class="is-numeric"><?= e(number_format((float) $agreement['fee_monthly'], 2)) ?></td>
-                    <td><span class="mbw-pill <?= (string) $agreement['status'] === 'final' ? 'tone-green' : 'tone-amber' ?>"><?= e(ucfirst((string) $agreement['status'])) ?></span></td>
+                    <td><strong><?= e((string) $agreement['agreement_no']) ?></strong>
+                        <?= $agreement['linked_contract_no'] !== null ? '<br><small style="color:var(--mbw-muted)">Contract ' . e((string) $agreement['linked_contract_no']) . '</small>' : '' ?>
+                        <?= $isBuilder ? '' : '<br><small style="color:var(--mbw-muted)">classic</small>' ?></td>
+                    <td><?= e((string) ($agreement['organization_name'] ?? $agreement['first_party_name_en'])) ?></td>
+                    <td><?= e((string) $agreement['purpose_en']) ?></td>
+                    <td class="is-numeric"><?= (int) $agreement['task_count'] ?></td>
+                    <td><?= e((string) ($agreement['effective_date'] ?? '') ?: (string) ($agreement['effective_date_bs'] ?? '—')) ?></td>
+                    <td><?= e((string) ($agreement['expiry_date'] ?? '—')) ?><?= $expiringSoon ? ' <span class="mbw-pill tone-amber" title="Expiring within 60 days">⏰</span>' : '' ?></td>
+                    <td><span class="mbw-pill <?= $tone ?>"><?= e(agreement_workflow_label($wfState)) ?></span></td>
+                    <td class="is-numeric">v<?= (int) ($agreement['current_version'] ?? 0) ?></td>
+                    <td><?= e((string) ($agreement['owner_name'] ?? '—')) ?></td>
+                    <td><small><?= e((string) $agreement['updated_at']) ?></small></td>
                     <td style="white-space:nowrap">
-                        <a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/service-agreements.php?edit=' . (int) $agreement['id'])) ?>">Edit</a>
-                        <a class="button secondary" style="min-height:30px;padding:3px 10px" target="_blank" href="<?= e(url('admin/export-agreement.php?id=' . (int) $agreement['id'] . '&lang=both')) ?>">Print</a>
-                        <?php if ((string) $agreement['status'] === 'draft'): ?>
+                        <a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url($isBuilder ? 'admin/agreement-builder.php?id=' . (int) $agreement['id'] : 'admin/service-agreements.php?edit=' . (int) $agreement['id'])) ?>"><?= $isBuilder ? 'Open' : 'Edit' ?></a>
+                        <a class="button secondary" style="min-height:30px;padding:3px 10px" target="_blank" href="<?= e(url('admin/export-agreement.php?id=' . (int) $agreement['id'])) ?>">Print</a>
+                        <?php if (in_array($wfState, ['draft', 'changes_requested'], true) && user_can_do('agreements', 'edit')): ?>
                             <form method="post" style="display:inline" data-confirm="Delete this DRAFT agreement?">
                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                 <input type="hidden" name="action" value="delete_agreement">
@@ -497,4 +689,37 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </table>
     </div>
 </section>
+
+<?php if (user_can_do('agreements', 'manage')): ?>
+<section class="mbw-card">
+    <div class="mbw-card-head"><h2>Agreement Templates (<?= count($agreementTemplates) ?>)</h2></div>
+    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">Each new agreement copies its template as an independent snapshot — changing or archiving a template never alters existing agreements. To edit a template's content, open any agreement built from it, adjust the outline, and use “Save as template”.</p>
+    <div style="overflow-x:auto">
+    <table>
+        <thead><tr><th>Name</th><th>Service type</th><th>Default</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+            <?php foreach ($agreementTemplates as $template): ?>
+                <tr>
+                    <td><strong><?= e((string) $template['name']) ?></strong><br><small style="color:var(--mbw-muted)"><?= e((string) ($template['description'] ?? '')) ?></small></td>
+                    <td><?= e((string) ($template['service_type'] ?? '—')) ?></td>
+                    <td><?= (int) $template['is_default'] === 1 ? '✓' : '' ?></td>
+                    <td><span class="mbw-pill <?= (int) $template['archived'] === 1 ? 'tone-grey' : 'tone-green' ?>"><?= (int) $template['archived'] === 1 ? 'Archived' : 'Active' ?></span></td>
+                    <td style="white-space:nowrap">
+                        <?php foreach ([['set_default', 'Set default', (int) $template['is_default'] !== 1 && (int) $template['archived'] === 0], ['duplicate', 'Duplicate', true], ['archive', 'Archive', (int) $template['archived'] === 0], ['restore', 'Restore', (int) $template['archived'] === 1]] as [$op, $label, $show]): if (!$show) { continue; } ?>
+                            <form method="post" style="display:inline">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="template_admin">
+                                <input type="hidden" name="template_id" value="<?= (int) $template['id'] ?>">
+                                <input type="hidden" name="op" value="<?= e($op) ?>">
+                                <button type="submit" class="button secondary" style="min-height:30px;padding:3px 10px"><?= e($label) ?></button>
+                            </form>
+                        <?php endforeach; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+    </div>
+</section>
+<?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

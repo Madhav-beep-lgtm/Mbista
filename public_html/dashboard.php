@@ -53,6 +53,41 @@ if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
     $clientId = (int) $clientProfile['id'];
 
+    // Accept or send back an ISSUED service agreement. Recorded as electronic
+    // acceptance (user, time, IP) — this is not a verified digital signature.
+    if ($action === 'agreement_decision' && table_exists('service_agreements') && column_exists('service_agreements', 'workflow_status')) {
+        $agreementId = (int) ($_POST['agreement_id'] ?? 0);
+        $decision = (string) ($_POST['decision'] ?? '');
+        $checkStmt = db()->prepare("SELECT id, agreement_no FROM service_agreements WHERE id = :id AND client_id = :client_id AND workflow_status = 'issued' LIMIT 1");
+        $checkStmt->execute(['id' => $agreementId, 'client_id' => $clientId]);
+        $agreementRow = $checkStmt->fetch();
+        if (!$agreementRow) {
+            flash('error', 'Agreement not found or it is not awaiting your response.');
+            redirect('dashboard.php?view=contracts');
+        }
+        if ($decision === 'accept') {
+            db()->prepare("UPDATE service_agreements SET workflow_status = 'accepted', accepted_at = :at, accepted_by_user_id = :uid,
+                    acceptance_note = 'Electronic acceptance via client portal', acceptance_ip = :ip WHERE id = :id")
+                ->execute(['at' => date('Y-m-d H:i:s'), 'uid' => $userId, 'ip' => mb_substr((string) ($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45), 'id' => $agreementId]);
+            log_activity('service_agreement', $agreementId, 'client_accepted', 'Agreement ' . $agreementRow['agreement_no'] . ' electronically accepted via client portal.', $userId);
+            flash('success', 'Agreement accepted. Your acceptance (name, date and time) has been recorded. You can upload a signed copy under My Documents.');
+        } elseif ($decision === 'reject') {
+            $comment = trim((string) ($_POST['comment'] ?? ''));
+            if ($comment === '') {
+                flash('error', 'Please describe the change you are requesting so our team can address it.');
+                redirect('dashboard.php?view=contracts');
+            }
+            db()->prepare("UPDATE service_agreements SET workflow_status = 'changes_requested' WHERE id = :id")->execute(['id' => $agreementId]);
+            if (table_exists('agreement_comments')) {
+                db()->prepare('INSERT INTO agreement_comments (agreement_id, comment, created_by) VALUES (:aid, :comment, :uid)')
+                    ->execute(['aid' => $agreementId, 'comment' => 'Client response (change requested): ' . $comment, 'uid' => $userId]);
+            }
+            log_activity('service_agreement', $agreementId, 'client_rejected', 'Agreement ' . $agreementRow['agreement_no'] . ' sent back by the client: ' . mb_substr($comment, 0, 180), $userId);
+            flash('success', 'Your change request has been sent to our team. The agreement will be revised and re-issued.');
+        }
+        redirect('dashboard.php?view=contracts');
+    }
+
     // Approve or reject accounting entries submitted by assigned staff.
     if ($action === 'client_voucher_decision' && column_exists('vouchers', 'requires_client_approval')) {
         // Only an owner/approver may decide a pending entry. Entry makers can
@@ -526,6 +561,19 @@ if ($clientProfile) {
         $teamMembers = $stmt->fetchAll();
     }
 
+    $clientAgreements = [];
+    if (table_exists('service_agreements') && column_exists('service_agreements', 'workflow_status')) {
+        // Only issued-or-later agreements are ever visible to the client;
+        // drafts, internal reviews and internal notes stay internal.
+        $agreementStmt = db()->prepare("SELECT id, agreement_no, purpose_en, purpose_np, workflow_status, current_version,
+                effective_date, effective_date_bs, expiry_date, issued_at, accepted_at, language_mode
+            FROM service_agreements
+            WHERE client_id = :client_id
+              AND workflow_status IN ('issued','accepted','signed','active','expired','terminated','superseded')
+            ORDER BY id DESC");
+        $agreementStmt->execute(['client_id' => (int) $clientProfile['id']]);
+        $clientAgreements = $agreementStmt->fetchAll();
+    }
     if (table_exists('service_contracts')) {
         $stmt = db()->prepare('SELECT * FROM service_contracts WHERE client_id = :client_id ORDER BY created_at DESC');
         $stmt->execute(['client_id' => $clientId]);
@@ -1132,6 +1180,63 @@ include __DIR__ . '/../app/views/partials/client_header.php';
     <?php endif; ?>
 
     <?php if ($view === 'contracts'): ?>
+        <?php if (!empty($clientAgreements)): ?>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Service agreements</h2></div>
+            <div style="overflow-x:auto">
+            <table>
+                <thead>
+                    <tr><th>Agreement</th><th>Status</th><th>Effective</th><th>Expiry</th><th>Version</th><th>View / Download</th><th>Response</th></tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($clientAgreements as $agreement): ?>
+                        <?php $agreementState = (string) $agreement['workflow_status']; ?>
+                        <tr>
+                            <td><strong><?= e((string) $agreement['agreement_no']) ?></strong><br><small><?= e((string) $agreement['purpose_en']) ?></small></td>
+                            <td><?= $mbwPill($agreementState === 'changes_requested' ? 'on_hold' : ($agreementState === 'issued' ? 'new' : (in_array($agreementState, ['accepted', 'signed', 'active'], true) ? 'completed' : $agreementState))) ?>
+                                <br><small><?= e(ucwords(str_replace('_', ' ', $agreementState))) ?></small></td>
+                            <td><?= e((string) (($agreement['effective_date_bs'] ?? '') !== '' ? $agreement['effective_date_bs'] : ($agreement['effective_date'] ?? '—'))) ?></td>
+                            <td><?= e((string) ($agreement['expiry_date'] ?? '—')) ?></td>
+                            <td>v<?= (int) $agreement['current_version'] ?></td>
+                            <td style="white-space:nowrap">
+                                <a class="button secondary" target="_blank" rel="noopener" href="<?= e(url('admin/export-agreement.php?id=' . (int) $agreement['id'] . '&lang=np')) ?>">नेपाली</a>
+                                <a class="button secondary" target="_blank" rel="noopener" href="<?= e(url('admin/export-agreement.php?id=' . (int) $agreement['id'] . '&lang=en')) ?>">English</a>
+                                <a class="button secondary" target="_blank" rel="noopener" href="<?= e(url('admin/export-agreement.php?id=' . (int) $agreement['id'])) ?>">Bilingual / PDF</a>
+                            </td>
+                            <td style="white-space:nowrap">
+                                <?php if ($agreementState === 'issued'): ?>
+                                    <form method="post" style="display:inline" data-confirm="Accept this agreement? Your name, date and time will be recorded as electronic acceptance.">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="agreement_decision">
+                                        <input type="hidden" name="agreement_id" value="<?= (int) $agreement['id'] ?>">
+                                        <input type="hidden" name="decision" value="accept">
+                                        <button type="submit" class="button">Accept</button>
+                                    </form>
+                                    <details style="display:inline-block">
+                                        <summary class="button secondary" style="display:inline-block;cursor:pointer">Request changes</summary>
+                                        <form method="post" style="display:grid;gap:6px;margin-top:6px;min-width:220px">
+                                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                            <input type="hidden" name="action" value="agreement_decision">
+                                            <input type="hidden" name="agreement_id" value="<?= (int) $agreement['id'] ?>">
+                                            <input type="hidden" name="decision" value="reject">
+                                            <textarea name="comment" rows="2" placeholder="What should change?" required></textarea>
+                                            <button type="submit" class="button secondary">Send request</button>
+                                        </form>
+                                    </details>
+                                <?php elseif ((string) ($agreement['accepted_at'] ?? '') !== ''): ?>
+                                    <small>Accepted <?= e((string) $agreement['accepted_at']) ?><br>(electronic acceptance)</small>
+                                <?php else: ?>
+                                    <small>—</small>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            </div>
+            <p style="font-size:12px;color:var(--mbw-muted);margin:8px 0 0">Acceptance here is recorded as an electronic acceptance (your user, date, time and network address) — it is not a certified digital signature. You can also upload a signed scanned copy under <a href="<?= e(url('dashboard.php?view=documents')) ?>">My Documents</a>.</p>
+        </section>
+        <?php endif; ?>
         <section class="mbw-card">
             <div class="mbw-card-head"><h2>Service contracts</h2></div>
             <div style="overflow-x:auto">

@@ -2,26 +2,292 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/agreement_builder.php';
 
-require_admin();
-require_company_context();
+$viewerUser = current_user();
+if (!$viewerUser) {
+    flash('error', 'Please log in first.');
+    redirect('login.php');
+}
 accounting_module_repair_database();
 
-$companyId = (int) (current_company()['id'] ?? 0);
+$viewerRole = (string) ($viewerUser['role'] ?? '');
 $agreementId = (int) ($_GET['id'] ?? 0);
-$lang = (string) ($_GET['lang'] ?? 'both');
-if (!in_array($lang, ['np', 'en', 'both'], true)) {
-    $lang = 'both';
-}
+$lang = (string) ($_GET['lang'] ?? '');
+$format = (string) ($_GET['format'] ?? 'html');
+$versionNo = (int) ($_GET['version'] ?? 0);
+$isClientView = false;
 
-$stmt = db()->prepare('SELECT * FROM service_agreements WHERE id = :id AND company_id = :cid');
-$stmt->execute(['id' => $agreementId, 'cid' => $companyId]);
-$sa = $stmt->fetch();
+if ($viewerRole === 'admin') {
+    require_admin();
+    require_company_context();
+    $companyId = (int) (current_company()['id'] ?? 0);
+    $sa = agreement_get($agreementId, $companyId);
+} elseif ($viewerRole === 'staff') {
+    require_permission('agreements', 'view');
+    $companyId = (int) ($viewerUser['company_id'] ?? 0);
+    $sa = agreement_get($agreementId, $companyId);
+} else {
+    // Client portal: only THIS client's own agreements, and only once issued.
+    $isClientView = true;
+    $stmt = db()->prepare("SELECT sa.* FROM service_agreements sa
+        INNER JOIN client_profiles cp ON cp.id = sa.client_id
+        WHERE sa.id = :id AND cp.user_id = :uid
+          AND sa.workflow_status IN ('issued','accepted','signed','active','expired','terminated','superseded')");
+    $stmt->execute(['id' => $agreementId, 'uid' => (int) $viewerUser['id']]);
+    $sa = $stmt->fetch() ?: null;
+    $companyId = $sa !== null ? (int) $sa['company_id'] : 0;
+}
 if (!$sa) {
     http_response_code(404);
     exit('Agreement not found.');
 }
-log_activity('service_agreement', $agreementId, 'printed', 'Agreement ' . ($sa['agreement_no'] ?? '') . ' printed (' . $lang . ').', (int) (current_user()['id'] ?? 0));
+if ($lang === '') {
+    $lang = (string) ($sa['language_mode'] ?? 'both') === 'both_seq' ? 'seq' : (string) ($sa['language_mode'] ?? 'both');
+}
+if (!in_array($lang, ['np', 'en', 'both', 'seq'], true)) {
+    $lang = 'both';
+}
+log_activity('service_agreement', $agreementId, $format === 'doc' ? 'exported_doc' : 'printed', 'Agreement ' . ($sa['agreement_no'] ?? '') . ' rendered (' . $lang . ($versionNo > 0 ? ', v' . $versionNo : '') . ')' . ($isClientView ? ' by client portal user.' : '.'), (int) $viewerUser['id']);
+
+// ---------------------------------------------------------------------------
+// BUILDER agreements (and version snapshots) render from the section tree.
+// Classic agreements continue to the fixed-format renderer further below.
+// ---------------------------------------------------------------------------
+$renderSa = $sa;
+$builderSections = null;
+if ($versionNo > 0) {
+    $version = agreement_version_get($agreementId, $versionNo);
+    if (!$version) {
+        http_response_code(404);
+        exit('Version not found.');
+    }
+    $snapshot = json_decode((string) $version['content_json'], true) ?: [];
+    $renderSa = array_merge($sa, $snapshot['master'] ?? []);
+    $renderSa['client_snapshot_json'] = json_encode($snapshot['client'] ?? [], JSON_UNESCAPED_UNICODE);
+    $renderSa['workflow_status'] = 'approved'; // Render copy only: forces the frozen client snapshot path.
+    $builderSections = $snapshot['sections'] ?? [];
+} elseif ((string) $sa['structure_mode'] === 'builder') {
+    $builderSections = agreement_sections_flat($agreementId);
+}
+
+if ($builderSections !== null) {
+    agreement_builder_render($renderSa, $builderSections, $lang, $format, $isClientView, $versionNo);
+    exit;
+}
+if ($lang === 'seq') {
+    $lang = 'both'; // Classic layout has one bilingual style.
+}
+
+/**
+ * Print-ready renderer for structured (builder) agreements: cover page, TOC,
+ * numbered section tree, signature block, schedules — in Nepali, English,
+ * bilingual side-by-side, or bilingual sequential layout. $format 'doc' sends
+ * Word headers. Client view never includes internal drafting notes.
+ */
+function agreement_builder_render(array $sa, array $flat, string $lang, string $format, bool $isClientView, int $versionNo): void
+{
+    $tree = agreement_sections_tree($flat);
+    $map = agreement_placeholder_map($sa);
+    $showNp = $lang !== 'en';
+    $showEn = $lang !== 'np';
+    $sideBySide = $lang === 'both';
+
+    $resolve = static fn (?string $text): string => agreement_resolve_text((string) $text, $map);
+    $npd = static fn (string $t): string => agreement_np_digits($t);
+
+    $fpNp = (string) ($sa['first_party_name_np'] ?? '') !== '' ? (string) $sa['first_party_name_np'] : (string) $sa['first_party_name_en'];
+    $fpEn = (string) $sa['first_party_name_en'];
+    $spNp = (string) ($sa['second_party_name_np'] ?? '') !== '' ? (string) $sa['second_party_name_np'] : (string) $sa['second_party_name_en'];
+    $spEn = (string) $sa['second_party_name_en'];
+    $dateBs = (string) ($sa['agreement_date_bs'] ?? '');
+    $titleNp = (string) $sa['purpose_np'] . ' सेवा प्रवाह सम्बन्धी सम्झौता पत्र';
+    $titleEn = 'Service Agreement for ' . (string) $sa['purpose_en'];
+    $docTitle = ($showNp ? $titleNp : $titleEn) . ' — ' . (string) $sa['agreement_no'];
+    $statusLabel = agreement_workflow_label((string) ($sa['workflow_status'] ?? 'draft'));
+    $isDraftDoc = !agreement_is_frozen($sa) && $versionNo === 0;
+
+    // Heading + body in the selected layout for one section node.
+    $sectionHtml = function (array $node, int $depth) use (&$sectionHtml, $showNp, $showEn, $sideBySide, $resolve, $isClientView): string {
+        $type = (string) $node['section_type'];
+        $titleN = trim((string) ($node['title_np'] ?? ''));
+        $titleE = trim((string) ($node['title_en'] ?? ''));
+        $bodyN = trim((string) ($node['body_np'] ?? ''));
+        $bodyE = trim((string) ($node['body_en'] ?? ''));
+        $clientNote = trim((string) ($node['client_note'] ?? ''));
+
+        $headNp = $headEn = '';
+        if ($type === 'chapter') {
+            $headNp = 'परिच्छेद – ' . (string) $node['number_np'] . ' : ' . $titleN;
+            $headEn = 'Chapter ' . (string) $node['number'] . ' : ' . $titleE;
+        } elseif ($type === 'schedule') {
+            $headNp = (string) $node['number_np'] . ' : ' . $titleN;
+            $headEn = (string) $node['number'] . ' : ' . $titleE;
+        } else {
+            $headNp = 'दफा ' . (string) $node['number_np'] . ' : ' . $titleN;
+            $headEn = 'Clause ' . (string) $node['number'] . ' : ' . $titleE;
+        }
+
+        $html = '<div class="sec sec-' . $type . ' depth-' . $depth . '">';
+        $tag = $type === 'chapter' || $type === 'schedule' ? 'h2' : ($depth <= 1 ? 'h3' : 'h4');
+        if ($showNp && $showEn) {
+            $html .= "<$tag>" . e($headNp !== ' : ' && $titleN !== '' ? $headNp : $headEn) . ($titleE !== '' && $titleN !== '' ? ' <span class="en-inline">(' . e($headEn) . ')</span>' : '') . "</$tag>";
+        } elseif ($showNp) {
+            $html .= "<$tag>" . e($titleN !== '' ? $headNp : $headEn) . "</$tag>";
+        } else {
+            $html .= "<$tag>" . e($titleE !== '' ? $headEn : $headNp) . "</$tag>";
+        }
+
+        if ($sideBySide && $showNp && $showEn && ($bodyN !== '' || $bodyE !== '')) {
+            $html .= '<div class="cols"><div class="col">' . ($bodyE !== '' ? nl2br(e($resolve($bodyE))) : '') . '</div>'
+                . '<div class="col">' . ($bodyN !== '' ? nl2br(e($resolve($bodyN))) : '') . '</div></div>';
+        } else {
+            if ($showEn && $bodyE !== '') {
+                $html .= '<p class="body-en">' . nl2br(e($resolve($bodyE))) . '</p>';
+            }
+            if ($showNp && $bodyN !== '') {
+                $html .= '<p class="body-np' . ($showEn ? ' alt' : '') . '">' . nl2br(e($resolve($bodyN))) . '</p>';
+            }
+        }
+        if ($clientNote !== '') {
+            $html .= '<p class="client-note">' . nl2br(e($resolve($clientNote))) . '</p>';
+        }
+        // Internal drafting notes are NEVER rendered, in any view.
+        foreach ($node['children'] ?? [] as $child) {
+            $html .= $sectionHtml($child, $depth + 1);
+        }
+        return $html . '</div>';
+    };
+
+    $mainSections = array_values(array_filter($tree, static fn (array $n): bool => $n['section_type'] !== 'schedule'));
+    $schedules = array_values(array_filter($tree, static fn (array $n): bool => $n['section_type'] === 'schedule'));
+
+    if ($format === 'doc') {
+        header('Content-Type: application/msword; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="Agreement-' . preg_replace('/[^A-Za-z0-9\-]/', '_', (string) $sa['agreement_no']) . ($versionNo > 0 ? '-v' . $versionNo : '') . '.doc"');
+    } else {
+        header('Content-Type: text/html; charset=utf-8');
+    }
+
+    echo '<!DOCTYPE html><html lang="' . ($lang === 'en' ? 'en' : 'ne') . '"><head><meta charset="UTF-8"><title>' . e($docTitle) . '</title><style>
+        body { font-family: "Noto Sans Devanagari", "Mangal", "Kalimati", "Times New Roman", serif; font-size: 12.5pt; line-height: 1.7; color: #111; margin: 0; background: #f1f1f4; }
+        .sheet { max-width: 820px; margin: 0 auto; background: #fff; padding: 48px 58px; }
+        .toolbar { position: sticky; top: 0; background: #1d1f2a; color: #fff; padding: 10px 16px; display: flex; gap: 10px; align-items: center; justify-content: center; z-index: 9; font-family: Segoe UI, sans-serif; font-size: 13px; }
+        .toolbar a, .toolbar button { background: #3b82f6; border: 0; color: #fff; padding: 7px 14px; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 13px; }
+        .toolbar a.ghost { background: transparent; border: 1px solid #666; }
+        .cover { text-align: center; padding-top: 80px; min-height: 900px; }
+        .cover .party { font-size: 17pt; font-weight: 700; margin: 4px 0; }
+        .cover .doc-title { font-size: 19pt; font-weight: 700; margin: 26px 0 30px; text-decoration: underline; text-underline-offset: 6px; }
+        .cover .meta { margin-top: 60px; font-size: 13pt; }
+        .rule { border: 0; border-top: 2.5px solid #111; margin: 22px auto; width: 140px; }
+        h2 { text-align: center; font-size: 14.5pt; margin: 26px 0 10px; page-break-after: avoid; }
+        h3 { font-size: 12.5pt; margin: 16px 0 6px; page-break-after: avoid; }
+        h4 { font-size: 12pt; margin: 12px 0 4px; }
+        .en-inline { font-weight: 500; font-style: italic; color: #444; font-size: 10.5pt; }
+        p { margin: 6px 0; text-align: justify; }
+        p.body-np.alt { font-size: 12.5pt; }
+        p.body-en { font-size: 11.5pt; }
+        .cols { display: table; width: 100%; table-layout: fixed; border-collapse: collapse; }
+        .cols .col { display: table-cell; width: 50%; vertical-align: top; padding: 2px 10px 2px 0; font-size: 11pt; text-align: justify; }
+        .cols .col + .col { padding: 2px 0 2px 10px; border-left: 1px solid #ddd; font-size: 12pt; }
+        .client-note { font-size: 10.5pt; font-style: italic; color: #444; }
+        .sec { page-break-inside: avoid; }
+        table.toc td { padding: 6px 4px; border-bottom: 1px dotted #999; font-size: 12pt; }
+        table.toc { width: 100%; border-collapse: collapse; }
+        .toc-no { width: 110px; font-weight: 600; }
+        .sig-table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+        .sig-table th, .sig-table td { border: 1px solid #333; padding: 8px 12px; width: 50%; vertical-align: top; text-align: left; }
+        .sig-table th { background: #efefef; }
+        .line { display: inline-block; min-width: 200px; border-bottom: 1px dotted #555; }
+        .docfoot { margin-top: 26px; font-size: 9.5pt; color: #555; border-top: 1px solid #ccc; padding-top: 6px; display: flex; justify-content: space-between; }
+        .draft-mark { text-align: center; color: #b91c1c; font-weight: 700; letter-spacing: 4px; }
+        .page-break { page-break-before: always; }
+        @media print { body { background: #fff; } .toolbar { display: none; } .sheet { max-width: none; padding: 0; } @page { size: A4; margin: 19mm 16mm; } }
+    </style></head><body>';
+
+    if ($format !== 'doc') {
+        echo '<div class="toolbar"><span>' . e((string) $sa['agreement_no']) . ($versionNo > 0 ? ' · v' . $versionNo : '') . ' · ' . e($statusLabel) . '</span>'
+            . '<button onclick="window.print()">🖨 Print / Save PDF</button>'
+            . '<a class="ghost" href="?id=' . (int) $sa['id'] . '&lang=np' . ($versionNo > 0 ? '&version=' . $versionNo : '') . '">नेपाली</a>'
+            . '<a class="ghost" href="?id=' . (int) $sa['id'] . '&lang=en' . ($versionNo > 0 ? '&version=' . $versionNo : '') . '">English</a>'
+            . '<a class="ghost" href="?id=' . (int) $sa['id'] . '&lang=both' . ($versionNo > 0 ? '&version=' . $versionNo : '') . '">Side by side</a>'
+            . '<a class="ghost" href="?id=' . (int) $sa['id'] . '&lang=seq' . ($versionNo > 0 ? '&version=' . $versionNo : '') . '">Sequential</a>'
+            . (!$isClientView ? '<a class="ghost" href="?id=' . (int) $sa['id'] . '&lang=' . e($lang) . '&format=doc' . ($versionNo > 0 ? '&version=' . $versionNo : '') . '">Word</a>' : '')
+            . '</div>';
+    }
+
+    echo '<div class="sheet">';
+    if ($isDraftDoc) {
+        echo '<p class="draft-mark">— DRAFT · ' . e(strtoupper($statusLabel)) . ' · NOT YET APPROVED —</p>';
+    }
+
+    // Cover page.
+    echo '<div class="cover">'
+        . '<div class="party">' . e($showNp ? $fpNp : $fpEn) . '</div>'
+        . ((string) ($sa['first_party_address'] ?? '') !== '' ? '<div>' . e((string) $sa['first_party_address']) . '</div>' : '')
+        . '<div style="margin:22px 0;font-size:14pt">' . ($showNp ? 'र' : 'and') . '</div>'
+        . '<div class="party">' . e($showNp ? $spNp : $spEn) . '</div>'
+        . '<hr class="rule">'
+        . '<div class="doc-title">' . ($showNp ? 'बीच<br>' . e($titleNp) : e($titleEn)) . '</div>'
+        . ($showNp && $showEn ? '<div style="font-style:italic;color:#333">(' . e($titleEn) . ')</div>' : '')
+        . '<div class="meta">'
+        . '<div><strong>' . ($showNp ? 'सम्झौता नं' : 'Agreement No') . ' :</strong> ' . e((string) $sa['agreement_no']) . '</div>'
+        . '<div><strong>' . ($showNp ? 'सम्झौता मिति' : 'Agreement Date') . ' :</strong> ' . e($dateBs !== '' ? $dateBs : '................') . '</div>'
+        . '<div><strong>Version :</strong> ' . ($versionNo > 0 ? 'v' . $versionNo : 'v' . (int) ($sa['current_version'] ?? 0) . ' (' . e($statusLabel) . ')') . '</div>'
+        . '</div></div>';
+
+    // Table of contents from the top level of the tree.
+    echo '<div class="page-break"><h2>' . ($showNp ? 'विषय सूची' : 'Table of Contents') . ($showNp && $showEn ? ' <span class="en-inline">(Table of Contents)</span>' : '') . '</h2><table class="toc">';
+    foreach ($tree as $top) {
+        $label = $showNp && trim((string) ($top['title_np'] ?? '')) !== '' ? (string) $top['title_np'] : (string) ($top['title_en'] ?? '');
+        $no = $top['section_type'] === 'schedule'
+            ? ($showNp ? (string) $top['number_np'] : (string) $top['number'])
+            : (($top['section_type'] === 'chapter' ? ($showNp ? 'परिच्छेद ' . (string) $top['number_np'] : 'Chapter ' . (string) $top['number']) : ($showNp ? 'दफा ' . (string) $top['number_np'] : 'Clause ' . (string) $top['number'])));
+        echo '<tr><td class="toc-no">' . e($no) . '</td><td>' . e($label) . ($showNp && $showEn && trim((string) ($top['title_en'] ?? '')) !== '' ? ' <span class="en-inline">' . e((string) $top['title_en']) . '</span>' : '') . '</td></tr>';
+    }
+    echo '<tr><td class="toc-no">' . ($showNp ? 'हस्ताक्षर' : 'Signatures') . '</td><td>' . ($showNp ? 'स्वीकृति तथा हस्ताक्षर' : 'Acceptance and Signatures') . '</td></tr>';
+    echo '</table></div>';
+
+    // Main body.
+    echo '<div class="page-break">';
+    foreach ($mainSections as $node) {
+        echo $sectionHtml($node, 0);
+    }
+    echo '</div>';
+
+    // Signature + witness block (always from the master record).
+    $sigLine = '<span class="line"></span>';
+    echo '<div class="page-break"><h2>' . ($showNp ? 'स्वीकृति तथा हस्ताक्षर' : 'Acceptance and Signatures') . ($showNp && $showEn ? ' <span class="en-inline">(Acceptance and Signatures)</span>' : '') . '</h2>';
+    echo '<p>' . ($showNp ? 'माथि उल्लिखित शर्तहरू पढी, बुझी, स्वीकार गरी दुवै पक्षका आधिकारिक प्रतिनिधिले साक्षीहरूको रोहबरमा तल हस्ताक्षर गरेका छौँ।' : 'Having read, understood and accepted the terms above, the authorised representatives of both parties sign below in the presence of the witnesses.') . '</p>';
+    echo '<table class="sig-table"><tr><th>' . ($showNp ? 'प्रथम पक्षको तर्फबाट' : 'For the First Party') . '</th><th>' . ($showNp ? 'दोस्रो पक्षको तर्फबाट' : 'For the Second Party') . '</th></tr><tr>';
+    foreach ([[$fpNp, $fpEn, (string) ($sa['first_party_signatory'] ?? ''), (string) ($sa['first_party_position'] ?? '')], [$spNp, $spEn, (string) ($sa['second_party_signatory'] ?? ''), (string) ($sa['second_party_position'] ?? '')]] as [$nameNp, $nameEn, $signatory, $position]) {
+        echo '<td>'
+            . '<p>' . ($showNp ? 'हस्ताक्षर' : 'Signature') . ' : ' . $sigLine . '</p>'
+            . '<p>' . ($showNp ? 'नाम' : 'Name') . ' : ' . ($signatory !== '' ? e($signatory) : $sigLine) . '</p>'
+            . '<p>' . ($showNp ? 'पद' : 'Position') . ' : ' . ($position !== '' ? e($position) : $sigLine) . '</p>'
+            . '<p>' . ($showNp ? 'कम्पनी' : 'Company') . ' : ' . e($showNp ? $nameNp : $nameEn) . '</p>'
+            . '<p>' . ($showNp ? 'मिति' : 'Date') . ' : ' . ($dateBs !== '' ? e($dateBs) : $sigLine) . '</p>'
+            . '<p style="margin-top:24px">' . ($showNp ? 'कम्पनीको छाप :' : 'Company Seal :') . '</p>'
+            . '</td>';
+    }
+    echo '</tr></table>';
+    $witnesses = json_decode((string) ($sa['witnesses_json'] ?? ''), true) ?: [];
+    echo '<h3 style="margin-top:22px">' . ($showNp ? 'साक्षीहरू' : 'Witnesses') . '</h3><table class="sig-table"><tr><th>' . ($showNp ? 'साक्षी – १' : 'Witness – 1') . '</th><th>' . ($showNp ? 'साक्षी – २' : 'Witness – 2') . '</th></tr><tr>';
+    foreach (['w1', 'w2'] as $w) {
+        echo '<td><p>' . ($showNp ? 'नाम' : 'Name') . ' : ' . (($witnesses[$w]['name'] ?? '') !== '' ? e((string) $witnesses[$w]['name']) : $sigLine) . '</p>'
+            . '<p>' . ($showNp ? 'ठेगाना' : 'Address') . ' : ' . (($witnesses[$w]['address'] ?? '') !== '' ? e((string) $witnesses[$w]['address']) : $sigLine) . '</p>'
+            . '<p>' . ($showNp ? 'हस्ताक्षर' : 'Signature') . ' : ' . $sigLine . '</p></td>';
+    }
+    echo '</tr></table></div>';
+
+    // Schedules after the signature pages (the firm's standard order).
+    foreach ($schedules as $schedule) {
+        echo '<div class="page-break">' . $sectionHtml($schedule, 0) . '</div>';
+    }
+
+    echo '<div class="docfoot"><span>' . e((string) $sa['agreement_no']) . ' · ' . ($versionNo > 0 ? 'v' . $versionNo : 'v' . (int) ($sa['current_version'] ?? 0)) . ' · ' . e($statusLabel) . '</span><span>Generated ' . e(date('Y-m-d H:i')) . '</span></div>';
+    echo '</div></body></html>';
+}
 
 /** Convert Western digits in a string to Devanagari digits. */
 function sa_np_digits(string $text): string

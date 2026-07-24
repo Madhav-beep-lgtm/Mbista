@@ -1728,7 +1728,12 @@ if ($missingTables === []) {
 
     $assignedNameSelect = $hasTaskAssignment ? ', au.name AS assigned_staff_name' : ', NULL AS assigned_staff_name';
     $assignedNameJoin = $hasTaskAssignment ? ' LEFT JOIN users au ON au.id = t.assigned_staff_user_id' : '';
-    $tasksSql = "SELECT t.*, cp.organization_name, tm.name AS team_name, sc.contract_no, u.name AS created_by_name{$assignedNameSelect},
+    $agreementLinkSelect = table_exists('agreement_task_links')
+        ? ", (SELECT atl.agreement_id FROM agreement_task_links atl WHERE atl.task_id = t.id ORDER BY atl.id ASC LIMIT 1) AS linked_agreement_id,
+            (SELECT sa.agreement_no FROM agreement_task_links atl2 INNER JOIN service_agreements sa ON sa.id = atl2.agreement_id WHERE atl2.task_id = t.id ORDER BY atl2.id ASC LIMIT 1) AS linked_agreement_no,
+            (SELECT sa2.workflow_status FROM agreement_task_links atl3 INNER JOIN service_agreements sa2 ON sa2.id = atl3.agreement_id WHERE atl3.task_id = t.id ORDER BY atl3.id ASC LIMIT 1) AS linked_agreement_status"
+        : ', NULL AS linked_agreement_id, NULL AS linked_agreement_no, NULL AS linked_agreement_status';
+    $tasksSql = "SELECT t.*, cp.organization_name, tm.name AS team_name, sc.contract_no, u.name AS created_by_name{$assignedNameSelect}{$agreementLinkSelect},
             COALESCE((SELECT SUM(si.amount) FROM task_invoices si WHERE si.task_id = t.id AND si.company_id = t.company_id AND si.status <> 'cancelled'), 0) AS invoiced_total,
             (SELECT COUNT(*) FROM task_stages sct WHERE sct.task_id = t.id) AS stage_total,
             (SELECT COUNT(*) FROM task_stages scc WHERE scc.task_id = t.id AND scc.status = 'completed') AS stage_completed
@@ -2385,7 +2390,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <a class="button secondary" href="<?= e(url('admin/service-agreements.php?edit=' . (int) $contract['agreement_id'])) ?>">Agreement<?= (string) $contract['agreement_status'] === 'final' ? ' ✓' : ' (draft)' ?></a>
                                     <a class="button secondary" href="<?= e(url('admin/export-agreement.php?id=' . (int) $contract['agreement_id'] . '&lang=both')) ?>" target="_blank" rel="noopener">Print</a>
                                 <?php else: ?>
-                                    <a class="button secondary" href="<?= e(url('admin/service-agreements.php?contract_id=' . (int) $contract['id'])) ?>">Draft Agreement</a>
+                                    <form method="post" action="<?= e(url('admin/service-agreements.php')) ?>" style="display:inline">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="create_builder">
+                                        <input type="hidden" name="contract_id" value="<?= (int) $contract['id'] ?>">
+                                        <input type="hidden" name="client_id" value="<?= (int) $contract['client_id'] ?>">
+                                        <button type="submit" class="button secondary">Draft Agreement</button>
+                                    </form>
                                     <a class="button secondary" href="<?= e(url('admin/export-contract.php?id=' . (int) $contract['id'] . '&format=pdf')) ?>" target="_blank" rel="noopener">Preview Template</a>
                                 <?php endif; ?>
                             </td>
@@ -2784,7 +2795,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php foreach ($tasks as $task): ?>
                         <?php $remaining = round((float) $task['quoted_fee'] - (float) $task['invoiced_total'], 2); ?>
                         <tr>
-                            <td>#<?= e((int) $task['id']) ?> <?= e($task['title']) ?><br><small><?= e($task['contract_no'] ?? 'No contract') ?></small></td>
+                            <td>#<?= e((int) $task['id']) ?> <?= e($task['title']) ?><br><small><?= e($task['contract_no'] ?? 'No contract') ?></small>
+                                <?php if (!empty($task['linked_agreement_id'])): ?>
+                                    <br><a href="<?= e(url('admin/agreement-builder.php?id=' . (int) $task['linked_agreement_id'])) ?>" title="Open linked agreement"><small>📄 <?= e((string) $task['linked_agreement_no']) ?> · <?= e(ucwords(str_replace('_', ' ', (string) $task['linked_agreement_status']))) ?></small></a>
+                                <?php endif; ?></td>
                             <td><?= e($task['organization_name']) ?></td>
                             <td><?= e($task['team_name'] ?? 'Unassigned') ?></td>
                             <td>

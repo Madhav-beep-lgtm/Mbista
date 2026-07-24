@@ -879,6 +879,11 @@ function rbac_modules(): array
         // create = generate daily costing; adjust = controlled recalculation;
         // export = report downloads.
         'hospitality' => ['label' => 'Hospitality Costing',  'actions' => ['view', 'create', 'edit', 'adjust', 'export']],
+        // Structured service agreements: edit = draft content; review/approve =
+        // maker-checker workflow; issue = release to the client; manage =
+        // templates, lifecycle overrides (terminate/supersede/archive) and the
+        // controlled self-approval override.
+        'agreements' => ['label' => 'Service Agreements',    'actions' => ['view', 'create', 'edit', 'review', 'approve', 'issue', 'manage', 'export']],
     ];
 }
 
@@ -888,6 +893,7 @@ function rbac_action_labels(): array
         'view' => 'View', 'create' => 'Create', 'edit' => 'Edit',
         'approve' => 'Approve', 'post' => 'Post', 'export' => 'Export',
         'generate' => 'Generate', 'adjust' => 'Adjust', 'finalize' => 'Finalize',
+        'review' => 'Review', 'issue' => 'Issue', 'manage' => 'Manage',
     ];
 }
 
