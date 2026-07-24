@@ -22,9 +22,13 @@ function bank_cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM company_bank_accounts WHERE company_id=$s");
         db()->exec("DELETE FROM service_agreements WHERE company_id=$s");
+        db()->exec("DELETE FROM service_contracts WHERE company_id=$s");
+        db()->exec("DELETE FROM client_profiles WHERE company_id=$s");
+        db()->exec("DELETE FROM users WHERE email='banktest-client@example.test'");
         db()->exec("DELETE FROM fiscal_years WHERE company_id=$s");
         db()->exec("DELETE FROM companies WHERE id=$s");
     }
+    db()->exec("DELETE FROM users WHERE email='banktest-client@example.test'");
 }
 bank_cleanup();
 
@@ -104,6 +108,36 @@ $backSvc = json_decode((string) $row['services_json'], true);
 ok(($backSvc[0]['title_np'] ?? '') === 'बुक किपिङ' && ($backSvc[0]['deliverable_en'] ?? '') === 'Monthly books', 'Annex-1 service rows survive the JSON round-trip');
 $backWit = json_decode((string) $row['witnesses_json'], true);
 ok(($backWit['w1']['name'] ?? '') === 'Witness One', 'witness block survives the JSON round-trip');
+
+echo "== Contract link (merged into Work Portal contracts) ==\n";
+ok(column_exists('service_agreements', 'contract_id'), 'repair added contract_id to service_agreements');
+
+db()->prepare("INSERT INTO users (name, email, password_hash, role, status) VALUES ('Bank Test Client', 'banktest-client@example.test', 'x', 'customer', 'active')")->execute();
+$clientUserId = (int) db()->lastInsertId();
+db()->prepare('INSERT INTO client_profiles (user_id, company_id, organization_name) VALUES (?,?,?)')->execute([$clientUserId, $coA, 'Akshara Jewellery Pvt. Ltd.']);
+$clientId = (int) db()->lastInsertId();
+db()->prepare('INSERT INTO service_contracts (company_id, client_id, title, contract_no, total_value, status) VALUES (?,?,?,?,?,?)')
+    ->execute([$coA, $clientId, 'Bookkeeping Services', 'SC-BANKT-1', 0, 'draft']);
+$contractId = (int) db()->lastInsertId();
+
+db()->prepare('INSERT INTO service_agreements (company_id, client_id, contract_id, agreement_no, first_party_name_en, second_party_name_en)
+    VALUES (?,?,?,?,?,?)')->execute([$coA, $clientId, $contractId, 'SC-BANKT-1', 'Akshara Jewellery Pvt. Ltd.', 'Bank Test A']);
+$linkedSaId = (int) db()->lastInsertId();
+$linkedRow = db()->query("SELECT sa.id FROM service_agreements sa INNER JOIN service_contracts sc ON sc.id = sa.contract_id WHERE sa.id=$linkedSaId")->fetch();
+ok($linkedRow !== false, 'agreement joins to its work-portal contract');
+
+$dupRejected = false;
+try {
+    db()->prepare('INSERT INTO service_agreements (company_id, contract_id, agreement_no, first_party_name_en, second_party_name_en)
+        VALUES (?,?,?,?,?)')->execute([$coA, $contractId, 'SC-BANKT-1-DUP', 'Dup First', 'Dup Second']);
+} catch (Throwable $e) {
+    $dupRejected = true;
+}
+ok($dupRejected, 'one agreement per contract (unique contract_id enforced)');
+
+db()->exec("DELETE FROM service_contracts WHERE id=$contractId");
+$orphan = db()->query("SELECT contract_id FROM service_agreements WHERE id=$linkedSaId")->fetch();
+ok($orphan !== false && $orphan['contract_id'] === null, 'deleting the contract keeps the agreement, unlinks it (SET NULL)');
 
 echo "== Cascade cleanup ==\n";
 db()->exec("DELETE FROM companies WHERE id=$coA");

@@ -686,7 +686,8 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $contractId = (int) db()->lastInsertId();
             log_activity('service_contract', $contractId, 'created', 'Service contract created from admin work portal.', $adminId);
-            flash('success', 'Service contract created successfully.');
+            flash('success', 'Contract created — now customise its bilingual agreement (the printable contract document).');
+            redirect('admin/service-agreements.php?contract_id=' . $contractId);
         } catch (Throwable $exception) {
             flash('error', 'Service contract creation failed. Contract number may already exist.');
         }
@@ -1669,10 +1670,13 @@ if ($missingTables === []) {
     $teamStmt->execute(['company_id' => $companyId]);
     $teams = $teamStmt->fetchAll();
 
-    $contractStmt = db()->prepare("SELECT sc.*, cp.organization_name, u.name AS created_by_name
+    $agreementJoin = table_exists('service_agreements') && column_exists('service_agreements', 'contract_id');
+    $contractStmt = db()->prepare("SELECT sc.*, cp.organization_name, u.name AS created_by_name"
+        . ($agreementJoin ? ', sa.id AS agreement_id, sa.status AS agreement_status' : ', NULL AS agreement_id, NULL AS agreement_status') . "
         FROM service_contracts sc
         INNER JOIN client_profiles cp ON cp.id = sc.client_id
-        LEFT JOIN users u ON u.id = sc.created_by
+        LEFT JOIN users u ON u.id = sc.created_by"
+        . ($agreementJoin ? ' LEFT JOIN service_agreements sa ON sa.contract_id = sc.id' : '') . "
         WHERE sc.company_id = :company_id
         ORDER BY sc.created_at DESC LIMIT 100");
     $contractStmt->execute(['company_id' => $companyId]);
@@ -2303,6 +2307,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         
             <div class="form-card">
                 <h3>Create service contract</h3>
+                <p style="margin:4px 0 10px;color:var(--mbw-muted);font-size:12.5px">Saving opens the bilingual (नेपाली + English) agreement builder — each contract's printable document with cover page, chapters, annexures and signatures.</p>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="create_service_contract">
@@ -2375,8 +2380,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 </form>
                             </td>
                             <td><?= e($contract['start_date'] ?? '-') ?> to <?= e($contract['end_date'] ?? '-') ?></td>
-                            <td>
-                                <a class="button secondary" href="<?= e(url('admin/export-contract.php?id=' . (int) $contract['id'] . '&format=pdf')) ?>" target="_blank" rel="noopener">Preview Template</a>
+                            <td style="white-space:nowrap">
+                                <?php if (!empty($contract['agreement_id'])): ?>
+                                    <a class="button secondary" href="<?= e(url('admin/service-agreements.php?edit=' . (int) $contract['agreement_id'])) ?>">Agreement<?= (string) $contract['agreement_status'] === 'final' ? ' ✓' : ' (draft)' ?></a>
+                                    <a class="button secondary" href="<?= e(url('admin/export-agreement.php?id=' . (int) $contract['agreement_id'] . '&lang=both')) ?>" target="_blank" rel="noopener">Print</a>
+                                <?php else: ?>
+                                    <a class="button secondary" href="<?= e(url('admin/service-agreements.php?contract_id=' . (int) $contract['id'])) ?>">Draft Agreement</a>
+                                    <a class="button secondary" href="<?= e(url('admin/export-contract.php?id=' . (int) $contract['id'] . '&format=pdf')) ?>" target="_blank" rel="noopener">Preview Template</a>
+                                <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>

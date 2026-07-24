@@ -93,6 +93,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Both party names (English) are required.');
             redirect('admin/service-agreements.php' . ($agreementId > 0 ? '?edit=' . $agreementId : ''));
         }
+        // Work-portal contract this agreement documents (the wiring record:
+        // client link, task linkage, billing status). One agreement per contract.
+        $contractId = (int) ($_POST['contract_id'] ?? 0);
+        $contract = null;
+        if ($contractId > 0) {
+            $contractStmt = db()->prepare('SELECT * FROM service_contracts WHERE id = :id AND company_id = :cid');
+            $contractStmt->execute(['id' => $contractId, 'cid' => $companyId]);
+            $contract = $contractStmt->fetch() ?: null;
+            if (!$contract) {
+                flash('error', 'Linked contract not found for this company.');
+                redirect('admin/workspace.php?view=contracts');
+            }
+            $linkedElsewhere = db()->prepare('SELECT id FROM service_agreements WHERE contract_id = :contract_id AND id != :id');
+            $linkedElsewhere->execute(['contract_id' => $contractId, 'id' => $agreementId]);
+            $otherId = (int) $linkedElsewhere->fetchColumn();
+            if ($otherId > 0) {
+                flash('error', 'That contract already has an agreement — edit it instead.');
+                redirect('admin/service-agreements.php?edit=' . $otherId);
+            }
+        }
         // Annex-1 service rows.
         $services = [];
         $titlesNp = (array) ($_POST['svc_title_np'] ?? []);
@@ -113,10 +133,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'w1' => ['name' => trim((string) ($_POST['w1_name'] ?? '')), 'address' => trim((string) ($_POST['w1_address'] ?? ''))],
             'w2' => ['name' => trim((string) ($_POST['w2_name'] ?? '')), 'address' => trim((string) ($_POST['w2_address'] ?? ''))],
         ];
+        $postedClientId = (int) ($_POST['client_id'] ?? 0);
+        if ($postedClientId <= 0 && $contract !== null) {
+            $postedClientId = (int) $contract['client_id'];
+        }
         $params = [
             'company_id' => $companyId,
-            'client_id' => (int) ($_POST['client_id'] ?? 0) ?: null,
-            'agreement_no' => trim((string) ($_POST['agreement_no'] ?? '')) ?: ('SA-' . date('Ymd-His')),
+            'client_id' => $postedClientId > 0 ? $postedClientId : null,
+            'contract_id' => $contractId > 0 ? $contractId : null,
+            'agreement_no' => trim((string) ($_POST['agreement_no'] ?? '')) ?: ($contract !== null ? (string) $contract['contract_no'] : 'SA-' . date('Ymd-His')),
             'purpose_en' => trim((string) ($_POST['purpose_en'] ?? '')) ?: 'Accounting and Advisory Services',
             'purpose_np' => trim((string) ($_POST['purpose_np'] ?? '')) ?: 'लेखा तथा परामर्श सेवा',
             'first_party_name_en' => $firstPartyEn,
@@ -160,7 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $params['id'] = $agreementId;
             $params['updated_by'] = $userId;
-            db()->prepare('UPDATE service_agreements SET client_id = :client_id, agreement_no = :agreement_no,
+            db()->prepare('UPDATE service_agreements SET client_id = :client_id, contract_id = :contract_id, agreement_no = :agreement_no,
                     purpose_en = :purpose_en, purpose_np = :purpose_np,
                     first_party_name_en = :first_party_name_en, first_party_name_np = :first_party_name_np,
                     first_party_address = :first_party_address, first_party_reg_no = :first_party_reg_no,
@@ -181,14 +206,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             log_activity('service_agreement', $agreementId, 'updated', 'Service agreement ' . $params['agreement_no'] . ' updated.', $userId);
         } else {
             $params['created_by'] = $userId;
-            db()->prepare('INSERT INTO service_agreements (company_id, client_id, agreement_no, purpose_en, purpose_np,
+            db()->prepare('INSERT INTO service_agreements (company_id, client_id, contract_id, agreement_no, purpose_en, purpose_np,
                     first_party_name_en, first_party_name_np, first_party_address, first_party_reg_no, first_party_signatory, first_party_position,
                     second_party_name_en, second_party_name_np, second_party_address, second_party_reg_no, second_party_signatory, second_party_position,
                     agreement_date_bs, effective_date, effective_date_bs, duration_months, trial_months,
                     fee_trial, fee_monthly, payment_days, termination_notice_days, cure_days,
                     jurisdiction_en, jurisdiction_np, staffing_np, staffing_en,
                     services_json, witnesses_json, custom_clauses_np, custom_clauses_en, status, created_by)
-                VALUES (:company_id, :client_id, :agreement_no, :purpose_en, :purpose_np,
+                VALUES (:company_id, :client_id, :contract_id, :agreement_no, :purpose_en, :purpose_np,
                     :first_party_name_en, :first_party_name_np, :first_party_address, :first_party_reg_no, :first_party_signatory, :first_party_position,
                     :second_party_name_en, :second_party_name_np, :second_party_address, :second_party_reg_no, :second_party_signatory, :second_party_position,
                     :agreement_date_bs, :effective_date, :effective_date_bs, :duration_months, :trial_months,
@@ -198,7 +223,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $agreementId = (int) db()->lastInsertId();
             log_activity('service_agreement', $agreementId, 'created', 'Service agreement ' . $params['agreement_no'] . ' drafted.', $userId);
         }
-        flash('success', 'Agreement saved. Use Print to produce the Nepali, English, or bilingual document.');
+        // Merge-back: the agreement IS the contract's document, so keep the
+        // contract wiring (client, dates, value, status) aligned with it.
+        if ($contract !== null) {
+            $syncStart = $params['effective_date'] ?: ((string) ($contract['start_date'] ?? '') ?: null);
+            $syncEnd = $syncStart !== null
+                ? date('Y-m-d', strtotime($syncStart . ' +' . (int) $params['duration_months'] . ' months -1 day'))
+                : ((string) ($contract['end_date'] ?? '') ?: null);
+            $trialMonths = (int) $params['trial_months'];
+            $regularMonths = max(0, (int) $params['duration_months'] - $trialMonths);
+            $syncValue = round((float) $params['fee_trial'] * $trialMonths + (float) $params['fee_monthly'] * $regularMonths, 2);
+            $syncStatus = (string) $contract['status'];
+            if ($params['status'] === 'final' && $syncStatus === 'draft') {
+                $syncStatus = 'active';
+            }
+            db()->prepare("UPDATE service_contracts SET start_date = :start_date, end_date = :end_date,
+                    total_value = :total_value, billing_cycle = COALESCE(NULLIF(billing_cycle, ''), 'monthly'), status = :status
+                WHERE id = :id AND company_id = :cid")->execute([
+                'start_date' => $syncStart,
+                'end_date' => $syncEnd,
+                'total_value' => $syncValue,
+                'status' => $syncStatus,
+                'id' => $contractId,
+                'cid' => $companyId,
+            ]);
+            log_activity('service_contract', $contractId, 'agreement_synced', 'Contract period, value and status synced from agreement ' . $params['agreement_no'] . '.', $userId);
+            flash('success', 'Agreement saved and contract ' . $contract['contract_no'] . ' updated (period, value' . ($syncStatus !== (string) $contract['status'] ? ', activated' : '') . '). Use Print for the bilingual document.');
+        } else {
+            flash('success', 'Agreement saved. Use Print to produce the Nepali, English, or bilingual document.');
+        }
         redirect('admin/service-agreements.php?edit=' . $agreementId);
     }
 
@@ -229,9 +282,53 @@ if ($editId > 0) {
     $editStmt->execute(['id' => $editId, 'cid' => $companyId]);
     $edit = $editStmt->fetch() ?: null;
 }
-// Prefill the first party from a chosen client (?client=ID on a fresh form).
+// Opened from the Work Portal contracts view: ?contract_id=N edits (or starts)
+// THE agreement of that contract, inheriting its client, number and terms.
+$linkedContract = null;
+$linkedContractId = $edit !== null ? (int) ($edit['contract_id'] ?? 0) : (int) ($_GET['contract_id'] ?? 0);
+if ($edit === null && $linkedContractId > 0) {
+    $alreadyStmt = db()->prepare('SELECT id FROM service_agreements WHERE contract_id = :contract_id AND company_id = :cid');
+    $alreadyStmt->execute(['contract_id' => $linkedContractId, 'cid' => $companyId]);
+    $alreadyId = (int) $alreadyStmt->fetchColumn();
+    if ($alreadyId > 0) {
+        redirect('admin/service-agreements.php?edit=' . $alreadyId);
+    }
+}
+if ($linkedContractId > 0) {
+    $contractStmt = db()->prepare('SELECT * FROM service_contracts WHERE id = :id AND company_id = :cid');
+    $contractStmt->execute(['id' => $linkedContractId, 'cid' => $companyId]);
+    $linkedContract = $contractStmt->fetch() ?: null;
+    if ($linkedContract === null && $edit === null) {
+        flash('error', 'Contract not found for this company.');
+        redirect('admin/workspace.php?view=contracts');
+    }
+}
+// Contract-derived defaults for a fresh agreement form.
+$contractDefaults = [];
+if ($edit === null && $linkedContract !== null) {
+    $months = 24;
+    if (!empty($linkedContract['start_date']) && !empty($linkedContract['end_date'])) {
+        $spanDays = (strtotime((string) $linkedContract['end_date']) - strtotime((string) $linkedContract['start_date'])) / 86400;
+        $months = max(1, (int) round($spanDays / 30.44));
+    }
+    $contractDefaults = [
+        'agreement_no' => (string) $linkedContract['contract_no'],
+        'purpose_en' => (string) $linkedContract['title'],
+        'effective_date' => (string) ($linkedContract['start_date'] ?? ''),
+        'duration_months' => $months,
+    ];
+    $cycle = strtolower(trim((string) ($linkedContract['billing_cycle'] ?? '')));
+    if ((float) $linkedContract['total_value'] > 0 && ($cycle === '' || $cycle === 'monthly')) {
+        $contractDefaults['fee_monthly'] = round((float) $linkedContract['total_value'] / $months, 2);
+    }
+}
+// Prefill the first party from a chosen client (?client=ID on a fresh form),
+// or from the linked contract's client.
 $prefillClient = null;
 $prefillClientId = (int) ($_GET['client'] ?? 0);
+if ($prefillClientId <= 0 && $edit === null && $linkedContract !== null) {
+    $prefillClientId = (int) ($linkedContract['client_id'] ?? 0);
+}
 foreach ($clients as $clientRow) {
     if ((int) $clientRow['id'] === $prefillClientId) {
         $prefillClient = $clientRow;
@@ -240,20 +337,21 @@ foreach ($clients as $clientRow) {
 $services = $edit !== null ? (json_decode((string) ($edit['services_json'] ?? ''), true) ?: []) : sa_default_services();
 $witnesses = $edit !== null ? (json_decode((string) ($edit['witnesses_json'] ?? ''), true) ?: []) : [];
 
-$listStmt = db()->prepare('SELECT sa.*, cp.organization_name FROM service_agreements sa
+$listStmt = db()->prepare('SELECT sa.*, cp.organization_name, sc.contract_no AS linked_contract_no FROM service_agreements sa
     LEFT JOIN client_profiles cp ON cp.id = sa.client_id
+    LEFT JOIN service_contracts sc ON sc.id = sa.contract_id
     WHERE sa.company_id = :cid ORDER BY sa.id DESC LIMIT 100');
 $listStmt->execute(['cid' => $companyId]);
 $agreements = $listStmt->fetchAll();
 
-$pageTitle = 'Service Agreements';
-$pageSubtitle = 'Draft a customised bilingual (नेपाली + English) service agreement for each client before work begins — cover page, table of contents, chapters, annexures and signatures, print-ready.';
+$pageTitle = 'Contract Agreements';
+$pageSubtitle = 'Each Work Portal contract carries one customised bilingual (नेपाली + English) agreement — cover page, table of contents, chapters, annexures and signatures, print-ready. Saving syncs the contract\'s period, value and status.';
 $pageHero = ['icon' => 'contracts'];
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <section class="mbw-card">
-    <div class="mbw-card-head"><h2><?= $edit ? 'Edit Agreement — ' . e((string) $edit['agreement_no']) : 'Draft New Agreement' ?></h2>
+    <div class="mbw-card-head"><h2><?= $edit ? 'Edit Agreement — ' . e((string) $edit['agreement_no']) : 'Draft New Agreement' ?><?= $linkedContract !== null ? ' <span class="mbw-pill tone-blue">Contract ' . e((string) $linkedContract['contract_no']) . '</span>' : '' ?></h2>
         <div class="mbw-card-tools">
             <?php if (!$edit && $clients !== []): ?>
                 <form method="get" style="display:flex;gap:6px;align-items:center">
@@ -271,12 +369,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <a class="button" target="_blank" href="<?= e(url('admin/export-agreement.php?id=' . (int) $edit['id'] . '&lang=both')) ?>">Print Bilingual</a>
                 <a class="mbw-view-all" href="<?= e(url('admin/service-agreements.php')) ?>">New / Close</a>
             <?php endif; ?>
+            <a class="mbw-view-all" href="<?= e(url('admin/workspace.php?view=contracts')) ?>">← Contracts</a>
         </div>
     </div>
     <form method="post" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="save_agreement">
         <input type="hidden" name="agreement_id" value="<?= e((int) ($edit['id'] ?? 0)) ?>">
+        <input type="hidden" name="contract_id" value="<?= e($linkedContract !== null ? (int) $linkedContract['id'] : (int) ($edit['contract_id'] ?? 0)) ?>">
         <label>Client (optional link)
             <select name="client_id">
                 <option value="0">— not linked —</option>
@@ -285,8 +385,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </select>
         </label>
-        <label>Agreement no<input type="text" name="agreement_no" maxlength="60" value="<?= e($edit['agreement_no'] ?? '') ?>" placeholder="Auto if blank"></label>
-        <label>Purpose (English)<input type="text" name="purpose_en" maxlength="190" value="<?= e($edit['purpose_en'] ?? 'Accounting and Advisory Services') ?>" placeholder="Bookkeeping / Internal Audit / Consulting…"></label>
+        <label>Agreement no<input type="text" name="agreement_no" maxlength="60" value="<?= e($edit['agreement_no'] ?? ($contractDefaults['agreement_no'] ?? '')) ?>" placeholder="Auto if blank"></label>
+        <label>Purpose (English)<input type="text" name="purpose_en" maxlength="190" value="<?= e($edit['purpose_en'] ?? ($contractDefaults['purpose_en'] ?? 'Accounting and Advisory Services')) ?>" placeholder="Bookkeeping / Internal Audit / Consulting…"></label>
         <label>Purpose (नेपाली)<input type="text" name="purpose_np" maxlength="190" value="<?= e($edit['purpose_np'] ?? 'लेखा तथा परामर्श सेवा') ?>"></label>
 
         <div class="workspace-span-2"><strong style="font-size:13px;color:var(--mbw-heading)">First Party — प्रथम पक्ष (the client)</strong></div>
@@ -308,11 +408,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="workspace-span-2"><strong style="font-size:13px;color:var(--mbw-heading)">Dates, Term &amp; Fees — मिति, अवधि तथा शुल्क</strong></div>
         <label>Agreement date (BS)<input type="text" name="agreement_date_bs" maxlength="30" value="<?= e($edit['agreement_date_bs'] ?? '') ?>" placeholder="२०८३।०४।०४"></label>
         <label>Service start date (BS)<input type="text" name="effective_date_bs" maxlength="30" value="<?= e($edit['effective_date_bs'] ?? '') ?>" placeholder="२०८३।०४।१०"></label>
-        <label>Service start date (AD)<input type="date" name="effective_date" value="<?= e($edit['effective_date'] ?? '') ?>"></label>
-        <label>Duration (months)<input type="number" min="1" name="duration_months" value="<?= e((int) ($edit['duration_months'] ?? 24)) ?>"></label>
+        <label>Service start date (AD)<input type="date" name="effective_date" value="<?= e($edit['effective_date'] ?? ($contractDefaults['effective_date'] ?? '')) ?>"></label>
+        <label>Duration (months)<input type="number" min="1" name="duration_months" value="<?= e((int) ($edit['duration_months'] ?? ($contractDefaults['duration_months'] ?? 24))) ?>"></label>
         <label>Trial period (months, 0 = none)<input type="number" min="0" name="trial_months" value="<?= e((int) ($edit['trial_months'] ?? 1)) ?>"></label>
         <label>Trial-period monthly fee (Rs, excl. VAT)<input type="number" step="0.01" min="0" name="fee_trial" value="<?= e(number_format((float) ($edit['fee_trial'] ?? 15000), 2, '.', '')) ?>"></label>
-        <label>Regular monthly fee (Rs, excl. VAT)<input type="number" step="0.01" min="0" name="fee_monthly" value="<?= e(number_format((float) ($edit['fee_monthly'] ?? 35000), 2, '.', '')) ?>"></label>
+        <label>Regular monthly fee (Rs, excl. VAT)<input type="number" step="0.01" min="0" name="fee_monthly" value="<?= e(number_format((float) ($edit['fee_monthly'] ?? ($contractDefaults['fee_monthly'] ?? 35000)), 2, '.', '')) ?>"></label>
         <label>Payment within (days of following month)<input type="number" min="1" name="payment_days" value="<?= e((int) ($edit['payment_days'] ?? 7)) ?>"></label>
         <label>General termination notice (days)<input type="number" min="1" name="termination_notice_days" value="<?= e((int) ($edit['termination_notice_days'] ?? 3)) ?>"></label>
         <label>Breach cure period (days)<input type="number" min="1" name="cure_days" value="<?= e((int) ($edit['cure_days'] ?? 7)) ?>"></label>
@@ -373,7 +473,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php if ($agreements === []): ?><tr><td colspan="7">No agreements yet. Draft one for each client before work begins.</td></tr><?php endif; ?>
             <?php foreach ($agreements as $agreement): ?>
                 <tr>
-                    <td><strong><?= e((string) $agreement['agreement_no']) ?></strong></td>
+                    <td><strong><?= e((string) $agreement['agreement_no']) ?></strong><?= $agreement['linked_contract_no'] !== null ? '<br><small style="color:var(--mbw-muted)">Contract ' . e((string) $agreement['linked_contract_no']) . '</small>' : '' ?></td>
                     <td><?= e($agreement['first_party_name_en']) ?><?= $agreement['organization_name'] ? ' <small style="color:var(--mbw-muted)">(' . e($agreement['organization_name']) . ')</small>' : '' ?></td>
                     <td><?= e($agreement['purpose_en']) ?></td>
                     <td><?= e($agreement['agreement_date_bs'] ?? '—') ?></td>

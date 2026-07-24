@@ -1207,6 +1207,15 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Service agreements merged into work-portal contracts (migration 065)', static function (): void {
+        if (!accounting_repair_table_exists('service_agreements') || !accounting_repair_table_exists('service_contracts')) {
+            return;
+        }
+        accounting_repair_add_column('service_agreements', 'contract_id', '`contract_id` INT UNSIGNED DEFAULT NULL AFTER `client_id`');
+        accounting_repair_add_index('service_agreements', 'uq_agreements_contract', 'UNIQUE KEY `uq_agreements_contract` (`contract_id`)');
+        accounting_repair_add_constraint('service_agreements', 'fk_agreements_contract', '`fk_agreements_contract` FOREIGN KEY (`contract_id`) REFERENCES `service_contracts` (`id`) ON DELETE SET NULL');
+    });
+
     $run('Hospitality accounting — recipe costing, reference-only (migration 063)', static function (): void {
         if (!accounting_repair_table_exists('client_profiles')) {
             return;
