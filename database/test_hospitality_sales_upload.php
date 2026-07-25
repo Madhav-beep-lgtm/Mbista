@@ -169,6 +169,61 @@ $parsedOut = hospitality_sales_upload_parse($tmp, 'csv', $cid, $fyId, $settings)
 ok((int) $parsedOut['valid_count'] === 0 && str_contains((string) $parsedOut['rows'][0]['errors'][0], 'fiscal year'),
     'A date outside the fiscal year is rejected at row level');
 
+echo "\n7. Per-category ledger SET (sales + receivable + discount per category)\n";
+$lBarSales = $mkLedger('HSU-S4', 'Sales — Bar', 'revenue');
+$lBarRecv = $mkLedger('HSU-R2', 'Bar Receivable', 'asset');
+$lBarDisc = $mkLedger('HSU-D2', 'Bar Discount Allowed', 'expense');
+db()->prepare("INSERT INTO hospitality_sales_ledger_maps (company_id, map_type, match_value, display_value, sales_ledger_id, receivable_ledger_id, discount_ledger_id, active)
+        VALUES (:cid, 'category', :norm, 'Bar', :s, :r, :d, 1)")
+    ->execute(['cid' => $cid, 'norm' => hospitality_sales_norm('Bar'), 's' => $lBarSales, 'r' => $lBarRecv, 'd' => $lBarDisc]);
+
+$maps = hospitality_sales_ledger_maps($cid);
+$defaultRecv = hospitality_posting_ledger($cid, $lRecv);
+$defaultDisc = hospitality_posting_ledger($cid, $lDisc);
+$barSet = hospitality_resolve_sales_ledger($maps, $defaultLedger, 'Bar', 'Mojito', $defaultRecv, $defaultDisc);
+ok((int) $barSet['ledger_id'] === $lBarSales && (int) $barSet['receivable_ledger_id'] === $lBarRecv && (int) $barSet['discount_ledger_id'] === $lBarDisc,
+    'Category mapping resolves its COMPLETE ledger set (sales, receivable, discount)');
+ok($barSet['receivable_source'] === 'category' && $barSet['discount_source'] === 'category', 'receivable and discount come from the category row');
+$foodSet = hospitality_resolve_sales_ledger($maps, $defaultLedger, 'Food', 'Veg Chowmein', $defaultRecv, $defaultDisc);
+ok((int) $foodSet['receivable_ledger_id'] === $lRecv && $foodSet['receivable_source'] === 'default',
+    'A category without its own receivable falls back to the default ledger');
+
+$csvBar = "Date,Category,Item,Qty,Total Sales Amount,Discount\n"
+    . "2026-08-10,Bar,Mojito,4,2260,113\n"        // taxable 2000, VAT 260, discount 113 -> Bar trio
+    . "2026-08-10,Food,Veg Chowmein,2,1130,0\n";  // taxable 1000, VAT 130 -> Food sales + default receivable
+$tmp2 = tempnam(sys_get_temp_dir(), 'hsu') . '.csv';
+file_put_contents($tmp2, $csvBar);
+$parsedBar = hospitality_sales_upload_parse($tmp2, 'csv', $cid, $fyId, $settings);
+ok((int) $parsedBar['valid_count'] === 2, 'Category-set sheet parses cleanly');
+$resultBar = hospitality_post_sales_upload($cid, $fyId, $parsedBar, 'bar-day.csv', $actorId);
+ok($resultBar['ok'] === true, 'Category-set sheet posts: ' . ($resultBar['error'] ?? ''));
+$barVoucher = db()->query("SELECT * FROM vouchers WHERE company_id=$cid AND voucher_date='2026-08-10' AND source_type='hospitality_sales_upload'")->fetch();
+ok($barVoucher !== false, 'One voucher for the day');
+$barEntries = db()->query('SELECT ledger_id, entry_type, amount FROM voucher_entries WHERE voucher_id=' . (int) $barVoucher['id'])->fetchAll();
+$byLedger2 = [];
+foreach ($barEntries as $e) { $byLedger2[(int) $e['ledger_id']] = [(string) $e['entry_type'], (float) $e['amount']]; }
+ok(isset($byLedger2[$lBarRecv]) && $byLedger2[$lBarRecv][0] === 'debit' && near($byLedger2[$lBarRecv][1], 2147.0),
+    'Bar receivable ledger debited the BAR portion only (2260 - 113 = 2147)');
+ok(isset($byLedger2[$lRecv]) && $byLedger2[$lRecv][0] === 'debit' && near($byLedger2[$lRecv][1], 1130.0),
+    'Default receivable debited only the fallback category portion (1130)');
+ok(isset($byLedger2[$lBarDisc]) && $byLedger2[$lBarDisc][0] === 'debit' && near($byLedger2[$lBarDisc][1], 113.0),
+    'Bar discount ledger debited the bar discount');
+ok(isset($byLedger2[$lBarSales]) && $byLedger2[$lBarSales][0] === 'credit' && near($byLedger2[$lBarSales][1], 2000.0),
+    'Bar sales ledger credited the bar taxable (2000)');
+$drTotal = 0.0; $crTotal = 0.0;
+foreach ($barEntries as $e) { if ($e['entry_type'] === 'debit') { $drTotal += (float) $e['amount']; } else { $crTotal += (float) $e['amount']; } }
+ok(near($drTotal, $crTotal), 'Category-wise voucher still balances (Dr ' . $drTotal . ' = Cr ' . $crTotal . ')');
+
+echo "\n8. Config check treats defaults as fallback only\n";
+db()->prepare('UPDATE hospitality_settings SET post_receivable_ledger_id=NULL WHERE company_id=:cid')->execute(['cid' => $cid]);
+$settingsNoRecv = hospitality_settings($cid);
+$configErrors = hospitality_posting_config_errors($cid, $settingsNoRecv);
+ok($configErrors !== [], 'Warning shown while some categories still rely on the default receivable');
+db()->exec("UPDATE hospitality_sales_ledger_maps SET receivable_ledger_id=$lBarRecv WHERE company_id=$cid AND map_type='category'");
+ok(hospitality_posting_config_errors($cid, $settingsNoRecv) === [], 'No warning once every category carries its own receivable ledger');
+db()->prepare('UPDATE hospitality_settings SET post_receivable_ledger_id=:r WHERE company_id=:cid')->execute(['r' => $lRecv, 'cid' => $cid]);
+
+@unlink($tmp2);
 @unlink($tmp);
 hsu_cleanup();
 

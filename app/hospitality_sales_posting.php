@@ -59,12 +59,26 @@ function hospitality_posting_ledger(int $companyId, int $ledgerId): ?array
  */
 function hospitality_posting_config_errors(int $companyId, array $settings): array
 {
+    // The category mapping rows carry the real ledger sets; the settings
+    // ledgers are only a FALLBACK for categories without their own mapping.
     $errors = [];
-    if (hospitality_posting_ledger($companyId, (int) ($settings['post_sales_ledger_id'] ?? 0)) === null) {
-        $errors[] = 'Default Sales ledger is not set (used for categories without their own mapping).';
+    $maps = hospitality_sales_ledger_maps($companyId);
+    $categoryMaps = $maps['category'];
+    $hasDefaultSales = hospitality_posting_ledger($companyId, (int) ($settings['post_sales_ledger_id'] ?? 0)) !== null;
+    $hasDefaultReceivable = hospitality_posting_ledger($companyId, (int) ($settings['post_receivable_ledger_id'] ?? 0)) !== null;
+    if ($categoryMaps === [] && !$hasDefaultSales) {
+        $errors[] = 'Map each category to its ledgers below (sales · receivable · discount), or set a default Sales ledger as fallback.';
     }
-    if (hospitality_posting_ledger($companyId, (int) ($settings['post_receivable_ledger_id'] ?? 0)) === null) {
-        $errors[] = 'Receivable ledger is not set (debited with the day\'s collectable amount).';
+    if (!$hasDefaultReceivable) {
+        $missingReceivable = $categoryMaps === [];
+        foreach ($categoryMaps as $categoryMap) {
+            if ((int) ($categoryMap['receivable_ledger_id'] ?? 0) <= 0 || $categoryMap['receivable_ledger_name'] === null) {
+                $missingReceivable = true;
+            }
+        }
+        if ($missingReceivable) {
+            $errors[] = 'Every category needs a receivable ledger on its mapping (or set the default Receivable ledger as fallback).';
+        }
     }
     return $errors;
 }
@@ -72,9 +86,13 @@ function hospitality_posting_config_errors(int $companyId, array $settings): arr
 /** Mapping rows keyed for resolution: ['item' => [norm => row], 'category' => [norm => row]]. */
 function hospitality_sales_ledger_maps(int $companyId): array
 {
-    $stmt = db()->prepare('SELECT m.*, l.name AS ledger_name, l.code AS ledger_code
+    $stmt = db()->prepare('SELECT m.*, l.name AS ledger_name, l.code AS ledger_code,
+            lr.name AS receivable_ledger_name, lr.code AS receivable_ledger_code,
+            ld.name AS discount_ledger_name, ld.code AS discount_ledger_code
         FROM hospitality_sales_ledger_maps m
         INNER JOIN ledgers l ON l.id = m.sales_ledger_id AND l.company_id = m.company_id
+        LEFT JOIN ledgers lr ON lr.id = m.receivable_ledger_id AND lr.company_id = m.company_id AND lr.status = \'active\'
+        LEFT JOIN ledgers ld ON ld.id = m.discount_ledger_id AND ld.company_id = m.company_id AND ld.status = \'active\'
         WHERE m.company_id = :cid AND m.active = 1 AND l.status = \'active\'
         ORDER BY m.map_type ASC, m.display_value ASC');
     $stmt->execute(['cid' => $companyId]);
@@ -86,37 +104,65 @@ function hospitality_sales_ledger_maps(int $companyId): array
 }
 
 /**
- * Sales ledger for one sheet row. Priority: exact ITEM mapping, then the
- * row's CATEGORY mapping, then the default sales ledger. Returns
- * ['ledger_id', 'ledger_label', 'source' => 'item'|'category'|'default'] or
- * nulls when even the default is missing.
+ * The COMPLETE ledger set for one sheet row. The row's CATEGORY mapping
+ * carries sales + receivable + discount ledgers (an exact ITEM mapping may
+ * override the sales ledger only); the global default ledgers act purely as
+ * fallback for categories without their own mapping. Returns
+ * ['ledger_id', 'ledger_label', 'source', 'receivable_ledger_id',
+ *  'receivable_source', 'discount_ledger_id', 'discount_source'] with nulls
+ * where nothing (not even a default) covers the row.
  */
-function hospitality_resolve_sales_ledger(array $maps, ?array $defaultLedger, string $category, string $item): array
+function hospitality_resolve_sales_ledger(array $maps, ?array $defaultLedger, string $category, string $item, ?array $defaultReceivable = null, ?array $defaultDiscount = null): array
 {
+    $categoryMap = $maps['category'][hospitality_sales_norm($category)] ?? null;
+
+    $salesLedgerId = null;
+    $salesLabel = null;
+    $salesSource = null;
     $itemMap = $maps['item'][hospitality_sales_norm($item)] ?? null;
     if ($itemMap !== null) {
-        return [
-            'ledger_id' => (int) $itemMap['sales_ledger_id'],
-            'ledger_label' => $itemMap['ledger_name'] . ' (' . $itemMap['ledger_code'] . ')',
-            'source' => 'item',
-        ];
+        $salesLedgerId = (int) $itemMap['sales_ledger_id'];
+        $salesLabel = $itemMap['ledger_name'] . ' (' . $itemMap['ledger_code'] . ')';
+        $salesSource = 'item';
+    } elseif ($categoryMap !== null) {
+        $salesLedgerId = (int) $categoryMap['sales_ledger_id'];
+        $salesLabel = $categoryMap['ledger_name'] . ' (' . $categoryMap['ledger_code'] . ')';
+        $salesSource = 'category';
+    } elseif ($defaultLedger !== null) {
+        $salesLedgerId = (int) $defaultLedger['id'];
+        $salesLabel = $defaultLedger['name'] . ' (' . $defaultLedger['code'] . ')';
+        $salesSource = 'default';
     }
-    $categoryMap = $maps['category'][hospitality_sales_norm($category)] ?? null;
-    if ($categoryMap !== null) {
-        return [
-            'ledger_id' => (int) $categoryMap['sales_ledger_id'],
-            'ledger_label' => $categoryMap['ledger_name'] . ' (' . $categoryMap['ledger_code'] . ')',
-            'source' => 'category',
-        ];
+
+    $receivableLedgerId = null;
+    $receivableSource = null;
+    if ($categoryMap !== null && (int) ($categoryMap['receivable_ledger_id'] ?? 0) > 0 && $categoryMap['receivable_ledger_name'] !== null) {
+        $receivableLedgerId = (int) $categoryMap['receivable_ledger_id'];
+        $receivableSource = 'category';
+    } elseif ($defaultReceivable !== null) {
+        $receivableLedgerId = (int) $defaultReceivable['id'];
+        $receivableSource = 'default';
     }
-    if ($defaultLedger !== null) {
-        return [
-            'ledger_id' => (int) $defaultLedger['id'],
-            'ledger_label' => $defaultLedger['name'] . ' (' . $defaultLedger['code'] . ')',
-            'source' => 'default',
-        ];
+
+    $discountLedgerId = null;
+    $discountSource = null;
+    if ($categoryMap !== null && (int) ($categoryMap['discount_ledger_id'] ?? 0) > 0 && $categoryMap['discount_ledger_name'] !== null) {
+        $discountLedgerId = (int) $categoryMap['discount_ledger_id'];
+        $discountSource = 'category';
+    } elseif ($defaultDiscount !== null) {
+        $discountLedgerId = (int) $defaultDiscount['id'];
+        $discountSource = 'default';
     }
-    return ['ledger_id' => null, 'ledger_label' => null, 'source' => null];
+
+    return [
+        'ledger_id' => $salesLedgerId,
+        'ledger_label' => $salesLabel,
+        'source' => $salesSource,
+        'receivable_ledger_id' => $receivableLedgerId,
+        'receivable_source' => $receivableSource,
+        'discount_ledger_id' => $discountLedgerId,
+        'discount_source' => $discountSource,
+    ];
 }
 
 /** Map the sheet's header row to column indexes for the sales layout. */
@@ -286,18 +332,18 @@ function hospitality_sales_upload_parse(string $path, string $extension, int $co
         }
         $lineTotal = round($taxable + $vat, 2);
 
-        $resolved = hospitality_resolve_sales_ledger($maps, $defaultLedger, $category, $item);
+        $resolved = hospitality_resolve_sales_ledger($maps, $defaultLedger, $category, $item, $receivableLedger, $discountLedger);
         if ($resolved['ledger_id'] === null) {
-            $errors[] = 'No sales ledger: map the category "' . $category . '" (or the item) to a ledger, or set the default Sales ledger.';
+            $errors[] = 'No sales ledger: map the category "' . $category . '" below, or set the default Sales ledger as fallback.';
         }
         if ($vat > 0 && $vatLedger === null) {
             $errors[] = 'VAT ledger is not set in the posting setup.';
         }
-        if ($discount > 0 && $discountLedger === null) {
-            $errors[] = 'Discount ledger is not set in the posting setup.';
+        if ($discount > 0 && $resolved['discount_ledger_id'] === null) {
+            $errors[] = 'No discount ledger: set one on the category "' . $category . '" mapping, or set the default Discount ledger as fallback.';
         }
-        if ($receivableLedger === null) {
-            $errors[] = 'Receivable ledger is not set in the posting setup.';
+        if ($resolved['receivable_ledger_id'] === null) {
+            $errors[] = 'No receivable ledger: set one on the category "' . $category . '" mapping, or set the default Receivable ledger as fallback.';
         }
 
         $rows[] = [
@@ -316,6 +362,8 @@ function hospitality_sales_upload_parse(string $path, string $extension, int $co
             'ledger_id' => $resolved['ledger_id'],
             'ledger_label' => $resolved['ledger_label'],
             'ledger_source' => $resolved['source'],
+            'receivable_ledger_id' => $resolved['receivable_ledger_id'],
+            'discount_ledger_id' => $resolved['discount_ledger_id'],
             'errors' => $errors,
         ];
 
@@ -391,11 +439,6 @@ function hospitality_post_sales_upload(int $companyId, int $fiscalYearId, array 
 
     $settings = hospitality_settings($companyId);
     $vatLedger = hospitality_posting_ledger($companyId, (int) ($settings['post_vat_ledger_id'] ?? 0));
-    $discountLedger = hospitality_posting_ledger($companyId, (int) ($settings['post_discount_ledger_id'] ?? 0));
-    $receivableLedger = hospitality_posting_ledger($companyId, (int) ($settings['post_receivable_ledger_id'] ?? 0));
-    if ($receivableLedger === null) {
-        return ['ok' => false, 'error' => 'Receivable ledger is not set in the posting setup.'];
-    }
 
     // Staff accountants working in a client's books never self-post — the
     // same control the voucher import applies (vouchers go for approval).
@@ -442,36 +485,49 @@ function hospitality_post_sales_upload(int $companyId, int $fiscalYearId, array 
 
         $voucherCount = 0;
         foreach ($byDate as $date => $dayRows) {
+            // Per-category ledger sets: each category's totals hit ITS OWN
+            // sales / receivable / discount ledgers (defaults only as
+            // fallback), so the day's voucher shows category-wise lines.
             $dayTaxableByLedger = [];
+            $dayReceivableByLedger = [];
+            $dayDiscountByLedger = [];
             $dayVat = 0.0;
             $dayDiscount = 0.0;
-            $dayGross = 0.0;
+            $dayReceivable = 0.0;
             foreach ($dayRows as $row) {
                 $ledgerId = (int) $row['ledger_id'];
                 $dayTaxableByLedger[$ledgerId] = round(($dayTaxableByLedger[$ledgerId] ?? 0) + $row['taxable'], 2);
+                $recvLedgerId = (int) $row['receivable_ledger_id'];
+                $dayReceivableByLedger[$recvLedgerId] = round(($dayReceivableByLedger[$recvLedgerId] ?? 0) + $row['receivable'], 2);
+                $dayReceivable = round($dayReceivable + $row['receivable'], 2);
+                if ((float) $row['discount'] > 0) {
+                    $discLedgerId = (int) $row['discount_ledger_id'];
+                    $dayDiscountByLedger[$discLedgerId] = round(($dayDiscountByLedger[$discLedgerId] ?? 0) + $row['discount'], 2);
+                    $dayDiscount = round($dayDiscount + $row['discount'], 2);
+                }
                 $dayVat = round($dayVat + $row['vat'], 2);
-                $dayDiscount = round($dayDiscount + $row['discount'], 2);
-                $dayGross = round($dayGross + $row['line_total'], 2);
             }
-            $dayReceivable = round($dayGross - $dayDiscount, 2);
             if ($dayVat > 0 && $vatLedger === null) {
                 throw new RuntimeException('VAT ledger is not set in the posting setup.');
             }
-            if ($dayDiscount > 0 && $discountLedger === null) {
-                throw new RuntimeException('Discount ledger is not set in the posting setup.');
-            }
 
-            $entries = [[
-                'ledger_id' => (int) $receivableLedger['id'],
-                'entry_type' => 'debit',
-                'amount' => $dayReceivable,
-                'memo' => 'Daily hospitality sales receivable — ' . $date,
-            ]];
-            if ($dayDiscount > 0) {
+            $entries = [];
+            foreach ($dayReceivableByLedger as $ledgerId => $receivableAmount) {
+                if ($receivableAmount == 0.0) {
+                    continue;
+                }
                 $entries[] = [
-                    'ledger_id' => (int) $discountLedger['id'],
+                    'ledger_id' => (int) $ledgerId,
                     'entry_type' => 'debit',
-                    'amount' => $dayDiscount,
+                    'amount' => $receivableAmount,
+                    'memo' => 'Daily hospitality sales receivable — ' . $date,
+                ];
+            }
+            foreach ($dayDiscountByLedger as $ledgerId => $discountAmount) {
+                $entries[] = [
+                    'ledger_id' => (int) $ledgerId,
+                    'entry_type' => 'debit',
+                    'amount' => $discountAmount,
                     'memo' => 'Discount allowed on daily sales — ' . $date,
                 ];
             }

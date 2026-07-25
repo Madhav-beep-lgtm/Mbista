@@ -1399,6 +1399,16 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Hospitality per-category ledger set (migration 069)', static function (): void {
+        if (!accounting_repair_table_exists('hospitality_sales_ledger_maps')) {
+            return;
+        }
+        accounting_repair_add_column('hospitality_sales_ledger_maps', 'receivable_ledger_id', '`receivable_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `sales_ledger_id`');
+        accounting_repair_add_column('hospitality_sales_ledger_maps', 'discount_ledger_id', '`discount_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `receivable_ledger_id`');
+        accounting_repair_add_constraint('hospitality_sales_ledger_maps', 'fk_hosp_ledger_map_recv', '`fk_hosp_ledger_map_recv` FOREIGN KEY (`receivable_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL');
+        accounting_repair_add_constraint('hospitality_sales_ledger_maps', 'fk_hosp_ledger_map_disc', '`fk_hosp_ledger_map_disc` FOREIGN KEY (`discount_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL');
+    });
+
     $run('Hospitality accounting — recipe costing, reference-only (migration 063)', static function (): void {
         if (!accounting_repair_table_exists('client_profiles')) {
             return;
