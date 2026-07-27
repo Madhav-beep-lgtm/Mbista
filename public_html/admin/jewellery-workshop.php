@@ -568,18 +568,18 @@ jw_filter_bar_styles();
                 </select>
             </label>
             <label>Value (<?= e($sym) ?>)<input type="number" name="advance_value" step="0.01" min="0" value="0" required></label>
-            <label>Old gold item
-                <select name="advance_item_id">
-                    <option value="0">— cash advance —</option>
+            <label>Taken in item
+                <select name="advance_item_id" class="jw-metal-item" data-purity-target="adv">
+                    <option value="0" data-metal="0">— cash advance —</option>
                     <?php foreach ($items as $it): ?>
-                        <option value="<?= (int) $it['id'] ?>"><?= e($it['code'] . ' — ' . $it['name']) ?></option>
+                        <option value="<?= (int) $it['id'] ?>" data-metal="<?= (int) $it['metal_id'] ?>"><?= e($it['code'] . ' — ' . $it['name'] . ' · ' . $it['metal_name']) ?></option>
                     <?php endforeach; ?>
                 </select>
             </label>
             <label>Purity
-                <select name="advance_purity_id">
+                <select name="advance_purity_id" class="jw-metal-purity" data-purity-key="adv">
                     <?php foreach ($purities as $p): ?>
-                        <option value="<?= (int) $p['id'] ?>" <?= (int) ($editOrder['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
+                        <option value="<?= (int) $p['id'] ?>" data-metal="<?= (int) $p['metal_id'] ?>" <?= (int) ($editOrder['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
                     <?php endforeach; ?>
                 </select>
             </label>
@@ -620,18 +620,18 @@ jw_filter_bar_styles();
                 </select>
             </label>
             <label>Value (<?= e($sym) ?>)<input type="number" name="advance_value" step="0.01" min="0" max="<?= e((string) $advanceAvailable) ?>" value="<?= e((string) $advanceAvailable) ?>" required></label>
-            <label>Gold item
-                <select name="advance_item_id">
-                    <option value="0">— cash refund —</option>
+            <label>Refunded in item
+                <select name="advance_item_id" class="jw-metal-item" data-purity-target="ref">
+                    <option value="0" data-metal="0">— cash refund —</option>
                     <?php foreach ($items as $it): ?>
-                        <option value="<?= (int) $it['id'] ?>"><?= e($it['code'] . ' — ' . $it['name']) ?></option>
+                        <option value="<?= (int) $it['id'] ?>" data-metal="<?= (int) $it['metal_id'] ?>"><?= e($it['code'] . ' — ' . $it['name'] . ' · ' . $it['metal_name']) ?></option>
                     <?php endforeach; ?>
                 </select>
             </label>
             <label>Purity
-                <select name="advance_purity_id">
+                <select name="advance_purity_id" class="jw-metal-purity" data-purity-key="ref">
                     <?php foreach ($purities as $p): ?>
-                        <option value="<?= (int) $p['id'] ?>" <?= (int) ($editOrder['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
+                        <option value="<?= (int) $p['id'] ?>" data-metal="<?= (int) $p['metal_id'] ?>" <?= (int) ($editOrder['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
                     <?php endforeach; ?>
                 </select>
             </label>
@@ -930,7 +930,13 @@ jw_filter_bar_styles();
                     <tr><td>Wastage (fine)</td><td class="is-numeric"><?= $fmt($receivePreview['wastage_fine'], 4) ?></td></tr>
                     <tr><td>Allowed at <?= $fmt((float) $receiveTarget['wastage_allowed_pct'], 3) ?>%</td><td class="is-numeric"><?= $fmt($receivePreview['allowed_fine'], 4) ?></td></tr>
                     <tr><td><strong>Excess wastage (fine)</strong></td><td class="is-numeric"><strong><?= $fmt($receivePreview['excess_fine'], 4) ?></strong></td></tr>
+                    <?php if ((float) ($receivePreview['surplus_fine'] ?? 0) > 0.00005): ?>
+                        <tr><td>Metal the kaligad added (fine)</td><td class="is-numeric"><?= $fmt((float) $receivePreview['surplus_fine'], 4) ?></td></tr>
+                    <?php endif; ?>
                     <tr><td>Making charge</td><td class="is-numeric"><?= e($sym) ?><?= $fmt($receivePreview['making_amount']) ?></td></tr>
+                    <?php if ((float) ($receivePreview['surplus_amount'] ?? 0) > 0.005): ?>
+                        <tr><td>Bought from the kaligad</td><td class="is-numeric">+ <?= e($sym) ?><?= $fmt((float) $receivePreview['surplus_amount']) ?></td></tr>
+                    <?php endif; ?>
                     <tr><td>Recovered from wages</td><td class="is-numeric">− <?= e($sym) ?><?= $fmt($receivePreview['recovery_amount']) ?></td></tr>
                     <tr><td><strong>Net payable to the kaligad</strong></td><td class="is-numeric"><strong><?= e($sym) ?><?= $fmt($receivePreview['net_payable']) ?></strong><?= $receivePreview['net_payable'] < 0 ? ' <span class="mbw-pill tone-red">Kaligad owes the shop</span>' : '' ?></td></tr>
                 </tbody>
@@ -1191,6 +1197,36 @@ jw_filter_bar_styles();
     <?php endif; ?>
 <?php endif; ?>
 
+<script>
+// An advance or a refund can be taken in ANY item the shop deals in — old
+// gold, silver, a diamond — and the engine refuses a purity that does not
+// belong to the chosen item's metal. So the purity list follows the item
+// instead of offering every purity in the shop and failing on save.
+(function () {
+    function sync(itemSelect) {
+        var key = itemSelect.getAttribute("data-purity-target");
+        var purity = document.querySelector('.jw-metal-purity[data-purity-key="' + key + '"]');
+        if (!purity) { return; }
+        if (!purity.jwOptions) {
+            purity.jwOptions = Array.prototype.slice.call(purity.options);
+        }
+        var chosen = itemSelect.options[itemSelect.selectedIndex];
+        var metal = chosen ? chosen.getAttribute("data-metal") : "0";
+        purity.innerHTML = "";
+        purity.jwOptions.forEach(function (option) {
+            // No item chosen means a cash advance: the purity is not used, so
+            // every one is left in place rather than emptying the control.
+            if (!metal || metal === "0" || option.getAttribute("data-metal") === metal) {
+                purity.appendChild(option);
+            }
+        });
+    }
+    Array.prototype.forEach.call(document.querySelectorAll(".jw-metal-item"), function (itemSelect) {
+        itemSelect.addEventListener("change", function () { sync(itemSelect); });
+        sync(itemSelect);
+    });
+})();
+</script>
 <?php
 // The grid buttons: add a row, remove a row.
 jw_line_grid_scripts();

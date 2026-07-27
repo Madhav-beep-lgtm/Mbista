@@ -387,6 +387,11 @@ function jw_wastage_split(float $issuedFine, float $receivedFine, float $allowed
         'wastage_fine' => $wastage,
         'allowed_fine' => min($allowed, $wastage),
         'excess_fine' => jw_round_weight(max(0.0, $wastage - $allowed)),
+        // The other direction. A kaligad short of metal tops up from his own
+        // and hands back a heavier piece; that gold is his, and the shop owes
+        // him for it. Wastage and surplus are mutually exclusive — one is
+        // always zero — so nothing downstream has to choose between them.
+        'surplus_fine' => jw_round_weight(max(0.0, $receivedFine - $issuedFine)),
     ];
 }
 
@@ -1484,6 +1489,10 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
     $making = jw_making_charge((string) $assignment['making_basis'], (float) $assignment['making_rate'], $receivedGross, $metalValue);
     $wastageAmount = jw_round_money($split['wastage_fine'] * $avgRate);
     $recovery = jw_round_money($split['excess_fine'] * $avgRate);
+    // Metal the kaligad put in himself, valued at the rate the issue was valued
+    // at so no gain or loss is invented by the day's rate. It is bought from
+    // him: it joins his wages, and the shop's stock rises by the same figure.
+    $surplusAmount = jw_round_money($split['surplus_fine'] * $avgRate);
 
     return [
         'ok' => true,
@@ -1494,12 +1503,14 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
         'wastage_fine' => $split['wastage_fine'],
         'allowed_fine' => $split['allowed_fine'],
         'excess_fine' => $split['excess_fine'],
+        'surplus_fine' => $split['surplus_fine'],
         'avg_fine_rate' => $avgRate,
         'received_value' => $metalValue,
         'making_amount' => $making,
         'wastage_amount' => $wastageAmount,
         'recovery_amount' => $recovery,
-        'net_payable' => jw_round_money($making - $recovery),
+        'surplus_amount' => $surplusAmount,
+        'net_payable' => jw_round_money($making - $recovery + $surplusAmount),
     ];
 }
 
@@ -1544,9 +1555,12 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
     if (!$preview['ok']) {
         return $preview;
     }
-    if ($preview['received_fine'] > $preview['issued_fine'] + 0.00005) {
-        return ['ok' => false, 'error' => 'More fine metal came back than went out. Record the extra as a separate purchase or adjustment.'];
-    }
+    // More fine metal coming back than went out used to be refused outright,
+    // with the advice to record the extra as a separate purchase. It IS a
+    // purchase — a kaligad short of metal tops up from his own — so the receipt
+    // records it as one instead of sending the shop away to do it by hand. The
+    // surplus is bought at the rate the issue was valued at and added to his
+    // wages; see the money legs below.
 
     $settings = jewellery_settings($companyId);
     $receiveDate = (string) ($input['receive_date'] ?? date('Y-m-d'));
@@ -1600,8 +1614,13 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
         // time — the value never left own stock. The same three legs still
         // hold: source and destination are then the same ledger and
         // jw_build_entries nets them down to just the wastage write-off.
+        // Stock rises by what the issue was worth, less anything lost as
+        // wastage and PLUS anything the kaligad added out of his own metal.
+        // That surplus is credited to him below as part of his wages, so the
+        // two sides move together and the voucher balances either way round.
         $issuedAmount = jw_round_money((float) $assignment['issued_amount']);
-        $returnedValue = jw_round_money($issuedAmount - $wastageAmount);
+        $surplusAmount = (float) ($preview['surplus_amount'] ?? 0);
+        $returnedValue = jw_round_money($issuedAmount - $wastageAmount + $surplusAmount);
         // Credit the LEDGER THE ISSUE ACTUALLY DEBITED, recorded on the
         // assignment at issue time. Re-deriving it here from the kaligad's
         // current name and current mappings is what created stranded debits
@@ -1672,7 +1691,7 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
             'qty_pieces' => round((float) ($input['qty_pieces'] ?? 0), 3),
             'gross_weight' => $receivedGross, 'fine_weight' => $preview['received_fine'],
             'rate' => $preview['avg_fine_rate'],
-            'amount' => jw_round_money((float) $assignment['issued_amount'] - $wastageAmount),
+            'amount' => $returnedValue,
             'source_type' => 'jewellery_order_receipt', 'source_id' => $receiptId, 'voucher_id' => $voucherId,
             'created_by' => $userId,
         ]);

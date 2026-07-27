@@ -778,6 +778,80 @@ foreach ($issuedOnly as $issuedRow) {
 ok(jewellery_assignments_list($cidA, ['karigar_id' => 999999]) === [],
     'Assignments: a kaligad with no issues returns none');
 
+echo "\n19. A kaligad who adds metal of his own is paid for it, not refused\n";
+// A kaligad short of gold tops up from his own and hands back a heavier piece.
+// That used to be refused outright — "record the extra as a separate purchase"
+// — which is exactly what the receipt now does itself.
+$surplusIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 4, 'issue_date' => '2026-10-01',
+    'wastage_allowed_pct' => 0, 'making_basis' => 'flat', 'making_rate' => 500,
+], $userA);
+ok($surplusIssue['ok'], 'Four tola go out' . ($surplusIssue['ok'] ? '' : ' — ' . $surplusIssue['error']));
+$surplusAid = (int) $surplusIssue['assignment_id'];
+
+// Five tola come back at the same purity: one tola of his own gold.
+$surplusPreview = jewellery_preview_receipt($cidA, $surplusAid, 5.0, $p22);
+ok(near($surplusPreview['surplus_fine'], 0.916, 0.002), 'The surplus is measured in fine: one tola at 916');
+ok($surplusPreview['wastage_fine'] < 0.00005, 'And it is not wastage — the two can never both be non-zero');
+ok($surplusPreview['surplus_amount'] > 0.005, 'It is valued at the rate the issue was valued at');
+ok(near($surplusPreview['net_payable'],
+    $surplusPreview['making_amount'] - $surplusPreview['recovery_amount'] + $surplusPreview['surplus_amount']),
+    'And it joins his wages — the shop bought that gold from him');
+
+$stockBefore = jw_item_balance($cidA, $chain, null, 'stock')['fine_weight'];
+$surplusReceipt = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => $surplusAid, 'received_gross_weight' => 5.0, 'received_purity_id' => $p22,
+    'qty_pieces' => 1, 'receive_date' => '2026-10-05',
+], $userA);
+ok($surplusReceipt['ok'], 'The receipt is accepted rather than refused'
+    . ($surplusReceipt['ok'] ? '' : ' — ' . $surplusReceipt['error']));
+
+$surplusVoucher = voucher_shape((int) $surplusReceipt['voucher_id']);
+ok(near($surplusVoucher['dr'], $surplusVoucher['cr']),
+    'Its voucher balances — the surplus is debited to stock and credited to the kaligad');
+ok(near(jw_item_balance($cidA, $chain, null, 'stock')['fine_weight'] - $stockBefore, 4.58, 0.02),
+    'Five tola of finished metal land in stock, all 4.58 fine of it');
+ok(near(jewellery_holder_metal_position($cidA, 'karigar', $kContractor)['fine_weight'],
+    jewellery_karigar_metal_balance($cidA, $kContractor)['held_fine']),
+    'And the kaligad is cleared of the issue, holding only what other jobs left him');
+
+echo "\n20. An advance can be taken in any metal, not only gold\n";
+// A customer pays an advance in whatever they walk in with — old gold, silver,
+// a diamond. The engine only asks that the purity belong to the item's metal.
+$silver = $q("SELECT id FROM jewellery_metals WHERE company_id=$cidA AND code='SILVER'");
+$pSilver = $q("SELECT id FROM jewellery_purities WHERE company_id=$cidA AND metal_id=$silver LIMIT 1");
+$silverItem = jewellery_save_item($cidA, ['code' => 'SIL-1', 'name' => 'Old Silver', 'item_type' => 'bullion',
+    'metal_id' => $silver, 'purity_id' => $pSilver, 'unit_id' => $tola], $userA);
+$advanceOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-10-06', 'party_id' => $customer, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'rate' => 150000, 'making_amount' => 2000],
+], $userA);
+
+$silverAdvance = jewellery_save_settlement($cidA, $fyA, [
+    'settlement_date' => '2026-10-06', 'party_id' => $customer, 'order_id' => $advanceOrder,
+    'is_advance' => 1, 'direction' => 'received', 'mode' => 'metal',
+    'item_id' => $silverItem, 'purity_id' => $pSilver, 'unit_id' => $tola,
+    'gross_weight' => 3, 'amount' => 6000,
+], [], $userA);
+ok($silverAdvance > 0, 'An advance is taken in SILVER, not gold');
+ok(jewellery_post_settlement($cidA, $silverAdvance, $userA)['ok'], 'And it posts');
+
+// The pairing is still enforced: a gold purity on a silver item is refused,
+// which is why the form now narrows the purity list to the item's metal.
+ok(threw(static fn () => jewellery_save_settlement($cidA, $fyA, [
+    'settlement_date' => '2026-10-06', 'party_id' => $customer, 'order_id' => $advanceOrder,
+    'is_advance' => 1, 'direction' => 'received', 'mode' => 'metal',
+    'item_id' => $silverItem, 'purity_id' => $p22, 'unit_id' => $tola,
+    'gross_weight' => 1, 'amount' => 2000,
+], [], $userA)), "A gold purity on a silver item is still refused");
+
+$advanceHeld = jewellery_order_advances($cidA, $advanceOrder);
+ok(near((float) $advanceHeld['metal_total'], 6000.0),
+    'The silver is held against the order the same way gold would be');
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";
