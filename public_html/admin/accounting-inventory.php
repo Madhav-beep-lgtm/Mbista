@@ -2,6 +2,10 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
+// The item master is shared with the Jewellery module, so this page has to be
+// able to read and complete the jewellery half of an item. Pure function
+// definitions — it does nothing unless the client has the module switched on.
+require_once __DIR__ . '/../../app/jewellery_stock.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -48,7 +52,7 @@ function inventory_valid_date(string $value): ?string
  */
 function inventory_mapping_purposes(): array
 {
-    return [
+    $purposes = [
         'inventory_asset'      => ['label' => 'Inventory Asset', 'expect' => 'asset'],
         'opening_equity'       => ['label' => 'Opening Balance Equity', 'expect' => 'equity'],
         'raw_material'         => ['label' => 'Raw Material Inventory', 'expect' => 'asset'],
@@ -68,6 +72,19 @@ function inventory_mapping_purposes(): array
         'tax_input'            => ['label' => 'Recoverable Input Tax', 'expect' => 'asset'],
         'tax_output'           => ['label' => 'Output Tax Payable', 'expect' => 'liability'],
     ];
+
+    // Jewellery writes into THIS table rather than keeping its own, so the
+    // purposes it adds (the revenue split, making charge, wastage, karigar and
+    // refinery accounts) belong on this screen too — otherwise a ledger set
+    // here and a ledger set in Jewellery → Settings would be two half-answers
+    // to the same question. Shown only where the module is actually in use.
+    if (function_exists('jewellery_extra_inventory_purposes')
+        && function_exists('jewellery_enabled_for_company')
+        && jewellery_enabled_for_company(current_company_id())) {
+        $purposes += jewellery_extra_inventory_purposes();
+    }
+
+    return $purposes;
 }
 
 /**
@@ -347,6 +364,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // separate mapping step. 0 = inherit the category/global default.
             foreach ((array) ($_POST['item_map'] ?? []) as $mapPurpose => $mapLedgerId) {
                 inventory_set_item_ledger($companyId, $savedItemId, (string) $mapPurpose, (int) $mapLedgerId, $userId);
+            }
+            // The item master is shared with the Jewellery module, so this form
+            // completes the jewellery half too — an item created here must not
+            // be invisible over there. Blank metal = a plain inventory item.
+            if (function_exists('jw_save_item_profile') && !empty($_POST['jw_enabled'])) {
+                jw_save_item_profile($companyId, $savedItemId, [
+                    'metal_id' => (int) ($_POST['jw_metal_id'] ?? 0),
+                    'purity_id' => (int) ($_POST['jw_purity_id'] ?? 0),
+                    'unit_id' => (int) ($_POST['jw_unit_id'] ?? 0),
+                    'jewellery_type' => (string) ($_POST['jw_type'] ?? 'ornament'),
+                    'gross_weight' => (float) ($_POST['jw_gross_weight'] ?? 0),
+                    'stone_weight' => (float) ($_POST['jw_stone_weight'] ?? 0),
+                    'making_charge_rate' => (float) ($_POST['jw_making_rate'] ?? 0),
+                    'vat_applicable' => isset($_POST['jw_vat_applicable']) ? 1 : 0,
+                    'vat_base' => (string) ($_POST['jw_vat_base'] ?? 'default'),
+                ]);
             }
             // Master opening stock must reach the BOOKS too (Dr stock ledger /
             // Cr opening equity), or the balance sheet starts life missing the
@@ -1517,10 +1550,17 @@ $allWarehouses = $allWarehousesStmt->fetchAll();
 $itemStmt = db()->prepare('
     SELECT i.*, l.code AS ledger_code,
            i.opening_qty + COALESCE(SUM(t.qty_in - t.qty_out), 0) AS on_hand,
-           COALESCE(SUM(t.amount), 0) AS movement_value
+           COALESCE(SUM(t.amount), 0) AS movement_value,
+           ' . (table_exists('jewellery_item_profiles') ? 'jwp.jewellery_type' : 'NULL') . ' AS jewellery_type
     FROM inventory_items i
     LEFT JOIN ledgers l ON l.id = i.ledger_id
     LEFT JOIN inventory_transactions t ON t.item_id = i.id
+    ' . (table_exists('jewellery_item_profiles')
+        // The item master is SHARED with the Jewellery module, so a gold chain
+        // is an inventory item like any other. Flag them here rather than hide
+        // them: their weight/purity detail is edited in Jewellery, and the list
+        // should say so instead of silently offering a half-usable edit form.
+        ? 'LEFT JOIN jewellery_item_profiles jwp ON jwp.inventory_item_id = i.id' : '') . '
     WHERE i.company_id = :company_id
     GROUP BY i.id
     ORDER BY i.status ASC, i.name ASC
@@ -1765,7 +1805,17 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                     <?php foreach ($valuationRows as $row): $v = $row['val']; ?>
                         <tr>
                             <td><?= e($row['sku']) ?></td>
-                            <td><?= e($row['name']) ?></td>
+                            <td>
+                                <?= e($row['name']) ?>
+                                <?php if (($row['jewellery_type'] ?? null) !== null): ?>
+                                    <?php // Shared item master: the weight and purity detail lives in Jewellery. ?>
+                                    <a class="mbw-pill tone-amber" style="margin-left:6px;text-decoration:none"
+                                       href="<?= e(url('admin/jewellery.php?view=items&edit=' . (int) $row['id'])) ?>"
+                                       title="This item is tracked by weight and purity in the Jewellery module">
+                                        <?= e(ucfirst((string) $row['jewellery_type'])) ?> →
+                                    </a>
+                                <?php endif; ?>
+                            </td>
                             <td><span class="mbw-pill tone-gray"><?= e(strtoupper(str_replace('_', ' ', (string) ($row['valuation_method'] ?? 'weighted_average')))) ?></span></td>
                             <td class="align-right"><?= e(number_format($v['qty'], 3)) ?></td>
                             <td class="align-right"><?= e(number_format($v['unit_cost'], 2)) ?></td>
@@ -1930,6 +1980,76 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                     </select>
                 </label>
             <?php endforeach; ?>
+            <?php
+            // Jewellery half of the SHARED item master. Only rendered where the
+            // module is on; leaving Metal blank keeps this a plain stock item.
+            $jwOn = function_exists('jewellery_enabled_for_company') && jewellery_enabled_for_company($companyId);
+            $jwProfile = null;
+            if ($jwOn && $editItem) {
+                $jwProfile = jewellery_item($companyId, (int) $editItem['id']);
+            }
+            ?>
+            <?php if ($jwOn): ?>
+                <input type="hidden" name="jw_enabled" value="1">
+                <label>Metal <span class="frm-optional">leave blank for a plain stock item</span>
+                    <select name="jw_metal_id" id="jwMetal">
+                        <option value="0">— not a jewellery item —</option>
+                        <?php foreach (jewellery_metals_list($companyId) as $jwMetal): ?>
+                            <option value="<?= (int) $jwMetal['id'] ?>" <?= (int) ($jwProfile['metal_id'] ?? 0) === (int) $jwMetal['id'] ? 'selected' : '' ?>><?= e($jwMetal['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Purity
+                    <select name="jw_purity_id" id="jwPurity">
+                        <?php foreach (jewellery_purities_list($companyId) as $jwPurity): ?>
+                            <option value="<?= (int) $jwPurity['id'] ?>" data-metal="<?= (int) $jwPurity['metal_id'] ?>" <?= (int) ($jwProfile['purity_id'] ?? 0) === (int) $jwPurity['id'] ? 'selected' : '' ?>><?= e($jwPurity['metal_code'] . ' · ' . $jwPurity['code']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Weight unit
+                    <select name="jw_unit_id">
+                        <?php foreach (jewellery_units_list($companyId) as $jwUnit): ?>
+                            <option value="<?= (int) $jwUnit['id'] ?>" <?= (int) ($jwProfile['unit_id'] ?? 0) === (int) $jwUnit['id'] ? 'selected' : '' ?>><?= e($jwUnit['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Jewellery type
+                    <select name="jw_type">
+                        <?php foreach (['ornament' => 'Ornament', 'bullion' => 'Bullion / raw metal', 'stone' => 'Stone', 'other' => 'Other'] as $jwK => $jwV): ?>
+                            <option value="<?= e($jwK) ?>" <?= (string) ($jwProfile['item_type'] ?? 'ornament') === $jwK ? 'selected' : '' ?>><?= e($jwV) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Gross weight<input type="number" step="0.0001" min="0" name="jw_gross_weight" value="<?= e((string) ($jwProfile['gross_weight'] ?? '0')) ?>"></label>
+                <label>Stone weight<input type="number" step="0.0001" min="0" name="jw_stone_weight" value="<?= e((string) ($jwProfile['stone_weight'] ?? '0')) ?>"></label>
+                <label>Making charge rate<input type="number" step="0.0001" min="0" name="jw_making_rate" value="<?= e((string) ($jwProfile['making_charge_rate'] ?? '0')) ?>"></label>
+                <label>VAT base
+                    <select name="jw_vat_base">
+                        <?php foreach (['default' => 'Company default', 'full_value' => 'Full line value', 'making_only' => 'Making charge only', 'stone_only' => 'Stone value only'] as $jwK => $jwV): ?>
+                            <option value="<?= e($jwK) ?>" <?= (string) ($jwProfile['vat_base'] ?? 'default') === $jwK ? 'selected' : '' ?>><?= e($jwV) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label class="frm-check"><input type="checkbox" name="jw_vat_applicable" <?= (int) ($jwProfile['vat_applicable'] ?? 0) === 1 ? 'checked' : '' ?>> VAT applicable (e.g. diamond)</label>
+                <script>
+                (function () {
+                    var metal = document.getElementById('jwMetal');
+                    var purity = document.getElementById('jwPurity');
+                    if (!metal || !purity) { return; }
+                    var all = Array.prototype.slice.call(purity.options);
+                    var preferred = purity.value;
+                    function sync() {
+                        purity.innerHTML = '';
+                        all.forEach(function (opt) {
+                            if (opt.getAttribute('data-metal') === metal.value) { purity.appendChild(opt); }
+                        });
+                        if (preferred) { purity.value = preferred; preferred = ''; }
+                    }
+                    metal.addEventListener('change', sync);
+                    sync();
+                })();
+                </script>
+            <?php endif; ?>
             <label class="workspace-span-2">Notes<textarea name="notes"><?= e($editItem['notes'] ?? '') ?></textarea></label>
             <div class="workspace-span-2"><button type="submit"><?= icon('services') ?>Save item</button><?php if ($editItem): ?> <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php')) ?>">Cancel edit</a><?php endif; ?></div>
         </form>

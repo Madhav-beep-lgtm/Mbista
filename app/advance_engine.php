@@ -14,17 +14,18 @@ declare(strict_types=1);
  * the advance. Every posting is idempotent on its (source_type, source_id).
  */
 
-/** "Advances from Customers" liability ledger for a company (found by code, else created). */
-function ensure_customer_advance_ledger(int $companyId): int
+/**
+ * The group customer advances live in — ONE definition, shared.
+ *
+ * The client-task advances here and the jewellery order advances are the same
+ * idea: money held for a customer before the work is delivered. They must not
+ * drift into two different corners of the chart of accounts, so both resolve
+ * their group through this function.
+ */
+function customer_advance_group_id(int $companyId): int
 {
-    if ($companyId <= 0 || !table_exists('ledgers')) {
+    if ($companyId <= 0 || !table_exists('ledger_groups')) {
         return 0;
-    }
-    $stmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND code = 'CUST-ADV' LIMIT 1");
-    $stmt->execute(['cid' => $companyId]);
-    $ledgerId = (int) ($stmt->fetchColumn() ?: 0);
-    if ($ledgerId > 0) {
-        return $ledgerId;
     }
     $groupStmt = db()->prepare("SELECT id FROM ledger_groups
         WHERE company_id = :cid AND is_active = 1 AND is_cash_or_bank = 0
@@ -32,13 +33,60 @@ function ensure_customer_advance_ledger(int $companyId): int
         ORDER BY (code = 'CURR_LIAB') DESC, id ASC LIMIT 1");
     $groupStmt->execute(['cid' => $companyId]);
     $groupId = (int) ($groupStmt->fetchColumn() ?: 0);
-    if ($groupId <= 0) {
-        db()->prepare("INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, 'Current Liabilities', 'current_liability', 0, 1)")
-            ->execute(['cid' => $companyId, 'code' => coa_next_group_code($companyId, 'current_liability')]);
-        $groupId = (int) db()->lastInsertId();
+    if ($groupId > 0) {
+        return $groupId;
     }
-    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:cid, :gid, 'CUST-ADV', 'Advances from Customers', 'liability', 1, 'active')")
-        ->execute(['cid' => $companyId, 'gid' => $groupId]);
+
+    db()->prepare("INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, 'Current Liabilities', 'current_liability', 0, 1)")
+        ->execute(['cid' => $companyId, 'code' => coa_next_group_code($companyId, 'current_liability')]);
+
+    return (int) db()->lastInsertId();
+}
+
+/**
+ * "Advances from Customers" liability ledger for a company (found by code, else created).
+ *
+ * Pass a party to get THAT customer's own advance ledger instead of the shared
+ * one. A single company-wide account answers "how much are we holding?" and
+ * nothing else — enough for a task advance raised against one invoice, useless
+ * at a jewellery counter where the question is always "how much of MINE are you
+ * holding for ME?". Both land in the same group either way, so the balance
+ * sheet still reads as one thing.
+ */
+function ensure_customer_advance_ledger(int $companyId, int $partyId = 0): int
+{
+    if ($companyId <= 0 || !table_exists('ledgers')) {
+        return 0;
+    }
+
+    $code = $partyId > 0 ? 'ADV-' . $partyId : 'CUST-ADV';
+    $stmt = db()->prepare('SELECT id FROM ledgers WHERE company_id = :cid AND code = :code LIMIT 1');
+    $stmt->execute(['cid' => $companyId, 'code' => $code]);
+    $ledgerId = (int) ($stmt->fetchColumn() ?: 0);
+    if ($ledgerId > 0) {
+        return $ledgerId;
+    }
+
+    $name = 'Advances from Customers';
+    if ($partyId > 0) {
+        $partyStmt = db()->prepare('SELECT name FROM accounting_parties WHERE id = :id AND company_id = :cid LIMIT 1');
+        $partyStmt->execute(['id' => $partyId, 'cid' => $companyId]);
+        $partyName = (string) ($partyStmt->fetchColumn() ?: '');
+        if ($partyName === '') {
+            return 0;
+        }
+        $name = 'Advance from ' . $partyName;
+    }
+
+    $groupId = customer_advance_group_id($companyId);
+    if ($groupId <= 0) {
+        return 0;
+    }
+    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status)
+        VALUES (:cid, :gid, :code, :name, 'liability', :sys, 'active')")
+        ->execute(['cid' => $companyId, 'gid' => $groupId, 'code' => $code, 'name' => $name,
+            'sys' => $partyId > 0 ? 0 : 1]);
+
     return (int) db()->lastInsertId();
 }
 

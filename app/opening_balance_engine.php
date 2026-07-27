@@ -472,8 +472,89 @@ function ob_review_batch(int $batchId, ?int $actorId = null): array
     return ['ok' => true];
 }
 
-/** Finalize a batch (after a balanced validation). */
-function ob_finalize_batch(int $batchId, ?int $actorId = null): array
+/**
+ * Park an unbalanced opening difference in the Opening Balance Adjustments
+ * account, so opening balances can be entered ONE SIDE AT A TIME.
+ *
+ * Entering openings is not the same job as entering a transaction. Last year's
+ * books already balanced; this year you are re-keying each ledger's closing
+ * figure, one at a time, over days. Demanding that the set balance after every
+ * ledger means it can never be entered incrementally at all.
+ *
+ * So the running difference goes to a single named suspense account. It shrinks
+ * on its own as the remaining ledgers are keyed in, and whatever is left at the
+ * end is a REAL difference to be found and adjusted — visible in one place
+ * rather than smeared across the accounts. Nothing is hidden: the line is
+ * labelled, it appears in the batch like any other, and it is recomputed (not
+ * accumulated) every time.
+ *
+ * Returns the difference that was parked.
+ */
+function ob_park_difference(int $batchId, ?int $actorId = null): array
+{
+    $batch = db()->query('SELECT * FROM opening_balance_batches WHERE id = ' . (int) $batchId)->fetch(PDO::FETCH_ASSOC);
+    if (!$batch) {
+        return ['ok' => false, 'error' => 'Batch not found.', 'difference' => 0.0];
+    }
+    if (in_array((string) $batch['status'], ['finalized', 'locked'], true)) {
+        return ['ok' => false, 'error' => 'This batch is already ' . $batch['status'] . '.', 'difference' => 0.0];
+    }
+    $companyId = (int) $batch['company_id'];
+    $ledgerId = function_exists('opening_balance_ledger_id') ? opening_balance_ledger_id($companyId) : 0;
+    if ($ledgerId <= 0) {
+        return ['ok' => false, 'error' => 'Could not open the Opening Balance Adjustments account.', 'difference' => 0.0];
+    }
+
+    // Clear any previous parking line FIRST, so the difference is measured
+    // against the real ledgers and re-running never compounds it.
+    db()->prepare("DELETE FROM opening_balance_lines WHERE batch_id = :bid AND line_key = 'opening_difference'")
+        ->execute(['bid' => $batchId]);
+
+    $v = ob_validate_batch($batchId);
+    $difference = ob_money((float) $v['total_debit'] - (float) $v['total_credit']);
+    if (abs($difference) < 0.005) {
+        return ['ok' => true, 'error' => '', 'difference' => 0.0,
+            'note' => 'The opening balances already agree — nothing to park.'];
+    }
+
+    // Debits exceed credits, so the plug is a credit, and vice versa.
+    $debit = $difference < 0 ? ob_money(-$difference) : 0.0;
+    $credit = $difference > 0 ? $difference : 0.0;
+
+    db()->prepare("INSERT INTO opening_balance_lines (batch_id, line_key, ledger_id, line_label, account_type, master_key,
+            is_applicable, system_opening_debit, system_opening_credit, final_opening_debit, final_opening_credit,
+            adjustment_reason)
+        VALUES (:bid, 'opening_difference', :lid, 'Opening balance difference (unallocated)', 'equity', 'equity',
+            1, :d1, :c1, :d2, :c2, :reason)")
+        ->execute([
+            'bid' => $batchId, 'lid' => $ledgerId,
+            'd1' => $debit, 'c1' => $credit, 'd2' => $debit, 'c2' => $credit,
+            'reason' => 'Difference between the opening balances keyed in so far. It shrinks as the remaining '
+                . 'ledgers are entered; whatever is left is a real difference to be adjusted.',
+        ]);
+
+    ob_refresh_batch_totals($batchId);
+    ob_write_audit($companyId, $batchId, null, (int) $batch['fiscal_year_id'], 'park_difference', null,
+        ['difference' => $difference], 'Opening difference parked in the Opening Balance Adjustments account', $actorId);
+
+    return ['ok' => true, 'error' => '', 'difference' => $difference, 'note' => ''];
+}
+
+/**
+ * Finalize a batch.
+ *
+ * By default an unbalanced batch is still REFUSED, and deliberately so: a
+ * difference must never reach the books because somebody clicked Finalize
+ * without reading it.
+ *
+ * Passing $parkDifference explicitly — which the screen does through its own
+ * clearly labelled button, never through the ordinary Finalize — parks the
+ * difference in the Opening Balance Adjustments account instead. That is the
+ * path that makes one-sided entry possible. Either way nothing is silent: the
+ * parked figure is named, audited, and sits in the trial balance until it is
+ * cleared.
+ */
+function ob_finalize_batch(int $batchId, ?int $actorId = null, bool $parkDifference = false): array
 {
     $batch = db()->query('SELECT * FROM opening_balance_batches WHERE id = ' . (int) $batchId)->fetch(PDO::FETCH_ASSOC);
     if (!$batch) {
@@ -483,13 +564,32 @@ function ob_finalize_batch(int $batchId, ?int $actorId = null): array
         return ['ok' => false, 'error' => 'This batch is already ' . $batch['status'] . '.'];
     }
     $v = ob_validate_batch($batchId);
+    $parked = 0.0;
     if (!$v['balanced']) {
-        return ['ok' => false, 'error' => 'Opening balances are not balanced (difference ' . number_format($v['difference'], 2) . '). Resolve the difference before finalizing — it is not posted silently to any account.'];
+        if (!$parkDifference) {
+            return ['ok' => false, 'error' => 'Opening balances are not balanced (difference ' . number_format($v['difference'], 2)
+                . '). Resolve the difference before finalizing — it is not posted silently to any account.'];
+        }
+        $park = ob_park_difference($batchId, $actorId);
+        if (!$park['ok']) {
+            return ['ok' => false, 'error' => $park['error']];
+        }
+        $parked = (float) $park['difference'];
+        $v = ob_validate_batch($batchId);
+        if (!$v['balanced']) {
+            return ['ok' => false, 'error' => 'The opening difference could not be parked; the batch still does not balance.'];
+        }
     }
     db()->prepare('UPDATE opening_balance_batches SET status = :s, finalized_by = :by, finalized_at = NOW() WHERE id = :id')
         ->execute(['s' => 'finalized', 'by' => $actorId ?: null, 'id' => $batchId]);
-    ob_write_audit((int) $batch['company_id'], $batchId, null, (int) $batch['fiscal_year_id'], 'finalize', null, ['total_debit' => $v['total_debit'], 'total_credit' => $v['total_credit']], 'Finalized (balanced)', $actorId);
-    return ['ok' => true];
+    ob_write_audit((int) $batch['company_id'], $batchId, null, (int) $batch['fiscal_year_id'], 'finalize', null,
+        ['total_debit' => $v['total_debit'], 'total_credit' => $v['total_credit'], 'parked_difference' => $parked],
+        $parked === 0.0 ? 'Finalized (balanced)'
+            : 'Finalized with ' . number_format(abs($parked), 2) . ' carried in Opening Balance Adjustments', $actorId);
+
+    return ['ok' => true, 'parked_difference' => $parked, 'note' => $parked === 0.0 ? ''
+        : 'Finalized. ' . number_format(abs($parked), 2) . ' is carried in Opening Balance Adjustments until the '
+            . 'remaining ledgers are entered or the difference is adjusted.'];
 }
 
 /** Lock a finalized batch. */

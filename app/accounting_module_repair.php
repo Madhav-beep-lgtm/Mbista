@@ -54,6 +54,57 @@ function accounting_repair_add_constraint(string $tableName, string $constraintN
     }
 }
 
+/**
+ * Replay a numbered migration file when its tables are missing.
+ *
+ * The older repair steps inline their DDL, which means the same CREATE TABLE
+ * exists twice and the two copies can drift. For large additions that is a
+ * real liability, so these steps read the migration file itself — one source
+ * of truth. `database/` is rsynced to the server by deploy/tasks.sh, so the
+ * file is present in production too.
+ *
+ * $sentinelTables is the fast path: when they all exist there is nothing to
+ * do and the file is never opened, so this costs nothing on a normal page
+ * load. The migrations it is used for are pure CREATE TABLE IF NOT EXISTS,
+ * so a replay is idempotent even if it does run.
+ */
+function accounting_repair_run_migration_file(string $migrationFile, array $sentinelTables): void
+{
+    foreach ($sentinelTables as $table) {
+        if (!accounting_repair_table_exists($table)) {
+            $missing = true;
+            break;
+        }
+    }
+    if (!isset($missing)) {
+        return;
+    }
+
+    $path = dirname(__DIR__) . '/database/migrations/' . $migrationFile;
+    if (!is_file($path)) {
+        return;
+    }
+    $sql = (string) file_get_contents($path);
+
+    // Drop whole-line SQL comments before splitting, so a stray semicolon in
+    // prose can never cut a statement in half.
+    $lines = [];
+    foreach (preg_split('/\R/', $sql) ?: [] as $line) {
+        if (preg_match('/^\s*--/', $line)) {
+            continue;
+        }
+        $lines[] = $line;
+    }
+
+    foreach (explode(';', implode("\n", $lines)) as $statement) {
+        $statement = trim($statement);
+        if ($statement === '') {
+            continue;
+        }
+        db()->exec($statement);
+    }
+}
+
 function accounting_module_required_tables(): array
 {
     return [
@@ -1741,6 +1792,639 @@ function accounting_module_repair_database(): array
                 CONSTRAINT `fk_hosp_upload_lines_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         }
+    });
+
+    // Ordered after the hospitality steps above: that is what guarantees the
+    // `hospitality_accounting_enabled` column the new flag is positioned after
+    // (with a fallback for databases that never ran the hospitality step).
+    $run('Jewellery accounting — masters, daily rates, ledger maps (migration 070)', static function (): void {
+        if (accounting_repair_table_exists('client_profiles')) {
+            $after = accounting_repair_column_exists('client_profiles', 'hospitality_accounting_enabled')
+                ? '`hospitality_accounting_enabled`'
+                : '`is_active`';
+            accounting_repair_add_column('client_profiles', 'jewellery_accounting_enabled', '`jewellery_accounting_enabled` TINYINT(1) NOT NULL DEFAULT 0 AFTER ' . $after);
+        }
+
+        if (!accounting_repair_table_exists('jewellery_units')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_units` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `code` VARCHAR(20) NOT NULL,
+                `name` VARCHAR(60) NOT NULL,
+                `grams` DECIMAL(18,6) NOT NULL DEFAULT 1.000000,
+                `is_base` TINYINT(1) NOT NULL DEFAULT 0,
+                `sort_order` INT NOT NULL DEFAULT 0,
+                `active` TINYINT(1) NOT NULL DEFAULT 1,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_jw_unit_code` (`company_id`, `code`),
+                KEY `idx_jw_units_active` (`company_id`, `active`),
+                CONSTRAINT `fk_jw_units_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        if (!accounting_repair_table_exists('jewellery_metals')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_metals` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `code` VARCHAR(20) NOT NULL,
+                `name` VARCHAR(80) NOT NULL,
+                `metal_kind` ENUM('metal','stone','other') NOT NULL DEFAULT 'metal',
+                `track_purity` TINYINT(1) NOT NULL DEFAULT 1,
+                `default_unit_id` INT UNSIGNED DEFAULT NULL,
+                `sort_order` INT NOT NULL DEFAULT 0,
+                `active` TINYINT(1) NOT NULL DEFAULT 1,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_jw_metal_code` (`company_id`, `code`),
+                KEY `idx_jw_metals_active` (`company_id`, `active`),
+                KEY `idx_jw_metals_unit` (`default_unit_id`),
+                CONSTRAINT `fk_jw_metals_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_metals_unit` FOREIGN KEY (`default_unit_id`) REFERENCES `jewellery_units` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        if (!accounting_repair_table_exists('jewellery_purities')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_purities` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `metal_id` INT UNSIGNED NOT NULL,
+                `code` VARCHAR(20) NOT NULL,
+                `name` VARCHAR(80) NOT NULL,
+                `fineness` DECIMAL(9,4) NOT NULL DEFAULT 1000.0000,
+                `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+                `sort_order` INT NOT NULL DEFAULT 0,
+                `active` TINYINT(1) NOT NULL DEFAULT 1,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_jw_purity_code` (`company_id`, `metal_id`, `code`),
+                KEY `idx_jw_purities_metal` (`metal_id`, `active`),
+                CONSTRAINT `fk_jw_purities_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_purities_metal` FOREIGN KEY (`metal_id`) REFERENCES `jewellery_metals` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        if (!accounting_repair_table_exists('jewellery_settings')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_settings` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `base_unit_id` INT UNSIGNED DEFAULT NULL,
+                `default_metal_id` INT UNSIGNED DEFAULT NULL,
+                `weight_precision` TINYINT UNSIGNED NOT NULL DEFAULT 4,
+                `rate_precision` TINYINT UNSIGNED NOT NULL DEFAULT 2,
+                `amount_precision` TINYINT UNSIGNED NOT NULL DEFAULT 2,
+                `vat_rate` DECIMAL(6,2) NOT NULL DEFAULT 13.00,
+                `default_vat_base` ENUM('full_value','making_only','stone_only') NOT NULL DEFAULT 'full_value',
+                `making_charge_basis` ENUM('per_unit_weight','percent_of_metal','flat') NOT NULL DEFAULT 'per_unit_weight',
+                `default_wastage_pct` DECIMAL(6,3) NOT NULL DEFAULT 0.000,
+                `rate_source` ENUM('manual','last_known') NOT NULL DEFAULT 'last_known',
+                `allow_negative_stock` TINYINT(1) NOT NULL DEFAULT 0,
+                `auto_post` TINYINT(1) NOT NULL DEFAULT 1,
+                `sale_no_prefix` VARCHAR(20) NOT NULL DEFAULT 'JS',
+                `purchase_no_prefix` VARCHAR(20) NOT NULL DEFAULT 'JP',
+                `order_no_prefix` VARCHAR(20) NOT NULL DEFAULT 'JO',
+                `issue_no_prefix` VARCHAR(20) NOT NULL DEFAULT 'JI',
+                `refinery_no_prefix` VARCHAR(20) NOT NULL DEFAULT 'JR',
+                `masters_seeded` TINYINT(1) NOT NULL DEFAULT 0,
+                `updated_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_jw_settings_company` (`company_id`),
+                KEY `idx_jw_settings_unit` (`base_unit_id`),
+                KEY `idx_jw_settings_metal` (`default_metal_id`),
+                CONSTRAINT `fk_jw_settings_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_settings_unit` FOREIGN KEY (`base_unit_id`) REFERENCES `jewellery_units` (`id`) ON DELETE SET NULL,
+                CONSTRAINT `fk_jw_settings_metal` FOREIGN KEY (`default_metal_id`) REFERENCES `jewellery_metals` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        if (!accounting_repair_table_exists('jewellery_daily_rates')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_daily_rates` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `rate_date` DATE NOT NULL,
+                `metal_id` INT UNSIGNED NOT NULL,
+                `purity_id` INT UNSIGNED NOT NULL,
+                `unit_id` INT UNSIGNED NOT NULL,
+                `rate_type` ENUM('market','sale','purchase') NOT NULL DEFAULT 'market',
+                `rate` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `note` VARCHAR(190) DEFAULT NULL,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_jw_rate` (`company_id`, `rate_date`, `metal_id`, `purity_id`, `rate_type`),
+                KEY `idx_jw_rates_lookup` (`company_id`, `metal_id`, `purity_id`, `rate_type`, `rate_date`),
+                KEY `idx_jw_rates_unit` (`unit_id`),
+                CONSTRAINT `fk_jw_rates_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_rates_metal` FOREIGN KEY (`metal_id`) REFERENCES `jewellery_metals` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_rates_purity` FOREIGN KEY (`purity_id`) REFERENCES `jewellery_purities` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_rates_unit` FOREIGN KEY (`unit_id`) REFERENCES `jewellery_units` (`id`) ON DELETE RESTRICT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        if (!accounting_repair_table_exists('jewellery_ledger_mappings')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_ledger_mappings` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `scope` ENUM('global','category','item') NOT NULL DEFAULT 'global',
+                `category` VARCHAR(120) DEFAULT NULL,
+                `item_id` INT UNSIGNED DEFAULT NULL,
+                `purpose` VARCHAR(60) NOT NULL,
+                `ledger_id` INT UNSIGNED NOT NULL,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_jw_mapping_scope` (`company_id`, `scope`, `category`, `item_id`, `purpose`),
+                KEY `idx_jw_mapping_lookup` (`company_id`, `purpose`, `scope`),
+                KEY `idx_jw_mapping_ledger` (`ledger_id`),
+                CONSTRAINT `fk_jw_mapping_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_mapping_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+    });
+
+    $run('Jewellery items, dual-unit stock ledger, opening stock (migration 071)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_metals')) {
+            return; // migration 070 has not landed yet
+        }
+
+        if (!accounting_repair_table_exists('jewellery_items')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_items` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `code` VARCHAR(60) NOT NULL,
+                `name` VARCHAR(190) NOT NULL,
+                `category` VARCHAR(120) DEFAULT NULL,
+                `item_type` ENUM('ornament','bullion','stone','other') NOT NULL DEFAULT 'ornament',
+                `metal_id` INT UNSIGNED NOT NULL,
+                `purity_id` INT UNSIGNED NOT NULL,
+                `unit_id` INT UNSIGNED NOT NULL,
+                `track_mode` ENUM('weight','piece') NOT NULL DEFAULT 'weight',
+                `gross_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `stone_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `net_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `wastage_pct` DECIMAL(6,3) NOT NULL DEFAULT 0.000,
+                `making_charge_basis` ENUM('default','per_unit_weight','percent_of_metal','flat') NOT NULL DEFAULT 'default',
+                `making_charge_rate` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `stone_value` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                `vat_applicable` TINYINT(1) NOT NULL DEFAULT 0,
+                `vat_base` ENUM('default','full_value','making_only','stone_only') NOT NULL DEFAULT 'default',
+                `hs_code` VARCHAR(40) DEFAULT NULL,
+                `hallmark` VARCHAR(60) DEFAULT NULL,
+                `design_no` VARCHAR(60) DEFAULT NULL,
+                `reorder_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `status` ENUM('active','inactive') NOT NULL DEFAULT 'active',
+                `notes` TEXT DEFAULT NULL,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `updated_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_jw_item_code` (`company_id`, `code`),
+                KEY `idx_jw_items_status` (`company_id`, `status`),
+                KEY `idx_jw_items_metal` (`company_id`, `metal_id`, `purity_id`),
+                KEY `idx_jw_items_category` (`company_id`, `category`),
+                KEY `idx_jw_items_purity` (`purity_id`),
+                KEY `idx_jw_items_unit` (`unit_id`),
+                CONSTRAINT `fk_jw_items_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_items_metal` FOREIGN KEY (`metal_id`) REFERENCES `jewellery_metals` (`id`) ON DELETE RESTRICT,
+                CONSTRAINT `fk_jw_items_purity` FOREIGN KEY (`purity_id`) REFERENCES `jewellery_purities` (`id`) ON DELETE RESTRICT,
+                CONSTRAINT `fk_jw_items_unit` FOREIGN KEY (`unit_id`) REFERENCES `jewellery_units` (`id`) ON DELETE RESTRICT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        if (!accounting_repair_table_exists('jewellery_stock_txns')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_stock_txns` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `fiscal_year_id` INT UNSIGNED DEFAULT NULL,
+                `item_id` INT UNSIGNED NOT NULL,
+                `txn_type` ENUM('opening','purchase','purchase_return','sale','sales_return','issue_karigar',
+                                'receive_karigar','issue_refinery','receive_refinery','wastage','adjustment','transfer')
+                           NOT NULL DEFAULT 'adjustment',
+                `direction` ENUM('in','out') NOT NULL,
+                `txn_date` DATE NOT NULL,
+                `ref_no` VARCHAR(120) DEFAULT NULL,
+                `holder_type` ENUM('stock','karigar','refinery','customer') NOT NULL DEFAULT 'stock',
+                `holder_id` INT UNSIGNED DEFAULT NULL,
+                `metal_id` INT UNSIGNED NOT NULL,
+                `purity_id` INT UNSIGNED NOT NULL,
+                `unit_id` INT UNSIGNED NOT NULL,
+                `qty_pieces` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+                `gross_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `fine_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `rate` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                `source_type` VARCHAR(40) DEFAULT NULL,
+                `source_id` INT UNSIGNED DEFAULT NULL,
+                `voucher_id` INT UNSIGNED DEFAULT NULL,
+                `party_id` INT UNSIGNED DEFAULT NULL,
+                `notes` VARCHAR(255) DEFAULT NULL,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_jw_stock_item_date` (`company_id`, `item_id`, `txn_date`),
+                KEY `idx_jw_stock_date` (`company_id`, `txn_date`),
+                KEY `idx_jw_stock_holder` (`company_id`, `holder_type`, `holder_id`),
+                KEY `idx_jw_stock_metal` (`company_id`, `metal_id`, `purity_id`, `txn_date`),
+                KEY `idx_jw_stock_source` (`company_id`, `source_type`, `source_id`),
+                KEY `idx_jw_stock_voucher` (`voucher_id`),
+                KEY `idx_jw_stock_party` (`party_id`),
+                KEY `idx_jw_stock_purity` (`purity_id`),
+                KEY `idx_jw_stock_unit` (`unit_id`),
+                CONSTRAINT `fk_jw_stock_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_stock_fy` FOREIGN KEY (`fiscal_year_id`) REFERENCES `fiscal_years` (`id`) ON DELETE SET NULL,
+                CONSTRAINT `fk_jw_stock_item` FOREIGN KEY (`item_id`) REFERENCES `jewellery_items` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_stock_metal` FOREIGN KEY (`metal_id`) REFERENCES `jewellery_metals` (`id`) ON DELETE RESTRICT,
+                CONSTRAINT `fk_jw_stock_purity` FOREIGN KEY (`purity_id`) REFERENCES `jewellery_purities` (`id`) ON DELETE RESTRICT,
+                CONSTRAINT `fk_jw_stock_unit` FOREIGN KEY (`unit_id`) REFERENCES `jewellery_units` (`id`) ON DELETE RESTRICT,
+                CONSTRAINT `fk_jw_stock_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        if (!accounting_repair_table_exists('jewellery_opening_stock')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_opening_stock` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `fiscal_year_id` INT UNSIGNED NOT NULL,
+                `item_id` INT UNSIGNED NOT NULL,
+                `as_on` DATE NOT NULL,
+                `qty_pieces` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+                `gross_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `fine_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `unit_id` INT UNSIGNED NOT NULL,
+                `rate` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                `status` ENUM('draft','posted') NOT NULL DEFAULT 'draft',
+                `voucher_id` INT UNSIGNED DEFAULT NULL,
+                `stock_txn_id` INT UNSIGNED DEFAULT NULL,
+                `notes` VARCHAR(255) DEFAULT NULL,
+                `posted_by` INT UNSIGNED DEFAULT NULL,
+                `posted_at` DATETIME DEFAULT NULL,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_jw_opening_item_fy` (`company_id`, `fiscal_year_id`, `item_id`),
+                KEY `idx_jw_opening_status` (`company_id`, `fiscal_year_id`, `status`),
+                KEY `idx_jw_opening_item` (`item_id`),
+                KEY `idx_jw_opening_unit` (`unit_id`),
+                KEY `idx_jw_opening_voucher` (`voucher_id`),
+                CONSTRAINT `fk_jw_opening_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_opening_fy` FOREIGN KEY (`fiscal_year_id`) REFERENCES `fiscal_years` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_opening_item` FOREIGN KEY (`item_id`) REFERENCES `jewellery_items` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_opening_unit` FOREIGN KEY (`unit_id`) REFERENCES `jewellery_units` (`id`) ON DELETE RESTRICT,
+                CONSTRAINT `fk_jw_opening_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        accounting_repair_add_constraint('jewellery_ledger_mappings', 'fk_jw_mapping_item',
+            '`fk_jw_mapping_item` FOREIGN KEY (`item_id`) REFERENCES `jewellery_items` (`id`) ON DELETE CASCADE');
+    });
+
+    $run('Jewellery purchases, sales, exchange and bill-wise accounting (migration 072)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_items') || !accounting_repair_table_exists('accounting_parties')) {
+            return; // migration 071 / the parties module has not landed yet
+        }
+        accounting_repair_run_migration_file('072_jewellery_trading.sql', [
+            'jewellery_purchases', 'jewellery_purchase_lines', 'jewellery_sales', 'jewellery_sale_lines',
+            'jewellery_sale_exchanges', 'jewellery_bills', 'jewellery_settlements', 'jewellery_settlement_allocations',
+        ]);
+    });
+
+    $run('Jewellery karigars, orders, assignments and refinery jobs (migration 073)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_sales')) {
+            return; // migration 072 has not landed yet (orders reference sales)
+        }
+        accounting_repair_run_migration_file('073_jewellery_workshop.sql', [
+            'jewellery_karigars', 'jewellery_orders', 'jewellery_order_assignments',
+            'jewellery_order_receipts', 'jewellery_refinery_jobs',
+        ]);
+    });
+
+    $run('Jewellery items merged into the shared item master (migration 074)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_metals') || !accounting_repair_table_exists('inventory_items')) {
+            return; // migration 070 / the inventory module has not landed yet
+        }
+        accounting_repair_run_migration_file('074_jewellery_shared_item_master.sql', ['jewellery_item_profiles']);
+        if (!accounting_repair_table_exists('jewellery_item_profiles')) {
+            return;
+        }
+
+        // Every table that pointed at the old jewellery_items master, and the
+        // constraint that held it there.
+        $children = [
+            ['jewellery_stock_txns', 'item_id', 'fk_jw_stock_item', 'RESTRICT'],
+            ['jewellery_opening_stock', 'item_id', 'fk_jw_opening_item', 'CASCADE'],
+            ['jewellery_purchase_lines', 'item_id', 'fk_jw_pline_item', 'RESTRICT'],
+            ['jewellery_sale_lines', 'item_id', 'fk_jw_sline_item', 'RESTRICT'],
+            ['jewellery_sale_exchanges', 'item_id', 'fk_jw_exch_item', 'RESTRICT'],
+            ['jewellery_settlements', 'item_id', 'fk_jw_settle_item', 'SET NULL'],
+            ['jewellery_orders', 'item_id', 'fk_jw_orders_item', 'SET NULL'],
+            ['jewellery_order_assignments', 'item_id', 'fk_jw_assign_item', 'RESTRICT'],
+            ['jewellery_order_receipts', 'received_item_id', 'fk_jw_receipts_item', 'RESTRICT'],
+            ['jewellery_refinery_jobs', 'item_id', 'fk_jw_refjobs_item', 'RESTRICT'],
+            ['jewellery_refinery_jobs', 'received_item_id', 'fk_jw_refjobs_ritem', 'SET NULL'],
+            ['jewellery_ledger_mappings', 'item_id', 'fk_jw_mapping_item', 'CASCADE'],
+        ];
+
+        // Nothing to do once jewellery_items is gone — this step already ran.
+        if (!accounting_repair_table_exists('jewellery_items')) {
+            return;
+        }
+
+        // 1. Move every jewellery item onto the shared master, remembering
+        //    where each one landed so the children can be repointed.
+        $idMap = [];
+        $rows = db()->query('SELECT * FROM jewellery_items ORDER BY id ASC')->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            $companyId = (int) $row['company_id'];
+            $unitCode = '';
+            if (accounting_repair_table_exists('jewellery_units')) {
+                $unitStmt = db()->prepare('SELECT code FROM jewellery_units WHERE id = :id LIMIT 1');
+                $unitStmt->execute(['id' => (int) $row['unit_id']]);
+                $unitCode = (string) ($unitStmt->fetchColumn() ?: '');
+            }
+            // A jewellery type maps onto the generic classification the core
+            // module reasons about; the precise one is kept on the profile.
+            $genericType = match ((string) $row['item_type']) {
+                'ornament' => 'finished_good',
+                'bullion', 'stone' => 'raw_material',
+                default => 'stock',
+            };
+
+            // The SKU must stay unique per company. A collision with an
+            // existing inventory item means that code is already taken, so
+            // suffix rather than fail the whole upgrade.
+            $sku = (string) $row['code'];
+            $clash = db()->prepare('SELECT COUNT(*) FROM inventory_items WHERE company_id = :cid AND sku = :sku');
+            $clash->execute(['cid' => $companyId, 'sku' => $sku]);
+            if ((int) $clash->fetchColumn() > 0) {
+                $sku = substr($sku, 0, 72) . '-JW' . (int) $row['id'];
+            }
+
+            db()->prepare('INSERT INTO inventory_items (company_id, ledger_id, sku, name, category, item_type,
+                    unit, hs_code, tax_rate, reorder_level, status, notes)
+                VALUES (:cid, :ledger, :sku, :name, :category, :type, :unit, :hs, :tax, :reorder, :status, :notes)')
+                ->execute([
+                    'cid' => $companyId,
+                    'ledger' => null,
+                    'sku' => $sku,
+                    'name' => (string) $row['name'],
+                    'category' => ($row['category'] ?? '') !== '' ? $row['category'] : null,
+                    'type' => $genericType,
+                    'unit' => $unitCode !== '' ? $unitCode : 'pcs',
+                    'hs' => ($row['hs_code'] ?? '') !== '' ? $row['hs_code'] : null,
+                    'tax' => 0,
+                    'reorder' => 0,
+                    'status' => (string) $row['status'] === 'inactive' ? 'inactive' : 'active',
+                    'notes' => $row['notes'] ?? null,
+                ]);
+            $newId = (int) db()->lastInsertId();
+            $idMap[(int) $row['id']] = $newId;
+
+            db()->prepare('INSERT INTO jewellery_item_profiles (inventory_item_id, company_id, metal_id, purity_id,
+                    unit_id, jewellery_type, track_mode, gross_weight, stone_weight, net_weight, wastage_pct,
+                    making_charge_basis, making_charge_rate, stone_value, vat_applicable, vat_base,
+                    hallmark, design_no, reorder_weight)
+                VALUES (:id, :cid, :metal, :purity, :unit, :jtype, :track, :gross, :stone, :net, :wastage,
+                    :basis, :rate, :svalue, :vat, :vbase, :hallmark, :design, :reorder)')
+                ->execute([
+                    'id' => $newId, 'cid' => $companyId,
+                    'metal' => (int) $row['metal_id'], 'purity' => (int) $row['purity_id'], 'unit' => (int) $row['unit_id'],
+                    'jtype' => (string) $row['item_type'], 'track' => (string) $row['track_mode'],
+                    'gross' => $row['gross_weight'], 'stone' => $row['stone_weight'], 'net' => $row['net_weight'],
+                    'wastage' => $row['wastage_pct'], 'basis' => (string) $row['making_charge_basis'],
+                    'rate' => $row['making_charge_rate'], 'svalue' => $row['stone_value'],
+                    'vat' => (int) $row['vat_applicable'], 'vbase' => (string) $row['vat_base'],
+                    'hallmark' => $row['hallmark'] ?? null, 'design' => $row['design_no'] ?? null,
+                    'reorder' => $row['reorder_weight'],
+                ]);
+        }
+
+        // 2. Repoint every child at the shared master. The constraint has to
+        //    come off before the ids can be rewritten, and the rewrite has to
+        //    happen before the new constraint can be trusted.
+        foreach ($children as [$table, $column, $constraint, $onDelete]) {
+            if (!accounting_repair_table_exists($table)) {
+                continue;
+            }
+            if (accounting_repair_constraint_exists($table, $constraint)) {
+                db()->exec('ALTER TABLE `' . $table . '` DROP FOREIGN KEY `' . $constraint . '`');
+            }
+            foreach ($idMap as $oldId => $newId) {
+                db()->prepare('UPDATE `' . $table . '` SET `' . $column . '` = :new WHERE `' . $column . '` = :old')
+                    ->execute(['new' => $newId, 'old' => $oldId]);
+            }
+            // Any id that survived the remap points at an item that no longer
+            // exists; null it rather than let the new constraint reject it.
+            db()->exec('UPDATE `' . $table . '` c LEFT JOIN inventory_items i ON i.id = c.`' . $column . '`
+                SET c.`' . $column . '` = NULL WHERE c.`' . $column . '` IS NOT NULL AND i.id IS NULL');
+            accounting_repair_add_constraint($table, $constraint,
+                '`' . $constraint . '` FOREIGN KEY (`' . $column . '`) REFERENCES `inventory_items` (`id`) ON DELETE ' . $onDelete);
+        }
+
+        // 3. The old master has no rows left worth keeping.
+        db()->exec('DROP TABLE IF EXISTS `jewellery_items`');
+    });
+
+    $run('Jewellery ledger mappings merged into the shared table (migration 075)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_ledger_mappings')
+            || !accounting_repair_table_exists('inventory_ledger_mappings')) {
+            return; // nothing to move, or already moved
+        }
+
+        // The jewellery purpose -> canonical purpose translation. Kept here
+        // rather than pulled from jewellery_engine.php so the repair layer
+        // stays self-contained and runnable before the module is loaded.
+        $canonical = [
+            'stock_metal' => 'inventory_asset',
+            'stock_finished' => 'finished_goods',
+            'sales_metal' => 'sales_revenue',
+            'vat_output' => 'tax_output',
+            'vat_input' => 'tax_input',
+            'stock_gain' => 'inventory_gain',
+            'stock_loss' => 'inventory_loss',
+        ];
+
+        foreach (db()->query('SELECT * FROM jewellery_ledger_mappings')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $purpose = $canonical[(string) $row['purpose']] ?? (string) $row['purpose'];
+            // An existing core mapping wins: it is the one the Inventory module
+            // has been posting through, so silently overwriting it would move
+            // live postings to a different ledger.
+            $exists = db()->prepare('SELECT COUNT(*) FROM inventory_ledger_mappings
+                WHERE company_id = :cid AND scope = :scope AND purpose = :p
+                  AND (category <=> :cat) AND (item_id <=> :iid)');
+            $exists->execute([
+                'cid' => (int) $row['company_id'], 'scope' => (string) $row['scope'], 'p' => $purpose,
+                'cat' => $row['category'], 'iid' => $row['item_id'],
+            ]);
+            if ((int) $exists->fetchColumn() > 0) {
+                continue;
+            }
+            // The ledger must still exist and still belong to that company.
+            $ledgerOk = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE id = :lid AND company_id = :cid');
+            $ledgerOk->execute(['lid' => (int) $row['ledger_id'], 'cid' => (int) $row['company_id']]);
+            if ((int) $ledgerOk->fetchColumn() === 0) {
+                continue;
+            }
+            db()->prepare('INSERT INTO inventory_ledger_mappings (company_id, scope, category, item_id, purpose, ledger_id, created_by)
+                VALUES (:cid, :scope, :cat, :iid, :p, :lid, :by)')
+                ->execute([
+                    'cid' => (int) $row['company_id'], 'scope' => (string) $row['scope'],
+                    'cat' => $row['category'], 'iid' => $row['item_id'], 'p' => $purpose,
+                    'lid' => (int) $row['ledger_id'], 'by' => $row['created_by'] ?? null,
+                ]);
+        }
+
+        db()->exec('DROP TABLE IF EXISTS `jewellery_ledger_mappings`');
+    });
+
+    $run('Jewellery opening stock merged into the shared item opening (migration 076)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_opening_stock')
+            || !accounting_repair_table_exists('inventory_items')) {
+            return; // already merged, or the module never landed
+        }
+
+        // While jewellery kept its own opening table, an item edited on the core
+        // Inventory form posted an `inventory_opening` voucher and the jewellery
+        // screen posted a `jewellery_opening` one — two vouchers for one
+        // opening. Move the numbers onto the item, drop the jewellery-side
+        // voucher and movement, and let the shared poster own it from here.
+        foreach (db()->query('SELECT * FROM jewellery_opening_stock ORDER BY id')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $companyId = (int) $row['company_id'];
+            $itemId = (int) $row['item_id'];
+            $owns = db()->prepare('SELECT COUNT(*) FROM inventory_items WHERE id = :id AND company_id = :cid');
+            $owns->execute(['id' => $itemId, 'cid' => $companyId]);
+            if ((int) $owns->fetchColumn() === 0) {
+                continue;
+            }
+            // Only carry a posted opening across; a draft was never in the books.
+            if ((string) $row['status'] === 'posted') {
+                db()->prepare('UPDATE inventory_items SET opening_qty = :qty, opening_amount = :amount
+                    WHERE id = :id AND company_id = :cid')
+                    ->execute([
+                        'qty' => (float) $row['gross_weight'], 'amount' => (float) $row['amount'],
+                        'id' => $itemId, 'cid' => $companyId,
+                    ]);
+            }
+            // Retire the jewellery-side voucher; the shared poster re-creates
+            // an equivalent one the first time the opening is saved or the item
+            // is edited, and leaving both would double-count the metal.
+            if ((int) ($row['voucher_id'] ?? 0) > 0) {
+                db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
+                    ->execute(['id' => (int) $row['voucher_id'], 'cid' => $companyId]);
+            }
+            // Re-point the metal movement at the shared source so it is found
+            // and replaced by the new path instead of being orphaned.
+            db()->prepare("UPDATE jewellery_stock_txns SET source_type = 'inventory_opening', source_id = :iid
+                WHERE company_id = :cid AND source_type = 'jewellery_opening' AND source_id = :oid")
+                ->execute(['iid' => $itemId, 'cid' => $companyId, 'oid' => (int) $row['id']]);
+        }
+
+        db()->exec('DROP TABLE IF EXISTS `jewellery_opening_stock`');
+    });
+
+    $run('Per-kaligad metal ledger (migration 077)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_karigars')) {
+            return;
+        }
+        accounting_repair_add_column('jewellery_karigars', 'metal_ledger_id',
+            '`metal_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `party_id`');
+        accounting_repair_add_index('jewellery_karigars', 'idx_jw_karigars_metal_ledger',
+            'KEY `idx_jw_karigars_metal_ledger` (`metal_ledger_id`)');
+        accounting_repair_add_constraint('jewellery_karigars', 'fk_jw_karigars_metal_ledger',
+            '`fk_jw_karigars_metal_ledger` FOREIGN KEY (`metal_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL');
+    });
+
+    $run('Remember the holder ledger an issue debited (migration 078)', static function (): void {
+        // Backfilling reads the issue voucher's own debit leg on an asset
+        // ledger — that IS the holder ledger that was used. Anything whose
+        // issue posted no voucher stays NULL, which correctly says the value
+        // never left the item's own stock.
+        $backfill = static function (string $table, string $alias): void {
+            if (!accounting_repair_table_exists('voucher_entries') || !accounting_repair_table_exists('ledgers')) {
+                return;
+            }
+            db()->exec("UPDATE `$table` $alias
+                JOIN `voucher_entries` e ON e.voucher_id = $alias.issue_voucher_id AND e.entry_type = 'debit'
+                JOIN `ledgers` l ON l.id = e.ledger_id AND l.type = 'asset'
+                SET $alias.metal_ledger_id = e.ledger_id
+                WHERE $alias.metal_ledger_id IS NULL AND $alias.issue_voucher_id IS NOT NULL");
+        };
+
+        foreach ([
+            ['jewellery_order_assignments', 'a', 'idx_jw_assign_metal_ledger', 'fk_jw_assign_metal_ledger'],
+            ['jewellery_refinery_jobs', 'j', 'idx_jw_refjobs_metal_ledger', 'fk_jw_refjobs_metal_ledger'],
+        ] as [$table, $alias, $index, $constraint]) {
+            if (!accounting_repair_table_exists($table)) {
+                continue;
+            }
+            accounting_repair_add_column($table, 'metal_ledger_id',
+                '`metal_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `issue_voucher_id`');
+            accounting_repair_add_index($table, $index, 'KEY `' . $index . '` (`metal_ledger_id`)');
+            accounting_repair_add_constraint($table, $constraint,
+                '`' . $constraint . '` FOREIGN KEY (`metal_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL');
+            $backfill($table, $alias);
+        }
+    });
+
+    $run('Tax framework (migration 079)', static function (): void {
+        accounting_repair_run_migration_file('079_jewellery_tax_framework.sql',
+            ['jewellery_taxes', 'jewellery_item_taxes', 'jewellery_line_taxes']);
+
+        // Seed the two taxes in force today into any company that has the
+        // module on and no tax register yet. Existing registers are never
+        // touched — a shop that retired one must not have it reinstated.
+        if (!accounting_repair_table_exists('jewellery_taxes') || !accounting_repair_table_exists('jewellery_settings')) {
+            return;
+        }
+        // This file is included by pages that have never heard of the jewellery
+        // module, so the engine has to be loaded here rather than assumed. It
+        // was assumed, and every one of those pages showed a repair warning.
+        if (!function_exists('jewellery_seed_taxes')) {
+            require_once __DIR__ . '/jewellery_engine.php';
+        }
+        $companies = db()->query('SELECT company_id FROM jewellery_settings')->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($companies as $companyId) {
+            jewellery_seed_taxes((int) $companyId);
+        }
+    });
+
+    $run('Order advances (migration 080)', static function (): void {
+        if (accounting_repair_table_exists('jewellery_settlements')) {
+            accounting_repair_add_column('jewellery_settlements', 'order_id',
+                '`order_id` INT UNSIGNED DEFAULT NULL AFTER `party_id`');
+            accounting_repair_add_column('jewellery_settlements', 'is_advance',
+                '`is_advance` TINYINT(1) NOT NULL DEFAULT 0 AFTER `order_id`');
+            accounting_repair_add_index('jewellery_settlements', 'idx_jw_settle_order',
+                'KEY `idx_jw_settle_order` (`company_id`, `order_id`)');
+            if (accounting_repair_table_exists('jewellery_orders')) {
+                accounting_repair_add_constraint('jewellery_settlements', 'fk_jw_settle_order',
+                    '`fk_jw_settle_order` FOREIGN KEY (`order_id`) REFERENCES `jewellery_orders` (`id`) ON DELETE SET NULL');
+            }
+        }
+        if (accounting_repair_table_exists('jewellery_sales')) {
+            accounting_repair_add_column('jewellery_sales', 'advance_amount',
+                '`advance_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `exchange_amount`');
+        }
+        if (accounting_repair_table_exists('accounting_parties')) {
+            accounting_repair_add_column('accounting_parties', 'advance_ledger_id',
+                '`advance_ledger_id` INT UNSIGNED DEFAULT NULL');
+            accounting_repair_add_index('accounting_parties', 'idx_parties_advance_ledger',
+                'KEY `idx_parties_advance_ledger` (`advance_ledger_id`)');
+        }
+    });
+
+    $run('Opening stock import staging (migration 081)', static function (): void {
+        accounting_repair_run_migration_file('081_opening_stock_import.sql',
+            ['inventory_opening_imports', 'inventory_opening_import_rows']);
     });
 
     return $errors;

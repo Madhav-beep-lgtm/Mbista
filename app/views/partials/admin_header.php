@@ -87,6 +87,8 @@ $headerPageIcons = [
     'payroll-overtime.php' => 'attendance', 'payroll-service-charge.php' => 'handshake',
     'payment-gateways.php' => 'card',
     'insights.php' => 'insights',
+    'jewellery.php' => 'coins', 'jewellery-trade.php' => 'coins',
+    'jewellery-workshop.php' => 'handshake', 'jewellery-reports.php' => 'reports',
 ];
 $headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php', 'payroll-overtime.php', 'payroll-service-charge.php'];
 $headerPayrollActive = in_array($headerScript, $headerPayrollScripts, true);
@@ -140,6 +142,54 @@ if ($headerHospitality) {
             . icon($hospIcon) . e($hospLabel) . '</a>';
     }
     $headerHospitalityMenu .= '</div></div>';
+}
+// Jewellery Accounting follows the same rule: client books only, Super Admin
+// activated, and the view permission on top.
+$headerJewellery = false;
+if ($headerIsClientBooks) {
+    require_once dirname(__DIR__, 2) . '/jewellery_engine.php';
+    $headerJewellery = jewellery_enabled_for_company((int) ($headerCompany['id'] ?? 0)) && user_can_do('jewellery', 'view');
+}
+// The module spans four pages, so "is this section open?" keys off the script
+// rather than a single filename.
+$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-reports.php'];
+$headerJewelleryActive = in_array($headerScript, $headerJewelleryScripts, true);
+$headerJewelleryView = (string) ($_GET['view'] ?? '');
+$headerJewelleryMenu = '';
+if ($headerJewellery) {
+    // [script, view, label, icon] — view '' means the page's own default.
+    $jewLinks = [
+        ['jewellery.php', 'dashboard', 'Dashboard', 'dashboard'],
+        ['jewellery.php', 'rates', 'Daily Rates', 'pie'],
+        ['jewellery.php', 'items', 'Items', 'box'],
+        ['jewellery.php', 'opening', 'Opening Stock', 'journal'],
+        ['jewellery.php', 'stock', 'Stock &amp; Metal Position', 'layers'],
+        ['jewellery-trade.php', 'purchases', 'Purchases', 'box'],
+        ['jewellery-trade.php', 'sales', 'Sales', 'receipt-voucher'],
+        ['jewellery-trade.php', 'bills', 'Bills &amp; Settlement', 'wallet'],
+        ['jewellery-workshop.php', 'orders', 'Orders', 'journal'],
+        ['jewellery-workshop.php', 'assignments', 'Kaligad Issue &amp; Receive', 'handshake'],
+        ['jewellery-workshop.php', 'delivery', 'Ready to Deliver', 'box'],
+        ['jewellery-workshop.php', 'karigars', 'Kaligads', 'teams'],
+        ['jewellery-workshop.php', 'refinery', 'Refinery', 'layers'],
+        ['jewellery-reports.php', 'summary', 'Reports', 'reports'],
+        ['jewellery.php', 'masters', 'Metals &amp; Units', 'scale'],
+        ['jewellery.php', 'settings', 'Settings', 'sliders'],
+    ];
+    // Each page's first tab is its default, so a bare URL still highlights.
+    $jewDefaults = ['jewellery.php' => 'dashboard', 'jewellery-trade.php' => 'purchases',
+        'jewellery-workshop.php' => 'orders', 'jewellery-reports.php' => 'summary'];
+    $headerJewelleryMenu = '<div class="mbw-nav-parent' . ($headerJewelleryActive ? ' is-open' : '') . '" data-nav-parent="jewellery">'
+        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerJewelleryActive ? 'true' : 'false') . '" class="' . ($headerJewelleryActive ? 'is-active' : '') . '">'
+        . icon('coins') . 'Jewellery Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
+    foreach ($jewLinks as [$jewScript, $jewView, $jewLabel, $jewIcon]) {
+        $isActive = $headerScript === $jewScript
+            && ($headerJewelleryView === $jewView
+                || ($headerJewelleryView === '' && ($jewDefaults[$jewScript] ?? '') === $jewView));
+        $headerJewelleryMenu .= '<a class="' . ($isActive ? 'is-active' : '') . '" href="' . e(url('admin/' . $jewScript . '?view=' . $jewView)) . '">'
+            . icon($jewIcon) . $jewLabel . '</a>';
+    }
+    $headerJewelleryMenu .= '</div></div>';
 }
 // A customer login inside its own books gets a reduced, books-only nav.
 $headerIsCustomer = (string) ($currentUser['role'] ?? '') === 'customer';
@@ -220,6 +270,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <span class="admin-nav-group">Hospitality</span>
                 <?= $headerHospitalityMenu ?>
             <?php endif; ?>
+            <?php if ($headerJewellery): ?>
+                <span class="admin-nav-group">Jewellery</span>
+                <?= $headerJewelleryMenu ?>
+            <?php endif; ?>
             <span class="admin-nav-group">Reports</span>
             <a class="<?= $headerScript === 'reports-center.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <span class="admin-nav-group">System</span>
@@ -285,6 +339,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     </div>
                 </div>
                 <?= $headerHospitality ? $headerHospitalityMenu : '' ?>
+                <?= $headerJewellery ? $headerJewelleryMenu : '' ?>
             <?php endif; ?>
 
             <span class="admin-nav-group">Reports &amp; Controls</span>

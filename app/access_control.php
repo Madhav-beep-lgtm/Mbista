@@ -879,6 +879,11 @@ function rbac_modules(): array
         // create = generate daily costing; adjust = controlled recalculation;
         // export = report downloads.
         'hospitality' => ['label' => 'Hospitality Costing',  'actions' => ['view', 'create', 'edit', 'adjust', 'export']],
+        // Jewellery vertical. view = pages and reports; edit = masters, rates,
+        // items, karigars and mappings; create = sales/purchases/orders/refinery
+        // entries; post = releasing those entries to the ledger; adjust =
+        // stock corrections and wastage overrides; export = report downloads.
+        'jewellery'  => ['label' => 'Jewellery Accounting', 'actions' => ['view', 'create', 'edit', 'post', 'adjust', 'export']],
         // Structured service agreements: edit = draft content; review/approve =
         // maker-checker workflow; issue = release to the client; manage =
         // templates, lifecycle overrides (terminate/supersede/archive) and the
@@ -978,6 +983,10 @@ function user_can_do(string $module, string $action, ?array $user = null): bool
             // Client admins run their own hospitality costing (reference only;
             // page gates additionally require the Super-Admin-set client flag).
             'hospitality' => ['view', 'create', 'edit', 'adjust', 'export'],
+            // Jewellery clients run their own shop. 'post' is listed, but the
+            // approver check above still gates it: an entry maker records the
+            // sale, an owner/approver releases it to the ledger.
+            'jewellery' => ['view', 'create', 'edit', 'post', 'adjust', 'export'],
         ];
 
         if (!$canApprove && in_array($action, ['approve', 'post'], true)) {

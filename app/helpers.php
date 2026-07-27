@@ -3006,6 +3006,18 @@ function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []
         'payroll_payment' => 'the Payroll module (the run would keep showing paid with no cash in the books — reopen the run for correction instead)',
         'payroll_advance' => 'the Payroll module (the advance register would keep a disbursement the books no longer show)',
         'payroll_advance_repay' => 'the Payroll module (the advance balance already reflects this repayment)',
+        // Every jewellery voucher backs a register row (a purchase, a sale and
+        // its stock movements, a bill, a karigar wage run) that would keep
+        // claiming a posting the ledger no longer has. Each is reversed from
+        // its own page, which rolls the register back in the same transaction.
+        'jewellery_opening' => 'the Jewellery module (the item\'s opening stock row backs it — unpost the opening from the Jewellery page instead)',
+        'jewellery_purchase' => 'the Jewellery module (its stock movements and bill back this posting — unpost the purchase instead)',
+        'jewellery_sale' => 'the Jewellery module (its stock movements, COGS and bill back this posting — unpost the sale instead)',
+        'jewellery_settlement' => 'the Jewellery module (the bills it settled would reopen with no matching entry — unpost the settlement instead)',
+        'jewellery_order_receipt' => 'the Jewellery module (the karigar receipt, its wastage and its wage bill back this posting — unpost the receipt instead)',
+        'jewellery_karigar_issue' => 'the Jewellery module (the karigar metal holding backs this posting — cancel the assignment instead)',
+        'jewellery_refinery_issue' => 'the Jewellery module (the refinery metal holding backs this posting — cancel the job instead)',
+        'jewellery_refinery_receive' => 'the Jewellery module (the refining loss and charges back this posting — reverse the job receipt instead)',
     ];
     $voucherSourceType = (string) ($voucher['source_type'] ?? '');
     if (isset($moduleSourceTypes[$voucherSourceType]) && !in_array($voucherSourceType, $allowModuleSources, true)) {

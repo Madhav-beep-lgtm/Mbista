@@ -1,0 +1,34 @@
+-- 075: De-duplicate the ledger-mapping surface — jewellery maps into the SAME
+-- table the core Inventory module uses.
+--
+-- THE PROBLEM THIS FIXES. jewellery_ledger_mappings was an exact structural
+-- copy of inventory_ledger_mappings, and roughly a third of its purposes were
+-- core purposes wearing a jewellery name:
+--
+--     jewellery              core
+--     ---------              ----
+--     cogs                   cogs
+--     purchase_clearing      purchase_clearing
+--     opening_equity         opening_equity
+--     vat_input              tax_input
+--     vat_output             tax_output
+--     stock_finished         finished_goods
+--     stock_metal            inventory_asset
+--     stock_gain             inventory_gain
+--     stock_loss             inventory_loss
+--     sales_metal            sales_revenue
+--
+-- A company running both modules therefore mapped the same ledger twice, on
+-- two screens, with nothing keeping the two answers in agreement.
+--
+-- There is now ONE store: inventory_ledger_mappings. The purposes that are
+-- genuinely jewellery-only (making charge, wastage, karigar, refinery, the
+-- revenue split) simply live in it alongside the core ones, so both screens
+-- list the same set and edit the same rows.
+--
+-- The row copy needs the alias translation above, which is not expressible in
+-- portable SQL, so it lives in the matching accounting_module_repair_database()
+-- step — the path that actually runs on upgrade.
+
+-- Intentionally no DDL: this migration is a data move plus a DROP, both of
+-- which are performed by the repair step so the translation stays in one place.

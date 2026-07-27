@@ -47,6 +47,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash($res['ok'] ? 'success' : 'error', $res['ok'] ? 'Opening balances finalized.' : (string) $res['error']);
         redirect('admin/opening-balances.php');
     }
+    if ($action === 'park_difference') {
+        require_permission('opening_balance', 'finalize');
+        $batch = ob_get_batch($companyId, $postFyId);
+        $res = $batch ? ob_park_difference((int) $batch['id'], $userId) : ['ok' => false, 'error' => 'Generate the batch first.'];
+        flash($res['ok'] ? 'success' : 'error', $res['ok']
+            ? (($res['note'] ?? '') ?: 'Difference of ' . number_format(abs((float) $res['difference']), 2)
+                . ' parked in Opening Balance Adjustments. It shrinks as you enter the remaining ledgers.')
+            : (string) $res['error']);
+        redirect('admin/opening-balances.php');
+    }
+    if ($action === 'finalize_with_difference') {
+        require_permission('opening_balance', 'finalize');
+        $batch = ob_get_batch($companyId, $postFyId);
+        $res = $batch ? ob_finalize_batch((int) $batch['id'], $userId, true) : ['ok' => false, 'error' => 'Generate the batch first.'];
+        flash($res['ok'] ? 'success' : 'error', $res['ok']
+            ? (($res['note'] ?? '') ?: 'Opening balances finalized.') : (string) $res['error']);
+        redirect('admin/opening-balances.php');
+    }
     if ($action === 'lock') {
         require_permission('opening_balance', 'finalize');
         $batch = ob_get_batch($companyId, $postFyId);
@@ -196,11 +214,37 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <th style="text-align:left">Finalized by / at</th><td><?= e($batch && $batch['finalized_by'] ? $userName((int) $batch['finalized_by']) . ' — ' . (string) $batch['finalized_at'] : '—') ?></td></tr>
             <tr><th style="text-align:left">Total opening debit</th><td><strong><?= e($sym . number_format((float) $validation['total_debit'], 2)) ?></strong></td>
                 <th style="text-align:left">Total opening credit</th><td><strong><?= e($sym . number_format((float) $validation['total_credit'], 2)) ?></strong></td></tr>
-            <tr><th style="text-align:left">Difference (must be 0)</th>
-                <td colspan="3"><span class="mbw-pill <?= $validation['balanced'] ? 'tone-green' : 'tone-red' ?>"><?= e($sym . number_format((float) $validation['difference'], 2)) ?> <?= $validation['balanced'] ? '(balanced)' : '(unbalanced — resolve before finalizing)' ?></span></td></tr>
+            <tr><th style="text-align:left">Difference</th>
+                <td colspan="3"><span class="mbw-pill <?= $validation['balanced'] ? 'tone-green' : 'tone-amber' ?>"><?= e($sym . number_format((float) $validation['difference'], 2)) ?> <?= $validation['balanced'] ? '(balanced)' : '(not yet balanced)' ?></span></td></tr>
         </tbody>
     </table>
     </div>
+    <?php if (!$validation['balanced'] && !$isLocked): ?>
+    <div class="mbw-note tone-amber" style="margin-top:12px">
+        <p style="margin:0 0 6px"><strong>Opening balances do not have to balance while you are still entering them.</strong></p>
+        <p style="margin:0 0 8px">
+            Last year's books already balanced, so this year you are only re-keying each ledger's closing figure —
+            one side at a time, over as long as it takes. Park the running difference in
+            <strong>Opening Balance Adjustments</strong> and it shrinks on its own as the remaining ledgers go in.
+            Whatever is left at the end is a real difference, sitting in one named account where you can see it and
+            adjust it, rather than spread across the accounts.
+        </p>
+        <?php if ($canFinalize): ?>
+        <form method="post" style="display:inline" data-confirm="Park the <?= e($sym . number_format(abs((float) $validation['difference']), 2)) ?> difference in Opening Balance Adjustments? It is recomputed each time, never accumulated, and stays visible in the trial balance until cleared.">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="park_difference">
+            <input type="hidden" name="fiscal_year_id" value="<?= e($fiscalYearId) ?>">
+            <button type="submit" class="button secondary">Park the difference</button>
+        </form>
+        <form method="post" style="display:inline" data-confirm="Finalize with <?= e($sym . number_format(abs((float) $validation['difference']), 2)) ?> carried in Opening Balance Adjustments?">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="finalize_with_difference">
+            <input type="hidden" name="fiscal_year_id" value="<?= e($fiscalYearId) ?>">
+            <button type="submit" class="button secondary">Park it and finalize</button>
+        </form>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
     <div class="mbw-card-tools" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         <?php if ($canGenerate && !$isLocked): ?>
         <form method="post" style="display:inline" data-confirm="<?= $batch ? 'Refresh opening balances from the previous fiscal year? Existing admin adjustments are preserved; posted transactions are not touched.' : 'Generate opening balances from the previous fiscal year?' ?>">

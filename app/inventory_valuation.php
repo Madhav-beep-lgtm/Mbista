@@ -551,9 +551,13 @@ function inv_post_item_opening_voucher(int $companyId, array $item, ?int $userId
         return ['voucher_id' => 0, 'note' => ''];
     }
     if ($debitLedgerId <= 0 || $creditLedgerId <= 0) {
-        return ['voucher_id' => 0, 'note' => 'Opening stock recorded WITHOUT a GL entry — map '
-            . ($debitLedgerId <= 0 ? 'Inventory Asset' : 'Opening Balance Equity')
-            . ' in the item\'s "This item posts to" panel, then save the item again to post it.'];
+        // The mapping store is shared with the Jewellery module, so name both
+        // routes: a jewellery user never opens the core item panel.
+        $missingLabel = $debitLedgerId <= 0 ? 'Inventory Asset' : 'Opening Balance Equity';
+
+        return ['voucher_id' => 0, 'note' => 'Opening stock recorded WITHOUT a GL entry — the weight is saved but nothing reached the books. Map '
+            . $missingLabel . ' first, either in the item\'s "This item posts to" panel on the Inventory page'
+            . ' or under Jewellery → Settings → Posting Ledgers (they are the same setting), then save the opening again.'];
     }
     $defaultFy = function_exists('current_fiscal_year') ? current_fiscal_year() : null;
     $openingDate = (string) ($defaultFy['start_date'] ?? date('Y-m-d'));
