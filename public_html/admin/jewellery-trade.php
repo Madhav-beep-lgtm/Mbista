@@ -362,13 +362,12 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <label>Other charges (<?= e($sym) ?>)<input type="number" name="other_charges" step="0.01" min="0" value="<?= e((string) ($editDoc['other_charges'] ?? '0')) ?>"></label>
                 <label>Discount (<?= e($sym) ?>)<input type="number" name="discount" step="0.01" min="0" value="<?= e((string) ($editDoc['discount'] ?? '0')) ?>"></label>
                 <label>Skills Promotion Tax (<?= e($sym) ?>)<input type="number" name="manual_tax_amount" step="0.01" min="0" placeholder="auto" value="<?= e((string) ($editDoc['manual_tax_amount'] ?? '')) ?>">
-                    <span class="frm-optional">Left blank it is worked out for you at the rate on the tax register. Punch a figure to override it.</span>
                 </label>
                 <label style="grid-column:1/-1">Narration<input type="text" name="narration" maxlength="255" value="<?= e((string) ($editDoc['narration'] ?? '')) ?>"></label>
             </div>
             <?php $renderLineRows('l', $editLines, max($lineSlots, count($editLines) + 1), 'Purchase lines'); ?>
             <button type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save Draft</button>
-            <?php if ($items === []): ?><p class="frm-optional">Add an item first.</p><?php endif; ?>
+            <?php if ($items === []): ?><?php endif; ?>
         </form>
         <?php endif; ?>
     </section>
@@ -446,7 +445,6 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                             <option value="<?= (int) $p['id'] ?>" <?= $saleParty === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
-                    <span class="frm-optional">Pick the customer to see any orders they are here to collect.</span>
                 </label>
                 <label>Customer name<input type="text" name="customer_name" maxlength="190" value="<?= e((string) ($editDoc['customer_name'] ?? '')) ?>" placeholder="Creates the customer and their ledger"></label>
                 <label>Phone<input type="text" name="party_phone" maxlength="60"></label>
@@ -467,22 +465,19 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <label>Other charges (<?= e($sym) ?>)<input type="number" name="other_charges" step="0.01" min="0" value="<?= e((string) ($editDoc['other_charges'] ?? '0')) ?>"></label>
                 <label>Discount (<?= e($sym) ?>)<input type="number" name="discount" step="0.01" min="0" value="<?= e((string) ($editDoc['discount'] ?? '0')) ?>"></label>
                 <label>Skills Promotion Tax (<?= e($sym) ?>)<input type="number" name="manual_tax_amount" step="0.01" min="0" placeholder="auto" value="<?= e((string) ($editDoc['manual_tax_amount'] ?? '')) ?>">
-                    <span class="frm-optional">Left blank it is worked out for you at the rate on the tax register. Punch a figure to override it.</span>
                 </label>
                 <label style="grid-column:1/-1">Narration<input type="text" name="narration" maxlength="255" value="<?= e((string) ($editDoc['narration'] ?? '')) ?>"></label>
                 <label style="grid-column:1/-1">Remarks (printed on the bill)<input type="text" name="remarks" maxlength="255" value="<?= e((string) ($editDoc['remarks'] ?? '')) ?>"></label>
             </div>
             <details<?= ((float) ($editDoc['paid_cash'] ?? 0) + (float) ($editDoc['paid_card'] ?? 0)
                 + (float) ($editDoc['paid_cheque'] ?? 0) + (float) ($editDoc['paid_qr'] ?? 0)) > 0 ? ' open' : '' ?>>
-                <summary>How the money was tendered <span class="frm-optional">(optional — for the printed bill)</span></summary>
+                <summary>How the money was tendered</summary>
                 <div class="workspace-form-grid">
                     <?php foreach (['paid_cash' => 'Cash', 'paid_card' => 'Card', 'paid_cheque' => 'Cheque', 'paid_qr' => 'QR / transfer'] as $tenderField => $tenderLabel): ?>
                         <label><?= e($tenderLabel) ?> (<?= e($sym) ?>)<input type="number" name="<?= e($tenderField) ?>" step="0.01" min="0"
                             value="<?= e((string) ($editDoc[$tenderField] ?? '0')) ?>"></label>
                     <?php endforeach; ?>
                 </div>
-                <p class="frm-optional">Leave these at zero and the whole receipt shows against the ledger above. Fill any of
-                    them and they must add up to the cash / bank received.</p>
             </details>
             <?php if ($openOrders !== []): ?>
             <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px;margin:12px 0">
@@ -517,7 +512,6 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                     <label style="display:block;margin-top:10px">Advance to apply (<?= e($sym) ?>)
                         <input type="number" name="advance_amount" step="0.01" min="0" max="<?= e((string) $advanceHeld) ?>"
                                value="<?= e((string) ($editDoc['advance_amount'] ?? $advanceHeld)) ?>" style="max-width:220px">
-                        <span class="frm-optional"><?= e($sym) ?> <?= $fmt($advanceHeld) ?> held. Refund any excess from the order screen.</span>
                     </label>
                     <?php endif; ?>
                     <div class="mbw-note tone-green" style="margin-top:10px">
@@ -764,4 +758,8 @@ document.addEventListener("change", function (event) {
 });
 </script>
 
-<?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
+<?php
+// The grid buttons: add a row, remove a row.
+jw_line_grid_scripts();
+include __DIR__ . '/../../app/views/partials/admin_footer.php';
+?>

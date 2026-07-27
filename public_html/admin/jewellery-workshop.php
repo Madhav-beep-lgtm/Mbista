@@ -374,7 +374,6 @@ jw_line_grid_styles();
             <input type="hidden" name="order_id" value="<?= (int) ($editOrder['id'] ?? 0) ?>">
             <div class="workspace-form-grid">
                 <label>Order date<input type="date" name="order_date" value="<?= e((string) ($editOrder['order_date'] ?? $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required>
-                    <span class="frm-optional">The metal rate is taken from this day and honoured on delivery.</span>
                 </label>
                 <label>Promised delivery<input type="date" name="delivery_date" value="<?= e((string) ($editOrder['delivery_date'] ?? '')) ?>"></label>
                 <label>Existing customer
@@ -392,7 +391,6 @@ jw_line_grid_styles();
                 <label>Other charges (<?= e($sym) ?>)<input type="number" name="other_charges" step="0.01" min="0" value="<?= e((string) ($editOrder['other_charges'] ?? '0')) ?>"></label>
                 <label>Discount (<?= e($sym) ?>)<input type="number" name="discount" step="0.01" min="0" value="<?= e((string) ($editOrder['discount'] ?? '0')) ?>"></label>
                 <label>Skills Promotion Tax (<?= e($sym) ?>)<input type="number" name="manual_tax_amount" step="0.01" min="0" placeholder="auto" value="<?= e((string) ($editOrder['manual_tax_amount'] ?? '')) ?>">
-                    <span class="frm-optional">Left blank it is worked out at the rate on the tax register.</span>
                 </label>
                 <label>Advance taken (<?= e($sym) ?>)<input type="number" name="advance_amount" step="0.01" min="0" value="<?= e((string) ($editOrder['advance_amount'] ?? '0')) ?>"></label>
                 <label>Status
@@ -454,10 +452,6 @@ jw_line_grid_styles();
                             <?php endif; ?>
                         </tbody>
                     </table></div>
-                    <p class="frm-optional" style="margin:8px 0 0">Worked out by the same engine that will raise the bill — the Skills
-                        Promotion Tax on metal and making, VAT on the stone and diamond side, on their own separate bases. The metal
-                        rate of <?= e(app_date((string) $editOrder['order_date'])) ?> is honoured on delivery; the tax rates are
-                        restated at the sale date, because a statutory rate follows the day of supply.</p>
                 </div>
             <?php endif; ?>
 
@@ -470,9 +464,7 @@ jw_line_grid_styles();
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head">
             <h2>Advance on <?= e((string) $editOrder['order_no']) ?></h2>
-            <span class="frm-optional">Cash, bank or old gold taken before the work is done.</span>
         </div>
-        <p class="frm-optional" style="margin:0 0 12px">Held as a liability in the customer's own advance account until delivery. Old gold goes into stock at the value entered.</p>
 
         <div class="mbw-stat-row" style="margin-bottom:14px">
             <div class="mbw-stat"><span>Cash / bank held</span><strong><?= e($sym) ?> <?= $fmt((float) $orderAdvances['cash_total']) ?></strong></div>
@@ -683,10 +675,6 @@ jw_line_grid_styles();
             <label style="grid-column:1/-1">Address<input type="text" name="address" maxlength="255" value="<?= e((string) ($editKarigar['address'] ?? '')) ?>"></label>
             <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editKarigar ? 'Update Kaligad' : 'Add Kaligad' ?></button></div>
         </form>
-        <p class="frm-optional" style="margin:10px 0 0">
-            A <strong>contractor</strong> automatically gets a party ledger, so wages accrue as a bill-wise trade payable you settle like any supplier.
-            An <strong>employee</strong> is linked to payroll instead and no party ledger is opened.
-        </p>
     </section>
     <?php endif; ?>
 
@@ -743,12 +731,8 @@ jw_line_grid_styles();
                         </option>
                     <?php endforeach; ?>
                 </select>
-                <span class="frm-optional">One row per ITEM, because one order can go to several kaligads. Picking one
-                    takes the item, purity and unit from the order — those are not retyped here, since handing over
-                    something other than what the customer ordered is the mistake this prevents.</span>
             </label>
-            <label>Against order <span class="frm-optional">only when no item is picked above</span>
-                <select name="order_id">
+            <label>Against order                <select name="order_id">
                     <option value="0">— none —</option>
                     <?php foreach (jewellery_orders_list($companyId, ['status' => 'confirmed']) as $o): ?>
                         <option value="<?= (int) $o['id'] ?>" <?= (int) ($_GET['order'] ?? 0) === (int) $o['id'] ? 'selected' : '' ?>><?= e($o['order_no']) ?></option>
@@ -766,8 +750,7 @@ jw_line_grid_styles();
                 $issuableFine += $itemOnHand[(int) $it['id']]['fine_weight'];
             }
             ?>
-            <label>Item <span class="frm-optional">from own stock — this is what can be issued</span>
-                <select name="item_id" required>
+            <label>Item                <select name="item_id" required>
                     <?php foreach ($items as $it): ?>
                         <?php $onHand = $itemOnHand[(int) $it['id']]; ?>
                         <option value="<?= (int) $it['id'] ?>" <?= $onHand['fine_weight'] <= 0 ? 'disabled' : '' ?>><?= e($it['code'] . ' — ' . $it['name']) ?> (<?= $onHand['fine_weight'] > 0 ? $fmt($onHand['fine_weight'], 4) . ' fine on hand' : 'no stock' ?>)</option>
@@ -1038,10 +1021,6 @@ jw_line_grid_styles();
             <h2>Receive Refined Metal — <?= e((string) $receiveJob['job_no']) ?></h2>
             <a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=refinery')) ?>">Cancel</a>
         </div>
-        <p class="frm-optional" style="margin:0 0 12px">
-            <?= $fmt((float) $receiveJob['issued_fine_weight'], 4) ?> fine went out.
-            Anything not returned is booked as a refining loss at the cost it was issued at.
-        </p>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="receive_refinery">
@@ -1085,4 +1064,8 @@ jw_line_grid_styles();
     <?php endif; ?>
 <?php endif; ?>
 
-<?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
+<?php
+// The grid buttons: add a row, remove a row.
+jw_line_grid_scripts();
+include __DIR__ . '/../../app/views/partials/admin_footer.php';
+?>

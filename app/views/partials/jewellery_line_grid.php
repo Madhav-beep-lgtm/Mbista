@@ -28,12 +28,17 @@ function jw_line_grid_styles(): void
     $done = true;
     ?>
 <style>
-/* The line grid carries sixteen columns. At the page's ordinary control size
-   that is far wider than any screen, so the shop scrolls sideways to reach the
-   stone columns and can never see a line whole. Everything below exists to fit
-   the whole line in one view: fixed column widths that add up to roughly
-   1120px, inputs that fill their cell instead of carrying their own width, and
-   a smaller type size for the grid alone. */
+/* The line grid carries up to eighteen columns. At the page's ordinary control
+   size that is wider than most screens, so without this the shop can never see
+   a line whole. Fixed column widths, inputs that fill their cell rather than
+   carrying their own width, and a smaller type size for the grid alone.
+
+   The scroller is what keeps the widest grid inside the card instead of pushing
+   the page sideways: the table may be wider than the screen, but the SCROLLER
+   never is, so the slider belongs to the grid and the page itself never moves. */
+.jw-lines-scroll { overflow-x: auto; max-width: 100%; }
+.jw-lines-scroll::-webkit-scrollbar { height: 10px; }
+.jw-lines-scroll::-webkit-scrollbar-thumb { background: #b9c7d3; border-radius: 5px; }
 table.jw-lines { font-size: .82rem; table-layout: fixed; width: 100%; min-width: 1120px; }
 table.jw-lines th,
 table.jw-lines td { padding: 2px 3px; }
@@ -63,11 +68,31 @@ table.jw-lines .c-amt  { width: 78px; }
 /* Order grids only: which kaligad makes this piece and when it is promised. */
 table.jw-lines .c-krg  { width: 74px; }
 table.jw-lines .c-date { width: 116px; }
+table.jw-lines .c-del  { width: 30px; text-align: center; }
+table.jw-lines td.c-del button {
+    width: 24px; min-height: 24px; padding: 0; line-height: 1;
+    border: 1px solid var(--mbw-border, #d9e2ec); border-radius: 4px;
+    background: transparent; cursor: pointer; color: #b03030;
+}
+table.jw-lines td.c-del button:hover { background: #fdeaea; }
+.jw-lines-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 @media (max-width: 1180px) {
-    /* Below this there is no honest way to fit sixteen columns, so the grid
-       goes back to scrolling rather than crushing the inputs to nothing. */
     table.jw-lines { font-size: .78rem; }
 }
+
+/* Fields sit in a row and wrap to the next, and every box lines up with its
+   neighbours whatever sits under it. Without the label being a flex column with
+   the control pushed to the bottom, one field carrying a note under it drags
+   its own box upward and the row reads as a staircase. */
+.workspace-form-grid > label {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.workspace-form-grid > label > input,
+.workspace-form-grid > label > select,
+.workspace-form-grid > label > textarea { margin-top: auto; }
+.workspace-form-grid > label > .frm-optional { order: 3; margin-top: 4px; }
 </style>
     <?php
 }
@@ -88,9 +113,9 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
     $withWorkshop = is_array($karigars);
     ?>
     <?php $full = $prefix === 'l'; ?>
-    <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:12px 0">
+    <fieldset class="jw-lines-box" style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:12px 0;min-width:0">
         <legend style="padding:0 6px;font-weight:600"><?= $legend ?></legend>
-        <div style="overflow-x:auto"><table class="jw-lines">
+        <div class="jw-lines-scroll"><table class="jw-lines">
             <thead>
                 <tr>
                     <th rowspan="2" class="c-item">Item</th>
@@ -108,6 +133,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                     <?php if ($withWorkshop): ?>
                         <th colspan="2">Workshop</th>
                     <?php endif; ?>
+                    <th rowspan="2" class="c-del"></th>
                 </tr>
                 <tr>
                     <th class="c-wt">Gross</th>
@@ -209,12 +235,82 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         </td>
                         <td><input type="date" name="<?= $prefix ?>_delivery_date[]" value="<?= e((string) ($row['delivery_date'] ?? '')) ?>"></td>
                     <?php endif; ?>
+                    <td class="c-del">
+                        <?php // Clearing the item empties the row, and an empty row is ignored on save. ?>
+                        <button type="button" class="jw-line-remove" aria-label="Remove this row">&times;</button>
+                    </td>
                 </tr>
             <?php endfor; ?>
             </tbody>
         </table></div>
-        <p class="frm-optional" style="margin:6px 0 0">Net wt = gross − less. The customer is charged on net + wastage, but only the
-            net metal leaves stock. Punch the wastage as a % or as a weight — the other follows. Rate 0 prices from the daily board.</p>
+        <div class="jw-lines-actions">
+            <button type="button" class="button secondary jw-line-add" style="min-height:30px;padding:4px 12px">+ Add item</button>
+        </div>
     </fieldset>
 <?php
+}
+
+/**
+ * The behaviour behind the grid's own two buttons: add a row, remove a row.
+ *
+ * A new row is a CLONE of the last one with its values reset, so a column added
+ * to the grid appears on added rows too, without a second copy of the markup
+ * here to keep in step.
+ *
+ * Removing takes the whole <tr> out. Every field posts as a parallel array, and
+ * pulling the row removes one element from each of them at the same position,
+ * so the arrays stay the same length as each other and nothing shifts onto the
+ * wrong line. A row whose metal is already out with a kaligad cannot be removed
+ * at all — its issue points back at it — and the last row is emptied rather
+ * than removed, because a grid with no rows cannot be typed into.
+ */
+function jw_line_grid_scripts(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    ?>
+<script>
+(function () {
+    function resetRow(row) {
+        Array.prototype.forEach.call(row.querySelectorAll("input, select"), function (field) {
+            if (field.disabled) { return; }
+            if (field.type === "hidden") { field.value = "0"; return; }
+            if (field.tagName === "SELECT") { field.selectedIndex = 0; return; }
+            field.value = field.type === "number" ? "0" : "";
+        });
+    }
+    document.addEventListener("click", function (event) {
+        var addButton = event.target.closest(".jw-line-add");
+        if (addButton) {
+            var box = addButton.closest(".jw-lines-box");
+            var body = box && box.querySelector("table.jw-lines tbody");
+            if (!body || !body.lastElementChild) { return; }
+            var clone = body.lastElementChild.cloneNode(true);
+            Array.prototype.forEach.call(clone.querySelectorAll("[disabled]"), function (field) {
+                field.disabled = false;
+            });
+            resetRow(clone);
+            body.appendChild(clone);
+            var firstSelect = clone.querySelector("select");
+            if (firstSelect) { firstSelect.focus(); }
+            return;
+        }
+        var removeButton = event.target.closest(".jw-line-remove");
+        if (!removeButton) { return; }
+        var target = removeButton.closest("tr");
+        if (!target) { return; }
+        if (target.querySelector("select[disabled]")) { return; }
+        var body = target.parentNode;
+        if (body && body.children.length > 1) {
+            body.removeChild(target);
+        } else {
+            resetRow(target);
+        }
+    });
+})();
+</script>
+    <?php
 }

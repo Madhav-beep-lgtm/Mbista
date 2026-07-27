@@ -822,10 +822,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label style="grid-column:1/-1">Note<input type="text" name="note" maxlength="190" placeholder="Optional — e.g. FENEGOSIDA published rate"></label>
             <div style="grid-column:1/-1"><button type="submit" class="button">Save Rate</button></div>
         </form>
-        <p class="frm-optional" style="margin:10px 0 0">
-            One quote per date, metal, purity and type — re-saving corrects the day rather than adding a duplicate.
-            A quote for any purity prices every other purity of the same metal through fine weight, so maintaining a single 24K line is enough.
-        </p>
     </section>
     <?php endif; ?>
 
@@ -923,7 +919,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <?php endforeach; ?>
                 </select>
                 <?php if ($categoryChoices === []): ?>
-                    <span class="frm-optional">Set your categories up under <a href="<?= e(url('admin/jewellery.php?view=masters')) ?>">Masters</a> first.</span>
                 <?php endif; ?>
             </label>
             <label>Type
@@ -976,12 +971,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label style="grid-column:1/-1">Notes<input type="text" name="notes" maxlength="255" value="<?= e((string) ($editItem['notes'] ?? '')) ?>"></label>
             <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editItem ? 'Update Item' : 'Add Item' ?></button></div>
         </form>
-        <p class="frm-optional" style="margin:10px 0 0">
-            An item is a kind of piece, not one piece: the weight, the wastage, the making charge and the stone value belong
-            to the line you sell it on, where each piece has its own. Only what is true of every piece of this kind is asked
-            for here. Once an item has stock movements its metal, purity and unit are locked — later entries were valued
-            against them.
-        </p>
     </section>
     <?php endif; ?>
 
@@ -1066,7 +1055,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <h2>Upload Opening Stock from a Spreadsheet</h2>
             <a class="button soft" style="min-height:32px" href="<?= e(url('admin/jewellery.php?view=opening&template=xlsx')) ?>">Download template</a>
         </div>
-        <p class="frm-optional" style="margin:0 0 12px"><strong>Uploading posts nothing.</strong> Check the preview, fix or remove rows, then Commit.</p>
         <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="upload_opening">
@@ -1074,7 +1062,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label>Spreadsheet<input type="file" name="opening_file" accept=".xlsx,.csv" required></label>
             <div style="align-self:end">
                 <button type="submit" class="button">Upload &amp; Preview</button>
-                <span class="frm-optional">.xlsx or .csv</span>
             </div>
         </form>
     </section>
@@ -1091,7 +1078,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <section class="mbw-card" style="margin-bottom:14px">
         <div class="mbw-card-head">
             <h2>Preview — <?= e((string) $importBatch['original_name']) ?></h2>
-            <span class="frm-optional">Uploaded <?= e((string) $importBatch['created_at']) ?></span>
         </div>
 
         <div class="mbw-stat-row" style="margin-bottom:12px">
@@ -1116,7 +1102,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <button type="submit" class="button secondary">Discard import</button>
             </form>
             <?php if ($errorCount > 0): ?>
-                <span class="frm-optional" style="align-self:center">Only ready rows are committed; the <?= $errorCount ?> with a problem stay here.</span>
             <?php endif; ?>
         </div>
 
@@ -1222,13 +1207,11 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </select>
             </label>
             <label>Pieces<input type="number" name="qty_pieces" step="0.001" min="0" value="0"></label>
-            <label>Gross weight <span class="frm-optional">in the item's own unit</span>
-                <input type="number" name="gross_weight" step="0.0001" min="0" value="0"></label>
+            <label>Gross weight                <input type="number" name="gross_weight" step="0.0001" min="0" value="0"></label>
             <label>Opening value (<?= e($sym) ?>)<input type="number" name="amount" step="0.01" min="0" value="0"></label>
             <div style="grid-column:1/-1"><button type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save &amp; Post</button></div>
         </form>
         <?php if ($items === []): ?>
-            <p class="frm-optional" style="margin:10px 0 0">Add an item first — opening stock belongs to an item.</p>
         <?php else: ?>
         <?php endif; ?>
     </section>
@@ -1427,11 +1410,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <?php if ($editCategory): ?><a class="button soft" href="<?= e(url('admin/jewellery.php?view=masters')) ?>">Cancel</a><?php endif; ?>
                 </div>
             </form>
-            <p class="frm-optional" style="margin:10px 0 0">
-                This is the list the item form offers, so a category is decided once here instead of being retyped on every
-                item. Renaming one carries every item filed under it across with it. Switching one off hides it from new
-                items without disturbing the ones already filed under it.
-            </p>
             <?php endif; ?>
         </section>
 
@@ -1561,7 +1539,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php if ($editPurity): ?><a class="button soft" href="<?= e(url('admin/jewellery.php?view=masters')) ?>">Cancel</a><?php endif; ?>
             </div>
         </form>
-        <p class="frm-optional" style="margin:10px 0 0">Fineness is parts per thousand: 999.9 = 24K, 916 = 22K, 750 = 18K, 585 = 14K.</p>
         <?php endif; ?>
     </section>
 
@@ -1628,7 +1605,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Taxes</h2></div>
-        <p class="frm-optional" style="margin:0 0 12px">Charged in sequence order, lowest first. VAT is simply the one with the highest sequence.</p>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Seq</th><th>Code</th><th>Name</th><th>Rate</th><th>Charged on</th><th>Applies to</th><th>Documents</th><th>In force</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
             <tbody>
@@ -1680,7 +1656,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label>Name<input type="text" name="name" maxlength="120" required value="<?= e((string) ($editTax['name'] ?? '')) ?>"></label>
             <label>Rate (%)<input type="number" name="rate" step="0.0001" min="0" value="<?= e((string) ($editTax['rate'] ?? '0')) ?>"></label>
             <label>Sequence<input type="number" name="sequence" step="1" value="<?= (int) ($editTax['sequence'] ?? 100) ?>">
-                <span class="frm-optional">Lowest first. Give VAT the highest.</span>
             </label>
             <label>Charged on
                 <select name="base">
@@ -1714,7 +1689,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </label>
             <label>In force from<input type="date" name="effective_from" value="<?= e((string) ($editTax['effective_from'] ?? '')) ?>"></label>
             <label>In force to<input type="date" name="effective_to" value="<?= e((string) ($editTax['effective_to'] ?? '')) ?>">
-                <span class="frm-optional">Leave blank for open-ended. Ending a tax does not change documents already priced with it.</span>
             </label>
             <label style="grid-column:1/-1">Notes<input type="text" name="notes" maxlength="255" value="<?= e((string) ($editTax['notes'] ?? '')) ?>"></label>
             <label class="frm-check"><input type="checkbox" name="manual_entry" <?= (int) ($editTax['manual_entry'] ?? 0) === 1 ? 'checked' : '' ?>> Punched by hand on the document</label>

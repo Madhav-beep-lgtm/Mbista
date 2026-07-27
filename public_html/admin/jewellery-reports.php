@@ -279,10 +279,6 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
             <article class="mbw-kpi"><div><span class="mbw-kpi-label"><?= e($kpiLabel) ?></span><div class="mbw-kpi-value" style="font-size:1.02rem"><?= e($kpiValue) ?></div></div><span class="mbw-chip <?= e($kpiTone) ?>"><?= icon($kpiIcon) ?></span></article>
         <?php endforeach; ?>
     </section>
-    <p class="frm-optional" style="margin-top:12px">
-        Net VAT positive means payable to the tax office; negative is a credit carried forward.
-        Every figure is derived from posted documents — nothing here is cached.
-    </p>
 
 <?php elseif ($view === 'sales'): ?>
     <?php $report = jw_report_sales_detail($companyId, $from, $to); $groups = jw_report_sales_grouped($companyId, $from, $to, $groupBy); ?>
@@ -391,7 +387,6 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
     <?php $report = jw_report_inventory_detail($companyId, $from, $to); ?>
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Inventory Detailed (<?= count($report['rows']) ?> items)</h2></div>
-        <p class="frm-optional" style="margin:0 0 12px">Fine weight. Items with no movement and no stock are omitted.</p>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Item</th><th>Metal / Purity</th><th class="is-numeric">Opening fine</th><th class="is-numeric">Opening value</th><th class="is-numeric">In fine</th><th class="is-numeric">Out fine</th><th class="is-numeric">Closing fine</th><th class="is-numeric">Closing value</th><th class="is-numeric">Own</th><th class="is-numeric">With others</th><th class="is-numeric">Avg cost/fine</th></tr></thead>
             <tbody>
@@ -465,8 +460,6 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                 <?php endforeach; ?>
             </tbody>
         </table></div>
-        <p class="frm-optional" style="margin:8px 12px 12px">Each tax is shown on the base it was actually charged on. They are
-            deliberately not added together — VAT and the Skills Development levy sit on different bases and are filed separately.</p>
     </section>
 
     <?php foreach ([['Output VAT (sales)', $register['output_rows'], $register['output']], ['Input VAT (purchases)', $register['input_rows'], $register['input']]] as [$title, $rows, $sums]): ?>
@@ -570,7 +563,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
 
 <?php elseif ($view === 'statement'): ?>
     <?php if (!$statement || !$statement['karigar']): ?>
-        <section class="mbw-card"><p class="frm-optional" style="margin:0">Choose a kaligad above to see their statement.</p></section>
+        <section class="mbw-card"></section>
     <?php else: ?>
     <?php
         $st = $statement;
@@ -582,9 +575,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
     <section class="mbw-card">
         <div class="mbw-card-head">
             <h2><?= e((string) $st['karigar']['name']) ?> — statement</h2>
-            <span class="frm-optional"><?= e(app_date($from)) ?> to <?= e(app_date($to)) ?></span>
         </div>
-        <p class="frm-optional" style="margin:0 0 12px">Metal valued at <strong><?= $fmt((float) $st['rate']['fine_rate'], 2) ?></strong> per fine <?= e($unitCode) ?> (<?= e((string) $st['rate']['label']) ?>).</p>
 
         <?php foreach ($st['mismatch'] as $mismatchNote): ?>
             <div class="mbw-note tone-amber" style="margin:0 0 10px"><?= e($mismatchNote) ?></div>
@@ -612,7 +603,6 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
             <button type="submit" class="button secondary" <?= abs((float) $settle['revaluation']) < 0.005 ? 'disabled' : '' ?>>
                 Post this revaluation
             </button>
-            <span class="frm-optional">Posts the <?= $fmt((float) $settle['revaluation']) ?> difference as at <?= e(app_date($to)) ?>.</span>
         </form>
         <?php endif; ?>
 
@@ -649,15 +639,6 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                         <th class="is-numeric"><?= $fmt((float) $metal['closing_fine'] * (float) $st['rate']['fine_rate']) ?></th>
                     </tr></tfoot>
                 </table></div>
-                <p class="frm-optional" style="margin:8px 0 0">
-                    <?php if ((float) $metal['closing_fine'] > 0): ?>
-                        Holding <?= $fmt((float) $settle['metal_receivable_fine'], 4) ?> fine of your metal.
-                    <?php elseif ((float) $metal['closing_fine'] < 0): ?>
-                        You owe them <?= $fmt((float) $settle['metal_payable_fine'], 4) ?> fine.
-                    <?php else: ?>
-                        Metal account is square.
-                    <?php endif; ?>
-                </p>
             </div>
 
             <div>
@@ -685,7 +666,6 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                         <th class="is-numeric"><?= $fmt((float) $money['closing']) ?></th>
                     </tr></tfoot>
                 </table></div>
-                <p class="frm-optional" style="margin:8px 0 0">Billed <?= $fmt((float) $money['billed']) ?>, paid <?= $fmt((float) $money['paid']) ?>.</p>
             </div>
         </div>
     </section>
