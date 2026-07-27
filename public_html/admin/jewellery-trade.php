@@ -301,9 +301,14 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
         <div style="overflow-x:auto"><table>
             <thead><tr>
                 <th style="min-width:200px">Item</th><th>Purity</th><th>Unit</th><th>Pieces</th>
-                <th>Gross wt</th><th>Stone wt</th><th>Rate</th>
-                <?php if ($prefix !== 'x'): ?><th>Wastage %</th><?php endif; ?>
-                <?php if ($prefix === 'l'): ?><th>Making</th><th>Stone value</th><?php endif; ?>
+                <th>Gross wt</th><th>Less (stone wt)</th><th>Rate</th>
+                <?php if ($prefix !== 'x'): ?><th>Wastage %</th><th>Wastage wt</th><?php endif; ?>
+                <?php if ($prefix === 'l'): ?>
+                    <th>Making</th>
+                    <th>Diamond crt</th><th>Diamond amt</th>
+                    <th>Other dia. crt</th><th>Other dia. amt</th>
+                    <th>Stone crt</th><th>Stone amt</th>
+                <?php endif; ?>
             </tr></thead>
             <tbody>
             <?php for ($i = 0; $i < $slots; $i++): $row = $existing[$i] ?? null; ?>
@@ -346,9 +351,15 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
                     <td><input type="number" name="<?= $prefix ?>_rate[]" step="0.0001" min="0" style="width:110px" value="<?= e((string) ($row['rate'] ?? '0')) ?>"></td>
                     <?php if ($prefix !== 'x'): ?>
                         <td><input type="number" name="<?= $prefix ?>_wastage_pct[]" class="jw-wastage-pct" step="0.001" min="0" style="width:90px" value="<?= e((string) ($row['wastage_pct'] ?? '0')) ?>"></td>
+                        <td><input type="number" name="<?= $prefix ?>_wastage_weight[]" class="jw-wastage-wt" step="0.0001" min="0" style="width:95px" value="<?= e((string) ($row['wastage_weight'] ?? '0')) ?>"></td>
                     <?php endif; ?>
                     <?php if ($prefix === 'l'): ?>
                         <td><input type="number" name="<?= $prefix ?>_making_amount[]" step="0.01" min="0" style="width:100px" value="<?= e((string) ($row['making_amount'] ?? '0')) ?>"></td>
+                        <td><input type="number" name="<?= $prefix ?>_diamond_carat[]" step="0.001" min="0" style="width:85px" value="<?= e((string) ($row['diamond_carat'] ?? '0')) ?>"></td>
+                        <td><input type="number" name="<?= $prefix ?>_diamond_amount[]" step="0.01" min="0" style="width:100px" value="<?= e((string) ($row['diamond_amount'] ?? '0')) ?>"></td>
+                        <td><input type="number" name="<?= $prefix ?>_other_diamond_carat[]" step="0.001" min="0" style="width:85px" value="<?= e((string) ($row['other_diamond_carat'] ?? '0')) ?>"></td>
+                        <td><input type="number" name="<?= $prefix ?>_other_diamond_amount[]" step="0.01" min="0" style="width:100px" value="<?= e((string) ($row['other_diamond_amount'] ?? '0')) ?>"></td>
+                        <td><input type="number" name="<?= $prefix ?>_stone_carat[]" step="0.0001" min="0" style="width:85px" value="<?= e((string) ($row['stone_carat'] ?? '0')) ?>"></td>
                         <td><input type="number" name="<?= $prefix ?>_stone_amount[]" step="0.01" min="0" style="width:100px" value="<?= e((string) ($row['stone_amount'] ?? '0')) ?>"></td>
                     <?php endif; ?>
                 </tr>
@@ -371,7 +382,9 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
             </div>
         </div>
         <?php endif; ?>
-        <p class="frm-optional" style="margin:8px 0 0">Gross includes stones; stone wt is deducted and the rate charged on the rest. Rate 0 prices from the daily board. Blank rows are ignored.</p>
+        <p class="frm-optional" style="margin:8px 0 0">Net wt = gross − less. The customer is charged on net + wastage, but only the
+            net metal leaves stock — wastage is a charge, not gold. Punch the wastage either as a % or as a weight and the other is
+            worked out for you. Rate 0 prices from the daily board. Blank rows are ignored.</p>
     </fieldset>
 <?php };
 ?>
@@ -846,9 +859,16 @@ document.addEventListener("click", function (event) {
     Array.prototype.forEach.call(box.querySelectorAll("tbody tr"), function (row) {
         var item = row.querySelector("select[name$=\"_item_id[]\"]");
         var field = row.querySelector(".jw-wastage-pct");
+        var weight = row.querySelector(".jw-wastage-wt");
         if (!item || !field || parseInt(item.value, 10) <= 0) { return; }
-        if (onlyEmpty && parseFloat(field.value || "0") > 0) { return; }
+        var punched = parseFloat(field.value || "0") > 0
+            || (weight && parseFloat(weight.value || "0") > 0);
+        if (onlyEmpty && punched) { return; }
         field.value = pct;
+        // A wastage WEIGHT beats a percentage on save, so applying a percentage
+        // in bulk has to clear the weight — otherwise the row would keep the old
+        // figure and the button would look broken.
+        if (weight) { weight.value = 0; }
     });
 });
 </script>

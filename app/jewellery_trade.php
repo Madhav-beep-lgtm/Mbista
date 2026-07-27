@@ -418,9 +418,20 @@ function jw_posted_lines(array $post, string $prefix): array
             'gross_weight' => (float) ($post[$prefix . '_gross_weight'][$index] ?? 0),
             'stone_weight' => (float) ($post[$prefix . '_stone_weight'][$index] ?? 0),
             'rate' => (float) ($post[$prefix . '_rate'][$index] ?? 0),
+            // Wastage can be punched either way round. A weight wins over a
+            // percentage because it is what the bill prints, and the engine
+            // back-fills whichever of the two was left blank.
             'wastage_pct' => (float) ($post[$prefix . '_wastage_pct'][$index] ?? 0),
+            'wastage_weight' => (float) ($post[$prefix . '_wastage_weight'][$index] ?? 0),
             'making_amount' => (float) ($post[$prefix . '_making_amount'][$index] ?? 0),
+            // The three stone columns the bill carries. They are separate
+            // because only this side of the line is vatable.
             'stone_amount' => (float) ($post[$prefix . '_stone_amount'][$index] ?? 0),
+            'stone_carat' => (float) ($post[$prefix . '_stone_carat'][$index] ?? 0),
+            'diamond_amount' => (float) ($post[$prefix . '_diamond_amount'][$index] ?? 0),
+            'diamond_carat' => (float) ($post[$prefix . '_diamond_carat'][$index] ?? 0),
+            'other_diamond_amount' => (float) ($post[$prefix . '_other_diamond_amount'][$index] ?? 0),
+            'other_diamond_carat' => (float) ($post[$prefix . '_other_diamond_carat'][$index] ?? 0),
             'notes' => (string) ($post[$prefix . '_notes'][$index] ?? ''),
         ];
     }

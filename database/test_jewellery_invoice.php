@@ -261,6 +261,56 @@ try {
 ok(stripos($refused, 'tender split') !== false,
     'A split that does not add up to the receipt is refused, not quietly printed');
 
+echo "\nThe counter can punch this bill from the form, not only from the API\n";
+// Exactly what the sale form posts for the Akshara line. If jw_posted_lines
+// drops a field the whole invoice model is unreachable from the screen, which
+// is how it stood before these columns were put on the grid.
+$formLines = jw_posted_lines([
+    'l_item_id' => [$ring], 'l_purity_id' => [$p22], 'l_unit_id' => [$gram],
+    'l_qty_pieces' => ['1'], 'l_gross_weight' => ['2.550'], 'l_stone_weight' => ['0.0400'],
+    'l_rate' => ['22645.062'], 'l_wastage_pct' => ['0'], 'l_wastage_weight' => ['0.4660'],
+    'l_making_amount' => ['1700.00'],
+    'l_diamond_carat' => ['0'], 'l_diamond_amount' => ['0'],
+    'l_other_diamond_carat' => ['0'], 'l_other_diamond_amount' => ['0'],
+    'l_stone_carat' => ['0.2500'], 'l_stone_amount' => ['232.60'],
+], 'l');
+ok(count($formLines) === 1 && near((float) $formLines[0]['wastage_weight'], 0.4660)
+    && near((float) $formLines[0]['stone_carat'], 0.2500),
+    'The form carries the wastage weight and the stone carat through to the engine');
+ok(array_key_exists('diamond_amount', $formLines[0]) && array_key_exists('other_diamond_carat', $formLines[0]),
+    'And both diamond columns as well');
+
+$formSale = jewellery_save_sale($cid, $fy, [
+    'sale_date' => '2026-07-26', 'party_id' => $customer, 'settle_mode' => 'credit',
+], $formLines, [], $uid);
+$formRow = jewellery_sale($cid, $formSale);
+ok(near((float) $formRow['total_amount'], 69700.00),
+    'A bill punched through the form comes to the same 69,700.00 as the paper');
+
+// The diamond columns, which the Akshara bill left empty, have to price and be
+// vatable the moment a shop uses them.
+$diaSale = jewellery_save_sale($cid, $fy, [
+    'sale_date' => '2026-07-26', 'party_id' => $customer, 'settle_mode' => 'credit',
+], jw_posted_lines([
+    'l_item_id' => [$ring], 'l_purity_id' => [$p22], 'l_unit_id' => [$gram],
+    'l_qty_pieces' => ['1'], 'l_gross_weight' => ['2.000'], 'l_rate' => ['22645.062'],
+    'l_making_amount' => ['1000.00'],
+    'l_diamond_carat' => ['0.750'], 'l_diamond_amount' => ['40000.00'],
+    'l_other_diamond_carat' => ['0.250'], 'l_other_diamond_amount' => ['5000.00'],
+    'l_stone_carat' => ['0.100'], 'l_stone_amount' => ['500.00'],
+], 'l'), [], $uid);
+$diaRow = jewellery_sale($cid, $diaSale);
+ok(near((float) $diaRow['vatable_amount'], 45500.00),
+    'Vatable Amt gathers diamond + other diamond + stone = 45,500.00');
+ok(near((float) $diaRow['sd_taxable_amount'], jw_round_money(2.0 * 22645.062) + 1000.00),
+    'SD Taxable Amt stays metal + making — the diamonds are not in it');
+ok(near((float) $diaRow['vat_amount'], 5915.00), 'VAT 13% of 45,500.00 = 5,915.00');
+$diaPost = jewellery_post_sale($cid, $diaSale, $uid);
+ok($diaPost['ok'], 'A bill with diamonds posts' . ($diaPost['ok'] ? '' : ' — ' . $diaPost['error']));
+$dv = voucher_ledgers((int) $diaPost['voucher_id']);
+ok(near($dv[$L['sales_stone']] ?? 0, -45500.00),
+    'And all three stone columns land in the stone revenue account, 45,500.00');
+
 echo "\nThe printed bill carries the same figures the books do\n";
 // Rendering has to happen in a child process: the page is a full document that
 // ends the request, and require_jewellery() needs a real session context.
