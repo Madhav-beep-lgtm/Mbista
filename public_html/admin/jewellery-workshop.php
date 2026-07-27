@@ -117,6 +117,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    if ($action === 'cancel_order') {
+        require_permission('jewellery', 'edit');
+        $cancelled = jewellery_cancel_order($companyId, (int) ($_POST['order_id'] ?? 0),
+            (string) ($_POST['reason'] ?? ''), $userId);
+        $advanceNote = '';
+        if ($cancelled['ok'] && (float) $cancelled['advance_held'] > 0.005) {
+            $advanceNote = ' ' . site_currency_symbol() . ' ' . number_format((float) $cancelled['advance_held'], 2)
+                . ' of advance is still held — refund it from the order screen.';
+        }
+        flash($cancelled['ok'] ? 'success' : 'error',
+            $cancelled['ok'] ? 'Order cancelled.' . $advanceNote : $cancelled['error']);
+        redirect($back);
+    }
+
+    if ($action === 'postpone_order') {
+        require_permission('jewellery', 'edit');
+        $moved = jewellery_postpone_order($companyId, (int) ($_POST['order_id'] ?? 0),
+            (string) ($_POST['delivery_date'] ?? ''), (string) ($_POST['reason'] ?? ''), $userId);
+        flash($moved['ok'] ? 'success' : 'error',
+            $moved['ok'] ? 'Order rescheduled.' : $moved['error']);
+        redirect($back);
+    }
+
     // An advance is an ordinary settlement flagged against the order, so it
     // reuses the numbering, posting, metal movement and unpost machinery that
     // already exists rather than growing a parallel one.
@@ -172,7 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'karigar_id' => (int) ($_POST['karigar_id'] ?? 0),
             // The order ITEM, when one was picked. It overrides the item, purity
             // and unit below, because those belong to what the customer ordered.
-            'order_line_id' => (int) ($_POST['order_line_id'] ?? 0),
+            'order_line_ids' => (array) ($_POST['order_line_ids'] ?? []),
             'order_id' => (int) ($_POST['order_id'] ?? 0),
             'item_id' => (int) ($_POST['item_id'] ?? 0),
             'purity_id' => (int) ($_POST['purity_id'] ?? 0),
@@ -626,6 +649,36 @@ jw_line_grid_styles();
                             <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?>
                                 <a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=assignments&order=' . (int) $row['id'])) ?>">Assign</a>
                             <?php endif; ?>
+                            <?php if ($canEdit && !in_array((string) $row['status'], ['delivered', 'cancelled'], true)): ?>
+                                <form method="post" style="display:inline-flex;gap:4px;align-items:center">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="postpone_order">
+                                    <input type="hidden" name="back_view" value="orders">
+                                    <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
+                                    <input type="date" name="delivery_date" required
+                                           value="<?= e((string) ($row['delivery_date'] ?? '')) ?>"
+                                           style="min-height:30px;padding:2px 6px;max-width:140px">
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Postpone</button>
+                                </form>
+                                <form method="post" style="display:inline"
+                                      onsubmit="return confirm('Cancel order <?= e((string) $row['order_no']) ?>?')">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="cancel_order">
+                                    <input type="hidden" name="back_view" value="orders">
+                                    <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px" title="Cancel this order">Cancel</button>
+                                </form>
+                            <?php endif; ?>
+                            <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?>
+                                <form method="post" style="display:inline"
+                                      onsubmit="return confirm('Delete order <?= e((string) $row['order_no']) ?> for good?')">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="delete_order">
+                                    <input type="hidden" name="back_view" value="orders">
+                                    <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:#b03030" title="Delete this order">&times;</button>
+                                </form>
+                            <?php endif; ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -681,11 +734,17 @@ jw_line_grid_styles();
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Kaligads (<?= count($karigars) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Code</th><th>Name</th><th>Engagement</th><th>Making</th><th class="is-numeric">Allowed wastage</th><th class="is-numeric">Metal held (fine)</th><th class="is-numeric">Wages payable</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Code</th><th>Name</th><th>Engagement</th><th>Making</th><th class="is-numeric">Allowed wastage</th><th class="is-numeric">Metal held (fine)</th><th class="is-numeric">Work needs</th><th class="is-numeric">Excess / shortfall</th><th class="is-numeric">Wages payable</th><th>Status</th><th></th></tr></thead>
             <tbody>
-                <?php if ($karigars === []): ?><tr><td colspan="9">No kaligads yet.</td></tr><?php endif; ?>
+                <?php if ($karigars === []): ?><tr><td colspan="11">No kaligads yet.</td></tr><?php endif; ?>
                 <?php foreach ($karigars as $row): ?>
-                    <?php $pos = jewellery_karigar_position($companyId, (int) $row['id']); ?>
+                    <?php
+                        $pos = jewellery_karigar_position($companyId, (int) $row['id']);
+                        // Metal goes out in weights a shop can hand over, not in the
+                        // exact sum of the pieces it will become, so held and needed
+                        // are not meant to agree. The DIFFERENCE is what is watched.
+                        $bal = jewellery_karigar_metal_balance($companyId, (int) $row['id']);
+                    ?>
                     <tr>
                         <td><?= e($row['code']) ?></td>
                         <td><?= e($row['name']) ?><?= ($row['phone'] ?? '') !== '' ? '<br><small>' . e((string) $row['phone']) . '</small>' : '' ?></td>
@@ -693,6 +752,15 @@ jw_line_grid_styles();
                         <td><?= $fmt((float) $row['default_making_rate'], 2) ?> <small><?= e(str_replace('_', ' ', (string) $row['default_making_basis'])) ?></small></td>
                         <td class="is-numeric"><?= $fmt((float) $row['wastage_allowed_pct'], 3) ?>%</td>
                         <td class="is-numeric"><?= $pos['fine_weight'] > 0 ? '<span class="mbw-pill tone-amber">' . $fmt($pos['fine_weight'], 4) . '</span>' : '—' ?></td>
+                        <td class="is-numeric"><?= $bal['committed_fine'] > 0 ? $fmt($bal['committed_fine'], 4) : '—' ?></td>
+                        <td class="is-numeric">
+                            <?php if (abs($bal['difference_fine']) < 0.00005): ?>—
+                            <?php elseif ($bal['difference_fine'] > 0): ?>
+                                <span class="mbw-pill tone-blue" title="Holding more than the outstanding work needs">+<?= $fmt($bal['excess_fine'], 4) ?></span>
+                            <?php else: ?>
+                                <span class="mbw-pill tone-red" title="Not enough metal issued for the outstanding work">−<?= $fmt($bal['shortfall_fine'], 4) ?></span>
+                            <?php endif; ?>
+                        </td>
                         <td class="is-numeric"><?= $pos['wages_payable'] > 0 ? $fmt($pos['wages_payable']) : '—' ?></td>
                         <td><span class="mbw-pill <?= (string) $row['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= e(ucfirst((string) $row['status'])) ?></span></td>
                         <td>
@@ -719,10 +787,10 @@ jw_line_grid_styles();
                     <?php endforeach; ?>
                 </select>
             </label>
-            <label>Against order item
-                <select name="order_line_id">
-                    <option value="0">— stock work, no order —</option>
-                    <?php foreach (jewellery_pending_order_lines($companyId) as $ol): ?>
+            <label style="grid-column:1/-1">Against order items
+                <?php $pendingLines = jewellery_pending_order_lines($companyId); ?>
+                <select name="order_line_ids[]" multiple size="<?= max(3, min(8, count($pendingLines))) ?>">
+                    <?php foreach ($pendingLines as $ol): ?>
                         <option value="<?= (int) $ol['id'] ?>" <?= (int) ($_GET['line'] ?? 0) === (int) $ol['id'] ? 'selected' : '' ?>>
                             <?= e($ol['order_no'] . ' · ' . $ol['item_code']
                                 . ' · ' . $fmt((float) $ol['gross_weight'], 3) . ' ' . $ol['unit_code']
@@ -732,7 +800,8 @@ jw_line_grid_styles();
                     <?php endforeach; ?>
                 </select>
             </label>
-            <label>Against order                <select name="order_id">
+            <label>Against order
+                <select name="order_id">
                     <option value="0">— none —</option>
                     <?php foreach (jewellery_orders_list($companyId, ['status' => 'confirmed']) as $o): ?>
                         <option value="<?= (int) $o['id'] ?>" <?= (int) ($_GET['order'] ?? 0) === (int) $o['id'] ? 'selected' : '' ?>><?= e($o['order_no']) ?></option>

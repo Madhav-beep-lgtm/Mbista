@@ -25,7 +25,7 @@ $userId = (int) ($currentUser['id'] ?? 0);
 $canExport = user_can_do('jewellery', 'export');
 $canPost = user_can_do('jewellery', 'post');
 
-$allowedViews = ['summary', 'sales', 'purchases', 'inventory', 'vat', 'karigar', 'statement', 'bills'];
+$allowedViews = ['summary', 'sales', 'purchases', 'inventory', 'vat', 'karigar', 'statement', 'bills', 'uncollected'];
 $view = jw_enum($_GET['view'] ?? null, $allowedViews, 'summary');
 
 $clampDate = static function (string $date) use ($fyStart, $fyEnd): string {
@@ -133,6 +133,17 @@ if (isset($_GET['export']) && $canExport) {
         }
         export_dispatch($format, 'jewellery-vat-' . $stamp, $data, 'Tax Register', $meta);
     }
+    if ($view === 'uncollected') {
+        $uncollected = jewellery_overdue_orders($companyId, $to);
+        $data = [['Order', 'Customer', 'Phone', 'Ordered', 'Promised', 'Days late', 'Weight', 'Unit',
+            'Value', 'Advance', 'Still to collect', 'Status']];
+        foreach ($uncollected['rows'] as $r) {
+            $data[] = [$r['order_no'], $r['party_label'], $r['phone'], $r['order_date'], $r['delivery_date'],
+                $r['days_late'], $r['expected_gross_weight'], $r['unit_code'],
+                $r['total_amount'], $r['advance_amount'], $r['balance_due'], $r['status']];
+        }
+        export_dispatch($format, 'jewellery-uncollected-' . $stamp, $data, 'Uncollected Orders', $meta);
+    }
     if ($view === 'bills') {
         $data = [['Party', 'Bill no', 'Type', 'Date', 'Billed', 'Settled', 'Outstanding', 'Status']];
         foreach (jw_report_bill_outstanding($companyId) as $party) {
@@ -207,7 +218,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
         'summary' => 'Summary', 'sales' => 'Sales Detailed', 'purchases' => 'Purchase Detailed',
         'inventory' => 'Inventory Detailed', 'vat' => 'VAT Register', 'karigar' => 'Kaligad Ledger',
         'statement' => 'Kaligad Statement',
-        'bills' => 'Bill-wise',
+        'bills' => 'Bill-wise', 'uncollected' => 'Uncollected Orders',
     ] as $tabView => $tabLabel): ?>
         <a class="mbw-tab <?= $view === $tabView ? 'is-active' : '' ?>" href="<?= e(url('admin/jewellery-reports.php?view=' . $tabView . '&from=' . $from . '&to=' . $to)) ?>"><?= e($tabLabel) ?></a>
     <?php endforeach; ?>
@@ -694,6 +705,70 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                     <?php endforeach; ?>
                 <?php endforeach; ?>
             </tbody>
+        </table></div>
+    </section>
+
+<?php elseif ($view === 'uncollected'): ?>
+    <?php
+        // Orders past their promised date that nobody has come in for. The piece
+        // is made, the gold is in the safe, and it is the customer's — the shop
+        // is insuring metal it cannot sell and holding an advance it cannot use.
+        $uncollected = jewellery_overdue_orders($companyId, $to);
+    ?>
+    <section class="mbw-kpi-grid" style="margin-top:14px" aria-label="Uncollected orders summary">
+        <?php foreach ([
+            ['Orders waiting', (string) $uncollected['totals']['orders'], 'journal', 'tone-amber'],
+            ['Value held', $sym . $fmt($uncollected['totals']['value']), 'wallet', 'tone-blue'],
+            ['Advance taken', $sym . $fmt($uncollected['totals']['advance']), 'receipt-voucher', 'tone-teal'],
+            ['Still to collect', $sym . $fmt($uncollected['totals']['balance']), 'reconcile',
+                $uncollected['totals']['balance'] > 0 ? 'tone-red' : 'tone-green'],
+        ] as [$kpiLabel, $kpiValue, $kpiIcon, $kpiTone]): ?>
+            <article class="mbw-kpi"><div><span class="mbw-kpi-label"><?= e($kpiLabel) ?></span><div class="mbw-kpi-value" style="font-size:1.02rem"><?= e($kpiValue) ?></div></div><span class="mbw-chip <?= e($kpiTone) ?>"><?= icon($kpiIcon) ?></span></article>
+        <?php endforeach; ?>
+    </section>
+
+    <section class="mbw-card" style="margin-top:14px">
+        <div class="mbw-card-head">
+            <h2>Promised on or before <?= e(app_date($uncollected['as_of'])) ?>, not collected (<?= count($uncollected['rows']) ?>)</h2>
+            <a class="mbw-view-all" href="<?= e($exportUrl('uncollected')) ?>">Export CSV</a>
+        </div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr>
+                <th>Order</th><th>Customer</th><th>Phone</th><th>Ordered</th><th>Promised</th>
+                <th class="is-numeric">Days late</th><th class="is-numeric">Weight</th>
+                <th class="is-numeric">Value</th><th class="is-numeric">Advance</th>
+                <th class="is-numeric">Still to collect</th><th>Status</th>
+            </tr></thead>
+            <tbody>
+                <?php if ($uncollected['rows'] === []): ?>
+                    <tr><td colspan="11">Nothing is waiting to be collected.</td></tr>
+                <?php endif; ?>
+                <?php foreach ($uncollected['rows'] as $r): ?>
+                    <?php $late = (int) $r['days_late']; ?>
+                    <tr>
+                        <td><a href="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $r['id'])) ?>"><?= e($r['order_no']) ?></a></td>
+                        <td><?= e($r['party_label']) ?></td>
+                        <td><?= e($r['phone'] !== '' ? $r['phone'] : '—') ?></td>
+                        <td><?= e(app_date((string) $r['order_date'])) ?></td>
+                        <td><?= e(app_date((string) $r['delivery_date'])) ?></td>
+                        <td class="is-numeric">
+                            <span class="mbw-pill <?= $late >= 30 ? 'tone-red' : ($late >= 7 ? 'tone-amber' : 'tone-gray') ?>"><?= $late ?></span>
+                        </td>
+                        <td class="is-numeric"><?= $fmt((float) $r['expected_gross_weight'], 4) ?> <small><?= e($r['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['total_amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['advance_amount']) ?></td>
+                        <td class="is-numeric"><strong><?= $fmt((float) $r['balance_due']) ?></strong></td>
+                        <td><span class="mbw-pill tone-gray"><?= e(ucfirst((string) $r['status'])) ?></span></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+            <tfoot><tr>
+                <th colspan="7">Total</th>
+                <th class="is-numeric"><?= $fmt($uncollected['totals']['value']) ?></th>
+                <th class="is-numeric"><?= $fmt($uncollected['totals']['advance']) ?></th>
+                <th class="is-numeric"><?= $fmt($uncollected['totals']['balance']) ?></th>
+                <th></th>
+            </tr></tfoot>
         </table></div>
     </section>
 <?php endif; ?>

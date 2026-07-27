@@ -413,6 +413,16 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                     <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Unpost</button>
                                 </form>
                             <?php endif; ?>
+                            <?php if ($isDraft && $canEdit): ?>
+                                <form method="post" style="display:inline"
+                                      onsubmit="return confirm('Delete purchase <?= e((string) $row['purchase_no']) ?>?')">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="delete_purchase">
+                                    <input type="hidden" name="back_view" value="purchases">
+                                    <input type="hidden" name="doc_id" value="<?= (int) $row['id'] ?>">
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:#b03030" title="Delete this draft purchase">&times;</button>
+                                </form>
+                            <?php endif; ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -578,6 +588,17 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                     <input type="hidden" name="back_view" value="sales">
                                     <input type="hidden" name="doc_id" value="<?= (int) $row['id'] ?>">
                                     <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Unpost</button>
+                                </form>
+                            <?php endif; ?>
+                            <?php if ($isDraft && $canEdit): ?>
+                                <?php // A posted sale is unposted first — deleting one would leave its voucher behind. ?>
+                                <form method="post" style="display:inline"
+                                      onsubmit="return confirm('Delete sale <?= e((string) $row['sale_no']) ?>?')">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="delete_sale">
+                                    <input type="hidden" name="back_view" value="sales">
+                                    <input type="hidden" name="doc_id" value="<?= (int) $row['id'] ?>">
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:#b03030" title="Delete this draft sale">&times;</button>
                                 </form>
                             <?php endif; ?>
                         </td>

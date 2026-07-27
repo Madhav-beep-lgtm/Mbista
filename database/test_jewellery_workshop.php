@@ -595,6 +595,129 @@ ok(jewellery_issue_to_karigar($cidA, $fyA, [
     'order_line_id' => (int) $freedRow['id'], 'issue_date' => '2026-08-13',
 ], $userA)['ok'], 'And it can be issued again — to a different kaligad if the shop chooses');
 
+echo "\n15. One issue, several items, and the balance that is left over\n";
+// A kaligad given a bar of gold makes three chains out of it. The metal handed
+// over is a round weight the shop can hand, not the exact sum of the pieces, so
+// issued and ordered are NOT meant to agree — the difference is a balance to
+// watch, not an error to prevent.
+$multiOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-09-01', 'party_id' => $customer, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1.5, 'rate' => 150000, 'karigar_id' => $kContractor, 'delivery_date' => '2026-09-20'],
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1.5, 'rate' => 150000, 'karigar_id' => $kContractor, 'delivery_date' => '2026-09-25'],
+], $userA);
+$multiOrderLines = jewellery_order_line_rows($cidA, $multiOrder);
+
+// This kaligad has been used earlier in the suite, so the figures below are
+// measured as the CHANGE this issue makes rather than as absolutes.
+$balanceBefore = jewellery_karigar_metal_balance($cidA, $kContractor);
+
+// Three tola of work; five tola of gold handed over, because that is the bar.
+$bulkIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'order_line_ids' => [(int) $multiOrderLines[0]['id'], (int) $multiOrderLines[1]['id']],
+    'issued_gross_weight' => 5, 'issue_date' => '2026-09-02',
+], $userA);
+ok($bulkIssue['ok'], 'One issue covers several items' . ($bulkIssue['ok'] ? '' : ' — ' . $bulkIssue['error']));
+$bulkAssignment = jewellery_assignment($cidA, (int) $bulkIssue['assignment_id']);
+ok(near((float) $bulkAssignment['issued_gross_weight'], 5.0),
+    'The weight issued is what the shop handed over, NOT the sum of the ordered pieces');
+ok((string) $bulkAssignment['expected_return_date'] === '2026-09-20',
+    'The kaligad is due back on the SOONEST of the promised dates');
+$bulkLines = jewellery_order_line_rows($cidA, $multiOrder);
+ok((int) $bulkLines[0]['assignment_id'] === (int) $bulkIssue['assignment_id']
+    && (int) $bulkLines[1]['assignment_id'] === (int) $bulkIssue['assignment_id'],
+    'Both items point at the one issue');
+ok(jewellery_pending_order_lines($cidA) === array_values(array_filter(
+    jewellery_pending_order_lines($cidA),
+    static fn (array $r): bool => (int) $r['order_id'] !== $multiOrder
+)), 'And neither is left on the pending board');
+
+$balance = jewellery_karigar_metal_balance($cidA, $kContractor);
+// 5 tola issued at 916 = 4.58 fine out; the two pieces need 1.5 + 1.5 at 916.
+ok(near($balance['held_fine'] - $balanceBefore['held_fine'], 4.58, 0.02),
+    'The balance knows what this issue put in his hands: 4.58 fine');
+ok(near($balance['committed_fine'] - $balanceBefore['committed_fine'], 2.748, 0.02),
+    'And what the two new pieces need of it: 2.748 fine');
+ok(near($balance['excess_fine'], jw_round_weight($balance['held_fine'] - $balance['committed_fine']), 0.001)
+    && $balance['shortfall_fine'] < 0.00005,
+    'The difference reads as EXCESS — he holds more than the work needs');
+
+// Issue too little and the same figure reads the other way.
+$shortOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-09-03', 'party_id' => $customer, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 10, 'rate' => 150000, 'karigar_id' => $kEmployee, 'delivery_date' => '2026-09-30'],
+], $userA);
+jewellery_issue_to_karigar($cidA, $fyA, [
+    'order_line_ids' => [(int) jewellery_order_line_rows($cidA, $shortOrder)[0]['id']],
+    'issued_gross_weight' => 4, 'issue_date' => '2026-09-04',
+], $userA);
+$shortBalance = jewellery_karigar_metal_balance($cidA, $kEmployee);
+ok($shortBalance['shortfall_fine'] > 0.001 && $shortBalance['excess_fine'] < 0.00005,
+    'Issuing less than the work needs reads as a SHORTFALL, not an error');
+
+ok(!jewellery_issue_to_karigar($cidA, $fyA, [
+    'order_line_ids' => [(int) $multiOrderLines[0]['id']], 'issue_date' => '2026-09-05',
+], $userA)['ok'], 'An item already covered by an issue cannot be put on a second one');
+
+echo "\n16. Cancelling and postponing an order\n";
+$laterOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-09-10', 'party_id' => $customer, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'delivery_date' => '2026-09-20'],
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'delivery_date' => '2026-09-22'],
+], $userA);
+$moved = jewellery_postpone_order($cidA, $laterOrder, '2026-10-15', 'Customer travelling', $userA);
+ok($moved['ok'], 'An order can be postponed' . ($moved['ok'] ? '' : ' — ' . $moved['error']));
+$movedLines = jewellery_order_line_rows($cidA, $laterOrder);
+ok((string) $movedLines[0]['delivery_date'] === '2026-10-15'
+    && (string) $movedLines[1]['delivery_date'] === '2026-10-15',
+    'Every item still waiting moves to the new date');
+ok((string) jewellery_order($cidA, $laterOrder)['delivery_date'] === '2026-10-15',
+    "And the order's own promise follows");
+ok(!jewellery_postpone_order($cidA, $laterOrder, '2026-09-01', '', $userA)['ok'],
+    'It cannot be rescheduled to before the order was taken');
+
+// An item already out with a kaligad keeps the date its issue was measured
+// against — the craftsman was told a day and his wastage runs to it.
+$fixedDate = (string) jewellery_order_line_rows($cidA, $multiOrder)[0]['delivery_date'];
+jewellery_postpone_order($cidA, $multiOrder, '2026-11-30', '', $userA);
+ok((string) jewellery_order_line_rows($cidA, $multiOrder)[0]['delivery_date'] === $fixedDate,
+    'An item already with a kaligad keeps the date his issue was measured against');
+
+ok(!jewellery_cancel_order($cidA, $multiOrder, '', $userA)['ok'],
+    'An order with metal still out with a kaligad refuses to cancel');
+$cancelled = jewellery_cancel_order($cidA, $laterOrder, 'Customer changed their mind', $userA);
+ok($cancelled['ok'], 'An order with nothing issued cancels');
+ok((string) jewellery_order($cidA, $laterOrder)['status'] === 'cancelled', 'And it reads as cancelled');
+ok(!jewellery_cancel_order($cidA, $laterOrder, '', $userA)['ok'], 'Cancelling twice is refused');
+
+echo "\n17. Orders nobody came in to collect\n";
+// The piece is made, the gold is in the safe, and it is the customer's. The
+// shop is insuring metal it cannot sell.
+$overdue = jewellery_overdue_orders($cidA, '2026-10-01');
+$overdueNos = array_column($overdue['rows'], 'order_no');
+$multiNo = (string) jewellery_order($cidA, $multiOrder)['order_no'];
+$laterNo = (string) jewellery_order($cidA, $laterOrder)['order_no'];
+ok(in_array($multiNo, $overdueNos, true), 'An order promised before today and not delivered shows up');
+ok(!in_array($laterNo, $overdueNos, true), 'A cancelled one does not');
+$overdueRow = null;
+foreach ($overdue['rows'] as $candidate) {
+    if ((string) $candidate['order_no'] === $multiNo) { $overdueRow = $candidate; }
+}
+ok($overdueRow !== null && (int) $overdueRow['days_late'] > 0, 'It says how many days late it is');
+ok($overdueRow !== null && near((float) $overdueRow['balance_due'],
+    (float) $overdueRow['total_amount'] - (float) $overdueRow['advance_amount']),
+    'And what is still to collect, net of the advance already taken');
+ok(jewellery_overdue_orders($cidA, '2026-09-01')['rows'] === []
+    || count(jewellery_overdue_orders($cidA, '2026-09-01')['rows']) < count($overdue['rows']),
+    'Asked as at an earlier date, fewer are late — the report is a date question, not a status flag');
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

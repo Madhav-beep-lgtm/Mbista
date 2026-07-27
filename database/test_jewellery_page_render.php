@@ -185,7 +185,7 @@ $pages = [
     'jewellery.php' => ['dashboard', 'rates', 'items', 'opening', 'stock', 'masters', 'settings'],
     'jewellery-trade.php' => ['purchases', 'sales', 'bills'],
     'jewellery-workshop.php' => ['orders', 'assignments', 'delivery', 'karigars', 'refinery'],
-    'jewellery-reports.php' => ['summary', 'sales', 'purchases', 'inventory', 'vat', 'karigar', 'statement', 'bills'],
+    'jewellery-reports.php' => ['summary', 'sales', 'purchases', 'inventory', 'vat', 'karigar', 'statement', 'bills', 'uncollected'],
     // Shared components live on these two as well now.
     'accounting-inventory.php' => ['inventory'],
 ];

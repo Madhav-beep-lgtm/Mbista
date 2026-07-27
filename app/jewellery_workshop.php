@@ -808,6 +808,118 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     return $orderId;
 }
 
+/**
+ * Cancel an order the customer walked away from.
+ *
+ * Cancelling is not deleting: the order stays in the books with its number, its
+ * quote and whatever advance was taken against it, because all of that
+ * happened. What it stops is the work. So an order with metal still out with a
+ * kaligad refuses to cancel — that metal is real and has to come back first.
+ */
+function jewellery_cancel_order(int $companyId, int $orderId, string $reason = '', int $userId = 0): array
+{
+    $order = jewellery_order($companyId, $orderId);
+    if (!$order) {
+        return ['ok' => false, 'error' => 'Order not found for this company.'];
+    }
+    if ((string) $order['status'] === 'cancelled') {
+        return ['ok' => false, 'error' => 'This order is already cancelled.'];
+    }
+    if ((string) $order['status'] === 'delivered') {
+        return ['ok' => false, 'error' => 'This order has already been delivered.'];
+    }
+
+    $outStmt = db()->prepare("SELECT COUNT(*) FROM jewellery_order_assignments
+        WHERE company_id = :cid AND order_id = :oid AND status = 'issued'");
+    $outStmt->execute(['cid' => $companyId, 'oid' => $orderId]);
+    if ((int) $outStmt->fetchColumn() > 0) {
+        return ['ok' => false, 'error' => 'This order still has metal out with a kaligad. '
+            . 'Take it back or cancel the issue first.'];
+    }
+
+    $note = trim($reason);
+    db()->prepare("UPDATE jewellery_orders SET status = 'cancelled',
+            notes = TRIM(CONCAT(COALESCE(notes, ''), :note))
+        WHERE id = :id AND company_id = :cid")
+        ->execute([
+            'note' => $note !== '' ? "\nCancelled: " . $note : '',
+            'id' => $orderId, 'cid' => $companyId,
+        ]);
+    log_activity('company', $companyId, 'jewellery_order_cancel',
+        'Order ' . $order['order_no'] . ' cancelled.' . ($note !== '' ? ' ' . $note : ''), $userId);
+
+    $held = jewellery_order_advance_available($companyId, $orderId);
+
+    return ['ok' => true, 'error' => '', 'advance_held' => $held];
+}
+
+/**
+ * Push an order's promised date back, on every item that has not already gone
+ * out to a kaligad.
+ *
+ * An item already being made keeps the date its issue was measured against —
+ * the kaligad was told a day and his wastage allowance runs to it — so only the
+ * items still waiting move. The order's own promise follows the last of them.
+ */
+function jewellery_postpone_order(int $companyId, int $orderId, string $newDate, string $reason = '', int $userId = 0): array
+{
+    $order = jewellery_order($companyId, $orderId);
+    if (!$order) {
+        return ['ok' => false, 'error' => 'Order not found for this company.'];
+    }
+    if (in_array((string) $order['status'], ['delivered', 'cancelled'], true)) {
+        return ['ok' => false, 'error' => 'A ' . $order['status'] . ' order cannot be rescheduled.'];
+    }
+    if ($newDate === '' || strtotime($newDate) === false) {
+        return ['ok' => false, 'error' => 'Enter the new date.'];
+    }
+    if ($newDate < (string) $order['order_date']) {
+        return ['ok' => false, 'error' => 'The new date cannot fall before the order was taken.'];
+    }
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        db()->prepare('UPDATE jewellery_order_lines SET delivery_date = :d
+            WHERE order_id = :oid AND company_id = :cid AND assignment_id IS NULL')
+            ->execute(['d' => $newDate, 'oid' => $orderId, 'cid' => $companyId]);
+
+        // The order's promise is the last of its items, so an item already out
+        // with a kaligad on a later date still governs when the whole order can
+        // be collected.
+        $maxStmt = db()->prepare('SELECT MAX(delivery_date) FROM jewellery_order_lines
+            WHERE order_id = :oid AND company_id = :cid');
+        $maxStmt->execute(['oid' => $orderId, 'cid' => $companyId]);
+        $latest = (string) ($maxStmt->fetchColumn() ?: $newDate);
+
+        $note = trim($reason);
+        db()->prepare("UPDATE jewellery_orders SET delivery_date = :d,
+                notes = TRIM(CONCAT(COALESCE(notes, ''), :note))
+            WHERE id = :id AND company_id = :cid")
+            ->execute([
+                'd' => $latest,
+                'note' => "\nPostponed to " . $latest . ($note !== '' ? ': ' . $note : ''),
+                'id' => $orderId, 'cid' => $companyId,
+            ]);
+
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $postponeException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+
+        return ['ok' => false, 'error' => $postponeException->getMessage()];
+    }
+    log_activity('company', $companyId, 'jewellery_order_postpone',
+        'Order ' . $order['order_no'] . ' rescheduled to ' . $newDate . '.' . ($reason !== '' ? ' ' . $reason : ''), $userId);
+
+    return ['ok' => true, 'error' => '', 'delivery_date' => $newDate];
+}
+
 function jewellery_delete_order(int $companyId, int $orderId): bool
 {
     // Only an order that never reached a karigar may be removed outright.
@@ -905,6 +1017,102 @@ function jewellery_pending_order_lines(int $companyId): array
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+/**
+ * What a kaligad is holding against what the work in his hands actually needs.
+ *
+ * Metal is issued in the weights a shop can hand over — a bar, a coil, a round
+ * figure — not in the exact sum of the pieces it will become. So the issued
+ * weight and the ordered weight are not meant to agree, and forcing them to
+ * would make the shop lie about one or the other. What matters is the
+ * DIFFERENCE, watched until the work comes back:
+ *
+ *     held        the fine metal physically with him right now
+ *     committed   the fine metal the outstanding items need
+ *     difference  held − committed
+ *                 positive → he is holding more than the work needs (excess)
+ *                 negative → he has not been given enough for it (shortfall)
+ *
+ * Both figures are in the company's base unit, so a shop issuing in tola and
+ * ordering in grams still gets one comparable number.
+ */
+function jewellery_karigar_metal_balance(int $companyId, int $karigarId, string $asOf = ''): array
+{
+    $position = jewellery_holder_metal_position($companyId, 'karigar', $karigarId, $asOf);
+
+    // What the still-outstanding items need. Only issues still 'issued' count:
+    // once a piece is received back the metal for it is no longer committed.
+    $stmt = db()->prepare("SELECT l.fine_weight, l.unit_id
+        FROM jewellery_order_lines l
+        INNER JOIN jewellery_order_assignments a ON a.id = l.assignment_id
+        WHERE l.company_id = :cid AND a.karigar_id = :kid AND a.status = 'issued'");
+    $stmt->execute(['cid' => $companyId, 'kid' => $karigarId]);
+
+    $unitMap = jw_unit_map($companyId);
+    $baseUnit = jewellery_base_unit($companyId);
+    $committed = 0.0;
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $committed += jw_weight_in_base((float) $row['fine_weight'], (int) $row['unit_id'], $unitMap, $baseUnit);
+    }
+    $committed = jw_round_weight($committed);
+    $held = (float) $position['fine_weight'];
+    $difference = jw_round_weight($held - $committed);
+
+    return [
+        'held_fine' => $held,
+        'committed_fine' => $committed,
+        'difference_fine' => $difference,
+        'excess_fine' => max(0.0, $difference),
+        'shortfall_fine' => max(0.0, -$difference),
+        'metal_value' => (float) $position['metal_value'],
+        'base_unit' => $baseUnit,
+    ];
+}
+
+/**
+ * Orders whose promised date has passed and which the customer has not come in
+ * for. The piece is finished and paid for in metal, sitting in the safe, and
+ * nobody has collected it — money the shop cannot use and gold it is insuring
+ * for someone else.
+ *
+ * Cancelled and delivered orders are out by definition; an order with no date
+ * promised was never late.
+ */
+function jewellery_overdue_orders(int $companyId, string $asOf = ''): array
+{
+    $asOf = $asOf !== '' ? $asOf : date('Y-m-d');
+    $stmt = db()->prepare("SELECT o.id, o.order_no, o.order_date, o.delivery_date, o.status,
+            o.expected_gross_weight, o.total_amount, o.advance_amount, o.customer_phone,
+            COALESCE(ap.name, o.customer_name, 'Walk-in') AS party_label,
+            ap.phone AS party_phone,
+            u.code AS unit_code,
+            DATEDIFF(:asof, o.delivery_date) AS days_late
+        FROM jewellery_orders o
+        LEFT JOIN accounting_parties ap ON ap.id = o.party_id
+        INNER JOIN jewellery_units u ON u.id = o.unit_id
+        WHERE o.company_id = :cid
+          AND o.delivery_date IS NOT NULL AND o.delivery_date < :asof2
+          AND o.status NOT IN ('delivered', 'cancelled')
+        ORDER BY o.delivery_date ASC, o.order_no ASC");
+    $stmt->execute(['cid' => $companyId, 'asof' => $asOf, 'asof2' => $asOf]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $totals = ['orders' => count($rows), 'value' => 0.0, 'advance' => 0.0, 'balance' => 0.0];
+    foreach ($rows as $index => $row) {
+        $value = (float) $row['total_amount'];
+        $advance = (float) $row['advance_amount'];
+        $rows[$index]['balance_due'] = jw_round_money($value - $advance);
+        $rows[$index]['phone'] = (string) ($row['party_phone'] ?? $row['customer_phone'] ?? '');
+        $totals['value'] += $value;
+        $totals['advance'] += $advance;
+        $totals['balance'] += $value - $advance;
+    }
+    foreach (['value', 'advance', 'balance'] as $key) {
+        $totals[$key] = jw_round_money($totals[$key]);
+    }
+
+    return ['rows' => $rows, 'totals' => $totals, 'as_of' => $asOf];
+}
+
 /** One line of an order, with its item, kaligad and promised date. */
 function jewellery_order_line(int $companyId, int $orderLineId): ?array
 {
@@ -916,41 +1124,81 @@ function jewellery_order_line(int $companyId, int $orderLineId): ?array
 
 function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $input, int $userId = 0): array
 {
-    // Issuing against a LINE is the normal case now: an order for a chain and a
-    // ring goes to two kaligads, so the issue has to say which item it covers.
-    // Everything the line already knows — who is making it, which item, at what
-    // purity and weight — is taken from it unless the caller says otherwise,
-    // because retyping it is how the wrong metal gets handed over.
-    $orderLineId = (int) ($input['order_line_id'] ?? 0);
-    $orderLine = null;
-    if ($orderLineId > 0) {
-        $orderLine = jewellery_order_line($companyId, $orderLineId);
-        if (!$orderLine) {
-            return ['ok' => false, 'error' => 'That order item does not belong to this company.'];
-        }
-        if ((int) ($orderLine['assignment_id'] ?? 0) > 0) {
-            return ['ok' => false, 'error' => 'That item already has metal out with a kaligad.'];
-        }
-        // The line is AUTHORITATIVE for what it describes — which piece, at what
-        // purity, in what unit, on which order. Those are not the issuer's to
-        // retype: handing over a different item than the customer ordered is
-        // the mistake this exists to prevent. The kaligad and the weight stay
-        // the issuer's call, because a shop does reassign work and does issue
-        // a little over or under the estimate.
-        $input['order_id'] = (int) $orderLine['order_id'];
-        $input['item_id'] = (int) $orderLine['item_id'];
-        $input['purity_id'] = (int) $orderLine['purity_id'];
-        $input['unit_id'] = (int) $orderLine['unit_id'];
-        if ((int) ($input['karigar_id'] ?? 0) <= 0) {
-            $input['karigar_id'] = (int) ($orderLine['karigar_id'] ?? 0);
-        }
-        if ((float) ($input['issued_gross_weight'] ?? 0) <= 0) {
-            $input['issued_gross_weight'] = (float) $orderLine['gross_weight'];
-        }
-        if (trim((string) ($input['expected_return_date'] ?? '')) === '') {
-            $input['expected_return_date'] = (string) ($orderLine['delivery_date'] ?? '');
+    // One issue can cover SEVERAL items. A kaligad given a bar of gold makes
+    // three chains out of it; the metal handed over is a round weight the shop
+    // has to hand, not the exact sum of what the pieces will come to. So the
+    // items are a list, the weight is the issuer's to state, and the difference
+    // between what went out and what the work needs is a balance to be watched
+    // rather than an error to be prevented — see jewellery_karigar_metal_balance().
+    $orderLineIds = [];
+    foreach ((array) ($input['order_line_ids'] ?? []) as $candidateId) {
+        if ((int) $candidateId > 0) {
+            $orderLineIds[(int) $candidateId] = (int) $candidateId;
         }
     }
+    if ((int) ($input['order_line_id'] ?? 0) > 0) {
+        $orderLineIds[(int) $input['order_line_id']] = (int) $input['order_line_id'];
+    }
+    $orderLineIds = array_values($orderLineIds);
+
+    $orderLines = [];
+    $lineGrossTotal = 0.0;
+    foreach ($orderLineIds as $candidateId) {
+        $candidate = jewellery_order_line($companyId, $candidateId);
+        if (!$candidate) {
+            return ['ok' => false, 'error' => 'One of those order items does not belong to this company.'];
+        }
+        if ((int) ($candidate['assignment_id'] ?? 0) > 0) {
+            return ['ok' => false, 'error' => 'One of those items already has metal out with a kaligad.'];
+        }
+        $orderLines[] = $candidate;
+        $lineGrossTotal += (float) $candidate['gross_weight'];
+    }
+
+    if ($orderLines !== []) {
+        // Every item on one issue has to be the same metal at the same purity —
+        // a single handful of gold cannot be issued as both 22K and 24K, and
+        // the receipt settles wastage against one fineness.
+        $first = $orderLines[0];
+        foreach ($orderLines as $candidate) {
+            if ((int) $candidate['purity_id'] !== (int) $first['purity_id']
+                || (int) $candidate['unit_id'] !== (int) $first['unit_id']) {
+                return ['ok' => false, 'error' => 'Items issued together must share one purity and one weight unit. '
+                    . 'Issue the others separately.'];
+            }
+            if ((int) $candidate['order_id'] !== (int) $first['order_id']) {
+                return ['ok' => false, 'error' => 'Items issued together must be from the same order.'];
+            }
+        }
+        // The lines are AUTHORITATIVE for what they describe — which piece, at
+        // what purity, in what unit, on which order. Those are not the issuer's
+        // to retype: handing over something other than what the customer
+        // ordered is the mistake this prevents. The kaligad and the WEIGHT stay
+        // the issuer's call.
+        $input['order_id'] = (int) $first['order_id'];
+        $input['item_id'] = (int) $first['item_id'];
+        $input['purity_id'] = (int) $first['purity_id'];
+        $input['unit_id'] = (int) $first['unit_id'];
+        if ((int) ($input['karigar_id'] ?? 0) <= 0) {
+            $input['karigar_id'] = (int) ($first['karigar_id'] ?? 0);
+        }
+        if ((float) ($input['issued_gross_weight'] ?? 0) <= 0) {
+            $input['issued_gross_weight'] = jw_round_weight($lineGrossTotal);
+        }
+        if (trim((string) ($input['expected_return_date'] ?? '')) === '') {
+            // The soonest of the promised dates — the kaligad has to be back by
+            // the first one, not the last.
+            $earliest = null;
+            foreach ($orderLines as $candidate) {
+                $candidateDate = (string) ($candidate['delivery_date'] ?? '');
+                if ($candidateDate !== '' && ($earliest === null || $candidateDate < $earliest)) {
+                    $earliest = $candidateDate;
+                }
+            }
+            $input['expected_return_date'] = $earliest ?? '';
+        }
+    }
+    $orderLineId = (int) ($orderLines[0]['id'] ?? 0);
 
     $karigarId = (int) ($input['karigar_id'] ?? 0);
     $karigar = jewellery_karigar($companyId, $karigarId);
@@ -1065,13 +1313,15 @@ function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $in
             ->execute(['o' => $outId, 'i' => $inId, 'v' => $voucherId,
                 'ml' => $voucherId ? $karigarLedgerId : null, 'id' => $assignmentId]);
 
-        // The line now knows which issue covers it, so the workshop board can
-        // say "the chain is with Ram, the ring is with Shyam" rather than only
-        // "this order has metal out somewhere".
-        if ($orderLineId > 0) {
-            db()->prepare('UPDATE jewellery_order_lines SET assignment_id = :aid, karigar_id = :kid
-                WHERE id = :id AND company_id = :cid')
-                ->execute(['aid' => $assignmentId, 'kid' => $karigarId, 'id' => $orderLineId, 'cid' => $companyId]);
+        // Every item this issue covers now knows which issue covers it, so the
+        // workshop board can say "the chain is with Ram, the ring is with
+        // Shyam" rather than only "this order has metal out somewhere". Several
+        // items can share one issue — a bar of gold makes three chains.
+        $linkStmt = db()->prepare('UPDATE jewellery_order_lines SET assignment_id = :aid, karigar_id = :kid
+            WHERE id = :id AND company_id = :cid');
+        foreach ($orderLines as $coveredLine) {
+            $linkStmt->execute(['aid' => $assignmentId, 'kid' => $karigarId,
+                'id' => (int) $coveredLine['id'], 'cid' => $companyId]);
         }
 
         if ($orderId !== null) {
