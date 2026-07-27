@@ -116,14 +116,22 @@ if (isset($_GET['export']) && $canExport) {
     }
     if ($view === 'vat') {
         $register = jw_report_vat_register($companyId, $from, $to);
-        $data = [['Direction', 'Date', 'Document', 'Party', 'PAN', 'Item', 'VAT base', 'Rate %', 'VAT']];
-        foreach ($register['output_rows'] as $r) {
-            $data[] = ['Output', $r['doc_date'], $r['doc_no'], $r['party_label'], $r['pan_no'], $r['item_code'], $r['vat_base'], $r['vat_rate'], $r['vat_amount']];
+        $data = [['Direction', 'Date', 'Document', 'Party', 'PAN', 'Item', 'VAT base', 'Taxable', 'Rate %', 'VAT']];
+        foreach ([['Output', 'output_rows'], ['Input', 'input_rows']] as [$direction, $key]) {
+            foreach ($register[$key] as $r) {
+                $data[] = [$direction, $r['doc_date'], $r['doc_no'], $r['party_label'], $r['pan_no'], $r['item_code'],
+                    $r['vat_base'], $r['taxable_amount'], $r['vat_rate'], $r['vat_amount']];
+            }
         }
-        foreach ($register['input_rows'] as $r) {
-            $data[] = ['Input', $r['doc_date'], $r['doc_no'], $r['party_label'], $r['pan_no'], $r['item_code'], $r['vat_base'], $r['vat_rate'], $r['vat_amount']];
+        // Every other tax, VAT included, summarised beneath — a filing needs the
+        // Skills Development levy as much as it needs the VAT.
+        $data[] = [];
+        $data[] = ['Tax', 'Name', 'Sales base', 'Charged on sales', 'Purchase base', 'Paid on purchases', 'Net payable'];
+        foreach ($register['by_tax'] as $t) {
+            $data[] = [$t['tax_code'], $t['tax_name'], $t['output_base'], $t['output_amount'],
+                $t['input_base'], $t['input_amount'], $t['net_payable']];
         }
-        export_dispatch($format, 'jewellery-vat-' . $stamp, $data, 'VAT Register', $meta);
+        export_dispatch($format, 'jewellery-vat-' . $stamp, $data, 'Tax Register', $meta);
     }
     if ($view === 'bills') {
         $data = [['Party', 'Bill no', 'Type', 'Date', 'Billed', 'Settled', 'Outstanding', 'Status']];
@@ -433,13 +441,41 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
         <?php endforeach; ?>
     </section>
 
+    <section class="mbw-card" style="margin-top:14px">
+        <div class="mbw-card-head"><h2>Every tax charged this period (<?= count($register['by_tax']) ?>)</h2></div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr>
+                <th>Tax</th><th class="is-numeric">Sales base</th><th class="is-numeric">Charged on sales</th>
+                <th class="is-numeric">Purchase base</th><th class="is-numeric">Paid on purchases</th>
+                <th class="is-numeric">Net payable</th>
+            </tr></thead>
+            <tbody>
+                <?php if ($register['by_tax'] === []): ?>
+                    <tr><td colspan="6">No tax was charged on a posted document in this period.</td></tr>
+                <?php endif; ?>
+                <?php foreach ($register['by_tax'] as $t): ?>
+                    <tr>
+                        <td><strong><?= e($t['tax_code']) ?></strong> — <?= e($t['tax_name']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $t['output_base']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $t['output_amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $t['input_base']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $t['input_amount']) ?></td>
+                        <td class="is-numeric"><strong><?= $fmt((float) $t['net_payable']) ?></strong></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+        <p class="frm-optional" style="margin:8px 12px 12px">Each tax is shown on the base it was actually charged on. They are
+            deliberately not added together — VAT and the Skills Development levy sit on different bases and are filed separately.</p>
+    </section>
+
     <?php foreach ([['Output VAT (sales)', $register['output_rows'], $register['output']], ['Input VAT (purchases)', $register['input_rows'], $register['input']]] as [$title, $rows, $sums]): ?>
         <section class="mbw-card" style="margin-top:14px">
             <div class="mbw-card-head"><h2><?= e($title) ?> (<?= count($rows) ?>)</h2></div>
             <div style="overflow-x:auto"><table>
-                <thead><tr><th>Date</th><th>Document</th><th>Party</th><th>PAN</th><th>Item</th><th>VAT base</th><th class="is-numeric">Rate</th><th class="is-numeric">VAT</th></tr></thead>
+                <thead><tr><th>Date</th><th>Document</th><th>Party</th><th>PAN</th><th>Item</th><th>VAT base</th><th class="is-numeric">Taxable</th><th class="is-numeric">Rate</th><th class="is-numeric">VAT</th></tr></thead>
                 <tbody>
-                    <?php if ($rows === []): ?><tr><td colspan="8">Nothing in this period.</td></tr><?php endif; ?>
+                    <?php if ($rows === []): ?><tr><td colspan="9">Nothing in this period.</td></tr><?php endif; ?>
                     <?php foreach ($rows as $r): ?>
                         <tr>
                             <td><?= e(app_date((string) $r['doc_date'])) ?></td>
@@ -448,12 +484,13 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                             <td><?= e((string) ($r['pan_no'] ?? '—')) ?></td>
                             <td><?= e($r['item_code']) ?></td>
                             <td><?= e(str_replace('_', ' ', (string) $r['vat_base'])) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) $r['taxable_amount']) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $r['vat_rate']) ?>%</td>
                             <td class="is-numeric"><?= $fmt((float) $r['vat_amount']) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
-                <tfoot><tr><th colspan="7">Total</th><th class="is-numeric"><?= $fmt($sums['vat']) ?></th></tr></tfoot>
+                <tfoot><tr><th colspan="6">Total</th><th class="is-numeric"><?= $fmt($sums['taxable']) ?></th><th></th><th class="is-numeric"><?= $fmt($sums['vat']) ?></th></tr></tfoot>
             </table></div>
         </section>
     <?php endforeach; ?>

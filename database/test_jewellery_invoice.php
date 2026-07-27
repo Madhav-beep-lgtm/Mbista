@@ -311,6 +311,23 @@ $dv = voucher_ledgers((int) $diaPost['voucher_id']);
 ok(near($dv[$L['sales_stone']] ?? 0, -45500.00),
     'And all three stone columns land in the stone revenue account, 45,500.00');
 
+echo "\nThe tax register files what was actually charged\n";
+// The Akshara bill and the diamond bill are both posted by now.
+$register = jw_report_vat_register($cid, '2026-07-16', '2027-07-15');
+$byCode2 = [];
+foreach ($register['by_tax'] as $t) { $byCode2[(string) $t['tax_code']] = $t; }
+ok(isset($byCode2['VAT']) && isset($byCode2['SD']),
+    'Both taxes appear — a register that knew only about VAT could not be filed');
+ok(isset($byCode2['SD']) && near((float) $byCode2['SD']['output_amount'], 345.46 + jw_round_money((jw_round_money(2.0 * 22645.062) + 1000.00) * 0.005)),
+    'The SD levy is registered on its own base, separately from VAT');
+ok(isset($byCode2['VAT']) && near((float) $byCode2['VAT']['output_base'], 232.60 + 45500.00),
+    'The VAT base is the stone side of both bills — 45,732.60, NOT the whole bill value');
+ok((float) $register['output']['taxable'] < 46000.0,
+    'And the VAT register does not declare the gold as taxable: a stone_diamond base '
+    . 'must never fall through to the whole line');
+ok(near((float) $register['output']['vat'], (float) $byCode2['VAT']['output_amount']),
+    'The line-level VAT total and the per-tax total agree');
+
 echo "\nThe printed bill carries the same figures the books do\n";
 // Rendering has to happen in a child process: the page is a full document that
 // ends the request, and require_jewellery() needs a real session context.

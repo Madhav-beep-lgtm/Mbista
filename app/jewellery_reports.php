@@ -281,7 +281,7 @@ function jw_report_vat_register(int $companyId, string $from, string $to): array
     $outStmt = db()->prepare("SELECT s.sale_no AS doc_no, s.sale_date AS doc_date,
             COALESCE(ap.name, s.customer_name, 'Walk-in') AS party_label, ap.pan_no,
             i.sku AS item_code, i.name AS item_name, l.vat_base, l.vat_rate, l.vat_amount,
-            l.metal_amount, l.making_amount, l.stone_amount
+            l.metal_amount, l.making_amount, l.stone_amount, l.diamond_amount, l.other_diamond_amount
         FROM jewellery_sale_lines l
         INNER JOIN jewellery_sales s ON s.id = l.sale_id
         INNER JOIN inventory_items i ON i.id = l.item_id
@@ -296,7 +296,7 @@ function jw_report_vat_register(int $companyId, string $from, string $to): array
     $inStmt = db()->prepare("SELECT pu.purchase_no AS doc_no, pu.purchase_date AS doc_date,
             COALESCE(ap.name, 'Walk-in') AS party_label, ap.pan_no,
             i.sku AS item_code, i.name AS item_name, l.vat_base, l.vat_rate, l.vat_amount,
-            l.metal_amount, l.making_amount, l.stone_amount
+            l.metal_amount, l.making_amount, l.stone_amount, l.diamond_amount, l.other_diamond_amount
         FROM jewellery_purchase_lines l
         INNER JOIN jewellery_purchases pu ON pu.id = l.purchase_id
         INNER JOIN inventory_items i ON i.id = l.item_id
@@ -308,19 +308,31 @@ function jw_report_vat_register(int $companyId, string $from, string $to): array
     $inStmt->execute(['cid' => $companyId, 'from' => $from, 'to' => $to]);
     $inputRows = $inStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $sum = static function (array $rows): array {
+    // The base a line was taxed on. Getting this wrong is a filing error, not a
+    // display one: 'stone_diamond' is the base a jewellery bill actually uses
+    // and it must NOT fall through to the whole line value — on a bill where
+    // only the stone is vatable, that would declare the gold as taxable too.
+    $baseOf = static function (array $row): float {
+        return match ((string) $row['vat_base']) {
+            'making_only' => (float) $row['making_amount'],
+            'stone_only' => (float) $row['stone_amount'],
+            'stone_diamond' => (float) $row['stone_amount'] + (float) $row['diamond_amount']
+                + (float) $row['other_diamond_amount'],
+            default => (float) $row['metal_amount'] + (float) $row['making_amount'] + (float) $row['stone_amount']
+                + (float) $row['diamond_amount'] + (float) $row['other_diamond_amount'],
+        };
+    };
+    $sum = static function (array $rows) use ($baseOf): array {
         $taxable = 0.0; $vat = 0.0;
         foreach ($rows as $row) {
-            $taxable += match ((string) $row['vat_base']) {
-                'making_only' => (float) $row['making_amount'],
-                'stone_only' => (float) $row['stone_amount'],
-                default => (float) $row['metal_amount'] + (float) $row['making_amount'] + (float) $row['stone_amount'],
-            };
+            $taxable += $baseOf($row);
             $vat += (float) $row['vat_amount'];
         }
 
         return ['taxable' => jw_round_money($taxable), 'vat' => jw_round_money($vat)];
     };
+    foreach ($outputRows as $i => $row) { $outputRows[$i]['taxable_amount'] = jw_round_money($baseOf($row)); }
+    foreach ($inputRows as $i => $row) { $inputRows[$i]['taxable_amount'] = jw_round_money($baseOf($row)); }
 
     $output = $sum($outputRows);
     $input = $sum($inputRows);
@@ -332,7 +344,54 @@ function jw_report_vat_register(int $companyId, string $from, string $to): array
         'input' => $input,
         // Positive = payable to the tax office, negative = credit carried forward.
         'net_payable' => jw_round_money($output['vat'] - $input['vat']),
+        'by_tax' => jw_report_tax_register($companyId, $from, $to),
     ];
+}
+
+/**
+ * Every tax the shop charged in a period, one row per tax, output against
+ * input. Driven by jewellery_line_taxes rather than the VAT columns on the
+ * line, because that is the only place a SECOND tax is recorded — the Skills
+ * Development levy sits beside VAT on the same bill, on a different base, and a
+ * register that knows only about VAT cannot be filed against it.
+ *
+ * Any tax added to the register later appears here without a code change,
+ * which is the point: the rates and the bases are the shop's to set.
+ */
+function jw_report_tax_register(int $companyId, string $from, string $to): array
+{
+    $sql = "SELECT t.tax_code, t.tax_name, :dir AS direction,
+            COALESCE(SUM(t.base_amount), 0) AS base_amount, COALESCE(SUM(t.amount), 0) AS amount,
+            COUNT(DISTINCT t.doc_id) AS doc_count
+        FROM jewellery_line_taxes t
+        INNER JOIN %s d ON d.id = t.doc_id AND d.company_id = t.company_id
+        WHERE t.company_id = :cid AND t.doc_type = :doc AND d.status = 'posted'
+          AND d.%s BETWEEN :from AND :to
+        GROUP BY t.tax_code, t.tax_name";
+
+    $taxes = [];
+    foreach ([
+        ['output', 'sale', 'jewellery_sales', 'sale_date'],
+        ['input', 'purchase', 'jewellery_purchases', 'purchase_date'],
+    ] as [$direction, $docType, $table, $dateColumn]) {
+        $stmt = db()->prepare(sprintf($sql, $table, $dateColumn));
+        $stmt->execute(['cid' => $companyId, 'doc' => $docType, 'dir' => $direction, 'from' => $from, 'to' => $to]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $code = (string) $row['tax_code'];
+            $taxes[$code] ??= ['tax_code' => $code, 'tax_name' => (string) $row['tax_name'],
+                'output_base' => 0.0, 'output_amount' => 0.0, 'output_docs' => 0,
+                'input_base' => 0.0, 'input_amount' => 0.0, 'input_docs' => 0, 'net_payable' => 0.0];
+            $taxes[$code][$direction . '_base'] = jw_round_money((float) $row['base_amount']);
+            $taxes[$code][$direction . '_amount'] = jw_round_money((float) $row['amount']);
+            $taxes[$code][$direction . '_docs'] = (int) $row['doc_count'];
+        }
+    }
+    foreach ($taxes as $code => $row) {
+        $taxes[$code]['net_payable'] = jw_round_money($row['output_amount'] - $row['input_amount']);
+    }
+    ksort($taxes);
+
+    return array_values($taxes);
 }
 
 // ---------------------------------------------------------------------------
