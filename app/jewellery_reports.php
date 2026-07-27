@@ -350,12 +350,19 @@ function jw_report_karigar_ledger(int $companyId, int $karigarId, string $from, 
         return ['karigar' => null, 'rows' => [], 'opening_fine' => 0.0, 'closing_fine' => 0.0, 'bills' => [], 'position' => []];
     }
 
+    // A kaligad holds several items at once, each written in whatever unit its
+    // document used, so this ledger crosses units by nature. Summing the stored
+    // weights would add tola to gram; the canonical gram figure is summed and
+    // shown in the company's reporting unit.
+    $baseUnit = jewellery_base_unit($companyId);
+    $perUnit = (float) ($baseUnit['grams'] ?? 0) ?: 1.0;
+
     $dayBefore = date('Y-m-d', strtotime($from . ' -1 day'));
-    $openStmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_weight ELSE -fine_weight END), 0)
+    $openStmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_grams ELSE -fine_grams END), 0)
         FROM jewellery_stock_txns
         WHERE company_id = :cid AND holder_type = 'karigar' AND holder_id = :kid AND txn_date <= :d");
     $openStmt->execute(['cid' => $companyId, 'kid' => $karigarId, 'd' => $dayBefore]);
-    $openingFine = jw_round_weight((float) $openStmt->fetchColumn());
+    $openingFine = jw_round_weight((float) $openStmt->fetchColumn() / $perUnit);
 
     $stmt = db()->prepare("SELECT t.*, i.sku AS item_code, i.name AS item_name, p.code AS purity_code, u.code AS unit_code
         FROM jewellery_stock_txns t
@@ -371,7 +378,11 @@ function jw_report_karigar_ledger(int $companyId, int $karigarId, string $from, 
     $running = $openingFine;
     $rows = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $running = jw_round_weight($running + ((string) $row['direction'] === 'in' ? 1 : -1) * (float) $row['fine_weight']);
+        // Each movement restated in the reporting unit before it moves the
+        // running balance, so a tola line and a gram line are comparable.
+        $movementFine = jw_round_weight((float) $row['fine_grams'] / $perUnit);
+        $running = jw_round_weight($running + ((string) $row['direction'] === 'in' ? 1 : -1) * $movementFine);
+        $row['base_fine_weight'] = $movementFine;
         $row['balance_fine'] = $running;
         $rows[] = $row;
     }
