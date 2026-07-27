@@ -65,3 +65,6 @@ output.pdf
 
 NRV-Final-Verification.txt
 NRV-Implementation-Audit.txt
+
+# Local agent/session config — never publish
+.claude/

@@ -152,7 +152,7 @@ function voucher_import_read_csv(string $path): array
     }
     $rows = [];
     $rowNo = 0;
-    while (($cells = fgetcsv($handle)) !== false) {
+    while (($cells = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
         $rowNo++;
         if ($rowNo > VOUCHER_IMPORT_MAX_ROWS) {
             break;
@@ -583,71 +583,14 @@ function voucher_import_ledger_list_csv(int $companyId): string
 /** Minimal single-sheet .xlsx built with inline strings. */
 function voucher_import_template_xlsx(): string
 {
-    $xml = static fn (string $value): string => htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+    // One .xlsx writer for the whole app — see app/export_engine.php. This file
+    // used to carry its own copy, and so did the hospitality sales template;
+    // three copies of the same SpreadsheetML package is three places for a
+    // corrupt-workbook bug to hide.
+    require_once __DIR__ . '/export_engine.php';
 
-    $rowsXml = '';
-    foreach (voucher_import_template_rows() as $rowIndex => $row) {
-        $cellsXml = '';
-        foreach ($row as $columnIndex => $value) {
-            $letters = '';
-            $n = $columnIndex + 1;
-            while ($n > 0) {
-                $letters = chr(65 + (($n - 1) % 26)) . $letters;
-                $n = intdiv($n - 1, 26);
-            }
-            $ref = $letters . ($rowIndex + 1);
-            if (is_int($value) || is_float($value)) {
-                $cellsXml .= '<c r="' . $ref . '"><v>' . $value . '</v></c>';
-            } elseif ((string) $value !== '') {
-                $cellsXml .= '<c r="' . $ref . '" t="inlineStr"><is><t xml:space="preserve">' . $xml((string) $value) . '</t></is></c>';
-            }
-        }
-        $rowsXml .= '<row r="' . ($rowIndex + 1) . '">' . $cellsXml . '</row>';
-    }
-
-    $files = [
-        '[Content_Types].xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-            . '<Default Extension="xml" ContentType="application/xml"/>'
-            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            . '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-            . '</Types>',
-        '_rels/.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-            . '</Relationships>',
-        'xl/workbook.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            . '<sheets><sheet name="Vouchers" sheetId="1" r:id="rId1"/></sheets></workbook>',
-        'xl/_rels/workbook.xml.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-            . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-            . '</Relationships>',
-        'xl/styles.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
-            . '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
-            . '<borders count="1"><border/></borders>'
-            . '<cellStyleXfs count="1"><xf/></cellStyleXfs>'
-            . '<cellXfs count="1"><xf xfId="0"/></cellXfs>'
-            . '</styleSheet>',
-        'xl/worksheets/sheet1.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . '<cols><col min="1" max="2" width="14" customWidth="1"/><col min="3" max="6" width="22" customWidth="1"/><col min="7" max="8" width="12" customWidth="1"/><col min="9" max="12" width="18" customWidth="1"/></cols>'
-            . '<sheetData>' . $rowsXml . '</sheetData></worksheet>',
-    ];
-
-    $temp = tempnam(sys_get_temp_dir(), 'vimp');
-    $zip = new ZipArchive();
-    $zip->open($temp, ZipArchive::OVERWRITE);
-    foreach ($files as $name => $content) {
-        $zip->addFromString($name, $content);
-    }
-    $zip->close();
-    $bytes = (string) file_get_contents($temp);
-    @unlink($temp);
-    return $bytes;
+    return xlsx_build(voucher_import_template_rows(), 'Vouchers', [
+        0 => 14, 1 => 14, 2 => 22, 3 => 22, 4 => 22, 5 => 22,
+        6 => 12, 7 => 12, 8 => 18, 9 => 18, 10 => 18, 11 => 18,
+    ]);
 }
