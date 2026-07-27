@@ -6,6 +6,32 @@ DirectoryIndex index.php
     Header always set X-Frame-Options "SAMEORIGIN"
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
     Header always set X-XSS-Protection "1; mode=block"
+
+    # Tell the browser never to speak plain HTTP to this host again. It is set
+    # only on responses that ARRIVED over HTTPS: sending it over HTTP is
+    # ignored by browsers, and setting it before the certificate works would
+    # lock users out of a site that cannot yet answer on 443.
+    #
+    # One year, subdomains included. Add "preload" and submit to
+    # hstspreload.org only once you are certain every subdomain has a
+    # certificate — it is very hard to undo.
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" "expr=%{HTTPS} == 'on'"
+
+    # What this page is allowed to load, and from where. The app serves its own
+    # CSS and JS from /assets, so nothing third-party is needed.
+    #
+    # 'unsafe-inline' is present for script-src and style-src because the pages
+    # carry inline <script> and style="" attributes throughout. It weakens the
+    # XSS protection this header exists to give, so it is a step to remove, not
+    # a finished state — but the header still blocks the thing that matters
+    # most: script loaded from somebody else's domain.
+    #
+    # frame-ancestors repeats X-Frame-Options for browsers that have dropped it;
+    # form-action stops a hijacked page posting your session somewhere else.
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+
+    # No browser feature here needs a camera, a microphone or a location.
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
 </IfModule>
 
 <FilesMatch "^(\.env|composer\.(json|lock)|package\.(json|lock)|yarn\.lock)$">
@@ -15,11 +41,24 @@ DirectoryIndex index.php
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
-    # Optional production canonical redirect.
-    # Enable only after DNS and SSL are ready for the final cPanel domain.
-    # RewriteCond %{HTTPS} !=on [OR]
-    # RewriteCond %{HTTP_HOST} !^www\.mbca\.com\.np$ [NC]
-    # RewriteRule ^ https://www.mbca.com.np%{REQUEST_URI} [R=301,L]
+    # Force HTTPS.
+    #
+    # Until this was on, one plain-HTTP request sent the session cookie in the
+    # clear: PHP only marks that cookie Secure when the request it is answering
+    # already arrived over HTTPS, so on shared wifi the cookie was readable and
+    # the session takeable.
+    #
+    # Deliberately NOT tied to one hostname. The old rule was, which is why it
+    # had to stay commented out until DNS was final — and so it never went on
+    # at all. This redirects whatever host the request came in on, so it is
+    # correct on the live domain, on an addon domain and on a staging URL.
+    #
+    # HTTP_X_FORWARDED_PROTO is checked too: behind cPanel's proxy or a CDN the
+    # connection to Apache can be plain HTTP even though the visitor is on
+    # HTTPS, and without this the two rules would bounce forever.
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
 
     # /login.php is the single sign-in page. The old admin entry points are kept
     # as external 301s so bookmarks land on it visibly instead of dead-ending.
