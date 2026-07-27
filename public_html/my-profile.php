@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/two_factor.php';
 
 require_login();
 
@@ -110,6 +111,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         security_event('password_change', 'success', 'Self-service password change.', null, $userId);
         flash('success', 'Password changed successfully.');
         redirect('my-profile.php');
+    }
+
+    // --- Two-factor authentication ------------------------------------------
+    if ($action === 'two_factor_begin') {
+        $_SESSION['2fa_setup_secret'] = two_factor_begin_enrolment($userId);
+        redirect('my-profile.php#two-factor');
+    }
+
+    if ($action === 'two_factor_confirm') {
+        $confirmed = two_factor_confirm_enrolment($userId, (string) ($_POST['code'] ?? ''));
+        if (!$confirmed['ok']) {
+            flash('error', $confirmed['error']);
+            redirect('my-profile.php#two-factor');
+        }
+        unset($_SESSION['2fa_setup_secret']);
+        // Shown once and never again — they are stored hashed.
+        $_SESSION['2fa_recovery_codes'] = $confirmed['recovery_codes'];
+        flash('success', 'Two-factor authentication is on. Save your recovery codes now.');
+        redirect('my-profile.php#two-factor');
+    }
+
+    if ($action === 'two_factor_disable') {
+        // Switching off the second factor is exactly what an attacker sitting
+        // on a stolen session would do, so it costs the password.
+        $account = user_by_email((string) $user['email']);
+        if (!$account || !password_verify((string) ($_POST['current_password'] ?? ''), (string) $account['password_hash'])) {
+            security_event('two_factor_disable', 'failure', 'Wrong password on an attempt to switch off 2FA.', null, $userId);
+            flash('error', 'Current password is incorrect.');
+            redirect('my-profile.php#two-factor');
+        }
+        two_factor_disable($userId);
+        flash('success', 'Two-factor authentication is off.');
+        redirect('my-profile.php#two-factor');
     }
 
     if ($action === 'create_portal_user') {
@@ -269,6 +303,68 @@ include __DIR__ . '/../app/views/partials/client_header.php';
         </form>
     </section>
 </div>
+
+
+<section class="mbw-card" style="margin-top:18px" id="two-factor">
+    <div class="mbw-card-head"><h2>Two-factor authentication</h2></div>
+    <?php
+        $tfaActive = two_factor_is_active($userId);
+        $tfaSecret = (string) ($_SESSION['2fa_setup_secret'] ?? '');
+        $tfaCodes = (array) ($_SESSION['2fa_recovery_codes'] ?? []);
+        unset($_SESSION['2fa_recovery_codes']);
+    ?>
+
+    <?php if ($tfaCodes !== []): ?>
+        <div class="notice" style="margin:0 0 14px">
+            <strong>Save these recovery codes now.</strong> Each works once, if you lose your phone.
+            They are stored hashed, so this is the only time they can be shown.
+            <ul style="columns:2;margin:10px 0 0;padding-left:18px;font-family:monospace;font-size:1rem">
+                <?php foreach ($tfaCodes as $tfaCode): ?><li><?= e($tfaCode) ?></li><?php endforeach; ?>
+            </ul>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($tfaActive): ?>
+        <p><span class="mbw-pill tone-green">On</span>
+           Sign-in asks for a code from your authenticator app.
+           Recovery codes left: <strong><?= (int) two_factor_recovery_remaining($userId) ?></strong>.</p>
+        <form method="post" class="mbw-form-grid" style="margin-top:12px">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="two_factor_disable">
+            <label>Confirm your password to switch it off
+                <input type="password" name="current_password" required autocomplete="current-password">
+            </label>
+            <div class="actions"><button type="submit">Switch off</button></div>
+        </form>
+
+    <?php elseif ($tfaSecret !== ''): ?>
+        <p>Add this key to Google Authenticator, Authy, Aegis or 1Password, then enter the code it shows.</p>
+        <p style="font-family:monospace;font-size:1.15rem;letter-spacing:2px;word-break:break-all;margin:10px 0">
+            <?= e(trim(chunk_split($tfaSecret, 4, ' '))) ?>
+        </p>
+        <p style="word-break:break-all;font-size:.8rem;color:var(--mbw-muted)">
+            <?= e(two_factor_provisioning_uri($tfaSecret, (string) $user['email'], (string) setting('site_name', 'M.B Group'))) ?>
+        </p>
+        <form method="post" class="mbw-form-grid" style="margin-top:12px">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="two_factor_confirm">
+            <label>Code from your app
+                <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code"
+                       pattern="[0-9]{6}" maxlength="6" required placeholder="123456">
+            </label>
+            <div class="actions"><button type="submit">Turn it on</button></div>
+        </form>
+
+    <?php else: ?>
+        <p><span class="mbw-pill tone-gray">Off</span>
+           A stolen password is enough to sign in as you. A code from your phone means it is not.</p>
+        <form method="post" style="margin-top:12px">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="two_factor_begin">
+            <button type="submit"><?= icon('lock') ?>Set it up</button>
+        </form>
+    <?php endif; ?>
+</section>
 
 <?php if ($clientProfile): ?>
 <section class="mbw-card" style="margin-top:18px">

@@ -40,6 +40,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('login.php');
     }
 
+    // The password was right. If this account carries a second factor, that is
+    // only half the answer — hold the user at the door rather than letting the
+    // session stand, and send them to the challenge.
+    require_once __DIR__ . '/../app/two_factor.php';
+    $signedIn = current_user();
+    if ($signedIn && two_factor_is_active((int) $signedIn['id'])) {
+        two_factor_hold_pending((int) $signedIn['id']);
+        $_SESSION['2fa_remember'] = !empty($_POST['remember']) ? 1 : 0;
+        redirect('two-factor.php');
+    }
+
     if (!empty($_POST['remember'])) {
         // Keep the session cookie alive for 30 days instead of ending with the browser.
         setcookie(session_name(), session_id(), [

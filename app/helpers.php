@@ -867,10 +867,22 @@ function client_service_provider_names(int $clientId): string
     return implode(', ', array_column($stmt->fetchAll(), 'name'));
 }
 
-function setting(string $key, mixed $default = ''): mixed
+/**
+ * A setting, read once per request and then cached.
+ *
+ * $refresh drops the cache. update_settings() uses it: without that, anything
+ * that saves a setting and then reads it back in the SAME request gets the
+ * value from before the save — a settings page that redirects afterwards never
+ * noticed, but anything acting on what it just wrote silently acted on the old
+ * value.
+ */
+function setting(string $key, mixed $default = '', bool $refresh = false): mixed
 {
     static $settings = null;
 
+    if ($refresh) {
+        $settings = null;
+    }
     if ($settings === null) {
         $settings = [];
         $rows = db()->query('SELECT setting_key, setting_value FROM settings')->fetchAll();
@@ -880,7 +892,7 @@ function setting(string $key, mixed $default = ''): mixed
         }
     }
 
-    return $settings[$key] ?? $default;
+    return $key === '' ? '' : ($settings[$key] ?? $default);
 }
 
 function all_settings(): array
@@ -905,6 +917,10 @@ function update_settings(array $settings): void
             'setting_value' => (string) $value,
         ]);
     }
+
+    // Drop the read cache, so anything acting on a setting later in this same
+    // request acts on what was just saved rather than on what it replaced.
+    setting('', '', true);
 }
 
 function plans(bool $onlyActive = true): array
