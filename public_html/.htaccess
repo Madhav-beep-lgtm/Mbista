@@ -38,6 +38,27 @@ DirectoryIndex index.php
     Require all denied
 </FilesMatch>
 
+# Editor and hand-made backups of source files.
+#
+# Apache runs .php. It does NOT run foo.php.bak — it serves it as plain text,
+# so a single forgotten backup hands over the whole file to anyone who guesses
+# the name, and the names are guessable. Thirteen of these were sitting under
+# this directory, and the deploy was copying them up with everything else.
+#
+# Blocked here as well as excluded from the deploy: one of the two will
+# eventually be forgotten, and this is the layer that still holds when it is.
+<FilesMatch "\.(bak|old|orig|save|swp|swo|tmp|log|sql|sh|inc|dist|example)$|~$">
+    Require all denied
+</FilesMatch>
+
+# Dotfiles and version-control leftovers.
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+<IfModule mod_rewrite.c>
+    RewriteRule (^|/)\.(git|svn|hg)(/|$) - [F,L]
+</IfModule>
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
