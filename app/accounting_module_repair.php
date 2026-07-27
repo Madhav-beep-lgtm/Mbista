@@ -2502,6 +2502,32 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Item category master (migration 086)', static function (): void {
+        db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `company_id` INT UNSIGNED NOT NULL,
+            `name` VARCHAR(120) NOT NULL,
+            `sort_order` INT NOT NULL DEFAULT 0,
+            `active` TINYINT(1) NOT NULL DEFAULT 1,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_jw_category` (`company_id`, `name`),
+            KEY `idx_jw_category_company` (`company_id`, `active`, `sort_order`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        // Adopt whatever is already filed, so turning the free-text box into a
+        // dropdown cannot orphan an existing item's category.
+        if (accounting_repair_table_exists('inventory_items') && accounting_repair_table_exists('jewellery_item_profiles')) {
+            db()->exec("INSERT IGNORE INTO `jewellery_item_categories` (`company_id`, `name`, `sort_order`, `active`)
+                SELECT i.`company_id`, TRIM(i.`category`), 0, 1
+                  FROM `inventory_items` i
+                 INNER JOIN `jewellery_item_profiles` j ON j.`inventory_item_id` = i.`id`
+                 WHERE i.`category` IS NOT NULL AND TRIM(i.`category`) <> ''
+                 GROUP BY i.`company_id`, TRIM(i.`category`)");
+        }
+    });
+
     $run('Printed tax bases on pre-083 documents (migration 085)', static function (): void {
         // The invoice reads its totals block straight off the header, so a bill
         // raised before the tax bases existed reprints as 0.00 / 0.00 / 0.00

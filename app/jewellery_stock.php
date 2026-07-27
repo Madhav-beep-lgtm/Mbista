@@ -96,7 +96,13 @@ function jewellery_item(int $companyId, int $itemId): ?array
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
-/** Distinct categories in use, for filters and category-scoped ledger maps. */
+/**
+ * Distinct categories in use, for filters and category-scoped ledger maps.
+ *
+ * Note this is what is ACTUALLY on the items, not what the master allows —
+ * a filter must still offer a category that was retired from the master,
+ * otherwise the items filed under it become unreachable.
+ */
 function jewellery_item_categories(int $companyId): array
 {
     $stmt = db()->prepare("SELECT DISTINCT i.category FROM inventory_items i
@@ -105,6 +111,116 @@ function jewellery_item_categories(int $companyId): array
     $stmt->execute(['cid' => $companyId]);
 
     return $stmt->fetchAll(PDO::FETCH_COLUMN);
+}
+
+/**
+ * The category master — the list a shop sets up once and files every item
+ * under, rather than retyping the word on each item and ending up with "Ring",
+ * "RING" and "Rings" as three headings in one report.
+ */
+function jewellery_categories_list(int $companyId, bool $activeOnly = true): array
+{
+    $sql = 'SELECT * FROM jewellery_item_categories WHERE company_id = :cid';
+    if ($activeOnly) {
+        $sql .= ' AND active = 1';
+    }
+    $sql .= ' ORDER BY sort_order ASC, name ASC';
+    $stmt = db()->prepare($sql);
+    $stmt->execute(['cid' => $companyId]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function jewellery_category(int $companyId, int $categoryId): ?array
+{
+    $stmt = db()->prepare('SELECT * FROM jewellery_item_categories WHERE id = :id AND company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $categoryId, 'cid' => $companyId]);
+
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+/**
+ * Create or rename a category. Renaming carries every item filed under the old
+ * name across with it — the name IS the link, so leaving the items behind would
+ * silently empty a heading the books are read by.
+ */
+function jewellery_save_category(int $companyId, array $data): int
+{
+    $categoryId = (int) ($data['id'] ?? 0);
+    $name = trim((string) ($data['name'] ?? ''));
+    if ($name === '') {
+        throw new RuntimeException('A category needs a name.');
+    }
+
+    $existing = $categoryId > 0 ? jewellery_category($companyId, $categoryId) : null;
+    if ($categoryId > 0 && !$existing) {
+        throw new RuntimeException('That category does not belong to this company.');
+    }
+
+    $clash = db()->prepare('SELECT id FROM jewellery_item_categories
+        WHERE company_id = :cid AND name = :name AND id <> :id LIMIT 1');
+    $clash->execute(['cid' => $companyId, 'name' => $name, 'id' => $categoryId]);
+    if ($clash->fetchColumn() !== false) {
+        throw new RuntimeException('There is already a category called "' . $name . '".');
+    }
+
+    $params = ['cid' => $companyId, 'name' => $name,
+        'sort' => (int) ($data['sort_order'] ?? 0),
+        'active' => !empty($data['active']) ? 1 : 0];
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        if ($existing) {
+            db()->prepare('UPDATE jewellery_item_categories SET name = :name, sort_order = :sort, active = :active
+                WHERE id = :id AND company_id = :cid')->execute($params + ['id' => $categoryId]);
+            $oldName = (string) $existing['name'];
+            if ($oldName !== $name) {
+                db()->prepare('UPDATE inventory_items i
+                    INNER JOIN jewellery_item_profiles j ON j.inventory_item_id = i.id
+                    SET i.category = :new WHERE i.company_id = :cid AND i.category = :old')
+                    ->execute(['new' => $name, 'cid' => $companyId, 'old' => $oldName]);
+            }
+        } else {
+            db()->prepare('INSERT INTO jewellery_item_categories (company_id, name, sort_order, active)
+                VALUES (:cid, :name, :sort, :active)')->execute($params);
+            $categoryId = (int) db()->lastInsertId();
+        }
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        throw $e;
+    }
+
+    return $categoryId;
+}
+
+/** A category can only go once nothing is filed under it. */
+function jewellery_delete_category(int $companyId, int $categoryId): array
+{
+    $category = jewellery_category($companyId, $categoryId);
+    if (!$category) {
+        return ['ok' => false, 'error' => 'That category does not belong to this company.'];
+    }
+    $inUse = db()->prepare('SELECT COUNT(*) FROM inventory_items i
+        INNER JOIN jewellery_item_profiles j ON j.inventory_item_id = i.id
+        WHERE i.company_id = :cid AND i.category = :name');
+    $inUse->execute(['cid' => $companyId, 'name' => (string) $category['name']]);
+    $count = (int) $inUse->fetchColumn();
+    if ($count > 0) {
+        return ['ok' => false, 'error' => $count . ' item(s) are filed under "' . $category['name']
+            . '". Move them first, or switch the category off instead of deleting it.'];
+    }
+    db()->prepare('DELETE FROM jewellery_item_categories WHERE id = :id AND company_id = :cid')
+        ->execute(['id' => $categoryId, 'cid' => $companyId]);
+
+    return ['ok' => true, 'error' => ''];
 }
 
 /**
@@ -138,8 +254,21 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
         throw new RuntimeException('Choose a weight unit that belongs to this company.');
     }
 
-    $gross = jw_round_weight((float) ($input['gross_weight'] ?? 0));
-    $stone = jw_round_weight((float) ($input['stone_weight'] ?? 0));
+    // A caller that does not mention a field leaves it as it was. Without this,
+    // dropping a field from the item form would silently zero it on every item
+    // the form touches — a screen deciding what the DATABASE forgets. Callers
+    // that do send the field still overwrite it, including with zero.
+    $existingItem = $itemId > 0 ? jewellery_item($companyId, $itemId) : null;
+    $keep = static function (string $field, $fallback) use ($input, $existingItem) {
+        if (array_key_exists($field, $input)) {
+            return $input[$field];
+        }
+
+        return $existingItem !== null && $existingItem[$field] !== null ? $existingItem[$field] : $fallback;
+    };
+
+    $gross = jw_round_weight((float) $keep('gross_weight', 0));
+    $stone = jw_round_weight((float) $keep('stone_weight', 0));
     if ($gross < 0 || $stone < 0) {
         throw new RuntimeException('Weights cannot be negative.');
     }
@@ -150,7 +279,7 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
     // typed, so the two can never disagree on a saved item.
     $net = jw_round_weight($gross - $stone);
 
-    $wastage = round((float) ($input['wastage_pct'] ?? 0), 3);
+    $wastage = round((float) $keep('wastage_pct', 0), 3);
     if ($wastage < 0 || $wastage >= 100) {
         throw new RuntimeException('Wastage must be between 0% and below 100%.');
     }
@@ -188,14 +317,14 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
         'stone_weight' => $stone,
         'net_weight' => $net,
         'wastage_pct' => $wastage,
-        'making_charge_basis' => jw_enum($input['making_charge_basis'] ?? null, ['default', 'per_unit_weight', 'percent_of_metal', 'flat'], 'default'),
-        'making_charge_rate' => max(0.0, jw_round_rate((float) ($input['making_charge_rate'] ?? 0))),
-        'stone_value' => max(0.0, jw_round_money((float) ($input['stone_value'] ?? 0))),
-        'vat_applicable' => !empty($input['vat_applicable']) ? 1 : 0,
-        'vat_base' => jw_enum($input['vat_base'] ?? null, ['default', 'full_value', 'making_only', 'stone_only'], 'default'),
-        'hallmark' => trim((string) ($input['hallmark'] ?? '')) ?: null,
-        'design_no' => trim((string) ($input['design_no'] ?? '')) ?: null,
-        'reorder_weight' => max(0.0, jw_round_weight((float) ($input['reorder_weight'] ?? 0))),
+        'making_charge_basis' => jw_enum($keep('making_charge_basis', null), ['default', 'per_unit_weight', 'percent_of_metal', 'flat'], 'default'),
+        'making_charge_rate' => max(0.0, jw_round_rate((float) $keep('making_charge_rate', 0))),
+        'stone_value' => max(0.0, jw_round_money((float) $keep('stone_value', 0))),
+        'vat_applicable' => !empty($keep('vat_applicable', 0)) ? 1 : 0,
+        'vat_base' => jw_enum($keep('vat_base', null), ['default', 'full_value', 'making_only', 'stone_only'], 'default'),
+        'hallmark' => trim((string) $keep('hallmark', '')) ?: null,
+        'design_no' => trim((string) $keep('design_no', '')) ?: null,
+        'reorder_weight' => max(0.0, jw_round_weight((float) $keep('reorder_weight', 0))),
     ];
 
     // The two halves commit together or not at all — a shared item with no

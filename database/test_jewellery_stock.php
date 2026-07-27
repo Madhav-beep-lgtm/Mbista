@@ -30,8 +30,8 @@ function jws_cleanup(): void
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
         foreach (['jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items', 'jewellery_daily_rates',
-                  'inventory_ledger_mappings', 'jewellery_settings', 'jewellery_purities', 'jewellery_metals',
-                  'jewellery_units'] as $t) {
+                  'inventory_ledger_mappings', 'jewellery_item_categories', 'jewellery_settings',
+                  'jewellery_purities', 'jewellery_metals', 'jewellery_units'] as $t) {
             db()->exec("DELETE FROM `$t` WHERE company_id=$s");
         }
         db()->exec("DELETE FROM ledgers WHERE company_id=$s");
@@ -424,6 +424,75 @@ ok(threw(static fn () => jewellery_save_mapping($cidB, 'stock_finished', $ldgSto
 $vA = (int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$cidB")->fetchColumn();
 ok($vA === 0, 'No voucher ever reached company B');
 
+
+echo "\n14. Item categories are a master, not free text\n";
+$catRings = jewellery_save_category($cidA, ['name' => 'Rings', 'sort_order' => 1, 'active' => 1]);
+$catChains = jewellery_save_category($cidA, ['name' => 'Bangles', 'sort_order' => 2, 'active' => 1]);
+ok($catRings > 0 && $catChains > 0, 'Two categories are set up');
+ok(count(jewellery_categories_list($cidA)) === 2, 'Both come back on the list');
+ok(threw(static fn () => jewellery_save_category($cidA, ['name' => 'Rings'])),
+    'The same name cannot be added twice — that is how one heading becomes three');
+ok(threw(static fn () => jewellery_save_category($cidA, ['name' => '   '])),
+    'And a category needs an actual name');
+ok(jewellery_categories_list($cidB) === [], "Company B sees none of company A's categories");
+ok(threw(static fn () => jewellery_save_category($cidB, ['id' => $catRings, 'name' => 'Hijack'])),
+    "And company B cannot rename company A's category");
+
+$catItem = jewellery_save_item($cidA, ['code' => 'CAT-1', 'name' => 'Filed Ring', 'item_type' => 'ornament',
+    'metal_id' => $goldA, 'purity_id' => $p22A, 'unit_id' => $gramA, 'category' => 'Rings'], $userA);
+ok((string) jewellery_item($cidA, $catItem)['category'] === 'Rings', 'An item is filed under it');
+
+$deleted = jewellery_delete_category($cidA, $catRings);
+ok(!$deleted['ok'] && stripos($deleted['error'], 'filed under') !== false,
+    'A category holding items refuses to be deleted rather than orphaning them');
+ok(jewellery_delete_category($cidA, $catChains)['ok'], 'An empty one goes without complaint');
+
+// Renaming has to carry the items across. Leaving them behind would empty a
+// heading the stock and sales reports are read by, silently.
+jewellery_save_category($cidA, ['id' => $catRings, 'name' => 'Gold Rings', 'active' => 1]);
+ok((string) jewellery_item($cidA, $catItem)['category'] === 'Gold Rings',
+    'Renaming a category carries every item filed under it across');
+ok(in_array('Gold Rings', jewellery_item_categories($cidA), true),
+    'And the in-use list follows, so report filters keep working');
+
+echo "\n15. Saving an item never wipes what it was not told about\n";
+// The item form no longer sends the per-piece figures. If an absent key meant
+// "set me to zero", opening an old item and pressing Update would quietly
+// destroy its stored weights.
+jewellery_save_item($cidA, ['id' => $catItem, 'code' => 'CAT-1', 'name' => 'Filed Ring',
+    'item_type' => 'ornament', 'metal_id' => $goldA, 'purity_id' => $p22A, 'unit_id' => $gramA,
+    'gross_weight' => 9.5, 'stone_weight' => 0.5, 'wastage_pct' => 4.25,
+    'making_charge_rate' => 250, 'stone_value' => 1200, 'hallmark' => 'BIS916',
+    'design_no' => 'D-77', 'reorder_weight' => 20], $userA);
+$before = jewellery_item($cidA, $catItem);
+ok(abs((float) $before['gross_weight'] - 9.5) < 0.001 && abs((float) $before['wastage_pct'] - 4.25) < 0.001,
+    'The figures are stored when a caller does send them');
+
+// Exactly what the item form posts now: no weights, no charges, no hallmark.
+jewellery_save_item($cidA, ['id' => $catItem, 'code' => 'CAT-1', 'name' => 'Filed Ring Renamed',
+    'item_type' => 'ornament', 'metal_id' => $goldA, 'purity_id' => $p22A, 'unit_id' => $gramA,
+    'category' => 'Gold Rings', 'hs_code' => '7113.19.00', 'vat_applicable' => 1,
+    'vat_base' => 'stone_only', 'status' => 'active'], $userA);
+$after = jewellery_item($cidA, $catItem);
+ok((string) $after['name'] === 'Filed Ring Renamed', 'What the form DOES send is written');
+ok(abs((float) $after['gross_weight'] - 9.5) < 0.001, 'Gross weight survives a save that never mentioned it');
+ok(abs((float) $after['stone_weight'] - 0.5) < 0.001, 'So does the stone weight');
+ok(abs((float) $after['wastage_pct'] - 4.25) < 0.001, 'And the wastage');
+ok(abs((float) $after['making_charge_rate'] - 250) < 0.001 && abs((float) $after['stone_value'] - 1200) < 0.001,
+    'And the making charge and stone value');
+ok((string) $after['hallmark'] === 'BIS916' && (string) $after['design_no'] === 'D-77'
+    && abs((float) $after['reorder_weight'] - 20) < 0.001, 'And the hallmark, design no. and reorder weight');
+ok((string) $after['hs_code'] === '7113.19.00' && (int) $after['vat_applicable'] === 1
+    && (string) $after['vat_base'] === 'stone_only',
+    'The three fields the form kept are all written through');
+
+// A caller that DOES send a zero still means zero — this is "unmentioned is
+// untouched", not "zero is ignored".
+jewellery_save_item($cidA, ['id' => $catItem, 'code' => 'CAT-1', 'name' => 'Filed Ring Renamed',
+    'item_type' => 'ornament', 'metal_id' => $goldA, 'purity_id' => $p22A, 'unit_id' => $gramA,
+    'gross_weight' => 0, 'stone_weight' => 0], $userA);
+ok(abs((float) jewellery_item($cidA, $catItem)['gross_weight']) < 0.001,
+    'An explicit zero is still an instruction, not a no-op');
 
 echo "\nMIXED UNITS — one item transacted in tola AND grams\n";
 // The unit is chosen per document LINE, not per item, so a shop that buys

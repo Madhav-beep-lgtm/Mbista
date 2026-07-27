@@ -251,6 +251,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    if ($action === 'save_category') {
+        require_permission('jewellery', 'edit');
+        try {
+            jewellery_save_category($companyId, [
+                'id' => (int) ($_POST['category_id'] ?? 0),
+                'name' => (string) ($_POST['name'] ?? ''),
+                'sort_order' => (int) ($_POST['sort_order'] ?? 0),
+                'active' => isset($_POST['active']) ? 1 : 0,
+            ]);
+            flash('success', 'Category saved.');
+        } catch (Throwable $categoryException) {
+            flash('error', $categoryException->getMessage());
+        }
+        redirect($back);
+    }
+
+    if ($action === 'delete_category') {
+        require_permission('jewellery', 'edit');
+        $removed = jewellery_delete_category($companyId, (int) ($_POST['category_id'] ?? 0));
+        flash($removed['ok'] ? 'success' : 'error', $removed['ok'] ? 'Category removed.' : $removed['error']);
+        redirect($back);
+    }
+
     if ($action === 'save_item') {
         require_permission('jewellery', 'edit');
         try {
@@ -264,18 +287,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'purity_id' => (int) ($_POST['purity_id'] ?? 0),
                 'unit_id' => (int) ($_POST['unit_id'] ?? 0),
                 'track_mode' => (string) ($_POST['track_mode'] ?? 'weight'),
-                'gross_weight' => (float) ($_POST['gross_weight'] ?? 0),
-                'stone_weight' => (float) ($_POST['stone_weight'] ?? 0),
-                'wastage_pct' => (float) ($_POST['wastage_pct'] ?? 0),
-                'making_charge_basis' => (string) ($_POST['making_charge_basis'] ?? 'default'),
-                'making_charge_rate' => (float) ($_POST['making_charge_rate'] ?? 0),
-                'stone_value' => (float) ($_POST['stone_value'] ?? 0),
+                // The per-piece figures — weight, wastage, making charge, stone
+                // value — are deliberately NOT sent from here. They are punched
+                // on the sale or purchase line, where each piece has its own,
+                // and jewellery_save_item() leaves anything it is not told about
+                // exactly as it found it.
                 'vat_applicable' => isset($_POST['vat_applicable']) ? 1 : 0,
                 'vat_base' => (string) ($_POST['vat_base'] ?? 'default'),
                 'hs_code' => (string) ($_POST['hs_code'] ?? ''),
-                'hallmark' => (string) ($_POST['hallmark'] ?? ''),
-                'design_no' => (string) ($_POST['design_no'] ?? ''),
-                'reorder_weight' => (float) ($_POST['reorder_weight'] ?? 0),
                 'status' => isset($_POST['active']) ? 'active' : 'inactive',
                 'notes' => (string) ($_POST['notes'] ?? ''),
             ], $userId);
@@ -504,10 +523,28 @@ foreach ($purities as $purityRow) {
 $editUnit = null;
 $editMetal = null;
 $editPurity = null;
+$editCategory = null;
+$categories = [];
 if ($view === 'masters') {
     $editUnit = jewellery_unit($companyId, (int) ($_GET['edit_unit'] ?? 0));
     $editMetal = jewellery_metal($companyId, (int) ($_GET['edit_metal'] ?? 0));
     $editPurity = jewellery_purity($companyId, (int) ($_GET['edit_purity'] ?? 0));
+    $editCategory = jewellery_category($companyId, (int) ($_GET['edit_category'] ?? 0));
+    // Retired categories still show here — this is where they are switched back
+    // on, so hiding them would make that impossible.
+    $categories = jewellery_categories_list($companyId, false);
+    // How many items each category actually holds. Counted from the database
+    // rather than from $items, which this view never loads — a count taken from
+    // an empty list would read zero and offer Delete on a category in use.
+    $useStmt = db()->prepare("SELECT i.category, COUNT(*) AS n FROM inventory_items i
+        INNER JOIN jewellery_item_profiles j ON j.inventory_item_id = i.id
+        WHERE i.company_id = :cid AND i.category IS NOT NULL AND i.category <> ''
+        GROUP BY i.category");
+    $useStmt->execute(['cid' => $companyId]);
+    $categoryUse = [];
+    foreach ($useStmt->fetchAll(PDO::FETCH_ASSOC) as $useRow) {
+        $categoryUse[(string) $useRow['category']] = (int) $useRow['n'];
+    }
 }
 
 $items = [];
@@ -853,7 +890,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </script>
 
 <?php elseif ($view === 'items'): ?>
-    <?php $itemCategories = jewellery_item_categories($companyId); ?>
+    <?php $itemCategories = jewellery_categories_list($companyId); ?>
     <?php if ($canEdit): ?>
     <section class="mbw-card" data-draggable>
         <div class="mbw-card-head">
@@ -867,8 +904,28 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <input type="hidden" name="item_id" value="<?= (int) ($editItem['id'] ?? 0) ?>">
             <label>Code<input type="text" name="code" maxlength="60" value="<?= e((string) ($editItem['code'] ?? '')) ?>" required></label>
             <label>Name<input type="text" name="name" maxlength="190" value="<?= e((string) ($editItem['name'] ?? '')) ?>" required></label>
-            <label>Category<input type="text" name="category" maxlength="120" list="jw-categories" value="<?= e((string) ($editItem['category'] ?? '')) ?>"></label>
-            <datalist id="jw-categories"><?php foreach ($itemCategories as $cat): ?><option value="<?= e((string) $cat) ?>"></option><?php endforeach; ?></datalist>
+            <label>Category
+                <select name="category">
+                    <option value="">— none —</option>
+                    <?php
+                        // The master, plus whatever this item is already filed
+                        // under. A category retired from the master must still
+                        // show on the items that carry it, or editing anything
+                        // else about the item would silently unfile it.
+                        $itemCategory = trim((string) ($editItem['category'] ?? ''));
+                        $categoryChoices = array_column($itemCategories, 'name');
+                        if ($itemCategory !== '' && !in_array($itemCategory, $categoryChoices, true)) {
+                            $categoryChoices[] = $itemCategory;
+                        }
+                    ?>
+                    <?php foreach ($categoryChoices as $cat): ?>
+                        <option value="<?= e((string) $cat) ?>" <?= $itemCategory === (string) $cat ? 'selected' : '' ?>><?= e((string) $cat) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php if ($categoryChoices === []): ?>
+                    <span class="frm-optional">Set your categories up under <a href="<?= e(url('admin/jewellery.php?view=masters')) ?>">Masters</a> first.</span>
+                <?php endif; ?>
+            </label>
             <label>Type
                 <select name="item_type">
                     <?php foreach (['ornament' => 'Ornament', 'bullion' => 'Bullion / raw metal', 'stone' => 'Stone', 'other' => 'Other'] as $typeKey => $typeLabel): ?>
@@ -906,18 +963,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <option value="piece" <?= (string) ($editItem['track_mode'] ?? '') === 'piece' ? 'selected' : '' ?>>Piece</option>
                 </select>
             </label>
-            <label>Gross weight<input type="number" name="gross_weight" step="0.0001" min="0" value="<?= e((string) ($editItem['gross_weight'] ?? '0')) ?>"></label>
-            <label>Stone weight<input type="number" name="stone_weight" step="0.0001" min="0" value="<?= e((string) ($editItem['stone_weight'] ?? '0')) ?>"></label>
-            <label>Wastage (%)<input type="number" name="wastage_pct" step="0.001" min="0" max="99.999" value="<?= e((string) ($editItem['wastage_pct'] ?? '0')) ?>"></label>
-            <label>Making charge basis
-                <select name="making_charge_basis">
-                    <?php foreach (['default' => 'Use company default', 'per_unit_weight' => 'Per unit of weight', 'percent_of_metal' => 'Percent of metal value', 'flat' => 'Flat amount'] as $basisKey => $basisLabel): ?>
-                        <option value="<?= e($basisKey) ?>" <?= (string) ($editItem['making_charge_basis'] ?? 'default') === $basisKey ? 'selected' : '' ?>><?= e($basisLabel) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Making charge rate<input type="number" name="making_charge_rate" step="0.0001" min="0" value="<?= e((string) ($editItem['making_charge_rate'] ?? '0')) ?>"></label>
-            <label>Stone value (<?= e($sym) ?>)<input type="number" name="stone_value" step="0.01" min="0" value="<?= e((string) ($editItem['stone_value'] ?? '0')) ?>"></label>
             <label>VAT base
                 <select name="vat_base">
                     <?php foreach (['default' => 'Use company default', 'full_value' => 'Full line value', 'making_only' => 'Making charge only', 'stone_only' => 'Stone value only'] as $vbKey => $vbLabel): ?>
@@ -926,17 +971,16 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </select>
             </label>
             <label>HS code<input type="text" name="hs_code" maxlength="40" value="<?= e((string) ($editItem['hs_code'] ?? '')) ?>"></label>
-            <label>Hallmark<input type="text" name="hallmark" maxlength="60" value="<?= e((string) ($editItem['hallmark'] ?? '')) ?>"></label>
-            <label>Design no.<input type="text" name="design_no" maxlength="60" value="<?= e((string) ($editItem['design_no'] ?? '')) ?>"></label>
-            <label>Reorder weight<input type="number" name="reorder_weight" step="0.0001" min="0" value="<?= e((string) ($editItem['reorder_weight'] ?? '0')) ?>"></label>
             <label class="frm-check"><input type="checkbox" name="vat_applicable" <?= (int) ($editItem['vat_applicable'] ?? 0) === 1 ? 'checked' : '' ?>> VAT applicable</label>
             <label class="frm-check"><input type="checkbox" name="active" <?= $editItem === null || (string) $editItem['status'] === 'active' ? 'checked' : '' ?>> Active</label>
             <label style="grid-column:1/-1">Notes<input type="text" name="notes" maxlength="255" value="<?= e((string) ($editItem['notes'] ?? '')) ?>"></label>
             <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editItem ? 'Update Item' : 'Add Item' ?></button></div>
         </form>
         <p class="frm-optional" style="margin:10px 0 0">
-            Net (metal-only) weight is derived as gross minus stone, so the two can never disagree.
-            Once an item has stock movements its metal, purity and unit are locked — later entries were valued against them.
+            An item is a kind of piece, not one piece: the weight, the wastage, the making charge and the stone value belong
+            to the line you sell it on, where each piece has its own. Only what is true of every piece of this kind is asked
+            for here. Once an item has stock movements its metal, purity and unit are locked — later entries were valued
+            against them.
         </p>
     </section>
     <?php endif; ?>
@@ -1337,6 +1381,60 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
 <?php elseif ($view === 'masters'): ?>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px">
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Item Categories (<?= count($categories) ?>)</h2></div>
+            <div style="overflow-x:auto"><table>
+                <thead><tr><th>Name</th><th class="is-numeric">Order</th><th class="is-numeric">Items</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
+                <tbody>
+                    <?php if ($categories === []): ?>
+                        <tr><td colspan="<?= $canEdit ? 5 : 4 ?>">No categories yet. Add the headings you want your stock and sales reports grouped under.</td></tr>
+                    <?php endif; ?>
+                    <?php foreach ($categories as $c): ?>
+                        <tr>
+                            <td><?= e((string) $c['name']) ?></td>
+                            <td class="is-numeric"><?= (int) $c['sort_order'] ?></td>
+                            <td class="is-numeric"><?= (int) ($categoryUse[(string) $c['name']] ?? 0) ?></td>
+                            <td><span class="mbw-pill <?= (int) $c['active'] === 1 ? 'tone-green' : 'tone-gray' ?>"><?= (int) $c['active'] === 1 ? 'Active' : 'Off' ?></span></td>
+                            <?php if ($canEdit): ?>
+                                <td style="white-space:nowrap">
+                                    <a class="mbw-view-all" href="<?= e(url('admin/jewellery.php?view=masters&edit_category=' . (int) $c['id'])) ?>">Edit</a>
+                                    <?php if ((int) ($categoryUse[(string) $c['name']] ?? 0) === 0): ?>
+                                        <form method="post" style="display:inline" onsubmit="return confirm('Remove this category?')">
+                                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                            <input type="hidden" name="action" value="delete_category">
+                                            <input type="hidden" name="back_view" value="masters">
+                                            <input type="hidden" name="category_id" value="<?= (int) $c['id'] ?>">
+                                            <button type="submit" class="button soft" style="min-height:26px;padding:2px 8px">Delete</button>
+                                        </form>
+                                    <?php endif; ?>
+                                </td>
+                            <?php endif; ?>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table></div>
+            <?php if ($canEdit): ?>
+            <form method="post" class="workspace-form-grid" style="margin-top:12px">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="save_category">
+                <input type="hidden" name="back_view" value="masters">
+                <input type="hidden" name="category_id" value="<?= (int) ($editCategory['id'] ?? 0) ?>">
+                <label>Name<input type="text" name="name" maxlength="120" value="<?= e((string) ($editCategory['name'] ?? '')) ?>" placeholder="Rings" required></label>
+                <label>Sort order<input type="number" name="sort_order" step="1" value="<?= e((string) ($editCategory['sort_order'] ?? '0')) ?>"></label>
+                <label class="frm-check"><input type="checkbox" name="active" <?= $editCategory === null || (int) $editCategory['active'] === 1 ? 'checked' : '' ?>> Active</label>
+                <div style="grid-column:1/-1">
+                    <button type="submit" class="button"><?= $editCategory ? 'Update Category' : 'Add Category' ?></button>
+                    <?php if ($editCategory): ?><a class="button soft" href="<?= e(url('admin/jewellery.php?view=masters')) ?>">Cancel</a><?php endif; ?>
+                </div>
+            </form>
+            <p class="frm-optional" style="margin:10px 0 0">
+                This is the list the item form offers, so a category is decided once here instead of being retyped on every
+                item. Renaming one carries every item filed under it across with it. Switching one off hides it from new
+                items without disturbing the ones already filed under it.
+            </p>
+            <?php endif; ?>
+        </section>
+
         <section class="mbw-card">
             <div class="mbw-card-head"><h2>Weight Units (<?= count($units) ?>)</h2></div>
             <div style="overflow-x:auto"><table>
