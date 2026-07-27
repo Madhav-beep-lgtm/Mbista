@@ -3,6 +3,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/jewellery_reports.php';
+// The order form punches items on the SAME grid the sale does, so a quote and
+// the bill it becomes can never carry different columns.
+require_once __DIR__ . '/../../app/views/partials/jewellery_line_grid.php';
 
 accounting_module_repair_database();
 require_jewellery();
@@ -87,10 +90,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'description' => (string) ($_POST['description'] ?? ''),
                 'making_basis' => (string) ($_POST['making_basis'] ?? 'per_unit_weight'),
                 'making_rate' => (float) ($_POST['making_rate'] ?? 0),
+                'other_charges' => (float) ($_POST['other_charges'] ?? 0),
+                'discount' => (float) ($_POST['discount'] ?? 0),
+                'manual_tax_amount' => ($_POST['manual_tax_amount'] ?? '') === '' ? null : (float) $_POST['manual_tax_amount'],
                 'advance_amount' => (float) ($_POST['advance_amount'] ?? 0),
                 'status' => (string) ($_POST['status'] ?? 'confirmed'),
                 'notes' => (string) ($_POST['notes'] ?? ''),
-            ], $userId);
+                // The items the customer is ordering, punched on the same grid
+                // the sale uses, so the quote and the bill cannot disagree.
+            ], jw_posted_lines($_POST, 'l'), $userId);
             flash('success', 'Order saved.');
         } catch (Throwable $e) {
             flash('error', $e->getMessage());
@@ -295,6 +303,15 @@ $editOrder = $view === 'orders' ? jewellery_order($companyId, (int) ($_GET['edit
 $orderAdvances = $editOrder ? jewellery_order_advances($companyId, (int) $editOrder['id'])
     : ['rows' => [], 'cash_total' => 0.0, 'metal_total' => 0.0, 'total' => 0.0];
 $advanceAvailable = $editOrder ? jewellery_order_advance_available($companyId, (int) $editOrder['id']) : 0.0;
+$orderLines = $editOrder ? jewellery_order_line_rows($companyId, (int) $editOrder['id']) : [];
+// What is on the shelf, shown on the item options the same way the sale form
+// shows it — an order for a piece the shop already has is filled off the tray.
+$orderOnHand = [];
+if ($view === 'orders') {
+    foreach ($items as $itemRow) {
+        $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
+    }
+}
 $cashBankLedgers = [];
 if ($view === 'orders' && table_exists('ledgers')) {
     $cashStmt = db()->prepare('SELECT l.id, l.code, l.name FROM ledgers l
@@ -323,6 +340,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
 $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' => 'tone-amber',
     'received' => 'tone-teal', 'delivered' => 'tone-green', 'cancelled' => 'tone-red'];
+jw_line_grid_styles();
 ?>
 
 <nav class="mbw-tabbar" aria-label="Jewellery workshop sections" style="flex-wrap:wrap">
@@ -343,73 +361,138 @@ $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' =>
             <h2><?= $editOrder ? 'Edit Order — ' . e((string) $editOrder['order_no']) : 'New Order' ?></h2>
             <?php if ($editOrder): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">New order</a><?php endif; ?>
         </div>
-        <form method="post" class="workspace-form-grid">
+        <form method="post">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_order">
             <input type="hidden" name="back_view" value="orders">
             <input type="hidden" name="order_id" value="<?= (int) ($editOrder['id'] ?? 0) ?>">
-            <label>Order date<input type="date" name="order_date" value="<?= e((string) ($editOrder['order_date'] ?? $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required></label>
-            <label>Promised delivery<input type="date" name="delivery_date" value="<?= e((string) ($editOrder['delivery_date'] ?? '')) ?>"></label>
-            <label>Existing customer
-                <select name="party_id">
-                    <option value="0">— new customer, type the name →</option>
-                    <?php foreach ($parties as $p): ?>
-                        <option value="<?= (int) $p['id'] ?>" <?= (int) ($editOrder['party_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Customer name<input type="text" name="customer_name" maxlength="190" value="<?= e((string) ($editOrder['customer_name'] ?? '')) ?>" placeholder="Creates the customer and their ledger"></label>
-            <label>Phone<input type="text" name="customer_phone" maxlength="60" value="<?= e((string) ($editOrder['customer_phone'] ?? '')) ?>"></label>
-            <label>Address<input type="text" name="customer_address" maxlength="255"></label>
-            <label>Metal
-                <select name="metal_id" required>
-                    <?php foreach ($metals as $m): ?>
-                        <option value="<?= (int) $m['id'] ?>" <?= (int) ($editOrder['metal_id'] ?? 0) === (int) $m['id'] ? 'selected' : '' ?>><?= e($m['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Purity
-                <select name="purity_id" required>
-                    <?php foreach ($purities as $p): ?>
-                        <option value="<?= (int) $p['id'] ?>" <?= (int) ($editOrder['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Unit
-                <select name="unit_id" required>
-                    <?php foreach ($units as $u): ?>
-                        <option value="<?= (int) $u['id'] ?>" <?= (int) ($editOrder['unit_id'] ?? (int) ($baseUnit['id'] ?? 0)) === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Expected gross weight<input type="number" name="expected_gross_weight" step="0.0001" min="0" value="<?= e((string) ($editOrder['expected_gross_weight'] ?? '0')) ?>"></label>
-            <label>Target item
-                <select name="item_id">
-                    <option value="0">— bespoke —</option>
-                    <?php foreach ($items as $it): ?>
-                        <option value="<?= (int) $it['id'] ?>" <?= (int) ($editOrder['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Design no.<input type="text" name="design_no" maxlength="60" value="<?= e((string) ($editOrder['design_no'] ?? '')) ?>"></label>
-            <label>Making basis
-                <select name="making_basis">
-                    <?php foreach (['per_unit_weight' => 'Per unit of weight', 'percent_of_metal' => '% of metal value', 'flat' => 'Flat'] as $k => $v): ?>
-                        <option value="<?= e($k) ?>" <?= (string) ($editOrder['making_basis'] ?? '') === $k ? 'selected' : '' ?>><?= e($v) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Making rate<input type="number" name="making_rate" step="0.0001" min="0" value="<?= e((string) ($editOrder['making_rate'] ?? '0')) ?>"></label>
-            <label>Advance taken (<?= e($sym) ?>)<input type="number" name="advance_amount" step="0.01" min="0" value="<?= e((string) ($editOrder['advance_amount'] ?? '0')) ?>"></label>
-            <label>Status
-                <select name="status">
-                    <?php foreach (['draft' => 'Draft', 'confirmed' => 'Confirmed', 'cancelled' => 'Cancelled'] as $k => $v): ?>
-                        <option value="<?= e($k) ?>" <?= (string) ($editOrder['status'] ?? 'confirmed') === $k ? 'selected' : '' ?>><?= e($v) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label style="grid-column:1/-1">Description<input type="text" name="description" maxlength="255" value="<?= e((string) ($editOrder['description'] ?? '')) ?>"></label>
-            <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editOrder ? 'Update Order' : 'Create Order' ?></button></div>
+            <div class="workspace-form-grid">
+                <label>Order date<input type="date" name="order_date" value="<?= e((string) ($editOrder['order_date'] ?? $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required>
+                    <span class="frm-optional">The metal rate is taken from this day and honoured on delivery.</span>
+                </label>
+                <label>Promised delivery<input type="date" name="delivery_date" value="<?= e((string) ($editOrder['delivery_date'] ?? '')) ?>"></label>
+                <label>Existing customer
+                    <select name="party_id">
+                        <option value="0">— new customer, type the name →</option>
+                        <?php foreach ($parties as $p): ?>
+                            <option value="<?= (int) $p['id'] ?>" <?= (int) ($editOrder['party_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Customer name<input type="text" name="customer_name" maxlength="190" value="<?= e((string) ($editOrder['customer_name'] ?? '')) ?>" placeholder="Creates the customer and their ledger"></label>
+                <label>Phone<input type="text" name="customer_phone" maxlength="60" value="<?= e((string) ($editOrder['customer_phone'] ?? '')) ?>"></label>
+                <label>Address<input type="text" name="customer_address" maxlength="255"></label>
+                <label>Design no.<input type="text" name="design_no" maxlength="60" value="<?= e((string) ($editOrder['design_no'] ?? '')) ?>"></label>
+                <label>Making basis
+                    <select name="making_basis">
+                        <?php foreach (['per_unit_weight' => 'Per unit of weight', 'percent_of_metal' => '% of metal value', 'flat' => 'Flat'] as $k => $v): ?>
+                            <option value="<?= e($k) ?>" <?= (string) ($editOrder['making_basis'] ?? '') === $k ? 'selected' : '' ?>><?= e($v) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <span class="frm-optional">What the kaligad is paid on. The customer's making charge is the one on the line.</span>
+                </label>
+                <label>Making rate<input type="number" name="making_rate" step="0.0001" min="0" value="<?= e((string) ($editOrder['making_rate'] ?? '0')) ?>"></label>
+                <label>Other charges (<?= e($sym) ?>)<input type="number" name="other_charges" step="0.01" min="0" value="<?= e((string) ($editOrder['other_charges'] ?? '0')) ?>"></label>
+                <label>Discount (<?= e($sym) ?>)<input type="number" name="discount" step="0.01" min="0" value="<?= e((string) ($editOrder['discount'] ?? '0')) ?>"></label>
+                <label>Skills Promotion Tax (<?= e($sym) ?>)<input type="number" name="manual_tax_amount" step="0.01" min="0" placeholder="auto" value="<?= e((string) ($editOrder['manual_tax_amount'] ?? '')) ?>">
+                    <span class="frm-optional">Left blank it is worked out at the rate on the tax register.</span>
+                </label>
+                <label>Advance taken (<?= e($sym) ?>)<input type="number" name="advance_amount" step="0.01" min="0" value="<?= e((string) ($editOrder['advance_amount'] ?? '0')) ?>"></label>
+                <label>Status
+                    <select name="status">
+                        <?php foreach (['draft' => 'Draft', 'confirmed' => 'Confirmed', 'cancelled' => 'Cancelled'] as $k => $v): ?>
+                            <option value="<?= e($k) ?>" <?= (string) ($editOrder['status'] ?? 'confirmed') === $k ? 'selected' : '' ?>><?= e($v) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label style="grid-column:1/-1">Description<input type="text" name="description" maxlength="255" value="<?= e((string) ($editOrder['description'] ?? '')) ?>"></label>
+            </div>
+
+            <?php
+                // The SAME grid the sale uses. One customer can order a ring and
+                // a chain and a pair of bangles on one order; each is a line,
+                // and each is priced by the engine that will bill it.
+                jw_render_line_grid('l', $orderLines, max(3, count($orderLines) + 2), 'Items ordered', [
+                    'items' => $items, 'purities' => $purities, 'units' => $units,
+                    'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $orderOnHand,
+                ]);
+            ?>
+
+            <details<?= $editOrder && (int) ($editOrder['item_id'] ?? 0) === 0 ? ' open' : '' ?>>
+                <summary>Bespoke order — nothing chosen off the tray yet</summary>
+                <div class="workspace-form-grid">
+                    <label>Metal
+                        <select name="metal_id">
+                            <?php foreach ($metals as $m): ?>
+                                <option value="<?= (int) $m['id'] ?>" <?= (int) ($editOrder['metal_id'] ?? 0) === (int) $m['id'] ? 'selected' : '' ?>><?= e($m['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Purity
+                        <select name="purity_id">
+                            <?php foreach ($purities as $p): ?>
+                                <option value="<?= (int) $p['id'] ?>" <?= (int) ($editOrder['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Unit
+                        <select name="unit_id">
+                            <?php foreach ($units as $u): ?>
+                                <option value="<?= (int) $u['id'] ?>" <?= (int) ($editOrder['unit_id'] ?? (int) ($baseUnit['id'] ?? 0)) === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Expected gross weight<input type="number" name="expected_gross_weight" step="0.0001" min="0" value="<?= e((string) ($editOrder['expected_gross_weight'] ?? '0')) ?>"></label>
+                </div>
+                <p class="frm-optional" style="margin:6px 0 0">Use this when the customer has described the piece but no item has been
+                    picked yet — "a ten-tola 22K chain". The order is recorded and the kaligad can be issued metal against it, but it
+                    quotes nothing until items are put on the grid above. Nothing is invented: an unquoted order shows no total
+                    rather than a wrong one.</p>
+            </details>
+
+            <?php if ($editOrder && (float) $editOrder['total_amount'] > 0): ?>
+                <?php
+                    $orderTotal = (float) $editOrder['total_amount'];
+                    $orderAdvanceHeld = (float) $orderAdvances['total'];
+                    $stillPayable = round($orderTotal - $orderAdvanceHeld, 2);
+                ?>
+                <div style="margin-top:12px;border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px">
+                    <h3 style="margin:0 0 8px;font-size:1rem">What the customer pays</h3>
+                    <div style="overflow-x:auto"><table style="max-width:520px">
+                        <tbody>
+                            <?php foreach ([
+                                ['Metal', (float) $editOrder['metal_amount']],
+                                ['Making', (float) $editOrder['making_amount']],
+                                ['Stone / diamond', (float) $editOrder['stone_amount'] + (float) $editOrder['diamond_amount']],
+                                ['Other charges', (float) $editOrder['other_charges']],
+                                ['Discount', -(float) $editOrder['discount']],
+                                ['Non taxable amt', (float) $editOrder['non_taxable_amount']],
+                                ['SD taxable amt', (float) $editOrder['sd_taxable_amount']],
+                                ['Skills Promotion Tax', (float) $editOrder['tax_amount']],
+                                ['Vatable amt', (float) $editOrder['vatable_amount']],
+                                ['VAT', (float) $editOrder['vat_amount']],
+                            ] as [$quoteLabel, $quoteValue]): ?>
+                                <?php if (abs($quoteValue) < 0.005) { continue; } ?>
+                                <tr><td><?= e($quoteLabel) ?></td><td class="is-numeric"><?= $fmt($quoteValue) ?></td></tr>
+                            <?php endforeach; ?>
+                            <tr style="border-top:2px solid var(--mbw-border,#d9e2ec)">
+                                <td><strong>Total payable</strong></td>
+                                <td class="is-numeric"><strong><?= e($sym) ?> <?= $fmt($orderTotal) ?></strong></td>
+                            </tr>
+                            <?php if ($orderAdvanceHeld > 0.005): ?>
+                                <tr><td>Less advance already taken</td><td class="is-numeric">(<?= $fmt($orderAdvanceHeld) ?>)</td></tr>
+                                <tr><td><strong>Due on delivery</strong></td><td class="is-numeric"><strong><?= e($sym) ?> <?= $fmt($stillPayable) ?></strong></td></tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table></div>
+                    <p class="frm-optional" style="margin:8px 0 0">Worked out by the same engine that will raise the bill — the Skills
+                        Promotion Tax on metal and making, VAT on the stone and diamond side, on their own separate bases. The metal
+                        rate of <?= e(app_date((string) $editOrder['order_date'])) ?> is honoured on delivery; the tax rates are
+                        restated at the sale date, because a statutory rate follows the day of supply.</p>
+                </div>
+            <?php endif; ?>
+
+            <div style="margin-top:12px"><button type="submit" class="button"><?= $editOrder ? 'Update Order' : 'Create Order' ?></button></div>
         </form>
     </section>
     <?php endif; ?>

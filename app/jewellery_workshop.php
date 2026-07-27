@@ -445,29 +445,48 @@ function jewellery_orders_list(int $companyId, array $filters = []): array
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, int $userId = 0): int
+/** The items on an order, in the same shape a sale's lines come back in. */
+function jewellery_order_line_rows(int $companyId, int $orderId): array
+{
+    $stmt = db()->prepare('SELECT l.*, i.sku AS item_code, i.name AS item_name, i.hs_code,
+            jp.jewellery_type AS item_type, i.category, mt.name AS metal_name, mt.id AS metal_id,
+            p.code AS purity_code, p.fineness, u.code AS unit_code
+        FROM jewellery_order_lines l
+        INNER JOIN inventory_items i ON i.id = l.item_id
+        INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
+        INNER JOIN jewellery_metals mt ON mt.id = jp.metal_id
+        INNER JOIN jewellery_purities p ON p.id = l.purity_id
+        INNER JOIN jewellery_units u ON u.id = l.unit_id
+        WHERE l.company_id = :cid AND l.order_id = :oid ORDER BY l.id ASC');
+    $stmt->execute(['cid' => $companyId, 'oid' => $orderId]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Create or revise an order, with as many items on it as the customer asked
+ * for, priced the way the bill will price it.
+ *
+ * The quote goes through jw_compute_document under doc_type 'sale'. That is
+ * deliberate and it is the whole point: an order is a sale that has not
+ * happened yet, so the Skills Development levy, the VAT on the stone side and
+ * the disjoint bases between them are worked out by the SAME code that will
+ * raise the bill. A separate "estimate" formula is how a shop ends up quoting
+ * one figure and charging another.
+ *
+ * The rate and the tax rules are those of the ORDER date. On delivery the
+ * metal rate is honoured from that day (the shop's promise) but the taxes are
+ * restated at the sale date, because a statutory rate follows the day of
+ * supply. So this total is exact on the day it is given, and the bill says so.
+ *
+ * @param array $lines line rows as jw_posted_lines() returns them
+ */
+function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, array $lines = [], int $userId = 0): int
 {
     $orderId = (int) ($input['id'] ?? 0);
     $settings = jewellery_settings($companyId);
+    $orderDate = (string) ($input['order_date'] ?? date('Y-m-d'));
 
-    $metalId = (int) ($input['metal_id'] ?? 0);
-    if (!jewellery_metal($companyId, $metalId)) {
-        throw new RuntimeException('Choose a metal that belongs to this company.');
-    }
-    $purityId = (int) ($input['purity_id'] ?? 0);
-    $purity = jewellery_purity($companyId, $purityId);
-    if (!$purity || (int) $purity['metal_id'] !== $metalId) {
-        throw new RuntimeException('Choose a purity that belongs to the selected metal.');
-    }
-    $unitId = (int) ($input['unit_id'] ?? 0);
-    if (!jewellery_unit($companyId, $unitId)) {
-        throw new RuntimeException('Choose a weight unit that belongs to this company.');
-    }
-
-    $itemId = (int) ($input['item_id'] ?? 0) ?: null;
-    if ($itemId !== null && !jewellery_item($companyId, $itemId)) {
-        throw new RuntimeException('Choose an item that belongs to this company.');
-    }
     // An order is the start of a customer relationship, so it opens the party
     // and its ledger immediately — name, phone and address all live there
     // rather than as loose text on the order.
@@ -481,60 +500,202 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, i
         throw new RuntimeException('Enter the customer — a name is enough, the party and its ledger are created automatically.');
     }
 
-    $gross = jw_round_weight((float) ($input['expected_gross_weight'] ?? 0));
-    if ($gross < 0) {
-        throw new RuntimeException('The expected weight cannot be negative.');
+    // An order taken the old way — one item described on the header — is still
+    // a valid order. It becomes a single line here rather than being refused,
+    // so every caller written before orders had lines keeps working and the
+    // arithmetic below has exactly one shape to deal with.
+    if ($lines === [] && (int) ($input['item_id'] ?? 0) > 0) {
+        $lines = [[
+            'item_id' => (int) $input['item_id'],
+            'purity_id' => (int) ($input['purity_id'] ?? 0),
+            'unit_id' => (int) ($input['unit_id'] ?? 0),
+            'qty_pieces' => 1,
+            'gross_weight' => (float) ($input['expected_gross_weight'] ?? 0),
+            'rate' => (float) ($input['rate'] ?? 0),
+            'making_amount' => jw_making_charge(
+                (string) ($input['making_basis'] ?? 'per_unit_weight'),
+                (float) ($input['making_rate'] ?? 0),
+                (float) ($input['expected_gross_weight'] ?? 0),
+                jw_round_money((float) ($input['expected_gross_weight'] ?? 0) * (float) ($input['rate'] ?? 0))
+            ),
+        ]];
     }
+
+    $computed = jw_compute_document($companyId, [
+        'document_date' => $orderDate,
+        'doc_type' => 'sale',
+        'rate_type' => 'sale',
+        'other_charges' => $input['other_charges'] ?? 0,
+        'discount' => $input['discount'] ?? 0,
+        'manual_tax_amount' => $input['manual_tax_amount'] ?? null,
+    ], $lines, $settings);
+    if ($computed['errors'] !== []) {
+        throw new RuntimeException(implode(' ', $computed['errors']));
+    }
+
+    if ($computed['lines'] !== []) {
+        // The header keeps mirroring the FIRST line. Every karigar issue,
+        // receipt and refinery job values the metal it moves against the
+        // order's purity and unit, so those columns have to stay meaningful.
+        $first = $computed['lines'][0];
+        $firstItem = jewellery_item($companyId, (int) $first['item_id']);
+        $firstItemId = (int) $first['item_id'];
+        $metalId = (int) $firstItem['metal_id'];
+        $purityId = (int) $first['purity_id'];
+        $unitId = (int) $first['unit_id'];
+
+        // Weight is summed across the lines so the workshop board still shows
+        // what the whole order weighs, not just its first piece.
+        $grossTotal = 0.0;
+        $fineTotal = 0.0;
+        foreach ($computed['lines'] as $lineRow) {
+            $grossTotal += (float) $lineRow['gross_weight'];
+            $fineTotal += (float) $lineRow['fine_weight'];
+        }
+    } else {
+        // A shop takes an order before it decides which piece off which tray
+        // will fill it: "a ten-tola 22K chain, design D-100". That order is
+        // real and has to be recordable, so the metal spec comes off the
+        // header and the quote stays empty until items are put on it. Nothing
+        // is invented — an unquoted order shows no total rather than a wrong
+        // one.
+        $metalId = (int) ($input['metal_id'] ?? 0);
+        if (!jewellery_metal($companyId, $metalId)) {
+            throw new RuntimeException('Choose a metal that belongs to this company.');
+        }
+        $purityId = (int) ($input['purity_id'] ?? 0);
+        $headerPurity = jewellery_purity($companyId, $purityId);
+        if (!$headerPurity || (int) $headerPurity['metal_id'] !== $metalId) {
+            throw new RuntimeException('Choose a purity that belongs to the selected metal.');
+        }
+        $unitId = (int) ($input['unit_id'] ?? 0);
+        if (!jewellery_unit($companyId, $unitId)) {
+            throw new RuntimeException('Choose a weight unit that belongs to this company.');
+        }
+        $firstItemId = 0;
+        $grossTotal = jw_round_weight((float) ($input['expected_gross_weight'] ?? 0));
+        if ($grossTotal < 0) {
+            throw new RuntimeException('The expected weight cannot be negative.');
+        }
+        $fineTotal = jw_fine_weight($grossTotal, (float) $headerPurity['fineness']);
+    }
+
+    $totals = $computed['totals'];
     $status = jw_enum($input['status'] ?? null, ['draft', 'confirmed', 'assigned', 'received', 'delivered', 'cancelled'], 'draft');
+    $advance = max(0.0, jw_round_money((float) ($input['advance_amount'] ?? 0)));
+    if ($advance > $totals['total_amount'] + 0.005) {
+        throw new RuntimeException('The advance (' . number_format($advance, 2)
+            . ') cannot exceed what the order comes to (' . number_format($totals['total_amount'], 2) . ').');
+    }
 
     $params = [
         'cid' => $companyId, 'fy' => $fiscalYearId ?: null,
-        'date' => (string) ($input['order_date'] ?? date('Y-m-d')),
+        'date' => $orderDate,
         'delivery' => ($input['delivery_date'] ?? '') !== '' ? (string) $input['delivery_date'] : null,
         'party' => $partyId, 'cname' => $customerName ?: null,
         'cphone' => trim((string) ($input['customer_phone'] ?? '')) ?: null,
-        'item' => $itemId, 'metal' => $metalId, 'purity' => $purityId, 'unit' => $unitId,
-        'gross' => $gross, 'fine' => jw_fine_weight($gross, (float) $purity['fineness']),
+        'item' => $firstItemId ?: null, 'metal' => $metalId, 'purity' => $purityId, 'unit' => $unitId,
+        'gross' => jw_round_weight($grossTotal), 'fine' => jw_round_weight($fineTotal),
         'design' => trim((string) ($input['design_no'] ?? '')) ?: null,
         'description' => trim((string) ($input['description'] ?? '')) ?: null,
         'basis' => jw_enum($input['making_basis'] ?? null, ['per_unit_weight', 'percent_of_metal', 'flat'], 'per_unit_weight'),
         'rate' => max(0.0, jw_round_rate((float) ($input['making_rate'] ?? 0))),
-        'advance' => max(0.0, jw_round_money((float) ($input['advance_amount'] ?? 0))),
+        'advance' => $advance,
         'status' => $status,
         'notes' => trim((string) ($input['notes'] ?? '')) ?: null,
+        'metalamt' => $totals['metal_amount'], 'wastageamt' => $totals['wastage_amount'],
+        'makingamt' => $totals['making_amount'], 'stoneamt' => $totals['stone_amount'],
+        'diamondamt' => $totals['diamond_amount'],
+        'other' => $totals['other_charges'], 'discount' => $totals['discount'],
+        'taxable' => $totals['taxable_amount'], 'nontax' => $totals['non_taxable_amount'],
+        'sdtaxable' => $totals['sd_taxable_amount'], 'vatable' => $totals['vatable_amount'],
+        'vat' => $totals['vat_amount'], 'tax' => $totals['tax_amount'],
+        'mtax' => $totals['manual_tax_amount'], 'total' => $totals['total_amount'],
     ];
 
-    if ($orderId > 0) {
-        $existing = jewellery_order($companyId, $orderId);
-        if (!$existing) {
-            throw new RuntimeException('Order not found for this company.');
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        if ($orderId > 0) {
+            $existing = jewellery_order($companyId, $orderId);
+            if (!$existing) {
+                throw new RuntimeException('Order not found for this company.');
+            }
+            // Once metal is out with a karigar the order's specification is what
+            // the issue was measured against — changing it would rewrite history.
+            if (in_array((string) $existing['status'], ['assigned', 'received', 'delivered'], true)
+                && ((int) $existing['purity_id'] !== $purityId || (int) $existing['unit_id'] !== $unitId)) {
+                throw new RuntimeException('This order already has metal issued against it — its purity and unit can no longer be changed.');
+            }
+            db()->prepare('UPDATE jewellery_orders SET order_date = :date, delivery_date = :delivery, party_id = :party,
+                    customer_name = :cname, customer_phone = :cphone, item_id = :item, metal_id = :metal, purity_id = :purity,
+                    unit_id = :unit, expected_gross_weight = :gross, expected_fine_weight = :fine, design_no = :design,
+                    description = :description, making_basis = :basis, making_rate = :rate, advance_amount = :advance,
+                    status = :status, notes = :notes, fiscal_year_id = :fy,
+                    metal_amount = :metalamt, wastage_amount = :wastageamt, making_amount = :makingamt,
+                    stone_amount = :stoneamt, diamond_amount = :diamondamt, other_charges = :other, discount = :discount,
+                    taxable_amount = :taxable, non_taxable_amount = :nontax, sd_taxable_amount = :sdtaxable,
+                    vatable_amount = :vatable, vat_amount = :vat, tax_amount = :tax, manual_tax_amount = :mtax,
+                    total_amount = :total
+                WHERE id = :id AND company_id = :cid')
+                ->execute($params + ['id' => $orderId]);
+            db()->prepare('DELETE FROM jewellery_order_lines WHERE order_id = :oid AND company_id = :cid')
+                ->execute(['oid' => $orderId, 'cid' => $companyId]);
+        } else {
+            $no = trim((string) ($input['order_no'] ?? '')) ?: jw_next_no($companyId, 'jewellery_orders', 'order_no', (string) ($settings['order_no_prefix'] ?? 'JO'));
+            db()->prepare('INSERT INTO jewellery_orders (company_id, fiscal_year_id, order_no, order_date, delivery_date, party_id,
+                    customer_name, customer_phone, item_id, metal_id, purity_id, unit_id, expected_gross_weight, expected_fine_weight,
+                    design_no, description, making_basis, making_rate, advance_amount, status, notes,
+                    metal_amount, wastage_amount, making_amount, stone_amount, diamond_amount, other_charges, discount,
+                    taxable_amount, non_taxable_amount, sd_taxable_amount, vatable_amount, vat_amount, tax_amount,
+                    manual_tax_amount, total_amount, created_by)
+                VALUES (:cid, :fy, :no, :date, :delivery, :party, :cname, :cphone, :item, :metal, :purity, :unit, :gross, :fine,
+                    :design, :description, :basis, :rate, :advance, :status, :notes,
+                    :metalamt, :wastageamt, :makingamt, :stoneamt, :diamondamt, :other, :discount,
+                    :taxable, :nontax, :sdtaxable, :vatable, :vat, :tax, :mtax, :total, :by)')
+                ->execute($params + ['no' => $no, 'by' => $userId ?: null]);
+            $orderId = (int) db()->lastInsertId();
         }
-        // Once metal is out with a karigar the order's specification is what
-        // the issue was measured against — changing it would rewrite history.
-        if (in_array((string) $existing['status'], ['assigned', 'received', 'delivered'], true)
-            && ((int) $existing['purity_id'] !== $purityId || (int) $existing['unit_id'] !== $unitId)) {
-            throw new RuntimeException('This order already has metal issued against it — its purity and unit can no longer be changed.');
-        }
-        db()->prepare('UPDATE jewellery_orders SET order_date = :date, delivery_date = :delivery, party_id = :party,
-                customer_name = :cname, customer_phone = :cphone, item_id = :item, metal_id = :metal, purity_id = :purity,
-                unit_id = :unit, expected_gross_weight = :gross, expected_fine_weight = :fine, design_no = :design,
-                description = :description, making_basis = :basis, making_rate = :rate, advance_amount = :advance,
-                status = :status, notes = :notes, fiscal_year_id = :fy
-            WHERE id = :id AND company_id = :cid')
-            ->execute($params + ['id' => $orderId]);
 
-        return $orderId;
+        $lineStmt = db()->prepare('INSERT INTO jewellery_order_lines (order_id, company_id, item_id, purity_id, unit_id,
+                qty_pieces, gross_weight, stone_weight, net_weight, fine_weight, rate, metal_amount,
+                wastage_pct, wastage_weight, total_weight, wastage_amount, making_amount, stone_amount,
+                stone_carat, diamond_amount, diamond_carat, other_diamond_amount, other_diamond_carat,
+                vat_base, vat_rate, vat_amount, tax_amount, allocated_adjust, line_total, notes)
+            VALUES (:oid, :cid, :item, :purity, :unit, :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
+                :wpct, :wweight, :tweight, :wamount, :making, :stone,
+                :scarat, :diamond, :dcarat, :odiamond, :odcarat, :vbase, :vrate, :vamount, :tamount, :adjust, :ltotal, :notes)');
+        foreach ($computed['lines'] as $row) {
+            $lineStmt->execute([
+                'oid' => $orderId, 'cid' => $companyId, 'item' => $row['item_id'], 'purity' => $row['purity_id'],
+                'unit' => $row['unit_id'], 'pieces' => $row['qty_pieces'], 'gross' => $row['gross_weight'],
+                'sweight' => $row['stone_weight'], 'net' => $row['net_weight'],
+                'fine' => $row['fine_weight'], 'rate' => $row['rate'], 'metal' => $row['metal_amount'],
+                'wpct' => $row['wastage_pct'], 'wweight' => $row['wastage_weight'],
+                'tweight' => $row['total_weight'], 'wamount' => $row['wastage_amount'],
+                'making' => $row['making_amount'], 'stone' => $row['stone_amount'],
+                'scarat' => $row['stone_carat'], 'diamond' => $row['diamond_amount'],
+                'dcarat' => $row['diamond_carat'], 'odiamond' => $row['other_diamond_amount'],
+                'odcarat' => $row['other_diamond_carat'], 'vbase' => $row['vat_base'],
+                'vrate' => $row['vat_rate'], 'vamount' => $row['vat_amount'], 'tamount' => $row['tax_amount'],
+                'adjust' => $row['allocated_adjust'],
+                'ltotal' => $row['line_total'], 'notes' => $row['notes'] !== '' ? $row['notes'] : null,
+            ]);
+        }
+
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $orderException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        throw $orderException;
     }
 
-    $no = trim((string) ($input['order_no'] ?? '')) ?: jw_next_no($companyId, 'jewellery_orders', 'order_no', (string) ($settings['order_no_prefix'] ?? 'JO'));
-    db()->prepare('INSERT INTO jewellery_orders (company_id, fiscal_year_id, order_no, order_date, delivery_date, party_id,
-            customer_name, customer_phone, item_id, metal_id, purity_id, unit_id, expected_gross_weight, expected_fine_weight,
-            design_no, description, making_basis, making_rate, advance_amount, status, notes, created_by)
-        VALUES (:cid, :fy, :no, :date, :delivery, :party, :cname, :cphone, :item, :metal, :purity, :unit, :gross, :fine,
-            :design, :description, :basis, :rate, :advance, :status, :notes, :by)')
-        ->execute($params + ['no' => $no, 'by' => $userId ?: null]);
-
-    return (int) db()->lastInsertId();
+    return $orderId;
 }
 
 function jewellery_delete_order(int $companyId, int $orderId): bool
@@ -1166,14 +1327,44 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
     $making = jw_making_charge((string) $order['making_basis'], (float) $order['making_rate'],
         $gross, jw_round_money($gross * $rate));
 
-    return [
-        'ok' => true,
-        'error' => '',
-        'order' => $order,
-        'received' => $received,
-        'rate_note' => $rateNote,
-        'advance_amount' => jw_round_money((float) $order['advance_amount']),
-        'line' => [
+    // Every item the customer ordered, priced as the order priced it. A shop
+    // that took an order for a ring AND a chain must get both back on the bill;
+    // returning only the first would quietly drop what it agreed to sell.
+    $orderLines = jewellery_order_line_rows($companyId, $orderId);
+    $lines = [];
+    foreach ($orderLines as $index => $orderLine) {
+        // The first line is the one the karigar worked to, so it takes the
+        // weight and rate actually received. The rest stand as ordered.
+        $isFirst = $index === 0;
+        $lineGross = $isFirst && $received !== null ? $gross : jw_round_weight((float) $orderLine['gross_weight']);
+        $lineRate = (float) $orderLine['rate'];
+        if ($isFirst && $rate > 0) {
+            $lineRate = $rate;
+        }
+        $lines[] = [
+            'item_id' => $isFirst ? $itemId : (int) $orderLine['item_id'],
+            'purity_id' => $isFirst ? $purityId : (int) $orderLine['purity_id'],
+            'unit_id' => (int) $orderLine['unit_id'],
+            'qty_pieces' => (float) $orderLine['qty_pieces'] ?: 1,
+            'gross_weight' => $lineGross,
+            'stone_weight' => (float) $orderLine['stone_weight'],
+            'wastage_pct' => (float) $orderLine['wastage_pct'],
+            'wastage_weight' => $isFirst ? 0.0 : (float) $orderLine['wastage_weight'],
+            'rate' => $lineRate,
+            'making_amount' => $isFirst ? $making : (float) $orderLine['making_amount'],
+            'stone_amount' => (float) $orderLine['stone_amount'],
+            'stone_carat' => (float) $orderLine['stone_carat'],
+            'diamond_amount' => (float) $orderLine['diamond_amount'],
+            'diamond_carat' => (float) $orderLine['diamond_carat'],
+            'other_diamond_amount' => (float) $orderLine['other_diamond_amount'],
+            'other_diamond_carat' => (float) $orderLine['other_diamond_carat'],
+            'notes' => (string) ($orderLine['notes'] ?? ''),
+        ];
+    }
+    if ($lines === []) {
+        // An order taken before orders had lines. Fall back to what the header
+        // knows, so the bill can still be raised from it.
+        $lines[] = [
             'item_id' => $itemId,
             'purity_id' => $purityId,
             'unit_id' => (int) $order['unit_id'],
@@ -1181,7 +1372,20 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
             'gross_weight' => $gross,
             'rate' => $rate,
             'making_amount' => $making,
-        ],
+        ];
+    }
+
+    return [
+        'ok' => true,
+        'error' => '',
+        'order' => $order,
+        'received' => $received,
+        'rate_note' => $rateNote,
+        'advance_amount' => jw_round_money((float) $order['advance_amount']),
+        'order_total' => jw_round_money((float) ($order['total_amount'] ?? 0)),
+        'lines' => $lines,
+        // Kept so callers written against the single-item order keep working.
+        'line' => $lines[0],
     ];
 }
 

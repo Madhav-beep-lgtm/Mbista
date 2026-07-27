@@ -2502,6 +2502,81 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Multi-item orders with a real quote (migration 087)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_orders')) {
+            return;
+        }
+        db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_order_lines` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `order_id` INT UNSIGNED NOT NULL,
+            `company_id` INT UNSIGNED NOT NULL,
+            `item_id` INT UNSIGNED NOT NULL,
+            `purity_id` INT UNSIGNED NOT NULL,
+            `unit_id` INT UNSIGNED NOT NULL,
+            `qty_pieces` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+            `gross_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `stone_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `net_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `fine_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `rate` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `metal_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `wastage_pct` DECIMAL(9,3) NOT NULL DEFAULT 0.000,
+            `wastage_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `total_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `wastage_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `making_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `stone_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `diamond_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `other_diamond_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `other_diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `stone_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `vat_base` ENUM('none','full_value','making_only','stone_only','stone_diamond') NOT NULL DEFAULT 'none',
+            `vat_rate` DECIMAL(6,2) NOT NULL DEFAULT 0.00,
+            `vat_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `tax_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `allocated_adjust` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `line_total` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `notes` VARCHAR(255) DEFAULT NULL,
+            PRIMARY KEY (`id`),
+            KEY `idx_jw_oline_order` (`order_id`),
+            KEY `idx_jw_oline_item` (`company_id`, `item_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        foreach ([
+            'metal_amount' => '`metal_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `making_rate`',
+            'wastage_amount' => '`wastage_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `metal_amount`',
+            'making_amount' => '`making_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `wastage_amount`',
+            'stone_amount' => '`stone_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `making_amount`',
+            'diamond_amount' => '`diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `stone_amount`',
+            'other_charges' => '`other_charges` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_amount`',
+            'discount' => '`discount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `other_charges`',
+            'taxable_amount' => '`taxable_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `discount`',
+            'non_taxable_amount' => '`non_taxable_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `taxable_amount`',
+            'sd_taxable_amount' => '`sd_taxable_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `non_taxable_amount`',
+            'vatable_amount' => '`vatable_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `sd_taxable_amount`',
+            'vat_amount' => '`vat_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `vatable_amount`',
+            'tax_amount' => '`tax_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `vat_amount`',
+            'manual_tax_amount' => '`manual_tax_amount` DECIMAL(18,2) DEFAULT NULL AFTER `tax_amount`',
+            'total_amount' => '`total_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `manual_tax_amount`',
+        ] as $column => $ddl) {
+            accounting_repair_add_column('jewellery_orders', $column, $ddl);
+        }
+
+        // Carry every order already taken into a line, priced at zero — the old
+        // order never held a metal rate, and inventing one would put a figure
+        // in front of a customer that nobody quoted.
+        db()->exec("INSERT INTO `jewellery_order_lines`
+                (`order_id`, `company_id`, `item_id`, `purity_id`, `unit_id`, `qty_pieces`,
+                 `gross_weight`, `net_weight`, `fine_weight`, `total_weight`)
+            SELECT o.`id`, o.`company_id`, o.`item_id`, o.`purity_id`, o.`unit_id`, 1,
+                   o.`expected_gross_weight`, o.`expected_gross_weight`, o.`expected_fine_weight`,
+                   o.`expected_gross_weight`
+              FROM `jewellery_orders` o
+             WHERE o.`item_id` IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM `jewellery_order_lines` l WHERE l.`order_id` = o.`id`)");
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

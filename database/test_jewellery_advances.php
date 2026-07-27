@@ -159,7 +159,7 @@ $order = jewellery_save_order($cid, $fy, [
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
     'expected_gross_weight' => 5, 'making_basis' => 'flat', 'making_rate' => 10000,
     'status' => 'confirmed',
-], $uid);
+], [], $uid);
 ok($order > 0, 'The order is created');
 
 $advCash = jewellery_save_settlement($cid, $fy, [
@@ -253,7 +253,7 @@ $order2 = jewellery_save_order($cid, $fy, [
     'order_date' => '2026-08-01', 'party_id' => $customer, 'item_id' => $chain,
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
     'expected_gross_weight' => 1, 'making_basis' => 'flat', 'making_rate' => 0, 'status' => 'confirmed',
-], $uid);
+], [], $uid);
 $bigAdvance = jewellery_save_settlement($cid, $fy, [
     'settlement_date' => '2026-08-03', 'party_id' => $customer, 'order_id' => $order2, 'is_advance' => 1,
     'direction' => 'received', 'mode' => 'cash', 'amount' => 200000, 'ledger_id' => $cash,
@@ -319,7 +319,7 @@ $orderEarly = jewellery_save_order($cid, $fy, [
     'order_date' => '2026-08-01', 'party_id' => $customer, 'item_id' => $vatItem,
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
     'expected_gross_weight' => 1, 'making_basis' => 'flat', 'making_rate' => 0, 'status' => 'confirmed',
-], $uid);
+], [], $uid);
 
 // The rate board says 100,000 on 1 Aug and 130,000 on 1 Oct (seeded above).
 $prefillEarly = jewellery_order_sale_prefill($cid, $orderEarly);
@@ -347,12 +347,14 @@ $orderLater = jewellery_save_order($cid, $fy, [
     'order_date' => '2026-08-01', 'party_id' => $customer, 'item_id' => $vatItem,
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
     'expected_gross_weight' => 1, 'making_basis' => 'flat', 'making_rate' => 0, 'status' => 'confirmed',
-], $uid);
+], [], $uid);
 $prefillLater = jewellery_order_sale_prefill($cid, $orderLater);
 $vatSale = jewellery_save_sale($cid, $fy, [
     'sale_date' => '2026-10-21', 'party_id' => $customer, 'settle_mode' => 'credit',
     'deliver_order_id' => $orderLater,
-], [$prefillLater['line'] + ['stone_amount' => 5000.0, 'stone_carat' => 0.5]], [], $uid);
+    // The overrides go on the LEFT of the union: `+` keeps the LEFT operand's
+    // keys, and a prefilled line now carries a stone_amount of its own.
+], [['stone_amount' => 5000.0, 'stone_carat' => 0.5] + $prefillLater['line']], [], $uid);
 $vatSaleRow = jewellery_sale($cid, $vatSale);
 ok(near((float) $vatSaleRow['metal_amount'], 100000.0), 'Same ordered rate honoured');
 // VAT rides on the STONE side, so the line carries a stone for it to bite on.

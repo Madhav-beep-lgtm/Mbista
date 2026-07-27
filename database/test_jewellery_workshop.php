@@ -43,7 +43,7 @@ function jww_cleanup(): void
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
         foreach (['jewellery_refinery_jobs', 'jewellery_order_receipts', 'jewellery_order_assignments',
-                  'jewellery_orders', 'jewellery_karigars', 'jewellery_settlement_allocations',
+                  'jewellery_order_lines', 'jewellery_orders', 'jewellery_karigars', 'jewellery_settlement_allocations',
                   'jewellery_settlements', 'jewellery_bills', 'jewellery_sale_exchanges', 'jewellery_sale_lines',
                   'jewellery_sales', 'jewellery_purchase_lines', 'jewellery_purchases',                   'jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items', 'jewellery_daily_rates', 'inventory_ledger_mappings',
                   'jewellery_settings', 'jewellery_purities', 'jewellery_metals', 'jewellery_units'] as $t) {
@@ -174,12 +174,12 @@ $order = jewellery_save_order($cidA, $fyA, [
     'order_date' => '2026-08-05', 'delivery_date' => '2026-08-25', 'party_id' => $customer,
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'expected_gross_weight' => 10,
     'design_no' => 'D-100', 'making_basis' => 'per_unit_weight', 'making_rate' => 1000, 'status' => 'confirmed',
-], $userA);
+], [], $userA);
 $orderRow = jewellery_order($cidA, $order);
 ok(near((float) $orderRow['expected_fine_weight'], 9.16), 'The expected fine weight is derived (10 tola at 916)');
 ok((string) $orderRow['status'] === 'confirmed', 'The order is confirmed');
 ok(threw(static fn () => jewellery_save_order($cidA, $fyA, ['order_date' => '2026-08-05',
-    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola], $userA)),
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola], [], $userA)),
     'An order with neither party nor customer name is rejected');
 
 echo "\n3. Issue metal to a karigar\n";
@@ -374,6 +374,77 @@ ok(!jewellery_issue_to_karigar($cidB, $fyB, ['karigar_id' => $kContractor, 'item
     "Company B cannot issue company A's metal to company A's karigar");
 ok(jewellery_karigars_list($cidB) === [], 'Company B has no karigars');
 ok($q("SELECT COUNT(*) FROM vouchers WHERE company_id=$cidB") === 0, 'No voucher ever reached company B');
+
+echo "\n13. One customer, several items, one order — quoted exactly\n";
+// A customer orders a chain AND a diamond-set ring in the same breath. Before
+// order lines existed that was two orders, two numbers and two advances for
+// one conversation, and neither of them could say what it came to.
+$multi = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-08-05', 'party_id' => $customer, 'status' => 'confirmed',
+    'delivery_date' => '2026-08-25', 'design_no' => 'D-200',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'rate' => 150000, 'making_amount' => 4000],
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'making_amount' => 2500,
+     'diamond_amount' => 60000, 'diamond_carat' => 1.25, 'stone_amount' => 800, 'stone_carat' => 0.4],
+], $userA);
+$multiRow = jewellery_order($cidA, $multi);
+$multiLines = jewellery_order_line_rows($cidA, $multi);
+ok(count($multiLines) === 2, 'Both items are on the ONE order');
+ok(near((float) $multiRow['metal_amount'], 450000.0), 'Metal is 3 tola at 150,000 = 450,000 across the two lines');
+ok(near((float) $multiRow['making_amount'], 6500.0), 'Making is 4,000 + 2,500');
+ok(near((float) $multiRow['expected_gross_weight'], 3.0), 'And the header weight is the whole order, not just its first piece');
+
+// The two taxes, on their own bases, exactly as the bill will charge them.
+ok(near((float) $multiRow['sd_taxable_amount'], 456500.0),
+    'SD taxable amt = metal + making = 456,500 — the diamond is NOT in it');
+ok(near((float) $multiRow['tax_amount'], 2282.50), 'Skills Promotion Tax at 0.5% = 2,282.50');
+ok(near((float) $multiRow['vatable_amount'], 60800.0),
+    'Vatable amt = diamond + stone = 60,800 — the gold and the labour are NOT in it');
+ok(near((float) $multiRow['vat_amount'], 7904.0), 'VAT at 13% of 60,800 = 7,904.00');
+ok(near((float) $multiRow['total_amount'], 450000.0 + 6500.0 + 60800.0 + 2282.50 + 7904.0),
+    'And the total payable quoted to the customer is 527,486.50');
+
+// The quote has to survive into the bill, or it was never a quote.
+$multiPrefill = jewellery_order_sale_prefill($cidA, $multi);
+ok(count($multiPrefill['lines']) === 2, 'Both ordered items come back for the bill — neither is dropped');
+ok(near((float) $multiPrefill['lines'][1]['diamond_amount'], 60000.0),
+    'The second line keeps its diamond all the way through to the sale form');
+ok(near((float) $multiPrefill['order_total'], (float) $multiRow['total_amount']),
+    'And the prefill carries the quoted total for the counter to check against');
+
+// Editing replaces the lines rather than piling more on.
+jewellery_save_order($cidA, $fyA, [
+    'id' => $multi, 'order_date' => '2026-08-05', 'party_id' => $customer, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'rate' => 150000, 'making_amount' => 4000],
+], $userA);
+ok(count(jewellery_order_line_rows($cidA, $multi)) === 1, 'Revising an order replaces its lines, it does not add to them');
+ok(near((float) jewellery_order($cidA, $multi)['total_amount'], 300000.0 + 4000.0 + jw_round_money(304000.0 * 0.005)),
+    'And the quote is re-worked from what is left');
+
+// An advance cannot exceed the quote — the shop would be holding money against
+// nothing, and it would net to a negative balance on delivery.
+ok(threw(static fn () => jewellery_save_order($cidA, $fyA, [
+    'id' => $multi, 'order_date' => '2026-08-05', 'party_id' => $customer, 'advance_amount' => 9999999,
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'rate' => 150000, 'making_amount' => 4000],
+], $userA)), 'An advance larger than the order itself is refused');
+
+// A bespoke order — no item picked yet — is still recordable, and quotes zero
+// rather than a guess.
+$bespoke = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-08-06', 'party_id' => $customer, 'status' => 'confirmed',
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'expected_gross_weight' => 10,
+    'description' => 'A ten-tola 22K chain, pattern to be chosen',
+], [], $userA);
+$bespokeRow = jewellery_order($cidA, $bespoke);
+ok($bespoke > 0 && (int) ($bespokeRow['item_id'] ?? 0) === 0, 'An order with no item chosen yet is still taken');
+ok(near((float) $bespokeRow['expected_fine_weight'], 9.16), 'Its metal spec still derives a fine weight for the kaligad');
+ok(near((float) $bespokeRow['total_amount'], 0.0), 'And it quotes nothing rather than inventing a figure');
 
 jww_cleanup();
 echo "\n==================================================\n";

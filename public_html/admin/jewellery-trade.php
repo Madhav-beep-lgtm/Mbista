@@ -286,6 +286,13 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 $lineSlots = 5;
 ?>
 
+<?php
+// The line grid is shared with the order form — one grid, one set of
+// column names, so a field added to a sale reaches an order too.
+require_once __DIR__ . '/../../app/views/partials/jewellery_line_grid.php';
+jw_line_grid_styles();
+?>
+
 <nav class="mbw-tabbar" aria-label="Jewellery trading sections" style="flex-wrap:wrap">
     <a class="mbw-tab" href="<?= e(url('admin/jewellery.php')) ?>"><?= icon('dashboard') ?> Jewellery Home</a>
     <?php foreach (['purchases' => ['Purchases', 'box'], 'sales' => ['Sales', 'receipt-voucher'], 'bills' => ['Bills &amp; Settlement', 'wallet']] as $tabView => [$tabLabel, $tabIcon]): ?>
@@ -294,99 +301,13 @@ $lineSlots = 5;
 </nav>
 
 <?php
-/** Render the shared line-entry grid used by both the purchase and sale forms. */
-$renderLineRows = function (string $prefix, array $existing, int $slots, string $legend) use ($items, $purities, $units, $baseUnit, $sym, $fmt, $onHand): void { ?>
-    <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px;margin:12px 0">
-        <legend style="padding:0 6px;font-weight:600"><?= $legend ?></legend>
-        <div style="overflow-x:auto"><table>
-            <thead><tr>
-                <th style="min-width:200px">Item</th><th>Purity</th><th>Unit</th><th>Pieces</th>
-                <th>Gross wt</th><th>Less (stone wt)</th><th>Rate</th>
-                <?php if ($prefix !== 'x'): ?><th>Wastage %</th><th>Wastage wt</th><?php endif; ?>
-                <?php if ($prefix === 'l'): ?>
-                    <th>Making</th>
-                    <th>Diamond crt</th><th>Diamond amt</th>
-                    <th>Other dia. crt</th><th>Other dia. amt</th>
-                    <th>Stone crt</th><th>Stone amt</th>
-                <?php endif; ?>
-            </tr></thead>
-            <tbody>
-            <?php for ($i = 0; $i < $slots; $i++): $row = $existing[$i] ?? null; ?>
-                <tr>
-                    <td>
-                        <select name="<?= $prefix ?>_item_id[]">
-                            <option value="0">—</option>
-                            <?php foreach ($items as $it): ?>
-                                <?php
-                                    // What is actually left, shown on the option itself: the
-                                    // shop needs to know before it commits the line, not after
-                                    // the negative-stock guard refuses it.
-                                    $stock = $onHand[(int) $it['id']] ?? null;
-                                    $left = $stock
-                                        ? '  ·  ' . $fmt((float) $stock['qty_pieces'], 0) . ' pc, '
-                                            . $fmt((float) $stock['fine_weight'], 3) . ' fine left'
-                                        : '';
-                                ?>
-                                <option value="<?= (int) $it['id'] ?>" <?= (int) ($row['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name'] . $left) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </td>
-                    <td>
-                        <select name="<?= $prefix ?>_purity_id[]">
-                            <?php foreach ($purities as $p): ?>
-                                <option value="<?= (int) $p['id'] ?>" <?= (int) ($row['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </td>
-                    <td>
-                        <select name="<?= $prefix ?>_unit_id[]">
-                            <?php foreach ($units as $u): ?>
-                                <option value="<?= (int) $u['id'] ?>" <?= (int) ($row['unit_id'] ?? (int) ($baseUnit['id'] ?? 0)) === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['code']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </td>
-                    <td><input type="number" name="<?= $prefix ?>_qty_pieces[]" step="0.001" min="0" style="width:80px" value="<?= e((string) ($row['qty_pieces'] ?? '0')) ?>"></td>
-                    <td><input type="number" name="<?= $prefix ?>_gross_weight[]" step="0.0001" min="0" style="width:100px" value="<?= e((string) ($row['gross_weight'] ?? '0')) ?>"></td>
-                    <td><input type="number" name="<?= $prefix ?>_stone_weight[]" class="jw-stone-wt" step="0.0001" min="0" style="width:95px" value="<?= e((string) ($row['stone_weight'] ?? '0')) ?>"></td>
-                    <td><input type="number" name="<?= $prefix ?>_rate[]" step="0.0001" min="0" style="width:110px" value="<?= e((string) ($row['rate'] ?? '0')) ?>"></td>
-                    <?php if ($prefix !== 'x'): ?>
-                        <td><input type="number" name="<?= $prefix ?>_wastage_pct[]" class="jw-wastage-pct" step="0.001" min="0" style="width:90px" value="<?= e((string) ($row['wastage_pct'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_wastage_weight[]" class="jw-wastage-wt" step="0.0001" min="0" style="width:95px" value="<?= e((string) ($row['wastage_weight'] ?? '0')) ?>"></td>
-                    <?php endif; ?>
-                    <?php if ($prefix === 'l'): ?>
-                        <td><input type="number" name="<?= $prefix ?>_making_amount[]" step="0.01" min="0" style="width:100px" value="<?= e((string) ($row['making_amount'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_diamond_carat[]" step="0.001" min="0" style="width:85px" value="<?= e((string) ($row['diamond_carat'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_diamond_amount[]" step="0.01" min="0" style="width:100px" value="<?= e((string) ($row['diamond_amount'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_other_diamond_carat[]" step="0.001" min="0" style="width:85px" value="<?= e((string) ($row['other_diamond_carat'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_other_diamond_amount[]" step="0.01" min="0" style="width:100px" value="<?= e((string) ($row['other_diamond_amount'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_stone_carat[]" step="0.0001" min="0" style="width:85px" value="<?= e((string) ($row['stone_carat'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_stone_amount[]" step="0.01" min="0" style="width:100px" value="<?= e((string) ($row['stone_amount'] ?? '0')) ?>"></td>
-                    <?php endif; ?>
-                </tr>
-            <?php endfor; ?>
-            </tbody>
-        </table></div>
-        <?php if ($prefix !== 'x'): ?>
-        <div class="workspace-form-grid" style="margin-top:10px">
-            <label>Apply wastage %
-                <input type="number" class="jw-bulk-wastage" step="0.001" min="0" value="0" style="width:110px">
-            </label>
-            <label>to
-                <select class="jw-bulk-wastage-scope">
-                    <option value="all">Every line with an item</option>
-                    <option value="empty">Only lines still at zero</option>
-                </select>
-            </label>
-            <div style="align-self:end">
-                <button type="button" class="button secondary jw-bulk-wastage-apply">Apply</button>
-            </div>
-        </div>
-        <?php endif; ?>
-        <p class="frm-optional" style="margin:8px 0 0">Net wt = gross − less. The customer is charged on net + wastage, but only the
-            net metal leaves stock — wastage is a charge, not gold. Punch the wastage either as a % or as a weight and the other is
-            worked out for you. Rate 0 prices from the daily board. Blank rows are ignored.</p>
-    </fieldset>
-<?php };
+$renderLineRows = static function (string $prefix, array $existing, int $slots, string $legend) use ($items, $purities, $units, $baseUnit, $fmt, $onHand): void {
+    jw_render_line_grid($prefix, $existing, $slots, $legend, [
+        'items' => $items, 'purities' => $purities, 'units' => $units,
+        'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $onHand,
+    ]);
+};
+?>
 ?>
 
 <?php if ($view === 'purchases'): ?>
@@ -843,33 +764,4 @@ document.addEventListener("change", function (event) {
 });
 </script>
 
-<script>
-// Fill the wastage column in one go. Typing the same percentage down twelve
-// lines is where mistakes come from; each line stays editable afterwards.
-document.addEventListener("click", function (event) {
-    var button = event.target.closest(".jw-bulk-wastage-apply");
-    if (!button) { return; }
-    var box = button.closest("fieldset");
-    if (!box) { return; }
-    var pctField = box.querySelector(".jw-bulk-wastage");
-    var pct = parseFloat(pctField ? pctField.value : "0");
-    if (!isFinite(pct) || pct < 0) { return; }
-    var scope = box.querySelector(".jw-bulk-wastage-scope");
-    var onlyEmpty = scope && scope.value === "empty";
-    Array.prototype.forEach.call(box.querySelectorAll("tbody tr"), function (row) {
-        var item = row.querySelector("select[name$=\"_item_id[]\"]");
-        var field = row.querySelector(".jw-wastage-pct");
-        var weight = row.querySelector(".jw-wastage-wt");
-        if (!item || !field || parseInt(item.value, 10) <= 0) { return; }
-        var punched = parseFloat(field.value || "0") > 0
-            || (weight && parseFloat(weight.value || "0") > 0);
-        if (onlyEmpty && punched) { return; }
-        field.value = pct;
-        // A wastage WEIGHT beats a percentage on save, so applying a percentage
-        // in bulk has to clear the weight — otherwise the row would keep the old
-        // figure and the button would look broken.
-        if (weight) { weight.value = 0; }
-    });
-});
-</script>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

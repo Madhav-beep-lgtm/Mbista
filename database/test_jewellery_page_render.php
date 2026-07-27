@@ -151,7 +151,7 @@ $karigar = jewellery_save_karigar($cid, ['code' => 'RAM', 'name' => 'Ram Shakya'
     'default_making_rate' => 1000, 'wastage_allowed_pct' => 0.5], $adminId);
 $order = jewellery_save_order($cid, $fyId, ['order_date' => '2026-08-05', 'delivery_date' => '2026-08-25',
     'party_id' => $customer, 'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
-    'expected_gross_weight' => 10, 'making_rate' => 1000, 'status' => 'confirmed', 'design_no' => 'D-100'], $adminId);
+    'expected_gross_weight' => 10, 'making_rate' => 1000, 'status' => 'confirmed', 'design_no' => 'D-100'], [], $adminId);
 $assign = jewellery_issue_to_karigar($cid, $fyId, ['karigar_id' => $karigar, 'order_id' => $order,
     'item_id' => $chain, 'unit_id' => $tola, 'issued_gross_weight' => 10, 'issue_date' => '2026-08-06',
     'wastage_allowed_pct' => 0.5, 'making_rate' => 1000], $adminId);
@@ -162,7 +162,7 @@ $assign2 = jewellery_issue_to_karigar($cid, $fyId, ['karigar_id' => $karigar, 'i
     'unit_id' => $tola, 'issued_gross_weight' => 3, 'issue_date' => '2026-08-21', 'making_rate' => 1000], $adminId);
 $order2 = jewellery_save_order($cid, $fyId, ['order_date' => '2026-08-22', 'customer_name' => 'Second Customer',
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'expected_gross_weight' => 4,
-    'status' => 'confirmed'], $adminId);
+    'status' => 'confirmed'], [], $adminId);
 
 $job = jewellery_issue_to_refinery($cid, $fyId, ['party_id' => $supplier, 'item_id' => $oldGold,
     'unit_id' => $tola, 'issued_gross_weight' => 5, 'issue_date' => '2026-09-01'], $adminId);
