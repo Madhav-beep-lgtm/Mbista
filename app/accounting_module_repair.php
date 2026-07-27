@@ -2427,6 +2427,64 @@ function accounting_module_repair_database(): array
             ['inventory_opening_imports', 'inventory_opening_import_rows']);
     });
 
+    $run('Invoice fields and tax bases (migration 083)', static function (): void {
+        // Column-only migration, so it cannot go through
+        // accounting_repair_run_migration_file() — that runner deliberately
+        // fires only when a whole TABLE is missing.
+        $lineColumns = [
+            'wastage_weight' => '`wastage_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `wastage_pct`',
+            'total_weight' => '`total_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `wastage_weight`',
+            'diamond_carat' => '`diamond_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `stone_amount`',
+            'diamond_amount' => '`diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_carat`',
+            'other_diamond_carat' => '`other_diamond_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `diamond_amount`',
+            'other_diamond_amount' => '`other_diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `other_diamond_carat`',
+            'stone_carat' => '`stone_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `other_diamond_amount`',
+        ];
+        foreach (['jewellery_sale_lines', 'jewellery_purchase_lines'] as $table) {
+            if (!accounting_repair_table_exists($table)) {
+                continue;
+            }
+            foreach ($lineColumns as $column => $ddl) {
+                accounting_repair_add_column($table, $column, $ddl);
+            }
+            // A line written before this carries no wastage weight, so the
+            // weight it was priced on is simply its net.
+            db()->exec("UPDATE `$table` SET `total_weight` = `net_weight`
+                WHERE `total_weight` = 0 AND `net_weight` <> 0");
+        }
+
+        $headerColumns = [
+            'non_taxable_amount' => '`non_taxable_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `taxable_amount`',
+            'sd_taxable_amount' => '`sd_taxable_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `non_taxable_amount`',
+            'vatable_amount' => '`vatable_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `sd_taxable_amount`',
+            'diamond_amount' => '`diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `stone_amount`',
+        ];
+        foreach (['jewellery_sales', 'jewellery_purchases'] as $table) {
+            if (!accounting_repair_table_exists($table)) {
+                continue;
+            }
+            foreach ($headerColumns as $column => $ddl) {
+                accounting_repair_add_column($table, $column, $ddl);
+            }
+        }
+        if (accounting_repair_table_exists('jewellery_sales')) {
+            accounting_repair_add_column('jewellery_sales', 'sales_person',
+                '`sales_person` VARCHAR(120) DEFAULT NULL AFTER `customer_name`');
+        }
+
+        // Diamonds and stones are taxed alike, so they need one base to be
+        // charged on. Widening an ENUM keeps every existing value.
+        if (accounting_repair_table_exists('jewellery_taxes')) {
+            $base = db()->query("SHOW COLUMNS FROM `jewellery_taxes` LIKE 'base'")->fetch(PDO::FETCH_ASSOC);
+            if ($base && !str_contains((string) ($base['Type'] ?? ''), 'stone_diamond')) {
+                db()->exec("ALTER TABLE `jewellery_taxes`
+                    MODIFY COLUMN `base` ENUM('metal','making','stone','wastage','metal_making',
+                        'metal_wastage_making','stone_diamond','subtotal','subtotal_with_taxes')
+                    NOT NULL DEFAULT 'subtotal'");
+            }
+        }
+    });
+
     $run('Canonical gram weights on stock movements (migration 082)', static function (): void {
         if (!accounting_repair_table_exists('jewellery_stock_txns')) {
             return;

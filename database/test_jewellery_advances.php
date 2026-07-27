@@ -352,11 +352,12 @@ $prefillLater = jewellery_order_sale_prefill($cid, $orderLater);
 $vatSale = jewellery_save_sale($cid, $fy, [
     'sale_date' => '2026-10-21', 'party_id' => $customer, 'settle_mode' => 'credit',
     'deliver_order_id' => $orderLater,
-], [$prefillLater['line']], [], $uid);
+], [$prefillLater['line'] + ['stone_amount' => 5000.0, 'stone_carat' => 0.5]], [], $uid);
 $vatSaleRow = jewellery_sale($cid, $vatSale);
 ok(near((float) $vatSaleRow['metal_amount'], 100000.0), 'Same ordered rate honoured');
-ok((float) $vatSaleRow['vat_amount'] > 0,
-    'And VAT IS charged, because it is in force on the sale date');
+// VAT rides on the STONE side, so the line carries a stone for it to bite on.
+ok(near((float) $vatSaleRow['vat_amount'], 650.0),
+    'And VAT IS charged on the stone — 13% of 5,000 — because it is in force on the sale date');
 
 jwadv_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";

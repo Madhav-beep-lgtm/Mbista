@@ -1205,6 +1205,7 @@ function jewellery_tax_bases(): array
         'metal' => 'Metal value only',
         'making' => 'Making charge only',
         'stone' => 'Stone value only',
+        'stone_diamond' => 'Stone + diamond + other diamond',
         'wastage' => 'Wastage value only',
         'metal_making' => 'Metal + making',
         'metal_wastage_making' => 'Metal + wastage + making',
@@ -1333,18 +1334,21 @@ function jewellery_seed_taxes(int $companyId): void
     // and punched by hand on the document because the shop totals it before
     // entering it.
     jewellery_save_tax($companyId, [
-        'code' => 'SPT',
-        'name' => 'Skills Promotion Tax',
+        'code' => 'SD',
+        'name' => 'Skills Development Tax',
         'rate' => 0.5,
-        'base' => 'metal_wastage_making',
+        // The bill's "SD Taxable Amt" is metal + making. The metal figure
+        // already carries the wastage, because the total weight is priced as
+        // one number.
+        'base' => 'metal_making',
         'applies_to' => 'all',
         'doc_types' => ['sale'],
         'sequence' => 100,
-        'manual_entry' => 1,
+        'manual_entry' => 0,
         'output_purpose' => 'spt_output',
         'input_purpose' => 'spt_input',
         'active' => 1,
-        'notes' => 'Metal value (gross less stone weight) plus wastage plus making charge.',
+        'notes' => 'SD Taxable Amt on the bill: metal (total weight x rate) plus making charge. Stones are excluded.',
     ]);
 
     // VAT last, on everything including the tax above, and only on items
@@ -1353,15 +1357,18 @@ function jewellery_seed_taxes(int $companyId): void
         'code' => 'VAT',
         'name' => 'VAT',
         'rate' => (float) ($settings['vat_rate'] ?? 13.0),
-        'base' => 'subtotal_with_taxes',
-        'applies_to' => 'tagged',
+        // The bill's "Vatable Amt" is the stone side alone — never gold,
+        // never making, and never on top of the SD tax. The two sit on
+        // disjoint bases.
+        'base' => 'stone_diamond',
+        'applies_to' => 'all',
         'doc_types' => ['sale', 'purchase'],
         'sequence' => 900,
         'manual_entry' => 0,
         'output_purpose' => 'vat_output',
         'input_purpose' => 'vat_input',
         'active' => 1,
-        'notes' => 'Applies to items flagged VAT-applicable. Charged on the line including every earlier tax.',
+        'notes' => 'Vatable Amt on the bill: stone + diamond + other diamond. Gold and making are outside VAT.',
     ]);
 }
 
@@ -1410,7 +1417,12 @@ function jw_charge_line_taxes(array $parts, array $taxes, array $itemTaxIds, boo
     $wastage = jw_round_money((float) ($parts['wastage'] ?? 0));
     $making = jw_round_money((float) ($parts['making'] ?? 0));
     $stone = jw_round_money((float) ($parts['stone'] ?? 0));
-    $subtotal = jw_round_money($metal + $wastage + $making + $stone);
+    $diamond = jw_round_money((float) ($parts['diamond'] ?? 0));
+    $otherDiamond = jw_round_money((float) ($parts['other_diamond'] ?? 0));
+    $stoneSide = jw_round_money($stone + $diamond + $otherDiamond);
+    // The metal figure already carries the wastage (the total weight is priced
+    // as one number, the way a bill does it), so wastage is NOT added again.
+    $subtotal = jw_round_money($metal + $making + $stoneSide);
 
     $charged = [];
     $runningTax = 0.0;
@@ -1436,13 +1448,14 @@ function jw_charge_line_taxes(array $parts, array $taxes, array $itemTaxIds, boo
         if ($isVatTax && $itemVatBase === 'making_only') {
             $base = 'making';
         } elseif ($isVatTax && $itemVatBase === 'stone_only') {
-            $base = 'stone';
+            $base = 'stone_diamond';
         }
 
         $baseAmount = match ($base) {
             'metal' => $metal,
             'making' => $making,
             'stone' => $stone,
+            'stone_diamond' => $stoneSide,
             'wastage' => $wastage,
             'metal_making' => jw_round_money($metal + $making),
             'metal_wastage_making' => jw_round_money($metal + $wastage + $making),

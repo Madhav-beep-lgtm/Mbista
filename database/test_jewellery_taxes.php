@@ -6,11 +6,10 @@ declare(strict_types=1);
  *
  * Proves the things that are easy to get subtly wrong and impossible to spot
  * afterwards in a ledger:
- *   * gross includes stones, NET is the metal, and the rate is charged on net;
- *   * wastage is a percentage of the metal value and forms part of a tax base;
- *   * taxes are charged in sequence, and a tax based on subtotal_with_taxes
- *     genuinely sees the ones before it — which is what "VAT is the final tax"
- *     means arithmetically;
+ *   * gross includes stones, NET is the metal that leaves, and the rate is
+ *     charged on net PLUS the wastage weight — the way a real bill does it;
+ *   * the two taxes sit on DISJOINT bases: SD on metal + making, VAT on the
+ *     stone side alone, never on top of each other;
  *   * a 'tagged' tax reaches only the items tagged for it;
  *   * a tax that has ended still prices a document dated before it ended;
  *   * each tax posts to ITS OWN payable, not to one lump tax account;
@@ -96,38 +95,40 @@ echo "\n1. The seeded tax register\n";
 $taxes = jewellery_taxes_list($cid);
 ok(count($taxes) === 2, 'Two taxes are seeded');
 $spt = null; $vat = null;
-foreach ($taxes as $t) { if ($t['code'] === 'SPT') { $spt = $t; } if ($t['code'] === 'VAT') { $vat = $t; } }
-ok($spt !== null && (float) $spt['rate'] === 0.5, 'Skills Promotion Tax is seeded at 0.5%');
-ok($spt !== null && $spt['base'] === 'metal_wastage_making', 'Its base is metal + wastage + making');
-ok($spt !== null && (int) $spt['manual_entry'] === 1, 'It is punched by hand after totalling');
-ok($vat !== null && $vat['base'] === 'subtotal_with_taxes', 'VAT is charged on the line INCLUDING earlier taxes');
-ok($vat !== null && $vat['applies_to'] === 'tagged', 'VAT reaches only tagged items — diamond this year');
-ok($spt !== null && $vat !== null && (int) $spt['sequence'] < (int) $vat['sequence'], 'VAT is charged LAST');
+foreach ($taxes as $t) { if ($t['code'] === 'SD') { $spt = $t; } if ($t['code'] === 'VAT') { $vat = $t; } }
+ok($spt !== null && (float) $spt['rate'] === 0.5, 'Skills Development Tax is seeded at 0.5%');
+ok($spt !== null && $spt['base'] === 'metal_making', 'Its base is metal + making — the bill\'s "SD Taxable Amt"');
+ok($spt !== null && (int) $spt['manual_entry'] === 0, 'It is worked out, not punched — the bill shows it computed');
+ok($vat !== null && $vat['base'] === 'stone_diamond', 'VAT is charged on the stone side alone');
+ok($vat !== null && $vat['applies_to'] === 'all', 'It reaches every line; the BASE is what limits it, not a tag');
+ok($spt !== null && $vat !== null && (int) $spt['sequence'] < (int) $vat['sequence'], 'VAT is charged last');
 jewellery_seed_taxes($cid);
 ok(count(jewellery_taxes_list($cid)) === 2, 'Re-seeding an existing register changes nothing');
 
 echo "\n2. Charging one line, by hand\n";
-// Metal 100,000; wastage 5% = 5,000; making 10,000; stone 20,000.
-// SPT  = 0.5% of (100,000 + 5,000 + 10,000) = 575
-// VAT  = 13% of (135,000 + 575)             = 17,624.75
+// Metal 100,000 (the wastage is already inside it, as on a real bill);
+// making 10,000; stone 20,000.
+//   SD  = 0.5% of (100,000 + 10,000) = 550
+//   VAT = 13% of 20,000              = 2,600   — the stone alone
 $charged = jw_charge_line_taxes(
     ['metal' => 100000, 'wastage' => 5000, 'making' => 10000, 'stone' => 20000],
     jewellery_taxes_list($cid, 'sale', '2026-08-01'),
     [], true, 'full_value'
 );
-ok(near($charged['other'], 575.0), 'SPT ignores the stone: 0.5% of 115,000 = 575');
-ok(near($charged['vat'], 17624.75), 'VAT is charged on 135,000 + 575 = 17,624.75');
-ok(near($charged['total'], 18199.75), 'The two together are 18,199.75');
-ok(count($charged['taxes']) === 2 && $charged['taxes'][0]['tax_code'] === 'SPT',
-    'They are returned in charging order, SPT first');
+ok(near($charged['other'], 550.0), 'SD ignores the stone: 0.5% of 110,000 = 550');
+ok(near($charged['vat'], 2600.0), 'VAT is charged on the 20,000 stone alone = 2,600');
+ok(near($charged['total'], 3150.0), 'The two together are 3,150');
+ok(count($charged['taxes']) === 2 && $charged['taxes'][0]['tax_code'] === 'SD',
+    'They are returned in charging order, SD first');
 
 $untagged = jw_charge_line_taxes(
     ['metal' => 100000, 'wastage' => 5000, 'making' => 10000, 'stone' => 20000],
     jewellery_taxes_list($cid, 'sale', '2026-08-01'),
     [], false, 'full_value'
 );
-ok(near($untagged['vat'], 0.0), 'An untagged item is NOT charged VAT');
-ok(near($untagged['other'], 575.0), 'But it still pays the Skills Promotion Tax, which applies to all');
+ok(near($untagged['vat'], 2600.0),
+    'The item flag no longer gates VAT — the stone side does, and this line has one');
+ok(near($untagged['other'], 550.0), 'And the SD tax is unchanged at 550');
 
 echo "\n3. A tax that has ended still prices an older document\n";
 jewellery_save_tax($cid, ['id' => (int) $vat['id'], 'effective_to' => '2026-12-31'] + $vat);
@@ -190,35 +191,40 @@ $s1 = jewellery_save_sale($cid, $fy, ['sale_date' => '2026-08-01', 'party_id' =>
       'making_amount' => 10000, 'stone_amount' => 20000, 'wastage_pct' => 5]], [], $uid);
 $line = db()->query("SELECT * FROM jewellery_sale_lines WHERE sale_id=$s1")->fetch(PDO::FETCH_ASSOC);
 ok(near((float) $line['net_weight'], 4.0), 'Net weight is gross 5 less stone 1 = 4 tola');
-ok(near((float) $line['metal_amount'], 400000.0), 'The metal is charged on NET: 4 x 100,000 = 400,000');
+ok(near((float) $line['total_weight'], 4.2), 'Total Wt = net 4 + wastage 0.2 (5% of net)');
+ok(near((float) $line['metal_amount'], 420000.0),
+    'The metal is charged on the TOTAL weight: 4.2 x 100,000 = 420,000');
 ok(near((float) $line['fine_weight'], 3.664), 'Fine content follows net weight too: 4 x 0.916');
 ok(near((float) $line['wastage_amount'], 20000.0), 'Wastage 5% of the metal value = 20,000');
 
 $s1Row = jewellery_sale($cid, $s1);
 // SPT = 0.5% of (400,000 + 20,000 + 10,000) = 2,150. The chain is not tagged
 // for VAT, so no VAT at all.
-ok(near((float) $s1Row['tax_amount'], 2150.0), 'SPT is 0.5% of metal + wastage + making = 2,150');
-ok(near((float) $s1Row['vat_amount'], 0.0), 'The untagged chain pays no VAT');
-ok(near((float) $s1Row['total_amount'], 452150.0), 'Total = 400,000 + 20,000 + 10,000 + 20,000 stone + 2,150 tax');
+ok(near((float) $s1Row['tax_amount'], 2150.0), 'SD is 0.5% of (420,000 + 10,000) = 2,150');
+ok(near((float) $s1Row['vat_amount'], 2600.0), 'VAT is 13% of the 20,000 stone = 2,600');
+ok(near((float) $s1Row['total_amount'], 454750.0),
+    'Total = 420,000 metal + 10,000 making + 20,000 stone + 2,150 SD + 2,600 VAT');
 
-echo "\n5. VAT applies LAST, on top of the earlier tax\n";
+echo "\n5. The two taxes sit on DISJOINT bases — VAT never rides on the SD tax\n";
 $s2 = jewellery_save_sale($cid, $fy, ['sale_date' => '2026-08-02', 'party_id' => $customer, 'settle_mode' => 'credit'],
     [['item_id' => $ring, 'gross_weight' => 2, 'rate' => 100000, 'making_amount' => 10000, 'wastage_pct' => 5]], [], $uid);
 $s2Row = jewellery_sale($cid, $s2);
-// metal 200,000 + wastage 10,000 + making 10,000 = 220,000
-// SPT 0.5% of 220,000 = 1,100 ; VAT 13% of (220,000 + 1,100) = 28,743
-ok(near((float) $s2Row['tax_amount'], 1100.0), 'SPT on the ring is 1,100');
-ok(near((float) $s2Row['vat_amount'], 28743.0), 'VAT is 13% of 221,100 — the subtotal INCLUDING the SPT');
-ok(near((float) $s2Row['total_amount'], 249843.0), 'The total carries both taxes');
+// net 2 + 5% wastage = 2.1 total weight -> metal 210,000
+// SD 0.5% of (210,000 + 10,000) = 1,100 ; the ring carries no stone, so no VAT.
+ok(near((float) $s2Row['tax_amount'], 1100.0), 'SD on the ring is 1,100');
+ok(near((float) $s2Row['vat_amount'], 0.0),
+    'And NO VAT at all — there is no stone on this line, and gold is outside VAT');
+ok(near((float) $s2Row['total_amount'], 221100.0), 'Total = 210,000 + 10,000 + 1,100');
 
 $r2 = jewellery_post_sale($cid, $s2, $uid);
 ok($r2['ok'], 'The sale posts' . ($r2['ok'] ? '' : ' — ' . $r2['error']));
 $v = voucher_ledgers((int) $r2['voucher_id']);
-ok(near($v[$L['vat_output']] ?? 0, -28743.0), 'VAT is credited to the VAT payable');
+ok(!isset($v[$L['vat_output']]) || near($v[$L['vat_output']], 0.0),
+    'Nothing reaches the VAT payable, because nothing on this bill is vatable');
 ok(near($v[$L['spt_output']] ?? 0, -1100.0), 'The Skills Promotion Tax has its OWN payable — not lumped into VAT');
 ok(near($v[$L['sales_metal']] ?? 0, -210000.0), 'Metal revenue carries the wastage: 200,000 + 10,000');
 $breakdown = jw_document_taxes($cid, 'sale', $s2);
-ok(count($breakdown) === 2, 'The per-line breakdown is stored, so a register can be produced per tax');
+ok(count($breakdown) === 1, 'Only the SD tax was charged, so only it is in the breakdown');
 
 echo "\n6. Item-wise sales ledgers\n";
 // Point the RING's metal revenue at its own ledger. The CHAIN keeps the
