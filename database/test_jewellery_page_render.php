@@ -295,6 +295,34 @@ foreach ([
 }
 @unlink($runner);
 
+// ---------------------------------------------------------------------------
+// The line grid's column widths come from its <colgroup>, because under
+// table-layout:fixed that is the only place they are read from when the first
+// header row carries colspans — as this one does. A colgroup with the wrong
+// number of <col> elements does not fail loudly: every width simply lands on
+// the wrong column and the grid looks squashed, which is the bug this whole
+// arrangement was introduced to fix. So the count is checked per variant.
+// ---------------------------------------------------------------------------
+echo "\nLine grid column alignment\n";
+require_once $root . '/app/views/partials/jewellery_line_grid.php';
+foreach ([
+    ['l', false, 'Sale / purchase line'],
+    ['l', true, 'Order line, with workshop'],
+    ['x', false, 'Old-gold exchange line'],
+] as [$gridPrefix, $withWorkshop, $gridLabel]) {
+    ob_start();
+    jw_render_line_grid($gridPrefix, [], 1, 'T', [
+        'items' => [], 'purities' => [], 'units' => [], 'base_unit' => null,
+        'on_hand' => [], 'karigars' => $withWorkshop ? [] : null,
+    ]);
+    $gridHtml = (string) ob_get_clean();
+    $colCount = substr_count($gridHtml, '<col ');
+    preg_match('~<tbody>(.*?)</tbody>~s', $gridHtml, $bodyMatch);
+    $cellCount = substr_count($bodyMatch[1] ?? '', '<td');
+    ok($colCount > 0 && $colCount === $cellCount,
+        str_pad($gridLabel, 44) . ' ' . $colCount . ' cols / ' . $cellCount . ' cells');
+}
+
 jwr_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

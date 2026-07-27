@@ -28,28 +28,43 @@ function jw_line_grid_styles(): void
     $done = true;
     ?>
 <style>
-/* The line grid carries up to eighteen columns. At the page's ordinary control
-   size that is wider than most screens, so without this the shop can never see
-   a line whole. Fixed column widths, inputs that fill their cell rather than
-   carrying their own width, and a smaller type size for the grid alone.
+/* The line grid carries up to eighteen columns. Squeezing all of them into the
+   viewport is what turned "GOLD·24K" into "GOL" and a date box into three grey
+   slivers: `width: 100%` with `table-layout: fixed` treats the column widths
+   below as PROPORTIONS and scales them down to whatever room is left.
 
-   The scroller is what keeps the widest grid inside the card instead of pushing
-   the page sideways: the table may be wider than the screen, but the SCROLLER
-   never is, so the slider belongs to the grid and the page itself never moves. */
-.jw-lines-scroll { overflow-x: auto; max-width: 100%; }
-.jw-lines-scroll::-webkit-scrollbar { height: 10px; }
-.jw-lines-scroll::-webkit-scrollbar-thumb { background: #b9c7d3; border-radius: 5px; }
-table.jw-lines { font-size: .82rem; table-layout: fixed; width: 100%; min-width: 1120px; }
+   So the table takes its natural width instead — the sum of the widths below,
+   each wide enough to read the control inside it — and anything past the edge
+   of the screen is reached with the scrollbar. min-width keeps it filling the
+   card on a wide screen rather than sitting stubby on one side.
+
+   The scroller is what keeps that inside the card instead of pushing the page
+   sideways: the table may be wider than the screen, but the SCROLLER never is,
+   so the slider belongs to the grid and the page itself never moves. */
+.jw-lines-scroll {
+    overflow-x: auto;
+    max-width: 100%;
+    /* On a trackpad the bar only appears mid-gesture, which is how a column
+       past the edge goes unnoticed. Keeping the gutter reserved means the grid
+       always looks scrollable. */
+    scrollbar-gutter: stable;
+    padding-bottom: 2px;
+}
+.jw-lines-scroll::-webkit-scrollbar { height: 12px; }
+.jw-lines-scroll::-webkit-scrollbar-track { background: #eef2f6; border-radius: 6px; }
+.jw-lines-scroll::-webkit-scrollbar-thumb { background: #9fb3c4; border-radius: 6px; }
+.jw-lines-scroll::-webkit-scrollbar-thumb:hover { background: #7d95a9; }
+table.jw-lines { font-size: .85rem; table-layout: fixed; width: auto; min-width: 100%; }
 table.jw-lines th,
-table.jw-lines td { padding: 2px 3px; }
-table.jw-lines thead th { font-size: .72rem; line-height: 1.15; text-align: center; white-space: nowrap; }
+table.jw-lines td { padding: 3px 4px; }
+table.jw-lines thead th { font-size: .74rem; line-height: 1.2; text-align: center; white-space: nowrap; }
 table.jw-lines input,
 table.jw-lines select {
     width: 100%;
     min-width: 0;
-    min-height: 28px;
-    padding: 2px 4px;
-    font-size: .82rem;
+    min-height: 32px;
+    padding: 3px 6px;
+    font-size: .85rem;
 }
 table.jw-lines input[type="number"] { text-align: right; }
 /* Number spinners eat about 16px of every cell and are useless for a weight
@@ -57,18 +72,25 @@ table.jw-lines input[type="number"] { text-align: right; }
 table.jw-lines input[type="number"] { -moz-appearance: textfield; }
 table.jw-lines input[type="number"]::-webkit-outer-spin-button,
 table.jw-lines input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-table.jw-lines .c-item { width: 178px; }
-table.jw-lines .c-sel  { width: 66px; }
-table.jw-lines .c-unit { width: 56px; }
-table.jw-lines .c-pcs  { width: 50px; }
-table.jw-lines .c-wt   { width: 68px; }
-table.jw-lines .c-rate { width: 86px; }
-table.jw-lines .c-crt  { width: 58px; }
-table.jw-lines .c-amt  { width: 78px; }
+/* Each width is what the WIDEST thing that column holds needs to be read:
+   "GOLD·24K" for a purity, four decimal places for a weight, a whole date for
+   the promise. Nothing here is a guess about how much room is left over.
+
+   They are applied through the table's <colgroup>, which is the only place
+   table-layout:fixed reads them from when the header has colspans in its first
+   row — as this one does. */
+table.jw-lines .c-item { width: 230px; }
+table.jw-lines .c-sel  { width: 110px; }
+table.jw-lines .c-unit { width: 88px; }
+table.jw-lines .c-pcs  { width: 68px; }
+table.jw-lines .c-wt   { width: 92px; }
+table.jw-lines .c-rate { width: 118px; }
+table.jw-lines .c-crt  { width: 80px; }
+table.jw-lines .c-amt  { width: 108px; }
 /* Order grids only: which kaligad makes this piece and when it is promised. */
-table.jw-lines .c-krg  { width: 74px; }
-table.jw-lines .c-date { width: 116px; }
-table.jw-lines .c-del  { width: 30px; text-align: center; }
+table.jw-lines .c-krg  { width: 104px; }
+table.jw-lines .c-date { width: 152px; }
+table.jw-lines .c-del  { width: 38px; text-align: center; }
 table.jw-lines td.c-del button {
     width: 24px; min-height: 24px; padding: 0; line-height: 1;
     border: 1px solid var(--mbw-border, #d9e2ec); border-radius: 4px;
@@ -76,9 +98,6 @@ table.jw-lines td.c-del button {
 }
 table.jw-lines td.c-del button:hover { background: #fdeaea; }
 .jw-lines-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
-@media (max-width: 1180px) {
-    table.jw-lines { font-size: .78rem; }
-}
 
 /* Fields sit in a row and wrap to the next, and every box lines up with its
    neighbours whatever sits under it. Without the label being a flex column with
@@ -116,6 +135,35 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
     <fieldset class="jw-lines-box" style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:12px 0;min-width:0">
         <legend style="padding:0 6px;font-weight:600"><?= $legend ?></legend>
         <div class="jw-lines-scroll"><table class="jw-lines">
+            <?php
+                // The widths live here rather than on the header cells. Under
+                // table-layout:fixed only the FIRST row sets column widths, and
+                // the first row of this header is full of colspans — Weight,
+                // Diamond, Workshop — so the widths written on the SECOND row
+                // were being ignored and those columns collapsed to whatever
+                // was left. A colgroup addresses the real columns directly.
+                $cols = ['c-item', 'c-sel', 'c-unit', 'c-pcs', 'c-wt', 'c-wt'];
+                if ($prefix !== 'x') {
+                    $cols[] = 'c-wt';
+                    $cols[] = 'c-wt';
+                }
+                $cols[] = 'c-rate';
+                if ($full) {
+                    $cols[] = 'c-amt';
+                    foreach ([1, 2, 3] as $stoneColumn) {
+                        $cols[] = 'c-crt';
+                        $cols[] = 'c-amt';
+                    }
+                }
+                if ($withWorkshop) {
+                    $cols[] = 'c-krg';
+                    $cols[] = 'c-date';
+                }
+                $cols[] = 'c-del';
+            ?>
+            <colgroup>
+                <?php foreach ($cols as $colClass): ?><col class="<?= e($colClass) ?>"><?php endforeach; ?>
+            </colgroup>
             <thead>
                 <tr>
                     <th rowspan="2" class="c-item">Item</th>
