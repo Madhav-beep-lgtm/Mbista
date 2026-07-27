@@ -2502,6 +2502,34 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Printed tax bases on pre-083 documents (migration 085)', static function (): void {
+        // The invoice reads its totals block straight off the header, so a bill
+        // raised before the tax bases existed reprints as 0.00 / 0.00 / 0.00
+        // above a correct net total. See the migration for why the guard makes
+        // this both re-runnable and impossible to apply to a current document.
+        foreach ([
+            ['jewellery_sales', ['non_taxable_amount', 'sd_taxable_amount', 'vatable_amount', 'taxable_amount',
+                'metal_amount', 'wastage_amount', 'making_amount', 'stone_amount', 'total_amount']],
+            ['jewellery_purchases', ['non_taxable_amount', 'sd_taxable_amount', 'vatable_amount', 'taxable_amount',
+                'metal_amount', 'wastage_amount', 'making_amount', 'stone_amount', 'total_amount']],
+        ] as [$table, $columns]) {
+            if (!accounting_repair_table_exists($table)) {
+                continue;
+            }
+            foreach ($columns as $column) {
+                if (!accounting_repair_column_exists($table, $column)) {
+                    continue 2;
+                }
+            }
+            db()->exec("UPDATE `$table`
+                   SET `vatable_amount` = `taxable_amount`,
+                       `non_taxable_amount` = GREATEST(0,
+                            `metal_amount` + `wastage_amount` + `making_amount` + `stone_amount` - `taxable_amount`)
+                 WHERE `non_taxable_amount` = 0 AND `sd_taxable_amount` = 0 AND `vatable_amount` = 0
+                   AND `total_amount` <> 0");
+        }
+    });
+
     $run('Canonical gram weights on stock movements (migration 082)', static function (): void {
         if (!accounting_repair_table_exists('jewellery_stock_txns')) {
             return;

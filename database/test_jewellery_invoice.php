@@ -328,6 +328,29 @@ ok((float) $register['output']['taxable'] < 46000.0,
 ok(near((float) $register['output']['vat'], (float) $byCode2['VAT']['output_amount']),
     'The line-level VAT total and the per-tax total agree');
 
+echo "\nA bill raised before the tax bases existed still reprints properly\n";
+// Beat the header back into its pre-083 shape: the three printed bases empty,
+// with only the single taxable_amount the old engine knew about.
+db()->exec("UPDATE jewellery_sales SET non_taxable_amount = 0, sd_taxable_amount = 0, vatable_amount = 0,
+        taxable_amount = 232.60, wastage_amount = 0
+    WHERE id = $sale");
+$legacy = jewellery_sale($cid, $sale);
+ok(near((float) $legacy['sd_taxable_amount'], 0) && near((float) $legacy['vatable_amount'], 0),
+    'The document now looks exactly like one raised before the split');
+accounting_module_repair_database();
+$repaired = jewellery_sale($cid, $sale);
+ok(near((float) $repaired['vatable_amount'], 232.60),
+    'The repair puts the old single base where VAT was actually charged');
+ok((float) $repaired['non_taxable_amount'] > 0,
+    'And the rest of the document value lands in Non Taxable Amt rather than vanishing');
+ok(near((float) $repaired['non_taxable_amount'] + (float) $repaired['vatable_amount'],
+    (float) $repaired['metal_amount'] + (float) $repaired['making_amount'] + (float) $repaired['stone_amount']),
+    'The two bases still account for the whole document — the totals block adds up');
+// Put the row back the way the engine computed it, so what follows measures the
+// real document and not the reconstruction.
+db()->exec("UPDATE jewellery_sales SET non_taxable_amount = 0, sd_taxable_amount = 69091.70,
+        vatable_amount = 232.60, taxable_amount = 232.60 WHERE id = $sale");
+
 echo "\nThe sales report agrees with the ledger it posted to\n";
 $salesReport = jw_report_sales_detail($cid, '2026-07-16', '2027-07-15');
 $reportedRevenue = (float) $salesReport['totals']['revenue'];
