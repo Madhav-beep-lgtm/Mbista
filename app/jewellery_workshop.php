@@ -450,13 +450,17 @@ function jewellery_order_line_rows(int $companyId, int $orderId): array
 {
     $stmt = db()->prepare('SELECT l.*, i.sku AS item_code, i.name AS item_name, i.hs_code,
             jp.jewellery_type AS item_type, i.category, mt.name AS metal_name, mt.id AS metal_id,
-            p.code AS purity_code, p.fineness, u.code AS unit_code
+            p.code AS purity_code, p.fineness, u.code AS unit_code,
+            k.code AS karigar_code, k.name AS karigar_name,
+            a.issue_no, a.issue_date, a.status AS assignment_status
         FROM jewellery_order_lines l
         INNER JOIN inventory_items i ON i.id = l.item_id
         INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
         INNER JOIN jewellery_metals mt ON mt.id = jp.metal_id
         INNER JOIN jewellery_purities p ON p.id = l.purity_id
         INNER JOIN jewellery_units u ON u.id = l.unit_id
+        LEFT JOIN jewellery_karigars k ON k.id = l.karigar_id
+        LEFT JOIN jewellery_order_assignments a ON a.id = l.assignment_id
         WHERE l.company_id = :cid AND l.order_id = :oid ORDER BY l.id ASC');
     $stmt->execute(['cid' => $companyId, 'oid' => $orderId]);
 
@@ -595,6 +599,43 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         $fineTotal = jw_fine_weight($grossTotal, (float) $headerPurity['fineness']);
     }
 
+    // Each item goes to its own kaligad, on its own promised date. Kaligads
+    // specialise — the one who makes chains does not set stones — so an order
+    // for a chain and a diamond ring is routinely two craftsmen and two dates.
+    $lineKarigars = [];
+    $lineDates = [];
+    foreach ($computed['lines'] as $index => $lineRow) {
+        $lineKarigarId = (int) ($lineRow['karigar_id'] ?? 0);
+        if ($lineKarigarId > 0 && !jewellery_karigar($companyId, $lineKarigarId)) {
+            throw new RuntimeException('Item ' . ($index + 1) . ': choose a kaligad that belongs to this company.');
+        }
+        $lineKarigars[$index] = $lineKarigarId ?: null;
+
+        $lineDate = trim((string) ($lineRow['delivery_date'] ?? ''));
+        if ($lineDate !== '' && strtotime($lineDate) === false) {
+            throw new RuntimeException('Item ' . ($index + 1) . ': that promised date is not a date.');
+        }
+        if ($lineDate !== '' && $lineDate < $orderDate) {
+            throw new RuntimeException('Item ' . ($index + 1) . ': it cannot be promised before the order was taken.');
+        }
+        $lineDates[$index] = $lineDate !== '' ? $lineDate : null;
+    }
+
+    // The order's own promise is the LAST of the item dates — the day the whole
+    // order can be collected. A customer collecting one order makes one journey,
+    // so promising them the earliest item would be a promise the shop breaks.
+    $headerDelivery = ($input['delivery_date'] ?? '') !== '' ? (string) $input['delivery_date'] : null;
+    $latestLineDate = null;
+    foreach ($lineDates as $lineDate) {
+        if ($lineDate !== null && ($latestLineDate === null || $lineDate > $latestLineDate)) {
+            $latestLineDate = $lineDate;
+        }
+    }
+    if ($latestLineDate !== null) {
+        $headerDelivery = $headerDelivery === null || $latestLineDate > $headerDelivery
+            ? $latestLineDate : $headerDelivery;
+    }
+
     $totals = $computed['totals'];
     $status = jw_enum($input['status'] ?? null, ['draft', 'confirmed', 'assigned', 'received', 'delivered', 'cancelled'], 'draft');
     $advance = max(0.0, jw_round_money((float) ($input['advance_amount'] ?? 0)));
@@ -606,7 +647,7 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     $params = [
         'cid' => $companyId, 'fy' => $fiscalYearId ?: null,
         'date' => $orderDate,
-        'delivery' => ($input['delivery_date'] ?? '') !== '' ? (string) $input['delivery_date'] : null,
+        'delivery' => $headerDelivery,
         'party' => $partyId, 'cname' => $customerName ?: null,
         'cphone' => trim((string) ($input['customer_phone'] ?? '')) ?: null,
         'item' => $firstItemId ?: null, 'metal' => $metalId, 'purity' => $purityId, 'unit' => $unitId,
@@ -628,6 +669,7 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         'mtax' => $totals['manual_tax_amount'], 'total' => $totals['total_amount'],
     ];
 
+    $priorAssignments = [];
     $ownsTransaction = !db()->inTransaction();
     if ($ownsTransaction) {
         db()->beginTransaction();
@@ -656,6 +698,41 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                     total_amount = :total
                 WHERE id = :id AND company_id = :cid')
                 ->execute($params + ['id' => $orderId]);
+
+            // Revising an order replaces its lines. Any line that already has
+            // metal out with a kaligad must survive that intact: its issue
+            // points back at it, and dropping the line would leave issued metal
+            // attached to nothing.
+            //
+            // Rows are matched by their stored id, NOT by position. Two rows can
+            // hold the same item, and the shop can reorder them, so position
+            // says nothing about which line is which.
+            $priorStmt = db()->prepare('SELECT id, item_id, assignment_id FROM jewellery_order_lines
+                WHERE order_id = :oid AND company_id = :cid ORDER BY id ASC');
+            $priorStmt->execute(['oid' => $orderId, 'cid' => $companyId]);
+            $submittedLineIds = [];
+            foreach ($computed['lines'] as $index => $submitted) {
+                if ((int) ($submitted['line_id'] ?? 0) > 0) {
+                    $submittedLineIds[(int) $submitted['line_id']] = $index;
+                }
+            }
+            foreach ($priorStmt->fetchAll(PDO::FETCH_ASSOC) as $priorLine) {
+                if ((int) ($priorLine['assignment_id'] ?? 0) <= 0) {
+                    continue;
+                }
+                $priorLineId = (int) $priorLine['id'];
+                if (!isset($submittedLineIds[$priorLineId])) {
+                    throw new RuntimeException('An item on this order already has metal out with a kaligad, '
+                        . 'so it cannot be removed. Cancel that issue first.');
+                }
+                $index = $submittedLineIds[$priorLineId];
+                if ((int) $computed['lines'][$index]['item_id'] !== (int) $priorLine['item_id']) {
+                    throw new RuntimeException('Item ' . ($index + 1) . ' already has metal out with a kaligad, '
+                        . 'so it cannot be changed to a different item. Cancel that issue first.');
+                }
+                $priorAssignments[$index] = (int) $priorLine['assignment_id'];
+            }
+
             db()->prepare('DELETE FROM jewellery_order_lines WHERE order_id = :oid AND company_id = :cid')
                 ->execute(['oid' => $orderId, 'cid' => $companyId]);
         } else {
@@ -674,16 +751,22 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
             $orderId = (int) db()->lastInsertId();
         }
 
-        $lineStmt = db()->prepare('INSERT INTO jewellery_order_lines (order_id, company_id, item_id, purity_id, unit_id,
+        $lineStmt = db()->prepare('INSERT INTO jewellery_order_lines (order_id, company_id, item_id, karigar_id,
+                delivery_date, assignment_id, purity_id, unit_id,
                 qty_pieces, gross_weight, stone_weight, net_weight, fine_weight, rate, metal_amount,
                 wastage_pct, wastage_weight, total_weight, wastage_amount, making_amount, stone_amount,
                 stone_carat, diamond_amount, diamond_carat, other_diamond_amount, other_diamond_carat,
                 vat_base, vat_rate, vat_amount, tax_amount, allocated_adjust, line_total, notes)
-            VALUES (:oid, :cid, :item, :purity, :unit, :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
+            VALUES (:oid, :cid, :item, :karigar, :ldelivery, :assignment, :purity, :unit,
+                :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
                 :wpct, :wweight, :tweight, :wamount, :making, :stone,
                 :scarat, :diamond, :dcarat, :odiamond, :odcarat, :vbase, :vrate, :vamount, :tamount, :adjust, :ltotal, :notes)');
-        foreach ($computed['lines'] as $row) {
+        $insertedLineIds = [];
+        foreach ($computed['lines'] as $lineIndex => $row) {
             $lineStmt->execute([
+                'karigar' => $lineKarigars[$lineIndex] ?? null,
+                'ldelivery' => $lineDates[$lineIndex] ?? null,
+                'assignment' => $priorAssignments[$lineIndex] ?? null,
                 'oid' => $orderId, 'cid' => $companyId, 'item' => $row['item_id'], 'purity' => $row['purity_id'],
                 'unit' => $row['unit_id'], 'pieces' => $row['qty_pieces'], 'gross' => $row['gross_weight'],
                 'sweight' => $row['stone_weight'], 'net' => $row['net_weight'],
@@ -698,6 +781,18 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                 'adjust' => $row['allocated_adjust'],
                 'ltotal' => $row['line_total'], 'notes' => $row['notes'] !== '' ? $row['notes'] : null,
             ]);
+            $insertedLineIds[$lineIndex] = (int) db()->lastInsertId();
+        }
+
+        // The assignment points back at the line it covers. The line ids just
+        // changed, so any issue carried across has to be re-pointed or the
+        // workshop board would show issued metal against a line that is gone.
+        foreach ($priorAssignments as $lineIndex => $assignmentId) {
+            if (isset($insertedLineIds[$lineIndex])) {
+                db()->prepare('UPDATE jewellery_order_assignments SET order_line_id = :lid
+                    WHERE id = :aid AND company_id = :cid')
+                    ->execute(['lid' => $insertedLineIds[$lineIndex], 'aid' => $assignmentId, 'cid' => $companyId]);
+            }
         }
 
         if ($ownsTransaction) {
@@ -782,8 +877,81 @@ function jewellery_assignments_list(int $companyId, array $filters = []): array
  * a "Metal with karigar" ledger is mapped; when it is not, the value simply
  * stays in the main stock ledger, which is equally correct, just less granular.
  */
+/**
+ * Order items still waiting to go out to a kaligad — one row per item, not per
+ * order, because an order for a chain and a ring is two separate jobs going to
+ * two separate craftsmen on two separate dates.
+ */
+function jewellery_pending_order_lines(int $companyId): array
+{
+    $stmt = db()->prepare("SELECT l.id, l.order_id, l.karigar_id, l.delivery_date, l.gross_weight,
+            l.purity_id, l.unit_id, l.item_id,
+            o.order_no, o.order_date, COALESCE(ap.name, o.customer_name, 'Walk-in') AS party_label,
+            i.sku AS item_code, i.name AS item_name,
+            k.code AS karigar_code, k.name AS karigar_name,
+            u.code AS unit_code, p.code AS purity_code
+        FROM jewellery_order_lines l
+        INNER JOIN jewellery_orders o ON o.id = l.order_id
+        INNER JOIN inventory_items i ON i.id = l.item_id
+        INNER JOIN jewellery_units u ON u.id = l.unit_id
+        INNER JOIN jewellery_purities p ON p.id = l.purity_id
+        LEFT JOIN jewellery_karigars k ON k.id = l.karigar_id
+        LEFT JOIN accounting_parties ap ON ap.id = o.party_id
+        WHERE l.company_id = :cid AND l.assignment_id IS NULL
+          AND o.status IN ('draft', 'confirmed', 'assigned')
+        ORDER BY COALESCE(l.delivery_date, '9999-12-31') ASC, o.order_no ASC, l.id ASC");
+    $stmt->execute(['cid' => $companyId]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/** One line of an order, with its item, kaligad and promised date. */
+function jewellery_order_line(int $companyId, int $orderLineId): ?array
+{
+    $stmt = db()->prepare('SELECT * FROM jewellery_order_lines WHERE id = :id AND company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $orderLineId, 'cid' => $companyId]);
+
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
 function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $input, int $userId = 0): array
 {
+    // Issuing against a LINE is the normal case now: an order for a chain and a
+    // ring goes to two kaligads, so the issue has to say which item it covers.
+    // Everything the line already knows — who is making it, which item, at what
+    // purity and weight — is taken from it unless the caller says otherwise,
+    // because retyping it is how the wrong metal gets handed over.
+    $orderLineId = (int) ($input['order_line_id'] ?? 0);
+    $orderLine = null;
+    if ($orderLineId > 0) {
+        $orderLine = jewellery_order_line($companyId, $orderLineId);
+        if (!$orderLine) {
+            return ['ok' => false, 'error' => 'That order item does not belong to this company.'];
+        }
+        if ((int) ($orderLine['assignment_id'] ?? 0) > 0) {
+            return ['ok' => false, 'error' => 'That item already has metal out with a kaligad.'];
+        }
+        // The line is AUTHORITATIVE for what it describes — which piece, at what
+        // purity, in what unit, on which order. Those are not the issuer's to
+        // retype: handing over a different item than the customer ordered is
+        // the mistake this exists to prevent. The kaligad and the weight stay
+        // the issuer's call, because a shop does reassign work and does issue
+        // a little over or under the estimate.
+        $input['order_id'] = (int) $orderLine['order_id'];
+        $input['item_id'] = (int) $orderLine['item_id'];
+        $input['purity_id'] = (int) $orderLine['purity_id'];
+        $input['unit_id'] = (int) $orderLine['unit_id'];
+        if ((int) ($input['karigar_id'] ?? 0) <= 0) {
+            $input['karigar_id'] = (int) ($orderLine['karigar_id'] ?? 0);
+        }
+        if ((float) ($input['issued_gross_weight'] ?? 0) <= 0) {
+            $input['issued_gross_weight'] = (float) $orderLine['gross_weight'];
+        }
+        if (trim((string) ($input['expected_return_date'] ?? '')) === '') {
+            $input['expected_return_date'] = (string) ($orderLine['delivery_date'] ?? '');
+        }
+    }
+
     $karigarId = (int) ($input['karigar_id'] ?? 0);
     $karigar = jewellery_karigar($companyId, $karigarId);
     if (!$karigar) {
@@ -830,13 +998,15 @@ function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $in
     }
     try {
         $no = trim((string) ($input['issue_no'] ?? '')) ?: jw_next_no($companyId, 'jewellery_order_assignments', 'issue_no', (string) ($settings['issue_no_prefix'] ?? 'JI'));
-        db()->prepare('INSERT INTO jewellery_order_assignments (company_id, fiscal_year_id, order_id, karigar_id, issue_no,
+        db()->prepare('INSERT INTO jewellery_order_assignments (company_id, fiscal_year_id, order_id, order_line_id,
+                karigar_id, issue_no,
                 issue_date, expected_return_date, item_id, purity_id, unit_id, issued_gross_weight, issued_fine_weight,
                 issued_amount, wastage_allowed_pct, making_basis, making_rate, notes, created_by)
-            VALUES (:cid, :fy, :order, :kid, :no, :date, :expected, :item, :purity, :unit, :gross, :fine, :amount,
+            VALUES (:cid, :fy, :order, :oline, :kid, :no, :date, :expected, :item, :purity, :unit, :gross, :fine, :amount,
                 :wastage, :basis, :rate, :notes, :by)')
             ->execute([
-                'cid' => $companyId, 'fy' => $fiscalYearId ?: null, 'order' => $orderId, 'kid' => $karigarId,
+                'cid' => $companyId, 'fy' => $fiscalYearId ?: null, 'order' => $orderId,
+                'oline' => $orderLineId ?: null, 'kid' => $karigarId,
                 'no' => $no, 'date' => $issueDate,
                 'expected' => ($input['expected_return_date'] ?? '') !== '' ? (string) $input['expected_return_date'] : null,
                 'item' => $itemId, 'purity' => $purityId, 'unit' => $unitId, 'gross' => $gross, 'fine' => $fine,
@@ -895,6 +1065,15 @@ function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $in
             ->execute(['o' => $outId, 'i' => $inId, 'v' => $voucherId,
                 'ml' => $voucherId ? $karigarLedgerId : null, 'id' => $assignmentId]);
 
+        // The line now knows which issue covers it, so the workshop board can
+        // say "the chain is with Ram, the ring is with Shyam" rather than only
+        // "this order has metal out somewhere".
+        if ($orderLineId > 0) {
+            db()->prepare('UPDATE jewellery_order_lines SET assignment_id = :aid, karigar_id = :kid
+                WHERE id = :id AND company_id = :cid')
+                ->execute(['aid' => $assignmentId, 'kid' => $karigarId, 'id' => $orderLineId, 'cid' => $companyId]);
+        }
+
         if ($orderId !== null) {
             db()->prepare("UPDATE jewellery_orders SET status = 'assigned' WHERE id = :id AND company_id = :cid AND status IN ('draft','confirmed')")
                 ->execute(['id' => $orderId, 'cid' => $companyId]);
@@ -949,6 +1128,11 @@ function jewellery_cancel_assignment(int $companyId, int $assignmentId, int $use
                 issue_stock_txn_out = NULL, issue_stock_txn_in = NULL, metal_ledger_id = NULL
             WHERE id = :id AND company_id = :cid")
             ->execute(['id' => $assignmentId, 'cid' => $companyId]);
+        // Free the order item again, or it could never be re-issued: the issue
+        // path refuses a line that already has metal out with a kaligad.
+        db()->prepare('UPDATE jewellery_order_lines SET assignment_id = NULL
+            WHERE assignment_id = :aid AND company_id = :cid')
+            ->execute(['aid' => $assignmentId, 'cid' => $companyId]);
         if ((int) ($assignment['order_id'] ?? 0) > 0) {
             db()->prepare("UPDATE jewellery_orders SET status = 'confirmed' WHERE id = :id AND company_id = :cid AND status = 'assigned'")
                 ->execute(['id' => (int) $assignment['order_id'], 'cid' => $companyId]);

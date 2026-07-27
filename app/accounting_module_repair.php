@@ -2577,6 +2577,29 @@ function accounting_module_repair_database(): array
                AND NOT EXISTS (SELECT 1 FROM `jewellery_order_lines` l WHERE l.`order_id` = o.`id`)");
     });
 
+    $run('Per-item kaligad and delivery date on orders (migration 088)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_order_lines')
+            || !accounting_repair_table_exists('jewellery_order_assignments')) {
+            return;
+        }
+        foreach ([
+            'karigar_id' => '`karigar_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`',
+            'delivery_date' => '`delivery_date` DATE DEFAULT NULL AFTER `karigar_id`',
+            'assignment_id' => '`assignment_id` INT UNSIGNED DEFAULT NULL AFTER `delivery_date`',
+        ] as $column => $ddl) {
+            accounting_repair_add_column('jewellery_order_lines', $column, $ddl);
+        }
+        accounting_repair_add_column('jewellery_order_assignments', 'order_line_id',
+            '`order_line_id` INT UNSIGNED DEFAULT NULL AFTER `order_id`');
+
+        // Existing lines inherit the order's single promise, so nothing already
+        // taken loses its date the moment the column appears.
+        db()->exec("UPDATE `jewellery_order_lines` l
+            INNER JOIN `jewellery_orders` o ON o.`id` = l.`order_id`
+               SET l.`delivery_date` = o.`delivery_date`
+             WHERE l.`delivery_date` IS NULL AND o.`delivery_date` IS NOT NULL");
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

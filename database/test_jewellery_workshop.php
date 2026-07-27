@@ -469,6 +469,132 @@ ok(near((float) $keptRow['making_rate'], 7777.0),
 ok(near((float) $keptRow['making_amount'], 3000.0),
     "While the customer's own making charge comes from the line, where it belongs");
 
+echo "\n14. Each item on an order goes to its own kaligad, on its own date\n";
+// Kaligads specialise: the one who makes chains does not set stones. So an
+// order for two different pieces is two craftsmen, two issues and two dates
+// back — and it must still be ONE order to the customer.
+$splitOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-08-10', 'party_id' => $customer, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'rate' => 150000, 'making_amount' => 3000,
+     'karigar_id' => $kContractor, 'delivery_date' => '2026-08-20'],
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'making_amount' => 2000,
+     'karigar_id' => $kEmployee, 'delivery_date' => '2026-09-05'],
+], $userA);
+$splitLines = jewellery_order_line_rows($cidA, $splitOrder);
+ok(count($splitLines) === 2, 'Both items are on the one order');
+ok((int) $splitLines[0]['karigar_id'] === $kContractor && (int) $splitLines[1]['karigar_id'] === $kEmployee,
+    'Each item names its OWN kaligad');
+ok((string) $splitLines[0]['delivery_date'] === '2026-08-20'
+    && (string) $splitLines[1]['delivery_date'] === '2026-09-05',
+    'And each carries its own promised date');
+ok((string) jewellery_order($cidA, $splitOrder)['delivery_date'] === '2026-09-05',
+    "The order's own promise is the LAST of them — one order, one journey for the customer");
+
+ok(threw(static fn () => jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-08-10', 'party_id' => $customer,
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'delivery_date' => '2026-08-01'],
+], $userA)), 'An item cannot be promised before the order was taken');
+
+// Issuing against the ITEM, not the order.
+$splitIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'order_line_id' => (int) $splitLines[0]['id'],
+    'issue_date' => '2026-08-11',
+], $userA);
+ok($splitIssue['ok'], 'Metal issues against the order ITEM' . ($splitIssue['ok'] ? '' : ' — ' . $splitIssue['error']));
+$splitAssignment = jewellery_assignment($cidA, (int) $splitIssue['assignment_id']);
+ok((int) $splitAssignment['karigar_id'] === $kContractor,
+    "It goes to the kaligad the ITEM named, without the issuer retyping it");
+ok((int) $splitAssignment['item_id'] === $chain && near((float) $splitAssignment['issued_gross_weight'], 2.0),
+    'And it carries the item and weight from the order, not from the form');
+ok((string) $splitAssignment['expected_return_date'] === '2026-08-20',
+    "The kaligad is due back on THAT item's date, not the order's");
+ok((int) $splitAssignment['order_line_id'] === (int) $splitLines[0]['id'],
+    'The issue points back at the item it covers');
+
+$splitLinesAfter = jewellery_order_line_rows($cidA, $splitOrder);
+ok((int) $splitLinesAfter[0]['assignment_id'] === (int) $splitIssue['assignment_id'],
+    'And the item points at the issue — the board can say which piece is with whom');
+ok((int) ($splitLinesAfter[1]['assignment_id'] ?? 0) === 0,
+    'The second item is untouched, still waiting for its own kaligad');
+
+$reissue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'order_line_id' => (int) $splitLines[0]['id'], 'issue_date' => '2026-08-12',
+], $userA);
+ok(!$reissue['ok'] && stripos($reissue['error'], 'already has metal out') !== false,
+    'The same item cannot be issued twice over');
+
+// The remaining item still shows on the board; the issued one does not.
+$pendingLines = jewellery_pending_order_lines($cidA);
+$pendingIds = array_map('intval', array_column($pendingLines, 'id'));
+ok(!in_array((int) $splitLines[0]['id'], $pendingIds, true), 'An issued item leaves the pending board');
+ok(in_array((int) $splitLines[1]['id'], $pendingIds, true), 'And the one still to go stays on it');
+
+// Revising the order must not orphan metal already out with a kaligad. Rows are
+// identified by their stored id: both these lines carry the SAME item, so
+// position could never tell the engine which one was dropped.
+ok(threw(static fn () => jewellery_save_order($cidA, $fyA, [
+    'id' => $splitOrder, 'order_date' => '2026-08-10', 'party_id' => $customer,
+], [
+    ['line_id' => (int) $splitLines[1]['id'],
+     'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'karigar_id' => $kEmployee, 'delivery_date' => '2026-09-05'],
+], $userA)), 'An item with metal already out cannot be dropped from the order');
+
+// Dropping the OTHER one — the one with nothing issued against it — is fine.
+jewellery_save_order($cidA, $fyA, [
+    'id' => $splitOrder, 'order_date' => '2026-08-10', 'party_id' => $customer,
+], [
+    ['line_id' => (int) $splitLines[0]['id'],
+     'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'rate' => 150000, 'making_amount' => 3000,
+     'karigar_id' => $kContractor, 'delivery_date' => '2026-08-20'],
+], $userA);
+ok(count(jewellery_order_line_rows($cidA, $splitOrder)) === 1,
+    'An item with nothing issued against it CAN be dropped');
+
+// A revision that keeps the assigned line carries the issue across to its new
+// row, and re-pointing works even when the row moves position.
+jewellery_save_order($cidA, $fyA, [
+    'id' => $splitOrder, 'order_date' => '2026-08-10', 'party_id' => $customer,
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'making_amount' => 2000,
+     'karigar_id' => $kEmployee, 'delivery_date' => '2026-09-05'],
+    ['line_id' => (int) jewellery_order_line_rows($cidA, $splitOrder)[0]['id'],
+     'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'rate' => 150000, 'making_amount' => 3500,
+     'karigar_id' => $kContractor, 'delivery_date' => '2026-08-20'],
+], $userA);
+$revised = jewellery_order_line_rows($cidA, $splitOrder);
+$assignedRow = null;
+foreach ($revised as $revisedRow) {
+    if ((int) ($revisedRow['assignment_id'] ?? 0) === (int) $splitIssue['assignment_id']) {
+        $assignedRow = $revisedRow;
+    }
+}
+ok($assignedRow !== null, 'Revising the order keeps the issue attached to its item, even as the row moves position');
+$revisedAssignment = jewellery_assignment($cidA, (int) $splitIssue['assignment_id']);
+ok($assignedRow !== null && (int) $revisedAssignment['order_line_id'] === (int) $assignedRow['id'],
+    'And the issue is re-pointed at the new line row, so the link survives both ways');
+
+// Cancelling frees the item to be issued again.
+ok(jewellery_cancel_assignment($cidA, (int) $splitIssue['assignment_id'], $userA)['ok'], 'The issue cancels');
+$freedRow = null;
+foreach (jewellery_order_line_rows($cidA, $splitOrder) as $candidateRow) {
+    if ((int) $candidateRow['id'] === (int) ($assignedRow['id'] ?? 0)) {
+        $freedRow = $candidateRow;
+    }
+}
+ok($freedRow !== null && (int) ($freedRow['assignment_id'] ?? 0) === 0, 'Cancelling frees the item');
+ok(jewellery_issue_to_karigar($cidA, $fyA, [
+    'order_line_id' => (int) $freedRow['id'], 'issue_date' => '2026-08-13',
+], $userA)['ok'], 'And it can be issued again — to a different kaligad if the shop chooses');
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

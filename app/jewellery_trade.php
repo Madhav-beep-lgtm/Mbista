@@ -433,6 +433,16 @@ function jw_posted_lines(array $post, string $prefix): array
             'other_diamond_amount' => (float) ($post[$prefix . '_other_diamond_amount'][$index] ?? 0),
             'other_diamond_carat' => (float) ($post[$prefix . '_other_diamond_carat'][$index] ?? 0),
             'notes' => (string) ($post[$prefix . '_notes'][$index] ?? ''),
+            // Order-only, and absent from the sale and purchase grids: which
+            // kaligad is to make THIS piece and when it is promised. A shop's
+            // kaligads specialise, so one order routinely goes to several.
+            'karigar_id' => (int) ($post[$prefix . '_karigar_id'][$index] ?? 0),
+            'delivery_date' => (string) ($post[$prefix . '_delivery_date'][$index] ?? ''),
+            // Which stored line this row IS, when the form is revising one.
+            // Position is not identity — two rows can hold the same item — and
+            // an order line that already has metal out with a kaligad has to be
+            // recognised however the rows are reordered.
+            'line_id' => (int) ($post[$prefix . '_line_id'][$index] ?? 0),
         ];
     }
 
@@ -695,6 +705,12 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
             'allocated_adjust' => 0.0,
             'line_total' => jw_round_money($subtotal + $charge['total']),
             'notes' => (string) ($line['notes'] ?? ''),
+            // Carried straight through for the ORDER, which assigns each item
+            // to its own kaligad and promises each its own date. Meaningless on
+            // a sale or a purchase, which simply ignore them.
+            'karigar_id' => (int) ($line['karigar_id'] ?? 0),
+            'delivery_date' => (string) ($line['delivery_date'] ?? ''),
+            'line_id' => (int) ($line['line_id'] ?? 0),
         ];
 
         $sumMetal += $metalAmount;

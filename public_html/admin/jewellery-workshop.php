@@ -170,6 +170,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('jewellery', 'post');
         $result = jewellery_issue_to_karigar($companyId, $fiscalYearId, [
             'karigar_id' => (int) ($_POST['karigar_id'] ?? 0),
+            // The order ITEM, when one was picked. It overrides the item, purity
+            // and unit below, because those belong to what the customer ordered.
+            'order_line_id' => (int) ($_POST['order_line_id'] ?? 0),
             'order_id' => (int) ($_POST['order_id'] ?? 0),
             'item_id' => (int) ($_POST['item_id'] ?? 0),
             'purity_id' => (int) ($_POST['purity_id'] ?? 0),
@@ -409,6 +412,9 @@ jw_line_grid_styles();
                 jw_render_line_grid('l', $orderLines, max(3, count($orderLines) + 2), 'Items ordered', [
                     'items' => $items, 'purities' => $purities, 'units' => $units,
                     'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $orderOnHand,
+                    // Handing over a kaligad list is what turns on the two
+                    // workshop columns: who makes each piece, and when it is due.
+                    'karigars' => $karigars,
                 ]);
             ?>
 
@@ -725,9 +731,25 @@ jw_line_grid_styles();
                     <?php endforeach; ?>
                 </select>
             </label>
-            <label>Against order
-                <select name="order_id">
+            <label>Against order item
+                <select name="order_line_id">
                     <option value="0">— stock work, no order —</option>
+                    <?php foreach (jewellery_pending_order_lines($companyId) as $ol): ?>
+                        <option value="<?= (int) $ol['id'] ?>" <?= (int) ($_GET['line'] ?? 0) === (int) $ol['id'] ? 'selected' : '' ?>>
+                            <?= e($ol['order_no'] . ' · ' . $ol['item_code']
+                                . ' · ' . $fmt((float) $ol['gross_weight'], 3) . ' ' . $ol['unit_code']
+                                . ($ol['karigar_code'] ? ' · ' . $ol['karigar_code'] : '')
+                                . ($ol['delivery_date'] ? ' · due ' . app_date((string) $ol['delivery_date']) : '')) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <span class="frm-optional">One row per ITEM, because one order can go to several kaligads. Picking one
+                    takes the item, purity and unit from the order — those are not retyped here, since handing over
+                    something other than what the customer ordered is the mistake this prevents.</span>
+            </label>
+            <label>Against order <span class="frm-optional">only when no item is picked above</span>
+                <select name="order_id">
+                    <option value="0">— none —</option>
                     <?php foreach (jewellery_orders_list($companyId, ['status' => 'confirmed']) as $o): ?>
                         <option value="<?= (int) $o['id'] ?>" <?= (int) ($_GET['order'] ?? 0) === (int) $o['id'] ? 'selected' : '' ?>><?= e($o['order_no']) ?></option>
                     <?php endforeach; ?>

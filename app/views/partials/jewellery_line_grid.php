@@ -60,6 +60,9 @@ table.jw-lines .c-wt   { width: 68px; }
 table.jw-lines .c-rate { width: 86px; }
 table.jw-lines .c-crt  { width: 58px; }
 table.jw-lines .c-amt  { width: 78px; }
+/* Order grids only: which kaligad makes this piece and when it is promised. */
+table.jw-lines .c-krg  { width: 74px; }
+table.jw-lines .c-date { width: 116px; }
 @media (max-width: 1180px) {
     /* Below this there is no honest way to fit sixteen columns, so the grid
        goes back to scrolling rather than crushing the inputs to nothing. */
@@ -77,6 +80,12 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
     $baseUnit = $ctx['base_unit'] ?? null;
     $onHand = $ctx['on_hand'] ?? [];
     $fmt = $ctx['fmt'] ?? static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
+    // Orders only. Kaligads specialise — the one who makes chains does not set
+    // stones — so each item on an order goes to its own craftsman and carries
+    // its own promised date. A sale or a purchase has neither, so the two
+    // columns appear only when the page hands over a kaligad list.
+    $karigars = $ctx['karigars'] ?? null;
+    $withWorkshop = is_array($karigars);
     ?>
     <?php $full = $prefix === 'l'; ?>
     <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:12px 0">
@@ -96,6 +105,9 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         <th colspan="2">Other diamond</th>
                         <th colspan="2">Stone</th>
                     <?php endif; ?>
+                    <?php if ($withWorkshop): ?>
+                        <th colspan="2">Workshop</th>
+                    <?php endif; ?>
                 </tr>
                 <tr>
                     <th class="c-wt">Gross</th>
@@ -106,12 +118,25 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         <th class="c-crt">Crt</th><th class="c-amt">Amt</th>
                         <th class="c-crt">Crt</th><th class="c-amt">Amt</th>
                     <?php endif; ?>
+                    <?php if ($withWorkshop): ?>
+                        <th class="c-krg">Kaligad</th><th class="c-date">Promised</th>
+                    <?php endif; ?>
                 </tr>
             </thead>
             <tbody>
             <?php for ($i = 0; $i < $slots; $i++): $row = $existing[$i] ?? null; ?>
                 <tr>
                     <td>
+                        <?php
+                            // Which stored line this row IS. Position is not
+                            // identity — two rows can hold the same item, and
+                            // rows get reordered — so a revision says so
+                            // explicitly. It sits INSIDE the cell because a bare
+                            // input between <tr> and <td> is hoisted out of the
+                            // table by every browser, and would then post out of
+                            // step with the rest of the row.
+                        ?>
+                        <input type="hidden" name="<?= $prefix ?>_line_id[]" value="<?= (int) ($row['id'] ?? 0) ?>">
                         <select name="<?= $prefix ?>_item_id[]" class="c-item">
                             <option value="0">—</option>
                             <?php foreach ($items as $it): ?>
@@ -161,6 +186,28 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         <td><input type="number" name="<?= $prefix ?>_other_diamond_amount[]" step="0.01" min="0" value="<?= e((string) ($row['other_diamond_amount'] ?? '0')) ?>"></td>
                         <td><input type="number" name="<?= $prefix ?>_stone_carat[]" step="0.0001" min="0" value="<?= e((string) ($row['stone_carat'] ?? '0')) ?>"></td>
                         <td><input type="number" name="<?= $prefix ?>_stone_amount[]" step="0.01" min="0" value="<?= e((string) ($row['stone_amount'] ?? '0')) ?>"></td>
+                    <?php endif; ?>
+                    <?php if ($withWorkshop): ?>
+                        <?php
+                            // Once metal is out with a kaligad the pair is fixed:
+                            // the issue was measured against THIS craftsman and
+                            // THIS date, and the receipt settles his wage and his
+                            // wastage against it.
+                            $issued = (int) ($row['assignment_id'] ?? 0) > 0;
+                        ?>
+                        <td>
+                            <select name="<?= $prefix ?>_karigar_id[]"<?= $issued ? ' disabled' : '' ?>
+                                title="<?= $issued ? e('Metal is already out on issue ' . (string) ($row['issue_no'] ?? '')) : 'Who is to make this piece' ?>">
+                                <option value="0">—</option>
+                                <?php foreach ($karigars as $k): ?>
+                                    <option value="<?= (int) $k['id'] ?>" <?= (int) ($row['karigar_id'] ?? 0) === (int) $k['id'] ? 'selected' : '' ?>><?= e($k['code']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if ($issued): ?>
+                                <input type="hidden" name="<?= $prefix ?>_karigar_id[]" value="<?= (int) ($row['karigar_id'] ?? 0) ?>">
+                            <?php endif; ?>
+                        </td>
+                        <td><input type="date" name="<?= $prefix ?>_delivery_date[]" value="<?= e((string) ($row['delivery_date'] ?? '')) ?>"></td>
                     <?php endif; ?>
                 </tr>
             <?php endfor; ?>
