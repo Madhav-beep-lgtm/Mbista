@@ -88,8 +88,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'expected_gross_weight' => (float) ($_POST['expected_gross_weight'] ?? 0),
                 'design_no' => (string) ($_POST['design_no'] ?? ''),
                 'description' => (string) ($_POST['description'] ?? ''),
-                'making_basis' => (string) ($_POST['making_basis'] ?? 'per_unit_weight'),
-                'making_rate' => (float) ($_POST['making_rate'] ?? 0),
+                // making_basis / making_rate are deliberately NOT sent. What the
+                // customer is charged for labour is the making amount on each
+                // line of the grid; what the KALIGAD is paid is set on the issue
+                // screen, which carries its own basis and rate. A third copy on
+                // the order header fed neither.
                 'other_charges' => (float) ($_POST['other_charges'] ?? 0),
                 'discount' => (float) ($_POST['discount'] ?? 0),
                 'manual_tax_amount' => ($_POST['manual_tax_amount'] ?? '') === '' ? null : (float) $_POST['manual_tax_amount'],
@@ -383,15 +386,6 @@ jw_line_grid_styles();
                 <label>Phone<input type="text" name="customer_phone" maxlength="60" value="<?= e((string) ($editOrder['customer_phone'] ?? '')) ?>"></label>
                 <label>Address<input type="text" name="customer_address" maxlength="255"></label>
                 <label>Design no.<input type="text" name="design_no" maxlength="60" value="<?= e((string) ($editOrder['design_no'] ?? '')) ?>"></label>
-                <label>Making basis
-                    <select name="making_basis">
-                        <?php foreach (['per_unit_weight' => 'Per unit of weight', 'percent_of_metal' => '% of metal value', 'flat' => 'Flat'] as $k => $v): ?>
-                            <option value="<?= e($k) ?>" <?= (string) ($editOrder['making_basis'] ?? '') === $k ? 'selected' : '' ?>><?= e($v) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <span class="frm-optional">What the kaligad is paid on. The customer's making charge is the one on the line.</span>
-                </label>
-                <label>Making rate<input type="number" name="making_rate" step="0.0001" min="0" value="<?= e((string) ($editOrder['making_rate'] ?? '0')) ?>"></label>
                 <label>Other charges (<?= e($sym) ?>)<input type="number" name="other_charges" step="0.01" min="0" value="<?= e((string) ($editOrder['other_charges'] ?? '0')) ?>"></label>
                 <label>Discount (<?= e($sym) ?>)<input type="number" name="discount" step="0.01" min="0" value="<?= e((string) ($editOrder['discount'] ?? '0')) ?>"></label>
                 <label>Skills Promotion Tax (<?= e($sym) ?>)<input type="number" name="manual_tax_amount" step="0.01" min="0" placeholder="auto" value="<?= e((string) ($editOrder['manual_tax_amount'] ?? '')) ?>">

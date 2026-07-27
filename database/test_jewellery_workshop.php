@@ -446,6 +446,29 @@ ok($bespoke > 0 && (int) ($bespokeRow['item_id'] ?? 0) === 0, 'An order with no 
 ok(near((float) $bespokeRow['expected_fine_weight'], 9.16), 'Its metal spec still derives a fine weight for the kaligad');
 ok(near((float) $bespokeRow['total_amount'], 0.0), 'And it quotes nothing rather than inventing a figure');
 
+// The order form no longer sends making_basis / making_rate — the customer's
+// labour charge is on the line, the kaligad's is on the issue screen. An
+// absent field must leave the stored one alone rather than zeroing it.
+$keepOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-08-07', 'party_id' => $customer, 'status' => 'confirmed',
+    'making_basis' => 'flat', 'making_rate' => 7777,
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000],
+], $userA);
+ok(near((float) jewellery_order($cidA, $keepOrder)['making_rate'], 7777.0), 'A making rate is stored when it is sent');
+jewellery_save_order($cidA, $fyA, [
+    'id' => $keepOrder, 'order_date' => '2026-08-07', 'party_id' => $customer, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'making_amount' => 3000],
+], $userA);
+$keptRow = jewellery_order($cidA, $keepOrder);
+ok(near((float) $keptRow['making_rate'], 7777.0),
+    'And it survives a save that never mentioned it — the form does not decide what the books forget');
+ok(near((float) $keptRow['making_amount'], 3000.0),
+    "While the customer's own making charge comes from the line, where it belongs");
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

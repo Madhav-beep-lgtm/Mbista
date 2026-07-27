@@ -487,6 +487,19 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     $settings = jewellery_settings($companyId);
     $orderDate = (string) ($input['order_date'] ?? date('Y-m-d'));
 
+    // A caller that does not mention a field leaves it as it was, so removing
+    // a field from the order form can never make the SCREEN decide what the
+    // database forgets. A caller that does send it still overwrites it.
+    $existingOrder = $orderId > 0 ? jewellery_order($companyId, $orderId) : null;
+    $keep = static function (string $field, $fallback) use ($input, $existingOrder) {
+        if (array_key_exists($field, $input)) {
+            return $input[$field];
+        }
+
+        return $existingOrder !== null && ($existingOrder[$field] ?? null) !== null
+            ? $existingOrder[$field] : $fallback;
+    };
+
     // An order is the start of a customer relationship, so it opens the party
     // and its ledger immediately — name, phone and address all live there
     // rather than as loose text on the order.
@@ -598,8 +611,8 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         'gross' => jw_round_weight($grossTotal), 'fine' => jw_round_weight($fineTotal),
         'design' => trim((string) ($input['design_no'] ?? '')) ?: null,
         'description' => trim((string) ($input['description'] ?? '')) ?: null,
-        'basis' => jw_enum($input['making_basis'] ?? null, ['per_unit_weight', 'percent_of_metal', 'flat'], 'per_unit_weight'),
-        'rate' => max(0.0, jw_round_rate((float) ($input['making_rate'] ?? 0))),
+        'basis' => jw_enum($keep('making_basis', null), ['per_unit_weight', 'percent_of_metal', 'flat'], 'per_unit_weight'),
+        'rate' => max(0.0, jw_round_rate((float) $keep('making_rate', 0))),
         'advance' => $advance,
         'status' => $status,
         'notes' => trim((string) ($input['notes'] ?? '')) ?: null,
