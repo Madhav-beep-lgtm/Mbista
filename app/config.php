@@ -65,3 +65,21 @@ define('DB_NAME', env('DB_NAME', 'mbista_altiora_complete_hosting'));
 define('DB_USER', env('DB_USER', 'root'));
 define('DB_PASS', env('DB_PASS', ''));
 define('DB_CHARSET', env('DB_CHARSET', 'utf8mb4'));
+
+/**
+ * The one clock the whole application runs on.
+ *
+ * Nothing used to set this, so PHP took whatever php.ini happened to say while
+ * MySQL took the server's own timezone — on this machine that is 5 hours 45
+ * minutes apart. For an accounting system that is not cosmetic: a document
+ * dated with PHP's date('Y-m-d') and compared against MySQL's CURDATE() can
+ * disagree about which DAY it is for the whole of that window, and a sale
+ * entered late at night on the last day of a fiscal year would post into the
+ * wrong year.
+ *
+ * Asia/Kathmandu is the default because the books, the fiscal years and the
+ * Nepali dates all belong to that calendar. Override with APP_TIMEZONE if the
+ * business ever runs somewhere else.
+ */
+define('APP_TIMEZONE', env('APP_TIMEZONE', 'Asia/Kathmandu'));
+date_default_timezone_set(APP_TIMEZONE);

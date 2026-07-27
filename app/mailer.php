@@ -128,9 +128,20 @@ function send_app_email(string $to, string $subject, string $htmlBody, array $at
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
             return ['ok' => false, 'error' => 'Could not create storage/mail directory.', 'transport' => $transport];
         }
-        $file = $dir . '/' . date('Ymd-His') . '-' . preg_replace('/[^a-z0-9]+/i', '-', substr($subject, 0, 40)) . '.eml';
+        // The name was date-to-the-second plus the subject, so two messages
+        // with the same subject in the same second overwrote each other and one
+        // simply vanished. That is exactly what happens when a batch goes out,
+        // or when someone clicks twice — and in log mode a vanished message is
+        // a message the shop believes it sent. A short random suffix makes each
+        // name its own.
+        $file = $dir . '/' . date('Ymd-His') . '-'
+            . preg_replace('/[^a-z0-9]+/i', '-', substr($subject, 0, 40)) . '-'
+            . bin2hex(random_bytes(3)) . '.eml';
         $raw = 'To: ' . $to . "\r\n" . 'Subject: ' . mb_encode_mimeheader($subject, 'UTF-8') . "\r\n" . implode("\r\n", $headers) . "\r\n\r\n" . $body;
-        file_put_contents($file, $raw);
+        if (file_put_contents($file, $raw) === false) {
+            return ['ok' => false, 'error' => 'Could not write the message to storage/mail.', 'transport' => $transport];
+        }
+
         return ['ok' => true, 'error' => null, 'transport' => $transport];
     }
 
