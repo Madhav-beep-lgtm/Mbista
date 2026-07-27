@@ -197,6 +197,51 @@ ok(opening_import_batch($otherCompany, $importId) === null, 'A batch cannot be r
 ok(!opening_import_delete_row($otherCompany, (int) $byRow[2]['id'])['ok'],
     'Nor can its rows be deleted through the wrong company');
 
+
+echo "\n8. Typed and uploaded openings are the SAME thing, in the same list\n";
+// The screen shows one "Opening Stock" table. Whether a line got there by
+// being typed into the form or by being committed from a spreadsheet must make
+// no difference at all — same row on the item, same voucher, same list.
+$typedItem = jewellery_save_item($cid, ['code' => 'IMP-TY', 'name' => 'Typed Item', 'item_type' => 'ornament',
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola], $uid);
+$typed = jewellery_save_opening($cid, $fy, [
+    'item_id' => $typedItem, 'purity_id' => $p22, 'unit_id' => $tola,
+    'qty_pieces' => 3, 'gross_weight' => 6, 'amount' => 540000,
+], $uid);
+ok(($typed['ok'] ?? false), 'An opening typed into the form saves');
+
+$listed = jewellery_opening_rows($cid, $fy);
+$byCode = [];
+foreach ($listed as $row) { $byCode[(string) $row['code']] = $row; }
+
+ok(isset($byCode['IMP-TY']), 'The TYPED opening appears in the list');
+ok(isset($byCode['IMP-CH']) && isset($byCode['IMP-RG']), 'The UPLOADED openings appear in the SAME list');
+ok(count($listed) === 3, 'One list, three items — no separate "imported" table');
+
+// Same shape, so the screen cannot tell them apart.
+foreach (['IMP-TY' => 'typed', 'IMP-CH' => 'uploaded'] as $code => $how) {
+    $row = $byCode[$code];
+    ok((float) $row['amount'] > 0 && (float) $row['gross_weight'] > 0,
+        "The $how row carries weight and value like any other");
+    ok((int) ($row['voucher_id'] ?? 0) > 0, "The $how row is backed by a posted voucher");
+}
+
+// Both routes post the SAME source_type, so the Opening Balances screen and
+// the Voucher Register treat them identically.
+$sourceTypes = db()->query("SELECT DISTINCT source_type FROM vouchers
+    WHERE company_id=$cid AND source_type LIKE '%opening%'")->fetchAll(PDO::FETCH_COLUMN);
+ok($sourceTypes === ['inventory_opening'],
+    'Both routes post inventory_opening — one source type, not one per route');
+
+echo "\n9. Committing again later tops the same batch up\n";
+// A shop corrects the rows it could not match and commits a second time; the
+// rows already in the books must not post twice.
+$vouchersBefore = $q("SELECT COUNT(*) FROM vouchers WHERE company_id=$cid AND source_type='inventory_opening'");
+$second = opening_import_commit($cid, $importId, $fy, $uid);
+ok($second['ok'] === false || $second['committed'] === 0, 'A second commit of the same rows posts nothing more');
+ok($q("SELECT COUNT(*) FROM vouchers WHERE company_id=$cid AND source_type='inventory_opening'") === $vouchersBefore,
+    'And no extra opening voucher appears');
+
 @unlink($path);
 osi_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";

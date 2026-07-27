@@ -299,6 +299,65 @@ ok(threw(static fn () => jewellery_save_settlement($cid, $fy, [
     ], [], $uid)),
     'An advance cannot be attached to an order belonging to a different party');
 
+echo "\n8. An ordered piece: the RATE is the order day's, the TAX is the sale day's\n";
+// Two different dates deliberately. The metal rate was agreed the day the
+// customer ordered, so it is honoured. A statutory tax follows the day of
+// SUPPLY — the sale — because that is the tax point, not the day the deal was
+// struck. Getting these the same way round is the whole point of this test.
+$vatRow = null;
+foreach (jewellery_taxes_list($cid, '', '', false) as $t) { if ($t['code'] === 'VAT') { $vatRow = $t; } }
+ok($vatRow !== null, 'The VAT row is available to date-limit');
+
+$vatItem = jewellery_save_item($cid, ['code' => 'AVT-1', 'name' => 'VAT Ring', 'item_type' => 'ornament',
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'vat_applicable' => 1], $uid);
+$pv = jewellery_save_purchase($cid, $fy, ['purchase_date' => '2026-07-20', 'party_id' => $supplier,
+    'settle_mode' => 'cash', 'settle_ledger_id' => $cash],
+    [['item_id' => $vatItem, 'gross_weight' => 20, 'qty_pieces' => 10, 'rate' => 90000]], $uid);
+ok(jewellery_post_purchase($cid, $pv, $uid)['ok'], 'Stock for the VAT item is in');
+
+$orderEarly = jewellery_save_order($cid, $fy, [
+    'order_date' => '2026-08-01', 'party_id' => $customer, 'item_id' => $vatItem,
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'expected_gross_weight' => 1, 'making_basis' => 'flat', 'making_rate' => 0, 'status' => 'confirmed',
+], $uid);
+
+// The rate board says 100,000 on 1 Aug and 130,000 on 1 Oct (seeded above).
+$prefillEarly = jewellery_order_sale_prefill($cid, $orderEarly);
+ok(near((float) $prefillEarly['line']['rate'], 100000.0),
+    'The RATE comes from the order date: 100,000, not October\'s 130,000');
+
+// VAT ends 16 Sep. Sell in October, delivering the August order.
+jewellery_save_tax($cid, ['id' => (int) $vatRow['id'], 'effective_to' => '2026-09-16'] + $vatRow);
+$orderedSale = jewellery_save_sale($cid, $fy, [
+    'sale_date' => '2026-10-20', 'party_id' => $customer, 'settle_mode' => 'credit',
+    'deliver_order_id' => $orderEarly,
+], [$prefillEarly['line']], [], $uid);
+$orderedRow = jewellery_sale($cid, $orderedSale);
+ok(near((float) $orderedRow['metal_amount'], 100000.0),
+    'The bill uses the ordered rate — the customer is charged what was agreed');
+ok(near((float) $orderedRow['vat_amount'], 0.0),
+    'But NO VAT: it had ended by the sale date, and a statutory rate follows the day of supply');
+ok(near((float) $orderedRow['tax_amount'], 500.0),
+    'The Skills Promotion Tax still applies, at the sale date, on the ordered rate');
+
+// Put VAT back, then sell the same thing again — now VAT is in force on the
+// sale date and must be charged, on the same ordered rate.
+jewellery_save_tax($cid, ['id' => (int) $vatRow['id'], 'effective_to' => null] + $vatRow);
+$orderLater = jewellery_save_order($cid, $fy, [
+    'order_date' => '2026-08-01', 'party_id' => $customer, 'item_id' => $vatItem,
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'expected_gross_weight' => 1, 'making_basis' => 'flat', 'making_rate' => 0, 'status' => 'confirmed',
+], $uid);
+$prefillLater = jewellery_order_sale_prefill($cid, $orderLater);
+$vatSale = jewellery_save_sale($cid, $fy, [
+    'sale_date' => '2026-10-21', 'party_id' => $customer, 'settle_mode' => 'credit',
+    'deliver_order_id' => $orderLater,
+], [$prefillLater['line']], [], $uid);
+$vatSaleRow = jewellery_sale($cid, $vatSale);
+ok(near((float) $vatSaleRow['metal_amount'], 100000.0), 'Same ordered rate honoured');
+ok((float) $vatSaleRow['vat_amount'] > 0,
+    'And VAT IS charged, because it is in force on the sale date');
+
 jwadv_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

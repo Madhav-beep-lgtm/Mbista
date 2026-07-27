@@ -1153,7 +1153,9 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
             $gross, (int) $order['unit_id'], $orderDate, 'sale');
         if ($valued['ok']) {
             $rate = jw_round_rate($valued['amount'] / $gross);
-            $rateNote = 'Priced at the rate board as it stood on ' . $orderDate . ', the day the order was taken.';
+            $rateNote = 'Metal priced at the rate board of ' . $orderDate . ', the day the order was taken. '
+                . 'Taxes are charged at the rates in force on the SALE date — a statutory rate follows the day of supply, '
+                . 'not the day the order was agreed.';
         } else {
             $rateNote = 'No rate was quoted on or before ' . $orderDate . ', so the line needs a rate typed in.';
         }

@@ -830,7 +830,12 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
         $txn->execute(['cid' => $companyId, 'iid' => (int) $item['id']]);
         $txnRow = $txn->fetch(PDO::FETCH_ASSOC) ?: [];
 
-        $rows[] = $item + [
+        // The COMPUTED opening figures must win over the item's own spec
+        // fields. `$item + [...]` keeps the LEFT operand's keys, and the item
+        // row already carries a `gross_weight` — the profile's design weight,
+        // normally zero — so written that way round the list showed every
+        // opening as weightless while the books held the real figure.
+        $rows[] = [
             'as_on' => $asOn,
             'gross_weight' => $gross,
             'fine_weight' => jw_fine_weight($gross, (float) $item['fineness']),
@@ -841,7 +846,7 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
             'stock_txn_id' => (int) ($txnRow['id'] ?? 0),
             'voucher_id' => (int) ($txnRow['voucher_id'] ?? 0),
             'posted' => (int) ($txnRow['id'] ?? 0) > 0,
-        ];
+        ] + $item;
     }
 
     return $rows;
