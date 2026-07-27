@@ -205,7 +205,7 @@ function agreement_builder_render(array $sa, array $flat, string $lang, string $
         .sig-table th { background: #efefef; }
         .line { display: inline-block; min-width: 200px; border-bottom: 1px dotted #555; }
         .docfoot { margin-top: 26px; font-size: 9.5pt; color: #555; border-top: 1px solid #ccc; padding-top: 6px; display: flex; justify-content: space-between; }
-        .draft-mark { text-align: center; color: #b91c1c; font-weight: 700; letter-spacing: 4px; }
+        .draft-mark { text-align: center; color: var(--mbw-red, #b91c1c); font-weight: 700; letter-spacing: 4px; }
         .page-break { page-break-before: always; }
         @media print { body { background: #fff; } .toolbar { display: none; } .sheet { max-width: none; padding: 0; } @page { size: A4; margin: 19mm 16mm; } }
     </style></head><body>';

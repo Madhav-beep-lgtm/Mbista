@@ -720,7 +720,7 @@ jw_filter_bar_styles();
                                     <input type="hidden" name="action" value="delete_order">
                                     <input type="hidden" name="back_view" value="orders">
                                     <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:#b03030" title="Delete this order">&times;</button>
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:var(--mbw-red,#e5484d)" title="Delete this order">&times;</button>
                                 </form>
                             <?php endif; ?>
                         </td>

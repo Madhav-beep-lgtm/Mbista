@@ -679,7 +679,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                 <input type="hidden" name="action" value="delete_agreement">
                                 <input type="hidden" name="agreement_id" value="<?= (int) $agreement['id'] ?>">
-                                <button type="submit" class="button secondary" style="min-height:30px;padding:3px 10px;color:#a33">Delete</button>
+                                <button type="submit" class="button secondary" style="min-height:30px;padding:3px 10px;color:var(--mbw-red, #a33)">Delete</button>
                             </form>
                         <?php endif; ?>
                     </td>

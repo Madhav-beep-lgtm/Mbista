@@ -783,7 +783,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                         <input type="hidden" name="action" value="delete_salary_revision">
                                         <input type="hidden" name="revision_id" value="<?= e((int) $revision['id']) ?>">
                                         <input type="hidden" name="employee_id" value="<?= e((int) $editEmployee['id']) ?>">
-                                        <button type="submit" class="button secondary" style="color:#a33">&times;</button>
+                                        <button type="submit" class="button secondary" style="color:var(--mbw-red, #a33)">&times;</button>
                                     </form>
                                 </td>
                             </tr>
@@ -830,7 +830,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                         <input type="hidden" name="action" value="delete_manual_projection">
                                         <input type="hidden" name="projection_id" value="<?= e((int) $projection['id']) ?>">
                                         <input type="hidden" name="employee_id" value="<?= e((int) $editEmployee['id']) ?>">
-                                        <button type="submit" class="button secondary" style="color:#a33">&times;</button>
+                                        <button type="submit" class="button secondary" style="color:var(--mbw-red, #a33)">&times;</button>
                                     </form>
                                 </td>
                             </tr>

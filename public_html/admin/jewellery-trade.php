@@ -459,7 +459,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                     <input type="hidden" name="action" value="delete_purchase">
                                     <input type="hidden" name="back_view" value="purchases">
                                     <input type="hidden" name="doc_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:#b03030" title="Delete this draft purchase">&times;</button>
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:var(--mbw-red,#e5484d)" title="Delete this draft purchase">&times;</button>
                                 </form>
                             <?php endif; ?>
                         </td>
@@ -651,7 +651,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                     <input type="hidden" name="action" value="delete_sale">
                                     <input type="hidden" name="back_view" value="sales">
                                     <input type="hidden" name="doc_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:#b03030" title="Delete this draft sale">&times;</button>
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:var(--mbw-red,#e5484d)" title="Delete this draft sale">&times;</button>
                                 </form>
                             <?php endif; ?>
                         </td>

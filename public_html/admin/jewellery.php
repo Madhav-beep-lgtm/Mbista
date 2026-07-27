@@ -1113,7 +1113,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <tbody>
                 <?php foreach ($importRows as $ir): ?>
                     <?php $isCommitted = (string) $ir['status'] === 'committed'; ?>
-                    <tr<?= (string) $ir['status'] === 'error' ? ' style="background:#fdf5ef"' : '' ?>>
+                    <tr<?= (string) $ir['status'] === 'error' ? ' style="background:var(--mbw-red-soft,#fdf5ef)"' : '' ?>>
                         <?php if ($isCommitted): ?>
                             <td><?= (int) $ir['source_row_no'] ?></td>
                             <td><?= e((string) $ir['raw_code']) ?> <?= e((string) $ir['raw_name']) ?></td>

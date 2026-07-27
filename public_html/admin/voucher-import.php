@@ -296,7 +296,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <style>
 .vimp-columns-table td, .vimp-columns-table th, .vimp-rules-table td, .vimp-rules-table th { padding: 8px 10px; text-align: left; vertical-align: top; }
-.vimp-preview-table .vimp-errors { color: #b42318; font-size: 0.86rem; margin: 4px 0 0; padding-left: 18px; }
+.vimp-preview-table .vimp-errors { color: var(--mbw-red, #b42318); font-size: 0.86rem; margin: 4px 0 0; padding-left: 18px; }
 .vimp-preview-table .vimp-warnings { color: #b54708; font-size: 0.86rem; margin: 4px 0 0; padding-left: 18px; }
 .vimp-lines summary { cursor: pointer; font-size: 0.86rem; }
 .vimp-lines table { margin-top: 6px; }
@@ -386,8 +386,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="frm-section-head"><span class="mbw-chip is-square tone-blue"><?= icon('upload') ?></span><h2>Import Preview</h2></div>
         <div class="vimp-summary">
             <span><strong><?= count($preview['vouchers']) ?></strong>vouchers in sheet</span>
-            <span><strong style="color:#067647"><?= count($validVouchers) ?></strong>ready to import</span>
-            <span><strong style="color:#b42318"><?= count($invalidVouchers) ?></strong>with errors</span>
+            <span><strong style="color:var(--mbw-green, #067647)"><?= count($validVouchers) ?></strong>ready to import</span>
+            <span><strong style="color:var(--mbw-red, #b42318)"><?= count($invalidVouchers) ?></strong>with errors</span>
             <span><strong><?= $previewLineCount ?></strong>ledger lines</span>
             <span><strong><?= e($currency) ?><?= number_format($previewDebitTotal, 2) ?></strong>total amount (valid)</span>
         </div>

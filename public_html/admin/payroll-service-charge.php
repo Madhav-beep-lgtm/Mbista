@@ -233,7 +233,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="remove">
                     <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
-                    <button type="submit" class="button secondary" style="color:#a33">Remove allocation</button>
+                    <button type="submit" class="button secondary" style="color:var(--mbw-red, #a33)">Remove allocation</button>
                 </form>
             <?php endif; ?>
         </div>

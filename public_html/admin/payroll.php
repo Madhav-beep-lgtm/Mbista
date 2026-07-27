@@ -481,7 +481,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="delete_run">
                     <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
-                    <button type="submit" class="button secondary" style="color:#a33">Delete Sheet</button>
+                    <button type="submit" class="button secondary" style="color:var(--mbw-red, #a33)">Delete Sheet</button>
                 </form>
             <?php elseif ((string) $run['status'] === 'cancelled'): ?>
                 <span class="mbw-pill tone-amber">Cancelled</span>
@@ -489,7 +489,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="delete_run">
                     <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
-                    <button type="submit" class="button secondary" style="color:#a33">Delete Sheet</button>
+                    <button type="submit" class="button secondary" style="color:var(--mbw-red, #a33)">Delete Sheet</button>
                 </form>
             <?php elseif (in_array((string) $run['status'], ['approved', 'posted'], true)): ?>
                 <form method="post" style="display:inline" data-confirm="Record the salary payment for <?= e($run['period_label']) ?>? This posts a bank payment voucher for the total net pay.">
@@ -593,7 +593,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                             <input type="text" name="override_reason" maxlength="255" placeholder="Reason if changed" value="<?= e((string) ($componentRow['override_reason'] ?? '')) ?>" style="flex:1">
                                             <?php if (!in_array((string) $componentRow['source'], ['overtime', 'service_charge'], true)): ?>
                                                 <button type="submit" class="button secondary" style="min-height:32px;padding:4px 8px">Save</button>
-                                                <button type="submit" name="remove" value="1" class="button secondary" style="min-height:32px;padding:4px 8px;color:#a33" title="Remove for this month">&times;</button>
+                                                <button type="submit" name="remove" value="1" class="button secondary" style="min-height:32px;padding:4px 8px;color:var(--mbw-red, #a33)" title="Remove for this month">&times;</button>
                                             <?php endif; ?>
                                         </div>
                                     </form>
@@ -816,11 +816,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 html += '<div class="pr-ins-row"><span>Remaining periods (incl. current)</span><b>' + proj.remaining_periods + '</b></div>';
                 html += '<div class="pr-ins-row"><span>Remaining tax to withhold</span><b>' + fmt(proj.remaining_tax) + '</b></div>';
                 if (proj.excess_tax > 0) {
-                    html += '<div class="pr-ins-row" style="color:#c0392b"><span>EXCESS tax already deducted</span><b>' + fmt(proj.excess_tax) + '</b></div>';
+                    html += '<div class="pr-ins-row" style="color:var(--mbw-red, #c0392b)"><span>EXCESS tax already deducted</span><b>' + fmt(proj.excess_tax) + '</b></div>';
                     html += '<div class="pr-ins-note">Treatment: ' + (proj.excess_treatment || 'offset') + ' — see Payroll Settings.</div>';
                 }
                 if (trace.withholding && trace.withholding.tax_override !== null && trace.withholding.tax_override !== undefined) {
-                    html += '<div class="pr-ins-row" style="color:#b9770e"><span>Approved override (system ' + fmt(trace.withholding.system_tax) + ')</span><b>' + fmt(trace.withholding.tax_override) + '</b></div>';
+                    html += '<div class="pr-ins-row" style="color:var(--mbw-amber, #b9770e)"><span>Approved override (system ' + fmt(trace.withholding.system_tax) + ')</span><b>' + fmt(trace.withholding.tax_override) + '</b></div>';
                 }
             }
             if (trace.retirement && trace.retirement.scheme !== 'none') {

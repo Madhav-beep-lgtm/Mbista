@@ -537,7 +537,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <?php endif; ?>
                         <?php if (($currentAdmin["role"] ?? "") === "admin" && voucher_mutation_blocker($voucher) !== null): ?>
                             <details class="vr-force" style="position:relative;display:inline-block">
-                                <summary class="button secondary" style="min-height:30px;padding:3px 10px;color:#a33;list-style:none;cursor:pointer">Force delete…</summary>
+                                <summary class="button secondary" style="min-height:30px;padding:3px 10px;color:var(--mbw-red, #a33);list-style:none;cursor:pointer">Force delete…</summary>
                                 <form method="post" style="position:absolute;right:0;z-index:40;margin-top:6px;display:grid;gap:8px;width:280px;padding:12px;text-align:left;background:var(--mbw-card,#fff);border:1px solid var(--mbw-line,rgba(0,0,0,.16));border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.22)"
                                       data-confirm="FORCE delete <?= e($voucher['voucher_no']) ?>? This overrides the module lock: the owning register is rolled back / unlinked, reconciled entries are un-reconciled, and the action is security-logged. It cannot be undone.">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

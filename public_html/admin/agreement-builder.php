@@ -367,7 +367,7 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
             echo ' 🔒';
         }
         if ((int) $node['is_mandatory'] === 1) {
-            echo ' <span title="Mandatory" style="color:#b45309">*</span>';
+            echo ' <span title="Mandatory" style="color:var(--mbw-amber, #b45309)">*</span>';
         }
         echo '</a>';
         if ($editable && $canEdit) {
@@ -397,11 +397,11 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
     .ab-pillrow { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
     .ab-kv { font-size: 12.5px; margin: 3px 0; }
     .ab-kv strong { display: inline-block; min-width: 110px; }
-    .ab-warn { font-size: 12.5px; color: #b45309; margin: 3px 0; }
-    .ab-err { font-size: 12.5px; color: #b91c1c; margin: 3px 0; }
+    .ab-warn { font-size: 12.5px; color: var(--mbw-amber, #b45309); margin: 3px 0; }
+    .ab-err { font-size: 12.5px; color: var(--mbw-red, #b91c1c); margin: 3px 0; }
     .ab-history { max-height: 220px; overflow-y: auto; font-size: 12px; }
     .ab-comment { border-left: 3px solid var(--mbw-accent, #3b82f6); padding: 4px 8px; margin: 6px 0; font-size: 12.5px; }
-    .ab-comment.is-resolved { opacity: .55; border-left-color: #16a34a; }
+    .ab-comment.is-resolved { opacity: .55; border-left-color: var(--mbw-green, #16a34a); }
     details.ab-block { margin: 10px 0; }
     details.ab-block > summary { cursor: pointer; font-weight: 600; font-size: 13px; }
     /* Word-style rich text editor */
@@ -500,11 +500,11 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
                     <h3 style="margin:0 0 8px">Compare v<?= (int) $_GET['compare_a'] ?> → v<?= (int) $_GET['compare_b'] ?> <a class="mbw-view-all" href="?id=<?= $agreementId ?>">close</a></h3>
                     <?php if (isset($compare['error'])): ?><p class="ab-err"><?= e($compare['error']) ?></p>
                     <?php else: ?>
-                        <p class="ab-kv"><strong style="color:#16a34a">Added:</strong> <?= count($compare['added']) ?> · <strong style="color:#b91c1c">Removed:</strong> <?= count($compare['removed']) ?> · <strong style="color:#b45309">Modified:</strong> <?= count($compare['modified']) ?></p>
-                        <?php foreach ($compare['added'] as $section): ?><p class="ab-kv" style="color:#16a34a">+ <?= e((string) (($section['title_en'] ?? '') ?: ($section['title_np'] ?? '#' . $section['id']))) ?></p><?php endforeach; ?>
-                        <?php foreach ($compare['removed'] as $section): ?><p class="ab-kv" style="color:#b91c1c">− <?= e((string) (($section['title_en'] ?? '') ?: ($section['title_np'] ?? '#' . $section['id']))) ?></p><?php endforeach; ?>
+                        <p class="ab-kv"><strong style="color:var(--mbw-green, #16a34a)">Added:</strong> <?= count($compare['added']) ?> · <strong style="color:var(--mbw-red, #b91c1c)">Removed:</strong> <?= count($compare['removed']) ?> · <strong style="color:var(--mbw-amber, #b45309)">Modified:</strong> <?= count($compare['modified']) ?></p>
+                        <?php foreach ($compare['added'] as $section): ?><p class="ab-kv" style="color:var(--mbw-green, #16a34a)">+ <?= e((string) (($section['title_en'] ?? '') ?: ($section['title_np'] ?? '#' . $section['id']))) ?></p><?php endforeach; ?>
+                        <?php foreach ($compare['removed'] as $section): ?><p class="ab-kv" style="color:var(--mbw-red, #b91c1c)">− <?= e((string) (($section['title_en'] ?? '') ?: ($section['title_np'] ?? '#' . $section['id']))) ?></p><?php endforeach; ?>
                         <?php foreach ($compare['modified'] as $pair): ?>
-                            <details class="ab-block"><summary style="color:#b45309">± <?= e((string) (($pair['after']['title_en'] ?? '') ?: ($pair['after']['title_np'] ?? '#' . $pair['after']['id']))) ?></summary>
+                            <details class="ab-block"><summary style="color:var(--mbw-amber, #b45309)">± <?= e((string) (($pair['after']['title_en'] ?? '') ?: ($pair['after']['title_np'] ?? '#' . $pair['after']['id']))) ?></summary>
                                 <p class="ab-kv"><strong>Before (EN):</strong> <?= e(mb_strimwidth((string) ($pair['before']['body_en'] ?? ''), 0, 400, '…')) ?></p>
                                 <p class="ab-kv"><strong>After (EN):</strong> <?= e(mb_strimwidth((string) ($pair['after']['body_en'] ?? ''), 0, 400, '…')) ?></p>
                             </details>
@@ -517,7 +517,7 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
                         <?php if ($editable && $canEdit): ?>
                             <span style="float:right;display:flex;gap:6px">
                                 <form method="post" style="display:inline"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="duplicate_section"><input type="hidden" name="agreement_id" value="<?= $agreementId ?>"><input type="hidden" name="section_id" value="<?= $selectedId ?>"><button type="submit" class="button secondary" style="min-height:28px;padding:3px 10px">Duplicate</button></form>
-                                <form method="post" style="display:inline" data-confirm="Delete this section? Its children move up one level."><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="delete_section"><input type="hidden" name="agreement_id" value="<?= $agreementId ?>"><input type="hidden" name="section_id" value="<?= $selectedId ?>"><button type="submit" class="button secondary" style="min-height:28px;padding:3px 10px;color:#a33">Delete</button></form>
+                                <form method="post" style="display:inline" data-confirm="Delete this section? Its children move up one level."><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="delete_section"><input type="hidden" name="agreement_id" value="<?= $agreementId ?>"><input type="hidden" name="section_id" value="<?= $selectedId ?>"><button type="submit" class="button secondary" style="min-height:28px;padding:3px 10px;color:var(--mbw-red, #a33)">Delete</button></form>
                             </span>
                         <?php endif; ?>
                     </h3>
@@ -759,7 +759,7 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
                         <?php if ($comment['status'] === 'open' && ($canReview || $canEdit)): ?>
                             <form method="post" style="display:inline"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="resolve_comment"><input type="hidden" name="agreement_id" value="<?= $agreementId ?>"><input type="hidden" name="comment_id" value="<?= (int) $comment['id'] ?>"><button type="submit" class="button secondary" style="min-height:24px;padding:1px 8px;font-size:11px">Resolve</button></form>
                         <?php elseif ($comment['status'] === 'resolved'): ?>
-                            <small style="color:#16a34a">resolved by <?= e((string) ($comment['resolver_name'] ?? '')) ?></small>
+                            <small style="color:var(--mbw-green, #16a34a)">resolved by <?= e((string) ($comment['resolver_name'] ?? '')) ?></small>
                         <?php endif; ?>
                     </div>
                 <?php endforeach; ?>

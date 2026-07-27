@@ -1790,7 +1790,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="delete_costing_run">
                                     <input type="hidden" name="run_id" value="<?= (int) $savedRun['id'] ?>">
-                                    <button type="submit" class="button secondary" style="min-height:28px;padding:2px 8px;color:#a33">Delete</button>
+                                    <button type="submit" class="button secondary" style="min-height:28px;padding:2px 8px;color:var(--mbw-red, #a33)">Delete</button>
                                 </form>
                             <?php endif; ?>
                         </td>
@@ -1876,7 +1876,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                                 <span class="mbw-pill tone-green">✓ Ready</span>
                             <?php else: ?>
                                 <span class="mbw-pill tone-red"><?= count($previewRow['errors']) ?> error(s)</span>
-                                <ul style="color:#b42318;font-size:.85rem;margin:4px 0 0;padding-left:16px"><?php foreach ($previewRow['errors'] as $rowError): ?><li><?= e($rowError) ?></li><?php endforeach; ?></ul>
+                                <ul style="color:var(--mbw-red, #b42318);font-size:.85rem;margin:4px 0 0;padding-left:16px"><?php foreach ($previewRow['errors'] as $rowError): ?><li><?= e($rowError) ?></li><?php endforeach; ?></ul>
                             <?php endif; ?>
                         </td>
                     </tr>

@@ -50,10 +50,13 @@ function jw_line_grid_styles(): void
     scrollbar-gutter: stable;
     padding-bottom: 2px;
 }
+/* Design tokens, not fixed colours: these flip with the theme, and a pale grey
+   bar painted on a dark page is the sort of thing nobody notices until a user
+   reports the grid "looks broken at night". */
 .jw-lines-scroll::-webkit-scrollbar { height: 12px; }
-.jw-lines-scroll::-webkit-scrollbar-track { background: #eef2f6; border-radius: 6px; }
-.jw-lines-scroll::-webkit-scrollbar-thumb { background: #9fb3c4; border-radius: 6px; }
-.jw-lines-scroll::-webkit-scrollbar-thumb:hover { background: #7d95a9; }
+.jw-lines-scroll::-webkit-scrollbar-track { background: var(--mbw-border-soft, #eef2f6); border-radius: 6px; }
+.jw-lines-scroll::-webkit-scrollbar-thumb { background: var(--mbw-muted, #9fb3c4); border-radius: 6px; }
+.jw-lines-scroll::-webkit-scrollbar-thumb:hover { background: var(--mbw-primary, #7d95a9); }
 table.jw-lines { font-size: .85rem; table-layout: fixed; width: auto; min-width: 100%; }
 table.jw-lines th,
 table.jw-lines td { padding: 3px 4px; }
@@ -94,9 +97,9 @@ table.jw-lines .c-del  { width: 38px; text-align: center; }
 table.jw-lines td.c-del button {
     width: 24px; min-height: 24px; padding: 0; line-height: 1;
     border: 1px solid var(--mbw-border, #d9e2ec); border-radius: 4px;
-    background: transparent; cursor: pointer; color: #b03030;
+    background: transparent; cursor: pointer; color: var(--mbw-red, #e5484d);
 }
-table.jw-lines td.c-del button:hover { background: #fdeaea; }
+table.jw-lines td.c-del button:hover { background: var(--mbw-red-soft, #fdeaea); }
 .jw-lines-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 
 /* Fields sit in a row and wrap to the next, and every box lines up with its
