@@ -236,6 +236,59 @@ foreach ($pages as $script => $views) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The print / preview controller, once per document type. It exits via
+// export_print(), so each is run in a child process — an exit() in-process
+// would take the whole suite with it.
+// ---------------------------------------------------------------------------
+echo "\nDocument preview (print controller)\n";
+$runner = $root . '/database/jewellery_print_probe.php';
+file_put_contents($runner, <<<'PROBE'
+<?php
+// The controller ends in export_print(), which exits — and any refusal ends in
+// redirect(), which also exits. So the result is reported from a shutdown
+// handler; capturing after the include would never run.
+//
+// The context has to be established exactly as the parent suite does it, or
+// require_jewellery() refuses and the probe measures an empty redirect.
+if (PHP_SAPI !== 'cli') { exit(1); }
+require __DIR__ . '/../app/bootstrap.php';
+$probeCompany = (int) $argv[1];
+$probeFy = (int) $argv[2];
+$_SESSION['user_id'] = (int) $argv[3];
+set_context($probeCompany, $probeFy);
+mark_company_pin_verified($probeCompany);
+set_selected_company($probeCompany);
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_SERVER['SCRIPT_NAME'] = '/admin/jewellery-print.php';
+$_GET = ['doc' => $argv[4], 'id' => (int) $argv[5], 'format' => 'print'];
+$_POST = [];
+register_shutdown_function(static function (): void {
+    $html = '';
+    while (ob_get_level() > 0) { $html = ob_get_clean() . $html; }
+    $dirty = stripos($html, 'Fatal error') !== false || stripos($html, 'Warning:') !== false
+        || stripos($html, 'Uncaught') !== false;
+    fwrite(STDOUT, strlen($html) . '|' . ($dirty ? 'DIRTY' : 'CLEAN'));
+});
+ob_start();
+include __DIR__ . '/../public_html/admin/jewellery-print.php';
+PROBE);
+
+foreach ([
+    ['sale', $s2, 'Sale'],
+    ['purchase', $p1, 'Purchase'],
+    ['order', $order2, 'Order'],
+] as [$docKind, $docId, $label]) {
+    $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($runner) . ' '
+        . (int) $cid . ' ' . (int) $fyId . ' ' . (int) $adminId . ' '
+        . escapeshellarg($docKind) . ' ' . (int) $docId;
+    $out = trim((string) shell_exec($cmd . ' 2>&1'));
+    [$len, $state] = array_pad(explode('|', $out), 2, '');
+    $ok = is_numeric($len) && (int) $len > 400 && $state === 'CLEAN';
+    ok($ok, str_pad($label . ' preview renders', 44) . ' ' . ($ok ? $len . ' bytes' : $out));
+}
+@unlink($runner);
+
 jwr_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

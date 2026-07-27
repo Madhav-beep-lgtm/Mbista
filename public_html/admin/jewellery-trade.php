@@ -453,6 +453,7 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
                         <td style="white-space:nowrap">
                             <?php if ($isDraft && $canEdit): ?>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-trade.php?view=purchases&edit=' . (int) $row['id'])) ?>">Edit</a>
+                                <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=purchase&id=' . (int) $row['id'])) ?>">Preview</a>
                             <?php endif; ?>
                             <?php if ($isDraft && $canPost): ?>
                                 <form method="post" style="display:inline">
@@ -607,6 +608,7 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
                         <td style="white-space:nowrap">
                             <?php if ($isDraft && $canEdit): ?>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-trade.php?view=sales&edit=' . (int) $row['id'])) ?>">Edit</a>
+                                <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'])) ?>">Preview</a>
                             <?php endif; ?>
                             <?php if ($isDraft && $canPost): ?>
                                 <form method="post" style="display:inline">
@@ -771,6 +773,7 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
                         <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) $row['amount']) ?></td>
                         <td><span class="mbw-pill <?= (string) $row['status'] === 'posted' ? 'tone-green' : 'tone-amber' ?>"><?= e(ucfirst((string) $row['status'])) ?></span></td>
                         <td>
+                            <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=settlement&id=' . (int) $row['id'])) ?>">Preview</a>
                             <?php if ((string) $row['status'] === 'posted' && $canPost): ?>
                                 <form method="post" data-confirm="Reverse this settlement? The bills it settled will reopen.">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

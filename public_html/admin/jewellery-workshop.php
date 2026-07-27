@@ -558,6 +558,7 @@ $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' =>
                         <td style="white-space:nowrap">
                             <?php if ($canEdit): ?>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) ?>">Edit</a>
+                                <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=order&id=' . (int) $row['id'])) ?>">Preview</a>
                             <?php endif; ?>
                             <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?>
                                 <a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=assignments&order=' . (int) $row['id'])) ?>">Assign</a>
