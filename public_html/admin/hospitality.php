@@ -4,6 +4,9 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/hospitality_engine.php';
 require_once __DIR__ . '/../../app/hospitality_sales_posting.php';
+// The inventory ledger mapping is ONE shared table; this page shows it rather
+// than keeping a restaurant copy of the same setting.
+require_once __DIR__ . '/../../app/inventory_mapping.php';
 
 // Server-side gate: books access + company context + client feature flag +
 // hospitality.view. Direct URLs are denied when the flag is off — the hidden
@@ -524,6 +527,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ONE form saves the whole ledger mapping: the default/fallback row, the
     // VAT settings, every existing category row (inline edits + active flag)
     // and an optional new category row — all together, all validated first.
+    if ($action === 'save_inventory_mapping') {
+        require_permission('hospitality', 'edit');
+        try {
+            inventory_mapping_save($companyId, (string) ($_POST['purpose'] ?? ''), (int) ($_POST['ledger_id'] ?? 0), $userId);
+            flash('success', 'Inventory posting ledger saved.');
+        } catch (Throwable $mapException) {
+            flash('error', $mapException->getMessage());
+        }
+        redirect('admin/hospitality.php?view=settings');
+    }
+
+    if ($action === 'autocreate_inventory_mapping') {
+        require_permission('hospitality', 'edit');
+        $res = inventory_mapping_autocreate($companyId, $userId);
+        if ($res['errors'] !== []) { flash('error', implode(' ', $res['errors'])); }
+        flash($res['mapped'] === [] ? 'info' : 'success', $res['mapped'] === []
+            ? 'Every inventory purpose was already mapped.'
+            : count($res['created']) . ' opened, ' . count($res['mapped']) . ' mapped, ' . count($res['skipped']) . ' left as set.');
+        redirect('admin/hospitality.php?view=settings');
+    }
+
     if ($action === 'save_ledger_mapping') {
         require_permission('hospitality', 'edit');
 
@@ -1883,6 +1907,68 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php endif; ?>
 
 <?php elseif ($view === 'settings'): ?>
+    <?php
+        $invMapRows = inventory_mapping_rows($companyId);
+        $invMapGaps = inventory_mapping_gaps($companyId);
+        $invLedgerList = [];
+        if (table_exists('ledgers')) {
+            $invLedgerStmt = db()->prepare('SELECT id, code, name FROM ledgers WHERE company_id = :cid ORDER BY code ASC, name ASC');
+            $invLedgerStmt->execute(['cid' => $companyId]);
+            $invLedgerList = $invLedgerStmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+    ?>
+    <section class="mbw-card" style="margin-top:14px">
+        <div class="mbw-card-head"><h2>Inventory Posting Ledgers</h2></div>
+        <p class="frm-optional" style="margin:0 0 12px">
+            The same rows the Inventory module reads — set here or there, it is one setting.
+        </p>
+        <?php if ($canEdit && $invMapGaps !== []): ?>
+        <div class="mbw-note tone-amber" style="margin:0 0 12px">
+            <p style="margin:0 0 8px"><strong><?= count($invMapGaps) ?> unmapped:</strong>
+                <?= e(implode(', ', array_slice($invMapGaps, 0, 6))) ?><?= count($invMapGaps) > 6 ? ' +' . (count($invMapGaps) - 6) . ' more' : '' ?>.</p>
+            <form method="post" style="display:inline">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="autocreate_inventory_mapping">
+                <button type="submit" class="button">Open and map the standard ledgers</button>
+            </form>
+        </div>
+        <?php endif; ?>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Purpose</th><th>Ledger</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
+            <tbody>
+                <?php foreach (inventory_mapping_purposes() as $invPurpose => $invMeta): ?>
+                    <?php $invMapped = $invMapRows[$invPurpose] ?? null; ?>
+                    <tr>
+                        <td><?= e((string) $invMeta['label']) ?></td>
+                        <td>
+                            <?php if ($invMapped): ?>
+                                <span class="mbw-pill tone-green"><?= e((($invMapped['ledger_code'] ?? '') ? $invMapped['ledger_code'] . ' — ' : '') . $invMapped['ledger_name']) ?></span>
+                            <?php else: ?>
+                                <span class="mbw-pill tone-gray">Not set</span>
+                            <?php endif; ?>
+                        </td>
+                        <?php if ($canEdit): ?>
+                        <td>
+                            <form method="post" style="display:flex;gap:6px;align-items:center">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="save_inventory_mapping">
+                                <input type="hidden" name="purpose" value="<?= e((string) $invPurpose) ?>">
+                                <select name="ledger_id">
+                                    <option value="0">— not set —</option>
+                                    <?php foreach ($invLedgerList as $invLedger): ?>
+                                        <option value="<?= (int) $invLedger['id'] ?>" <?= (int) ($invMapped['ledger_id'] ?? 0) === (int) $invLedger['id'] ? 'selected' : '' ?>><?= e((($invLedger['code'] ?? '') ? $invLedger['code'] . ' — ' : '') . $invLedger['name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="submit" class="button secondary" style="min-height:32px;padding:4px 10px">Save</button>
+                            </form>
+                        </td>
+                        <?php endif; ?>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+    </section>
+
     <section class="mbw-card">
         <div class="mbw-card-head"><h2>Hospitality Settings (this client only)</h2></div>
         <?php if (!$canEdit): ?><div class="notice">You have view-only access to these settings.</div><?php endif; ?>

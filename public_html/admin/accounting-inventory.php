@@ -6,6 +6,9 @@ require_once __DIR__ . '/../../app/accounting_module_repair.php';
 // able to read and complete the jewellery half of an item. Pure function
 // definitions — it does nothing unless the client has the module switched on.
 require_once __DIR__ . '/../../app/jewellery_stock.php';
+// The ledger-mapping catalogue lives in app/ so Hospitality and Jewellery can
+// show the SAME table rather than each keeping a copy of the list.
+require_once __DIR__ . '/../../app/inventory_mapping.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -50,42 +53,6 @@ function inventory_valid_date(string $value): ?string
  * human label and the account type each SHOULD point at (used for the
  * "wrong-type" warning so an asset is not mapped to income, etc.).
  */
-function inventory_mapping_purposes(): array
-{
-    $purposes = [
-        'inventory_asset'      => ['label' => 'Inventory Asset', 'expect' => 'asset'],
-        'opening_equity'       => ['label' => 'Opening Balance Equity', 'expect' => 'equity'],
-        'raw_material'         => ['label' => 'Raw Material Inventory', 'expect' => 'asset'],
-        'wip'                  => ['label' => 'Work in Progress', 'expect' => 'asset'],
-        'finished_goods'       => ['label' => 'Finished Goods Inventory', 'expect' => 'asset'],
-        'cogs'                 => ['label' => 'Cost of Goods Sold', 'expect' => 'expense'],
-        'purchase_clearing'    => ['label' => 'Purchase / GRNI Clearing', 'expect' => 'liability'],
-        'sales_revenue'        => ['label' => 'Sales Revenue', 'expect' => 'revenue'],
-        'inventory_gain'       => ['label' => 'Inventory Gain / Adjustment', 'expect' => 'revenue'],
-        'inventory_loss'       => ['label' => 'Inventory Loss / Damage / Expiry', 'expect' => 'expense'],
-        'write_down_expense'   => ['label' => 'Inventory Write-down Expense', 'expect' => 'expense'],
-        'write_down_allowance' => ['label' => 'Allowance for Write-down', 'expect' => 'liability'],
-        'write_down_reversal'  => ['label' => 'Reversal of Write-down', 'expect' => 'revenue'],
-        'scrap_inventory'      => ['label' => 'Scrap / By-product Inventory', 'expect' => 'asset'],
-        'labour_clearing'      => ['label' => 'Direct Labour Clearing / Wages Payable', 'expect' => 'liability'],
-        'overhead_absorbed'    => ['label' => 'Production Overhead Absorbed', 'expect' => 'expense'],
-        'tax_input'            => ['label' => 'Recoverable Input Tax', 'expect' => 'asset'],
-        'tax_output'           => ['label' => 'Output Tax Payable', 'expect' => 'liability'],
-    ];
-
-    // Jewellery writes into THIS table rather than keeping its own, so the
-    // purposes it adds (the revenue split, making charge, wastage, karigar and
-    // refinery accounts) belong on this screen too — otherwise a ledger set
-    // here and a ledger set in Jewellery → Settings would be two half-answers
-    // to the same question. Shown only where the module is actually in use.
-    if (function_exists('jewellery_extra_inventory_purposes')
-        && function_exists('jewellery_enabled_for_company')
-        && jewellery_enabled_for_company(current_company_id())) {
-        $purposes += jewellery_extra_inventory_purposes();
-    }
-
-    return $purposes;
-}
 
 /**
  * Sets (or with ledger id 0 clears) ONE item-scope ledger mapping — the same
