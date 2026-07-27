@@ -395,25 +395,71 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Sidebar collapsible groups (Accounting workspace submenu).
-  document.querySelectorAll('[data-nav-parent]').forEach((parent) => {
+  // Sidebar collapsible groups, one open at a time.
+  //
+  // They used to toggle independently, so every group a user ever opened stayed
+  // open and the sidebar grew until the item they wanted was below the fold.
+  // Opening one now closes the rest.
+  //
+  // Only TOP-LEVEL groups take part: a group nested inside another belongs to
+  // it, and closing its own ancestor when it opens would shut the child too.
+  const navParents = Array.from(document.querySelectorAll('[data-nav-parent]')).filter(
+    (parent) => !parent.parentElement || !parent.parentElement.closest('[data-nav-parent]')
+  );
+
+  const navStorageKey = (parent) => 'mbwNavOpen:' + parent.getAttribute('data-nav-parent');
+
+  const setNavOpen = (parent, open) => {
+    parent.classList.toggle('is-open', open);
     const toggle = parent.querySelector('[data-nav-toggle]');
-    if (!toggle) {
-      return;
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     }
-    const storageKey = 'mbwNavOpen:' + parent.getAttribute('data-nav-parent');
-    const stored = localStorage.getItem(storageKey);
-    if (stored === '1' && !parent.classList.contains('is-open')) {
-      parent.classList.add('is-open');
-      toggle.setAttribute('aria-expanded', 'true');
+    try {
+      localStorage.setItem(navStorageKey(parent), open ? '1' : '0');
+    } catch (error) {
+      // Private browsing denies storage; the accordion still works, it just
+      // will not be remembered.
     }
-    toggle.addEventListener('click', (event) => {
-      event.preventDefault();
-      const isOpen = parent.classList.toggle('is-open');
-      toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-      localStorage.setItem(storageKey, isOpen ? '1' : '0');
+  };
+
+  const openOnlyNav = (chosen) => {
+    navParents.forEach((parent) => setNavOpen(parent, parent === chosen));
+  };
+
+  const navRemembered = (parent) => {
+    try {
+      return localStorage.getItem(navStorageKey(parent)) === '1';
+    } catch (error) {
+      return false;
+    }
+  };
+
+  if (navParents.length) {
+    // Which one to start with, in order of how much it is worth: the group
+    // holding the page actually being looked at, then whatever the server
+    // marked open, then whatever was open on the last visit.
+    const initialNav = navParents.find((parent) => parent.querySelector('.mbw-subnav a.is-active'))
+      || navParents.find((parent) => parent.classList.contains('is-open'))
+      || navParents.find(navRemembered)
+      || null;
+    openOnlyNav(initialNav);
+
+    navParents.forEach((parent) => {
+      const toggle = parent.querySelector('[data-nav-toggle]');
+      if (!toggle) {
+        return;
+      }
+      toggle.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (parent.classList.contains('is-open')) {
+          setNavOpen(parent, false);
+        } else {
+          openOnlyNav(parent);
+        }
+      });
     });
-  });
+  }
 
   const currentParams = new URLSearchParams(window.location.search);
   document.querySelectorAll('.admin-nav a, .site-header .nav a').forEach((link) => {
