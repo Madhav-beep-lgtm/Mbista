@@ -63,6 +63,11 @@ foreach (db()->query("SELECT id FROM companies WHERE code = 'OBTESTA'")->fetchAl
     db()->exec("DELETE FROM ledger_groups WHERE company_id = $stale");
     db()->exec("DELETE FROM companies WHERE id = $stale");
 }
+// The strict-mode staff user is keyed by EMAIL, not by company, so deleting the
+// stale company above does not take it with it. A run that died part-way would
+// otherwise leave it behind and wedge every later run on a duplicate email.
+db()->exec("DELETE FROM staff_permissions WHERE user_id IN (SELECT id FROM users WHERE email = 'obstrict@test.local')");
+db()->exec("DELETE FROM users WHERE email = 'obstrict@test.local'");
 db()->prepare("INSERT INTO companies (name, code, is_active) VALUES ('OB Test Co', 'OBTESTA', 1)")->execute();
 $cid = (int) db()->lastInsertId();
 
@@ -318,6 +323,64 @@ ok(strpos($obSrc, '$canAdjustNow') !== false && strpos($obSrc, "\$status !== 'lo
     'UI: adjust gate is $canAdjustNow, defined as status !== locked (adjustable while finalized)');
 ok(substr_count($obSrc, 'if ($canAdjustNow)') >= 2 && strpos($obSrc, 'if ($canAdjust && !$isLocked)') === false,
     'UI: both the Reason-column header and the per-line Adjust cell gate on $canAdjustNow, not $isLocked');
+
+echo "\nAn opening balance typed on the ledger reaches the batch\n";
+// A user creating a ledger types its opening balance right there.
+// post_ledger_opening_balance() dates that voucher ON the fiscal-year start —
+// the only date belonging to no earlier period that still sits inside this
+// year. But the batch is built from what is brought FORWARD, struck strictly
+// BEFORE the window opens, so the figure landed in the period movement and
+// never appeared on the screen meant to show it. It was simply lost.
+// Contiguous with the fixture's last year, and its OWN variable — $fy3 is
+// already the 2026/27 year the tests above rely on.
+$fyDirect = create_fiscal_year($cid, 'OB Direct 2027/28', '2027-07-16', '2028-07-15', false);
+ok((int) ($fyDirect['id'] ?? 0) > 0, 'A later fiscal year is opened for this case' . (empty($fyDirect['id']) ? ' — ' . ($fyDirect['error'] ?? '?') : ''));
+db()->prepare("UPDATE fiscal_years SET status='open' WHERE id=?")->execute([$fyDirect['id']]);
+set_context($cid, (int) $fyDirect['id']);
+
+$lDirect = $mkLedger($gCash, 'OB-DIR', 'Direct Opening Cash', 'asset');
+$directErr = post_ledger_opening_balance($cid, $lDirect, 250000.00, 'debit', $userId);
+ok($directErr === null, 'An opening balance is posted from the ledger itself' . ($directErr ? " — $directErr" : ''));
+
+$directVoucherDate = (string) db()->query("SELECT voucher_date FROM vouchers
+    WHERE company_id = $cid AND source_type = 'ledger_opening' AND source_id = $lDirect")->fetchColumn();
+ok($directVoucherDate === '2027-07-16',
+    'Its voucher sits ON the fiscal-year start — which is why it used to fall outside the brought-forward figure');
+
+$directRows = ob_computed_opening_rows($cid, (int) $fyDirect['id']);
+$directRow = null;
+foreach ($directRows as $candidate) {
+    if ((int) ($candidate['ledger_id'] ?? 0) === $lDirect) { $directRow = $candidate; break; }
+}
+ok($directRow !== null && near((float) $directRow['opening_dr'], 250000.00),
+    'The computed opening carries it: 250,000 Dr');
+
+$directGen = ob_generate_batch($cid, (int) $fyDirect['id'], $userId);
+ok($directGen['ok'], 'The batch generates' . ($directGen['ok'] ? '' : ' — ' . $directGen['error']));
+$directBatch = ob_get_batch($cid, (int) $fyDirect['id']);
+$directLine = $lineByLedger(ob_get_lines((int) $directBatch['id']), $lDirect);
+ok($directLine !== null && near((float) $directLine['system_opening_debit'], 250000.00),
+    'And it lands in the batch as the SYSTEM opening, so no adjustment is needed to see it');
+ok(near((float) $directBatch['total_debit'], (float) $directBatch['total_credit']),
+    'The batch still balances — the contra leg comes across with it');
+
+// Adjusting on top posts only the DIFFERENCE, so folding the ledger opening in
+// cannot double-count it in the books.
+$directAdj = ob_apply_adjustment((int) $directBatch['id'], (int) $directLine['id'], 300000, 0,
+    'Prior-year audit revised the cash count', 'AUD-1', $userId);
+ok($directAdj['ok'], 'An adjustment on top is accepted');
+$adjVoucherTotal = (float) db()->query("SELECT COALESCE(SUM(amount),0) FROM voucher_entries e
+    INNER JOIN vouchers v ON v.id = e.voucher_id
+    WHERE v.company_id = $cid AND v.source_type = 'opening_balance_adj'
+      AND e.ledger_id = $lDirect AND e.entry_type = 'debit'")->fetchColumn();
+ok(near($adjVoucherTotal, 50000.00),
+    'It posts the DIFFERENCE only — 50,000, not 300,000 — so the ledger opening is never counted twice');
+
+$directLineAfter = $lineByLedger(ob_get_lines((int) $directBatch['id']), $lDirect);
+ok(near((float) $directLineAfter['final_opening_debit'], 300000.00),
+    'And the final opening reads 300,000: what was typed on the ledger, as adjusted');
+
+set_context($cid, (int) $fy2['id']);
 
 // ---------------------------------------------------------------------------
 // Cleanup

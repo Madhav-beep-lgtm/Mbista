@@ -412,37 +412,6 @@ jw_line_grid_styles();
                 ]);
             ?>
 
-            <details<?= $editOrder && (int) ($editOrder['item_id'] ?? 0) === 0 ? ' open' : '' ?>>
-                <summary>Bespoke order — nothing chosen off the tray yet</summary>
-                <div class="workspace-form-grid">
-                    <label>Metal
-                        <select name="metal_id">
-                            <?php foreach ($metals as $m): ?>
-                                <option value="<?= (int) $m['id'] ?>" <?= (int) ($editOrder['metal_id'] ?? 0) === (int) $m['id'] ? 'selected' : '' ?>><?= e($m['name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-                    <label>Purity
-                        <select name="purity_id">
-                            <?php foreach ($purities as $p): ?>
-                                <option value="<?= (int) $p['id'] ?>" <?= (int) ($editOrder['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-                    <label>Unit
-                        <select name="unit_id">
-                            <?php foreach ($units as $u): ?>
-                                <option value="<?= (int) $u['id'] ?>" <?= (int) ($editOrder['unit_id'] ?? (int) ($baseUnit['id'] ?? 0)) === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-                    <label>Expected gross weight<input type="number" name="expected_gross_weight" step="0.0001" min="0" value="<?= e((string) ($editOrder['expected_gross_weight'] ?? '0')) ?>"></label>
-                </div>
-                <p class="frm-optional" style="margin:6px 0 0">Use this when the customer has described the piece but no item has been
-                    picked yet — "a ten-tola 22K chain". The order is recorded and the kaligad can be issued metal against it, but it
-                    quotes nothing until items are put on the grid above. Nothing is invented: an unquoted order shows no total
-                    rather than a wrong one.</p>
-            </details>
 
             <?php if ($editOrder && (float) $editOrder['total_amount'] > 0): ?>
                 <?php

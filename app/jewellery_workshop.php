@@ -566,13 +566,15 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
             $fineTotal += (float) $lineRow['fine_weight'];
         }
     } else {
-        // A shop takes an order before it decides which piece off which tray
-        // will fill it: "a ten-tola 22K chain, design D-100". That order is
-        // real and has to be recordable, so the metal spec comes off the
-        // header and the quote stays empty until items are put on it. Nothing
-        // is invented — an unquoted order shows no total rather than a wrong
-        // one.
+        // No lines. The order form always sends them, so this is an order
+        // already in the books from before orders had lines, or a caller that
+        // describes the piece on the header. It stays supported so the karigar
+        // can still be issued metal against such an order, but it quotes
+        // nothing — an unquoted order shows no total rather than a wrong one.
         $metalId = (int) ($input['metal_id'] ?? 0);
+        if ($metalId <= 0) {
+            throw new RuntimeException('An order needs at least one item.');
+        }
         if (!jewellery_metal($companyId, $metalId)) {
             throw new RuntimeException('Choose a metal that belongs to this company.');
         }

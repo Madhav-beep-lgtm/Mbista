@@ -80,6 +80,51 @@ function ob_previous_fiscal_year(int $companyId, int $fiscalYearId): ?array
  *   is_applicable (false for income/expense), opening_dr, opening_cr, opening_net.
  * Income/expense ledgers are returned with opening 0 and is_applicable=false.
  */
+/**
+ * Opening balances typed on the ledger itself, keyed by ledger id, net and
+ * debit-positive.
+ *
+ * post_ledger_opening_balance() dates its voucher ON the fiscal-year start,
+ * which is the only date that belongs to no earlier period and still sits
+ * inside this year. But rc_ledger_balances() reports what is brought FORWARD —
+ * struck strictly BEFORE the window opens — so a voucher dated exactly on the
+ * start date lands in the period movement and never reached the opening batch.
+ * The figure a user typed while creating the ledger simply vanished from the
+ * screen that is supposed to show it.
+ *
+ * Those vouchers are opening balances by construction, so they are folded into
+ * the system opening here rather than being re-dated. Re-dating them would push
+ * them into the PREVIOUS fiscal year — which may not exist, and may be locked.
+ *
+ * Only vouchers dated exactly on the fiscal-year start are taken. One from an
+ * earlier year is already inside opening_net, and adding it again would double
+ * the balance.
+ *
+ * Both legs come back, the ledger's and the Opening Balance Adjustments contra,
+ * so the batch stays in balance.
+ */
+function ob_direct_ledger_openings(int $companyId, string $fyStart): array
+{
+    if (!table_exists('vouchers') || !table_exists('voucher_entries')) {
+        return [];
+    }
+    $stmt = db()->prepare("SELECT e.ledger_id,
+            COALESCE(SUM(CASE WHEN e.entry_type = 'debit' THEN e.amount ELSE -e.amount END), 0) AS net
+        FROM voucher_entries e
+        INNER JOIN vouchers v ON v.id = e.voucher_id
+        WHERE v.company_id = :cid AND v.source_type = 'ledger_opening' AND v.status = 'posted'
+          AND COALESCE(v.voucher_date, DATE(v.created_at)) = :fystart
+        GROUP BY e.ledger_id");
+    $stmt->execute(['cid' => $companyId, 'fystart' => $fyStart]);
+
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $out[(int) $row['ledger_id']] = (float) $row['net'];
+    }
+
+    return $out;
+}
+
 function ob_computed_opening_rows(int $companyId, int $fiscalYearId): array
 {
     $fy = fiscal_year_by_id($fiscalYearId);
@@ -92,13 +137,16 @@ function ob_computed_opening_rows(int $companyId, int $fiscalYearId): array
     // permanent accounts show their cumulative prior closing and temporary
     // accounts reset to zero, with prior P&L rolled into "Retained Earnings b/f".
     $rows = rc_ledger_balances($companyId, $fyStart, $fyStart, '', 0, 0, [], $fyStart);
+    $directOpenings = ob_direct_ledger_openings($companyId, $fyStart);
 
     $out = [];
     foreach ($rows as $r) {
         $ledgerId = (int) ($r['id'] ?? 0);
         $nature = rc_ledger_nature($r);
         $isPermanent = ob_nature_is_permanent($nature);
-        $opening = $isPermanent ? ob_money((float) ($r['opening_net'] ?? 0)) : 0.0;
+        $opening = $isPermanent
+            ? ob_money((float) ($r['opening_net'] ?? 0) + ($directOpenings[$ledgerId] ?? 0.0))
+            : 0.0;
 
         if ($ledgerId === 0 && (string) ($r['name'] ?? '') === 'Retained Earnings b/f') {
             $lineKey = 'RE_BF';
