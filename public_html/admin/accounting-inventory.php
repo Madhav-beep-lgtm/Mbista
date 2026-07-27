@@ -2017,7 +2017,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             <thead><tr><th>Row</th><th>From the sheet</th><th style="min-width:200px">Item</th><th>Qty</th><th>Rate</th><th>Amount</th><th></th></tr></thead>
             <tbody>
                 <?php foreach ($invImportRows as $ir): ?>
-                    <tr<?= (string) $ir['status'] === 'error' ? ' style="background:#fdf5ef"' : '' ?>>
+                    <tr<?= (string) $ir['status'] === 'error' ? ' style="background:var(--mbw-red-soft,#fdf5ef)"' : '' ?>>
                         <?php if ((string) $ir['status'] === 'committed'): ?>
                             <td><?= (int) $ir['source_row_no'] ?></td>
                             <td><?= e(trim((string) $ir['raw_code'] . ' ' . (string) $ir['raw_name'])) ?></td>

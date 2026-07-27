@@ -73,7 +73,7 @@ function accounting_dashboard_donut_style(array $buckets): string
 {
     $total = array_sum(array_column($buckets, 'amount'));
     if ($total <= 0) {
-        return 'background:#e8eef6';
+        return 'background:var(--mbw-border-soft,#e8eef6)';
     }
 
     $segments = [];

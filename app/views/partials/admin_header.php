@@ -318,7 +318,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" style="margin:2px 12px 4px; display:flex; gap:6px">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <label class="sr-only" for="sidebar-client-books">Open client accounting</label>
-                    <select id="sidebar-client-books" name="company_id" style="flex:1;min-height:32px;font-size:12px;border-radius:8px;border:1px solid var(--mbw-sidebar-line);background:rgba(186,230,253,0.10);color:#dbeffd;padding:4px 8px" onchange="if(this.value){this.form.submit();}">
+                    <select id="sidebar-client-books" name="company_id" style="flex:1;min-height:32px;font-size:12px;border-radius:8px;border:1px solid var(--mbw-sidebar-line);background:rgba(186,230,253,0.10);color:var(--mbw-sidebar-text,#dbeffd);padding:4px 8px" onchange="if(this.value){this.form.submit();}">
                         <option value="">Select client...</option>
                         <?php foreach ($headerClientBooksOptions as $headerClientOption): ?>
                             <option value="<?= (int) $headerClientOption['books_company_id'] ?>" <?= $headerIsClientBooks && (int) $headerClientOption['books_company_id'] === $headerCompanyId ? 'selected' : '' ?>><?= e($headerClientOption['organization_name']) ?></option>

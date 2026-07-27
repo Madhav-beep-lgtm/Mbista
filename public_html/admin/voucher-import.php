@@ -297,7 +297,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <style>
 .vimp-columns-table td, .vimp-columns-table th, .vimp-rules-table td, .vimp-rules-table th { padding: 8px 10px; text-align: left; vertical-align: top; }
 .vimp-preview-table .vimp-errors { color: var(--mbw-red, #b42318); font-size: 0.86rem; margin: 4px 0 0; padding-left: 18px; }
-.vimp-preview-table .vimp-warnings { color: #b54708; font-size: 0.86rem; margin: 4px 0 0; padding-left: 18px; }
+.vimp-preview-table .vimp-warnings { color: var(--mbw-amber, #b54708); font-size: 0.86rem; margin: 4px 0 0; padding-left: 18px; }
 .vimp-lines summary { cursor: pointer; font-size: 0.86rem; }
 .vimp-lines table { margin-top: 6px; }
 .vimp-summary { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }

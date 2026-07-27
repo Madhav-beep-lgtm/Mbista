@@ -1076,7 +1076,7 @@ if (table_exists('company_shareholdings')) {
     <span style="color:var(--mbw-muted);font-size:12px"><?= icon('about') ?> Changes can be applied selectively across portals. Drafts are saved separately from live settings.</span>
     <button type="submit" form="stc-main-form" class="button secondary" onclick="document.getElementById('stc-save-mode').value='draft'"><?= icon('documents') ?>Save Draft</button>
     <button type="submit" form="stc-main-form" class="button" onclick="document.getElementById('stc-save-mode').value='save'" style="margin-left:auto"><?= icon('tasks') ?>Save Settings</button>
-    <button type="submit" form="stc-main-form" class="button" onclick="document.getElementById('stc-save-mode').value='publish'" style="background:var(--mbw-gold);color:#1a2233"><?= icon('portal') ?>Publish to Portals</button>
+    <button type="submit" form="stc-main-form" class="button" onclick="document.getElementById('stc-save-mode').value='publish'" style="background:var(--mbw-gold);color:var(--mbw-sidebar,#1a2233)"><?= icon('portal') ?>Publish to Portals</button>
 </div>
 </div>
 
