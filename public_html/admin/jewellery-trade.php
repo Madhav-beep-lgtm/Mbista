@@ -370,7 +370,7 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
 
 <?php if ($view === 'purchases'): ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-draggable>
         <div class="mbw-card-head">
             <h2><?= $editDoc ? 'Edit Draft Purchase — ' . e((string) $editDoc['purchase_no']) : 'New Purchase' ?></h2>
             <?php if ($editDoc): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">New purchase</a><?php endif; ?>
@@ -480,7 +480,7 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
 
 <?php elseif ($view === 'sales'): ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-draggable>
         <div class="mbw-card-head">
             <h2><?= $editDoc ? 'Edit Draft Sale — ' . e((string) $editDoc['sale_no']) : 'New Sale' ?></h2>
             <?php if ($editDoc): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales')) ?>">New sale</a><?php endif; ?>
@@ -680,7 +680,7 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
     </section>
 
     <?php if ($canEdit && $settleParty > 0): ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-draggable style="margin-top:14px">
         <div class="mbw-card-head">
             <h2>Settle Bills</h2>
             <a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=bills')) ?>">Cancel</a>

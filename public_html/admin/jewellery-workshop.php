@@ -319,7 +319,7 @@ $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' =>
 
 <?php if ($view === 'orders'): ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-draggable>
         <div class="mbw-card-head">
             <h2><?= $editOrder ? 'Edit Order — ' . e((string) $editOrder['order_no']) : 'New Order' ?></h2>
             <?php if ($editOrder): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">New order</a><?php endif; ?>
@@ -571,7 +571,7 @@ $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' =>
 
 <?php elseif ($view === 'karigars'): ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-draggable>
         <div class="mbw-card-head">
             <h2><?= $editKarigar ? 'Edit Kaligad — ' . e((string) $editKarigar['code']) : 'Add Kaligad' ?></h2>
             <?php if ($editKarigar): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=karigars')) ?>">Add new</a><?php endif; ?>
@@ -646,7 +646,7 @@ $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' =>
 
 <?php elseif ($view === 'assignments'): ?>
     <?php if ($canPost): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-draggable>
         <div class="mbw-card-head"><h2>Issue Metal to a Kaligad</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -852,7 +852,7 @@ $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' =>
 
 <?php elseif ($view === 'refinery'): ?>
     <?php if ($canPost): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-draggable>
         <div class="mbw-card-head"><h2>Send Metal for Refining</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

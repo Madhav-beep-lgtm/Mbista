@@ -10948,3 +10948,21 @@ body.home-page .hero::before {
   max-width: none;
   margin-inline: auto;
 }
+
+/* --- Draggable form panels (data-draggable) ------------------------------
+   The handle only advertises itself on hover, so a panel nobody drags looks
+   exactly as it did before. */
+.mbw-drag-handle { cursor: grab; user-select: none; }
+.mbw-drag-handle:active { cursor: grabbing; }
+[data-draggable].is-dragging { z-index: 60; box-shadow: 0 12px 32px rgba(0,0,0,.22); opacity: .97; }
+[data-draggable].is-moved { z-index: 20; }
+body.mbw-dragging { user-select: none; cursor: grabbing; }
+[data-draggable] .mbw-drag-handle::after {
+    content: "\2725";
+    float: right;
+    opacity: 0;
+    font-size: 12px;
+    transition: opacity .12s ease;
+}
+[data-draggable]:hover .mbw-drag-handle::after { opacity: .45; }
+@media print { [data-draggable].is-moved { position: static !important; left: auto !important; top: auto !important; } }

@@ -743,7 +743,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $defaultMetalId = (int) ($settings['default_metal_id'] ?? 0);
     ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-draggable>
         <div class="mbw-card-head"><h2>Quote a Rate</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -855,7 +855,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 <?php elseif ($view === 'items'): ?>
     <?php $itemCategories = jewellery_item_categories($companyId); ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-draggable>
         <div class="mbw-card-head">
             <h2><?= $editItem ? 'Edit Item — ' . e((string) $editItem['code']) : 'Add Item' ?></h2>
             <?php if ($editItem): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery.php?view=items')) ?>">Cancel</a><?php endif; ?>
@@ -1164,7 +1164,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php endif; ?>
 
     <?php if ($canEdit): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-draggable>
         <div class="mbw-card-head"><h2>Record Opening Stock</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1468,7 +1468,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
 
 <?php elseif ($view === 'settings'): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-draggable>
         <div class="mbw-card-head"><h2>Module Settings</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
