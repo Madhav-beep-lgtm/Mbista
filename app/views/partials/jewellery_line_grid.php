@@ -137,6 +137,15 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
     <?php $full = $prefix === 'l'; ?>
     <fieldset class="jw-lines-box" style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:12px 0;min-width:0">
         <legend style="padding:0 6px;font-weight:600"><?= $legend ?></legend>
+        <?php
+            // Controls that belong to this grid — load a template, import a
+            // sheet — sit on its own header rather than loose on the page, so
+            // it is obvious which grid they fill when a sale shows two.
+            $headActions = (string) ($ctx['head_actions'] ?? '');
+        ?>
+        <?php if ($headActions !== ''): ?>
+            <div class="jw-grid-toolbar"><?= $headActions ?></div>
+        <?php endif; ?>
         <div class="jw-lines-scroll"><table class="jw-lines">
             <?php
                 // The widths live here rather than on the header cells. Under

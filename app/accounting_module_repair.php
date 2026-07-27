@@ -2600,6 +2600,23 @@ function accounting_module_repair_database(): array
              WHERE l.`delivery_date` IS NULL AND o.`delivery_date` IS NOT NULL");
     });
 
+    $run('Saved line templates (migration 089)', static function (): void {
+        db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_line_templates` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `company_id` INT UNSIGNED NOT NULL,
+            `doc_type` ENUM('sale','purchase') NOT NULL DEFAULT 'sale',
+            `name` VARCHAR(120) NOT NULL,
+            `lines_json` MEDIUMTEXT NOT NULL,
+            `line_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `created_by` INT UNSIGNED DEFAULT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_jw_template` (`company_id`, `doc_type`, `name`),
+            KEY `idx_jw_template_company` (`company_id`, `doc_type`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

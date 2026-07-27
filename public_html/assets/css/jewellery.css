@@ -128,6 +128,18 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* A disclosure in the rail — how the money was tendered — kept narrow enough
+   that its fields stack rather than fighting for a row. */
+.jw-rail-extra { margin-top: 14px; border-top: 1px solid var(--mbw-border-soft, #eef2f6); padding-top: 12px; }
+.jw-rail-extra > details > summary {
+    cursor: pointer;
+    font-size: .86rem;
+    font-weight: 600;
+    color: var(--mbw-heading, #1c2434);
+    padding: 2px 0;
+}
+.jw-rail-extra .workspace-form-grid { grid-template-columns: 1fr; gap: 8px; margin-top: 10px; }
+
 .jw-rail-actions { display: grid; gap: 9px; margin-top: 14px; }
 .jw-rail-actions .button,
 .jw-rail-actions button { width: 100%; justify-content: center; }
@@ -190,6 +202,21 @@ table.jw-lines .jw-derived {
     font-variant-numeric: tabular-nums;
     color: var(--mbw-green, #16a34a);
 }
+
+/* The grid's own toolbar: templates, import, add a row. */
+.jw-grid-toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    margin: -4px 0 10px;
+}
+.jw-grid-toolbar .button { min-height: 32px; padding: 4px 12px; font-size: .85rem; }
+.jw-grid-toolbar form { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.jw-grid-toolbar select,
+.jw-grid-toolbar input[type="text"],
+.jw-grid-toolbar input[type="file"] { min-height: 32px; font-size: .85rem; max-width: 200px; }
 
 .jw-lines-actions .button { min-height: 32px; }
 /* "Add another item" spans the grid as a ghost row rather than a stray button. */

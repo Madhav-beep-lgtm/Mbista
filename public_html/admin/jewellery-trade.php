@@ -4,6 +4,12 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 // jewellery_reports.php chains in the workshop, trade and stock engines.
 require_once __DIR__ . '/../../app/jewellery_reports.php';
+// The module skin, the summary rail, and the two ways of filling the grid
+// without typing. Required up here because the page body uses them while
+// preparing data, not only while rendering.
+require_once __DIR__ . '/../../app/views/partials/jewellery_page_head.php';
+require_once __DIR__ . '/../../app/views/partials/jewellery_summary_rail.php';
+require_once __DIR__ . '/../../app/jewellery_line_io.php';
 
 // Same server-side gate as every other jewellery page.
 accounting_module_repair_database();
@@ -43,7 +49,10 @@ $todayInFy = $clampDate(date('Y-m-d'));
 // ---------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
-    $action = (string) ($_POST['action'] ?? '');
+    // A toolbar button inside the document form says which of the two it is;
+    // without this the form-level action would always win and the import
+    // would be read as a save.
+    $action = (string) ($_POST['grid_action'] ?? $_POST['action'] ?? '');
     $back = 'admin/jewellery-trade.php?view=' . urlencode((string) ($_POST['back_view'] ?? $view));
 
     if ($action === 'save_purchase') {
@@ -145,6 +154,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? jewellery_delete_purchase($companyId, $id)
             : jewellery_delete_sale($companyId, $id);
         flash($removed ? 'success' : 'error', $removed ? 'Draft removed.' : 'Only a draft can be deleted.');
+        redirect($back);
+    }
+
+    // --- filling the grid without typing -----------------------------------
+    //
+    // A template and an import both end in the SAME place: rows parked in the
+    // session, rendered into the grid on the next request, and then saved by
+    // the ordinary save action. Neither writes a document, so neither can put
+    // anything in the books that the normal validation would have refused.
+    if ($action === 'apply_template') {
+        require_permission('jewellery', 'edit');
+        $docType = (string) ($_POST['doc_type'] ?? 'sale');
+        $rows = jw_template_lines($companyId, (int) ($_POST['template_id'] ?? 0));
+        if ($rows === []) {
+            flash('error', 'That template is empty or does not belong to this company.');
+        } else {
+            $_SESSION['jw_staged_lines'][$docType] = $rows;
+            flash('success', count($rows) . ' item(s) loaded from the template. Nothing is saved until you save the document.');
+        }
+        redirect($back);
+    }
+
+    if ($action === 'save_template') {
+        require_permission('jewellery', 'edit');
+        $docType = (string) ($_POST['doc_type'] ?? 'sale');
+        $saved = jw_template_save($companyId, $docType, (string) ($_POST['template_name'] ?? ''),
+            jw_posted_lines($_POST, 'l'), $userId);
+        flash($saved['ok'] ? 'success' : 'error', $saved['ok']
+            ? ('Template saved with ' . $saved['count'] . ' item(s).') : $saved['error']);
+        redirect($back);
+    }
+
+    if ($action === 'import_lines') {
+        require_permission('jewellery', 'edit');
+        $docType = (string) ($_POST['doc_type'] ?? 'sale');
+        $upload = $_FILES['lines_file'] ?? null;
+        if (!$upload || ($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file($upload['tmp_name'])) {
+            flash('error', 'Choose a .csv or .xlsx file to import.');
+            redirect($back);
+        }
+        $extension = strtolower(pathinfo((string) $upload['name'], PATHINFO_EXTENSION));
+        if (!in_array($extension, ['csv', 'xlsx'], true)) {
+            flash('error', 'Only .csv and .xlsx files can be imported.');
+            redirect($back);
+        }
+        $imported = jw_import_lines($companyId, (string) $upload['tmp_name'], $extension);
+        if ($imported['rows'] !== []) {
+            $_SESSION['jw_staged_lines'][$docType] = $imported['rows'];
+        }
+        // Both halves are reported: what came in, and what did not. An import
+        // that silently drops three rows is worse than one that refuses.
+        $note = $imported['matched'] . ' item(s) read from the file.';
+        if ($imported['errors'] !== []) {
+            $note .= ' ' . count($imported['errors']) . ' row(s) skipped: '
+                . implode(' ', array_slice($imported['errors'], 0, 3));
+        }
+        flash($imported['ok'] ? 'success' : 'error',
+            $imported['ok'] ? $note . ' Nothing is saved until you save the document.' : implode(' ', $imported['errors']));
         redirect($back);
     }
 
@@ -256,6 +323,18 @@ if ($view === 'purchases') {
     }
 }
 
+// Rows a template or an import just put on the form. They REPLACE whatever the
+// grid would otherwise show, and are taken out of the session as they are read
+// so a refresh does not apply them again — a page that keeps re-filling itself
+// is impossible to correct.
+$stagedDocType = $view === 'purchases' ? 'purchase' : 'sale';
+if (!empty($_SESSION['jw_staged_lines'][$stagedDocType])) {
+    $editLines = (array) $_SESSION['jw_staged_lines'][$stagedDocType];
+    unset($_SESSION['jw_staged_lines'][$stagedDocType]);
+}
+$lineTemplates = in_array($view, ['purchases', 'sales'], true)
+    ? jw_templates_list($companyId, $stagedDocType) : [];
+
 // Orders waiting to be collected by the customer on this sale. Somebody at the
 // counter picking up their ring should not have to be asked which order it was.
 $saleParty = (int) ($_GET['for_party'] ?? ($editDoc['party_id'] ?? 0));
@@ -313,8 +392,6 @@ require_once __DIR__ . '/../../app/views/partials/jewellery_line_grid.php';
 require_once __DIR__ . '/../../app/views/partials/jewellery_filter_bar.php';
 // The module skin: the document header, the summary rail and the strip
 // that closes the page.
-require_once __DIR__ . '/../../app/views/partials/jewellery_page_head.php';
-require_once __DIR__ . '/../../app/views/partials/jewellery_summary_rail.php';
 jw_line_grid_styles();
 jw_filter_bar_styles();
 ?>
@@ -327,10 +404,47 @@ jw_filter_bar_styles();
 </nav>
 
 <?php
-$renderLineRows = static function (string $prefix, array $existing, int $slots, string $legend) use ($items, $purities, $units, $baseUnit, $fmt, $onHand): void {
+/**
+ * The grid's toolbar: load a saved set of lines, save the current one, or read
+ * them out of a spreadsheet.
+ *
+ * These controls live INSIDE the document form — a form cannot be nested inside
+ * another, and putting them in one of their own would have meant the import
+ * losing everything already typed on the page.
+ *
+ * So they share the form and say which button was pressed through grid_action,
+ * which the dispatcher reads BEFORE the form's own hidden action. Relying on a
+ * second field called "action" overriding the first by document order would
+ * have worked, and would have been a trap for whoever moved a field later.
+ */
+$renderGridToolbar = static function (string $docType) use ($lineTemplates): string {
+    ob_start(); ?>
+    <input type="hidden" name="doc_type" value="<?= e($docType) ?>">
+    <?php if ($lineTemplates !== []): ?>
+        <label class="sr-only" for="jw-tpl-<?= e($docType) ?>">Quick template</label>
+        <select id="jw-tpl-<?= e($docType) ?>" name="template_id">
+            <option value="">Quick templates…</option>
+            <?php foreach ($lineTemplates as $tpl): ?>
+                <option value="<?= (int) $tpl['id'] ?>"><?= e($tpl['name']) ?> (<?= (int) $tpl['line_count'] ?>)</option>
+            <?php endforeach; ?>
+        </select>
+        <button type="submit" class="button soft" name="grid_action" value="apply_template" formnovalidate>Load</button>
+    <?php endif; ?>
+    <label class="sr-only" for="jw-tplname-<?= e($docType) ?>">Save these lines as</label>
+    <input id="jw-tplname-<?= e($docType) ?>" type="text" name="template_name" maxlength="120" placeholder="Save as template…">
+    <button type="submit" class="button soft" name="grid_action" value="save_template" formnovalidate>Save set</button>
+    <label class="sr-only" for="jw-imp-<?= e($docType) ?>">Spreadsheet of items</label>
+    <input id="jw-imp-<?= e($docType) ?>" type="file" name="lines_file" accept=".csv,.xlsx">
+    <button type="submit" class="button soft" name="grid_action" value="import_lines" formnovalidate><?= icon('upload') ?>Import</button>
+    <?php
+    return (string) ob_get_clean();
+};
+
+$renderLineRows = static function (string $prefix, array $existing, int $slots, string $legend, string $headActions = '') use ($items, $purities, $units, $baseUnit, $fmt, $onHand): void {
     jw_render_line_grid($prefix, $existing, $slots, $legend, [
         'items' => $items, 'purities' => $purities, 'units' => $units,
         'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $onHand,
+        'head_actions' => $headActions,
     ]);
 };
 ?>
@@ -347,7 +461,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         <?php else: ?>
         <?php // The FORM is the two-column grid, so the rail is a real sibling
               // of the working area rather than something floated beside it. ?>
-        <form method="post" class="jw-layout">
+        <form method="post" class="jw-layout" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_purchase">
             <input type="hidden" name="back_view" value="purchases">
@@ -398,7 +512,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 </label>
                 <label style="grid-column:1/-1">Narration<input type="text" name="narration" maxlength="255" value="<?= e((string) ($editDoc['narration'] ?? '')) ?>"></label>
             </div>
-            <?php $renderLineRows('l', $editLines, max($lineSlots, count($editLines) + 1), 'Purchase lines'); ?>
+            <?php $renderLineRows('l', $editLines, max($lineSlots, count($editLines) + 1), 'Purchase lines', $renderGridToolbar('purchase')); ?>
             </section>
           </div>
 
@@ -508,7 +622,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
             <div class="notice">This sale is posted and can no longer be edited. Unpost it first.</div>
         </section>
         <?php else: ?>
-        <form method="post" class="jw-layout">
+        <form method="post" class="jw-layout" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_sale">
             <input type="hidden" name="back_view" value="sales">
@@ -553,16 +667,6 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <label style="grid-column:1/-1">Narration<input type="text" name="narration" maxlength="255" value="<?= e((string) ($editDoc['narration'] ?? '')) ?>"></label>
                 <label style="grid-column:1/-1">Remarks (printed on the bill)<input type="text" name="remarks" maxlength="255" value="<?= e((string) ($editDoc['remarks'] ?? '')) ?>"></label>
             </div>
-            <details<?= ((float) ($editDoc['paid_cash'] ?? 0) + (float) ($editDoc['paid_card'] ?? 0)
-                + (float) ($editDoc['paid_cheque'] ?? 0) + (float) ($editDoc['paid_qr'] ?? 0)) > 0 ? ' open' : '' ?>>
-                <summary>How the money was tendered</summary>
-                <div class="workspace-form-grid">
-                    <?php foreach (['paid_cash' => 'Cash', 'paid_card' => 'Card', 'paid_cheque' => 'Cheque', 'paid_qr' => 'QR / transfer'] as $tenderField => $tenderLabel): ?>
-                        <label><?= e($tenderLabel) ?> (<?= e($sym) ?>)<input type="number" name="<?= e($tenderField) ?>" step="0.01" min="0"
-                            value="<?= e((string) ($editDoc[$tenderField] ?? '0')) ?>"></label>
-                    <?php endforeach; ?>
-                </div>
-            </details>
             <?php if ($openOrders !== []): ?>
             <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px;margin:12px 0">
                 <legend style="padding:0 6px;font-weight:600">Orders this customer is here to collect</legend>
@@ -615,7 +719,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <?php endif; ?>
             </fieldset>
             <?php endif; ?>
-            <?php $renderLineRows('l', $editLines, max($lineSlots, count($editLines) + 1), 'Items sold'); ?>
+            <?php $renderLineRows('l', $editLines, max($lineSlots, count($editLines) + 1), 'Items sold', $renderGridToolbar('sale')); ?>
             <?php $renderLineRows('x', $editExchanges, max(2, count($editExchanges) + 1), 'Old gold taken in exchange (metal-to-metal)'); ?>
             </section>
           </div>
@@ -627,9 +731,27 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                     <a class="button soft" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-invoice.php?id=' . (int) $editDoc['id'])) ?>"><?= icon('receipt-voucher') ?>Invoice</a>
                     <a class="button soft" href="<?= e(url('admin/jewellery-trade.php?view=sales')) ?>">Cancel</a>
                 <?php endif; ?>
+                <?php
+                // How the money was tendered belongs with the money, so it
+                // sits in the rail beside the total rather than halfway down
+                // the form. It is still inside the document form, so its
+                // fields post with everything else.
+                ob_start(); ?>
+                <details<?= ((float) ($editDoc['paid_cash'] ?? 0) + (float) ($editDoc['paid_card'] ?? 0)
+                    + (float) ($editDoc['paid_cheque'] ?? 0) + (float) ($editDoc['paid_qr'] ?? 0)) > 0 ? ' open' : '' ?>>
+                    <summary>How the money was tendered</summary>
+                    <div class="workspace-form-grid">
+                        <?php foreach (['paid_cash' => 'Cash', 'paid_card' => 'Card', 'paid_cheque' => 'Cheque', 'paid_qr' => 'QR / transfer'] as $tenderField => $tenderLabel): ?>
+                            <label><?= e($tenderLabel) ?> (<?= e($sym) ?>)<input type="number" name="<?= e($tenderField) ?>" step="0.01" min="0"
+                                value="<?= e((string) ($editDoc[$tenderField] ?? '0')) ?>"></label>
+                        <?php endforeach; ?>
+                    </div>
+                </details>
+                <?php $tenderPanel = (string) ob_get_clean(); ?>
                 <?php jw_summary_rail([
                     'currency' => $sym,
                     'with_old_gold' => true,
+                    'extra' => $tenderPanel,
                     'actions' => (string) ob_get_clean(),
                     'shortcuts' => [
                         'Metal rates' => url('admin/jewellery.php?view=rates'),

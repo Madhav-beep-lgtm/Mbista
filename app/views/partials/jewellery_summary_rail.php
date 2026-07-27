@@ -42,6 +42,15 @@ function jw_summary_rail(array $ctx): void
                 <span>Document total (<?= e($sym) ?>) — before tax</span>
                 <strong data-jw-sum="total">0.00</strong>
             </div>
+            <?php
+                // Anything that belongs with the money rather than with the
+                // items — how it was tendered, for instance. It renders INSIDE
+                // the document form, so its fields post with everything else.
+                $extra = (string) ($ctx['extra'] ?? '');
+            ?>
+            <?php if ($extra !== ''): ?>
+                <div class="jw-rail-extra"><?= $extra ?></div>
+            <?php endif; ?>
             <?php if ($actions !== ''): ?>
                 <div class="jw-rail-actions"><?= $actions ?></div>
             <?php endif; ?>
