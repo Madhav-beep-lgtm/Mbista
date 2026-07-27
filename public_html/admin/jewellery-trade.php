@@ -221,14 +221,34 @@ $editDoc = null;
 $editLines = [];
 $editExchanges = [];
 $docs = [];
+// What the list is filtered by. Everything travels in the query string, so a
+// filtered list can be bookmarked or sent to somebody and come back the same.
+$filterSearch = trim((string) ($_GET['q'] ?? ''));
+$filterFrom = (string) ($_GET['from'] ?? '');
+$filterTo = (string) ($_GET['to'] ?? '');
+$filterStatus = (string) ($_GET['status'] ?? '');
+$filterParty = (int) ($_GET['party'] ?? 0);
+$filterSource = (string) ($_GET['source'] ?? '');
+$docFilters = [
+    'limit' => 300,
+    'search' => $filterSearch,
+    'status' => $filterStatus,
+    'party_id' => $filterParty,
+];
+if ($filterFrom !== '' && $filterTo !== '') {
+    $docFilters['from'] = $filterFrom;
+    $docFilters['to'] = $filterTo;
+}
+$advancedInUse = $filterStatus !== '' || $filterParty > 0 || $filterSource !== '';
+
 if ($view === 'purchases') {
-    $docs = jewellery_purchases_list($companyId, ['limit' => 100]);
+    $docs = jewellery_purchases_list($companyId, $docFilters + ['source' => $filterSource]);
     $editDoc = jewellery_purchase($companyId, (int) ($_GET['edit'] ?? 0));
     if ($editDoc) {
         $editLines = jewellery_purchase_line_rows($companyId, (int) $editDoc['id']);
     }
 } elseif ($view === 'sales') {
-    $docs = jewellery_sales_list($companyId, ['limit' => 100]);
+    $docs = jewellery_sales_list($companyId, $docFilters);
     $editDoc = jewellery_sale($companyId, (int) ($_GET['edit'] ?? 0));
     if ($editDoc) {
         $editLines = jewellery_sale_line_rows($companyId, (int) $editDoc['id']);
@@ -290,7 +310,9 @@ $lineSlots = 5;
 // The line grid is shared with the order form — one grid, one set of
 // column names, so a field added to a sale reaches an order too.
 require_once __DIR__ . '/../../app/views/partials/jewellery_line_grid.php';
+require_once __DIR__ . '/../../app/views/partials/jewellery_filter_bar.php';
 jw_line_grid_styles();
+jw_filter_bar_styles();
 ?>
 
 <nav class="mbw-tabbar" aria-label="Jewellery trading sections" style="flex-wrap:wrap">
@@ -375,6 +397,23 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Purchases (<?= count($docs) ?>)</h2></div>
+        <?php jw_render_filter_bar([
+            'hidden' => ['view' => 'purchases'],
+            'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
+            'min_date' => $fyStart, 'max_date' => $fyEnd,
+            'reset' => url('admin/jewellery-trade.php?view=purchases'),
+            'advanced_in_use' => $advancedInUse,
+            'advanced' => [
+                ['label' => 'Status', 'html' => jw_filter_select('status', $filterStatus,
+                    ['draft' => 'Draft', 'posted' => 'Posted'])],
+                ['label' => 'Party', 'html' => jw_filter_select('party', (string) $filterParty,
+                    array_column($parties, 'name', 'id'))],
+                ['label' => 'Source', 'html' => jw_filter_select('source', $filterSource, [
+                    'supplier' => 'Supplier', 'customer' => 'Old gold from a customer', 'refinery' => 'Refinery',
+                ])],
+            ],
+        ]); ?>
+
         <div style="overflow-x:auto"><table>
             <thead><tr><th>No.</th><th>Date</th><th>Party</th><th>Source</th><th class="is-numeric">Metal</th><th class="is-numeric">VAT</th><th class="is-numeric">Total</th><th>Settlement</th><th>Status</th><th></th></tr></thead>
             <tbody>
@@ -551,6 +590,20 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2></div>
+        <?php jw_render_filter_bar([
+            'hidden' => ['view' => 'sales'],
+            'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
+            'min_date' => $fyStart, 'max_date' => $fyEnd,
+            'reset' => url('admin/jewellery-trade.php?view=sales'),
+            'advanced_in_use' => $advancedInUse,
+            'advanced' => [
+                ['label' => 'Status', 'html' => jw_filter_select('status', $filterStatus,
+                    ['draft' => 'Draft', 'posted' => 'Posted'])],
+                ['label' => 'Customer', 'html' => jw_filter_select('party', (string) $filterParty,
+                    array_column($parties, 'name', 'id'))],
+            ],
+        ]); ?>
+
         <div style="overflow-x:auto"><table>
             <thead><tr><th>No.</th><th>Date</th><th>Customer</th><th class="is-numeric">Total</th><th class="is-numeric">Cash</th><th class="is-numeric">Exchange</th><th class="is-numeric">Balance</th><th class="is-numeric">COGS</th><th>Status</th><th></th></tr></thead>
             <tbody>

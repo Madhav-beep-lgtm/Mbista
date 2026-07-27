@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../app/jewellery_reports.php';
 // The order form punches items on the SAME grid the sale does, so a quote and
 // the bill it becomes can never carry different columns.
 require_once __DIR__ . '/../../app/views/partials/jewellery_line_grid.php';
+require_once __DIR__ . '/../../app/views/partials/jewellery_filter_bar.php';
 
 accounting_module_repair_database();
 require_jewellery();
@@ -326,7 +327,30 @@ if (table_exists('payroll_employees')) {
     $employees = $empStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-$orders = $view === 'orders' ? jewellery_orders_list($companyId) : [];
+// Everything a list is filtered by travels in the query string, so a filtered
+// list can be bookmarked or sent to somebody and come back the same.
+$filterSearch = trim((string) ($_GET['q'] ?? ''));
+$filterFrom = (string) ($_GET['from'] ?? '');
+$filterTo = (string) ($_GET['to'] ?? '');
+$filterStatus = (string) ($_GET['status'] ?? '');
+$filterParty = (int) ($_GET['party'] ?? 0);
+$filterKarigar = (int) ($_GET['karigar'] ?? 0);
+$filterOverdue = !empty($_GET['overdue']);
+$listFilters = [
+    'limit' => 300,
+    'search' => $filterSearch,
+    'status' => $filterStatus,
+    'party_id' => $filterParty,
+    'karigar_id' => $filterKarigar,
+    'overdue_only' => $filterOverdue,
+];
+if ($filterFrom !== '' && $filterTo !== '') {
+    $listFilters['from'] = $filterFrom;
+    $listFilters['to'] = $filterTo;
+}
+$advancedInUse = $filterStatus !== '' || $filterParty > 0 || $filterKarigar > 0 || $filterOverdue;
+
+$orders = $view === 'orders' ? jewellery_orders_list($companyId, $listFilters) : [];
 $editKarigar = $view === 'karigars' ? jewellery_karigar($companyId, (int) ($_GET['edit'] ?? 0)) : null;
 $editOrder = $view === 'orders' ? jewellery_order($companyId, (int) ($_GET['edit'] ?? 0)) : null;
 $orderAdvances = $editOrder ? jewellery_order_advances($companyId, (int) $editOrder['id'])
@@ -350,7 +374,7 @@ if ($view === 'orders' && table_exists('ledgers')) {
     $cashStmt->execute(['cid' => $companyId]);
     $cashBankLedgers = $cashStmt->fetchAll(PDO::FETCH_ASSOC);
 }
-$assignments = $view === 'assignments' ? jewellery_assignments_list($companyId) : [];
+$assignments = $view === 'assignments' ? jewellery_assignments_list($companyId, $listFilters) : [];
 $receiveTarget = $view === 'assignments' ? jewellery_assignment($companyId, (int) ($_GET['receive'] ?? 0)) : null;
 $receivePreview = null;
 if ($receiveTarget && (string) $receiveTarget['status'] === 'issued') {
@@ -370,6 +394,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' => 'tone-amber',
     'received' => 'tone-teal', 'delivered' => 'tone-green', 'cancelled' => 'tone-red'];
 jw_line_grid_styles();
+jw_filter_bar_styles();
 ?>
 
 <nav class="mbw-tabbar" aria-label="Jewellery workshop sections" style="flex-wrap:wrap">
@@ -628,6 +653,25 @@ jw_line_grid_styles();
 
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Orders (<?= count($orders) ?>)</h2></div>
+        <?php jw_render_filter_bar([
+            'hidden' => ['view' => 'orders'],
+            'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
+            'min_date' => $fyStart, 'max_date' => $fyEnd,
+            'reset' => url('admin/jewellery-workshop.php?view=orders'),
+            'advanced_in_use' => $advancedInUse,
+            'advanced' => [
+                ['label' => 'Status', 'html' => jw_filter_select('status', $filterStatus, [
+                    'draft' => 'Draft', 'confirmed' => 'Confirmed', 'assigned' => 'Assigned',
+                    'received' => 'Received', 'delivered' => 'Delivered', 'cancelled' => 'Cancelled',
+                ])],
+                ['label' => 'Customer', 'html' => jw_filter_select('party', (string) $filterParty,
+                    array_column($parties, 'name', 'id'))],
+                ['label' => 'Kaligad', 'html' => jw_filter_select('karigar', (string) $filterKarigar,
+                    array_column($karigars, 'code', 'id'))],
+                ['label' => 'Past due, uncollected', 'html' => jw_filter_select('overdue',
+                    $filterOverdue ? '1' : '', ['1' => 'Only these'], '— all —')],
+            ],
+        ]); ?>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>No.</th><th>Date</th><th>Customer</th><th>Metal</th><th class="is-numeric">Expected wt</th><th>Delivery</th><th>Status</th><th></th></tr></thead>
             <tbody>
@@ -923,6 +967,20 @@ jw_line_grid_styles();
 
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Assignments (<?= count($assignments) ?>)</h2></div>
+        <?php jw_render_filter_bar([
+            'hidden' => ['view' => 'assignments'],
+            'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
+            'min_date' => $fyStart, 'max_date' => $fyEnd,
+            'reset' => url('admin/jewellery-workshop.php?view=assignments'),
+            'advanced_in_use' => $advancedInUse,
+            'advanced' => [
+                ['label' => 'Status', 'html' => jw_filter_select('status', $filterStatus, [
+                    'issued' => 'Issued', 'received' => 'Received', 'cancelled' => 'Cancelled',
+                ])],
+                ['label' => 'Kaligad', 'html' => jw_filter_select('karigar', (string) $filterKarigar,
+                    array_column($karigars, 'code', 'id'))],
+            ],
+        ]); ?>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Issue no.</th><th>Date</th><th>Kaligad</th><th>Order</th><th>Item</th><th class="is-numeric">Issued (fine)</th><th class="is-numeric">Allowed wastage</th><th>Status</th><th></th></tr></thead>
             <tbody>

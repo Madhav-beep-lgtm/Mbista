@@ -437,6 +437,29 @@ function jewellery_orders_list(int $companyId, array $filters = []): array
         $sql .= ' AND o.delivery_date IS NOT NULL AND o.delivery_date <= :due';
         $params['due'] = (string) $filters['due_before'];
     }
+    if (!empty($filters['party_id'])) {
+        $sql .= ' AND o.party_id = :pid';
+        $params['pid'] = (int) $filters['party_id'];
+    }
+    if (!empty($filters['karigar_id'])) {
+        $sql .= ' AND EXISTS (SELECT 1 FROM jewellery_order_lines ol
+            WHERE ol.order_id = o.id AND ol.karigar_id = :kid)';
+        $params['kid'] = (int) $filters['karigar_id'];
+    }
+    if (!empty($filters['overdue_only'])) {
+        // Promised, past due, and still nobody has come in for it.
+        $sql .= " AND o.delivery_date IS NOT NULL AND o.delivery_date < :today
+            AND o.status NOT IN ('delivered', 'cancelled')";
+        $params['today'] = date('Y-m-d');
+    }
+    if (trim((string) ($filters['search'] ?? '')) !== '') {
+        $sql .= ' AND (o.order_no LIKE :q1 OR o.customer_name LIKE :q2
+            OR o.design_no LIKE :q3 OR ap.name LIKE :q4)';
+        $needle = '%' . trim((string) $filters['search']) . '%';
+        foreach (['q1', 'q2', 'q3', 'q4'] as $key) {
+            $params[$key] = $needle;
+        }
+    }
     $sql .= ' ORDER BY o.order_date DESC, o.id DESC LIMIT ' . max(1, min(1000, (int) ($filters['limit'] ?? 300)));
 
     $stmt = db()->prepare($sql);
@@ -972,6 +995,19 @@ function jewellery_assignments_list(int $companyId, array $filters = []): array
     if (!empty($filters['karigar_id'])) {
         $sql .= ' AND a.karigar_id = :kid';
         $params['kid'] = (int) $filters['karigar_id'];
+    }
+    if (($filters['from'] ?? '') !== '' && ($filters['to'] ?? '') !== '') {
+        $sql .= ' AND a.issue_date BETWEEN :from AND :to';
+        $params['from'] = (string) $filters['from'];
+        $params['to'] = (string) $filters['to'];
+    }
+    if (trim((string) ($filters['search'] ?? '')) !== '') {
+        $sql .= ' AND (a.issue_no LIKE :q1 OR k.name LIKE :q2 OR k.code LIKE :q3
+            OR i.sku LIKE :q4 OR o.order_no LIKE :q5)';
+        $needle = '%' . trim((string) $filters['search']) . '%';
+        foreach (['q1', 'q2', 'q3', 'q4', 'q5'] as $key) {
+            $params[$key] = $needle;
+        }
     }
     $sql .= ' ORDER BY a.issue_date DESC, a.id DESC LIMIT ' . max(1, min(1000, (int) ($filters['limit'] ?? 300)));
 

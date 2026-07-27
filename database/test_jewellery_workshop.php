@@ -718,6 +718,66 @@ ok(jewellery_overdue_orders($cidA, '2026-09-01')['rows'] === []
     || count(jewellery_overdue_orders($cidA, '2026-09-01')['rows']) < count($overdue['rows']),
     'Asked as at an earlier date, fewer are late — the report is a date question, not a status flag');
 
+echo "\n18. The list filters actually filter\n";
+// A filter that renders but does not narrow the list is worse than none: it
+// tells the user the list is complete when it is not.
+$filterOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-09-15', 'party_id' => $customer, 'status' => 'confirmed',
+    'design_no' => 'FIND-ME-77',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'karigar_id' => $kEmployee, 'delivery_date' => '2026-09-28'],
+], $userA);
+$filterNo = (string) jewellery_order($cidA, $filterOrder)['order_no'];
+
+$bySearch = array_column(jewellery_orders_list($cidA, ['search' => 'FIND-ME-77']), 'order_no');
+ok($bySearch === [$filterNo], 'Searching the design number finds exactly that order');
+ok(array_column(jewellery_orders_list($cidA, ['search' => $filterNo]), 'order_no') === [$filterNo],
+    'And so does searching its number');
+ok(jewellery_orders_list($cidA, ['search' => 'NOTHING-MATCHES-THIS']) === [],
+    'A search that matches nothing returns nothing, not everything');
+
+$byStatus = jewellery_orders_list($cidA, ['status' => 'cancelled']);
+foreach ($byStatus as $statusRow) {
+    ok((string) $statusRow['status'] === 'cancelled', 'Status filter returns only that status');
+    break;
+}
+ok(count(jewellery_orders_list($cidA, ['status' => 'confirmed']))
+    < count(jewellery_orders_list($cidA, [])), 'A status filter narrows the list');
+
+$byKarigar = jewellery_orders_list($cidA, ['karigar_id' => $kEmployee]);
+$byKarigarNos = array_column($byKarigar, 'order_no');
+ok(in_array($filterNo, $byKarigarNos, true), "Filtering by kaligad finds the order whose ITEM names him");
+ok(!in_array($filterNo, array_column(jewellery_orders_list($cidA, ['karigar_id' => $kContractor]), 'order_no'), true),
+    'And not one whose items name somebody else');
+
+$byParty = jewellery_orders_list($cidA, ['party_id' => $customer]);
+ok($byParty !== [] && count($byParty) <= count(jewellery_orders_list($cidA, [])),
+    'Filtering by customer narrows to that customer');
+ok(jewellery_orders_list($cidA, ['party_id' => 999999]) === [], 'A customer with no orders returns none');
+
+$overdueList = jewellery_orders_list($cidA, ['overdue_only' => true]);
+foreach ($overdueList as $overdueRow) {
+    ok((string) $overdueRow['delivery_date'] < date('Y-m-d')
+        && !in_array((string) $overdueRow['status'], ['delivered', 'cancelled'], true),
+        'The past-due filter returns only orders promised before today and not closed');
+    break;
+}
+
+$byDate = jewellery_orders_list($cidA, ['from' => '2026-09-15', 'to' => '2026-09-15']);
+ok(array_column($byDate, 'order_no') === [$filterNo], 'A one-day range returns just that day');
+
+// The same on assignments.
+ok(jewellery_assignments_list($cidA, ['search' => 'NOTHING-MATCHES-THIS']) === [],
+    'Assignments: a search that matches nothing returns nothing');
+$issuedOnly = jewellery_assignments_list($cidA, ['status' => 'issued']);
+foreach ($issuedOnly as $issuedRow) {
+    ok((string) $issuedRow['status'] === 'issued', 'Assignments: the status filter holds');
+    break;
+}
+ok(jewellery_assignments_list($cidA, ['karigar_id' => 999999]) === [],
+    'Assignments: a kaligad with no issues returns none');
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

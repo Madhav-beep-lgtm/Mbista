@@ -873,6 +873,13 @@ function jewellery_purchases_list(int $companyId, array $filters = []): array
         $sql .= ' AND p.party_id = :pid';
         $params['pid'] = (int) $filters['party_id'];
     }
+    if (trim((string) ($filters['search'] ?? '')) !== '') {
+        $sql .= ' AND (p.purchase_no LIKE :q1 OR p.ref_no LIKE :q2 OR ap.name LIKE :q3)';
+        $needle = '%' . trim((string) $filters['search']) . '%';
+        foreach (['q1', 'q2', 'q3'] as $key) {
+            $params[$key] = $needle;
+        }
+    }
     $sql .= ' ORDER BY p.purchase_date DESC, p.id DESC LIMIT ' . max(1, min(1000, (int) ($filters['limit'] ?? 200)));
 
     $stmt = db()->prepare($sql);
@@ -1263,6 +1270,14 @@ function jewellery_sales_list(int $companyId, array $filters = []): array
     if (!empty($filters['party_id'])) {
         $sql .= ' AND s.party_id = :pid';
         $params['pid'] = (int) $filters['party_id'];
+    }
+    if (trim((string) ($filters['search'] ?? '')) !== '') {
+        $sql .= ' AND (s.sale_no LIKE :q1 OR s.ref_no LIKE :q2
+            OR s.customer_name LIKE :q3 OR ap.name LIKE :q4)';
+        $needle = '%' . trim((string) $filters['search']) . '%';
+        foreach (['q1', 'q2', 'q3', 'q4'] as $key) {
+            $params[$key] = $needle;
+        }
     }
     $sql .= ' ORDER BY s.sale_date DESC, s.id DESC LIMIT ' . max(1, min(1000, (int) ($filters['limit'] ?? 200)));
 
