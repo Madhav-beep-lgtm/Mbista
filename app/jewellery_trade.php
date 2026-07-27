@@ -808,11 +808,13 @@ function jewellery_purchase(int $companyId, int $purchaseId): ?array
 
 function jewellery_purchase_line_rows(int $companyId, int $purchaseId): array
 {
-    $stmt = db()->prepare('SELECT l.*, i.sku AS item_code, i.name AS item_name, jp.jewellery_type AS item_type, i.category,
+    $stmt = db()->prepare('SELECT l.*, i.sku AS item_code, i.name AS item_name, i.hs_code,
+            jp.jewellery_type AS item_type, i.category, mt.name AS metal_name,
             p.code AS purity_code, p.fineness, u.code AS unit_code
         FROM jewellery_purchase_lines l
         INNER JOIN inventory_items i ON i.id = l.item_id
             INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
+        INNER JOIN jewellery_metals mt ON mt.id = jp.metal_id
         INNER JOIN jewellery_purities p ON p.id = l.purity_id
         INNER JOIN jewellery_units u ON u.id = l.unit_id
         WHERE l.company_id = :cid AND l.purchase_id = :pid ORDER BY l.id ASC');
@@ -1183,11 +1185,16 @@ function jewellery_sale(int $companyId, int $saleId): ?array
 
 function jewellery_sale_line_rows(int $companyId, int $saleId): array
 {
-    $stmt = db()->prepare('SELECT l.*, i.sku AS item_code, i.name AS item_name, jp.jewellery_type AS item_type, i.category,
+    // hs_code and the metal name are here because the printed bill has an
+    // "HS Code" and a "Type" column; without them the invoice would have to
+    // look each item up again, row by row.
+    $stmt = db()->prepare('SELECT l.*, i.sku AS item_code, i.name AS item_name, i.hs_code,
+            jp.jewellery_type AS item_type, i.category, mt.name AS metal_name,
             p.code AS purity_code, p.fineness, u.code AS unit_code
         FROM jewellery_sale_lines l
         INNER JOIN inventory_items i ON i.id = l.item_id
             INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
+        INNER JOIN jewellery_metals mt ON mt.id = jp.metal_id
         INNER JOIN jewellery_purities p ON p.id = l.purity_id
         INNER JOIN jewellery_units u ON u.id = l.unit_id
         WHERE l.company_id = :cid AND l.sale_id = :sid ORDER BY l.id ASC');
@@ -1377,6 +1384,28 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
         }
     }
 
+    // How the received amount was tendered. This is a BREAKDOWN for the printed
+    // bill, not a second source of truth: the money still moves through the one
+    // settle ledger above. Leaving every field blank is the normal case and
+    // keeps the old behaviour — the whole receipt simply shows against the
+    // settle mode. Fill any of them and they must add up exactly, otherwise the
+    // bill would print a tender row that disagrees with its own total.
+    $tender = [];
+    $tenderTotal = 0.0;
+    foreach (['cash', 'card', 'cheque', 'qr'] as $mode) {
+        $amount = jw_round_money((float) ($header['paid_' . $mode] ?? 0));
+        if ($amount < 0) {
+            throw new RuntimeException('A tender amount cannot be negative.');
+        }
+        $tender['paid_' . $mode] = $amount;
+        $tenderTotal += $amount;
+    }
+    $tenderTotal = jw_round_money($tenderTotal);
+    if ($tenderTotal > 0 && abs($tenderTotal - $received) > 0.005) {
+        throw new RuntimeException('The tender split (' . number_format($tenderTotal, 2)
+            . ') must add up to the amount received (' . number_format($received, 2) . ').');
+    }
+
     $params = [
         'cid' => $companyId, 'fy' => $fiscalYearId ?: null, 'date' => $date, 'party' => $partyId,
         'cname' => trim((string) ($header['customer_name'] ?? '')) ?: null,
@@ -1390,8 +1419,13 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
         'nontax' => $totals['non_taxable_amount'], 'sdtaxable' => $totals['sd_taxable_amount'],
         'vatable' => $totals['vatable_amount'], 'diamond' => $totals['diamond_amount'],
         'sperson' => trim((string) ($header['sales_person'] ?? '')) ?: null,
+        'cref' => trim((string) ($header['customer_ref'] ?? '')) ?: null,
+        'datebs' => trim((string) ($header['tran_date_bs'] ?? '')) ?: null,
+        'remarks' => trim((string) ($header['remarks'] ?? '')) ?: null,
         'total' => $total,
         'received' => $received, 'exchange' => $exchangeTotal, 'advance' => $advanceApplied, 'balance' => $balance,
+        'pcash' => $tender['paid_cash'], 'pcard' => $tender['paid_card'],
+        'pcheque' => $tender['paid_cheque'], 'pqr' => $tender['paid_qr'],
         'smode' => $settleMode, 'sledger' => $settleLedgerId,
     ];
 
@@ -1406,8 +1440,10 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
                     wastage_amount = :wastage, making_amount = :making, stone_amount = :stone, other_charges = :other,
                     discount = :discount, taxable_amount = :taxable, non_taxable_amount = :nontax,
                     sd_taxable_amount = :sdtaxable, vatable_amount = :vatable, diamond_amount = :diamond,
-                    sales_person = :sperson, vat_amount = :vat, tax_amount = :tax,
+                    sales_person = :sperson, customer_ref = :cref, tran_date_bs = :datebs, remarks = :remarks,
+                    vat_amount = :vat, tax_amount = :tax,
                     manual_tax_amount = :mtax, total_amount = :total, received_amount = :received,
+                    paid_cash = :pcash, paid_card = :pcard, paid_cheque = :pcheque, paid_qr = :pqr,
                     exchange_amount = :exchange, advance_amount = :advance, balance_amount = :balance,
                     settle_mode = :smode, settle_ledger_id = :sledger
                 WHERE id = :id AND company_id = :cid')
@@ -1416,14 +1452,16 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
             db()->prepare('DELETE FROM jewellery_sale_exchanges WHERE sale_id = :sid AND company_id = :cid')->execute(['sid' => $saleId, 'cid' => $companyId]);
         } else {
             $no = trim((string) ($header['sale_no'] ?? '')) ?: jw_next_no($companyId, 'jewellery_sales', 'sale_no', (string) ($settings['sale_no_prefix'] ?? 'JS'));
-            db()->prepare('INSERT INTO jewellery_sales (company_id, fiscal_year_id, sale_no, sale_date, party_id, customer_name,
-                    ref_no, narration, metal_amount, wastage_amount, making_amount, stone_amount, other_charges, discount,
-                    taxable_amount, non_taxable_amount, sd_taxable_amount, vatable_amount, diamond_amount, sales_person,
-                    vat_amount, tax_amount, manual_tax_amount, total_amount, received_amount, exchange_amount,
+            db()->prepare('INSERT INTO jewellery_sales (company_id, fiscal_year_id, sale_no, sale_date, tran_date_bs, party_id, customer_name,
+                    ref_no, narration, remarks, metal_amount, wastage_amount, making_amount, stone_amount, other_charges, discount,
+                    taxable_amount, non_taxable_amount, sd_taxable_amount, vatable_amount, diamond_amount, sales_person, customer_ref,
+                    vat_amount, tax_amount, manual_tax_amount, total_amount, received_amount,
+                    paid_cash, paid_card, paid_cheque, paid_qr, exchange_amount,
                     advance_amount, balance_amount, settle_mode, settle_ledger_id, created_by)
-                VALUES (:cid, :fy, :no, :date, :party, :cname, :ref, :narration, :metal, :wastage, :making, :stone, :other, :discount,
-                    :taxable, :nontax, :sdtaxable, :vatable, :diamond, :sperson,
-                    :vat, :tax, :mtax, :total, :received, :exchange, :advance, :balance, :smode, :sledger, :by)')
+                VALUES (:cid, :fy, :no, :date, :datebs, :party, :cname, :ref, :narration, :remarks, :metal, :wastage, :making, :stone, :other, :discount,
+                    :taxable, :nontax, :sdtaxable, :vatable, :diamond, :sperson, :cref,
+                    :vat, :tax, :mtax, :total, :received, :pcash, :pcard, :pcheque, :pqr,
+                    :exchange, :advance, :balance, :smode, :sledger, :by)')
                 ->execute($params + ['no' => $no, 'by' => $userId ?: null]);
             $saleId = (int) db()->lastInsertId();
         }

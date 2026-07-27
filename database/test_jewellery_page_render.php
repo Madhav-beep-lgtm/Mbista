@@ -259,9 +259,14 @@ $_SESSION['user_id'] = (int) $argv[3];
 set_context($probeCompany, $probeFy);
 mark_company_pin_verified($probeCompany);
 set_selected_company($probeCompany);
+$probeScript = $argv[6] ?? 'jewellery-print.php';
 $_SERVER['REQUEST_METHOD'] = 'GET';
-$_SERVER['SCRIPT_NAME'] = '/admin/jewellery-print.php';
-$_GET = ['doc' => $argv[4], 'id' => (int) $argv[5], 'format' => 'print'];
+$_SERVER['SCRIPT_NAME'] = '/admin/' . $probeScript;
+// jewellery-invoice.php only ever prints a sale, so it takes an id and nothing
+// else; the generic preview controller needs to be told which book to look in.
+$_GET = $probeScript === 'jewellery-invoice.php'
+    ? ['id' => (int) $argv[5]]
+    : ['doc' => $argv[4], 'id' => (int) $argv[5], 'format' => 'print'];
 $_POST = [];
 register_shutdown_function(static function (): void {
     $html = '';
@@ -271,17 +276,18 @@ register_shutdown_function(static function (): void {
     fwrite(STDOUT, strlen($html) . '|' . ($dirty ? 'DIRTY' : 'CLEAN'));
 });
 ob_start();
-include __DIR__ . '/../public_html/admin/jewellery-print.php';
+include __DIR__ . '/../public_html/admin/' . $probeScript;
 PROBE);
 
 foreach ([
-    ['sale', $s2, 'Sale'],
-    ['purchase', $p1, 'Purchase'],
-    ['order', $order2, 'Order'],
-] as [$docKind, $docId, $label]) {
+    ['sale', $s2, 'Sale', 'jewellery-print.php'],
+    ['purchase', $p1, 'Purchase', 'jewellery-print.php'],
+    ['order', $order2, 'Order', 'jewellery-print.php'],
+    ['sale', $s2, 'Tax invoice', 'jewellery-invoice.php'],
+] as [$docKind, $docId, $label, $script]) {
     $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($runner) . ' '
         . (int) $cid . ' ' . (int) $fyId . ' ' . (int) $adminId . ' '
-        . escapeshellarg($docKind) . ' ' . (int) $docId;
+        . escapeshellarg($docKind) . ' ' . (int) $docId . ' ' . escapeshellarg($script);
     $out = trim((string) shell_exec($cmd . ' 2>&1'));
     [$len, $state] = array_pad(explode('|', $out), 2, '');
     $ok = is_numeric($len) && (int) $len > 400 && $state === 'CLEAN';

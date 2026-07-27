@@ -83,7 +83,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'other_charges' => (float) ($_POST['other_charges'] ?? 0),
                 'manual_tax_amount' => ($_POST['manual_tax_amount'] ?? '') === '' ? null : (float) $_POST['manual_tax_amount'],
                 'discount' => (float) ($_POST['discount'] ?? 0),
+                'sales_person' => (string) ($_POST['sales_person'] ?? ''),
+                'customer_ref' => (string) ($_POST['customer_ref'] ?? ''),
+                'tran_date_bs' => (string) ($_POST['tran_date_bs'] ?? ''),
+                'remarks' => (string) ($_POST['remarks'] ?? ''),
                 'received_amount' => (float) ($_POST['received_amount'] ?? 0),
+                'paid_cash' => (float) ($_POST['paid_cash'] ?? 0),
+                'paid_card' => (float) ($_POST['paid_card'] ?? 0),
+                'paid_cheque' => (float) ($_POST['paid_cheque'] ?? 0),
+                'paid_qr' => (float) ($_POST['paid_qr'] ?? 0),
                 'deliver_order_id' => (int) ($_POST['deliver_order_id'] ?? 0),
                 'advance_amount' => (float) ($_POST['advance_amount'] ?? 0),
                 'settle_mode' => (string) ($_POST['settle_mode'] ?? 'cash'),
@@ -519,13 +527,29 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
                     </select>
                 </label>
                 <label>Bill ref.<input type="text" name="ref_no" maxlength="120" value="<?= e((string) ($editDoc['ref_no'] ?? '')) ?>"></label>
+                <label>Sales person<input type="text" name="sales_person" maxlength="120" value="<?= e((string) ($editDoc['sales_person'] ?? '')) ?>"></label>
+                <label>Customer id / ref.<input type="text" name="customer_ref" maxlength="60" value="<?= e((string) ($editDoc['customer_ref'] ?? '')) ?>"></label>
+                <label>Tran. date (B.S.)<input type="text" name="tran_date_bs" maxlength="20" placeholder="2082-03-15" value="<?= e((string) ($editDoc['tran_date_bs'] ?? '')) ?>"></label>
                 <label>Other charges (<?= e($sym) ?>)<input type="number" name="other_charges" step="0.01" min="0" value="<?= e((string) ($editDoc['other_charges'] ?? '0')) ?>"></label>
                 <label>Discount (<?= e($sym) ?>)<input type="number" name="discount" step="0.01" min="0" value="<?= e((string) ($editDoc['discount'] ?? '0')) ?>"></label>
                 <label>Skills Promotion Tax (<?= e($sym) ?>)<input type="number" name="manual_tax_amount" step="0.01" min="0" placeholder="auto" value="<?= e((string) ($editDoc['manual_tax_amount'] ?? '')) ?>">
                     <span class="frm-optional">Left blank it is worked out for you at the rate on the tax register. Punch a figure to override it.</span>
                 </label>
                 <label style="grid-column:1/-1">Narration<input type="text" name="narration" maxlength="255" value="<?= e((string) ($editDoc['narration'] ?? '')) ?>"></label>
+                <label style="grid-column:1/-1">Remarks (printed on the bill)<input type="text" name="remarks" maxlength="255" value="<?= e((string) ($editDoc['remarks'] ?? '')) ?>"></label>
             </div>
+            <details<?= ((float) ($editDoc['paid_cash'] ?? 0) + (float) ($editDoc['paid_card'] ?? 0)
+                + (float) ($editDoc['paid_cheque'] ?? 0) + (float) ($editDoc['paid_qr'] ?? 0)) > 0 ? ' open' : '' ?>>
+                <summary>How the money was tendered <span class="frm-optional">(optional — for the printed bill)</span></summary>
+                <div class="workspace-form-grid">
+                    <?php foreach (['paid_cash' => 'Cash', 'paid_card' => 'Card', 'paid_cheque' => 'Cheque', 'paid_qr' => 'QR / transfer'] as $tenderField => $tenderLabel): ?>
+                        <label><?= e($tenderLabel) ?> (<?= e($sym) ?>)<input type="number" name="<?= e($tenderField) ?>" step="0.01" min="0"
+                            value="<?= e((string) ($editDoc[$tenderField] ?? '0')) ?>"></label>
+                    <?php endforeach; ?>
+                </div>
+                <p class="frm-optional">Leave these at zero and the whole receipt shows against the ledger above. Fill any of
+                    them and they must add up to the cash / bank received.</p>
+            </details>
             <?php if ($openOrders !== []): ?>
             <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px;margin:12px 0">
                 <legend style="padding:0 6px;font-weight:600">Orders this customer is here to collect</legend>
@@ -609,6 +633,7 @@ $renderLineRows = function (string $prefix, array $existing, int $slots, string 
                             <?php if ($isDraft && $canEdit): ?>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-trade.php?view=sales&edit=' . (int) $row['id'])) ?>">Edit</a>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'])) ?>">Preview</a>
+                                <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-invoice.php?id=' . (int) $row['id'])) ?>">Invoice</a>
                             <?php endif; ?>
                             <?php if ($isDraft && $canPost): ?>
                                 <form method="post" style="display:inline">

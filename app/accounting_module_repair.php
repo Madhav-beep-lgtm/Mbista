@@ -2485,6 +2485,23 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Tender breakdown and bill references (migration 084)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_sales')) {
+            return;
+        }
+        foreach ([
+            'paid_cash' => '`paid_cash` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `received_amount`',
+            'paid_card' => '`paid_card` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `paid_cash`',
+            'paid_cheque' => '`paid_cheque` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `paid_card`',
+            'paid_qr' => '`paid_qr` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `paid_cheque`',
+            'customer_ref' => '`customer_ref` VARCHAR(60) DEFAULT NULL AFTER `sales_person`',
+            'tran_date_bs' => '`tran_date_bs` VARCHAR(20) DEFAULT NULL AFTER `sale_date`',
+            'remarks' => '`remarks` VARCHAR(255) DEFAULT NULL AFTER `narration`',
+        ] as $column => $ddl) {
+            accounting_repair_add_column('jewellery_sales', $column, $ddl);
+        }
+    });
+
     $run('Canonical gram weights on stock movements (migration 082)', static function (): void {
         if (!accounting_repair_table_exists('jewellery_stock_txns')) {
             return;

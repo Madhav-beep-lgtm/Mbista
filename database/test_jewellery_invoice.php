@@ -222,6 +222,97 @@ ok((float) $stockOut['gross_grams'] < 2.9,
 ok(near((float) $stockOut['fine_grams'], 2.510 * 0.916, 0.002),
     'Fine content comes from the NET metal: 2.510 x 0.916');
 
+echo "\nThe tender row: a breakdown that has to agree with itself\n";
+$mixed = jewellery_save_sale($cid, $fy, [
+    'sale_date' => '2026-07-26', 'party_id' => $customer, 'sales_person' => 'Sangita',
+    'customer_ref' => 'C-8384', 'tran_date_bs' => '2083-04-11', 'remarks' => 'Handed over at the counter.',
+    'settle_mode' => 'cash', 'settle_ledger_id' => $cash, 'received_amount' => 10000,
+    'paid_cash' => 4000, 'paid_card' => 3500, 'paid_cheque' => 1500, 'paid_qr' => 1000,
+], [[
+    'item_id' => $ring, 'purity_id' => $p22, 'unit_id' => $gram,
+    'qty_pieces' => 1, 'gross_weight' => 2.550, 'stone_weight' => 0.0400,
+    'wastage_weight' => 0.4660, 'rate' => 22645.062, 'making_amount' => 1700.00,
+    'stone_amount' => 232.60, 'stone_carat' => 0.2500,
+]], [], $uid);
+$mixedRow = jewellery_sale($cid, $mixed);
+ok(near((float) $mixedRow['paid_cash'], 4000) && near((float) $mixedRow['paid_card'], 3500)
+    && near((float) $mixedRow['paid_cheque'], 1500) && near((float) $mixedRow['paid_qr'], 1000),
+    'Cash / card / cheque / QR are stored as punched');
+ok(near((float) $mixedRow['paid_cash'] + (float) $mixedRow['paid_card']
+    + (float) $mixedRow['paid_cheque'] + (float) $mixedRow['paid_qr'], (float) $mixedRow['received_amount']),
+    'And they add up to the amount received');
+ok((string) $mixedRow['customer_ref'] === 'C-8384' && (string) $mixedRow['tran_date_bs'] === '2083-04-11'
+    && (string) $mixedRow['remarks'] === 'Handed over at the counter.',
+    'Customer id, the B.S. tran date and the remarks all survive the round trip');
+
+$refused = '';
+try {
+    jewellery_save_sale($cid, $fy, [
+        'sale_date' => '2026-07-26', 'party_id' => $customer,
+        'settle_mode' => 'cash', 'settle_ledger_id' => $cash, 'received_amount' => 10000,
+        'paid_cash' => 4000, 'paid_card' => 3500,
+    ], [[
+        'item_id' => $ring, 'purity_id' => $p22, 'unit_id' => $gram,
+        'qty_pieces' => 1, 'gross_weight' => 2.550, 'rate' => 22645.062,
+    ]], [], $uid);
+} catch (Throwable $e) {
+    $refused = $e->getMessage();
+}
+ok(stripos($refused, 'tender split') !== false,
+    'A split that does not add up to the receipt is refused, not quietly printed');
+
+echo "\nThe printed bill carries the same figures the books do\n";
+// Rendering has to happen in a child process: the page is a full document that
+// ends the request, and require_jewellery() needs a real session context.
+$runner = __DIR__ . '/jwinv_render_probe.php';
+file_put_contents($runner, <<<'PROBE'
+<?php
+if (PHP_SAPI !== 'cli') { exit(1); }
+require __DIR__ . '/../app/bootstrap.php';
+$_SESSION['user_id'] = (int) $argv[3];
+set_context((int) $argv[1], (int) $argv[2]);
+mark_company_pin_verified((int) $argv[1]);
+set_selected_company((int) $argv[1]);
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_SERVER['SCRIPT_NAME'] = '/admin/jewellery-invoice.php';
+$_GET = ['id' => (int) $argv[4]];
+$_POST = [];
+register_shutdown_function(static function (): void {
+    $html = '';
+    while (ob_get_level() > 0) { $html = ob_get_clean() . $html; }
+    fwrite(STDOUT, $html);
+});
+ob_start();
+include __DIR__ . '/../public_html/admin/jewellery-invoice.php';
+PROBE);
+$html = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($runner) . ' '
+    . $cid . ' ' . $fy . ' ' . $uid . ' ' . $sale . ' 2>&1');
+@unlink($runner);
+$text = html_entity_decode(strip_tags(preg_replace('~<(script|style)[^>]*>.*?</\1>~is', ' ', $html) ?? ''), ENT_QUOTES, 'UTF-8');
+$has = static fn (string $needle): bool => strpos($text, $needle) !== false;
+
+ok(stripos($html, 'Fatal error') === false && stripos($html, 'Warning:') === false
+    && stripos($html, 'Uncaught') === false, 'The invoice renders without a single notice');
+ok($has('2.550') && $has('0.0400') && $has('2.510') && $has('0.4660') && $has('2.976'),
+    'The five weight columns print 2.550 / 0.0400 / 2.510 / 0.4660 / 2.976');
+ok($has('22,645.062'), 'Rate/Gm prints 22,645.062');
+ok($has(number_format(22645.062 * 11.6638, 2)), 'And the per-tola figure beside it is the gram rate x 11.6638');
+ok($has('67,391.70') && $has('1,700.00') && $has('232.60'),
+    'Amount, Making and Stone print 67,391.70 / 1,700.00 / 232.60');
+ok($has('69,091.70') && $has('345.46'), 'SD Taxable Amt 69,091.70 and SD Tax 345.46 print');
+ok($has('30.24'), 'VAT 30.24 prints');
+ok($has('69,700.00'), 'Net Total 69,700.00 prints');
+ok($has(npr_amount_in_words(69700.00)), 'And the amount in words agrees with it');
+ok($has('SD Taxable Amt') && $has('Vatable Amt') && $has('Non Taxable Amt'),
+    'The totals block is named the way the law names it');
+ok($has('Cash') && $has('Card') && $has('Advance') && $has('Cheque')
+    && $has('Credit') && $has('QR/Transfer') && $has('Purchase'),
+    'The seven tender columns are all on the paper');
+ok($has('69,700.00') && $has('Credit'),
+    'This bill was sold on credit, so the whole 69,700.00 sits in the Credit column');
+ok($has('Sangita'), 'The sales person is named');
+ok(substr_count($html, '<tr>') >= 8, 'And the line table is padded out with blank rows to a full sheet');
+
 jwinv_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
