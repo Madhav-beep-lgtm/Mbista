@@ -311,6 +311,10 @@ $lineSlots = 5;
 // column names, so a field added to a sale reaches an order too.
 require_once __DIR__ . '/../../app/views/partials/jewellery_line_grid.php';
 require_once __DIR__ . '/../../app/views/partials/jewellery_filter_bar.php';
+// The module skin: the document header, the summary rail and the strip
+// that closes the page.
+require_once __DIR__ . '/../../app/views/partials/jewellery_page_head.php';
+require_once __DIR__ . '/../../app/views/partials/jewellery_summary_rail.php';
 jw_line_grid_styles();
 jw_filter_bar_styles();
 ?>
@@ -330,23 +334,30 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     ]);
 };
 ?>
-?>
 
 <?php if ($view === 'purchases'): ?>
+    <?php jw_page_head('Jewellery Purchases (Metal, Stones & Other Items)',
+        'Record what was bought for the shop — purity, weight, wastage and making charges.', 'box'); ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-draggable>
-        <div class="mbw-card-head">
-            <h2><?= $editDoc ? 'Edit Draft Purchase — ' . e((string) $editDoc['purchase_no']) : 'New Purchase' ?></h2>
-            <?php if ($editDoc): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">New purchase</a><?php endif; ?>
-        </div>
         <?php if ($editDoc && (string) $editDoc['status'] !== 'draft'): ?>
+        <section class="jw-card">
+            <div class="jw-card-head"><h2><?= icon('box') ?>Purchase <?= e((string) $editDoc['purchase_no']) ?></h2></div>
             <div class="notice">This purchase is posted and can no longer be edited. Unpost it first.</div>
+        </section>
         <?php else: ?>
-        <form method="post">
+        <?php // The FORM is the two-column grid, so the rail is a real sibling
+              // of the working area rather than something floated beside it. ?>
+        <form method="post" class="jw-layout">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_purchase">
             <input type="hidden" name="back_view" value="purchases">
             <input type="hidden" name="purchase_id" value="<?= (int) ($editDoc['id'] ?? 0) ?>">
+          <div>
+            <section class="jw-card">
+            <div class="jw-card-head">
+                <h2><?= icon('box') ?><?= $editDoc ? 'Edit Draft Purchase — ' . e((string) $editDoc['purchase_no']) : 'New Purchase' ?></h2>
+                <?php if ($editDoc): ?><span class="jw-card-head-actions"><a class="button soft" href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">New purchase</a></span><?php endif; ?>
+            </div>
             <div class="workspace-form-grid">
                 <label>Date<input type="date" name="purchase_date" value="<?= e((string) ($editDoc['purchase_date'] ?? $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required></label>
                 <label>Source
@@ -388,11 +399,29 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <label style="grid-column:1/-1">Narration<input type="text" name="narration" maxlength="255" value="<?= e((string) ($editDoc['narration'] ?? '')) ?>"></label>
             </div>
             <?php $renderLineRows('l', $editLines, max($lineSlots, count($editLines) + 1), 'Purchase lines'); ?>
-            <button type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save Draft</button>
-            <?php if ($items === []): ?><?php endif; ?>
+            </section>
+          </div>
+
+            <?php
+                // The rail is the form's SECOND grid column, and being inside
+                // the form is what lets its buttons submit it and the totals
+                // script scope itself to exactly these fields.
+                ob_start(); ?>
+                <button type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>><?= icon('tasks') ?>Save Draft</button>
+                <?php if ($editDoc): ?>
+                    <a class="button soft" href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">Cancel</a>
+                <?php endif; ?>
+                <?php jw_summary_rail([
+                    'currency' => $sym,
+                    'actions' => (string) ob_get_clean(),
+                    'shortcuts' => [
+                        'Metal rates' => url('admin/jewellery.php?view=rates'),
+                        'Items &amp; purity' => url('admin/jewellery.php?view=items'),
+                        'Posting ledgers' => url('admin/jewellery.php?view=settings'),
+                    ],
+                ]); ?>
         </form>
         <?php endif; ?>
-    </section>
     <?php endif; ?>
 
     <section class="mbw-card" style="margin-top:14px">
@@ -470,20 +499,26 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     </section>
 
 <?php elseif ($view === 'sales'): ?>
+    <?php jw_page_head('Jewellery Sales (Counter Billing)',
+        'Raise the bill, take old gold in exchange, and settle what is left.', 'receipt-voucher'); ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-draggable>
-        <div class="mbw-card-head">
-            <h2><?= $editDoc ? 'Edit Draft Sale — ' . e((string) $editDoc['sale_no']) : 'New Sale' ?></h2>
-            <?php if ($editDoc): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales')) ?>">New sale</a><?php endif; ?>
-        </div>
         <?php if ($editDoc && (string) $editDoc['status'] !== 'draft'): ?>
+        <section class="jw-card">
+            <div class="jw-card-head"><h2><?= icon('receipt-voucher') ?>Sale <?= e((string) $editDoc['sale_no']) ?></h2></div>
             <div class="notice">This sale is posted and can no longer be edited. Unpost it first.</div>
+        </section>
         <?php else: ?>
-        <form method="post">
+        <form method="post" class="jw-layout">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_sale">
             <input type="hidden" name="back_view" value="sales">
             <input type="hidden" name="sale_id" value="<?= (int) ($editDoc['id'] ?? 0) ?>">
+          <div>
+            <section class="jw-card">
+            <div class="jw-card-head">
+                <h2><?= icon('receipt-voucher') ?><?= $editDoc ? 'Edit Draft Sale — ' . e((string) $editDoc['sale_no']) : 'New Sale' ?></h2>
+                <?php if ($editDoc): ?><span class="jw-card-head-actions"><a class="button soft" href="<?= e(url('admin/jewellery-trade.php?view=sales')) ?>">New sale</a></span><?php endif; ?>
+            </div>
             <div class="workspace-form-grid">
                 <label>Date<input type="date" name="sale_date" value="<?= e((string) ($editDoc['sale_date'] ?? $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required></label>
                 <label>Existing customer
@@ -582,10 +617,28 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
             <?php endif; ?>
             <?php $renderLineRows('l', $editLines, max($lineSlots, count($editLines) + 1), 'Items sold'); ?>
             <?php $renderLineRows('x', $editExchanges, max(2, count($editExchanges) + 1), 'Old gold taken in exchange (metal-to-metal)'); ?>
-            <button type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save Draft</button>
+            </section>
+          </div>
+
+            <?php
+                ob_start(); ?>
+                <button type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>><?= icon('tasks') ?>Save Draft</button>
+                <?php if ($editDoc): ?>
+                    <a class="button soft" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-invoice.php?id=' . (int) $editDoc['id'])) ?>"><?= icon('receipt-voucher') ?>Invoice</a>
+                    <a class="button soft" href="<?= e(url('admin/jewellery-trade.php?view=sales')) ?>">Cancel</a>
+                <?php endif; ?>
+                <?php jw_summary_rail([
+                    'currency' => $sym,
+                    'with_old_gold' => true,
+                    'actions' => (string) ob_get_clean(),
+                    'shortcuts' => [
+                        'Metal rates' => url('admin/jewellery.php?view=rates'),
+                        'Orders to deliver' => url('admin/jewellery-workshop.php?view=delivery'),
+                        'Bills &amp; settlement' => url('admin/jewellery-trade.php?view=bills'),
+                    ],
+                ]); ?>
         </form>
         <?php endif; ?>
-    </section>
     <?php endif; ?>
 
     <section class="mbw-card" style="margin-top:14px">
@@ -833,7 +886,8 @@ document.addEventListener("change", function (event) {
 </script>
 
 <?php
-// The grid buttons: add a row, remove a row.
+// The grid buttons, and the live totals in the summary rail.
 jw_line_grid_scripts();
+jw_summary_rail_script();
 include __DIR__ . '/../../app/views/partials/admin_footer.php';
 ?>

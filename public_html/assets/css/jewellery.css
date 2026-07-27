@@ -1,0 +1,220 @@
+/* ---------------------------------------------------------------------------
+   Jewellery module skin.
+   ---------------------------------------------------------------------------
+   Styling only. Every rule here is scoped under .jw-page so it cannot reach any
+   other module, and every colour is a design token so the whole thing follows
+   the light/dark switch rather than pinning itself to one of them.
+
+   The shape it is aiming for: a document header with its own icon, a working
+   area on the left, and a summary rail on the right that keeps the totals and
+   the save buttons in view while a long grid is being filled in.
+   --------------------------------------------------------------------------- */
+
+/* --- page header -------------------------------------------------------- */
+
+.jw-page-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    background: var(--mbw-card, #fff);
+    border: 1px solid var(--mbw-border, #d9e2ec);
+    border-radius: var(--mbw-radius, 12px);
+    padding: 18px 20px;
+    margin-bottom: 14px;
+}
+.jw-page-head-icon {
+    flex: 0 0 auto;
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    background: var(--mbw-green-soft, #e5f6ec);
+    color: var(--mbw-green, #16a34a);
+}
+.jw-page-head-icon svg { width: 26px; height: 26px; }
+.jw-page-head-text { flex: 1 1 auto; min-width: 0; }
+.jw-page-head-text h1 {
+    margin: 0 0 3px;
+    font-size: 1.35rem;
+    line-height: 1.25;
+    color: var(--mbw-heading, #1c2434);
+}
+.jw-page-head-text p {
+    margin: 0;
+    color: var(--mbw-muted, #64748b);
+    font-size: .88rem;
+}
+.jw-page-head-aside { flex: 0 0 auto; }
+
+/* --- the two-column working area ---------------------------------------- */
+
+.jw-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 14px;
+    align-items: start;
+}
+.jw-layout > * { min-width: 0; }
+
+/* The rail follows the page down, so the totals and the save buttons are
+   still there at the bottom of a twenty-row grid. */
+.jw-rail { position: sticky; top: 14px; display: grid; gap: 14px; }
+
+@media (max-width: 1100px) {
+    .jw-layout { grid-template-columns: minmax(0, 1fr); }
+    .jw-rail { position: static; }
+}
+
+/* --- cards -------------------------------------------------------------- */
+
+.jw-card {
+    background: var(--mbw-card, #fff);
+    border: 1px solid var(--mbw-border, #d9e2ec);
+    border-radius: var(--mbw-radius, 12px);
+    padding: 16px 18px;
+}
+.jw-card + .jw-card { margin-top: 14px; }
+.jw-card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: -2px 0 14px;
+}
+.jw-card-head h2 {
+    margin: 0;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--mbw-heading, #1c2434);
+}
+.jw-card-head h2 svg { width: 18px; height: 18px; color: var(--mbw-green, #16a34a); }
+/* Buttons in a card header sit to the right of the title. */
+.jw-card-head-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* --- summary rail ------------------------------------------------------- */
+
+.jw-summary-rows { display: grid; gap: 9px; }
+.jw-summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font-size: .86rem;
+}
+.jw-summary-row span { color: var(--mbw-muted, #64748b); }
+.jw-summary-row strong { color: var(--mbw-heading, #1c2434); font-variant-numeric: tabular-nums; }
+
+/* The one figure the shop actually reads off this panel. */
+.jw-summary-total {
+    margin-top: 14px;
+    padding: 14px;
+    border-radius: 10px;
+    background: var(--mbw-green-soft, #e5f6ec);
+    border: 1px solid var(--mbw-green, #16a34a);
+    text-align: center;
+}
+.jw-summary-total span {
+    display: block;
+    font-size: .8rem;
+    color: var(--mbw-muted, #64748b);
+    margin-bottom: 4px;
+}
+.jw-summary-total strong {
+    font-size: 1.55rem;
+    color: var(--mbw-heading, #1c2434);
+    font-variant-numeric: tabular-nums;
+}
+
+.jw-rail-actions { display: grid; gap: 9px; margin-top: 14px; }
+.jw-rail-actions .button,
+.jw-rail-actions button { width: 100%; justify-content: center; }
+
+/* --- shortcuts ---------------------------------------------------------- */
+
+.jw-shortcuts { display: grid; gap: 2px; }
+.jw-shortcuts a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 2px;
+    font-size: .86rem;
+    color: var(--mbw-primary, #0b7a4b);
+    text-decoration: none;
+    border-bottom: 1px solid var(--mbw-border-soft, #eef2f6);
+}
+.jw-shortcuts a:last-child { border-bottom: 0; }
+.jw-shortcuts a:hover { color: var(--mbw-heading, #1c2434); }
+.jw-shortcuts svg { width: 14px; height: 14px; opacity: .6; }
+
+/* --- the totals footer strip -------------------------------------------- */
+
+.jw-page-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 14px;
+    padding: 11px 16px;
+    border-radius: var(--mbw-radius, 12px);
+    background: var(--mbw-green-soft, #e5f6ec);
+    border: 1px solid var(--mbw-border, #d9e2ec);
+    font-size: .82rem;
+    color: var(--mbw-muted, #64748b);
+}
+.jw-page-foot .jw-foot-secure { display: flex; align-items: center; gap: 7px; }
+.jw-page-foot svg { width: 15px; height: 15px; color: var(--mbw-green, #16a34a); }
+
+/* --- the line grid, dressed to match ------------------------------------ */
+
+/* A row number, so a validation message can say "item 3" and be followed. */
+table.jw-lines .c-no { width: 34px; text-align: center; color: var(--mbw-muted, #64748b); font-size: .78rem; }
+table.jw-lines thead th {
+    background: var(--mbw-green-soft, #e5f6ec);
+    color: var(--mbw-heading, #1c2434);
+    font-weight: 600;
+}
+table.jw-lines tbody tr:nth-child(even) { background: var(--mbw-border-soft, #f8fafc); }
+table.jw-lines tbody tr:hover { background: var(--mbw-green-soft, #e5f6ec); }
+
+/* Derived figures are green and not editable, so the eye can tell at a glance
+   what it has to fill in from what the page works out. */
+table.jw-lines .jw-derived {
+    text-align: right;
+    padding-right: 8px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--mbw-green, #16a34a);
+}
+
+.jw-lines-actions .button { min-height: 32px; }
+/* "Add another item" spans the grid as a ghost row rather than a stray button. */
+.jw-add-row {
+    width: 100%;
+    margin-top: 8px;
+    padding: 9px;
+    border: 1px dashed var(--mbw-border, #d9e2ec);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--mbw-primary, #0b7a4b);
+    font: inherit;
+    font-size: .88rem;
+    cursor: pointer;
+}
+.jw-add-row:hover {
+    background: var(--mbw-green-soft, #e5f6ec);
+    border-style: solid;
+}
+
+/* --- empty state -------------------------------------------------------- */
+
+.jw-empty {
+    padding: 22px;
+    text-align: center;
+    color: var(--mbw-muted, #64748b);
+    font-size: .88rem;
+}

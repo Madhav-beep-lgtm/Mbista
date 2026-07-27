@@ -145,5 +145,34 @@ foreach ($headers as $header) {
 ok($without === [], 'Every layout offers the toggle'
     . ($without === [] ? '' : ' — missing from ' . implode(', ', $without)));
 
+echo "\n5. No stray PHP close tags reaching the page\n";
+/*
+ * A close tag followed by a second one does not error: the second is HTML, and
+ * the page prints those two characters to the user. It happened once here, from
+ * an automated edit, and nothing failed — the page just had rubbish at the top.
+ *
+ * This comment is a BLOCK comment on purpose. A close tag inside a // comment
+ * ends PHP mode, so writing this note the obvious way turned the rest of this
+ * very file into HTML and made the suite print its own source.
+ */
+$strays = [];
+foreach (array_merge(hygiene_php_files($root . '/public_html'), hygiene_php_files($root . '/app/views')) as $path) {
+    if (preg_match('~\?>\s*\?>~', (string) file_get_contents($path))) {
+        $strays[] = basename($path);
+    }
+}
+ok($strays === [], 'No file closes PHP twice in a row'
+    . ($strays === [] ? '' : ': ' . implode(', ', $strays)));
+
+echo "\n6. The jewellery skin is wired up\n";
+ok(is_file($root . '/public_html/assets/css/jewellery.css'), 'The module stylesheet exists');
+$skin = (string) file_get_contents($root . '/public_html/assets/css/jewellery.css');
+ok(!preg_match('~:\s*#[0-9a-fA-F]{3,6}\s*[;}]~', str_replace('var(--', '', $skin)) || substr_count($skin, 'var(--') > 20,
+    'And is written in tokens, so it follows the theme');
+$trade = (string) file_get_contents($root . '/public_html/admin/jewellery-trade.php');
+ok(str_contains($trade, 'jw_page_head('), 'The trade page uses the shared document header');
+ok(substr_count($trade, 'jw_summary_rail(') === 2, 'Both the purchase and the sale carry a summary rail');
+ok(str_contains($trade, 'jw_summary_rail_script();'), 'And the live-totals script is emitted');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
