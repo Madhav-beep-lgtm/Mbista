@@ -1679,3 +1679,157 @@ function jewellery_revalue_karigar_metal(
         return ['ok' => false, 'error' => $revalueException->getMessage()];
     }
 }
+
+/**
+ * Undo a posted kaligad receipt, putting the metal back with the kaligad.
+ *
+ * Weights are mis-keyed constantly in this trade — a receipt entered at 4.9
+ * instead of 9.4 posts wages, a wastage loss, two stock movements and a bill,
+ * and without this there was no way back short of editing the database. The
+ * module's own design note says a jewellery house "backdates and corrects
+ * constantly"; a one-way receipt contradicted that.
+ *
+ * REFUSED when the wage bill has already been settled, for the same reason a
+ * sale is: reversing would strand the payment against a bill that no longer
+ * exists. Reverse the settlement first.
+ */
+function jewellery_unpost_receipt(int $companyId, int $receiptId, int $userId = 0): array
+{
+    $stmt = db()->prepare('SELECT r.*, a.id AS assignment_id, a.order_id
+        FROM jewellery_order_receipts r
+        INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id
+        WHERE r.id = :id AND r.company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $receiptId, 'cid' => $companyId]);
+    $receipt = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$receipt) {
+        return ['ok' => false, 'error' => 'Receipt not found for this company.'];
+    }
+    if ((string) $receipt['status'] !== 'posted') {
+        return ['ok' => false, 'error' => 'Only a posted receipt can be reversed.'];
+    }
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        // The wage bill first: if any of it has been paid, stop before anything
+        // is undone rather than half way through.
+        $billStmt = db()->prepare("SELECT id, bill_no, settled_amount FROM jewellery_bills
+            WHERE company_id = :cid AND source_type = 'jewellery_order_receipt' AND source_id = :sid LIMIT 1");
+        $billStmt->execute(['cid' => $companyId, 'sid' => $receiptId]);
+        $bill = $billStmt->fetch(PDO::FETCH_ASSOC);
+        if ($bill && (float) $bill['settled_amount'] > 0.005) {
+            throw new RuntimeException('Wage bill ' . $bill['bill_no'] . ' has already been part settled. '
+                . 'Reverse that settlement before reversing this receipt.');
+        }
+
+        $voucherId = (int) ($receipt['voucher_id'] ?? 0);
+        if ($voucherId > 0) {
+            $vStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :cid LIMIT 1');
+            $vStmt->execute(['id' => $voucherId, 'cid' => $companyId]);
+            $voucher = $vStmt->fetch(PDO::FETCH_ASSOC);
+            if ($voucher) {
+                $blocker = voucher_mutation_blocker($voucher, ['jewellery_order_receipt']);
+                if ($blocker !== null) {
+                    throw new RuntimeException($blocker);
+                }
+            }
+            db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
+                ->execute(['id' => $voucherId, 'cid' => $companyId]);
+        }
+        if ($bill) {
+            db()->prepare('DELETE FROM jewellery_bills WHERE id = :id AND company_id = :cid')
+                ->execute(['id' => (int) $bill['id'], 'cid' => $companyId]);
+        }
+        db()->prepare("DELETE FROM jewellery_stock_txns
+            WHERE company_id = :cid AND source_type = 'jewellery_order_receipt' AND source_id = :sid")
+            ->execute(['cid' => $companyId, 'sid' => $receiptId]);
+        db()->prepare('DELETE FROM jewellery_order_receipts WHERE id = :id AND company_id = :cid')
+            ->execute(['id' => $receiptId, 'cid' => $companyId]);
+
+        // The metal is with the kaligad again, so the assignment is outstanding
+        // again — and the order is back to being out for making.
+        db()->prepare("UPDATE jewellery_order_assignments SET status = 'issued' WHERE id = :id AND company_id = :cid")
+            ->execute(['id' => (int) $receipt['assignment_id'], 'cid' => $companyId]);
+        if ((int) ($receipt['order_id'] ?? 0) > 0) {
+            db()->prepare("UPDATE jewellery_orders SET status = 'assigned'
+                WHERE id = :id AND company_id = :cid AND status = 'received'")
+                ->execute(['id' => (int) $receipt['order_id'], 'cid' => $companyId]);
+        }
+
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+        log_activity('company', $companyId, 'jewellery_receipt_reversed',
+            'Kaligad receipt ' . $receipt['receipt_no'] . ' reversed; the metal is with the kaligad again.', $userId);
+
+        return ['ok' => true, 'error' => ''];
+    } catch (Throwable $reverseException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+
+        return ['ok' => false, 'error' => $reverseException->getMessage()];
+    }
+}
+
+/**
+ * Cancel a refinery job that is still out, bringing the metal back into stock.
+ *
+ * The mirror of jewellery_cancel_assignment for the refinery side, which had
+ * no reversal at all: metal sent for refining could never be recalled in the
+ * books even if the job was entered against the wrong refiner or the wrong bar.
+ */
+function jewellery_cancel_refinery_job(int $companyId, int $jobId, int $userId = 0): array
+{
+    $job = jewellery_refinery_job($companyId, $jobId);
+    if (!$job) {
+        return ['ok' => false, 'error' => 'Refinery job not found for this company.'];
+    }
+    if ((string) $job['status'] !== 'issued') {
+        return ['ok' => false, 'error' => 'Only a job still out at the refinery can be cancelled.'];
+    }
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        $voucherId = (int) ($job['issue_voucher_id'] ?? 0);
+        if ($voucherId > 0) {
+            $vStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :cid LIMIT 1');
+            $vStmt->execute(['id' => $voucherId, 'cid' => $companyId]);
+            $voucher = $vStmt->fetch(PDO::FETCH_ASSOC);
+            if ($voucher) {
+                $blocker = voucher_mutation_blocker($voucher, ['jewellery_refinery_issue']);
+                if ($blocker !== null) {
+                    throw new RuntimeException($blocker);
+                }
+            }
+            db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
+                ->execute(['id' => $voucherId, 'cid' => $companyId]);
+        }
+        db()->prepare("DELETE FROM jewellery_stock_txns
+            WHERE company_id = :cid AND source_type = 'jewellery_refinery_issue' AND source_id = :sid")
+            ->execute(['cid' => $companyId, 'sid' => $jobId]);
+        db()->prepare("UPDATE jewellery_refinery_jobs SET status = 'cancelled', issue_voucher_id = NULL,
+                issue_stock_txn_out = NULL, issue_stock_txn_in = NULL, metal_ledger_id = NULL
+            WHERE id = :id AND company_id = :cid")
+            ->execute(['id' => $jobId, 'cid' => $companyId]);
+
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+        log_activity('company', $companyId, 'jewellery_refinery_cancelled',
+            'Refinery job ' . $job['job_no'] . ' cancelled; the metal returned to own stock.', $userId);
+
+        return ['ok' => true, 'error' => ''];
+    } catch (Throwable $cancelException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+
+        return ['ok' => false, 'error' => $cancelException->getMessage()];
+    }
+}

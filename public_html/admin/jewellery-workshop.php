@@ -201,6 +201,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    // A receipt entered at the wrong weight has to be correctable — see
+    // jewellery_unpost_receipt(). Refused if the wage bill is part paid.
+    if ($action === 'unpost_receipt') {
+        require_permission('jewellery', 'post');
+        $result = jewellery_unpost_receipt($companyId, (int) ($_POST['receipt_id'] ?? 0), $userId);
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? 'Receipt reversed. The metal is with the kaligad again — receive it at the corrected weight.'
+            : $result['error']);
+        redirect($back);
+    }
+
+    if ($action === 'cancel_refinery_job') {
+        require_permission('jewellery', 'post');
+        $result = jewellery_cancel_refinery_job($companyId, (int) ($_POST['job_id'] ?? 0), $userId);
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? 'Refinery job cancelled; the metal is back in own stock.' : $result['error']);
+        redirect($back);
+    }
+
     if ($action === 'deliver_order') {
         require_permission('jewellery', 'post');
         $result = jewellery_deliver_order($companyId, (int) ($_POST['order_id'] ?? 0), (int) ($_POST['sale_id'] ?? 0), $userId);
@@ -809,6 +828,20 @@ $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' =>
                                     <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Cancel</button>
                                 </form>
                             <?php endif; ?>
+                            <?php if ((string) $row['status'] === 'received' && $canPost): ?>
+                                <?php $rcptId = (int) db()->query("SELECT id FROM jewellery_order_receipts
+                                    WHERE company_id={$companyId} AND assignment_id=" . (int) $row['id'] . "
+                                      AND status='posted' ORDER BY id DESC LIMIT 1")->fetchColumn(); ?>
+                                <?php if ($rcptId > 0): ?>
+                                <form method="post" style="display:inline" data-confirm="Reverse this receipt? The metal goes back to the kaligad so you can receive it at the corrected weight.">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="unpost_receipt">
+                                    <input type="hidden" name="back_view" value="assignments">
+                                    <input type="hidden" name="receipt_id" value="<?= $rcptId ?>">
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Reverse receipt</button>
+                                </form>
+                                <?php endif; ?>
+                            <?php endif; ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -915,6 +948,13 @@ $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' =>
                         <td>
                             <?php if ($isOut && $canPost): ?>
                                 <a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=refinery&receive=' . (int) $row['id'])) ?>">Receive</a>
+                                <form method="post" style="display:inline" data-confirm="Cancel this refinery job? The metal returns to own stock.">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="cancel_refinery_job">
+                                    <input type="hidden" name="back_view" value="refinery">
+                                    <input type="hidden" name="job_id" value="<?= (int) $row['id'] ?>">
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Cancel</button>
+                                </form>
                             <?php endif; ?>
                         </td>
                     </tr>

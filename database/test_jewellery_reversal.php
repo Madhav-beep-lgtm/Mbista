@@ -159,6 +159,9 @@ foreach ([
     ['stock_metal', 'RSTKM', 'Metal Stock', 'assets', 'asset'],
     ['stock_finished', 'RSTKF', 'Finished Stock', 'assets', 'asset'],
     ['stock_karigar', 'RSTKK', 'Metal with Karigar', 'assets', 'asset'],
+    ['stock_refinery', 'RSTKR', 'Metal with Refinery', 'assets', 'asset'],
+    ['refinery_loss', 'RREFL', 'Refining Loss', 'expenses', 'expense'],
+    ['refinery_charges', 'RREFC', 'Refinery Charges', 'expenses', 'expense'],
     ['sales_metal', 'RSALM', 'Sales Metal', 'income', 'revenue'],
     ['sales_making', 'RSALK', 'Sales Making', 'income', 'revenue'],
     ['sales_stone', 'RSALS', 'Sales Stone', 'income', 'revenue'],
@@ -363,6 +366,89 @@ $overSettled = db()->query("SELECT b.id, b.bill_no, b.bill_amount,
     HAVING allocated > bill_amount + 0.005")->fetchAll(PDO::FETCH_ASSOC);
 ok($overSettled === [], 'No bill in the company is over-settled'
     . ($overSettled === [] ? '' : ' — ' . json_encode($overSettled)));
+
+echo "\n9. A kaligad receipt can be reversed — weights get mis-keyed\n";
+// Issue, receive at the WRONG weight, then put it right. Before this existed
+// the only way back was editing the database by hand.
+$issue2 = jewellery_issue_to_karigar($cid, $fy, ['karigar_id' => $karigar, 'item_id' => $chain,
+    'unit_id' => $tola, 'issued_gross_weight' => 4, 'issue_date' => '2026-09-01'], $uid);
+ok($issue2['ok'], 'Metal goes out to the kaligad' . ($issue2['ok'] ? '' : ' — ' . $issue2['error']));
+$assignId = (int) $issue2['assignment_id'];
+$beforeReceipt = jwrev_snapshot($cid);
+
+$recv = jewellery_receive_from_karigar($cid, $fy, ['assignment_id' => $assignId,
+    'received_item_id' => $chain, 'received_purity_id' => $p22,
+    'received_gross_weight' => 3.9, 'receive_date' => '2026-09-10', 'qty_pieces' => 1], $uid);
+ok($recv['ok'], 'The piece comes back' . ($recv['ok'] ? '' : ' — ' . $recv['error']));
+$receiptId = (int) db()->query("SELECT id FROM jewellery_order_receipts
+    WHERE company_id=$cid AND assignment_id=$assignId ORDER BY id DESC LIMIT 1")->fetchColumn();
+ok($receiptId > 0, 'A receipt row exists');
+ok((string) jewellery_assignment($cid, $assignId)['status'] === 'received', 'The assignment reads as received');
+
+$rev = jewellery_unpost_receipt($cid, $receiptId, $uid);
+ok($rev['ok'], 'The receipt reverses' . ($rev['ok'] ? '' : ' — ' . $rev['error']));
+$afterReceipt = jwrev_snapshot($cid);
+$diff = jwrev_diff($beforeReceipt, $afterReceipt);
+ok($diff === '', 'Everything is back to the moment before it was received'
+    . ($diff === '' ? '' : ' — LEFTOVER: ' . $diff));
+ok((string) jewellery_assignment($cid, $assignId)['status'] === 'issued',
+    'And the assignment is outstanding again, with the metal still at the kaligad');
+
+// Re-receive at the right weight — the point of the whole exercise.
+$again = jewellery_receive_from_karigar($cid, $fy, ['assignment_id' => $assignId,
+    'received_item_id' => $chain, 'received_purity_id' => $p22,
+    'received_gross_weight' => 3.95, 'receive_date' => '2026-09-10', 'qty_pieces' => 1], $uid);
+ok($again['ok'], 'It can be received again at the corrected weight'
+    . ($again['ok'] ? '' : ' — ' . $again['error']));
+
+echo "\n10. A settled wage bill blocks the reversal\n";
+$newReceiptId = (int) db()->query("SELECT id FROM jewellery_order_receipts
+    WHERE company_id=$cid AND assignment_id=$assignId ORDER BY id DESC LIMIT 1")->fetchColumn();
+$wageBill = db()->query("SELECT id, bill_amount FROM jewellery_bills
+    WHERE company_id=$cid AND source_type='jewellery_order_receipt' AND source_id=$newReceiptId LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if ($wageBill) {
+    $karigarParty = (int) jewellery_karigar($cid, $karigar)['party_id'];
+    $pay = jewellery_save_settlement($cid, $fy, ['settlement_date' => '2026-09-15',
+        'party_id' => $karigarParty, 'direction' => 'paid', 'mode' => 'cash',
+        'amount' => 100, 'ledger_id' => $cash], [['bill_id' => (int) $wageBill['id'], 'amount' => 100]], $uid);
+    ok(jewellery_post_settlement($cid, $pay, $uid)['ok'], 'Part of the wages is paid');
+    $blocked = jewellery_unpost_receipt($cid, $newReceiptId, $uid);
+    ok(!$blocked['ok'], 'Reversing the receipt is now REFUSED');
+    ok(str_contains(strtolower((string) $blocked['error']), 'settle'), 'And the message says why');
+} else {
+    ok(true, 'No wage bill on this receipt (employee kaligad) — nothing to block');
+    ok(true, '(skipped)');
+    ok(true, '(skipped)');
+}
+
+echo "\n11. A refinery job out at the refiner can be cancelled\n";
+$refinerParty = $supplier;
+$beforeJob = jwrev_snapshot($cid);
+$job = jewellery_issue_to_refinery($cid, $fy, ['party_id' => $refinerParty, 'item_id' => $chain,
+    'unit_id' => $tola, 'issued_gross_weight' => 2, 'issue_date' => '2026-09-20'], $uid);
+ok($job['ok'], 'Metal goes to the refinery' . ($job['ok'] ? '' : ' — ' . $job['error']));
+$jobId = (int) $job['job_id'];
+$cancelJob = jewellery_cancel_refinery_job($cid, $jobId, $uid);
+ok($cancelJob['ok'], 'The job cancels' . ($cancelJob['ok'] ? '' : ' — ' . $cancelJob['error']));
+$afterJob = jwrev_snapshot($cid);
+$diff = jwrev_diff($beforeJob, $afterJob);
+ok($diff === '', 'The metal is back in own stock and nothing is left behind'
+    . ($diff === '' ? '' : ' — LEFTOVER: ' . $diff));
+ok(!jewellery_cancel_refinery_job($cid, $jobId, $uid)['ok'], 'It cannot be cancelled twice');
+
+echo "\n12. The Voucher Register still cannot touch these postings\n";
+$again2 = jewellery_issue_to_refinery($cid, $fy, ['party_id' => $refinerParty, 'item_id' => $chain,
+    'unit_id' => $tola, 'issued_gross_weight' => 1, 'issue_date' => '2026-09-21'], $uid);
+ok($again2['ok'], 'A fresh refinery job posts');
+$jobVoucher = (int) db()->query("SELECT issue_voucher_id FROM jewellery_refinery_jobs
+    WHERE id=" . (int) $again2['job_id'])->fetchColumn();
+if ($jobVoucher > 0) {
+    $v = db()->query("SELECT * FROM vouchers WHERE id=$jobVoucher")->fetch(PDO::FETCH_ASSOC);
+    ok(voucher_mutation_blocker($v, []) !== null,
+        'Its voucher is protected from the Voucher Register');
+} else {
+    ok(true, 'No voucher (mapping absent) — nothing to protect');
+}
 
 jwrev_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
