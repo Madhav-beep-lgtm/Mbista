@@ -186,6 +186,8 @@ $pages = [
     'jewellery-trade.php' => ['purchases', 'sales', 'bills'],
     'jewellery-workshop.php' => ['orders', 'assignments', 'delivery', 'karigars', 'refinery'],
     'jewellery-reports.php' => ['summary', 'sales', 'purchases', 'inventory', 'vat', 'karigar', 'statement', 'bills'],
+    // Shared components live on these two as well now.
+    'accounting-inventory.php' => ['inventory'],
 ];
 // Deep links that exercise the edit/drill-down branches, which are where the
 // interesting template code lives.

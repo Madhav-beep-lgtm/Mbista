@@ -9,6 +9,7 @@ require_once __DIR__ . '/../../app/jewellery_stock.php';
 // The ledger-mapping catalogue lives in app/ so Hospitality and Jewellery can
 // show the SAME table rather than each keeping a copy of the list.
 require_once __DIR__ . '/../../app/inventory_mapping.php';
+require_once __DIR__ . '/../../app/opening_stock_import.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -369,6 +370,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/accounting-inventory.php');
     }
 
+    // --- Opening stock from a spreadsheet --------------------------------
+    // Same staged flow the Jewellery screen uses, on the same engine: an
+    // upload posts nothing until a deliberate commit.
+    if ($action === 'upload_opening') {
+        try {
+            $file = $_FILES['opening_file'] ?? null;
+            if (!$file || (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                throw new RuntimeException('Choose a .xlsx or .csv file to upload.');
+            }
+            $originalName = (string) ($file['name'] ?? 'sheet');
+            $extension = strtolower((string) pathinfo($originalName, PATHINFO_EXTENSION));
+            if (!in_array($extension, ['xlsx', 'csv'], true)) {
+                throw new RuntimeException('Upload a .xlsx or .csv file.');
+            }
+            $fy = function_exists('current_fiscal_year') ? current_fiscal_year() : null;
+            $staged = opening_import_stage($companyId, (int) ($fy['id'] ?? 0), (string) $file['tmp_name'],
+                $extension, $originalName, 'inventory', $userId);
+            flash($staged['valid_count'] === $staged['row_count'] ? 'success' : 'info',
+                $staged['row_count'] . ' row(s) read, ' . $staged['valid_count'] . ' ready. Nothing posted yet.');
+            redirect('admin/accounting-inventory.php?import=' . $staged['import_id'] . '#opening-import');
+        } catch (Throwable $uploadException) {
+            flash('error', $uploadException->getMessage());
+        }
+        redirect('admin/accounting-inventory.php#opening-import');
+    }
+
+    if ($action === 'update_opening_import_row') {
+        $res = opening_import_update_row($companyId, (int) ($_POST['row_id'] ?? 0), [
+            'item_id' => (int) ($_POST['item_id'] ?? 0),
+            'qty_pieces' => (float) ($_POST['qty_pieces'] ?? 0),
+            'rate' => (float) ($_POST['rate'] ?? 0),
+            'amount' => (float) ($_POST['amount'] ?? 0),
+        ]);
+        flash($res['ok'] ? 'success' : 'error', $res['ok'] ? 'Row updated.' : $res['error']);
+        redirect('admin/accounting-inventory.php?import=' . (int) ($_POST['import_id'] ?? 0) . '#opening-import');
+    }
+
+    if ($action === 'delete_opening_import_row') {
+        $res = opening_import_delete_row($companyId, (int) ($_POST['row_id'] ?? 0));
+        flash($res['ok'] ? 'success' : 'error', $res['ok'] ? 'Row removed.' : $res['error']);
+        redirect('admin/accounting-inventory.php?import=' . (int) ($_POST['import_id'] ?? 0) . '#opening-import');
+    }
+
+    if ($action === 'discard_opening_import') {
+        $res = opening_import_discard($companyId, (int) ($_POST['import_id'] ?? 0));
+        flash($res['ok'] ? 'success' : 'error', $res['ok'] ? 'Import discarded.' : $res['error']);
+        redirect('admin/accounting-inventory.php#opening-import');
+    }
+
+    if ($action === 'commit_opening_import') {
+        $importId = (int) ($_POST['import_id'] ?? 0);
+        $fy = function_exists('current_fiscal_year') ? current_fiscal_year() : null;
+        $res = opening_import_commit($companyId, $importId, (int) ($fy['id'] ?? 0), $userId);
+        if ($res['ok']) {
+            $msg = $res['committed'] . ' opening row(s) committed.';
+            if ($res['failures'] !== []) {
+                $msg .= ' ' . count($res['failures']) . ' could not be — they are still in the import.';
+            }
+            flash($res['failures'] === [] ? 'success' : 'info', $msg);
+        } else {
+            flash('error', $res['error']);
+        }
+        redirect('admin/accounting-inventory.php?import=' . $importId . '#opening-import');
+    }
     if ($action === 'save_warehouse') {
         require_permission('inventory', 'create');
         $warehouseName = trim((string) ($_POST['name'] ?? ''));
@@ -1663,6 +1728,25 @@ $pageSubtitle = $inventoryProfile['show_manufacturing']
     ? 'Item master, stock movements, valuation, and production orders'
     : 'Item master, stock movements, and valuation';
 $bodyClass = 'admin-layout accounting-module-page';
+
+// Opening-stock import batch being previewed, and the item list its rows pick
+// from. Same engine as the Jewellery screen, module = inventory.
+$invImportBatch = opening_import_batch($companyId, (int) ($_GET['import'] ?? 0))
+    ?: opening_import_latest_staged($companyId, 'inventory');
+$invImportRows = $invImportBatch ? opening_import_rows($companyId, (int) $invImportBatch['id']) : [];
+$invImportItems = [];
+if ($invImportBatch) {
+    $invItemStmt = db()->prepare('SELECT id, sku, name FROM inventory_items WHERE company_id = :cid ORDER BY sku ASC');
+    $invItemStmt->execute(['cid' => $companyId]);
+    $invImportItems = $invItemStmt->fetchAll(PDO::FETCH_ASSOC);
+}
+if (($_GET['opening_template'] ?? '') !== '') {
+    require_once __DIR__ . '/../../app/export_engine.php';
+    $tplRows = opening_import_template_rows(false);
+    if ((string) $_GET['opening_template'] === 'csv') { export_csv('opening-stock-template.csv', $tplRows); }
+    export_xlsx('opening-stock-template.xlsx', $tplRows, 'Opening Stock');
+}
+
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <nav class="mbw-tabbar inventory-module-tabs" aria-label="Inventory modules">
@@ -1882,6 +1966,108 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 </nav>
 <div class="workspace-feature-stack">
     <?php if ($invView === 'inventory'): ?>
+    <details class="feature-disclosure" id="opening-import">
+        <summary><span><strong><?= icon('documents') ?>Opening stock from a spreadsheet</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+        <p class="frm-optional" style="margin:0 0 12px">
+            <strong>Uploading posts nothing.</strong> Check the preview, fix or remove rows, then Commit.
+            <a href="<?= e(url('admin/accounting-inventory.php?opening_template=xlsx')) ?>">Download template</a>
+        </p>
+        <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="upload_opening">
+            <label>Spreadsheet<input type="file" name="opening_file" accept=".xlsx,.csv" required></label>
+            <div style="align-self:end">
+                <button type="submit" class="button">Upload &amp; Preview</button>
+                <span class="frm-optional">.xlsx or .csv</span>
+            </div>
+        </form>
+
+        <?php if ($invImportBatch): ?>
+        <?php
+            $invReady = 0; $invErrors = 0; $invDone = 0; $invValue = 0.0;
+            foreach ($invImportRows as $ir) {
+                if ((string) $ir['status'] === 'ready') { $invReady++; $invValue += (float) $ir['amount']; }
+                elseif ((string) $ir['status'] === 'committed') { $invDone++; }
+                else { $invErrors++; }
+            }
+        ?>
+        <h3 style="margin:16px 0 8px"><?= e((string) $invImportBatch['original_name']) ?></h3>
+        <div class="mbw-stat-row" style="margin-bottom:12px">
+            <div class="mbw-stat"><span>Rows</span><strong><?= count($invImportRows) ?></strong></div>
+            <div class="mbw-stat"><span>Ready</span><strong><?= $invReady ?></strong></div>
+            <div class="mbw-stat <?= $invErrors > 0 ? 'tone-amber' : '' ?>"><span>Need attention</span><strong><?= $invErrors ?></strong></div>
+            <div class="mbw-stat"><span>Committed</span><strong><?= $invDone ?></strong></div>
+            <div class="mbw-stat"><span>Value ready</span><strong><?= number_format($invValue, 2) ?></strong></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <form method="post" style="display:inline" onsubmit="return confirm('Commit <?= $invReady ?> row(s) as opening stock?');">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="commit_opening_import">
+                <input type="hidden" name="import_id" value="<?= (int) $invImportBatch['id'] ?>">
+                <button type="submit" class="button" <?= $invReady > 0 ? '' : 'disabled' ?>>Commit <?= $invReady ?></button>
+            </form>
+            <form method="post" style="display:inline" onsubmit="return confirm('Discard this import? Nothing has reached the books.');">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="discard_opening_import">
+                <input type="hidden" name="import_id" value="<?= (int) $invImportBatch['id'] ?>">
+                <button type="submit" class="button secondary">Discard</button>
+            </form>
+        </div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Row</th><th>From the sheet</th><th style="min-width:200px">Item</th><th>Qty</th><th>Rate</th><th>Amount</th><th></th></tr></thead>
+            <tbody>
+                <?php foreach ($invImportRows as $ir): ?>
+                    <tr<?= (string) $ir['status'] === 'error' ? ' style="background:#fdf5ef"' : '' ?>>
+                        <?php if ((string) $ir['status'] === 'committed'): ?>
+                            <td><?= (int) $ir['source_row_no'] ?></td>
+                            <td><?= e(trim((string) $ir['raw_code'] . ' ' . (string) $ir['raw_name'])) ?></td>
+                            <td><?= e((string) ($ir['item_code'] ?? '')) ?></td>
+                            <td class="is-numeric"><?= number_format((float) $ir['qty_pieces'], 3) ?></td>
+                            <td class="is-numeric"><?= number_format((float) $ir['rate'], 4) ?></td>
+                            <td class="is-numeric"><?= number_format((float) $ir['amount'], 2) ?></td>
+                            <td><span class="mbw-pill tone-green">Committed</span></td>
+                        <?php else: ?>
+                        <form method="post">
+                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                            <input type="hidden" name="action" value="update_opening_import_row">
+                            <input type="hidden" name="import_id" value="<?= (int) $invImportBatch['id'] ?>">
+                            <input type="hidden" name="row_id" value="<?= (int) $ir['id'] ?>">
+                            <td><?= (int) $ir['source_row_no'] ?></td>
+                            <td class="frm-optional"><?= e(trim((string) $ir['raw_code'] . ' ' . (string) $ir['raw_name'])) ?>
+                                <?php if ((string) $ir['error_text'] !== ''): ?>
+                                    <br><span class="mbw-pill tone-amber"><?= e((string) $ir['error_text']) ?></span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <select name="item_id">
+                                    <option value="0">— not matched —</option>
+                                    <?php foreach ($invImportItems as $ii): ?>
+                                        <option value="<?= (int) $ii['id'] ?>" <?= (int) $ir['item_id'] === (int) $ii['id'] ? 'selected' : '' ?>><?= e($ii['sku'] . ' — ' . $ii['name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                            <td><input type="number" name="qty_pieces" step="0.001" min="0" style="width:90px" value="<?= e((string) $ir['qty_pieces']) ?>"></td>
+                            <td><input type="number" name="rate" step="0.0001" min="0" style="width:110px" value="<?= e((string) $ir['rate']) ?>"></td>
+                            <td><input type="number" name="amount" step="0.01" min="0" style="width:120px" value="<?= e((string) $ir['amount']) ?>"></td>
+                            <td style="white-space:nowrap">
+                                <button type="submit" class="button secondary" style="min-height:30px;padding:3px 9px">Save</button>
+                        </form>
+                                <form method="post" style="display:inline" onsubmit="return confirm('Remove row <?= (int) $ir['source_row_no'] ?>?');">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="delete_opening_import_row">
+                                    <input type="hidden" name="import_id" value="<?= (int) $invImportBatch['id'] ?>">
+                                    <input type="hidden" name="row_id" value="<?= (int) $ir['id'] ?>">
+                                    <button type="submit" class="button secondary" style="min-height:30px;padding:3px 9px">Delete</button>
+                                </form>
+                            </td>
+                        <?php endif; ?>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+        <?php endif; ?>
+    </details>
+
     <details class="feature-disclosure" id="create-item" open>
         <summary><span><strong><?= icon('services') ?><?= $editItem ? 'Edit item' : 'Create item' ?></strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid">
