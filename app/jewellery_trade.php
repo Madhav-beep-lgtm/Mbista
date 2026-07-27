@@ -1996,9 +1996,19 @@ function jewellery_save_settlement(int $companyId, int $fiscalYearId, array $hea
         if ((int) $bill['party_id'] !== $partyId) {
             throw new RuntimeException('Bill ' . $bill['bill_no'] . ' belongs to a different party.');
         }
-        // What this settlement already contributes must not be double-counted.
-        $priorStmt = db()->prepare('SELECT COALESCE(SUM(amount), 0) FROM jewellery_settlement_allocations
-            WHERE company_id = :cid AND bill_id = :bid AND settlement_id <> :sid');
+        // What has ALREADY REACHED THE BOOKS against this bill — posted
+        // settlements only, and never this settlement's own prior rows.
+        //
+        // It has to agree with jw_refresh_bill(), which also counts posted rows
+        // and nothing else. Counting drafts here made the two disagree:
+        // reversing a settlement reopened the bill on screen, while the draft
+        // it left behind went on silently reserving the room, so every attempt
+        // to settle that reopened bill was refused with "0.00 outstanding".
+        $priorStmt = db()->prepare("SELECT COALESCE(SUM(a.amount), 0)
+            FROM jewellery_settlement_allocations a
+            INNER JOIN jewellery_settlements s ON s.id = a.settlement_id
+            WHERE a.company_id = :cid AND a.bill_id = :bid AND a.settlement_id <> :sid
+              AND s.status = 'posted'");
         $priorStmt->execute(['cid' => $companyId, 'bid' => $billId, 'sid' => $settlementId]);
         $otherAllocations = jw_round_money((float) $priorStmt->fetchColumn());
         $room = jw_round_money((float) $bill['bill_amount'] - $otherAllocations);

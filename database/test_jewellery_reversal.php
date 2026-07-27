@@ -296,6 +296,74 @@ $orphanEntries = (int) db()->query("SELECT COUNT(*) FROM voucher_entries e
     LEFT JOIN vouchers v ON v.id = e.voucher_id WHERE v.id IS NULL")->fetchColumn();
 ok($orphanEntries === 0, 'No voucher entry is orphaned from its voucher');
 
+echo "\n7. Bill allocation cannot over-settle, by any route\n";
+// The bill from section 3 is already part settled by 1,000.
+$billId = (int) $openBill['id'];
+$billAmount = (float) $openBill['bill_amount'];
+$billRow = static function () use ($cid, $billId): array {
+    $stmt = db()->prepare('SELECT * FROM jewellery_bills WHERE id = :id AND company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $billId, 'cid' => $cid]);
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+};
+ok(near((float) $billRow()['settled_amount'], 1000.0), 'The bill shows 1,000 settled');
+ok((string) $billRow()['status'] === 'part_settled', 'And reads as part settled');
+
+// A SECOND settlement must see the first one's allocation and refuse to take
+// the whole bill again.
+ok(threw(static fn () => jewellery_save_settlement($cid, $fy, ['settlement_date' => '2026-08-16',
+        'party_id' => $customer, 'direction' => 'received', 'mode' => 'cash',
+        'amount' => $billAmount, 'ledger_id' => $cash],
+        [['bill_id' => $billId, 'amount' => $billAmount]], $uid)),
+    'A second settlement cannot allocate the full bill again');
+
+// Allocating more than the settlement itself is worth is refused too.
+ok(threw(static fn () => jewellery_save_settlement($cid, $fy, ['settlement_date' => '2026-08-16',
+        'party_id' => $customer, 'direction' => 'received', 'mode' => 'cash',
+        'amount' => 100, 'ledger_id' => $cash],
+        [['bill_id' => $billId, 'amount' => 500]], $uid)),
+    'Allocations cannot exceed the settlement amount');
+
+// Settling the exact remainder closes it — and not a paisa more can follow.
+$remainder = jw_round_money($billAmount - 1000.0);
+$closer = jewellery_save_settlement($cid, $fy, ['settlement_date' => '2026-08-17',
+    'party_id' => $customer, 'direction' => 'received', 'mode' => 'cash',
+    'amount' => $remainder, 'ledger_id' => $cash],
+    [['bill_id' => $billId, 'amount' => $remainder]], $uid);
+ok(jewellery_post_settlement($cid, $closer, $uid)['ok'], 'The remainder settles');
+ok(near((float) $billRow()['settled_amount'], $billAmount), 'The bill is settled in full');
+ok((string) $billRow()['status'] === 'settled', 'And reads as settled');
+ok(threw(static fn () => jewellery_save_settlement($cid, $fy, ['settlement_date' => '2026-08-18',
+        'party_id' => $customer, 'direction' => 'received', 'mode' => 'cash',
+        'amount' => 1, 'ledger_id' => $cash], [['bill_id' => $billId, 'amount' => 1]], $uid)),
+    'Nothing more can be allocated to a fully settled bill');
+
+// Reversing a settlement must reopen the bill by exactly its share.
+$un = jewellery_unpost_settlement($cid, $closer, $uid);
+ok($un['ok'], 'The closing settlement reverses' . ($un['ok'] ? '' : ' — ' . $un['error']));
+ok(near((float) $billRow()['settled_amount'], 1000.0), 'The bill drops back to 1,000 settled');
+ok((string) $billRow()['status'] === 'part_settled', 'And reopens as part settled');
+
+// A DRAFT settlement must not move the bill at all.
+$draft = jewellery_save_settlement($cid, $fy, ['settlement_date' => '2026-08-19',
+    'party_id' => $customer, 'direction' => 'received', 'mode' => 'cash',
+    'amount' => 50, 'ledger_id' => $cash], [['bill_id' => $billId, 'amount' => 50]], $uid);
+ok(near((float) $billRow()['settled_amount'], 1000.0),
+    'A DRAFT settlement does not change what the bill shows as settled');
+ok(jewellery_delete_settlement($cid, $draft), 'The draft can be deleted');
+ok((int) db()->query("SELECT COUNT(*) FROM jewellery_settlement_allocations
+    WHERE company_id=$cid AND settlement_id=$draft")->fetchColumn() === 0,
+    'And its allocations go with it');
+
+echo "\n8. The sum of allocations never exceeds the bill\n";
+$overSettled = db()->query("SELECT b.id, b.bill_no, b.bill_amount,
+        COALESCE((SELECT SUM(a.amount) FROM jewellery_settlement_allocations a
+                  INNER JOIN jewellery_settlements s ON s.id = a.settlement_id
+                  WHERE a.bill_id = b.id AND s.status = 'posted'), 0) AS allocated
+    FROM jewellery_bills b WHERE b.company_id = $cid
+    HAVING allocated > bill_amount + 0.005")->fetchAll(PDO::FETCH_ASSOC);
+ok($overSettled === [], 'No bill in the company is over-settled'
+    . ($overSettled === [] ? '' : ' — ' . json_encode($overSettled)));
+
 jwrev_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
