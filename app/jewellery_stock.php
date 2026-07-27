@@ -496,7 +496,8 @@ function jw_record_stock_txn(int $companyId, array $txn): int
         throw new RuntimeException('The movement purity must belong to the item\'s metal.');
     }
     $unitId = (int) ($txn['unit_id'] ?? $item['unit_id']);
-    if (!jewellery_unit($companyId, $unitId)) {
+    $unitRow = jewellery_unit($companyId, $unitId);
+    if (!$unitRow) {
         throw new RuntimeException('The movement unit must belong to this company.');
     }
 
@@ -536,14 +537,19 @@ function jw_record_stock_txn(int $companyId, array $txn): int
         $held = jw_item_balance($companyId, $itemId, $txnDate, $holderType, (int) ($txn['holder_id'] ?? 0) ?: null);
         // Weight is compared in FINE terms: that is the only basis on which a
         // 22K issue against a 24K balance is a meaningful question at all.
-        if ($fine > 0 && jw_round_weight($held['fine_weight'] - $fine) < -0.00005) {
+        //
+        // AND IN THE SAME UNIT. The balance comes back in the ITEM's unit while
+        // this movement carries its own — a 5 g issue against a 0.9 tola
+        // balance is not an overdraw, but comparing 5 with 0.9 says it is.
+        $fineInItemUnit = jw_round_weight(jw_to_grams($fine, $unitRow) / jw_item_unit_grams($companyId, $itemId));
+        if ($fine > 0 && jw_round_weight($held['fine_weight'] - $fineInItemUnit) < -0.00005) {
             throw new RuntimeException(sprintf(
                 'Not enough stock on %s: %s holds %s fine of %s but the movement takes out %s fine.',
                 $txnDate,
                 $holderType,
                 number_format($held['fine_weight'], 4),
                 (string) $item['code'],
-                number_format($fine, 4)
+                number_format($fineInItemUnit, 4)
             ));
         }
         if ($pieces > 0 && ($held['qty_pieces'] - $pieces) < -0.0005) {
@@ -568,10 +574,10 @@ function jw_record_stock_txn(int $companyId, array $txn): int
 
     db()->prepare('INSERT INTO jewellery_stock_txns
             (company_id, fiscal_year_id, item_id, txn_type, direction, txn_date, ref_no, holder_type, holder_id,
-             metal_id, purity_id, unit_id, qty_pieces, gross_weight, fine_weight, rate, amount,
+             metal_id, purity_id, unit_id, qty_pieces, gross_weight, gross_grams, fine_weight, fine_grams, rate, amount,
              source_type, source_id, voucher_id, party_id, notes, created_by)
         VALUES (:cid, :fy, :iid, :type, :dir, :d, :ref, :ht, :hid,
-             :mid, :pid, :uid, :pieces, :gross, :fine, :rate, :amount,
+             :mid, :pid, :uid, :pieces, :gross, :ggrams, :fine, :fgrams, :rate, :amount,
              :stype, :sid, :vid, :party, :notes, :by)')
         ->execute([
             'cid' => $companyId,
@@ -588,7 +594,12 @@ function jw_record_stock_txn(int $companyId, array $txn): int
             'uid' => $unitId,
             'pieces' => $pieces,
             'gross' => $gross,
+            // The canonical figure, written once at the only choke point that
+            // records a movement. Every balance sums THESE, so a tola in and a
+            // gram out no longer cancel each other out. See migration 082.
+            'ggrams' => jw_to_grams($gross, $unitRow),
             'fine' => $fine,
+            'fgrams' => jw_to_grams($fine, $unitRow),
             'rate' => $rate,
             'amount' => $amount,
             'stype' => ($txn['source_type'] ?? '') !== '' ? (string) $txn['source_type'] : null,
@@ -605,19 +616,38 @@ function jw_record_stock_txn(int $companyId, array $txn): int
 /**
  * Balance of one item, optionally as at a date and for one holder.
  *
- * Weights are summed in the item's own unit; every movement of an item is
- * recorded in a unit of the same company, and jw_stock_ledger() converts for
- * display. Value is a running total, and avg_fine_rate is the weighted
- * average cost per unit of PURE metal — the figure Phase 4 charges COGS at.
+ * WEIGHTS ARE SUMMED IN GRAMS AND RESTATED IN THE ITEM'S OWN UNIT. The unit is
+ * chosen per document LINE, not per item, so an item bought in tola and sold in
+ * grams has movements in both — and adding those columns straight in SQL made
+ * 1 tola in and 1 gram out cancel to nothing. Every movement now carries its
+ * weight in grams as well (migration 082), which keeps the balance a single
+ * aggregate and makes it a correct one.
+ *
+ * Value is a running total, and avg_fine_rate is the weighted average cost per
+ * unit of PURE metal in the item's unit — the figure COGS is charged at.
  */
 function jw_item_balance(int $companyId, int $itemId, ?string $asOf = null, string $holderType = 'stock', ?int $holderId = null): array
 {
+    // The item's own unit is the reporting unit for its balance. Cached per
+    // call because this runs once per line and once per report row.
+    static $unitGrams = [];
+    $cacheKey = $companyId . ':' . $itemId;
+    if (!isset($unitGrams[$cacheKey])) {
+        $gramsStmt = db()->prepare('SELECT u.grams FROM inventory_items i
+            INNER JOIN jewellery_item_profiles j ON j.inventory_item_id = i.id
+            INNER JOIN jewellery_units u ON u.id = j.unit_id
+            WHERE i.id = :iid AND i.company_id = :cid LIMIT 1');
+        $gramsStmt->execute(['iid' => $itemId, 'cid' => $companyId]);
+        $unitGrams[$cacheKey] = (float) ($gramsStmt->fetchColumn() ?: 1.0);
+    }
+    $item = ['grams' => $unitGrams[$cacheKey]];
+
     $sql = "SELECT
             COALESCE(SUM(CASE WHEN direction = 'in' THEN qty_pieces ELSE -qty_pieces END), 0) AS pieces,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN gross_weight ELSE -gross_weight END), 0) AS gross,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_weight ELSE -fine_weight END), 0) AS fine,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN gross_grams ELSE -gross_grams END), 0) AS gross_g,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_grams ELSE -fine_grams END), 0) AS fine_g,
             COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END), 0) AS value,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_weight ELSE 0 END), 0) AS fine_in,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_grams ELSE 0 END), 0) AS fine_in_g,
             COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE 0 END), 0) AS value_in,
             COUNT(*) AS movements
         FROM jewellery_stock_txns
@@ -642,9 +672,15 @@ function jw_item_balance(int $companyId, int $itemId, ?string $asOf = null, stri
     $stmt->execute($params);
     $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
-    $fineIn = (float) ($row['fine_in'] ?? 0);
+    // Grams came out of SQL; the caller wants the ITEM's own unit, which is
+    // what every rate, guard and report in the module reasons in.
+    $perUnit = (float) ($item['grams'] ?? 0);
+    if ($perUnit <= 0) {
+        $perUnit = 1.0;
+    }
+    $fineIn = (float) ($row['fine_in_g'] ?? 0) / $perUnit;
     $valueIn = (float) ($row['value_in'] ?? 0);
-    $fine = jw_round_weight((float) ($row['fine'] ?? 0));
+    $fine = jw_round_weight((float) ($row['fine_g'] ?? 0) / $perUnit);
     $value = jw_round_money((float) ($row['value'] ?? 0));
 
     // MOVING weighted average: the value still on hand divided by the fine
@@ -666,7 +702,7 @@ function jw_item_balance(int $companyId, int $itemId, ?string $asOf = null, stri
 
     return [
         'qty_pieces' => round((float) ($row['pieces'] ?? 0), 3),
-        'gross_weight' => jw_round_weight((float) ($row['gross'] ?? 0)),
+        'gross_weight' => jw_round_weight((float) ($row['gross_g'] ?? 0) / $perUnit),
         'fine_weight' => $fine,
         'value' => $value,
         'avg_fine_rate' => $avgFineRate,
@@ -674,13 +710,31 @@ function jw_item_balance(int $companyId, int $itemId, ?string $asOf = null, stri
     ];
 }
 
+/** Grams per one unit of an item's own weight unit. Cached: this is a hot path. */
+function jw_item_unit_grams(int $companyId, int $itemId): float
+{
+    static $cache = [];
+    $key = $companyId . ':' . $itemId;
+    if (!isset($cache[$key])) {
+        $stmt = db()->prepare('SELECT u.grams FROM inventory_items i
+            INNER JOIN jewellery_item_profiles j ON j.inventory_item_id = i.id
+            INNER JOIN jewellery_units u ON u.id = j.unit_id
+            WHERE i.id = :iid AND i.company_id = :cid LIMIT 1');
+        $stmt->execute(['iid' => $itemId, 'cid' => $companyId]);
+        $grams = (float) ($stmt->fetchColumn() ?: 0);
+        $cache[$key] = $grams > 0 ? $grams : 1.0;
+    }
+
+    return $cache[$key];
+}
+
 /** Balances of one item split by holder — own stock, each karigar, refinery. */
 function jewellery_item_holdings(int $companyId, int $itemId, ?string $asOf = null): array
 {
     $sql = "SELECT holder_type, holder_id,
             COALESCE(SUM(CASE WHEN direction = 'in' THEN qty_pieces ELSE -qty_pieces END), 0) AS pieces,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN gross_weight ELSE -gross_weight END), 0) AS gross,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_weight ELSE -fine_weight END), 0) AS fine,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN gross_grams ELSE -gross_grams END), 0) AS gross_g,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_grams ELSE -fine_grams END), 0) AS fine_g,
             COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END), 0) AS value
         FROM jewellery_stock_txns
         WHERE company_id = :cid AND item_id = :iid";
@@ -689,12 +743,21 @@ function jewellery_item_holdings(int $companyId, int $itemId, ?string $asOf = nu
         $sql .= ' AND txn_date <= :asof';
         $params['asof'] = $asOf;
     }
-    $sql .= ' GROUP BY holder_type, holder_id HAVING ABS(fine) > 0.00005 OR ABS(pieces) > 0.0005 ORDER BY holder_type ASC';
+    $sql .= ' GROUP BY holder_type, holder_id HAVING ABS(fine_g) > 0.00005 OR ABS(pieces) > 0.0005 ORDER BY holder_type ASC';
 
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // Restate the gram totals in the item's own unit, and keep the historic
+    // `gross` / `fine` keys so no caller has to change.
+    $perUnit = jw_item_unit_grams($companyId, $itemId);
+    foreach ($rows as $index => $row) {
+        $rows[$index]['gross'] = jw_round_weight((float) $row['gross_g'] / $perUnit);
+        $rows[$index]['fine'] = jw_round_weight((float) $row['fine_g'] / $perUnit);
+    }
+
+    return $rows;
 }
 
 /**
@@ -707,7 +770,7 @@ function jewellery_metal_position(int $companyId, ?string $asOf = null, array $f
             m.code AS metal_code, m.name AS metal_name,
             p.code AS purity_code, p.fineness,
             COALESCE(SUM(CASE WHEN t.direction = 'in' THEN t.qty_pieces ELSE -t.qty_pieces END), 0) AS pieces,
-            COALESCE(SUM(CASE WHEN t.direction = 'in' THEN t.fine_weight ELSE -t.fine_weight END), 0) AS fine,
+            COALESCE(SUM(CASE WHEN t.direction = 'in' THEN t.fine_grams ELSE -t.fine_grams END), 0) AS fine_g,
             COALESCE(SUM(CASE WHEN t.direction = 'in' THEN t.amount ELSE -t.amount END), 0) AS value
         FROM jewellery_stock_txns t
         INNER JOIN jewellery_metals m ON m.id = t.metal_id
@@ -728,13 +791,22 @@ function jewellery_metal_position(int $companyId, ?string $asOf = null, array $f
         $params['mid'] = (int) $filters['metal_id'];
     }
     $sql .= ' GROUP BY t.metal_id, t.purity_id, t.holder_type, t.holder_id, m.code, m.name, p.code, p.fineness
-              HAVING ABS(fine) > 0.00005 OR ABS(pieces) > 0.0005
+              HAVING ABS(fine_g) > 0.00005 OR ABS(pieces) > 0.0005
               ORDER BY m.name ASC, p.fineness DESC, t.holder_type ASC';
 
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // This crosses items, so there is no single item unit to report in — the
+    // company's reporting unit is the honest one.
+    $baseUnit = jewellery_base_unit($companyId);
+    $perUnit = (float) ($baseUnit['grams'] ?? 0) ?: 1.0;
+    foreach ($rows as $index => $row) {
+        $rows[$index]['fine'] = jw_round_weight((float) $row['fine_g'] / $perUnit);
+    }
+
+    return $rows;
 }
 
 /**

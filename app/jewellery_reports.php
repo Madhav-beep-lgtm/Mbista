@@ -210,15 +210,16 @@ function jw_report_inventory_detail(int $companyId, string $from, string $to): a
         'out_fine' => 0.0, 'out_value' => 0.0, 'closing_fine' => 0.0, 'closing_value' => 0.0, 'with_others_fine' => 0.0];
 
     $movementStmt = db()->prepare("SELECT
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_weight ELSE 0 END), 0) AS in_fine,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_grams ELSE 0 END), 0) AS in_fine_g,
             COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE 0 END), 0) AS in_value,
-            COALESCE(SUM(CASE WHEN direction = 'out' THEN fine_weight ELSE 0 END), 0) AS out_fine,
+            COALESCE(SUM(CASE WHEN direction = 'out' THEN fine_grams ELSE 0 END), 0) AS out_fine_g,
             COALESCE(SUM(CASE WHEN direction = 'out' THEN amount ELSE 0 END), 0) AS out_value
         FROM jewellery_stock_txns
         WHERE company_id = :cid AND item_id = :iid AND txn_date BETWEEN :from AND :to");
 
     foreach ($items as $item) {
         $itemId = (int) $item['id'];
+        $perUnit = jw_item_unit_grams($companyId, $itemId);
         $opening = jw_item_balance($companyId, $itemId, $dayBefore, '');
         $closing = jw_item_balance($companyId, $itemId, $to, '');
         $ownClosing = jw_item_balance($companyId, $itemId, $to, 'stock');
@@ -233,7 +234,7 @@ function jw_report_inventory_detail(int $companyId, string $from, string $to): a
         $isQuiet = abs($opening['fine_weight']) < 0.00005 && abs($closing['fine_weight']) < 0.00005
             && abs($opening['qty_pieces']) < 0.0005 && abs($closing['qty_pieces']) < 0.0005
             && abs($opening['value']) < 0.005 && abs($closing['value']) < 0.005
-            && (float) ($movement['in_fine'] ?? 0) < 0.00005 && (float) ($movement['out_fine'] ?? 0) < 0.00005
+            && (float) ($movement['in_fine_g'] ?? 0) < 0.00005 && (float) ($movement['out_fine_g'] ?? 0) < 0.00005
             && (float) ($movement['in_value'] ?? 0) < 0.005 && (float) ($movement['out_value'] ?? 0) < 0.005;
         if ($isQuiet) {
             continue;
@@ -241,9 +242,10 @@ function jw_report_inventory_detail(int $companyId, string $from, string $to): a
 
         $row = $item + [
             'opening_fine' => $opening['fine_weight'], 'opening_value' => $opening['value'],
-            'in_fine' => jw_round_weight((float) ($movement['in_fine'] ?? 0)),
+            // Grams out of SQL, restated in the item's own unit (migration 082).
+            'in_fine' => jw_round_weight((float) ($movement['in_fine_g'] ?? 0) / $perUnit),
             'in_value' => jw_round_money((float) ($movement['in_value'] ?? 0)),
-            'out_fine' => jw_round_weight((float) ($movement['out_fine'] ?? 0)),
+            'out_fine' => jw_round_weight((float) ($movement['out_fine_g'] ?? 0) / $perUnit),
             'out_value' => jw_round_money((float) ($movement['out_value'] ?? 0)),
             'closing_fine' => $closing['fine_weight'], 'closing_value' => $closing['value'],
             'closing_pieces' => $closing['qty_pieces'],

@@ -2427,5 +2427,27 @@ function accounting_module_repair_database(): array
             ['inventory_opening_imports', 'inventory_opening_import_rows']);
     });
 
+    $run('Canonical gram weights on stock movements (migration 082)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_stock_txns')) {
+            return;
+        }
+        accounting_repair_add_column('jewellery_stock_txns', 'gross_grams',
+            '`gross_grams` DECIMAL(18,6) NOT NULL DEFAULT 0.000000 AFTER `gross_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'fine_grams',
+            '`fine_grams` DECIMAL(18,6) NOT NULL DEFAULT 0.000000 AFTER `fine_weight`');
+        accounting_repair_add_index('jewellery_stock_txns', 'idx_jw_txn_item_grams',
+            'KEY `idx_jw_txn_item_grams` (`company_id`, `item_id`, `txn_date`)');
+
+        // Backfill from the unit each row was written in. Rows that already
+        // carry a gram figure are left alone, so this is safe to re-run.
+        if (accounting_repair_table_exists('jewellery_units')) {
+            db()->exec('UPDATE `jewellery_stock_txns` t
+                JOIN `jewellery_units` u ON u.id = t.unit_id
+                SET t.gross_grams = t.gross_weight * IF(u.grams > 0, u.grams, 1),
+                    t.fine_grams  = t.fine_weight  * IF(u.grams > 0, u.grams, 1)
+                WHERE t.gross_grams = 0 AND t.fine_grams = 0');
+        }
+    });
+
     return $errors;
 }

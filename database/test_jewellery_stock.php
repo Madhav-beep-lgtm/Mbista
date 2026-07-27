@@ -424,6 +424,55 @@ ok(threw(static fn () => jewellery_save_mapping($cidB, 'stock_finished', $ldgSto
 $vA = (int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$cidB")->fetchColumn();
 ok($vA === 0, 'No voucher ever reached company B');
 
+
+echo "\nMIXED UNITS — one item transacted in tola AND grams\n";
+// The unit is chosen per document LINE, not per item, so a shop that buys
+// bullion in tola and sells scrap in grams has both on one item. Summing the
+// stored weight columns straight in SQL used to make 1 tola in and 1 gram out
+// cancel to nothing: the module reported zero stock while 10.66 g of gold sat
+// on the shelf. Every balance now sums the canonical gram figure.
+$mixItem = jewellery_save_item($cidA, ['code' => 'MIX-1', 'name' => 'Mixed Unit Bar', 'item_type' => 'bullion',
+    'metal_id' => $goldA, 'purity_id' => $p24A, 'unit_id' => $tolaA], $userA);
+
+jw_record_stock_txn($cidA, ['item_id' => $mixItem, 'txn_type' => 'opening', 'direction' => 'in',
+    'txn_date' => '2026-08-01', 'holder_type' => 'stock', 'purity_id' => $p24A, 'unit_id' => $tolaA,
+    'gross_weight' => 1, 'fine_weight' => 1, 'amount' => 139000, 'qty_pieces' => 1]);
+jw_record_stock_txn($cidA, ['item_id' => $mixItem, 'txn_type' => 'adjustment', 'direction' => 'out',
+    'txn_date' => '2026-08-02', 'holder_type' => 'stock', 'purity_id' => $p24A, 'unit_id' => $gramA,
+    'gross_weight' => 1, 'fine_weight' => 1, 'amount' => 11918, 'qty_pieces' => 0]);
+
+$mixBal = jw_item_balance($cidA, $mixItem, null, 'stock');
+$expected = 1 - (1 / 11.6638);   // one tola in, one gram out, in tola
+ok(near($mixBal['gross_weight'], $expected, 0.0002),
+    'A tola in and a gram out leaves ' . number_format($expected, 4) . ' tola — not zero');
+ok(near($mixBal['fine_weight'], $expected, 0.0002), 'And the fine weight agrees');
+ok($mixBal['gross_weight'] > 0.9, 'The 10.66 g that used to vanish is still there');
+
+// The stored row keeps the unit that was typed, so the document still reads
+// the way it was written.
+$typed = db()->query("SELECT gross_weight, gross_grams, unit_id FROM jewellery_stock_txns
+    WHERE company_id=$cidA AND item_id=$mixItem ORDER BY id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+ok(near((float) $typed['gross_weight'], 1.0), 'The row still shows the 1 that was typed');
+ok(near((float) $typed['gross_grams'], 11.6638, 0.001), 'And carries 11.6638 g alongside it');
+
+// A guard built on the balance must agree: selling more than is left is still
+// refused, and selling what IS left is still allowed.
+$overdraw = false;
+try {
+    jw_record_stock_txn($cidA, ['item_id' => $mixItem, 'txn_type' => 'adjustment', 'direction' => 'out',
+        'txn_date' => '2026-08-03', 'holder_type' => 'stock', 'purity_id' => $p24A, 'unit_id' => $tolaA,
+        'gross_weight' => 5, 'fine_weight' => 5, 'amount' => 100, 'qty_pieces' => 0]);
+} catch (Throwable $e) { $overdraw = true; }
+ok($overdraw, 'The negative-stock guard still refuses an over-issue, now on the right balance');
+
+$withinReach = true;
+try {
+    jw_record_stock_txn($cidA, ['item_id' => $mixItem, 'txn_type' => 'adjustment', 'direction' => 'out',
+        'txn_date' => '2026-08-03', 'holder_type' => 'stock', 'purity_id' => $p24A, 'unit_id' => $gramA,
+        'gross_weight' => 5, 'fine_weight' => 5, 'amount' => 100, 'qty_pieces' => 0]);
+} catch (Throwable $e) { $withinReach = false; }
+ok($withinReach, 'And ALLOWS a 5 g issue that the old naive sum would have blocked as an overdraw');
+
 jws_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";
