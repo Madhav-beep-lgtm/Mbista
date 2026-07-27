@@ -85,22 +85,22 @@ if (isset($_GET['export']) && $canExport) {
     $meta = ['Period' => app_date($from) . ' to ' . app_date($to)];
     if ($view === 'sales') {
         $data = [['Date', 'Sale no', 'Party', 'Item', 'Purity', 'Pieces', 'Gross wt', 'Fine wt', 'Rate',
-            'Metal', 'Making', 'Stone', 'VAT base', 'VAT', 'Revenue', 'COGS', 'Gross profit', 'GP %']];
+            'Metal', 'Making', 'Stone / diamond', 'VAT base', 'VAT', 'Revenue', 'COGS', 'Gross profit', 'GP %']];
         foreach (jw_report_sales_detail($companyId, $from, $to)['rows'] as $r) {
             $data[] = [$r['sale_date'], $r['sale_no'], $r['party_label'], $r['item_code'], $r['purity_code'],
                 $r['qty_pieces'], $r['gross_weight'], $r['fine_weight'], $r['rate'], $r['metal_amount'],
-                $r['making_amount'], $r['stone_amount'], $r['vat_base'], $r['vat_amount'], $r['revenue'],
+                $r['making_amount'], $r['stone_side'], $r['vat_base'], $r['vat_amount'], $r['revenue'],
                 $r['cogs_amount'], $r['gross_profit'], $r['gp_pct']];
         }
         export_dispatch($format, 'jewellery-sales-' . $stamp, $data, 'Sales Detailed', $meta);
     }
     if ($view === 'purchases') {
         $data = [['Date', 'Purchase no', 'Party', 'Source', 'Item', 'Purity', 'Pieces', 'Gross wt', 'Fine wt',
-            'Rate', 'Metal', 'Making', 'Stone', 'VAT', 'Landed cost']];
+            'Rate', 'Metal', 'Making', 'Stone / diamond', 'VAT', 'Landed cost']];
         foreach (jw_report_purchase_detail($companyId, $from, $to)['rows'] as $r) {
             $data[] = [$r['purchase_date'], $r['purchase_no'], $r['party_label'], $r['source'], $r['item_code'],
                 $r['purity_code'], $r['qty_pieces'], $r['gross_weight'], $r['fine_weight'], $r['rate'],
-                $r['metal_amount'], $r['making_amount'], $r['stone_amount'], $r['vat_amount'], $r['stock_amount']];
+                $r['metal_amount'], $r['making_amount'], $r['stone_side'], $r['vat_amount'], $r['stock_amount']];
         }
         export_dispatch($format, 'jewellery-purchases-' . $stamp, $data, 'Purchase Detailed', $meta);
     }
@@ -311,7 +311,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Sales Detailed (<?= count($report['rows']) ?> lines)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Date</th><th>Sale</th><th>Customer</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone</th><th class="is-numeric">VAT</th><th class="is-numeric">COGS</th><th class="is-numeric">GP</th></tr></thead>
+            <thead><tr><th>Date</th><th>Sale</th><th>Customer</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone / diamond</th><th class="is-numeric">VAT</th><th class="is-numeric">COGS</th><th class="is-numeric">GP</th></tr></thead>
             <tbody>
                 <?php if ($report['rows'] === []): ?><tr><td colspan="14">No posted sales in this period.</td></tr><?php endif; ?>
                 <?php foreach ($report['rows'] as $r): ?>
@@ -326,7 +326,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                         <td class="is-numeric"><?= $fmt((float) $r['rate']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['metal_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['making_amount']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $r['stone_amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['stone_side']) ?></td>
                         <td class="is-numeric"><?= (float) $r['vat_amount'] > 0 ? $fmt((float) $r['vat_amount']) . '<br><small>' . e(str_replace('_', ' ', (string) $r['vat_base'])) . '</small>' : '—' ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['cogs_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['gross_profit']) ?></td>
@@ -339,7 +339,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                 <th></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['metal_amount']) ?></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['making_amount']) ?></th>
-                <th class="is-numeric"><?= $fmt($report['totals']['stone_amount']) ?></th>
+                <th class="is-numeric"><?= $fmt($report['totals']['stone_side']) ?></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['vat_amount']) ?></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['cogs_amount']) ?></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['gross_profit']) ?></th>
@@ -352,7 +352,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Purchase Detailed (<?= count($report['rows']) ?> lines)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Date</th><th>Purchase</th><th>Party</th><th>Source</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone</th><th class="is-numeric">VAT</th><th class="is-numeric">Landed cost</th></tr></thead>
+            <thead><tr><th>Date</th><th>Purchase</th><th>Party</th><th>Source</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone / diamond</th><th class="is-numeric">VAT</th><th class="is-numeric">Landed cost</th></tr></thead>
             <tbody>
                 <?php if ($report['rows'] === []): ?><tr><td colspan="14">No posted purchases in this period.</td></tr><?php endif; ?>
                 <?php foreach ($report['rows'] as $r): ?>
@@ -368,7 +368,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                         <td class="is-numeric"><?= $fmt((float) $r['rate']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['metal_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['making_amount']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $r['stone_amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['stone_side']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['vat_amount']) ?></td>
                         <td class="is-numeric"><strong><?= $fmt((float) $r['stock_amount']) ?></strong></td>
                     </tr>
@@ -380,7 +380,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                 <th></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['metal_amount']) ?></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['making_amount']) ?></th>
-                <th class="is-numeric"><?= $fmt($report['totals']['stone_amount']) ?></th>
+                <th class="is-numeric"><?= $fmt($report['totals']['stone_side']) ?></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['vat_amount']) ?></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['stock_amount']) ?></th>
             </tr></tfoot>

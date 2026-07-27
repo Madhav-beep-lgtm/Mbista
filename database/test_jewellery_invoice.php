@@ -328,6 +328,19 @@ ok((float) $register['output']['taxable'] < 46000.0,
 ok(near((float) $register['output']['vat'], (float) $byCode2['VAT']['output_amount']),
     'The line-level VAT total and the per-tax total agree');
 
+echo "\nThe sales report agrees with the ledger it posted to\n";
+$salesReport = jw_report_sales_detail($cid, '2026-07-16', '2027-07-15');
+$reportedRevenue = (float) $salesReport['totals']['revenue'];
+// What the books say: everything credited to the three revenue accounts.
+$bookedRevenue = (float) db()->query('SELECT COALESCE(SUM(CASE WHEN e.entry_type = \'credit\' THEN e.amount ELSE -e.amount END), 0)
+    FROM voucher_entries e INNER JOIN vouchers v ON v.id = e.voucher_id
+    WHERE v.company_id=' . $cid . ' AND e.ledger_id IN (' . $L['sales_metal'] . ',' . $L['sales_making'] . ',' . $L['sales_stone'] . ')')->fetchColumn();
+ok(near($reportedRevenue, $bookedRevenue, 0.02),
+    'Reported revenue ' . number_format($reportedRevenue, 2) . ' equals what was credited to sales, '
+    . number_format($bookedRevenue, 2));
+ok(near((float) $salesReport['totals']['stone_side'], 232.60 + 45500.00),
+    'The stone side gathers all three columns — a diamond bill is not understated by 45,000');
+
 echo "\nThe printed bill carries the same figures the books do\n";
 // Rendering has to happen in a child process: the page is a full document that
 // ends the request, and require_jewellery() needs a real session context.

@@ -26,7 +26,8 @@ function jw_report_sales_detail(int $companyId, string $from, string $to, array 
     $sql = "SELECT s.sale_no, s.sale_date, s.party_id, s.customer_name, s.status,
                 COALESCE(ap.name, s.customer_name, 'Walk-in') AS party_label,
                 l.id AS line_id, l.qty_pieces, l.gross_weight, l.fine_weight, l.rate,
-                l.metal_amount, l.making_amount, l.stone_amount, l.vat_base, l.vat_rate, l.vat_amount,
+                l.metal_amount, l.making_amount, l.stone_amount, l.diamond_amount, l.other_diamond_amount,
+                l.vat_base, l.vat_rate, l.vat_amount,
                 l.allocated_adjust, l.line_total, l.cogs_amount,
                 i.sku AS item_code, i.name AS item_name, i.category, jp.jewellery_type AS item_type,
                 m.name AS metal_name, p.code AS purity_code, u.code AS unit_code
@@ -61,12 +62,18 @@ function jw_report_sales_detail(int $companyId, string $from, string $to, array 
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $totals = ['fine_weight' => 0.0, 'metal_amount' => 0.0, 'making_amount' => 0.0, 'stone_amount' => 0.0,
+        'diamond_amount' => 0.0, 'other_diamond_amount' => 0.0, 'stone_side' => 0.0,
         'vat_amount' => 0.0, 'line_total' => 0.0, 'cogs_amount' => 0.0, 'gross_profit' => 0.0];
     foreach ($rows as $index => $row) {
+        // The three stone columns are one revenue side — posting credits them to
+        // a single account, so a report that counted only `stone_amount` would
+        // understate a diamond bill by the whole diamond value.
+        $stoneSide = (float) $row['stone_amount'] + (float) $row['diamond_amount'] + (float) $row['other_diamond_amount'];
         // Margin is measured against the revenue side only — VAT is collected
         // for the government, never earned, so it stays out of gross profit.
-        $revenue = (float) $row['metal_amount'] + (float) $row['making_amount'] + (float) $row['stone_amount'] + (float) $row['allocated_adjust'];
+        $revenue = (float) $row['metal_amount'] + (float) $row['making_amount'] + $stoneSide + (float) $row['allocated_adjust'];
         $profit = jw_round_money($revenue - (float) $row['cogs_amount']);
+        $rows[$index]['stone_side'] = jw_round_money($stoneSide);
         $rows[$index]['revenue'] = jw_round_money($revenue);
         $rows[$index]['gross_profit'] = $profit;
         $rows[$index]['gp_pct'] = $revenue > 0 ? round($profit / $revenue * 100, 2) : null;
@@ -75,6 +82,9 @@ function jw_report_sales_detail(int $companyId, string $from, string $to, array 
         $totals['metal_amount'] += (float) $row['metal_amount'];
         $totals['making_amount'] += (float) $row['making_amount'];
         $totals['stone_amount'] += (float) $row['stone_amount'];
+        $totals['diamond_amount'] += (float) $row['diamond_amount'];
+        $totals['other_diamond_amount'] += (float) $row['other_diamond_amount'];
+        $totals['stone_side'] += $stoneSide;
         $totals['vat_amount'] += (float) $row['vat_amount'];
         $totals['line_total'] += (float) $row['line_total'];
         $totals['cogs_amount'] += (float) $row['cogs_amount'];
@@ -83,7 +93,7 @@ function jw_report_sales_detail(int $companyId, string $from, string $to, array 
     foreach ($totals as $key => $value) {
         $totals[$key] = $key === 'fine_weight' ? jw_round_weight($value) : jw_round_money($value);
     }
-    $totals['revenue'] = jw_round_money($totals['metal_amount'] + $totals['making_amount'] + $totals['stone_amount']);
+    $totals['revenue'] = jw_round_money($totals['metal_amount'] + $totals['making_amount'] + $totals['stone_side']);
     $totals['gp_pct'] = $totals['revenue'] > 0 ? round($totals['gross_profit'] / $totals['revenue'] * 100, 2) : null;
 
     return ['rows' => $rows, 'totals' => $totals];
@@ -140,7 +150,8 @@ function jw_report_purchase_detail(int $companyId, string $from, string $to, arr
     $sql = "SELECT pu.purchase_no, pu.purchase_date, pu.party_id, pu.source, pu.status,
                 COALESCE(ap.name, 'Walk-in') AS party_label,
                 l.id AS line_id, l.qty_pieces, l.gross_weight, l.fine_weight, l.rate,
-                l.metal_amount, l.making_amount, l.stone_amount, l.vat_base, l.vat_rate, l.vat_amount,
+                l.metal_amount, l.making_amount, l.stone_amount, l.diamond_amount, l.other_diamond_amount,
+                l.vat_base, l.vat_rate, l.vat_amount,
                 l.allocated_adjust, l.line_total, l.stock_amount,
                 i.sku AS item_code, i.name AS item_name, i.category, jp.jewellery_type AS item_type,
                 m.name AS metal_name, p.code AS purity_code, u.code AS unit_code
@@ -175,12 +186,18 @@ function jw_report_purchase_detail(int $companyId, string $from, string $to, arr
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $totals = ['fine_weight' => 0.0, 'metal_amount' => 0.0, 'making_amount' => 0.0, 'stone_amount' => 0.0,
+        'diamond_amount' => 0.0, 'other_diamond_amount' => 0.0, 'stone_side' => 0.0,
         'vat_amount' => 0.0, 'line_total' => 0.0, 'stock_amount' => 0.0];
-    foreach ($rows as $row) {
+    foreach ($rows as $index => $row) {
+        $stoneSide = (float) $row['stone_amount'] + (float) $row['diamond_amount'] + (float) $row['other_diamond_amount'];
+        $rows[$index]['stone_side'] = jw_round_money($stoneSide);
         $totals['fine_weight'] += (float) $row['fine_weight'];
         $totals['metal_amount'] += (float) $row['metal_amount'];
         $totals['making_amount'] += (float) $row['making_amount'];
         $totals['stone_amount'] += (float) $row['stone_amount'];
+        $totals['diamond_amount'] += (float) $row['diamond_amount'];
+        $totals['other_diamond_amount'] += (float) $row['other_diamond_amount'];
+        $totals['stone_side'] += $stoneSide;
         $totals['vat_amount'] += (float) $row['vat_amount'];
         $totals['line_total'] += (float) $row['line_total'];
         $totals['stock_amount'] += (float) $row['stock_amount'];
