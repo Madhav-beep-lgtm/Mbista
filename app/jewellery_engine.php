@@ -848,6 +848,19 @@ function jewellery_mapping_purposes(): array
         'stock_loss'        => ['Stock loss', 'Adjustments', 'inventory_loss', 'expense'],
         'rounding'          => ['Rounding difference', 'Adjustments', 'rounding', 'expense'],
         'opening_equity'    => ['Opening balance equity', 'Adjustments', 'opening_equity', 'equity'],
+        // A customer settling one bill with part cash, part card and the rest
+        // by QR is ordinary. The bill has always PRINTED that breakdown, but
+        // every rupee went to one settlement ledger — so the cash book said the
+        // shop took the whole lot in cash, and it could never be counted
+        // against the till at closing time.
+        //
+        // Map these and each part lands where the money actually went. They are
+        // optional: a shop that leaves them unset carries on with a single
+        // settlement ledger exactly as before.
+        'tender_cash'       => ['Money taken — cash', 'Settlement', 'tender_cash', 'asset'],
+        'tender_card'       => ['Money taken — card', 'Settlement', 'tender_card', 'asset'],
+        'tender_cheque'     => ['Money taken — cheque', 'Settlement', 'tender_cheque', 'asset'],
+        'tender_qr'         => ['Money taken — QR / wallet', 'Settlement', 'tender_qr', 'asset'],
     ];
 }
 

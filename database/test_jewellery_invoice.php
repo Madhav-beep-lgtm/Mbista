@@ -416,6 +416,54 @@ ok($has('69,700.00') && $has('Credit'),
 ok($has('Sangita'), 'The sales person is named');
 ok(substr_count($html, '<tr>') >= 8, 'And the line table is padded out with blank rows to a full sheet');
 
+echo "\nAnd the tender split POSTS the way it prints\n";
+/*
+ * The breakdown used to be for the paper only: every rupee went to the single
+ * settlement ledger, so a bill paid half in cash and half by card posted as
+ * though it were all cash. The cash book then disagreed with the till by the
+ * card takings, every day, with nothing in the books to explain the gap.
+ */
+$tenderCash = $mkLedger($cid, 'TCASH', 'Cash in hand', 'assets', 'asset');
+$tenderCard = $mkLedger($cid, 'TCARD', 'Card settlement', 'assets', 'asset');
+$tenderQr = $mkLedger($cid, 'TQR', 'QR wallet', 'assets', 'asset');
+jewellery_save_mapping($cid, 'tender_cash', $tenderCash, $uid);
+jewellery_save_mapping($cid, 'tender_card', $tenderCard, $uid);
+jewellery_save_mapping($cid, 'tender_qr', $tenderQr, $uid);
+// tender_cheque is deliberately left unmapped, to prove a shop can adopt this
+// one mode at a time without the unmapped ones going astray.
+
+$mixedPost = jewellery_post_sale($cid, $mixed, $uid);
+ok($mixedPost['ok'], 'The mixed-tender bill posts' . ($mixedPost['ok'] ? '' : ' — ' . $mixedPost['error']));
+$mv = voucher_ledgers((int) $mixedPost['voucher_id']);
+ok(near($mv[$tenderCash] ?? 0, 4000.00), 'The 4,000 in cash is debited to cash in hand');
+ok(near($mv[$tenderCard] ?? 0, 3500.00), 'The 3,500 on card goes to the card account, not to cash');
+ok(near($mv[$tenderQr] ?? 0, 1000.00), 'And the 1,000 by QR to the wallet account');
+ok(near($mv[$cash] ?? 0, 1500.00),
+    'The cheque, whose mode nobody mapped, falls back to the settlement ledger — 1,500');
+$mixedDr = 0.0; $mixedCr = 0.0;
+foreach ($mv as $amount) { if ($amount > 0) { $mixedDr += $amount; } else { $mixedCr -= $amount; } }
+ok(near($mixedDr, $mixedCr), 'And the voucher still balances across four settlement ledgers');
+ok(near(($mv[$tenderCash] ?? 0) + ($mv[$tenderCard] ?? 0) + ($mv[$tenderQr] ?? 0) + ($mv[$cash] ?? 0),
+    (float) $mixedRow['received_amount']),
+    'The four together come to exactly what the customer handed over');
+
+// A bill with no breakdown at all must behave exactly as it always did.
+$plain = jewellery_save_sale($cid, $fy, [
+    'sale_date' => '2026-07-27', 'party_id' => $customer,
+    'settle_mode' => 'cash', 'settle_ledger_id' => $cash, 'received_amount' => 5000,
+], [[
+    'item_id' => $ring, 'purity_id' => $p22, 'unit_id' => $gram,
+    'qty_pieces' => 1, 'gross_weight' => 2.550, 'rate' => 22645.062,
+]], [], $uid);
+$plainPost = jewellery_post_sale($cid, $plain, $uid);
+ok($plainPost['ok'], 'A bill with no tender breakdown still posts'
+    . ($plainPost['ok'] ? '' : ' — ' . $plainPost['error']));
+$pv = voucher_ledgers((int) $plainPost['voucher_id']);
+ok(near($pv[$cash] ?? 0, 5000.00),
+    'Its whole receipt goes to the settlement ledger, exactly as before — a shop ignoring this sees no change');
+ok(near($pv[$tenderCash] ?? 0, 0.0), 'And nothing is invented in the tender accounts');
+
+
 jwinv_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

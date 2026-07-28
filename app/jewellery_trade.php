@@ -1426,12 +1426,18 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
         }
     }
 
-    // How the received amount was tendered. This is a BREAKDOWN for the printed
-    // bill, not a second source of truth: the money still moves through the one
-    // settle ledger above. Leaving every field blank is the normal case and
-    // keeps the old behaviour — the whole receipt simply shows against the
-    // settle mode. Fill any of them and they must add up exactly, otherwise the
-    // bill would print a tender row that disagrees with its own total.
+    // How the received amount was tendered.
+    //
+    // This used to be a breakdown for the printed bill only — the money still
+    // moved through the single settle ledger, so a bill paid half in cash and
+    // half by card posted as if it were all cash. It now POSTS the way it
+    // prints: jewellery_post_sale() sends each part to the ledger mapped for
+    // that tender mode, falling back to the settle ledger for any mode the shop
+    // has not mapped yet.
+    //
+    // Leaving every field blank is still the normal case and still behaves as
+    // it always did. Fill any of them and they must add up exactly, otherwise
+    // the bill would print a tender row that disagrees with its own total.
     $tender = [];
     $tenderTotal = 0.0;
     foreach (['cash', 'card', 'cheque', 'qr'] as $mode) {
@@ -1674,8 +1680,47 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
         }
 
         // Settlement side.
+        //
+        // A bill settled part cash, part card and part QR used to land entirely
+        // in ONE ledger: the breakdown was printed but never posted, so the cash
+        // book claimed the shop took the whole amount in cash and the till could
+        // never be counted against it at closing time.
+        //
+        // Each part now goes where the money actually went — but only as far as
+        // the shop has said where that is. A tender mode with no ledger mapped
+        // falls back to the settlement ledger, so this can be adopted one mode
+        // at a time, and a shop that maps none of them is unaffected.
         if ((float) $sale['received_amount'] > 0) {
-            $legs[] = ['ledger_id' => (int) $sale['settle_ledger_id'], 'amount' => (float) $sale['received_amount'], 'memo' => 'Received ' . $sale['sale_no']];
+            $settleLedgerId = (int) $sale['settle_ledger_id'];
+            $tenderLegs = [];
+            $tenderPosted = 0.0;
+            foreach (['cash', 'card', 'cheque', 'qr'] as $tenderMode) {
+                $tenderPart = jw_round_money((float) ($sale['paid_' . $tenderMode] ?? 0));
+                if ($tenderPart <= 0) {
+                    continue;
+                }
+                $tenderLedger = jewellery_resolve_mapping($companyId, 'tender_' . $tenderMode);
+                $tenderLegs[] = [
+                    'ledger_id' => $tenderLedger ? (int) $tenderLedger['id'] : $settleLedgerId,
+                    'amount' => $tenderPart,
+                    'memo' => 'Received by ' . $tenderMode . ' ' . $sale['sale_no'],
+                ];
+                $tenderPosted = jw_round_money($tenderPosted + $tenderPart);
+            }
+            // Saving validates that a filled-in split equals the amount
+            // received, but a bill written before that rule — or one left
+            // unsplit — would post short. Whatever the breakdown does not
+            // account for goes to the settlement ledger, so the voucher can
+            // never fall out of balance over how the tender boxes were filled.
+            $tenderRemainder = jw_round_money((float) $sale['received_amount'] - $tenderPosted);
+            foreach ($tenderLegs as $tenderLeg) {
+                $legs[] = $tenderLeg;
+            }
+            if ($tenderLegs === [] || $tenderRemainder > 0.004) {
+                $legs[] = ['ledger_id' => $settleLedgerId,
+                    'amount' => $tenderLegs === [] ? (float) $sale['received_amount'] : $tenderRemainder,
+                    'memo' => 'Received ' . $sale['sale_no']];
+            }
         }
         // Applying an advance CLEARS the liability the shop has been carrying
         // since the order was taken — it does not touch cash, because the money
