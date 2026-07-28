@@ -98,14 +98,23 @@ closed               delivered and the balance is nil
 "Gold Issued"/"In Production"). Existing rows are recomputed by a migration in
 the manner of 090.
 
-### C. Advance and payment modes (§7, §11)
+### C. Advance and payment modes (§7, §11) — **SHIPPED** (migration 092)
 
-`settlements.mode` gains `cheque`, `qr`, `wallet`, `credit_note`, `card`,
-`other`, plus a `mode_label VARCHAR(60)` for the user-defined name and a
-`reference VARCHAR(60)` for the cheque/transaction number. `metal` already
-covers old gold and raw gold; `adjustment` already covers journal adjustments.
-The advance *sources* the prompt lists (opening balance, previous order, excess
-from a previous invoice) are not modes — they are the allocation problem in D.
+Reshaped by a rule stated after this plan was written: **one payment is
+routinely made several ways at once** — part cash, part Fonepay, part old gold,
+at the same counter in the same minute. A wider enum alone cannot say that, so
+the split became child rows: `jewellery_settlement_tenders`, one row per way
+the customer paid, each with its own `mode`, `mode_label`, `reference`,
+`ledger_id` and (for old gold) full item/purity/unit/weight context. The rows
+must sum to the settlement's own amount; posting gives each way its own voucher
+leg and each metal row its own stock movement. The header's `mode` widened to
+name single modes it could not (`cheque`, `qr`, `wallet`, `card`, `other`) and
+to read `mixed` when the rows disagree. The advance and refund forms on the
+workshop page are now tender grids. `metal` covers old gold and raw gold;
+`adjustment` covers journal adjustments; `other` + `mode_label` covers credit
+notes and anything else the shop names. The advance *sources* the prompt lists
+(opening balance, previous order, excess from a previous invoice) are not
+modes — they are the allocation problem in D.
 
 ### D. Advance allocation table (§8, §9) — the core change
 
