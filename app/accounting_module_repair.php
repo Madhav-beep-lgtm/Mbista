@@ -2617,6 +2617,40 @@ function accounting_module_repair_database(): array
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     });
 
+    $run('Recompute order statuses from all their items (migration 090)', static function (): void {
+        // The status used to move on the FIRST issue and the FIRST piece back,
+        // so a five-piece order with one ring returned read as fully received
+        // and turned up on the ready-to-deliver list. The engine now derives it
+        // from every item; this brings already-stored orders into line.
+        //
+        // Only 'assigned'/'received' orders are touched — delivered and
+        // cancelled are a person's decision about the whole order — and only
+        // those with item rows, since a single-item order gave the same answer
+        // under the old rule anyway.
+        if (!accounting_repair_table_exists('jewellery_orders')
+            || !accounting_repair_table_exists('jewellery_order_lines')
+            || !accounting_repair_table_exists('jewellery_order_assignments')) {
+            return;
+        }
+        db()->exec("UPDATE `jewellery_orders` o
+            INNER JOIN (
+                SELECT l.`order_id`,
+                       COUNT(*) AS total_items,
+                       SUM(CASE WHEN a.`id` IS NOT NULL AND a.`status` <> 'cancelled' THEN 1 ELSE 0 END) AS out_now,
+                       SUM(CASE WHEN a.`status` = 'received' THEN 1 ELSE 0 END) AS came_back
+                  FROM `jewellery_order_lines` l
+                  LEFT JOIN `jewellery_order_assignments` a
+                         ON a.`id` = l.`assignment_id` AND a.`company_id` = l.`company_id`
+                 GROUP BY l.`order_id`
+            ) t ON t.`order_id` = o.`id`
+               SET o.`status` = CASE
+                    WHEN t.came_back >= t.total_items THEN 'received'
+                    WHEN t.out_now > 0                THEN 'assigned'
+                    ELSE 'confirmed'
+               END
+             WHERE o.`status` IN ('assigned', 'received')");
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

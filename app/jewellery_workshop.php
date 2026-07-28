@@ -1366,8 +1366,7 @@ function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $in
         }
 
         if ($orderId !== null) {
-            db()->prepare("UPDATE jewellery_orders SET status = 'assigned' WHERE id = :id AND company_id = :cid AND status IN ('draft','confirmed')")
-                ->execute(['id' => $orderId, 'cid' => $companyId]);
+            jewellery_sync_order_status($companyId, $orderId);
         }
 
         if ($ownsTransaction) {
@@ -1382,6 +1381,98 @@ function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $in
 
         return ['ok' => false, 'error' => $issueException->getMessage()];
     }
+}
+
+/**
+ * Work out an order's status from ALL of its items, and store it.
+ *
+ * An order for five pieces goes to five different benches and comes back over
+ * five different days. Every place that used to touch the status did so on the
+ * FIRST event of its kind — the first issue made the order "assigned", the
+ * first piece back made it "received" — so an order with one ring returned and
+ * four bangles still at the karigar's read as fully received, and turned up on
+ * the ready-to-deliver list. Somebody would have gone to fetch it, and it would
+ * not have been there.
+ *
+ * So the status is no longer nudged from four places. It is DERIVED, here, from
+ * what the items actually say, and every one of those places calls this instead:
+ *
+ *   received  every item is back
+ *   assigned  at least one item is out for making, but not all are back
+ *   confirmed nothing is out at the moment
+ *
+ * "delivered" and "cancelled" are decisions a person made about the whole order
+ * and are left exactly alone — handing the goods over is not something the
+ * workshop can undo by cancelling a receipt.
+ *
+ * Orders written before per-item ordering, and one-line quick orders, carry no
+ * item rows at all. Those fall back to counting the issues directly, which for
+ * a single-item order is the same answer the old code gave.
+ *
+ * @return string the status now stored against the order
+ */
+function jewellery_sync_order_status(int $companyId, int $orderId): string
+{
+    if ($orderId <= 0) {
+        return '';
+    }
+    $stmt = db()->prepare('SELECT status FROM jewellery_orders WHERE id = :id AND company_id = :cid');
+    $stmt->execute(['id' => $orderId, 'cid' => $companyId]);
+    $current = (string) ($stmt->fetchColumn() ?: '');
+    if ($current === '') {
+        return '';
+    }
+    // A delivered or cancelled order is finished with. Nothing the workshop
+    // does afterwards may quietly reopen it.
+    if (in_array($current, ['delivered', 'cancelled'], true)) {
+        return $current;
+    }
+
+    // Per item: is it out with somebody, and has it come back? A cancelled
+    // issue releases its items (assignment_id is cleared), so they read as
+    // not-yet-issued again, which is exactly right.
+    $count = db()->prepare("SELECT COUNT(*) AS total,
+            SUM(CASE WHEN a.id IS NOT NULL AND a.status <> 'cancelled' THEN 1 ELSE 0 END) AS out_now,
+            SUM(CASE WHEN a.status = 'received' THEN 1 ELSE 0 END) AS back
+        FROM jewellery_order_lines l
+        LEFT JOIN jewellery_order_assignments a
+               ON a.id = l.assignment_id AND a.company_id = l.company_id
+        WHERE l.order_id = :oid AND l.company_id = :cid");
+    $count->execute(['oid' => $orderId, 'cid' => $companyId]);
+    $row = $count->fetch(PDO::FETCH_ASSOC) ?: [];
+    $total = (int) ($row['total'] ?? 0);
+    $outNow = (int) ($row['out_now'] ?? 0);
+    $back = (int) ($row['back'] ?? 0);
+
+    if ($total === 0) {
+        // No item rows to go on, so count the issues themselves.
+        $legacy = db()->prepare("SELECT COUNT(*) AS total,
+                SUM(CASE WHEN status = 'received' THEN 1 ELSE 0 END) AS back
+            FROM jewellery_order_assignments
+            WHERE order_id = :oid AND company_id = :cid AND status <> 'cancelled'");
+        $legacy->execute(['oid' => $orderId, 'cid' => $companyId]);
+        $legacyRow = $legacy->fetch(PDO::FETCH_ASSOC) ?: [];
+        $outNow = (int) ($legacyRow['total'] ?? 0);
+        $back = (int) ($legacyRow['back'] ?? 0);
+        $total = $outNow;
+    }
+
+    if ($total > 0 && $back >= $total) {
+        $next = 'received';
+    } elseif ($outNow > 0) {
+        $next = 'assigned';
+    } else {
+        // Nothing is out. An order that had reached the workshop goes back to
+        // confirmed; one still being written up keeps the status it has.
+        $next = in_array($current, ['assigned', 'received'], true) ? 'confirmed' : $current;
+    }
+
+    if ($next !== $current) {
+        db()->prepare('UPDATE jewellery_orders SET status = :s WHERE id = :id AND company_id = :cid')
+            ->execute(['s' => $next, 'id' => $orderId, 'cid' => $companyId]);
+    }
+
+    return $next;
 }
 
 /** Cancel an issued assignment, pulling the metal back out of the karigar. */
@@ -1425,8 +1516,9 @@ function jewellery_cancel_assignment(int $companyId, int $assignmentId, int $use
             WHERE assignment_id = :aid AND company_id = :cid')
             ->execute(['aid' => $assignmentId, 'cid' => $companyId]);
         if ((int) ($assignment['order_id'] ?? 0) > 0) {
-            db()->prepare("UPDATE jewellery_orders SET status = 'confirmed' WHERE id = :id AND company_id = :cid AND status = 'assigned'")
-                ->execute(['id' => (int) $assignment['order_id'], 'cid' => $companyId]);
+            // Items may still be out with OTHER karigars, so the order leaves
+            // the workshop only when the last issue is cancelled.
+            jewellery_sync_order_status($companyId, (int) $assignment['order_id']);
         }
 
         if ($ownsTransaction) {
@@ -1711,8 +1803,8 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
         db()->prepare("UPDATE jewellery_order_assignments SET status = 'received' WHERE id = :id AND company_id = :cid")
             ->execute(['id' => $assignmentId, 'cid' => $companyId]);
         if ((int) ($assignment['order_id'] ?? 0) > 0) {
-            db()->prepare("UPDATE jewellery_orders SET status = 'received' WHERE id = :id AND company_id = :cid AND status = 'assigned'")
-                ->execute(['id' => (int) $assignment['order_id'], 'cid' => $companyId]);
+            // Only the LAST piece coming back makes the order ready to hand over.
+            jewellery_sync_order_status($companyId, (int) $assignment['order_id']);
         }
 
         if ($ownsTransaction) {
@@ -2461,9 +2553,7 @@ function jewellery_unpost_receipt(int $companyId, int $receiptId, int $userId = 
         db()->prepare("UPDATE jewellery_order_assignments SET status = 'issued' WHERE id = :id AND company_id = :cid")
             ->execute(['id' => (int) $receipt['assignment_id'], 'cid' => $companyId]);
         if ((int) ($receipt['order_id'] ?? 0) > 0) {
-            db()->prepare("UPDATE jewellery_orders SET status = 'assigned'
-                WHERE id = :id AND company_id = :cid AND status = 'received'")
-                ->execute(['id' => (int) $receipt['order_id'], 'cid' => $companyId]);
+            jewellery_sync_order_status($companyId, (int) $receipt['order_id']);
         }
 
         if ($ownsTransaction) {

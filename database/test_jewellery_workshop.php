@@ -852,6 +852,128 @@ $advanceHeld = jewellery_order_advances($cidA, $advanceOrder);
 ok(near((float) $advanceHeld['metal_total'], 6000.0),
     'The silver is held against the order the same way gold would be');
 
+echo "\n21. An order is only 'received' when EVERY piece is back\n";
+/*
+ * Three pieces, three benches, three different days. The status used to move on
+ * the FIRST event of each kind, so one ring coming back marked the whole order
+ * received and put it on the ready-to-deliver list — with two bangles still at
+ * the karigar's. Somebody would have gone to fetch it and it would not be there.
+ */
+$threeOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-08-14', 'party_id' => $customer, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'making_amount' => 1000,
+     'karigar_id' => $kContractor, 'delivery_date' => '2026-09-10'],
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'making_amount' => 1000,
+     'karigar_id' => $kEmployee, 'delivery_date' => '2026-09-11'],
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'making_amount' => 1000,
+     'karigar_id' => $kContractor, 'delivery_date' => '2026-09-12'],
+], $userA);
+$threeLines = jewellery_order_line_rows($cidA, $threeOrder);
+ok(count($threeLines) === 3, 'Three pieces on one order');
+
+$statusOf = static fn (): string => (string) jewellery_order($cidA, $threeOrder)['status'];
+ok($statusOf() === 'confirmed', 'Nothing is out yet, so it is merely confirmed');
+
+$issues = [];
+foreach ($threeLines as $i => $threeLine) {
+    $issue = jewellery_issue_to_karigar($cidA, $fyA, [
+        'order_line_id' => (int) $threeLine['id'], 'issue_date' => '2026-08-15',
+    ], $userA);
+    ok($issue['ok'], 'Piece ' . ($i + 1) . ' goes out' . ($issue['ok'] ? '' : ' — ' . $issue['error']));
+    $issues[] = (int) $issue['assignment_id'];
+    ok($statusOf() === 'assigned', 'With ' . ($i + 1) . ' of 3 out, the order reads assigned');
+}
+
+// Now the part that used to be wrong.
+$receiveOne = static function (int $assignmentId, string $day) use ($cidA, $fyA, $userA, $p22, $tola): array {
+    $assignmentRow = jewellery_assignment($cidA, $assignmentId);
+
+    return jewellery_receive_from_karigar($cidA, $fyA, [
+        'assignment_id' => $assignmentId, 'receive_date' => $day,
+        'received_item_id' => (int) $assignmentRow['item_id'],
+        'received_purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+        'received_gross_weight' => (float) $assignmentRow['issued_gross_weight'],
+    ], $userA);
+};
+$got1 = $receiveOne($issues[0], '2026-08-20');
+ok($got1['ok'], 'The first piece comes back' . ($got1['ok'] ? '' : ' — ' . $got1['error']));
+ok($statusOf() === 'assigned',
+    'ONE piece back does NOT make the order received — two are still at the bench');
+ok(!in_array($threeOrder, array_map('intval', array_column(jewellery_pending_delivery($cidA), 'id')), true),
+    'So it stays off the ready-to-deliver list, which is where the old bug did its damage');
+
+$got2 = $receiveOne($issues[1], '2026-08-21');
+ok($got2['ok'] && $statusOf() === 'assigned', 'Two back, one out: still not ready');
+
+$got3 = $receiveOne($issues[2], '2026-08-22');
+ok($got3['ok'], 'The last piece comes back' . ($got3['ok'] ? '' : ' — ' . $got3['error']));
+ok($statusOf() === 'received', 'NOW the order is received');
+ok(in_array($threeOrder, array_map('intval', array_column(jewellery_pending_delivery($cidA), 'id')), true),
+    'And only now does it appear as ready to hand over');
+
+// Undoing a receipt has to walk back the same way.
+ok(jewellery_unpost_receipt($cidA, (int) $got3['receipt_id'], $userA)['ok'], 'The last receipt is unposted');
+ok($statusOf() === 'assigned', 'Which puts the order back to out-for-making, not stuck on received');
+
+// And cancelling ONE issue must not pretend the whole order left the workshop.
+$stillOut = jewellery_assignment($cidA, $issues[2]);
+ok((string) $stillOut['status'] === 'issued', 'That piece is out with the karigar again');
+ok(jewellery_cancel_assignment($cidA, $issues[2], $userA)['ok'], 'Its issue is cancelled');
+/*
+ * Cancelling that issue sent the metal back to the shop UNMADE, so the third
+ * piece does not exist. Two of three are finished and one has not been started:
+ * the order is in progress, and must NOT read as received — the customer asked
+ * for three. It does not drop to "confirmed" either, because work has happened.
+ */
+ok($statusOf() === 'assigned',
+    'A cancelled issue leaves the order in progress — not ready to deliver, and not back to square one');
+ok(!in_array($threeOrder, array_map('intval', array_column(jewellery_pending_delivery($cidA), 'id')), true),
+    'So it is off the delivery list again: two pieces made is not three pieces made');
+
+/*
+ * The engine can no longer produce a wrong status, but databases that ran the
+ * old code still hold them, so migration 090 recomputes what is already stored.
+ * Testing it means putting the books back into the broken state by hand — the
+ * only way to get there now — and checking the repair walks it out again.
+ */
+db()->prepare("UPDATE jewellery_orders SET status = 'received' WHERE id = :id AND company_id = :cid")
+    ->execute(['id' => $threeOrder, 'cid' => $cidA]);
+ok($statusOf() === 'received', 'An order stored the way the old rule left it');
+accounting_module_repair_database();
+ok($statusOf() === 'assigned', 'Migration 090 corrects it from the items themselves');
+accounting_module_repair_database();
+ok($statusOf() === 'assigned', 'And running the repair twice does not drift it');
+
+// It must correct in the other direction too, not just downgrade.
+db()->prepare("UPDATE jewellery_orders SET status = 'assigned' WHERE id = :id AND company_id = :cid")
+    ->execute(['id' => $threeOrder, 'cid' => $cidA]);
+db()->prepare("UPDATE jewellery_order_assignments SET status = 'received'
+    WHERE order_id = :id AND company_id = :cid AND status <> 'cancelled'")
+    ->execute(['id' => $threeOrder, 'cid' => $cidA]);
+// The third item was freed by the cancellation, so point it at a finished issue
+// to make this a genuinely everything-is-back order.
+db()->prepare("UPDATE jewellery_order_lines SET assignment_id = (
+        SELECT id FROM (SELECT id FROM jewellery_order_assignments
+                         WHERE order_id = :o1 AND company_id = :c1 AND status = 'received' LIMIT 1) x)
+    WHERE order_id = :o2 AND company_id = :c2 AND (assignment_id IS NULL OR assignment_id = 0)")
+    ->execute(['o1' => $threeOrder, 'c1' => $cidA, 'o2' => $threeOrder, 'c2' => $cidA]);
+accounting_module_repair_database();
+ok($statusOf() === 'received', 'With every item back it raises the order to received');
+
+// And a delivered order is a person's decision the repair may not touch.
+db()->prepare("UPDATE jewellery_orders SET status = 'delivered' WHERE id = :id AND company_id = :cid")
+    ->execute(['id' => $threeOrder, 'cid' => $cidA]);
+db()->prepare("UPDATE jewellery_order_assignments SET status = 'issued'
+    WHERE order_id = :id AND company_id = :cid")
+    ->execute(['id' => $threeOrder, 'cid' => $cidA]);
+accounting_module_repair_database();
+ok($statusOf() === 'delivered',
+    'A delivered order is left alone whatever the items say — the goods are with the customer');
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";
