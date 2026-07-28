@@ -71,7 +71,48 @@ security clean-up.
 
 ---
 
-## 3. Backups
+## 3. Backups — and what "no data loss" actually means
+
+Be clear about this before relying on it. **A nightly backup does not mean no
+data loss. It means you can lose up to a day.** If the disk dies at 8pm and the
+last dump ran at 2:15am, everything billed that day is gone.
+
+What the current setup gives you:
+
+| | |
+|---|---|
+| **Worst-case loss** | up to ~24 hours of work |
+| **Covers** | the whole database, and the uploaded files it names |
+| **Verified** | yes — end-of-dump marker and table count, per run |
+| **Off-site** | only if `BACKUP_REMOTE` is set (it is not) |
+| **Encrypted** | only if `BACKUP_PASSPHRASE` is set (it is not) |
+
+If a day is too much to lose, the options in increasing order of effort are:
+
+1. **Run it more than once a day.** A second cron at midday halves the exposure.
+   Costs nothing but disk.
+2. **Enable MySQL binary logging** for point-in-time recovery — restore last
+   night's dump, then replay the log up to the moment before the failure. This
+   is the only thing that gets close to no loss at all. Many shared cPanel plans
+   do not allow it; ask the host before planning around it.
+3. **A replica.** Real-time, and a different order of cost and complexity.
+
+Whichever you choose, **the number to decide is how many hours of billing you
+could re-enter from paper.** That is your real target, and everything else
+follows from it.
+
+### The part that is easy to miss
+
+A dump restores rows. It does not restore the KYC scan, the signed agreement or
+the attachment on a message — those are files on disk, and the database only
+stores the *path* to them. Restore the database alone and every one of those
+rows points at a file that is not there.
+
+So the nightly job now archives `public_html/uploads/` and `secure_uploads/`
+alongside the dump, and both age out together — half a backup restores to a shop
+with broken documents.
+
+### Knowing it is still running
 
 Two keys in the server's `.env`, both currently unset:
 
@@ -88,11 +129,20 @@ exists for.
 Keep the passphrase somewhere that is **not** the server. A passphrase stored
 next to the thing it encrypts is decoration.
 
-Check the nightly job is actually running and actually succeeding:
+A backup nobody checks is a belief, not a backup. Every run now records how it
+went, and the audit reads it:
 
 ```bash
-ls -la storage/backups/
+php database/security_audit.php
 ```
+
+It reports the last run, whether it succeeded, how old it is, and whether both
+halves are present. A job that quietly stopped six weeks ago shows up as
+CRITICAL there instead of being discovered during a restore.
+
+Failures are still kept as `.FAILED` files rather than rotated away — a bad dump
+is evidence of a night that did not work, and it should be looked at rather than
+tidied up.
 
 `deploy/backup-database.sh` verifies the dump's end marker and table count, and
 renames a bad run to `.FAILED` rather than leaving a truncated file that looks

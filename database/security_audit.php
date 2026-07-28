@@ -188,6 +188,63 @@ if (!$looksLocal) {
 }
 
 // ---------------------------------------------------------------------------
+// Backups
+// ---------------------------------------------------------------------------
+//
+// A backup nobody checks is a belief, not a backup. The nightly job writes how
+// it went to backup-status.json; this reads it, so "the backups stopped six
+// weeks ago" is something you find out now rather than during a restore.
+echo "\nBackups\n";
+echo str_repeat('-', 72) . "\n";
+
+$backupDir = (string) (function_exists('env') ? env('BACKUP_DIR', '') : '');
+if ($backupDir === '') {
+    $backupDir = dirname(__DIR__) . '/storage/backups';
+}
+$statusPath = rtrim($backupDir, '/\\') . '/backup-status.json';
+$status = is_file($statusPath) ? json_decode((string) file_get_contents($statusPath), true) : null;
+
+if (!is_array($status)) {
+    printf("  %-20s %s\n", 'last run', 'NO RECORD at ' . $statusPath);
+    $note('HIGH', 'No backup has ever reported in',
+        'Either the nightly cron was never set up, or it has never got far enough to say so. '
+        . 'Set it in cPanel → Cron Jobs, per docs/SECURITY_RUNBOOK.md.');
+} else {
+    $ranAt = (string) ($status['at'] ?? '');
+    $state = (string) ($status['state'] ?? 'unknown');
+    $ageHours = $ranAt !== '' ? (time() - strtotime($ranAt)) / 3600 : PHP_INT_MAX;
+    printf("  %-20s %s (%s)\n", 'last run', $ranAt !== '' ? $ranAt : 'unknown', $state);
+    printf("  %-20s %s\n", 'detail', (string) ($status['detail'] ?? ''));
+
+    if ($state !== 'ok') {
+        $note('CRITICAL', 'The last backup FAILED (' . $ranAt . ')',
+            (string) ($status['detail'] ?? '') . ' — see backup-database.log on the server.');
+    } elseif ($ageHours > 48) {
+        $note('CRITICAL', 'The last good backup is ' . (int) round($ageHours / 24) . ' days old',
+            'A nightly job that has not run for days has stopped. Check the cron entry.');
+    } elseif ($ageHours > 26) {
+        $note('HIGH', 'No backup in the last ' . (int) round($ageHours) . ' hours',
+            'The nightly job may have been skipped.');
+    }
+}
+
+// Both halves have to be there. A dump restores rows; the files those rows name
+// — KYC scans, signed agreements, message attachments — live on disk.
+$dumps = glob(rtrim($backupDir, '/\\') . '/*.sql.gz*') ?: [];
+$fileSets = glob(rtrim($backupDir, '/\\') . '/*_files_*.tar.gz*') ?: [];
+printf("  %-20s %d\n", 'database dumps', count($dumps));
+printf("  %-20s %d\n", 'file archives', count($fileSets));
+if ($dumps !== [] && $fileSets === []) {
+    $note('HIGH', 'There are database dumps but no file archives',
+        'Restoring would give you every row with its documents missing. Update deploy/backup-database.sh on the server.');
+}
+$failed = glob(rtrim($backupDir, '/\\') . '/*.FAILED') ?: [];
+if ($failed !== []) {
+    $note('HIGH', count($failed) . ' failed backup artefact(s) left on disk',
+        'Each one is a night with no backup. They are kept deliberately, as evidence — look at them, then delete.');
+}
+
+// ---------------------------------------------------------------------------
 // What to do about it
 // ---------------------------------------------------------------------------
 echo "\nFindings\n";

@@ -36,8 +36,32 @@ log() {
     printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG"
 }
 
+# A machine-readable record of how the last run went.
+#
+# Until now a failure wrote the word FAILED into a log file on the server and
+# stopped. Nobody reads a log file on a good day, so backups could stop for
+# weeks and the first anyone would know is the day they were needed. The app
+# reads this file instead (php database/security_audit.php), which turns
+# "backups silently stopped" into something that shows up while it still
+# matters.
+write_status() {
+    # Resolved when it is CALLED, not when this function is defined. BACKUP_DIR
+    # is read from .env further down, so computing the path up here put the
+    # status file in $HOME while the app looked for it in the backup directory —
+    # the two would never have met, and the health check would have reported "no
+    # backup has ever run" on a server backing up perfectly well every night.
+    status_path="${BACKUP_DIR:-$HOME}/backup-status.json"
+    # Quotes and backslashes would break the JSON this is read back as.
+    detail="$(printf '%s' "$2" | tr -d '\\"')"
+    printf '{"state":"%s","at":"%s","detail":"%s","tables":%s,"artifact":"%s"}\n' \
+        "$1" "$(date '+%Y-%m-%d %H:%M:%S')" "$detail" \
+        "${TABLES:-0}" "$(basename "${ARTIFACT:-none}")" > "$status_path" 2>/dev/null || true
+    chmod 600 "$status_path" 2>/dev/null || true
+}
+
 fail() {
     log "FAILED: $1"
+    write_status "failed" "$1"
     # Keep the log from growing without bound.
     tail -n 500 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
     exit 1
@@ -180,30 +204,80 @@ log "wrote $ARTIFACT ($SIZE)"
 # anything rclone or scp understands, e.g.
 #     BACKUP_REMOTE="rclone:gdrive:mbista-backups"
 #     BACKUP_REMOTE="scp:backupuser@203.0.113.9:/srv/mbista"
-if [ -n "$BACKUP_REMOTE" ]; then
+ship_offsite() {
+    ARTEFACT="$1"
+    if [ -z "$BACKUP_REMOTE" ]; then
+        log "NOTE: BACKUP_REMOTE is not set — $(basename "$ARTEFACT") exists only on this server"
+        return 0
+    fi
     case "$BACKUP_REMOTE" in
         rclone:*)
             TARGET="${BACKUP_REMOTE#rclone:}"
             if command -v rclone >/dev/null 2>&1; then
-                rclone copy "$ARTIFACT" "$TARGET" >>"$LOG" 2>&1 \
-                    && log "copied off-server to $TARGET" \
-                    || log "WARNING: rclone copy to $TARGET failed — the backup is only on this server"
+                rclone copy "$ARTEFACT" "$TARGET" >>"$LOG" 2>&1                     && log "copied $(basename "$ARTEFACT") off-server to $TARGET"                     || log "WARNING: rclone copy to $TARGET failed — $(basename "$ARTEFACT") is only on this server"
             else
                 log "WARNING: BACKUP_REMOTE uses rclone but rclone is not installed"
             fi
             ;;
         scp:*)
             TARGET="${BACKUP_REMOTE#scp:}"
-            scp -q -o BatchMode=yes "$ARTIFACT" "$TARGET" >>"$LOG" 2>&1 \
-                && log "copied off-server to $TARGET" \
-                || log "WARNING: scp to $TARGET failed — the backup is only on this server"
+            scp -q -o BatchMode=yes "$ARTEFACT" "$TARGET" >>"$LOG" 2>&1                 && log "copied $(basename "$ARTEFACT") off-server to $TARGET"                 || log "WARNING: scp to $TARGET failed — $(basename "$ARTEFACT") is only on this server"
             ;;
         *)
             log "WARNING: BACKUP_REMOTE must start with rclone: or scp: — got '$BACKUP_REMOTE'"
             ;;
     esac
+}
+
+ship_offsite "$ARTIFACT"
+
+# ---------------------------------------------------------------------------
+# The files the database only holds the NAMES of
+# ---------------------------------------------------------------------------
+# A dump restores rows. It does not restore the client's KYC scan, the signed
+# agreement or the attachment on a message — those are files on disk, and the
+# database only stores the path to them. Restore the database alone and every
+# one of those rows points at something that is not there any more.
+#
+# So they are backed up in the same run, and they go off-site with the dump: a
+# pair of artefacts from the same night restores to a consistent shop.
+#
+# A full archive each night, because these are small. If it ever grows past a
+# few hundred MB, switch to rsync against a remote that keeps its own history
+# rather than making the tarball nightly.
+FILE_ROOTS=()
+[ -d "$REPO_DIR/public_html/uploads" ] && FILE_ROOTS+=("public_html/uploads")
+[ -d "$REPO_DIR/secure_uploads" ] && FILE_ROOTS+=("secure_uploads")
+
+if [ ${#FILE_ROOTS[@]} -eq 0 ]; then
+    log "NOTE: no upload directories found to back up"
 else
-    log "NOTE: BACKUP_REMOTE is not set — this backup exists only on this server"
+    FILES_BASE="$BACKUP_DIR/${DB_NAME}_files_$STAMP.tar.gz"
+    if tar -czf "$FILES_BASE" -C "$REPO_DIR" "${FILE_ROOTS[@]}" 2>>"$LOG"; then
+        # tar exits 0 on an empty archive too, so the contents are counted.
+        FILE_COUNT="$(tar -tzf "$FILES_BASE" 2>/dev/null | wc -l | tr -d ' ')"
+        if [ "${FILE_COUNT:-0}" -lt 1 ]; then
+            mv "$FILES_BASE" "$FILES_BASE.FAILED" 2>/dev/null
+            log "WARNING: the file archive came out empty — kept as $(basename "$FILES_BASE").FAILED"
+        else
+            FILES_ARTIFACT="$FILES_BASE"
+            if [ -n "$BACKUP_PASSPHRASE" ] && command -v openssl >/dev/null 2>&1; then
+                BACKUP_PASSPHRASE_ENV="$BACKUP_PASSPHRASE" openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt                     -in "$FILES_ARTIFACT" -out "$FILES_ARTIFACT.enc" -pass env:BACKUP_PASSPHRASE_ENV 2>>"$LOG"
+                if [ -s "$FILES_ARTIFACT.enc" ]; then
+                    rm -f "$FILES_ARTIFACT"
+                    FILES_ARTIFACT="$FILES_ARTIFACT.enc"
+                else
+                    rm -f "$FILES_ARTIFACT.enc"
+                    log "WARNING: file archive encryption produced nothing; keeping the unencrypted copy"
+                fi
+            fi
+            chmod 600 "$FILES_ARTIFACT" 2>/dev/null || true
+            log "wrote $(basename "$FILES_ARTIFACT") ($FILE_COUNT entries, $(du -h "$FILES_ARTIFACT" | cut -f1))"
+            ship_offsite "$FILES_ARTIFACT"
+        fi
+    else
+        log "WARNING: could not archive the upload directories"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -212,9 +286,13 @@ fi
 # Only rotate away GOOD backups. A .FAILED file is evidence of a night that did
 # not work and is left for a human to look at.
 find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_*.sql.gz*" -mtime "+$BACKUP_KEEP_DAYS" -print -delete >>"$LOG" 2>&1
+# The file archives age out on the same schedule, so a dump and its files are
+# never kept apart — half a backup restores to a shop with broken documents.
+find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_files_*.tar.gz*" -mtime "+$BACKUP_KEEP_DAYS" -print -delete >>"$LOG" 2>&1
 
 REMAINING="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_*.sql.gz*" | wc -l | tr -d ' ')"
 log "done — $REMAINING backup(s) held, keeping $BACKUP_KEEP_DAYS days"
+write_status "ok" "$REMAINING held, $TABLES tables"
 
 tail -n 500 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
 exit 0
