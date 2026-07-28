@@ -222,6 +222,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'received_gross_weight' => (float) ($_POST['received_gross_weight'] ?? 0),
             'qty_pieces' => (float) ($_POST['qty_pieces'] ?? 0),
             'receive_date' => $clampDate((string) ($_POST['receive_date'] ?? '')),
+            // Passed through as typed, blank included: blank means no allowance,
+            // which is the rule. Casting it to a float here would turn "nothing
+            // granted" into "0.0000 granted" — the same answer, but it would
+            // stop the engine telling the two apart.
+            'allow_wastage_fine' => (string) ($_POST['allow_wastage_fine'] ?? ''),
             'notes' => (string) ($_POST['notes'] ?? ''),
         ], $userId);
         flash($result['ok'] ? 'success' : 'error', $result['ok']
@@ -385,8 +390,17 @@ if ($view === 'orders' && table_exists('ledgers')) {
 $assignments = $view === 'assignments' ? jewellery_assignments_list($companyId, $listFilters) : [];
 $receiveTarget = $view === 'assignments' ? jewellery_assignment($companyId, (int) ($_GET['receive'] ?? 0)) : null;
 $receivePreview = null;
+// Wastage the shop chooses to let go on this return, in fine weight. Blank —
+// the normal case — means none: the kaligad bears what is missing.
+$allowWastage = trim((string) ($_GET['allow'] ?? ''));
 if ($receiveTarget && (string) $receiveTarget['status'] === 'issued') {
-    $receivePreview = jewellery_preview_receipt($companyId, (int) $receiveTarget['id'], (float) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight']));
+    $receivePreview = jewellery_preview_receipt(
+        $companyId,
+        (int) $receiveTarget['id'],
+        (float) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight']),
+        null,
+        $allowWastage === '' ? null : (float) $allowWastage
+    );
 }
 $pending = $view === 'delivery' ? jewellery_pending_delivery($companyId) : [];
 $jobs = $view === 'refinery' ? jewellery_refinery_jobs_list($companyId) : [];
@@ -775,7 +789,10 @@ jw_filter_bar_styles();
                 </select>
             </label>
             <label>Making rate<input type="number" name="default_making_rate" step="0.0001" min="0" value="<?= e((string) ($editKarigar['default_making_rate'] ?? '0')) ?>"></label>
-            <label>Allowed wastage (%)<input type="number" name="wastage_allowed_pct" step="0.001" min="0" max="99.999" value="<?= e((string) ($editKarigar['wastage_allowed_pct'] ?? '0')) ?>"></label>
+            <?php // No standing wastage allowance. Metal is the shop's and the kaligad
+                 // is paid a percentage for the work, so nothing is written off in
+                 // advance. An allowance is granted on the RECEIPT, once somebody has
+                 // seen what actually came back. ?>
             <label class="frm-check"><input type="checkbox" name="active" <?= $editKarigar === null || (string) $editKarigar['status'] === 'active' ? 'checked' : '' ?>> Active</label>
             <label style="grid-column:1/-1">Address<input type="text" name="address" maxlength="255" value="<?= e((string) ($editKarigar['address'] ?? '')) ?>"></label>
             <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editKarigar ? 'Update Kaligad' : 'Add Kaligad' ?></button></div>
@@ -786,7 +803,7 @@ jw_filter_bar_styles();
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Kaligads (<?= count($karigars) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Code</th><th>Name</th><th>Engagement</th><th>Making</th><th class="is-numeric">Allowed wastage</th><th class="is-numeric">Metal held (fine)</th><th class="is-numeric">Work needs</th><th class="is-numeric">Excess / shortfall</th><th class="is-numeric">Wages payable</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Code</th><th>Name</th><th>Engagement</th><th>Making</th><th class="is-numeric">Metal held (fine)</th><th class="is-numeric">Work needs</th><th class="is-numeric">Excess / shortfall</th><th class="is-numeric">Wages payable</th><th>Status</th><th></th></tr></thead>
             <tbody>
                 <?php if ($karigars === []): ?><tr><td colspan="11">No kaligads yet.</td></tr><?php endif; ?>
                 <?php foreach ($karigars as $row): ?>
@@ -802,7 +819,6 @@ jw_filter_bar_styles();
                         <td><?= e($row['name']) ?><?= ($row['phone'] ?? '') !== '' ? '<br><small>' . e((string) $row['phone']) . '</small>' : '' ?></td>
                         <td><span class="mbw-pill <?= (string) $row['engagement_type'] === 'contractor' ? 'tone-blue' : 'tone-teal' ?>"><?= e(ucfirst((string) $row['engagement_type'])) ?></span></td>
                         <td><?= $fmt((float) $row['default_making_rate'], 2) ?> <small><?= e(str_replace('_', ' ', (string) $row['default_making_basis'])) ?></small></td>
-                        <td class="is-numeric"><?= $fmt((float) $row['wastage_allowed_pct'], 3) ?>%</td>
                         <td class="is-numeric"><?= $pos['fine_weight'] > 0 ? '<span class="mbw-pill tone-amber">' . $fmt($pos['fine_weight'], 4) . '</span>' : '—' ?></td>
                         <td class="is-numeric"><?= $bal['committed_fine'] > 0 ? $fmt($bal['committed_fine'], 4) : '—' ?></td>
                         <td class="is-numeric">
@@ -895,7 +911,7 @@ jw_filter_bar_styles();
             <label>Gross weight issued<input type="number" name="issued_gross_weight" step="0.0001" min="0.0001" required></label>
             <label>Issue date<input type="date" name="issue_date" value="<?= e($todayInFy) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required></label>
             <label>Expected return<input type="date" name="expected_return_date"></label>
-            <label>Allowed wastage (%)<input type="number" name="wastage_allowed_pct" step="0.001" min="0" max="99.999" value="0"></label>
+            <?php // Nothing is forgiven at issue time; see the receive screen. ?>
             <label>Making basis
                 <select name="making_basis">
                     <?php foreach (['per_unit_weight' => 'Per unit of weight', 'percent_of_metal' => '% of metal value', 'flat' => 'Flat'] as $k => $v): ?>
@@ -928,6 +944,7 @@ jw_filter_bar_styles();
             <input type="hidden" name="view" value="assignments">
             <input type="hidden" name="receive" value="<?= (int) $receiveTarget['id'] ?>">
             <label>Weight received back<input type="number" name="wt" step="0.0001" min="0" value="<?= e((string) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight'])) ?>"></label>
+            <label>Wastage to allow (fine)<input type="number" name="allow" step="0.0001" min="0" value="<?= e($allowWastage) ?>" placeholder="0.0000"></label>
             <button type="submit" class="button secondary" style="min-height:34px">Recalculate</button>
         </form>
         <?php if ($receivePreview && $receivePreview['ok']): ?>
@@ -936,8 +953,8 @@ jw_filter_bar_styles();
                     <tr><td>Issued (fine)</td><td class="is-numeric"><?= $fmt($receivePreview['issued_fine'], 4) ?></td></tr>
                     <tr><td>Received (fine)</td><td class="is-numeric"><?= $fmt($receivePreview['received_fine'], 4) ?></td></tr>
                     <tr><td>Wastage (fine)</td><td class="is-numeric"><?= $fmt($receivePreview['wastage_fine'], 4) ?></td></tr>
-                    <tr><td>Allowed at <?= $fmt((float) $receiveTarget['wastage_allowed_pct'], 3) ?>%</td><td class="is-numeric"><?= $fmt($receivePreview['allowed_fine'], 4) ?></td></tr>
-                    <tr><td><strong>Excess wastage (fine)</strong></td><td class="is-numeric"><strong><?= $fmt($receivePreview['excess_fine'], 4) ?></strong></td></tr>
+                    <tr><td>Wastage allowed<?= (float) $receivePreview['allowed_fine'] > 0.00005 ? ' — written off by the shop' : '' ?></td><td class="is-numeric"><?= $fmt($receivePreview['allowed_fine'], 4) ?></td></tr>
+                    <tr><td><strong>Wastage the kaligad bears (fine)</strong></td><td class="is-numeric"><strong><?= $fmt($receivePreview['excess_fine'], 4) ?></strong></td></tr>
                     <?php if ((float) ($receivePreview['surplus_fine'] ?? 0) > 0.00005): ?>
                         <tr><td>Metal the kaligad added (fine)</td><td class="is-numeric"><?= $fmt((float) $receivePreview['surplus_fine'], 4) ?></td></tr>
                     <?php endif; ?>
@@ -955,6 +972,8 @@ jw_filter_bar_styles();
                 <input type="hidden" name="back_view" value="assignments">
                 <input type="hidden" name="assignment_id" value="<?= (int) $receiveTarget['id'] ?>">
                 <input type="hidden" name="received_gross_weight" value="<?= e((string) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight'])) ?>">
+                <?php // Whatever the shop granted above is what gets saved — the figures on screen and the figures posted are the same ones. ?>
+                <input type="hidden" name="allow_wastage_fine" value="<?= e($allowWastage) ?>">
                 <label>Finished item
                     <select name="received_item_id">
                         <?php foreach ($items as $it): ?>
@@ -996,7 +1015,7 @@ jw_filter_bar_styles();
             ],
         ]); ?>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Issue no.</th><th>Date</th><th>Kaligad</th><th>Order</th><th>Item</th><th class="is-numeric">Issued (fine)</th><th class="is-numeric">Allowed wastage</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Issue no.</th><th>Date</th><th>Kaligad</th><th>Order</th><th>Item</th><th class="is-numeric">Issued (fine)</th><th>Status</th><th></th></tr></thead>
             <tbody>
                 <?php if ($assignments === []): ?><tr><td colspan="9">Nothing issued yet.</td></tr><?php endif; ?>
                 <?php foreach ($assignments as $row): ?>
@@ -1007,7 +1026,6 @@ jw_filter_bar_styles();
                         <td><?= e((string) ($row['order_no'] ?? '—')) ?></td>
                         <td><?= e($row['item_code'] . ' · ' . $row['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['issued_fine_weight'], 4) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $row['wastage_allowed_pct'], 3) ?>%</td>
                         <td><span class="mbw-pill <?= (string) $row['status'] === 'issued' ? 'tone-amber' : ((string) $row['status'] === 'received' ? 'tone-green' : 'tone-gray') ?>"><?= e(ucfirst((string) $row['status'])) ?></span></td>
                         <td style="white-space:nowrap">
                             <?php if ((string) $row['status'] === 'issued' && $canPost): ?>

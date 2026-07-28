@@ -378,10 +378,24 @@ function jw_making_charge(string $basis, float $rate, float $grossWeight, float 
  * Returns ['wastage_fine', 'allowed_fine', 'excess_fine'] — never negative,
  * so a karigar who returns MORE than issued (metal added) is not charged.
  */
-function jw_wastage_split(float $issuedFine, float $receivedFine, float $allowedPct): array
+function jw_wastage_split(float $issuedFine, float $receivedFine, float $allowedPct, ?float $grantedFine = null): array
 {
     $wastage = jw_round_weight(max(0.0, $issuedFine - $receivedFine));
-    $allowed = jw_round_weight($issuedFine * max(0.0, $allowedPct) / 100.0);
+
+    // NOBODY IS ALLOWED TO LOSE GOLD.
+    //
+    // The kaligad is paid a percentage for the work; the metal is the shop's
+    // throughout. So a piece that comes back light is short by his doing and he
+    // bears it — the default allowance is nothing at all, and every grain
+    // missing is recovered from his wages.
+    //
+    // An allowance is a CONCESSION, granted by a person who has looked at the
+    // actual loss and decided to let it go. It is never a standing rate that
+    // forgives the loss before anyone knows there was one, which is why nothing
+    // here reads a default from the kaligad's record any more.
+    $allowed = $grantedFine !== null
+        ? jw_round_weight(max(0.0, $grantedFine))
+        : jw_round_weight($issuedFine * max(0.0, $allowedPct) / 100.0);
 
     return [
         'wastage_fine' => $wastage,
@@ -1300,7 +1314,12 @@ function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $in
                 'expected' => ($input['expected_return_date'] ?? '') !== '' ? (string) $input['expected_return_date'] : null,
                 'item' => $itemId, 'purity' => $purityId, 'unit' => $unitId, 'gross' => $gross, 'fine' => $fine,
                 'amount' => $issuedAmount,
-                'wastage' => round((float) ($input['wastage_allowed_pct'] ?? $karigar['wastage_allowed_pct']), 3),
+                // Nothing is forgiven in advance. This used to fall back to the
+                // kaligad's own record, so a percentage typed there once quietly
+                // wrote off metal on every issue afterwards, for work nobody had
+                // seen yet. An allowance is now granted on the RECEIPT, by
+                // somebody looking at what actually came back.
+                'wastage' => round((float) ($input['wastage_allowed_pct'] ?? 0), 3),
                 'basis' => (string) ($input['making_basis'] ?? $karigar['default_making_basis']),
                 'rate' => jw_round_rate((float) ($input['making_rate'] ?? $karigar['default_making_rate'])),
                 'notes' => trim((string) ($input['notes'] ?? '')) ?: null,
@@ -1558,7 +1577,7 @@ function jewellery_receipt(int $companyId, int $receiptId): ?array
  * Preview the settlement of a return WITHOUT writing anything — the numbers
  * the receive screen shows before the user commits.
  */
-function jewellery_preview_receipt(int $companyId, int $assignmentId, float $receivedGross, ?int $receivedPurityId = null): array
+function jewellery_preview_receipt(int $companyId, int $assignmentId, float $receivedGross, ?int $receivedPurityId = null, ?float $grantedFine = null): array
 {
     $assignment = jewellery_assignment($companyId, $assignmentId);
     if (!$assignment) {
@@ -1572,7 +1591,9 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
 
     $issuedFine = (float) $assignment['issued_fine_weight'];
     $receivedFine = jw_fine_weight(jw_round_weight($receivedGross), (float) $purity['fineness']);
-    $split = jw_wastage_split($issuedFine, $receivedFine, (float) $assignment['wastage_allowed_pct']);
+    // The allowance, if there is one, is what somebody granted on this receipt
+    // after seeing the shortfall — not a rate agreed before the work started.
+    $split = jw_wastage_split($issuedFine, $receivedFine, (float) $assignment['wastage_allowed_pct'], $grantedFine);
 
     // Value the metal at what it was issued at, so the wastage charge does not
     // silently move with the day's rate.
@@ -1643,7 +1664,18 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
         return ['ok' => false, 'error' => 'Enter the weight received back.'];
     }
 
-    $preview = jewellery_preview_receipt($companyId, $assignmentId, $receivedGross, $receivedPurityId);
+    // Wastage the shop has decided to let go on THIS return, in fine weight,
+    // after seeing what came back. Absent means none — which is the rule, not a
+    // default someone forgot to change.
+    $grantedFine = null;
+    if (array_key_exists('allow_wastage_fine', $input) && trim((string) $input['allow_wastage_fine']) !== '') {
+        $grantedFine = jw_round_weight((float) $input['allow_wastage_fine']);
+        if ($grantedFine < 0) {
+            return ['ok' => false, 'error' => 'A wastage allowance cannot be negative.'];
+        }
+    }
+
+    $preview = jewellery_preview_receipt($companyId, $assignmentId, $receivedGross, $receivedPurityId, $grantedFine);
     if (!$preview['ok']) {
         return $preview;
     }

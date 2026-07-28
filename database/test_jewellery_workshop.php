@@ -227,6 +227,49 @@ ok(near(jw_making_charge('per_unit_weight', 1000, 9.9, 0), 9900.0), 'Per-unit-we
 ok(near(jw_making_charge('percent_of_metal', 5, 0, 200000), 10000.0), 'Percent-of-metal making: 5% of 200,000');
 ok(near(jw_making_charge('flat', 7500, 99, 999999), 7500.0), 'Flat making ignores weight and value');
 
+echo "\n4b. Nobody is allowed to lose gold\n";
+/*
+ * The kaligad is paid a percentage for the WORK; the metal stays the shop's the
+ * whole time. So a piece that comes back light is short by his doing, and he
+ * bears it. The default is no allowance at all.
+ *
+ * An allowance is a concession somebody grants after seeing the actual loss —
+ * never a standing rate that writes metal off before anyone knows there was a
+ * shortfall. Which is why an issue no longer inherits anything from the
+ * kaligad's own record.
+ */
+$strict = jw_wastage_split(10.0, 9.9, 0.0);
+ok(near($strict['allowed_fine'], 0.0), 'With no allowance, nothing is written off');
+ok(near($strict['excess_fine'], 0.1), 'And the whole 0.1 fine shortfall is his to bear');
+
+// Granted on the day, in fine weight, by somebody looking at the actual loss.
+$granted = jw_wastage_split(10.0, 9.9, 0.0, 0.04);
+ok(near($granted['allowed_fine'], 0.04), 'A grant of 0.04 fine is allowed');
+ok(near($granted['excess_fine'], 0.06), 'And he bears only the remaining 0.06');
+ok(near($granted['wastage_fine'], 0.1), 'The shortfall itself is unchanged — only who pays for it moves');
+
+// A grant beyond the actual loss must not manufacture a credit.
+$over = jw_wastage_split(10.0, 9.9, 0.0, 5.0);
+ok(near($over['allowed_fine'], 0.1) && near($over['excess_fine'], 0.0),
+    'Allowing more than was lost forgives the loss and no more — it cannot pay him for metal he kept');
+
+// A grant overrides any percentage, so an old stored rate cannot creep back in.
+$overrides = jw_wastage_split(10.0, 9.9, 90.0, 0.0);
+ok(near($overrides['allowed_fine'], 0.0) && near($overrides['excess_fine'], 0.1),
+    'Granting nothing beats a percentage left on a record — the person on the day decides');
+
+// And the issue itself must not pick up a standing rate. $kContractor carries
+// 0.5% on his record; an issue that says nothing about wastage must ignore it.
+$standing = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 1, 'issue_date' => '2026-08-16',
+], $userA);
+ok($standing['ok'], 'An issue that names no allowance still goes out'
+    . ($standing['ok'] ? '' : ' — ' . $standing['error']));
+ok(near((float) jewellery_assignment($cidA, (int) $standing['assignment_id'])['wastage_allowed_pct'], 0.0),
+    "It carries NO allowance, though the kaligad's record says 0.5% — nothing is forgiven in advance");
+jewellery_cancel_assignment($cidA, (int) $standing['assignment_id'], $userA);
+
 echo "\n5. Receive back, with wages and excess wastage recovered\n";
 $preview = jewellery_preview_receipt($cidA, (int) $r['assignment_id'], 9.9);
 ok(near($preview['making_amount'], 9900.0), 'Preview: wages are 9,900');
@@ -1064,6 +1107,70 @@ db()->prepare("UPDATE jewellery_order_assignments SET status = 'issued'
 accounting_module_repair_database();
 ok($statusOf() === 'delivered',
     'A delivered order is left alone whatever the items say — the goods are with the customer');
+
+echo "\n22. Letting a shortfall go is a decision made on the receipt\n";
+/*
+ * The shop CAN forgive a loss — it simply has to say so, on the day, having
+ * seen it. Proving it end to end matters more than proving the arithmetic:
+ * a grant that changed the preview but not the posted voucher would quietly
+ * pay the kaligad one figure and book another.
+ */
+$forgiveIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 2, 'issue_date' => '2026-08-22', 'making_basis' => 'flat', 'making_rate' => 4000,
+], $userA);
+ok($forgiveIssue['ok'], 'Two tola go out with no allowance'
+    . ($forgiveIssue['ok'] ? '' : ' — ' . $forgiveIssue['error']));
+$forgiveAid = (int) $forgiveIssue['assignment_id'];
+$forgiveIssued = (float) jewellery_assignment($cidA, $forgiveAid)['issued_fine_weight'];
+
+// He returns a piece 0.02 fine light.
+$backGrossFine = jw_round_weight($forgiveIssued - 0.02);
+$backGross = jw_round_weight($backGrossFine / 0.916);
+$strictPreview = jewellery_preview_receipt($cidA, $forgiveAid, $backGross, $p22);
+ok($strictPreview['excess_fine'] > 0.019, 'Unforgiven, the whole shortfall is his');
+$strictRecovery = (float) $strictPreview['recovery_amount'];
+ok($strictRecovery > 0, 'So something is recovered from his wages');
+
+// Now the shop grants exactly that shortfall.
+$forgivePreview = jewellery_preview_receipt($cidA, $forgiveAid, $backGross, $p22, $strictPreview['wastage_fine']);
+ok(near($forgivePreview['excess_fine'], 0.0), 'Granted the full shortfall, he bears nothing');
+ok(near($forgivePreview['recovery_amount'], 0.0), 'And nothing is taken off his wages');
+ok($forgivePreview['net_payable'] > $strictPreview['net_payable'],
+    'So he is paid more than he would have been — which is the whole point of granting it');
+
+// And it must survive into the books, not just the screen.
+$forgiveRec = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => $forgiveAid, 'received_item_id' => $chain, 'received_purity_id' => $p22,
+    'received_gross_weight' => $backGross, 'qty_pieces' => 1, 'receive_date' => '2026-08-25',
+    'allow_wastage_fine' => $strictPreview['wastage_fine'],
+], $userA);
+ok($forgiveRec['ok'], 'The receipt posts with the grant'
+    . ($forgiveRec['ok'] ? '' : ' — ' . $forgiveRec['error']));
+ok(near((float) $forgiveRec['recovery_amount'], 0.0),
+    'The POSTED receipt recovers nothing — the grant reached the books, not only the preview');
+$forgiveRow = db()->query("SELECT * FROM jewellery_order_receipts WHERE id = " . (int) $forgiveRec['receipt_id'])->fetch(PDO::FETCH_ASSOC);
+ok($forgiveRow && near((float) $forgiveRow['wastage_allowed_fine'], (float) $strictPreview['wastage_fine'], 0.0002),
+    'And the receipt records how much was let go, so the concession is on the record');
+ok($forgiveRow && near((float) $forgiveRow['excess_wastage_fine'], 0.0),
+    'With nothing left charged against him');
+
+// Blank means none — it must not be read as "allow 0.0000 deliberately" or,
+// worse, as some default.
+$blankIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 2, 'issue_date' => '2026-08-26', 'making_basis' => 'flat', 'making_rate' => 4000,
+], $userA);
+$blankAid = (int) $blankIssue['assignment_id'];
+$blankBack = jw_round_weight((jw_round_weight((float) jewellery_assignment($cidA, $blankAid)['issued_fine_weight'] - 0.02)) / 0.916);
+$blankRec = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => $blankAid, 'received_item_id' => $chain, 'received_purity_id' => $p22,
+    'received_gross_weight' => $blankBack, 'qty_pieces' => 1, 'receive_date' => '2026-08-27',
+    'allow_wastage_fine' => '',
+], $userA);
+ok($blankRec['ok'] && (float) $blankRec['recovery_amount'] > 0,
+    'A blank allowance forgives nothing — he bears the shortfall, which is the rule');
+
 
 jww_cleanup();
 echo "\n==================================================\n";
