@@ -15,6 +15,8 @@ $here = __DIR__;
 require $root . '/app/bootstrap.php';
 require_once $root . '/app/accounting_module_repair.php';
 require_once $root . '/app/jewellery_stock.php';
+// The workshop engine, for the order the advance section takes money against.
+require_once $root . '/app/jewellery_workshop.php';
 
 $pass = 0; $fail = 0;
 function ok(bool $c, string $l): void { global $pass, $fail; if ($c) { $pass++; echo "  PASS  $l\n"; } else { $fail++; echo "  FAIL  $l\n"; } }
@@ -25,11 +27,14 @@ function cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
-        foreach (['jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items', 'jewellery_daily_rates',
+        foreach (['jewellery_settlement_tenders', 'jewellery_settlement_allocations', 'jewellery_settlements',
+                  'jewellery_order_lines', 'jewellery_orders',
+                  'jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items', 'jewellery_daily_rates',
                   'inventory_ledger_mappings', 'jewellery_settings', 'jewellery_purities', 'jewellery_metals',
                   'jewellery_units'] as $t) {
             db()->exec("DELETE FROM `$t` WHERE company_id=$s");
         }
+        db()->exec("DELETE FROM accounting_parties WHERE company_id=$s");
         db()->exec("DELETE FROM ledgers WHERE company_id=$s");
         db()->exec("DELETE FROM ledger_groups WHERE company_id=$s");
         db()->exec("DELETE FROM client_profiles WHERE books_company_id=$s");
@@ -71,8 +76,9 @@ $p22 = $q("SELECT id FROM jewellery_purities WHERE company_id=$cid AND metal_id=
 $p24 = $q("SELECT id FROM jewellery_purities WHERE company_id=$cid AND metal_id=$gold AND code='24K'");
 $tola = $q("SELECT id FROM jewellery_units WHERE company_id=$cid AND code='TOLA'");
 
-$run = static function (array $post) use ($cid, $fyId, $adminId, $here): array {
-    $payload = json_encode(['company_id' => $cid, 'fy_id' => $fyId, 'user_id' => $adminId, 'post' => $post], JSON_THROW_ON_ERROR);
+$run = static function (array $post, string $page = 'jewellery.php') use ($cid, $fyId, $adminId, $here): array {
+    $payload = json_encode(['company_id' => $cid, 'fy_id' => $fyId, 'user_id' => $adminId, 'post' => $post,
+        'page' => $page], JSON_THROW_ON_ERROR);
     // The payload travels via a FILE: Windows' escapeshellarg() strips the
     // double quotes out of a JSON argument, so argv cannot carry it.
     $payloadFile = sys_get_temp_dir() . '/jw_page_action_payload.json';
@@ -187,6 +193,79 @@ $r = $run(['action' => 'clear_opening', 'back_view' => 'opening', 'item_id' => (
 ok($r['kind'] === 'SUCCESS', 'clear_opening — ' . $r['msg']);
 ok($q("SELECT COUNT(*) FROM vouchers WHERE company_id=$cid AND source_type='inventory_opening'") === 0, 'Its voucher was removed');
 ok($q("SELECT COUNT(*) FROM inventory_items WHERE id=$itemId AND opening_qty=0.000") === 1, 'And the shared master is zeroed');
+
+// --- Workshop: one advance paid several ways at once ------------------------
+// The engine test proves the maths; this proves the WIRING — the tender grid's
+// parallel arrays crossing the real POST path into one mixed settlement.
+db()->prepare("INSERT INTO ledger_groups (company_id,name,code,master_key) VALUES (:cid,'JW Liab','JWGL','current_liability')")->execute(['cid' => $cid]);
+$gl = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO ledgers (company_id,group_id,name,code,type) VALUES (:cid,:g,'Customer Advances','JWADV','liability')")->execute(['cid' => $cid, 'g' => $gl]);
+$ldgAdvance = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO ledgers (company_id,group_id,name,code) VALUES (:cid,:g,'Till','JWCSH')")->execute(['cid' => $cid, 'g' => $ga]);
+$ldgCash = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO ledgers (company_id,group_id,name,code) VALUES (:cid,:g,'Fonepay','JWQR')")->execute(['cid' => $cid, 'g' => $ga]);
+$ldgQr = (int) db()->lastInsertId();
+jewellery_save_mapping($cid, 'customer_advance', $ldgAdvance, $adminId);
+jewellery_save_mapping($cid, 'tender_qr', $ldgQr, $adminId);
+
+db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type, status) VALUES (:c,'PCUS','Counter Customer','customer','active')")
+    ->execute(['c' => $cid]);
+$postCustomer = (int) db()->lastInsertId();
+$postOrder = jewellery_save_order($cid, $fyId, [
+    'order_date' => '2026-08-01', 'party_id' => $postCustomer, 'item_id' => $itemId,
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'expected_gross_weight' => 2, 'making_basis' => 'flat', 'making_rate' => 5000, 'status' => 'confirmed',
+], [], $adminId);
+
+$r = $run(['action' => 'save_advance', 'back_view' => 'orders', 'order_id' => (string) $postOrder,
+    'advance_date' => '2026-08-01',
+    'tender_mode' => ['cash', 'qr', 'metal'],
+    'tender_label' => ['', '', ''],
+    'tender_reference' => ['', 'FP-1122', ''],
+    'tender_amount' => ['20000', '15000', '15000'],
+    'tender_ledger_id' => [(string) $ldgCash, '0', '0'],
+    'tender_item_id' => ['0', '0', (string) $itemId],
+    'tender_purity_id' => ['0', '0', (string) $p22],
+    'tender_unit_id' => ['0', '0', (string) $tola],
+    'tender_gross_weight' => ['0', '0', '0.1'],
+], 'jewellery-workshop.php');
+ok($r['kind'] === 'SUCCESS', 'save_advance takes cash + Fonepay + old gold as ONE payment — ' . $r['msg']);
+$mixedId = $q("SELECT id FROM jewellery_settlements WHERE company_id=$cid AND order_id=$postOrder AND is_advance=1");
+ok($mixedId > 0 && $q("SELECT COUNT(*) FROM jewellery_settlements WHERE id=$mixedId AND mode='mixed' AND amount=50000.00 AND status='posted'") === 1,
+    "It is ONE posted settlement of 50,000, reading 'mixed'");
+ok($q("SELECT COUNT(*) FROM jewellery_settlement_tenders WHERE settlement_id=$mixedId") === 3,
+    'With all three ways of paying on record');
+ok($q("SELECT COUNT(*) FROM jewellery_settlement_tenders WHERE settlement_id=$mixedId AND mode='metal' AND stock_txn_id IS NOT NULL") === 1,
+    'And the old gold really moved stock');
+
+$r = $run(['action' => 'refund_advance', 'back_view' => 'orders', 'order_id' => (string) $postOrder,
+    'advance_date' => '2026-08-02',
+    'tender_mode' => ['cash'], 'tender_label' => [''], 'tender_reference' => [''],
+    'tender_amount' => ['5000'], 'tender_ledger_id' => [(string) $ldgCash],
+    'tender_item_id' => ['0'], 'tender_purity_id' => ['0'], 'tender_unit_id' => ['0'],
+    'tender_gross_weight' => ['0'],
+], 'jewellery-workshop.php');
+ok($r['kind'] === 'SUCCESS', 'refund_advance hands part of it back through the same grid — ' . $r['msg']);
+ok($q("SELECT COUNT(*) FROM jewellery_settlements WHERE company_id=$cid AND order_id=$postOrder AND is_advance=1 AND direction='paid' AND mode='cash' AND amount=5000.00") === 1,
+    "A single-row grid stores its real mode, not 'mixed'");
+
+$r = $run(['action' => 'save_advance', 'back_view' => 'orders', 'order_id' => (string) $postOrder,
+    'advance_date' => '2026-08-03',
+    'tender_mode' => ['cash'], 'tender_label' => [''], 'tender_reference' => [''],
+    'tender_amount' => ['0'], 'tender_ledger_id' => [(string) $ldgCash],
+    'tender_item_id' => ['0'], 'tender_purity_id' => ['0'], 'tender_unit_id' => ['0'],
+    'tender_gross_weight' => ['0'],
+], 'jewellery-workshop.php');
+ok($r['kind'] === 'ERROR', 'An empty grid takes no money — ' . $r['msg']);
+
+$r = $run(['action' => 'save_advance', 'back_view' => 'orders', 'order_id' => (string) $postOrder,
+    'advance_date' => '2026-08-03',
+    'tender_mode' => ['cash'], 'tender_label' => [''], 'tender_reference' => [''],
+    'tender_amount' => ['1000'], 'tender_ledger_id' => ['0'],
+    'tender_item_id' => ['0'], 'tender_purity_id' => ['0'], 'tender_unit_id' => ['0'],
+    'tender_gross_weight' => ['0'],
+], 'jewellery-workshop.php');
+ok($r['kind'] === 'ERROR', 'Cash without naming the till is refused on the POST path too — ' . $r['msg']);
 
 cleanup();
 echo "\n==================================================\n";

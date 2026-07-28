@@ -155,20 +155,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ((int) ($order['party_id'] ?? 0) <= 0) {
                 throw new RuntimeException('Give this order a customer first — an advance has to be held against somebody.');
             }
-            $mode = jw_enum($_POST['advance_mode'] ?? null, ['cash', 'bank', 'metal'], 'cash');
+            // One payment, possibly made several ways at once — 20,000 cash,
+            // 15,000 on Fonepay and an old ring for the rest is ONE advance.
+            // Each grid row is one way the customer paid; blank rows are
+            // dropped, and the engine holds every row to the same rules the
+            // single-mode form was held to.
+            $tenders = [];
+            foreach ((array) ($_POST['tender_amount'] ?? []) as $index => $tenderAmount) {
+                $tenders[] = [
+                    'mode' => (string) ($_POST['tender_mode'][$index] ?? 'cash'),
+                    'mode_label' => (string) ($_POST['tender_label'][$index] ?? ''),
+                    'reference' => (string) ($_POST['tender_reference'][$index] ?? ''),
+                    'amount' => (float) $tenderAmount,
+                    'ledger_id' => (int) ($_POST['tender_ledger_id'][$index] ?? 0),
+                    'item_id' => (int) ($_POST['tender_item_id'][$index] ?? 0),
+                    'purity_id' => (int) ($_POST['tender_purity_id'][$index] ?? 0),
+                    'unit_id' => (int) ($_POST['tender_unit_id'][$index] ?? 0),
+                    'gross_weight' => (float) ($_POST['tender_gross_weight'][$index] ?? 0),
+                ];
+            }
+            // The total is the sum of what was actually handed over, so the
+            // counter can never type a figure the parts disagree with.
+            $amount = 0.0;
+            foreach ($tenders as $tenderRow) {
+                if ((float) $tenderRow['amount'] > 0) {
+                    $amount += (float) $tenderRow['amount'];
+                }
+            }
             $id = jewellery_save_settlement($companyId, $fiscalYearId, [
                 'settlement_date' => $clampDate((string) ($_POST['advance_date'] ?? '')),
                 'party_id' => (int) $order['party_id'],
                 'order_id' => $orderId,
                 'is_advance' => 1,
                 'direction' => $action === 'refund_advance' ? 'paid' : 'received',
-                'mode' => $mode,
-                'amount' => (float) ($_POST['advance_value'] ?? 0),
-                'ledger_id' => (int) ($_POST['advance_ledger_id'] ?? 0),
-                'item_id' => (int) ($_POST['advance_item_id'] ?? 0),
-                'purity_id' => (int) ($_POST['advance_purity_id'] ?? 0),
-                'unit_id' => (int) ($_POST['advance_unit_id'] ?? 0),
-                'gross_weight' => (float) ($_POST['advance_gross_weight'] ?? 0),
+                'amount' => jw_round_money($amount),
+                'tenders' => $tenders,
                 'notes' => ($action === 'refund_advance' ? 'Advance refunded on order ' : 'Advance on order ')
                     . (string) $order['order_no'],
             ], [], $userId);
@@ -177,9 +198,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$posted['ok']) {
                     throw new RuntimeException($posted['error']);
                 }
+                $tookMetal = in_array('metal', array_column($tenders, 'mode'), true);
                 flash('success', $action === 'refund_advance'
                     ? 'Advance refunded and posted.'
-                    : ($mode === 'metal' ? 'Old gold taken in as an advance — the weight is in stock and the value is held for the customer.'
+                    : ($tookMetal ? 'Advance received and posted — the old gold\'s weight is in stock and its value is held for the customer.'
                         : 'Advance received and posted.'));
             } else {
                 flash('success', 'Advance saved as a draft — someone with posting rights must post it.');
@@ -553,9 +575,22 @@ jw_filter_bar_styles();
                         <td><?= e((string) $adv['settlement_no']) ?></td>
                         <td>
                             <?= (string) $adv['direction'] === 'paid' ? 'Refunded' : 'Received' ?> —
-                            <?= e((string) $adv['mode']) ?>
-                            <?php if ((string) $adv['mode'] === 'metal'): ?>
-                                <small><?= e((string) ($adv['item_code'] ?? '')) ?> <?= e((string) ($adv['purity_code'] ?? '')) ?></small>
+                            <?php if ((string) $adv['mode'] === 'mixed'): ?>
+                                <?php
+                                    // One payment, several ways at once: name each part,
+                                    // because 'mixed' alone tells the counter nothing.
+                                    $advParts = [];
+                                    foreach (jewellery_settlement_tenders($companyId, (int) $adv['id']) as $advTender) {
+                                        $advParts[] = jw_tender_mode_label((string) $advTender['mode'], $advTender['mode_label'] ?? null)
+                                            . ' ' . number_format((float) $advTender['amount'], 2);
+                                    }
+                                ?>
+                                <small><?= e(implode(' + ', $advParts)) ?></small>
+                            <?php else: ?>
+                                <?= e(jw_tender_mode_label((string) $adv['mode'])) ?>
+                                <?php if ((string) $adv['mode'] === 'metal'): ?>
+                                    <small><?= e((string) ($adv['item_code'] ?? '')) ?> <?= e((string) ($adv['purity_code'] ?? '')) ?></small>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </td>
                         <td class="is-numeric"><?= (float) $adv['gross_weight'] > 0
@@ -567,6 +602,86 @@ jw_filter_bar_styles();
         </table></div>
         <?php endif; ?>
 
+        <?php
+        // The ways ONE payment was made, a row per way. A customer putting
+        // down 50,000 hands over cash, taps Fonepay and puts an old ring on
+        // the scale in the same minute — that is one advance with three rows,
+        // not three advances. Shared by the take and refund forms; the engine
+        // holds every row to the single-mode form's old rules.
+        $tenderGrid = static function (string $goldWord) use ($cashBankLedgers, $items, $purities, $units, $editOrder, $sym): void { ?>
+            <fieldset class="jw-lines-box" style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:6px 0;min-width:0;grid-column:1/-1">
+                <legend style="padding:0 6px;font-weight:600">How it is paid — several ways at once is fine</legend>
+                <div class="jw-lines-scroll"><table class="jw-lines">
+                    <thead><tr>
+                        <th style="min-width:130px">Paid by</th>
+                        <th style="min-width:150px">Ledger</th>
+                        <th style="min-width:110px">Reference</th>
+                        <th style="min-width:150px"><?= e($goldWord) ?> item</th>
+                        <th style="min-width:90px">Purity</th>
+                        <th style="min-width:70px">Unit</th>
+                        <th style="min-width:90px">Weight</th>
+                        <th style="min-width:100px">Amount (<?= e($sym) ?>)</th>
+                        <th></th>
+                    </tr></thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <select name="tender_mode[]" class="jw-tender-mode">
+                                    <option value="cash">Cash</option>
+                                    <option value="bank">Bank</option>
+                                    <option value="card">Card</option>
+                                    <option value="cheque">Cheque</option>
+                                    <option value="qr">QR / Fonepay</option>
+                                    <option value="wallet">Mobile wallet</option>
+                                    <option value="metal"><?= e($goldWord) ?></option>
+                                    <option value="other">Other…</option>
+                                </select>
+                                <input type="text" name="tender_label[]" class="jw-tender-label" placeholder="name it" style="display:none;margin-top:4px" maxlength="60">
+                            </td>
+                            <td>
+                                <select name="tender_ledger_id[]">
+                                    <option value="0">— mapped / not money —</option>
+                                    <?php foreach ($cashBankLedgers as $l): ?>
+                                        <option value="<?= (int) $l['id'] ?>"><?= e(($l['code'] ? $l['code'] . ' — ' : '') . $l['name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                            <td><input type="text" name="tender_reference[]" placeholder="chq / txn no." maxlength="60"></td>
+                            <td>
+                                <select name="tender_item_id[]" class="jw-tender-item">
+                                    <option value="0" data-metal="0">— money, not metal —</option>
+                                    <?php foreach ($items as $it): ?>
+                                        <option value="<?= (int) $it['id'] ?>" data-metal="<?= (int) $it['metal_id'] ?>"><?= e($it['code'] . ' — ' . $it['name'] . ' · ' . $it['metal_name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                            <td>
+                                <select name="tender_purity_id[]" class="jw-tender-purity">
+                                    <?php foreach ($purities as $p): ?>
+                                        <option value="<?= (int) $p['id'] ?>" data-metal="<?= (int) $p['metal_id'] ?>" <?= (int) ($editOrder['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                            <td>
+                                <select name="tender_unit_id[]">
+                                    <?php foreach ($units as $u): ?>
+                                        <option value="<?= (int) $u['id'] ?>" <?= (int) ($editOrder['unit_id'] ?? 0) === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['code']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                            <td><input type="number" name="tender_gross_weight[]" step="0.0001" min="0" value="0"></td>
+                            <td><input type="number" name="tender_amount[]" class="jw-tender-amount" step="0.01" min="0" value="0"></td>
+                            <td><button type="button" class="button secondary jw-line-remove" title="Remove this way of paying" style="min-height:30px;padding:4px 10px">&times;</button></td>
+                        </tr>
+                    </tbody>
+                </table></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:10px;flex-wrap:wrap">
+                    <button type="button" class="button secondary jw-line-add" style="min-height:30px;padding:4px 12px">+ Another way of paying</button>
+                    <strong>Total: <?= e($sym) ?> <span class="jw-tender-total">0.00</span></strong>
+                </div>
+            </fieldset>
+        <?php }; ?>
+
         <h3 style="margin:16px 0 8px">Take an advance</h3>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -574,45 +689,7 @@ jw_filter_bar_styles();
             <input type="hidden" name="back_view" value="orders">
             <input type="hidden" name="order_id" value="<?= (int) $editOrder['id'] ?>">
             <label>Date<input type="date" name="advance_date" value="<?= e($todayInFy) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
-            <label>Taken as
-                <select name="advance_mode">
-                    <option value="cash">Cash</option>
-                    <option value="bank">Bank</option>
-                    <option value="metal">Old gold</option>
-                </select>
-            </label>
-            <label>Into / from ledger
-                <select name="advance_ledger_id">
-                    <option value="0">— cash and bank only —</option>
-                    <?php foreach ($cashBankLedgers as $l): ?>
-                        <option value="<?= (int) $l['id'] ?>"><?= e(($l['code'] ? $l['code'] . ' — ' : '') . $l['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Value (<?= e($sym) ?>)<input type="number" name="advance_value" step="0.01" min="0" value="0" required></label>
-            <label>Taken in item
-                <select name="advance_item_id" class="jw-metal-item" data-purity-target="adv">
-                    <option value="0" data-metal="0">— cash advance —</option>
-                    <?php foreach ($items as $it): ?>
-                        <option value="<?= (int) $it['id'] ?>" data-metal="<?= (int) $it['metal_id'] ?>"><?= e($it['code'] . ' — ' . $it['name'] . ' · ' . $it['metal_name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Purity
-                <select name="advance_purity_id" class="jw-metal-purity" data-purity-key="adv">
-                    <?php foreach ($purities as $p): ?>
-                        <option value="<?= (int) $p['id'] ?>" data-metal="<?= (int) $p['metal_id'] ?>" <?= (int) ($editOrder['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Unit
-                <select name="advance_unit_id">
-                    <?php foreach ($units as $u): ?>
-                        <option value="<?= (int) $u['id'] ?>" <?= (int) ($editOrder['unit_id'] ?? 0) === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['code']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Gross weight<input type="number" name="advance_gross_weight" step="0.0001" min="0" value="0"></label>
+            <?php $tenderGrid('Old gold'); ?>
             <div style="grid-column:1/-1">
                 <button type="submit" class="button">Record Advance</button>
             </div>
@@ -626,45 +703,11 @@ jw_filter_bar_styles();
             <input type="hidden" name="back_view" value="orders">
             <input type="hidden" name="order_id" value="<?= (int) $editOrder['id'] ?>">
             <label>Date<input type="date" name="advance_date" value="<?= e($todayInFy) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
-            <label>Refunded as
-                <select name="advance_mode">
-                    <option value="cash">Cash</option>
-                    <option value="bank">Bank</option>
-                    <option value="metal">Gold back</option>
-                </select>
-            </label>
-            <label>From ledger
-                <select name="advance_ledger_id">
-                    <option value="0">— cash and bank only —</option>
-                    <?php foreach ($cashBankLedgers as $l): ?>
-                        <option value="<?= (int) $l['id'] ?>"><?= e(($l['code'] ? $l['code'] . ' — ' : '') . $l['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Value (<?= e($sym) ?>)<input type="number" name="advance_value" step="0.01" min="0" max="<?= e((string) $advanceAvailable) ?>" value="<?= e((string) $advanceAvailable) ?>" required></label>
-            <label>Refunded in item
-                <select name="advance_item_id" class="jw-metal-item" data-purity-target="ref">
-                    <option value="0" data-metal="0">— cash refund —</option>
-                    <?php foreach ($items as $it): ?>
-                        <option value="<?= (int) $it['id'] ?>" data-metal="<?= (int) $it['metal_id'] ?>"><?= e($it['code'] . ' — ' . $it['name'] . ' · ' . $it['metal_name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Purity
-                <select name="advance_purity_id" class="jw-metal-purity" data-purity-key="ref">
-                    <?php foreach ($purities as $p): ?>
-                        <option value="<?= (int) $p['id'] ?>" data-metal="<?= (int) $p['metal_id'] ?>" <?= (int) ($editOrder['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Unit
-                <select name="advance_unit_id">
-                    <?php foreach ($units as $u): ?>
-                        <option value="<?= (int) $u['id'] ?>" <?= (int) ($editOrder['unit_id'] ?? 0) === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['code']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Gross weight<input type="number" name="advance_gross_weight" step="0.0001" min="0" value="0"></label>
+            <div style="grid-column:1/-1;color:var(--mbw-muted,#64748b)">
+                <?= e($sym) ?> <?= $fmt((float) $advanceAvailable) ?> is still held. A refund can also be split —
+                part cash back, part gold back — and it must not exceed what is held.
+            </div>
+            <?php $tenderGrid('Gold back'); ?>
             <div style="grid-column:1/-1">
                 <button type="submit" class="button secondary">Refund Advance</button>
             </div>
@@ -1237,14 +1280,16 @@ jw_filter_bar_styles();
 <?php endif; ?>
 
 <script>
-// An advance or a refund can be taken in ANY item the shop deals in — old
-// gold, silver, a diamond — and the engine refuses a purity that does not
-// belong to the chosen item's metal. So the purity list follows the item
-// instead of offering every purity in the shop and failing on save.
+// The tender grid: one payment, several ways of paying at once. Everything is
+// DELEGATED to the document because "+ Another way of paying" clones the last
+// row — a listener bound to the original would not follow it to the clone.
 (function () {
-    function sync(itemSelect) {
-        var key = itemSelect.getAttribute("data-purity-target");
-        var purity = document.querySelector('.jw-metal-purity[data-purity-key="' + key + '"]');
+    // The purity list follows the chosen item, because the engine refuses a
+    // purity from a different metal. No item means a money row: the purity is
+    // not used, so the full list is left alone rather than emptied.
+    function syncPurity(itemSelect) {
+        var row = itemSelect.closest("tr");
+        var purity = row && row.querySelector(".jw-tender-purity");
         if (!purity) { return; }
         if (!purity.jwOptions) {
             purity.jwOptions = Array.prototype.slice.call(purity.options);
@@ -1253,17 +1298,46 @@ jw_filter_bar_styles();
         var metal = chosen ? chosen.getAttribute("data-metal") : "0";
         purity.innerHTML = "";
         purity.jwOptions.forEach(function (option) {
-            // No item chosen means a cash advance: the purity is not used, so
-            // every one is left in place rather than emptying the control.
             if (!metal || metal === "0" || option.getAttribute("data-metal") === metal) {
-                purity.appendChild(option);
+                purity.appendChild(option.cloneNode(true));
             }
         });
     }
-    Array.prototype.forEach.call(document.querySelectorAll(".jw-metal-item"), function (itemSelect) {
-        itemSelect.addEventListener("change", function () { sync(itemSelect); });
-        sync(itemSelect);
+    // An "Other…" way of paying carries its own name — the box appears only
+    // when it is needed.
+    function syncLabel(modeSelect) {
+        var row = modeSelect.closest("tr");
+        var label = row && row.querySelector(".jw-tender-label");
+        if (label) { label.style.display = modeSelect.value === "other" ? "" : "none"; }
+    }
+    // The running total, so the counter watches the parts meet the figure the
+    // customer was told before pressing anything.
+    function syncTotal(anyField) {
+        var box = anyField.closest(".jw-lines-box");
+        var out = box && box.querySelector(".jw-tender-total");
+        if (!out) { return; }
+        var total = 0;
+        Array.prototype.forEach.call(box.querySelectorAll(".jw-tender-amount"), function (amount) {
+            total += parseFloat(amount.value) || 0;
+        });
+        out.textContent = total.toFixed(2);
+    }
+    document.addEventListener("change", function (event) {
+        if (event.target.classList.contains("jw-tender-item")) { syncPurity(event.target); }
+        if (event.target.classList.contains("jw-tender-mode")) { syncLabel(event.target); }
     });
+    document.addEventListener("input", function (event) {
+        if (event.target.classList.contains("jw-tender-amount")) { syncTotal(event.target); }
+    });
+    // Removing a row changes the total without firing input on any amount box.
+    document.addEventListener("click", function (event) {
+        var button = event.target.closest(".jw-line-remove, .jw-line-add");
+        if (!button) { return; }
+        var box = button.closest(".jw-lines-box");
+        var amount = box && box.querySelector(".jw-tender-amount");
+        if (amount) { setTimeout(function () { syncTotal(amount); }, 0); }
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".jw-tender-item"), syncPurity);
 })();
 </script>
 <?php
