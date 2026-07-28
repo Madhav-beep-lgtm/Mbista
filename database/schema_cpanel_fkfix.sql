@@ -1650,15 +1650,36 @@ UPDATE `companies`
 SET parent_company_id = NULL
 WHERE code IN ('AGHPL', 'MBAACA');
 
+-- SECURITY: no usable password is seeded here.
+--
+-- These rows used to carry real bcrypt hashes. This file is in the git
+-- repository, so anyone who could read the repository could take the hash
+-- for the super admin away and attack it offline at their leisure — and if
+-- the installed password was never changed, walk in.
+--
+-- The value below is not a hash and can never match any password:
+-- password_verify() rejects it, including against itself. So a fresh
+-- install has NO working login until somebody sets one:
+--
+--     php database/change_admin_credentials.php
+--
+-- That is deliberate. An install that cannot be logged into is a nuisance
+-- for five minutes; an install everyone shares a known password to is a
+-- problem for as long as it runs.
 INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `status`, `company_id`, `company`) VALUES
-('Super Admin', 'admin@mbista.local', '$2y$10$yeqdVHMElucdlMZWdRO8Ru9Auoymey4RY3rUVnuYcd2WjiYxgVLo.', 'admin', 'active', (SELECT `id` FROM `companies` WHERE `code` = 'AGHPL' LIMIT 1), 'Altiora Global Holdings Private Limited'),
-('Excel Business Client', 'excelbusinessandtax@gmail.com', '$2y$10$ZhJ74eAtR.gMbwufkPzAiO1y2G2c9H8gWQWJ/PXC2v9KYfYtR2.WC', 'customer', 'active', (SELECT `id` FROM `companies` WHERE `code` = 'EBCPL' LIMIT 1), 'Excel Business Consulting Private Limited'),
-('Test Customer', 'testcustomer@example.com', '$2y$10$HULv47NgbaGJuPGGvfZnyurg/1FUy0IExZDgG95bbo2mzhXIVRzmu', 'customer', 'active', NULL, 'Test Customer')
+('Super Admin', 'admin@mbista.local', '*LOCKED — run: php database/change_admin_credentials.php*', 'admin', 'active', (SELECT `id` FROM `companies` WHERE `code` = 'AGHPL' LIMIT 1), 'Altiora Global Holdings Private Limited'),
+('Excel Business Client', 'excelbusinessandtax@gmail.com', '*LOCKED — run: php database/change_admin_credentials.php*', 'customer', 'active', (SELECT `id` FROM `companies` WHERE `code` = 'EBCPL' LIMIT 1), 'Excel Business Consulting Private Limited'),
+('Test Customer', 'testcustomer@example.com', '*LOCKED — run: php database/change_admin_credentials.php*', 'customer', 'active', NULL, 'Test Customer')
+-- Re-running this file must not disturb an account that already exists.
+--
+-- password_hash, role and status are deliberately NOT re-asserted here.
+-- Overwriting the hash would reset a live admin password back to whatever
+-- this file ships (and now would lock the account outright); overwriting
+-- role and status would quietly re-activate, or re-promote, an account
+-- somebody had disabled or demoted on purpose. Only the descriptive
+-- columns are refreshed.
 ON DUPLICATE KEY UPDATE
 `name` = VALUES(`name`),
-`password_hash` = VALUES(`password_hash`),
-`role` = VALUES(`role`),
-`status` = VALUES(`status`),
 `company_id` = VALUES(`company_id`),
 `company` = VALUES(`company`);
 
