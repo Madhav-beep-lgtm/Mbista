@@ -145,11 +145,19 @@ delivering order's own entries so the invariant (advance_amount = sum of
 rows) holds for every sale — the screen never takes that path. Sales already
 stored were back-filled by the same FIFO rule in the repair step.
 
-### E. Fine weight beside actual weight (§5)
+### E. Fine weight beside actual weight (§5) — **SHIPPED** (migration 095)
 
-Add the fine column to `jewellery-trade.php`'s line grid and to
-`jewellery-invoice.php`'s printed bill. Add `stone_weight` and the derived net
-gold weight to `jewellery_order_receipts`.
+Stones are weighed apart on kaligad receipts: `stone_weight` and
+`net_gold_weight` on `jewellery_order_receipts`, and the fine equivalent —
+with it the wastage, the recovery and the value into stock — is computed
+over gross − stone. Counting the stones credited the kaligad with metal he
+never returned. Existing receipts backfill stone 0 / net = gross.
+
+Actual weight and fine equivalent now show together on: the sale/purchase
+entry rail (live Fine equivalent row, from each line's chosen purity), the
+printed bill (per-line fine under net, plus a fine-gold-equivalent total in
+grams), the orders list, the ready-to-deliver board, and the receive-back
+preview. Inventory and stock reports already carried both.
 
 ### F. Order reports (§14)
 

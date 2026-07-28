@@ -30,6 +30,9 @@ function jw_summary_rail(array $ctx): void
                 <div class="jw-summary-row"><span>Total items</span><strong data-jw-sum="items">0</strong></div>
                 <div class="jw-summary-row"><span>Gross weight</span><strong data-jw-sum="gross">0.000</strong></div>
                 <div class="jw-summary-row"><span>Net weight</span><strong data-jw-sum="net">0.000</strong></div>
+                <?php // The pure-metal content of what is on the document, shown WITH the
+                      // actual weights — a 22K figure and a 24K figure only compare in fine. ?>
+                <div class="jw-summary-row"><span>Fine equivalent</span><strong data-jw-sum="fine">0.000</strong></div>
                 <div class="jw-summary-row"><span>Charged weight</span><strong data-jw-sum="charged">0.000</strong></div>
                 <div class="jw-summary-row"><span>Metal</span><strong data-jw-sum="metal">0.00</strong></div>
                 <div class="jw-summary-row"><span>Making</span><strong data-jw-sum="making">0.00</strong></div>
@@ -104,7 +107,7 @@ function jw_summary_rail_script(): void
     }
 
     function recalc() {
-        var totals = { items: 0, gross: 0, net: 0, charged: 0, metal: 0, making: 0, stone: 0, oldgold: 0 };
+        var totals = { items: 0, gross: 0, net: 0, fine: 0, charged: 0, metal: 0, making: 0, stone: 0, oldgold: 0 };
 
         form.querySelectorAll('table.jw-lines tbody tr').forEach(function (row) {
             var itemSelect = row.querySelector('select[name$="_item_id[]"]');
@@ -137,6 +140,14 @@ function jw_summary_rail_script(): void
             totals.items += 1;
             totals.gross += gross;
             totals.net += net;
+            // The pure-metal content: net × fineness ÷ 1000, read off the
+            // purity the row actually chose — actual weight and fine
+            // equivalent shown together, which is how a jewellery figure is
+            // read.
+            var puritySelect = row.querySelector('select[name="' + prefix + '_purity_id[]"]');
+            var chosenPurity = puritySelect && puritySelect.options[puritySelect.selectedIndex];
+            var fineness = chosenPurity ? parseFloat(chosenPurity.getAttribute('data-fineness')) : 0;
+            if (isFinite(fineness) && fineness > 0) { totals.fine += net * fineness / 1000; }
             totals.charged += charged;
             totals.metal += charged * rate;
             totals.making += num(row, prefix + '_making_amount');
@@ -156,6 +167,7 @@ function jw_summary_rail_script(): void
             items: String(totals.items),
             gross: weight(totals.gross),
             net: weight(totals.net),
+            fine: weight(totals.fine),
             charged: weight(totals.charged),
             metal: money(totals.metal),
             making: money(totals.making),

@@ -242,6 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'received_item_id' => (int) ($_POST['received_item_id'] ?? 0),
             'received_purity_id' => (int) ($_POST['received_purity_id'] ?? 0),
             'received_gross_weight' => (float) ($_POST['received_gross_weight'] ?? 0),
+            'stone_weight' => (float) ($_POST['stone_weight'] ?? 0),
             'qty_pieces' => (float) ($_POST['qty_pieces'] ?? 0),
             'receive_date' => $clampDate((string) ($_POST['receive_date'] ?? '')),
             // Passed through as typed, blank included: blank means no allowance,
@@ -421,7 +422,10 @@ if ($receiveTarget && (string) $receiveTarget['status'] === 'issued') {
         (int) $receiveTarget['id'],
         (float) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight']),
         null,
-        $allowWastage === '' ? null : (float) $allowWastage
+        $allowWastage === '' ? null : (float) $allowWastage,
+        // Stones set into the piece, weighed apart — the wastage settles over
+        // the metal only.
+        (float) ($_GET['stone'] ?? 0)
     );
 }
 $pending = $view === 'delivery' ? jewellery_pending_delivery($companyId) : [];
@@ -752,7 +756,12 @@ jw_filter_bar_styles();
                         <td><?= e(app_date((string) $row['order_date'])) ?></td>
                         <td><?= e((string) ($row['party_name'] ?? $row['customer_name'] ?? 'Walk-in')) ?></td>
                         <td><?= e($row['metal_name'] . ' · ' . $row['purity_code']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $row['expected_gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['expected_gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small>
+                            <?php // Actual weight and pure-metal content together — the pair a jewellery figure is read as. ?>
+                            <?php if ((float) $row['expected_fine_weight'] > 0.00005): ?>
+                                <br><small><?= $fmt((float) $row['expected_fine_weight'], 4) ?> fine</small>
+                            <?php endif; ?>
+                        </td>
                         <td><?= ($row['delivery_date'] ?? null) ? e(app_date((string) $row['delivery_date'])) : '—' ?></td>
                         <td><span class="mbw-pill <?= e($statusTone[$row['status']] ?? 'tone-gray') ?>"><?= e($statusLabel((string) $row['status'])) ?></span></td>
                         <td style="white-space:nowrap">
@@ -991,7 +1000,8 @@ jw_filter_bar_styles();
         <form method="get" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:12px">
             <input type="hidden" name="view" value="assignments">
             <input type="hidden" name="receive" value="<?= (int) $receiveTarget['id'] ?>">
-            <label>Weight received back<input type="number" name="wt" step="0.0001" min="0" value="<?= e((string) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight'])) ?>"></label>
+            <label>Weight received back (gross)<input type="number" name="wt" step="0.0001" min="0" value="<?= e((string) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight'])) ?>"></label>
+            <label>Of which stones<input type="number" name="stone" step="0.0001" min="0" value="<?= e((string) ($_GET['stone'] ?? '0')) ?>" placeholder="0.0000"></label>
             <label>Wastage to allow (fine)<input type="number" name="allow" step="0.0001" min="0" value="<?= e($allowWastage) ?>" placeholder="0.0000"></label>
             <button type="submit" class="button secondary" style="min-height:34px">Recalculate</button>
         </form>
@@ -999,6 +1009,12 @@ jw_filter_bar_styles();
             <div style="overflow-x:auto"><table>
                 <tbody>
                     <tr><td>Issued (fine)</td><td class="is-numeric"><?= $fmt($receivePreview['issued_fine'], 4) ?></td></tr>
+                    <?php if ((float) ($receivePreview['stone_weight'] ?? 0) > 0.00005): ?>
+                        <?php // Actual weight and fine equivalent, side by side — the ornament as weighed, the metal as the melt would prove it. ?>
+                        <tr><td>On the scale (gross)</td><td class="is-numeric"><?= $fmt((float) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight']), 4) ?></td></tr>
+                        <tr><td>Stones — not gold</td><td class="is-numeric">− <?= $fmt((float) $receivePreview['stone_weight'], 4) ?></td></tr>
+                        <tr><td>Metal returned (net gold)</td><td class="is-numeric"><?= $fmt((float) $receivePreview['net_gold_weight'], 4) ?></td></tr>
+                    <?php endif; ?>
                     <tr><td>Received (fine)</td><td class="is-numeric"><?= $fmt($receivePreview['received_fine'], 4) ?></td></tr>
                     <tr><td>Wastage (fine)</td><td class="is-numeric"><?= $fmt($receivePreview['wastage_fine'], 4) ?></td></tr>
                     <tr><td>Wastage allowed<?= (float) $receivePreview['allowed_fine'] > 0.00005 ? ' — written off by the shop' : '' ?></td><td class="is-numeric"><?= $fmt($receivePreview['allowed_fine'], 4) ?></td></tr>
@@ -1020,6 +1036,7 @@ jw_filter_bar_styles();
                 <input type="hidden" name="back_view" value="assignments">
                 <input type="hidden" name="assignment_id" value="<?= (int) $receiveTarget['id'] ?>">
                 <input type="hidden" name="received_gross_weight" value="<?= e((string) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight'])) ?>">
+                <input type="hidden" name="stone_weight" value="<?= e((string) ($_GET['stone'] ?? '0')) ?>">
                 <?php // Whatever the shop granted above is what gets saved — the figures on screen and the figures posted are the same ones. ?>
                 <input type="hidden" name="allow_wastage_fine" value="<?= e($allowWastage) ?>">
                 <label>Finished item
@@ -1122,7 +1139,11 @@ jw_filter_bar_styles();
                         <td><?= e($row['order_no']) ?></td>
                         <td><?= e((string) ($row['party_name'] ?? $row['customer_name'] ?? 'Walk-in')) ?><?= ($row['customer_phone'] ?? '') !== '' ? '<br><small>' . e((string) $row['customer_phone']) . '</small>' : '' ?></td>
                         <td><?= ($row['receive_date'] ?? null) ? e(app_date((string) $row['receive_date'])) : '—' ?></td>
-                        <td class="is-numeric"><?= $fmt((float) ($row['received_gross_weight'] ?? 0), 4) ?> <small><?= e((string) $row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['received_gross_weight'] ?? 0), 4) ?> <small><?= e((string) $row['unit_code']) ?></small>
+                            <?php if ((float) ($row['received_fine_weight'] ?? 0) > 0.00005): ?>
+                                <br><small><?= $fmt((float) $row['received_fine_weight'], 4) ?> fine</small>
+                            <?php endif; ?>
+                        </td>
                         <td class="is-numeric"><?= (int) ($row['days_waiting'] ?? 0) > 7 ? '<span class="mbw-pill tone-red">' . (int) $row['days_waiting'] . '</span>' : (int) ($row['days_waiting'] ?? 0) ?></td>
                         <td><?= ($row['delivery_date'] ?? null) ? e(app_date((string) $row['delivery_date'])) : '—' ?></td>
                         <td>

@@ -1236,6 +1236,50 @@ $blankRec = jewellery_receive_from_karigar($cidA, $fyA, [
 ok($blankRec['ok'] && (float) $blankRec['recovery_amount'] > 0,
     'A blank allowance forgives nothing — he bears the shortfall, which is the rule');
 
+echo "\n23. Stones are not gold — the receipt weighs them apart\n";
+// 2 tola of 22K goes out (1.832 fine). Back comes a stone-set piece: 2.1 on
+// the scale, of which 0.6 is stone. The metal returned is 1.5 tola = 1.374
+// fine; the missing 0.458 fine is wastage the kaligad bears. Counting the
+// stones as gold would have called it 1.9236 fine back — a SURPLUS — and
+// paid him for metal that is actually rock.
+$stoneIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 2, 'issue_date' => '2026-08-28', 'making_basis' => 'flat', 'making_rate' => 5000,
+], $userA);
+ok($stoneIssue['ok'], 'Two tola go out for a stone-set ring');
+$stoneAid = (int) $stoneIssue['assignment_id'];
+
+$stonePreview = jewellery_preview_receipt($cidA, $stoneAid, 2.1, null, null, 0.6);
+ok($stonePreview['ok'], 'The preview accepts the stone weight');
+ok(near((float) $stonePreview['net_gold_weight'], 1.5), 'Net gold is the scale less the stones: 2.1 − 0.6 = 1.5');
+ok(near((float) $stonePreview['received_fine'], 1.374), 'The fine equivalent is computed over the METAL only (1.5 × 916 = 1.374)');
+ok(near((float) $stonePreview['wastage_fine'], 0.458), 'So the wastage is honest: 1.832 − 1.374 = 0.458 fine');
+ok((float) $stonePreview['surplus_fine'] < 0.0001,
+    'No phantom surplus — counting stones as gold would have shown one');
+
+$badStone = jewellery_preview_receipt($cidA, $stoneAid, 2.1, null, null, 2.1);
+ok(!$badStone['ok'], 'Stones weighing as much as the whole piece are refused — the scale is being misread');
+ok(!jewellery_preview_receipt($cidA, $stoneAid, 2.1, null, null, -0.5)['ok'], 'A negative stone weight is refused');
+
+$stoneRec = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => $stoneAid, 'received_item_id' => $chain, 'received_purity_id' => $p22,
+    'received_gross_weight' => 2.1, 'stone_weight' => 0.6, 'qty_pieces' => 1, 'receive_date' => '2026-08-29',
+], $userA);
+ok($stoneRec['ok'], 'The stone-set receipt posts' . ($stoneRec['ok'] ? '' : ' — ' . $stoneRec['error']));
+$stoneRow = db()->query('SELECT * FROM jewellery_order_receipts WHERE id = ' . (int) $stoneRec['receipt_id'])->fetch(PDO::FETCH_ASSOC);
+ok($stoneRow && near((float) $stoneRow['stone_weight'], 0.6) && near((float) $stoneRow['net_gold_weight'], 1.5),
+    'The receipt records the stones and the net gold, so both weights can always be shown together');
+ok($stoneRow && near((float) $stoneRow['received_fine_weight'], 1.374),
+    'And the stored fine weight is metal only');
+ok($stoneRow && near((float) $stoneRow['excess_wastage_fine'], 0.458, 0.0002),
+    'The kaligad bears the true metal shortfall, not one the stones papered over');
+
+// A karigar receiving with no stones is exactly as before — 095 changes
+// nothing for the plain case.
+$plainRow = db()->query("SELECT received_gross_weight, net_gold_weight FROM jewellery_order_receipts
+    WHERE company_id = $cidA AND stone_weight = 0 AND received_gross_weight > 0 ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+ok($plainRow && near((float) $plainRow['net_gold_weight'], (float) $plainRow['received_gross_weight']),
+    'A stoneless receipt has net gold = gross, same meaning as every receipt before 095');
 
 jww_cleanup();
 echo "\n==================================================\n";

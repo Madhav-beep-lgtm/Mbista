@@ -237,7 +237,13 @@ header('Content-Type: text/html; charset=utf-8');
         <td class="c"><?= $esc($line['purity_code'] ?? '') ?></td>
         <td class="n"><?= $w($line['gross_weight'], 3) ?></td>
         <td class="n"><?= $w($line['stone_weight']) ?></td>
-        <td class="n"><?= $w($line['net_weight'], 3) ?></td>
+        <td class="n"><?= $w($line['net_weight'], 3) ?>
+          <?php // The pure-metal content, printed WITH the actual weight — the
+                // ornament as weighed and the metal as the melt would prove it. ?>
+          <?php if ((float) ($line['fine_weight'] ?? 0) > 0.0005): ?>
+            <br><span style="font-size:9px">fine <?= $w($line['fine_weight'], 3) ?></span>
+          <?php endif; ?>
+        </td>
         <td class="n"><?= $w($line['wastage_weight']) ?></td>
         <td class="n"><?= $w($line['total_weight'], 3) ?></td>
         <td class="n">
@@ -288,6 +294,19 @@ header('Content-Type: text/html; charset=utf-8');
         <tr>
           <td class="words">In Words: <?= $esc(npr_amount_in_words((float) $sale['total_amount'])) ?></td>
         </tr>
+        <?php
+          // The bill's whole pure-metal content, reduced to grams so lines in
+          // different units still sum to one honest figure.
+          $fineGrams = 0.0;
+          foreach ($lines as $line) {
+              $fineGrams += (float) ($line['fine_weight'] ?? 0) * $unitGrams($line);
+          }
+        ?>
+        <?php if ($fineGrams > 0.0005): ?>
+        <tr>
+          <td style="font-size:9.5px;padding:2px 4px">Fine gold equivalent: <?= $n3($fineGrams) ?> g</td>
+        </tr>
+        <?php endif; ?>
       </table>
       <table style="margin-top:-1px">
         <thead><tr>

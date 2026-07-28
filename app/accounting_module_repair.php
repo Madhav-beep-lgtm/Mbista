@@ -2864,6 +2864,24 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Stones weighed apart on kaligad receipts (migration 095)', static function (): void {
+        // The fine-gold equivalent of a stone-set piece was computed over the
+        // stones too — crediting the kaligad with metal he never returned and
+        // understating his wastage. The receipt now stores the stone weight
+        // and the net gold weight the fine figure is computed from. Existing
+        // rows backfill stone 0 / net = gross, keeping their meaning exactly.
+        if (!accounting_repair_table_exists('jewellery_order_receipts')) {
+            return;
+        }
+        accounting_repair_add_column('jewellery_order_receipts', 'stone_weight',
+            '`stone_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `received_gross_weight`');
+        accounting_repair_add_column('jewellery_order_receipts', 'net_gold_weight',
+            '`net_gold_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `stone_weight`');
+        db()->exec("UPDATE `jewellery_order_receipts`
+               SET `net_gold_weight` = `received_gross_weight`
+             WHERE `net_gold_weight` = 0 AND `received_gross_weight` > 0");
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

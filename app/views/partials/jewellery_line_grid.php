@@ -243,9 +243,12 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         </select>
                     </td>
                     <td>
+                        <?php // data-fineness lets the summary rail turn net weight into the
+                              // FINE equivalent live — actual weight and pure-metal content
+                              // shown together, which is how a jewellery figure is read. ?>
                         <select name="<?= $prefix ?>_purity_id[]">
                             <?php foreach ($purities as $p): ?>
-                                <option value="<?= (int) $p['id'] ?>" <?= (int) ($row['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
+                                <option value="<?= (int) $p['id'] ?>" data-fineness="<?= e((string) (float) ($p['fineness'] ?? 0)) ?>" <?= (int) ($row['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </td>

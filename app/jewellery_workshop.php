@@ -1666,8 +1666,14 @@ function jewellery_receipt(int $companyId, int $receiptId): ?array
 /**
  * Preview the settlement of a return WITHOUT writing anything — the numbers
  * the receive screen shows before the user commits.
+ *
+ * $stoneWeight is what the set stones weigh. STONES ARE NOT GOLD: the fine
+ * equivalent — and with it the wastage, the recovery and the value into
+ * stock — is computed over gross − stone, the metal actually returned.
+ * Counting the stones credited the kaligad with pure metal he never handed
+ * back, by exactly their weight at the piece's fineness.
  */
-function jewellery_preview_receipt(int $companyId, int $assignmentId, float $receivedGross, ?int $receivedPurityId = null, ?float $grantedFine = null): array
+function jewellery_preview_receipt(int $companyId, int $assignmentId, float $receivedGross, ?int $receivedPurityId = null, ?float $grantedFine = null, float $stoneWeight = 0.0): array
 {
     $assignment = jewellery_assignment($companyId, $assignmentId);
     if (!$assignment) {
@@ -1678,9 +1684,17 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
     if (!$purity) {
         return ['ok' => false, 'error' => 'Unknown purity.'];
     }
+    $stoneWeight = jw_round_weight($stoneWeight);
+    if ($stoneWeight < 0) {
+        return ['ok' => false, 'error' => 'A stone weight cannot be negative.'];
+    }
+    if ($stoneWeight >= jw_round_weight($receivedGross) && $receivedGross > 0) {
+        return ['ok' => false, 'error' => 'The stones cannot weigh as much as the whole piece — check the two weights.'];
+    }
 
     $issuedFine = (float) $assignment['issued_fine_weight'];
-    $receivedFine = jw_fine_weight(jw_round_weight($receivedGross), (float) $purity['fineness']);
+    $netGold = jw_round_weight(jw_round_weight($receivedGross) - $stoneWeight);
+    $receivedFine = jw_fine_weight($netGold, (float) $purity['fineness']);
     // The allowance, if there is one, is what somebody granted on this receipt
     // after seeing the shortfall — not a rate agreed before the work started.
     $split = jw_wastage_split($issuedFine, $receivedFine, (float) $assignment['wastage_allowed_pct'], $grantedFine);
@@ -1702,6 +1716,8 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
         'error' => '',
         'assignment' => $assignment,
         'issued_fine' => $issuedFine,
+        'stone_weight' => $stoneWeight,
+        'net_gold_weight' => $netGold,
         'received_fine' => $receivedFine,
         'wastage_fine' => $split['wastage_fine'],
         'allowed_fine' => $split['allowed_fine'],
@@ -1753,6 +1769,14 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
     if ($receivedGross <= 0) {
         return ['ok' => false, 'error' => 'Enter the weight received back.'];
     }
+    // Stones set into the piece, weighed apart — the fine equivalent and the
+    // wastage settle over the METAL only (gross − stone).
+    $stoneWeight = jw_round_weight((float) ($input['stone_weight'] ?? 0));
+    $hasStoneColumns = column_exists('jewellery_order_receipts', 'stone_weight');
+    if ($stoneWeight > 0 && !$hasStoneColumns) {
+        return ['ok' => false, 'error' => 'This database has not been upgraded to weigh stones apart yet. '
+            . 'Run the accounting repair, then receive it again.'];
+    }
 
     // Wastage the shop has decided to let go on THIS return, in fine weight,
     // after seeing what came back. Absent means none — which is the rule, not a
@@ -1765,7 +1789,7 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
         }
     }
 
-    $preview = jewellery_preview_receipt($companyId, $assignmentId, $receivedGross, $receivedPurityId, $grantedFine);
+    $preview = jewellery_preview_receipt($companyId, $assignmentId, $receivedGross, $receivedPurityId, $grantedFine, $stoneWeight);
     if (!$preview['ok']) {
         return $preview;
     }
@@ -1786,13 +1810,19 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
     }
     try {
         $no = trim((string) ($input['receipt_no'] ?? '')) ?: jw_next_no($companyId, 'jewellery_order_receipts', 'receipt_no', 'JRC');
-        db()->prepare('INSERT INTO jewellery_order_receipts (company_id, fiscal_year_id, assignment_id, receipt_no, receive_date,
-                received_item_id, received_purity_id, unit_id, qty_pieces, received_gross_weight, received_fine_weight,
+        // The stone columns arrived with migration 095; a database that has
+        // not run it yet still receives stoneless pieces exactly as before.
+        $stoneColumns = $hasStoneColumns ? ' stone_weight, net_gold_weight,' : '';
+        $stoneValues = $hasStoneColumns ? ' :stone, :netgold,' : '';
+        $stoneParams = $hasStoneColumns
+            ? ['stone' => $stoneWeight, 'netgold' => $preview['net_gold_weight']] : [];
+        db()->prepare("INSERT INTO jewellery_order_receipts (company_id, fiscal_year_id, assignment_id, receipt_no, receive_date,
+                received_item_id, received_purity_id, unit_id, qty_pieces, received_gross_weight,$stoneColumns received_fine_weight,
                 wastage_fine_weight, wastage_allowed_fine, excess_wastage_fine, avg_fine_rate, wastage_amount,
                 recovery_amount, making_amount, net_payable, notes, created_by)
-            VALUES (:cid, :fy, :aid, :no, :date, :item, :purity, :unit, :pieces, :gross, :fine, :wfine, :afine, :efine,
-                :rate, :wamount, :recovery, :making, :net, :notes, :by)')
-            ->execute([
+            VALUES (:cid, :fy, :aid, :no, :date, :item, :purity, :unit, :pieces, :gross,$stoneValues :fine, :wfine, :afine, :efine,
+                :rate, :wamount, :recovery, :making, :net, :notes, :by)")
+            ->execute($stoneParams + [
                 'cid' => $companyId, 'fy' => $fiscalYearId ?: null, 'aid' => $assignmentId, 'no' => $no,
                 'date' => $receiveDate, 'item' => $receivedItemId, 'purity' => $receivedPurityId,
                 'unit' => (int) $assignment['unit_id'],
