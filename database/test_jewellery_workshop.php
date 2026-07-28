@@ -357,8 +357,99 @@ $refBill = db()->query("SELECT * FROM jewellery_bills WHERE company_id=$cidA AND
 ok($refBill && near((float) $refBill['bill_amount'], 5000.0), 'The refinery fee opened a bill');
 ok(!jewellery_receive_from_refinery($cidA, $fyA, ['job_id' => (int) $job['job_id'], 'received_gross_weight' => 1], $userA)['ok'],
     'A job cannot be received twice');
-ok(!jewellery_receive_from_refinery($cidA, $fyA, ['job_id' => (int) $job['job_id'], 'received_gross_weight' => 999], $userA)['ok'],
-    'Receiving more fine metal than went out is refused');
+
+echo "\n10b. A refiner who puts in metal of his own is paid for it, not refused\n";
+/*
+ * A furnace cannot make gold, so fine weight normally comes back lower than it
+ * went out. More coming back means the refiner added some of his own — usually
+ * so the shop gets a round bar instead of an awkward fraction.
+ *
+ * That used to be refused outright, with the advice to "record the extra as a
+ * separate purchase". It IS a purchase, and the karigar side of the workshop
+ * already knew that; the refinery side sent the shop away to key it in by hand,
+ * where it would be forgotten or valued at the wrong day's rate.
+ */
+// The 22K lot is spent, so this one re-refines part of the 24K bar it produced.
+$stockBeforeJob = jw_item_balance($cidA, $fine24)['fine_weight'];
+$surplusJob = jewellery_issue_to_refinery($cidA, $fyA, [
+    'party_id' => $refiner, 'item_id' => $fine24, 'purity_id' => $p24, 'unit_id' => $tola,
+    'issued_gross_weight' => 5, 'issue_date' => '2026-09-11',
+], $userA);
+ok($surplusJob['ok'], 'A second lot goes out' . ($surplusJob['ok'] ? '' : ' — ' . $surplusJob['error']));
+
+// Read the rate off the JOB rather than hardcoding one. The property under test
+// is that the surplus is valued at what the issue was worth — so the test has
+// to ask the issue, not a number typed into the test.
+$issuedJob = jewellery_refinery_job($cidA, (int) $surplusJob['job_id']);
+$issuedFineWt = (float) $issuedJob['issued_fine_weight'];
+$issuedValue = (float) $issuedJob['issued_amount'];
+$jobRate = jw_round_rate($issuedFineWt > 0 ? $issuedValue / $issuedFineWt : 0.0);
+
+// He hands back a bar 0.22 heavier than the metal he was given. What that is
+// worth in FINE weight is NOT 0.22 — even 24K is 0.9999 here, not pure — so the
+// expectation is converted the same way the engine converts it, rather than
+// assuming a gram of bar is a gram of gold.
+$backGross = jw_round_weight($issuedFineWt + 0.22);
+$backFine = jw_round_weight(jw_fine_weight($backGross, (float) jewellery_purity($cidA, $p24)['fineness']));
+$expectedSurplusFine = jw_round_weight($backFine - $issuedFineWt);
+$expectedSurplus = jw_round_money($expectedSurplusFine * $jobRate);
+$stockBefore = jw_item_balance($cidA, $fine24)['fine_weight'];
+
+$surplusRecv = jewellery_receive_from_refinery($cidA, $fyA, [
+    'job_id' => (int) $surplusJob['job_id'], 'received_item_id' => $fine24, 'received_purity_id' => $p24,
+    'received_gross_weight' => $backGross, 'receive_date' => '2026-09-20', 'charges_amount' => 2000,
+    'charges_settle_mode' => 'credit',
+], $userA);
+ok($surplusRecv['ok'], 'And comes back HEAVIER, which is now accepted'
+    . ($surplusRecv['ok'] ? '' : ' — ' . $surplusRecv['error']));
+ok(near((float) $surplusRecv['surplus_fine'], $expectedSurplusFine, 0.00011),
+    'The extra fine weight is his own metal, measured to the last decimal');
+ok(near((float) $surplusRecv['loss_amount'], 0.0) && near((float) $surplusRecv['loss_fine'], 0.0),
+    'And no refining loss: the two are mutually exclusive');
+ok(near((float) $surplusRecv['surplus_amount'], $expectedSurplus),
+    'Valued at the rate the ISSUE was worth, not at some other day\'s rate');
+
+$sv = voucher_shape((int) $surplusRecv['voucher_id']);
+ok(near($sv['dr'], $sv['cr']), 'The voucher balances with metal flowing the other way');
+ok(near($sv['ledgers'][$L['stock_metal']] ?? 0, $issuedValue + $expectedSurplus),
+    'Stock rises by the issued cost PLUS the metal he supplied');
+ok(near($sv['ledgers'][$refinerLedger] ?? 0, -$issuedValue),
+    "Only the issued value leaves the refiner's metal ledger, so it still closes to nil");
+ok(near($sv['ledgers'][$refPayable] ?? 0, -(2000.0 + $expectedSurplus)),
+    'And he is credited his fee and his metal together, in one place');
+ok(near($sv['ledgers'][$L['refinery_loss']] ?? 0, 0.0),
+    'Nothing is written off as a refining loss');
+// The issue took the metal out of stock and the receipt brings the whole bar
+// back, so across the two legs the shop is up by exactly what he supplied.
+ok(near(jw_item_balance($cidA, $fine24)['fine_weight'], $stockBefore + $backFine, 0.00011),
+    'The whole bar lands in stock, his share included');
+ok(near(jw_item_balance($cidA, $fine24)['fine_weight'], $stockBeforeJob + $expectedSurplusFine, 0.00011),
+    'So across issue and receipt together, the shop is up by exactly his 0.2195 fine');
+ok(near(jw_item_balance($cidA, $fine24, null, 'refinery', $refiner)['fine_weight'], 0.0),
+    'And the refinery holding still clears to zero');
+
+$surplusBill = db()->query("SELECT * FROM jewellery_bills WHERE company_id=$cidA
+    AND source_type='jewellery_refinery_receive' ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+ok($surplusBill && near((float) $surplusBill['bill_amount'], 2000.0 + $expectedSurplus),
+    'One bill covers both, so the refiner is not paid twice for one job');
+
+$storedJob = jewellery_refinery_job($cidA, (int) $surplusJob['job_id']);
+ok(near((float) $storedJob['surplus_fine_weight'], $expectedSurplusFine, 0.00011)
+    && near((float) $storedJob['surplus_amount'], $expectedSurplus),
+    'The job keeps the figures, the way it already keeps the loss');
+
+// Metal of his own still needs somebody to owe it to.
+$noParty = jewellery_issue_to_refinery($cidA, $fyA, [
+    'item_id' => $fine24, 'purity_id' => $p24, 'unit_id' => $tola,
+    'issued_gross_weight' => 1, 'issue_date' => '2026-09-21',
+], $userA);
+ok($noParty['ok'], 'A lot can go out without naming a refiner' . ($noParty['ok'] ? '' : ' — ' . $noParty['error']));
+$refused = jewellery_receive_from_refinery($cidA, $fyA, [
+    'job_id' => (int) ($noParty['job_id'] ?? 0), 'received_item_id' => $fine24, 'received_purity_id' => $p24,
+    'received_gross_weight' => 2, 'receive_date' => '2026-09-22', 'charges_settle_mode' => 'credit',
+], $userA);
+ok(!$refused['ok'] && stripos($refused['error'], 'party') !== false,
+    'But metal on credit from a refiner nobody named is refused — there is no one to owe it to');
 
 echo "\n11. Reversal protection\n";
 $vCheck = db()->query("SELECT * FROM vouchers WHERE company_id=$cidA AND source_type='jewellery_order_receipt' LIMIT 1")->fetch(PDO::FETCH_ASSOC);

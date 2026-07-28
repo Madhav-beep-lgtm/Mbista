@@ -2617,6 +2617,20 @@ function accounting_module_repair_database(): array
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     });
 
+    $run('Metal the refiner supplied of his own (migration 091)', static function (): void {
+        // A furnace cannot make gold, so more fine weight coming back than went
+        // out means the refiner added some of his own — usually to settle on a
+        // round bar. That used to be refused; it is a purchase from him, and the
+        // job now records it the way it already records the refining loss.
+        if (!accounting_repair_table_exists('jewellery_refinery_jobs')) {
+            return;
+        }
+        accounting_repair_add_column('jewellery_refinery_jobs', 'surplus_fine_weight',
+            '`surplus_fine_weight` DECIMAL(18,4) NOT NULL DEFAULT 0 AFTER `loss_amount`');
+        accounting_repair_add_column('jewellery_refinery_jobs', 'surplus_amount',
+            '`surplus_amount` DECIMAL(18,2) NOT NULL DEFAULT 0 AFTER `surplus_fine_weight`');
+    });
+
     $run('Recompute order statuses from all their items (migration 090)', static function (): void {
         // The status used to move on the FIRST issue and the FIRST piece back,
         // so a five-piece order with one ring returned read as fully received

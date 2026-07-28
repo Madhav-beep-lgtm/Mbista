@@ -292,9 +292,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'charges_settle_mode' => (string) ($_POST['charges_settle_mode'] ?? 'credit'),
             'charges_ledger_id' => (int) ($_POST['charges_ledger_id'] ?? 0),
         ], $userId);
+        // Say which way the metal actually went. A refiner who put some of his
+        // own in is owed for it, and the shop should be told so rather than
+        // reading a loss of 0.0000 and assuming nothing of note happened.
+        $surplusFine = (float) ($result['surplus_fine'] ?? 0);
         flash($result['ok'] ? 'success' : 'error', $result['ok']
-            ? ('Refined metal received. Loss ' . number_format((float) $result['loss_fine'], 4)
-               . ' fine (' . $sym . number_format((float) $result['loss_amount'], 2) . ').')
+            ? ($surplusFine > 0
+                ? ('Refined metal received. The refiner supplied ' . number_format($surplusFine, 4)
+                   . ' fine of his own (' . $sym . number_format((float) $result['surplus_amount'], 2)
+                   . '), credited to him.')
+                : ('Refined metal received. Loss ' . number_format((float) $result['loss_fine'], 4)
+                   . ' fine (' . $sym . number_format((float) $result['loss_amount'], 2) . ').'))
             : $result['error']);
         redirect($back);
     }
@@ -1115,7 +1123,7 @@ jw_filter_bar_styles();
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Refinery Jobs (<?= count($jobs) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Job</th><th>Refiner</th><th>Issued</th><th class="is-numeric">Out (fine)</th><th class="is-numeric">Back (fine)</th><th class="is-numeric">Loss (fine)</th><th class="is-numeric">Charges</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Job</th><th>Refiner</th><th>Issued</th><th class="is-numeric">Out (fine)</th><th class="is-numeric">Back (fine)</th><th class="is-numeric">Loss / extra (fine)</th><th class="is-numeric">Charges</th><th>Status</th><th></th></tr></thead>
             <tbody>
                 <?php if ($jobs === []): ?><tr><td colspan="9">No refinery jobs yet.</td></tr><?php endif; ?>
                 <?php foreach ($jobs as $row): ?>
@@ -1126,7 +1134,16 @@ jw_filter_bar_styles();
                         <td><?= e(app_date((string) $row['issue_date'])) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['issued_fine_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $isOut ? '—' : $fmt((float) $row['received_fine_weight'], 4) ?></td>
-                        <td class="is-numeric"><?= $isOut ? '—' : '<span class="mbw-pill tone-amber">' . $fmt((float) $row['loss_fine_weight'], 4) . '</span>' ?></td>
+                        <?php
+                            // The column runs both ways: amber for metal the
+                            // furnace ate, green for metal the refiner put in.
+                            // Only one of the two is ever non-zero on a job.
+                            $jobSurplus = (float) ($row['surplus_fine_weight'] ?? 0);
+                            $jobLossCell = $jobSurplus > 0
+                                ? '<span class="mbw-pill tone-green">+' . $fmt($jobSurplus, 4) . '</span>'
+                                : '<span class="mbw-pill tone-amber">' . $fmt((float) $row['loss_fine_weight'], 4) . '</span>';
+                        ?>
+                        <td class="is-numeric"><?= $isOut ? '—' : $jobLossCell ?></td>
                         <td class="is-numeric"><?= $isOut ? '—' : $fmt((float) $row['charges_amount']) ?></td>
                         <td><span class="mbw-pill <?= $isOut ? 'tone-amber' : 'tone-green' ?>"><?= e(ucfirst((string) $row['status'])) ?></span></td>
                         <td>

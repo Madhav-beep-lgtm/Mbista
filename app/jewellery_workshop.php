@@ -2166,11 +2166,15 @@ function jewellery_issue_to_refinery(int $companyId, int $fiscalYearId, array $i
 /**
  * Take refined metal back.
  *
- *   Dr  stock (refined item)   issued cost less the refining loss
+ *   Dr  stock (refined item)   issued cost, less the refining loss,
+ *                              plus any metal the refiner added of his own
  *   Dr  refining loss          value of the fine metal that did not come back
  *   Dr  refinery charges       the refiner's fee
  *       Cr  stock (with refinery)
- *       Cr  party / cash-bank  the fee
+ *       Cr  party / cash-bank  the fee, and the metal he supplied
+ *
+ * Loss and surplus are mutually exclusive, so only one of those two ever
+ * carries a figure on a given job.
  */
 function jewellery_receive_from_refinery(int $companyId, int $fiscalYearId, array $input, int $userId = 0): array
 {
@@ -2200,12 +2204,22 @@ function jewellery_receive_from_refinery(int $companyId, int $fiscalYearId, arra
 
     $issuedFine = (float) $job['issued_fine_weight'];
     $receivedFine = jw_fine_weight($receivedGross, (float) $receivedPurity['fineness']);
-    if ($receivedFine > $issuedFine + 0.00005) {
-        return ['ok' => false, 'error' => 'More fine metal came back than went out. Record the extra as a separate purchase.'];
-    }
-    $lossFine = jw_round_weight($issuedFine - $receivedFine);
+    // A furnace cannot make gold, so fine weight normally comes back lower than
+    // it went out. More coming back means the refiner put some of his own in —
+    // usually to settle on a round bar rather than an awkward fraction. That
+    // used to be refused, with the advice to "record the extra as a separate
+    // purchase". It IS a purchase, so the receipt records it as one instead of
+    // sending the shop away to key it in by hand.
+    //
+    // Loss and surplus are mutually exclusive — one of the two is always zero —
+    // so nothing downstream has to choose between them.
+    $lossFine = jw_round_weight(max(0.0, $issuedFine - $receivedFine));
+    $surplusFine = jw_round_weight(max(0.0, $receivedFine - $issuedFine));
     $avgRate = $issuedFine > 0 ? jw_round_rate((float) $job['issued_amount'] / $issuedFine) : 0.0;
     $lossAmount = jw_round_money($lossFine * $avgRate);
+    // Bought at what the issue was valued at. Using today's market rate instead
+    // would book a profit or loss on metal that only passed through a furnace.
+    $surplusAmount = jw_round_money($surplusFine * $avgRate);
     $charges = jw_round_money((float) ($input['charges_amount'] ?? 0));
     if ($charges < 0) {
         return ['ok' => false, 'error' => 'Refinery charges cannot be negative.'];
@@ -2213,9 +2227,13 @@ function jewellery_receive_from_refinery(int $companyId, int $fiscalYearId, arra
 
     $chargesMode = jw_enum($input['charges_settle_mode'] ?? null, ['credit', 'cash', 'bank'], 'credit');
     $chargesLedgerId = (int) ($input['charges_ledger_id'] ?? 0) ?: null;
-    if ($charges > 0) {
+    // Metal the refiner supplied is settled the same way his fee is, so the
+    // check covers both: something is owed, and it needs somewhere to go.
+    if ($charges > 0 || $surplusAmount > 0) {
         if ($chargesMode === 'credit' && (int) ($job['party_id'] ?? 0) <= 0) {
-            return ['ok' => false, 'error' => 'Charges on credit need a refiner party on the job.'];
+            return ['ok' => false, 'error' => $surplusAmount > 0 && $charges <= 0
+                ? 'The refiner supplied metal of his own, so the job needs a refiner party to owe it to.'
+                : 'Charges on credit need a refiner party on the job.'];
         }
         if ($chargesMode !== 'credit') {
             if ($chargesLedgerId === null) {
@@ -2253,7 +2271,11 @@ function jewellery_receive_from_refinery(int $companyId, int $fiscalYearId, arra
             throw new RuntimeException('No stock ledger is mapped for the refined item.');
         }
 
-        $returnedValue = jw_round_money((float) $job['issued_amount'] - $lossAmount);
+        // What lands in stock is what went out, less anything the furnace ate,
+        // PLUS anything the refiner added from his own metal. That surplus is
+        // credited to him below, so the two sides move together and the voucher
+        // balances whichever way the weight went.
+        $returnedValue = jw_round_money((float) $job['issued_amount'] - $lossAmount + $surplusAmount);
         if ($returnedValue > 0) {
             $legs[] = ['ledger_id' => $destLedgerId, 'amount' => $returnedValue, 'memo' => 'Refined metal in ' . $job['job_no']];
         }
@@ -2263,12 +2285,18 @@ function jewellery_receive_from_refinery(int $companyId, int $fiscalYearId, arra
         if ((float) $job['issued_amount'] > 0) {
             $legs[] = ['ledger_id' => $sourceLedgerId, 'amount' => -(float) $job['issued_amount'], 'memo' => 'Metal returned from refinery ' . $job['job_no']];
         }
+        // The refiner is settled once, for his fee and for any metal of his own
+        // that came back in the bar — both down the route the job chose.
+        $creditLedgerId = $chargesMode === 'credit'
+            ? jw_party_ledger($companyId, (int) ($job['party_id'] ?? 0), 'payable')
+            : (int) $chargesLedgerId;
         if ($charges > 0) {
             $legs[] = ['ledger_id' => jw_require_ledger($companyId, 'refinery_charges'), 'amount' => $charges, 'memo' => 'Refinery charges ' . $job['job_no']];
-            $creditLedgerId = $chargesMode === 'credit'
-                ? jw_party_ledger($companyId, (int) $job['party_id'], 'payable')
-                : (int) $chargesLedgerId;
             $legs[] = ['ledger_id' => $creditLedgerId, 'amount' => -$charges, 'memo' => 'Refinery charges ' . $job['job_no']];
+        }
+        if ($surplusAmount > 0) {
+            $legs[] = ['ledger_id' => $creditLedgerId, 'amount' => -$surplusAmount,
+                'memo' => 'Metal supplied by refiner ' . $job['job_no']];
         }
 
         $voucherId = null;
@@ -2309,21 +2337,27 @@ function jewellery_receive_from_refinery(int $companyId, int $fiscalYearId, arra
         db()->prepare("UPDATE jewellery_refinery_jobs SET status = 'received', receive_date = :date,
                 received_item_id = :item, received_purity_id = :purity, received_gross_weight = :gross,
                 received_fine_weight = :fine, loss_fine_weight = :lfine, loss_amount = :lamount,
+                surplus_fine_weight = :sfine, surplus_amount = :samount,
                 charges_amount = :charges, charges_settle_mode = :cmode, charges_ledger_id = :cledger,
                 receive_voucher_id = :v
             WHERE id = :id AND company_id = :cid")
             ->execute([
                 'date' => $receiveDate, 'item' => $receivedItemId, 'purity' => $receivedPurityId,
                 'gross' => $receivedGross, 'fine' => $receivedFine, 'lfine' => $lossFine, 'lamount' => $lossAmount,
+                'sfine' => $surplusFine, 'samount' => $surplusAmount,
                 'charges' => $charges, 'cmode' => $chargesMode, 'cledger' => $chargesLedgerId, 'v' => $voucherId,
                 'id' => $jobId, 'cid' => $companyId,
             ]);
 
-        if ($charges > 0 && $chargesMode === 'credit' && (int) ($job['party_id'] ?? 0) > 0) {
+        // One bill for what the refiner is owed: his fee, and the metal of his
+        // own that came back in the bar. Billing them separately would have the
+        // shop paying one refiner twice for one job.
+        $owedOnCredit = jw_round_money($charges + $surplusAmount);
+        if ($owedOnCredit > 0 && $chargesMode === 'credit' && (int) ($job['party_id'] ?? 0) > 0) {
             jw_open_bill($companyId, [
                 'fiscal_year_id' => $fiscalYearId, 'party_id' => (int) $job['party_id'], 'bill_type' => 'purchase',
                 'source_type' => 'jewellery_refinery_receive', 'source_id' => $jobId,
-                'bill_no' => $job['job_no'] . '-R', 'bill_date' => $receiveDate, 'bill_amount' => $charges,
+                'bill_no' => $job['job_no'] . '-R', 'bill_date' => $receiveDate, 'bill_amount' => $owedOnCredit,
                 'voucher_id' => $voucherId,
             ]);
         }
@@ -2333,7 +2367,8 @@ function jewellery_receive_from_refinery(int $companyId, int $fiscalYearId, arra
         }
 
         return ['ok' => true, 'error' => '', 'voucher_id' => (int) $voucherId,
-            'loss_fine' => $lossFine, 'loss_amount' => $lossAmount];
+            'loss_fine' => $lossFine, 'loss_amount' => $lossAmount,
+            'surplus_fine' => $surplusFine, 'surplus_amount' => $surplusAmount];
     } catch (Throwable $receiveException) {
         if ($ownsTransaction && db()->inTransaction()) {
             db()->rollBack();
