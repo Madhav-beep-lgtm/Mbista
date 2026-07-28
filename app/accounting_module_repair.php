@@ -2665,6 +2665,61 @@ function accounting_module_repair_database(): array
              WHERE o.`status` IN ('assigned', 'received')");
     });
 
+    $run('One payment split across several ways of paying (migration 092)', static function (): void {
+        // A customer pays 20,000 cash, 15,000 by Fonepay and the rest in old
+        // gold, all at once. That was three settlements with three numbers,
+        // because the row held one mode and one amount. It is one payment, and
+        // it is now stored as one — with a child row per way it was tendered.
+        //
+        // Metal is why these are rows and not columns like the sale's
+        // paid_cash/paid_card/paid_cheque/paid_qr: a metal tender carries an
+        // item, a purity, a unit and a weight.
+        if (!accounting_repair_table_exists('jewellery_settlements')) {
+            return;
+        }
+        db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_settlement_tenders` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `company_id` INT UNSIGNED NOT NULL,
+            `settlement_id` INT UNSIGNED NOT NULL,
+            `line_no` SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+            `mode` ENUM('cash','bank','card','cheque','qr','wallet','metal','adjustment','other') NOT NULL DEFAULT 'cash',
+            `mode_label` VARCHAR(60) DEFAULT NULL,
+            `reference` VARCHAR(60) DEFAULT NULL,
+            `amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `ledger_id` INT UNSIGNED DEFAULT NULL,
+            `item_id` INT UNSIGNED DEFAULT NULL,
+            `purity_id` INT UNSIGNED DEFAULT NULL,
+            `unit_id` INT UNSIGNED DEFAULT NULL,
+            `gross_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `fine_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+            `stock_txn_id` INT UNSIGNED DEFAULT NULL,
+            `notes` VARCHAR(255) DEFAULT NULL,
+            PRIMARY KEY (`id`),
+            KEY `idx_jw_tender_settlement` (`settlement_id`),
+            KEY `idx_jw_tender_company` (`company_id`, `mode`),
+            KEY `idx_jw_tender_ledger` (`ledger_id`),
+            KEY `idx_jw_tender_item` (`item_id`),
+            CONSTRAINT `fk_jw_tender_settlement` FOREIGN KEY (`settlement_id`) REFERENCES `jewellery_settlements` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_jw_tender_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_jw_tender_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL,
+            CONSTRAINT `fk_jw_tender_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE SET NULL,
+            CONSTRAINT `fk_jw_tender_purity` FOREIGN KEY (`purity_id`) REFERENCES `jewellery_purities` (`id`) ON DELETE SET NULL,
+            CONSTRAINT `fk_jw_tender_unit` FOREIGN KEY (`unit_id`) REFERENCES `jewellery_units` (`id`) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        // Widen the header's own mode. 'mixed' is what it reads when the child
+        // rows disagree; the rest are modes a shop could always name but the
+        // column could not hold. Re-running this is harmless — MODIFY to the
+        // same definition is a no-op, and every value already stored is still
+        // in the list.
+        $mode = db()->query("SHOW COLUMNS FROM `jewellery_settlements` LIKE 'mode'")->fetch(PDO::FETCH_ASSOC);
+        if ($mode && stripos((string) ($mode['Type'] ?? ''), "'mixed'") === false) {
+            db()->exec("ALTER TABLE `jewellery_settlements`
+                MODIFY COLUMN `mode` ENUM('cash','bank','card','cheque','qr','wallet','metal','adjustment','other','mixed')
+                    NOT NULL DEFAULT 'cash'");
+        }
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

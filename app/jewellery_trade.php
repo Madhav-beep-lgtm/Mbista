@@ -359,7 +359,20 @@ function jewellery_order_advances(int $companyId, int $orderId): array
     foreach ($rows as $row) {
         // A refund is an advance handed BACK, so it reduces what is held.
         $sign = (string) $row['direction'] === 'received' ? 1 : -1;
-        if ((string) $row['mode'] === 'metal') {
+        // One advance can be paid several ways at once — part cash, part
+        // Fonepay, part old gold. Where a breakdown exists, the gold in it is
+        // gold and the rest is money; only a settlement without one is judged
+        // by its single mode.
+        $tenderRows = jewellery_settlement_tenders($companyId, (int) $row['id']);
+        if ($tenderRows !== []) {
+            foreach ($tenderRows as $tenderRow) {
+                if ((string) $tenderRow['mode'] === 'metal') {
+                    $metal += $sign * (float) $tenderRow['amount'];
+                } else {
+                    $cash += $sign * (float) $tenderRow['amount'];
+                }
+            }
+        } elseif ((string) $row['mode'] === 'metal') {
             $metal += $sign * (float) $row['amount'];
         } else {
             $cash += $sign * (float) $row['amount'];
@@ -2162,6 +2175,170 @@ function jewellery_settlement_allocations(int $companyId, int $settlementId): ar
  * allocated more than it still owes — otherwise a party ledger could look
  * settled while the bills behind it disagree.
  */
+/** The ways one settlement was paid, in the order they were entered. */
+function jewellery_settlement_tenders(int $companyId, int $settlementId): array
+{
+    if (!table_exists('jewellery_settlement_tenders')) {
+        return [];
+    }
+    $stmt = db()->prepare('SELECT t.*, l.name AS ledger_name, i.sku AS item_code, i.name AS item_name,
+            p.code AS purity_code, p.fineness, u.code AS unit_code
+        FROM jewellery_settlement_tenders t
+        LEFT JOIN ledgers l ON l.id = t.ledger_id
+        LEFT JOIN inventory_items i ON i.id = t.item_id
+        LEFT JOIN jewellery_purities p ON p.id = t.purity_id
+        LEFT JOIN jewellery_units u ON u.id = t.unit_id
+        WHERE t.settlement_id = :sid AND t.company_id = :cid
+        ORDER BY t.line_no ASC, t.id ASC');
+    $stmt->execute(['sid' => $settlementId, 'cid' => $companyId]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Whether this database's settlements.mode column can hold $mode. The wider
+ * enum arrives with migration 092 / the repair step; until that has run, only
+ * the original four are safe to write, and trying to store 'cheque' would be
+ * truncated to '' by MySQL rather than refused.
+ */
+function jw_settlement_mode_storable(string $mode): bool
+{
+    static $cache = null;
+    if ($cache === null) {
+        $col = db()->query("SHOW COLUMNS FROM `jewellery_settlements` LIKE 'mode'")->fetch(PDO::FETCH_ASSOC);
+        $cache = (string) ($col['Type'] ?? '');
+    }
+
+    return stripos($cache, "'" . $mode . "'") !== false;
+}
+
+/** How a tender mode is shown to a person: the shop's own word for it, else ours. */
+function jw_tender_mode_label(string $mode, ?string $customLabel = null): string
+{
+    $custom = trim((string) $customLabel);
+    if ($custom !== '') {
+        return $custom;
+    }
+
+    return ['cash' => 'Cash', 'bank' => 'Bank', 'card' => 'Card', 'cheque' => 'Cheque',
+        'qr' => 'QR / Fonepay', 'wallet' => 'Mobile wallet', 'metal' => 'Old gold',
+        'adjustment' => 'Adjustment', 'other' => 'Other', 'mixed' => 'Mixed'][$mode] ?? ucfirst($mode);
+}
+
+/**
+ * Check and normalise the ways one payment was tendered.
+ *
+ * Returns [] when the caller gave none, which is the ordinary single-mode
+ * settlement and leaves every existing behaviour alone. Anything it does
+ * return has been proved to belong to this company — ledger, item, purity and
+ * unit alike — so the save and the posting can use it without asking again.
+ */
+function jw_clean_settlement_tenders(int $companyId, array $tenders): array
+{
+    $clean = [];
+    $lineNo = 0;
+    foreach ($tenders as $row) {
+        $amount = jw_round_money((float) ($row['amount'] ?? 0));
+        $mode = jw_enum($row['mode'] ?? null,
+            ['cash', 'bank', 'card', 'cheque', 'qr', 'wallet', 'metal', 'adjustment', 'other'], 'cash');
+        // A blank row is how a fixed-size grid says "nothing here", so it is
+        // skipped rather than rejected. A NEGATIVE one is a typo that would
+        // quietly reduce the payment, so it is not.
+        if ($amount <= 0 && (float) ($row['gross_weight'] ?? 0) <= 0) {
+            if ((float) ($row['amount'] ?? 0) < 0) {
+                throw new RuntimeException('A tender amount cannot be negative.');
+            }
+            continue;
+        }
+        if ($amount <= 0) {
+            throw new RuntimeException('Tender ' . ($lineNo + 1) . ' (' . jw_tender_mode_label($mode)
+                . ') has a weight but no value. Price the metal before taking it in.');
+        }
+
+        $ledgerId = (int) ($row['ledger_id'] ?? 0) ?: null;
+        if ($ledgerId !== null) {
+            $lCheck = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE id = :id AND company_id = :cid');
+            $lCheck->execute(['id' => $ledgerId, 'cid' => $companyId]);
+            if ((int) $lCheck->fetchColumn() === 0) {
+                throw new RuntimeException('A tender points at a ledger that does not belong to this company.');
+            }
+        }
+        // Cash and bank have no mapped fallback to fall back ON — a shop keeps
+        // several tills and several bank accounts, and only the person taking
+        // the money knows which one it went into.
+        if (in_array($mode, ['cash', 'bank'], true) && $ledgerId === null) {
+            throw new RuntimeException('Choose the ' . $mode . ' ledger for the '
+                . jw_tender_mode_label($mode) . ' part of this payment.');
+        }
+        $modeLabel = trim((string) ($row['mode_label'] ?? '')) ?: null;
+        if ($mode === 'other') {
+            if ($ledgerId === null) {
+                throw new RuntimeException('An "other" tender needs the ledger it lands in.');
+            }
+            if ($modeLabel === null) {
+                throw new RuntimeException('Name the "other" way this payment was made.');
+            }
+        }
+
+        $itemId = null; $purityId = null; $unitId = null; $gross = 0.0; $fine = 0.0;
+        if ($mode === 'metal') {
+            // Old gold across the counter. The weight moves as well as the
+            // value, so it needs the same full item context a metal settlement
+            // has always needed.
+            $itemId = (int) ($row['item_id'] ?? 0);
+            $item = jewellery_item($companyId, $itemId);
+            if (!$item) {
+                throw new RuntimeException('The old-gold part of this payment needs an item that belongs to this company.');
+            }
+            $purityId = (int) ($row['purity_id'] ?? $item['purity_id']);
+            $purity = jewellery_purity($companyId, $purityId);
+            if (!$purity || (int) $purity['metal_id'] !== (int) $item['metal_id']) {
+                throw new RuntimeException('The old-gold purity must belong to the item\'s metal.');
+            }
+            $unitId = (int) ($row['unit_id'] ?? $item['unit_id']);
+            if (!jewellery_unit($companyId, $unitId)) {
+                throw new RuntimeException('The old-gold unit must belong to this company.');
+            }
+            $gross = jw_round_weight((float) ($row['gross_weight'] ?? 0));
+            if ($gross <= 0) {
+                throw new RuntimeException('Enter the weight of the old gold taken in.');
+            }
+            $fine = jw_fine_weight($gross, (float) $purity['fineness']);
+        }
+
+        $clean[] = [
+            'line_no' => ++$lineNo,
+            'mode' => $mode,
+            'mode_label' => $modeLabel,
+            'reference' => trim((string) ($row['reference'] ?? '')) ?: null,
+            'amount' => $amount,
+            'ledger_id' => $ledgerId,
+            'item_id' => $itemId,
+            'purity_id' => $purityId,
+            'unit_id' => $unitId,
+            'gross_weight' => $gross,
+            'fine_weight' => $fine,
+            'notes' => trim((string) ($row['notes'] ?? '')) ?: null,
+        ];
+    }
+
+    return $clean;
+}
+
+/**
+ * Save a settlement — money or metal moving between the shop and a party.
+ *
+ * ONE PAYMENT CAN BE MADE SEVERAL WAYS AT ONCE. A customer settling 50,000
+ * hands over cash, taps Fonepay and puts down an old chain, all at the same
+ * counter in the same minute. Pass those as `$header['tenders']`, one row per
+ * way, and they are stored as a breakdown of this single settlement rather
+ * than as three settlements with three numbers that nothing ties together.
+ *
+ * The rows must add up to the settlement's own amount — they are a breakdown,
+ * not a second source of truth, exactly as the sale's tender columns are.
+ * Sending none keeps the old single-mode behaviour, which is what every
+ * settlement recorded before this did.
+ */
 function jewellery_save_settlement(int $companyId, int $fiscalYearId, array $header, array $allocations, int $userId = 0): int
 {
     $settlementId = (int) ($header['id'] ?? 0);
@@ -2190,8 +2367,38 @@ function jewellery_save_settlement(int $companyId, int $fiscalYearId, array $hea
         throw new RuntimeException('Enter the settlement amount.');
     }
 
+    // How the payment was actually made. Present, these ARE the counter side:
+    // the header's own mode and metal columns step aside, because a payment
+    // that is part cash and part old gold cannot be described by one of each.
+    $tenders = jw_clean_settlement_tenders($companyId, (array) ($header['tenders'] ?? []));
+    if ($tenders !== []) {
+        if (!table_exists('jewellery_settlement_tenders')) {
+            throw new RuntimeException('This database has not been upgraded to record a split payment yet. '
+                . 'Run the accounting repair, then enter it again.');
+        }
+        $tenderTotal = jw_round_money(array_sum(array_column($tenders, 'amount')));
+        if (abs($tenderTotal - $amount) > 0.005) {
+            throw new RuntimeException('The payment breakdown (' . number_format($tenderTotal, 2)
+                . ') does not add up to the amount taken (' . number_format($amount, 2) . ').');
+        }
+        // One way of paying is not a split; it is an ordinary settlement that
+        // happens to have been entered on the grid, so the header says so
+        // plainly. Several ways read 'mixed', which tells any list view to go
+        // and look at the breakdown rather than name a mode it cannot.
+        $mode = count($tenders) === 1 ? (string) $tenders[0]['mode'] : 'mixed';
+        if (!jw_settlement_mode_storable($mode)) {
+            throw new RuntimeException('This database cannot store a ' . jw_tender_mode_label($mode)
+                . ' settlement yet. Run the accounting repair, then enter it again.');
+        }
+    }
+
     $ledgerId = (int) ($header['ledger_id'] ?? 0) ?: null;
-    if (in_array($mode, ['cash', 'bank'], true)) {
+    if ($tenders !== []) {
+        // The breakdown carries its own ledgers, item and weights, so the
+        // header keeps none of them. Leaving them behind would give posting two
+        // counter sides to choose between.
+        $ledgerId = null;
+    } elseif (in_array($mode, ['cash', 'bank'], true)) {
         if ($ledgerId === null) {
             throw new RuntimeException('Choose the cash or bank ledger for this settlement.');
         }
@@ -2205,8 +2412,11 @@ function jewellery_save_settlement(int $companyId, int $fiscalYearId, array $hea
     }
 
     // Metal settlement: the weight moves too, so it needs a full item context.
+    // With a breakdown the context lives on the metal TENDER ROW instead — a
+    // payment can carry old gold beside cash, and the header cannot describe
+    // half of it.
     $itemId = null; $purityId = null; $unitId = null; $gross = 0.0; $fine = 0.0;
-    if ($mode === 'metal') {
+    if ($mode === 'metal' && $tenders === []) {
         $itemId = (int) ($header['item_id'] ?? 0);
         $item = jewellery_item($companyId, $itemId);
         if (!$item) {
@@ -2332,6 +2542,26 @@ function jewellery_save_settlement(int $companyId, int $fiscalYearId, array $hea
             $allocStmt->execute(['cid' => $companyId, 'sid' => $settlementId, 'bid' => $row['bill_id'], 'amount' => $row['amount']]);
         }
 
+        // The ways this one payment was made. Rewritten wholesale on revision,
+        // like the allocations above: a draft's breakdown is still being
+        // decided, and only posting freezes it.
+        if (table_exists('jewellery_settlement_tenders')) {
+            db()->prepare('DELETE FROM jewellery_settlement_tenders WHERE settlement_id = :sid AND company_id = :cid')
+                ->execute(['sid' => $settlementId, 'cid' => $companyId]);
+            $tenderStmt = db()->prepare('INSERT INTO jewellery_settlement_tenders (company_id, settlement_id, line_no,
+                    mode, mode_label, reference, amount, ledger_id, item_id, purity_id, unit_id, gross_weight, fine_weight, notes)
+                VALUES (:cid, :sid, :line, :mode, :label, :ref, :amount, :ledger, :item, :purity, :unit, :gross, :fine, :notes)');
+            foreach ($tenders as $row) {
+                $tenderStmt->execute([
+                    'cid' => $companyId, 'sid' => $settlementId, 'line' => $row['line_no'],
+                    'mode' => $row['mode'], 'label' => $row['mode_label'], 'ref' => $row['reference'],
+                    'amount' => $row['amount'], 'ledger' => $row['ledger_id'], 'item' => $row['item_id'],
+                    'purity' => $row['purity_id'], 'unit' => $row['unit_id'],
+                    'gross' => $row['gross_weight'], 'fine' => $row['fine_weight'], 'notes' => $row['notes'],
+                ]);
+            }
+        }
+
         if ($ownsTransaction) {
             db()->commit();
         }
@@ -2382,20 +2612,68 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
         // liability; an advance refunded clears it.
         $legs = [['ledger_id' => $partyLedgerId, 'amount' => $direction === 'paid' ? $amount : -$amount, 'memo' => 'Settlement ' . $settlement['settlement_no']]];
 
-        $counterLedgerId = 0;
-        if ($mode === 'metal') {
-            $item = jewellery_item($companyId, (int) $settlement['item_id']);
-            $counterLedgerId = jw_item_stock_ledger_id($companyId, $item);
-            if ($counterLedgerId <= 0) {
-                throw new RuntimeException('No stock ledger is mapped for item ' . $item['code'] . '.');
+        // One payment, possibly made several ways at once. With a breakdown on
+        // record, EACH way is its own counter leg, so the cash book gains only
+        // the cash, the bank only the Fonepay, and the stock only the old
+        // gold — the till can be counted against the books at closing time.
+        // Without one, the single counter leg is built exactly as it always
+        // was.
+        $tenderRows = jewellery_settlement_tenders($companyId, $settlementId);
+        if ($tenderRows !== []) {
+            $tenderSum = 0.0;
+            foreach ($tenderRows as $tenderRow) {
+                $tenderSum += (float) $tenderRow['amount'];
             }
-        } elseif ($mode === 'adjustment') {
-            $counterLedgerId = jw_require_ledger($companyId, 'rounding');
+            if (abs(jw_round_money($tenderSum) - $amount) > 0.005) {
+                throw new RuntimeException('The payment breakdown no longer adds up to the settlement amount. Revise it before posting.');
+            }
+            foreach ($tenderRows as $tenderRow) {
+                $tenderMode = (string) $tenderRow['mode'];
+                $tenderAmount = jw_round_money((float) $tenderRow['amount']);
+                $tenderLedgerId = (int) ($tenderRow['ledger_id'] ?? 0);
+                if ($tenderMode === 'metal') {
+                    $item = jewellery_item($companyId, (int) $tenderRow['item_id']);
+                    $tenderLedgerId = jw_item_stock_ledger_id($companyId, $item);
+                    if ($tenderLedgerId <= 0) {
+                        throw new RuntimeException('No stock ledger is mapped for item ' . $item['code'] . '.');
+                    }
+                } elseif ($tenderMode === 'adjustment') {
+                    $tenderLedgerId = $tenderLedgerId ?: jw_require_ledger($companyId, 'rounding');
+                } elseif ($tenderLedgerId <= 0) {
+                    // Card, cheque and QR fall back to the shop's mapped tender
+                    // ledgers — the same accounts the sale's own tender split
+                    // posts to, because the same rupee taken the same way
+                    // belongs in the same place either side of a bill.
+                    $mapped = jewellery_resolve_mapping($companyId, 'tender_' . $tenderMode);
+                    $tenderLedgerId = $mapped ? (int) $mapped['id'] : 0;
+                    if ($tenderLedgerId <= 0) {
+                        throw new RuntimeException('No ledger is chosen or mapped for the '
+                            . jw_tender_mode_label($tenderMode, $tenderRow['mode_label'] ?? null)
+                            . ' part of this payment.');
+                    }
+                }
+                $legs[] = ['ledger_id' => $tenderLedgerId,
+                    'amount' => $direction === 'paid' ? -$tenderAmount : $tenderAmount,
+                    'memo' => jw_tender_mode_label($tenderMode, $tenderRow['mode_label'] ?? null)
+                        . ($tenderRow['reference'] ? ' ' . $tenderRow['reference'] : '')
+                        . ' — settlement ' . $settlement['settlement_no']];
+            }
         } else {
-            $counterLedgerId = (int) $settlement['ledger_id'];
+            $counterLedgerId = 0;
+            if ($mode === 'metal') {
+                $item = jewellery_item($companyId, (int) $settlement['item_id']);
+                $counterLedgerId = jw_item_stock_ledger_id($companyId, $item);
+                if ($counterLedgerId <= 0) {
+                    throw new RuntimeException('No stock ledger is mapped for item ' . $item['code'] . '.');
+                }
+            } elseif ($mode === 'adjustment') {
+                $counterLedgerId = jw_require_ledger($companyId, 'rounding');
+            } else {
+                $counterLedgerId = (int) $settlement['ledger_id'];
+            }
+            // Metal paid AWAY leaves stock; metal received comes IN. Cash mirrors it.
+            $legs[] = ['ledger_id' => $counterLedgerId, 'amount' => $direction === 'paid' ? -$amount : $amount, 'memo' => 'Settlement ' . $settlement['settlement_no']];
         }
-        // Metal paid AWAY leaves stock; metal received comes IN. Cash mirrors it.
-        $legs[] = ['ledger_id' => $counterLedgerId, 'amount' => $direction === 'paid' ? -$amount : $amount, 'memo' => 'Settlement ' . $settlement['settlement_no']];
 
         $voucherId = create_voucher_with_entries([
             'company_id' => $companyId,
@@ -2413,7 +2691,40 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
         ], jw_build_entries($legs));
 
         $stockTxnId = null;
-        if ($mode === 'metal') {
+        if ($tenderRows !== []) {
+            // Old gold in the breakdown moves weight as well as money — one
+            // stock movement per metal row, remembered on the row so unposting
+            // can reverse each one.
+            foreach ($tenderRows as $tenderRow) {
+                if ((string) $tenderRow['mode'] !== 'metal') {
+                    continue;
+                }
+                $tenderTxnId = jw_record_stock_txn($companyId, [
+                    'item_id' => (int) $tenderRow['item_id'],
+                    'txn_type' => 'adjustment',
+                    'direction' => $direction === 'paid' ? 'out' : 'in',
+                    'txn_date' => (string) $settlement['settlement_date'],
+                    'ref_no' => (string) $settlement['settlement_no'],
+                    'holder_type' => 'stock',
+                    'purity_id' => (int) $tenderRow['purity_id'],
+                    'unit_id' => (int) $tenderRow['unit_id'],
+                    'gross_weight' => (float) $tenderRow['gross_weight'],
+                    'fine_weight' => (float) $tenderRow['fine_weight'],
+                    'amount' => jw_round_money((float) $tenderRow['amount']),
+                    'source_type' => 'jewellery_settlement',
+                    'source_id' => $settlementId,
+                    'voucher_id' => $voucherId,
+                    'party_id' => (int) $settlement['party_id'],
+                    'notes' => 'Old gold taken in payment',
+                    'created_by' => $userId,
+                ]);
+                db()->prepare('UPDATE jewellery_settlement_tenders SET stock_txn_id = :t WHERE id = :id AND company_id = :cid')
+                    ->execute(['t' => $tenderTxnId, 'id' => (int) $tenderRow['id'], 'cid' => $companyId]);
+                // The settlement's own pointer keeps the FIRST metal movement,
+                // so everything reading it still finds one, as it always has.
+                $stockTxnId = $stockTxnId ?? $tenderTxnId;
+            }
+        } elseif ($mode === 'metal') {
             $stockTxnId = jw_record_stock_txn($companyId, [
                 'item_id' => (int) $settlement['item_id'],
                 'txn_type' => 'adjustment',
@@ -2465,6 +2776,13 @@ function jewellery_unpost_settlement(int $companyId, int $settlementId, int $use
     if ($result['ok']) {
         foreach ($allocations as $allocation) {
             jw_refresh_bill($companyId, (int) $allocation['bill_id']);
+        }
+        // The stock movements the metal tenders made are gone with the
+        // voucher; the rows must not go on pointing at them.
+        if (table_exists('jewellery_settlement_tenders')) {
+            db()->prepare('UPDATE jewellery_settlement_tenders SET stock_txn_id = NULL
+                    WHERE settlement_id = :sid AND company_id = :cid')
+                ->execute(['sid' => $settlementId, 'cid' => $companyId]);
         }
     }
 

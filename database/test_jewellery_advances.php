@@ -361,6 +361,89 @@ ok(near((float) $vatSaleRow['metal_amount'], 100000.0), 'Same ordered rate honou
 ok(near((float) $vatSaleRow['vat_amount'], 650.0),
     'And VAT IS charged on the stone — 13% of 5,000 — because it is in force on the sale date');
 
+echo "\n9. One advance paid three ways at once — cash, Fonepay and old gold\n";
+// The counter reality: a customer putting down 50,000 hands over 20,000 in
+// cash, taps 15,000 on Fonepay and puts an old ring on the scale for the
+// rest. ONE payment, one settlement number, one receipt — with a breakdown.
+$qrLedger = $mkLedger($cid, 'AQRTL', 'Fonepay Collection', 'assets');
+jewellery_save_mapping($cid, 'tender_qr', $qrLedger, $uid);
+
+$order3 = jewellery_save_order($cid, $fy, [
+    'order_date' => '2026-08-01', 'party_id' => $customer, 'item_id' => $chain,
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'expected_gross_weight' => 2, 'making_basis' => 'flat', 'making_rate' => 5000, 'status' => 'confirmed',
+], [], $uid);
+
+$mixedTenders = [
+    ['mode' => 'cash', 'amount' => 20000, 'ledger_id' => $cash],
+    ['mode' => 'qr', 'amount' => 15000, 'reference' => 'FP-778899'],
+    ['mode' => 'metal', 'amount' => 15000, 'item_id' => $oldGold, 'purity_id' => $p22,
+        'unit_id' => $tola, 'gross_weight' => 0.15],
+];
+$advMixed = jewellery_save_settlement($cid, $fy, [
+    'settlement_date' => '2026-08-04', 'party_id' => $customer, 'order_id' => $order3, 'is_advance' => 1,
+    'direction' => 'received', 'amount' => 50000, 'tenders' => $mixedTenders,
+], [], $uid);
+$mixedRow = jewellery_settlement($cid, $advMixed);
+ok((string) $mixedRow['mode'] === 'mixed', "The header reads 'mixed' — no single word can name three ways of paying");
+$tenderRows = jewellery_settlement_tenders($cid, $advMixed);
+ok(count($tenderRows) === 3, 'All three ways are on record');
+ok((string) $tenderRows[1]['reference'] === 'FP-778899', 'The Fonepay transaction id is kept for the day it is queried');
+ok(near((float) $tenderRows[2]['fine_weight'], 0.1374), 'The old gold\'s fine weight is derived (0.15 tola at 916)');
+
+ok(threw(static fn () => jewellery_save_settlement($cid, $fy, [
+        'settlement_date' => '2026-08-04', 'party_id' => $customer, 'order_id' => $order3, 'is_advance' => 1,
+        'direction' => 'received', 'amount' => 60000, 'tenders' => $mixedTenders,
+    ], [], $uid)),
+    'A breakdown that does not add up to the amount taken is refused');
+ok(threw(static fn () => jewellery_save_settlement($cid, $fy, [
+        'settlement_date' => '2026-08-04', 'party_id' => $customer, 'order_id' => $order3, 'is_advance' => 1,
+        'direction' => 'received', 'amount' => 10000,
+        'tenders' => [['mode' => 'cash', 'amount' => 15000, 'ledger_id' => $cash],
+            ['mode' => 'qr', 'amount' => -5000]],
+    ], [], $uid)),
+    'A negative tender is refused, not netted');
+ok(threw(static fn () => jewellery_save_settlement($cid, $fy, [
+        'settlement_date' => '2026-08-04', 'party_id' => $customer, 'order_id' => $order3, 'is_advance' => 1,
+        'direction' => 'received', 'amount' => 10000,
+        'tenders' => [['mode' => 'cash', 'amount' => 10000]],
+    ], [], $uid)),
+    'Cash without saying WHICH till is refused — a shop keeps more than one');
+
+$goldBeforeMixed = jw_item_balance($cid, $oldGold)['fine_weight'];
+$rmx = jewellery_post_settlement($cid, $advMixed, $uid);
+ok($rmx['ok'], 'The mixed advance posts' . ($rmx['ok'] ? '' : ' — ' . $rmx['error']));
+$vmx = voucher_ledgers((int) $rmx['voucher_id']);
+ok(near($vmx[$advLedger] ?? 0, -50000.0), 'The customer\'s advance is credited the WHOLE 50,000');
+ok(near($vmx[$cash] ?? 0, 20000.0), 'The till gains only the 20,000 that actually went into it');
+ok(near($vmx[$qrLedger] ?? 0, 15000.0), 'Fonepay\'s 15,000 lands in its own mapped ledger');
+ok(near($vmx[$L['stock_metal']] ?? 0, 15000.0), 'And the old gold debits stock at its agreed value');
+ok(near(jw_item_balance($cid, $oldGold)['fine_weight'], $goldBeforeMixed + 0.1374),
+    'The ring\'s weight really entered stock');
+$adv3 = jewellery_order_advances($cid, $order3);
+ok(near($adv3['cash_total'], 35000.0) && near($adv3['metal_total'], 15000.0),
+    'The order splits the money held (35,000) from the gold held (15,000) by the BREAKDOWN, not the header');
+
+$rux = jewellery_unpost_settlement($cid, $advMixed, $uid);
+ok($rux['ok'], 'The mixed advance reverses' . ($rux['ok'] ? '' : ' — ' . $rux['error']));
+ok(near(jw_item_balance($cid, $oldGold)['fine_weight'], $goldBeforeMixed), 'The gold left stock with it');
+$tenderRowsAfter = jewellery_settlement_tenders($cid, $advMixed);
+ok(count($tenderRowsAfter) === 3 && $tenderRowsAfter[2]['stock_txn_id'] === null,
+    'The breakdown survives the reversal, no longer pointing at movements that are gone');
+ok(jewellery_post_settlement($cid, $advMixed, $uid)['ok'], 'And it posts again cleanly');
+
+// ONE way of paying entered on the same grid is not a split — the header
+// simply says what it was, now that the column can hold the word.
+$advCheque = jewellery_save_settlement($cid, $fy, [
+    'settlement_date' => '2026-08-05', 'party_id' => $customer, 'order_id' => $order3, 'is_advance' => 1,
+    'direction' => 'received', 'amount' => 25000,
+    'tenders' => [['mode' => 'cheque', 'amount' => 25000, 'ledger_id' => $cash, 'reference' => 'CHQ-4471']],
+], [], $uid);
+ok((string) jewellery_settlement($cid, $advCheque)['mode'] === 'cheque',
+    "A single-tender payment stores its real mode: 'cheque', not 'cash' with a note");
+ok(jewellery_post_settlement($cid, $advCheque, $uid)['ok'], 'And posts to the ledger the user picked');
+ok(near(jewellery_order_advances($cid, $order3)['total'], 75000.0), 'The order now holds 75,000 across both advances');
+
 jwadv_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
