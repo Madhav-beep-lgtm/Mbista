@@ -722,17 +722,17 @@ document.addEventListener('DOMContentLoaded', () => {
       'x_item_id[]': 'admin/jewellery.php?view=items',
       advance_item_id: 'admin/jewellery.php?view=items',
       received_item_id: 'admin/jewellery.php?view=items',
-      purity_id: 'admin/jewellery.php?view=masters',
-      'l_purity_id[]': 'admin/jewellery.php?view=masters',
-      'x_purity_id[]': 'admin/jewellery.php?view=masters',
-      advance_purity_id: 'admin/jewellery.php?view=masters',
-      received_purity_id: 'admin/jewellery.php?view=masters',
-      unit_id: 'admin/jewellery.php?view=masters',
-      'l_unit_id[]': 'admin/jewellery.php?view=masters',
-      'x_unit_id[]': 'admin/jewellery.php?view=masters',
-      advance_unit_id: 'admin/jewellery.php?view=masters',
-      metal_id: 'admin/jewellery.php?view=masters',
-      category: 'admin/jewellery.php?view=masters',
+      purity_id: 'admin/jewellery.php?view=masters#purity-grades',
+      'l_purity_id[]': 'admin/jewellery.php?view=masters#purity-grades',
+      'x_purity_id[]': 'admin/jewellery.php?view=masters#purity-grades',
+      advance_purity_id: 'admin/jewellery.php?view=masters#purity-grades',
+      received_purity_id: 'admin/jewellery.php?view=masters#purity-grades',
+      unit_id: 'admin/jewellery.php?view=masters#weight-units',
+      'l_unit_id[]': 'admin/jewellery.php?view=masters#weight-units',
+      'x_unit_id[]': 'admin/jewellery.php?view=masters#weight-units',
+      advance_unit_id: 'admin/jewellery.php?view=masters#weight-units',
+      metal_id: 'admin/jewellery.php?view=masters#metals-stones',
+      category: 'admin/jewellery.php?view=masters#item-categories',
       karigar_id: 'admin/jewellery-workshop.php?view=karigars',
       'l_karigar_id[]': 'admin/jewellery-workshop.php?view=karigars',
       party_id: 'admin/accounting-parties.php',
@@ -809,6 +809,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (path.indexOf('report') !== -1) { return; }
 
   const map = MASTERS[moduleKey];
+  // Set when somebody picks "+ Add new", read when this tab comes back.
+  let pendingRefresh = false;
 
   document.querySelectorAll('select[name]').forEach((select) => {
     const target = map[select.getAttribute('name')];
@@ -841,7 +843,61 @@ document.addEventListener('DOMContentLoaded', () => {
       // on the page is linked the same way.
       window.open('/' + target, '_blank', 'noopener');
       select.value = select.getAttribute('data-last-value') || '';
+      pendingRefresh = true;
     });
+  });
+
+  // Coming BACK is the half that matters.
+  //
+  // Opening the master screen in a new tab kept the half-filled bill intact,
+  // but the new customer still was not in the dropdown on return — and the only
+  // way to get them there was a reload, which threw the bill away. The feature
+  // saved the form and then made you lose it anyway.
+  //
+  // So when this tab regains focus after an "add new", the page is fetched
+  // again in the background and any options that appeared since are merged in.
+  // Nothing on screen is touched apart from adding options: what was typed, and
+  // what was already chosen, stay exactly as they are.
+  //
+  // Only the path and its view/tab parameter are re-fetched, never the whole
+  // query. A URL like ?delete=5 or ?edit=12 would re-run on the server, and a
+  // background request that quietly repeats an action is far worse than a
+  // dropdown being one option short.
+  window.addEventListener('focus', () => {
+    if (!pendingRefresh) { return; }
+    pendingRefresh = false;
+
+    const current = new URLSearchParams(window.location.search);
+    const safe = new URLSearchParams();
+    ['view', 'tab'].forEach((key) => {
+      if (current.has(key)) { safe.set(key, current.get(key)); }
+    });
+    const query = safe.toString();
+
+    window.fetch(window.location.pathname + (query ? '?' + query : ''), {
+      credentials: 'same-origin',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    })
+      .then((response) => (response.ok ? response.text() : Promise.reject(response.status)))
+      .then((html) => {
+        const fresh = new DOMParser().parseFromString(html, 'text/html');
+        document.querySelectorAll('select[name]').forEach((select) => {
+          if (!map[select.getAttribute('name')]) { return; }
+          const source = fresh.querySelector('select[name="' + CSS.escape(select.name) + '"]');
+          if (!source) { return; }
+          const have = new Set(Array.from(select.options).map((option) => option.value));
+          const addNew = select.querySelector('option[data-add-new]');
+          Array.from(source.options).forEach((option) => {
+            if (have.has(option.value) || option.value === '' || option.value === '__add_new__') { return; }
+            const fresher = document.createElement('option');
+            fresher.value = option.value;
+            fresher.textContent = option.textContent;
+            // Inserted BEFORE "+ Add new", so that stays last on the list.
+            select.insertBefore(fresher, addNew);
+          });
+        });
+      })
+      .catch(() => { /* offline, or the session needs a login — leave the form alone */ });
   });
 })();
 
@@ -888,6 +944,18 @@ document.addEventListener('DOMContentLoaded', () => {
     toggle.setAttribute('aria-label', 'Show or hide ' + title);
     head.appendChild(toggle);
 
+    // A name the card can be linked to. "Purity Grades (14)" becomes
+    // #purity-grades, so "+ Add new" on a purity dropdown can point at the
+    // section that adds one rather than at the top of a page of folded cards.
+    if (!card.id) {
+      const slug = title
+        .replace(/\(.*?\)/g, ' ')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+      if (slug !== '') { card.id = slug; }
+    }
+
     const apply = (open) => {
       card.classList.toggle('is-collapsed', !open);
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -903,6 +971,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     // Never hide a problem, or the field somebody is already in.
     if (body.querySelector('.notice, .field-error, .is-invalid, [autofocus]')) { open = true; }
+    // Nor the section somebody was sent here to use. This beats both a folded
+    // default AND a fold the user set earlier — arriving at a link that appears
+    // to do nothing is worse than either.
+    const wanted = window.location.hash.slice(1);
+    if (wanted !== '' && (card.id === wanted || body.querySelector('#' + CSS.escape(wanted)))) {
+      open = true;
+      window.setTimeout(() => { card.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 60);
+    }
     apply(open);
 
     const flip = () => {

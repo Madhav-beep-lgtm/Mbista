@@ -8,7 +8,7 @@
 </div>
 <script src="/assets/js/mbw-charts.js?v=20260712"></script>
 <script src="/assets/js/nepali-date.js?v=20260708"></script>
-<script src="/assets/js/main.js?v=20260728b"></script>
+<script src="/assets/js/main.js?v=20260728c"></script>
 <script src="/assets/js/searchable-select.js?v=20260719"></script>
 <script src="/assets/js/draggable-panel.js?v=20260727"></script>
 <script src="/i18n-dict.php?v=20260719"></script>

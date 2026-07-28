@@ -241,7 +241,9 @@ ok(str_contains($mainJs, "indexOf('report')"), 'And report pages get none of it'
  * A dropdown that sends you to a page which does not exist is worse than one
  * that sends you nowhere, so every target is checked against the filesystem.
  */
-preg_match_all("~'(admin/[a-z0-9-]+\.php(?:\?view=[a-z0-9-]+)?)'~", $mainJs, $addNewTargets);
+// The optional #fragment matters: without it in the pattern, links that name
+// a section slipped out of this check entirely and stopped being verified.
+preg_match_all("~'(admin/[a-z0-9-]+\.php(?:\?view=[a-z0-9-]+)?(?:#[a-z0-9-]+)?)'~", $mainJs, $addNewTargets);
 $targets = array_unique($addNewTargets[1]);
 ok(count($targets) >= 15, 'Master screens are mapped across the app (' . count($targets) . ')');
 
@@ -252,6 +254,7 @@ ok(count($targets) >= 15, 'Master screens are mapped across the app (' . count($
  */
 $missingTargets = [];
 foreach ($targets as $target) {
+    $target = explode('#', $target, 2)[0];
     [$targetFile, $targetQuery] = array_pad(explode('?', $target, 2), 2, '');
     $targetPath = $root . '/public_html/' . $targetFile;
     if (!is_file($targetPath)) {
@@ -281,6 +284,49 @@ foreach (['jewellery', 'accounting', 'hospitality', 'assets', 'hr', 'payroll', '
 }
 ok(count($mappedModules) >= 7,
     'Every module in the map is reachable from a path pattern (' . implode(', ', $mappedModules) . ')');
+
+/*
+ * Landing on the right PAGE is not enough when that page folds its sections.
+ * Adding collapsible cards broke this feature two commits after shipping it: a
+ * purity dropdown sent you to view=masters, where Purity Grades starts folded
+ * shut, so the link looked like it did nothing.
+ */
+preg_match_all("~'admin/jewellery\.php\?view=masters([^']*)'~", $mainJs, $mastersRaw);
+$mastersLinks = $mastersRaw[1];
+ok($mastersLinks !== [] && !in_array('', $mastersLinks, true),
+    'Every link into the shared masters page names the section it wants, not just the page');
+
+$jewellerySource = (string) file_get_contents($root . '/public_html/admin/jewellery.php');
+$headingSlugs = [];
+if (preg_match_all('~<h2>(.*?)</h2>~', $jewellerySource, $headings)) {
+    foreach ($headings[1] as $heading) {
+        // The id is built in the browser by slugifying the heading, so this has
+        // to slugify exactly the same way.
+        $literal = preg_replace('~<\?.*?\?>~', '', $heading);
+        $headingSlugs[] = trim(preg_replace('~[^a-z0-9]+~', '-',
+            strtolower(html_entity_decode(preg_replace('~\(.*?\)~', ' ', $literal), ENT_QUOTES | ENT_HTML5))), '-');
+    }
+}
+$badAnchors = [];
+foreach (array_unique($mastersLinks) as $fragment) {
+    if (!in_array(ltrim($fragment, '#'), $headingSlugs, true)) { $badAnchors[] = $fragment; }
+}
+ok($badAnchors === [], 'And each of those sections really exists on the page'
+    . ($badAnchors === [] ? '' : ' — no heading slugifies to ' . implode(', ', $badAnchors)));
+ok(str_contains($mainJs, 'window.location.hash.slice(1)'),
+    'A card the URL points at opens itself, beating both a folded default and a fold the user set');
+
+/*
+ * And the round trip has to finish. Opening the master screen in a new tab kept
+ * the half-filled bill, but the new record was not in the dropdown on return,
+ * so the only way to use it was a reload — which threw the bill away.
+ */
+ok(str_contains($mainJs, "window.addEventListener('focus'"),
+    'Returning to the tab refreshes the lists, so the record just added can be used');
+ok(str_contains($mainJs, 'insertBefore(fresher, addNew)'),
+    'New options land before "+ Add new", so it stays the last thing on the list');
+ok(str_contains($mainJs, "['view', 'tab'].forEach"),
+    'The refresh re-fetches only view/tab — never ?delete= or ?edit=, which would re-run on the server');
 
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
