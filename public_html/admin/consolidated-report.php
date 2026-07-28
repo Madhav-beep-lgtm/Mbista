@@ -178,7 +178,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 <?php endif; ?>
 
-<section class="mbw-card" aria-label="Company performance matrix">
+<section class="mbw-card" data-collapsible aria-label="Company performance matrix">
     <div class="mbw-card-head">
         <h2>Company Performance Matrix — All Group Companies</h2>
         <span class="mbw-info"><?= icon('about') ?></span>
@@ -237,7 +237,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <?php if ($consolidated !== null): ?>
-<section class="mbw-card" aria-label="Altiora group consolidation">
+<section class="mbw-card" data-collapsible aria-label="Altiora group consolidation">
     <div class="mbw-card-head">
         <h2>Altiora Group — Consolidated (IFRS 10)</h2>
         <span class="mbw-info"><?= icon('about') ?></span>
@@ -282,7 +282,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <div class="mbw-row-tables">
-    <section class="mbw-card" aria-label="Consolidated income components">
+    <section class="mbw-card" data-collapsible aria-label="Consolidated income components">
         <div class="mbw-card-head">
             <h2>Consolidated Income Components</h2>
         </div>
@@ -304,7 +304,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </section>
 
-    <section class="mbw-card" aria-label="Consolidated expense components">
+    <section class="mbw-card" data-collapsible aria-label="Consolidated expense components">
         <div class="mbw-card-head">
             <h2>Consolidated Expense Components</h2>
         </div>

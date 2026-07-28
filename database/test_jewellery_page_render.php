@@ -201,6 +201,7 @@ $extraParams = [
         'statement' => ['karigar' => $karigar, 'fine_rate' => 120000]],
 ];
 
+$renderedHtml = [];
 foreach ($pages as $script => $views) {
     $_SERVER['SCRIPT_NAME'] = '/admin/' . $script;
     foreach ($views as $view) {
@@ -233,7 +234,56 @@ foreach ($pages as $script => $views) {
         foreach ($problems as $problem) {
             echo '        ' . $problem . "\n";
         }
+        $renderedHtml[$script . '?view=' . $view] = $html;
     }
+}
+
+// ---------------------------------------------------------------------------
+// What the browser will find on those pages
+// ---------------------------------------------------------------------------
+//
+// Folding sections and the "+ Add new" option are both applied by JavaScript to
+// the markup produced above, so the only honest place to check them is here, on
+// the real rendered output rather than on the source that generates it.
+
+echo "\nSections fold, dropdowns offer \"+ Add new\"\n";
+
+// A card marked collapsible but with no heading is silently skipped by the
+// script — no chevron, no fold, and nothing anywhere says why.
+$headless = [];
+$markedTotal = 0;
+foreach ($renderedHtml as $page => $html) {
+    foreach (explode('data-collapsible', $html) as $i => $chunk) {
+        if ($i === 0) { continue; }
+        $markedTotal++;
+        // The heading is the card's first child, so it is a few dozen bytes in.
+        if (!str_contains(substr($chunk, 0, 600), 'mbw-card-head')) {
+            $headless[] = $page;
+        }
+    }
+}
+ok($markedTotal > 0, "Cards are marked collapsible on the rendered pages ($markedTotal)");
+ok($headless === [], 'Every one of them has a heading for the fold to hang off'
+    . ($headless === [] ? '' : ' — headless on ' . implode(', ', array_unique($headless))));
+
+/*
+ * And the "+ Add new" map is keyed by select NAME. A name that no page actually
+ * emits is a dead entry that can never fire, so the map is checked against what
+ * the templates really render rather than against what it claims to cover.
+ */
+$mainJs = (string) file_get_contents($root . '/public_html/assets/js/main.js');
+preg_match_all("~^\s*'?([a-z_]+(?:\[\])?)'?:\s*'admin/~m", $mainJs, $mapped);
+$allHtml = implode('', $renderedHtml);
+$live = 0;
+$dead = [];
+foreach (array_unique($mapped[1]) as $name) {
+    if (str_contains($allHtml, 'name="' . $name . '"')) { $live++; } else { $dead[] = $name; }
+}
+ok($live >= 8, "The mapped dropdown names are really on the pages ($live live)");
+// Names only reachable from a page this harness does not render are reported
+// rather than failed — the point is to see them, not to claim the map is perfect.
+if ($dead !== []) {
+    echo '        not seen in these views: ' . implode(', ', $dead) . "\n";
 }
 
 // ---------------------------------------------------------------------------

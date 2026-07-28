@@ -26,7 +26,7 @@ if (!$invoiceSchemaReady) {
     $bodyClass = 'admin-layout';
     include __DIR__ . '/../../app/views/partials/admin_header.php';
     ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Invoice module unavailable</h2></div>
         <p>The database is missing invoice tables or columns. Apply the pending migrations
             (<code>010</code>, <code>018</code>, <code>019</code> — or run
@@ -863,7 +863,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                 </a>
             </section>
 
-            <section class="mbw-card">
+            <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head">
                     <h2>Create Invoice</h2>
                     <div class="mbw-card-tools"><span style="color: var(--mbw-muted); font-size: 0.85rem;">Create directly from this tab without leaving Invoice Management.</span></div>
@@ -1057,7 +1057,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php endif; ?>
             </section>
 
-            <section class="mbw-card">
+            <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head">
                     <h2>Invoices</h2>
                     <div class="mbw-card-tools"><a class="mbw-view-all" href="<?php echo e(url('admin/reports-center.php?report=collections-register')); ?>">Receipt Register</a></div>
@@ -1143,7 +1143,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
             </section>
 
             <?php if (!empty($subsidiaryInvoices)): ?>
-                <section class="mbw-card">
+                <section class="mbw-card" data-collapsible>
                     <div class="mbw-card-head"><h2>Recent Subsidiary Invoices</h2></div>
                     <div style="overflow-x:auto">
                     <table class="invoice-table">
@@ -1178,7 +1178,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
 
         <?php elseif ($action === 'view' && $invoice): ?>
             <!-- View Invoice -->
-            <section class="mbw-card">
+            <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head">
                     <h2>Invoice: <?php echo e($invoice['invoice_no']); ?></h2>
                     <div class="mbw-card-tools"><a class="mbw-view-all" href="?action=list">Back to List</a></div>
@@ -1447,7 +1447,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
 
         <?php elseif ($action === 'edit' && $invoice): ?>
             <!-- Edit Invoice -->
-            <section class="mbw-card">
+            <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head">
                     <h2>Edit Invoice: <?php echo e($invoice['invoice_no']); ?></h2>
                     <div class="mbw-card-tools"><a class="mbw-view-all" href="?action=view&id=<?php echo (int) $invoice['id']; ?>">Back to Invoice</a></div>

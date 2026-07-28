@@ -689,3 +689,191 @@ document.addEventListener('DOMContentLoaded', () => {
     source.addEventListener('input', validate);
   });
 });
+
+// ---------------------------------------------------------------------------
+// "+ Add new…" at the end of every master-data dropdown
+// ---------------------------------------------------------------------------
+//
+// A clerk halfway through a bill discovers the customer is not on the list, or
+// the purity they need was never set up. Without this the only way out is to
+// abandon the document, go and create the record, and start again.
+//
+// One option is appended to the END of each list — the end, so it is never
+// picked by accident when someone is arrowing through — and choosing it opens
+// the master screen in a NEW TAB and puts the dropdown back where it was.
+// Nothing typed on the page is lost, which is the whole point.
+//
+// WHERE IT APPEARS is deliberately narrow:
+//   - data-entry forms only. A GET form is a filter, and "add new" in a filter
+//     is meaningless.
+//   - never inside the filter bar, and never on a report page. The user asked
+//     for exactly this exclusion, and it is also just correct: those lists are
+//     for narrowing what you are looking at, not for creating anything.
+//
+// The map is keyed by module first because the same field name means different
+// things in different places — item_id is a jewellery item on one page and an
+// inventory item on another, and sending someone to the wrong master screen is
+// worse than not offering the link.
+(function () {
+  const MASTERS = {
+    jewellery: {
+      item_id: 'admin/jewellery.php?view=items',
+      'l_item_id[]': 'admin/jewellery.php?view=items',
+      'x_item_id[]': 'admin/jewellery.php?view=items',
+      advance_item_id: 'admin/jewellery.php?view=items',
+      received_item_id: 'admin/jewellery.php?view=items',
+      purity_id: 'admin/jewellery.php?view=masters',
+      'l_purity_id[]': 'admin/jewellery.php?view=masters',
+      'x_purity_id[]': 'admin/jewellery.php?view=masters',
+      advance_purity_id: 'admin/jewellery.php?view=masters',
+      received_purity_id: 'admin/jewellery.php?view=masters',
+      unit_id: 'admin/jewellery.php?view=masters',
+      'l_unit_id[]': 'admin/jewellery.php?view=masters',
+      'x_unit_id[]': 'admin/jewellery.php?view=masters',
+      advance_unit_id: 'admin/jewellery.php?view=masters',
+      metal_id: 'admin/jewellery.php?view=masters',
+      category: 'admin/jewellery.php?view=masters',
+      karigar_id: 'admin/jewellery-workshop.php?view=karigars',
+      'l_karigar_id[]': 'admin/jewellery-workshop.php?view=karigars',
+      party_id: 'admin/accounting-parties.php',
+      ledger_id: 'admin/chart-ledgers.php',
+      settle_ledger_id: 'admin/chart-ledgers.php',
+    },
+    accounting: {
+      party_id: 'admin/accounting-parties.php',
+      ledger_id: 'admin/chart-ledgers.php',
+      item_id: 'admin/accounting-inventory.php?view=inventory',
+      group_id: 'admin/chart-groups.php',
+    },
+  };
+
+  // Which module this page belongs to, for the map above.
+  const path = window.location.pathname;
+  let moduleKey = null;
+  if (path.indexOf('jewellery') !== -1) {
+    moduleKey = 'jewellery';
+  } else if (path.indexOf('accounting') !== -1 || path.indexOf('voucher') !== -1 || path.indexOf('banking') !== -1) {
+    moduleKey = 'accounting';
+  }
+  if (!moduleKey) { return; }
+
+  // Reports never get it, however their selects are named.
+  if (path.indexOf('report') !== -1) { return; }
+
+  const map = MASTERS[moduleKey];
+
+  document.querySelectorAll('select[name]').forEach((select) => {
+    const target = map[select.getAttribute('name')];
+    if (!target) { return; }
+    // Filters are for narrowing a list, not for creating a record.
+    const form = select.closest('form');
+    if (!form || (form.getAttribute('method') || 'get').toLowerCase() !== 'post') { return; }
+    if (select.closest('.jw-filter, [data-filter-bar]')) { return; }
+    if (select.multiple) { return; }
+
+    // Remember what is selected NOW, before anyone touches it. Without this, a
+    // user whose FIRST action is picking "add new" — on an edit form where the
+    // field already had a value — would find it silently reset to blank.
+    select.setAttribute('data-last-value', select.value);
+
+    const option = document.createElement('option');
+    option.value = '__add_new__';
+    option.textContent = '+ Add new…';
+    option.setAttribute('data-add-new', target);
+    select.appendChild(option);
+
+    select.addEventListener('change', function () {
+      if (select.value !== '__add_new__') {
+        // Remember what was chosen, so picking "add new" can come back to it.
+        select.setAttribute('data-last-value', select.value);
+        return;
+      }
+      // A new tab, so the half-filled document on this one survives.
+      // The app is mounted at the domain root — every stylesheet and script
+      // on the page is linked the same way.
+      window.open('/' + target, '_blank', 'noopener');
+      select.value = select.getAttribute('data-last-value') || '';
+    });
+  });
+})();
+
+// ---------------------------------------------------------------------------
+// Collapsible workspace sections
+// ---------------------------------------------------------------------------
+//
+// Settings, Masters and the stock screens stack a dozen cards on one page, so
+// finding the one you want means scrolling past all the others every time.
+//
+// Any card marked data-collapsible folds to its heading. The state is kept per
+// page and per heading, so a shop that always works in Taxes finds Taxes open
+// and the rest out of the way — and it survives a save, which is when a page
+// reloads and would otherwise throw the arrangement away.
+//
+// A card containing the field that is currently focused, or one holding a
+// validation error, opens itself: a section that hides the reason a save failed
+// is worse than a long page.
+(function () {
+  const cards = document.querySelectorAll('[data-collapsible]');
+  if (!cards.length) { return; }
+
+  const pageKey = 'mbwSection:' + window.location.pathname + window.location.search.replace(/[?&]edit=\d+/, '');
+
+  cards.forEach((card) => {
+    const head = card.querySelector('.mbw-card-head, .jw-card-head');
+    const title = head ? (head.querySelector('h2') || head).textContent.trim().slice(0, 60) : '';
+    if (!head || title === '') { return; }
+
+    const key = pageKey + '|' + title;
+    const body = document.createElement('div');
+    body.className = 'mbw-card-body';
+    // Everything after the heading becomes the collapsible body — kept in the
+    // heading's OWN parent, because on some screens the heading sits inside the
+    // form rather than beside it, and lifting its fields out of the form would
+    // stop them being submitted at all.
+    const host = head.parentNode;
+    while (head.nextSibling) { body.appendChild(head.nextSibling); }
+    host.appendChild(body);
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'mbw-card-toggle';
+    toggle.setAttribute('aria-label', 'Show or hide ' + title);
+    head.appendChild(toggle);
+
+    const apply = (open) => {
+      card.classList.toggle('is-collapsed', !open);
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+
+    let open = true;
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored !== null) { open = stored === '1'; }
+      else if (card.hasAttribute('data-collapsed')) { open = false; }
+    } catch (error) {
+      open = !card.hasAttribute('data-collapsed');
+    }
+    // Never hide a problem, or the field somebody is already in.
+    if (body.querySelector('.notice, .field-error, .is-invalid, [autofocus]')) { open = true; }
+    apply(open);
+
+    const flip = () => {
+      const next = card.classList.contains('is-collapsed');
+      apply(next);
+      try { localStorage.setItem(key, next ? '1' : '0'); } catch (error) { /* private mode */ }
+    };
+    toggle.addEventListener('click', flip);
+
+    // On a panel you can drag by its heading, the heading is NOT also a collapse
+    // target: dragging it and letting go is a click, and the card would fold
+    // every time somebody moved it. There the chevron is the only way in.
+    if (!card.hasAttribute('data-draggable')) {
+      head.addEventListener('click', (event) => {
+        // A link or button in the heading keeps doing its own job.
+        if (event.target.closest('a, button:not(.mbw-card-toggle), input, select')) { return; }
+        flip();
+      });
+      head.classList.add('is-collapsible');
+    }
+  });
+})();

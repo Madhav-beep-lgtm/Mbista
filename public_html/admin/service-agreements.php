@@ -480,7 +480,7 @@ $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <?php if (user_can_do('agreements', 'create')): ?>
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>New Structured Agreement</h2></div>
     <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">Drafts a section-tree agreement from a template snapshot — outline editing, automatic clause numbering, bilingual side-by-side or sequential layouts, review/approval workflow, immutable versions, and task wiring. This is the standard drafting method; the single-form editor below remains only for pre-existing classic agreements.</p>
     <form method="post" class="workspace-form-grid">
@@ -508,7 +508,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
 </section>
 <?php endif; ?>
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2><?= $edit ? 'Edit Agreement — ' . e((string) $edit['agreement_no']) : 'Classic Single-Form Agreement (legacy)' ?><?= $linkedContract !== null ? ' <span class="mbw-pill tone-blue">Contract ' . e((string) $linkedContract['contract_no']) . '</span>' : '' ?></h2>
         <div class="mbw-card-tools">
             <?php if (!$edit && $clients !== []): ?>
@@ -622,7 +622,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
 </section>
 
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Agreements Register (<?= count($agreements) ?>)</h2>
         <div class="mbw-card-tools">
             <form method="get" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -691,7 +691,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <?php if (user_can_do('agreements', 'manage')): ?>
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Agreement Templates (<?= count($agreementTemplates) ?>)</h2></div>
     <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">Each new agreement copies its template as an independent snapshot — changing or archiving a template never alters existing agreements. To edit a template's content, open any agreement built from it, adjust the outline, and use “Save as template”.</p>
     <div style="overflow-x:auto">

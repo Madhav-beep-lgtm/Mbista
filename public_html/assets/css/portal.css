@@ -6555,3 +6555,81 @@ body.admin-layout .mbw-filter-bar .button {
     flex: 1 1 100%;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Collapsible sections
+   ---------------------------------------------------------------------------
+   Settings and masters screens carry a dozen cards each. Folding them to their
+   headings turns a page you scroll into a page you scan — and the heading stays
+   put, so what is behind the fold is never a mystery.
+
+   The chevron is drawn in CSS rather than pulled from the icon set, because the
+   markup is created by the script and has no PHP side to call icon() from.
+   Everything is a token, so it follows the theme switch like the rest.
+   --------------------------------------------------------------------------- */
+
+.mbw-card-head.is-collapsible,
+.jw-card-head.is-collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+
+.mbw-card-toggle {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--mbw-border, #d9e2ec);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--mbw-muted, #64748b);
+  cursor: pointer;
+  position: relative;
+}
+
+.mbw-card-toggle:hover {
+  background: var(--mbw-green-soft, #e5f6ec);
+  color: var(--mbw-heading, #1c2434);
+}
+
+.mbw-card-toggle:focus-visible {
+  outline: 2px solid var(--mbw-primary, #0b7a4b);
+  outline-offset: 2px;
+}
+
+/* The chevron: a rotated corner, pointing down when the card is open. */
+.mbw-card-toggle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translate(-50%, -70%) rotate(45deg);
+  transition: transform .15s ease;
+}
+
+/* Folded: the chevron points right, the way a closed list reads everywhere. */
+.is-collapsed .mbw-card-toggle::before {
+  transform: translate(-70%, -50%) rotate(-45deg);
+}
+
+.is-collapsed .mbw-card-body {
+  display: none;
+}
+
+/* With the body gone the heading's bottom margin would leave a gap inside an
+   otherwise empty card. */
+.is-collapsed .mbw-card-head,
+.is-collapsed .jw-card-head {
+  margin-bottom: 0;
+}
+
+/* Printing a page should print what is on it, not the current fold state. */
+@media print {
+  .is-collapsed .mbw-card-body { display: block; }
+  .mbw-card-toggle { display: none; }
+}

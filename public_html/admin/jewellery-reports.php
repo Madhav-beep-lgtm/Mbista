@@ -293,7 +293,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
 
 <?php elseif ($view === 'sales'): ?>
     <?php $report = jw_report_sales_detail($companyId, $from, $to); $groups = jw_report_sales_grouped($companyId, $from, $to, $groupBy); ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Sales by <?= e(ucfirst($groupBy)) ?> (<?= count($groups) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th><?= e(ucfirst($groupBy)) ?></th><th class="is-numeric">Pieces</th><th class="is-numeric">Fine wt</th><th class="is-numeric">Revenue</th><th class="is-numeric">VAT</th><th class="is-numeric">COGS</th><th class="is-numeric">Gross profit</th><th class="is-numeric">GP %</th></tr></thead>
@@ -315,7 +315,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
         </table></div>
     </section>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Sales Detailed (<?= count($report['rows']) ?> lines)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th>Sale</th><th>Customer</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone / diamond</th><th class="is-numeric">VAT</th><th class="is-numeric">COGS</th><th class="is-numeric">GP</th></tr></thead>
@@ -356,7 +356,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
 
 <?php elseif ($view === 'purchases'): ?>
     <?php $report = jw_report_purchase_detail($companyId, $from, $to); ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Purchase Detailed (<?= count($report['rows']) ?> lines)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th>Purchase</th><th>Party</th><th>Source</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone / diamond</th><th class="is-numeric">VAT</th><th class="is-numeric">Landed cost</th></tr></thead>
@@ -396,7 +396,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
 
 <?php elseif ($view === 'inventory'): ?>
     <?php $report = jw_report_inventory_detail($companyId, $from, $to); ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Inventory Detailed (<?= count($report['rows']) ?> items)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Item</th><th>Metal / Purity</th><th class="is-numeric">Opening fine</th><th class="is-numeric">Opening value</th><th class="is-numeric">In fine</th><th class="is-numeric">Out fine</th><th class="is-numeric">Closing fine</th><th class="is-numeric">Closing value</th><th class="is-numeric">Own</th><th class="is-numeric">With others</th><th class="is-numeric">Avg cost/fine</th></tr></thead>
@@ -447,7 +447,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
         <?php endforeach; ?>
     </section>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Every tax charged this period (<?= count($register['by_tax']) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr>
@@ -474,7 +474,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
     </section>
 
     <?php foreach ([['Output VAT (sales)', $register['output_rows'], $register['output']], ['Input VAT (purchases)', $register['input_rows'], $register['input']]] as [$title, $rows, $sums]): ?>
-        <section class="mbw-card" style="margin-top:14px">
+        <section class="mbw-card" data-collapsible style="margin-top:14px">
             <div class="mbw-card-head"><h2><?= e($title) ?> (<?= count($rows) ?>)</h2></div>
             <div style="overflow-x:auto"><table>
                 <thead><tr><th>Date</th><th>Document</th><th>Party</th><th>PAN</th><th>Item</th><th>VAT base</th><th class="is-numeric">Taxable</th><th class="is-numeric">Rate</th><th class="is-numeric">VAT</th></tr></thead>
@@ -501,7 +501,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
 
 <?php elseif ($view === 'karigar'): ?>
     <?php $wages = jw_report_karigar_wages($companyId, $from, $to); ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Kaligad Wages &amp; Wastage (<?= count($wages) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Kaligad</th><th>Engagement</th><th class="is-numeric">Jobs</th><th class="is-numeric">Received fine</th><th class="is-numeric">Wastage fine</th><th class="is-numeric">Wastage %</th><th class="is-numeric">Excess fine</th><th class="is-numeric">Making</th><th class="is-numeric">Recovered</th><th class="is-numeric">Net payable</th></tr></thead>
@@ -528,7 +528,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
     <?php if ($karigarId > 0): ?>
         <?php $ledger = jw_report_karigar_ledger($companyId, $karigarId, $from, $to); ?>
         <?php if ($ledger['karigar']): ?>
-        <section class="mbw-card" style="margin-top:14px">
+        <section class="mbw-card" data-collapsible style="margin-top:14px">
             <div class="mbw-card-head"><h2>Metal Ledger — <?= e((string) $ledger['karigar']['name']) ?></h2></div>
             <div style="overflow-x:auto"><table>
                 <thead><tr><th>Date</th><th>Type</th><th>Ref</th><th>Item</th><th>Purity</th><th class="is-numeric">In (fine)</th><th class="is-numeric">Out (fine)</th><th class="is-numeric">Balance (fine)</th></tr></thead>
@@ -583,7 +583,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
         $settle = $st['settlement'];
         $unitCode = (string) (($st['base_unit'] ?? [])['code'] ?? '');
     ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2><?= e((string) $st['karigar']['name']) ?> — statement</h2>
         </div>
@@ -684,7 +684,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
 
 <?php elseif ($view === 'bills'): ?>
     <?php $outstanding = jw_report_bill_outstanding($companyId); ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Bill-wise Outstanding (<?= count($outstanding) ?> parties)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Party</th><th>Bill</th><th>Type</th><th>Date</th><th class="is-numeric">Billed</th><th class="is-numeric">Settled</th><th class="is-numeric">Outstanding</th><th>Status</th></tr></thead>
@@ -727,7 +727,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
         <?php endforeach; ?>
     </section>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head">
             <h2>Promised on or before <?= e(app_date($uncollected['as_of'])) ?>, not collected (<?= count($uncollected['rows']) ?>)</h2>
             <a class="mbw-view-all" href="<?= e($exportUrl('uncollected')) ?>">Export CSV</a>

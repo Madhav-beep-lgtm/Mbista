@@ -405,7 +405,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="alert alert-info">Accounting entries dated on or before <?= e($lockedThrough) ?> are locked for this fiscal year.</div>
 <?php endif; ?>
 
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Create Vouchers</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/settings.php')) ?>">Fiscal setup moved to Settings</a></div></div>
     <div class="mbw-qa-grid" id="post-voucher">
         <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php')) ?>">
@@ -428,7 +428,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <?php if ($shareholdings !== []): ?>
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Shareholding and consolidation rules</h2></div>
     <div style="overflow-x:auto">
     <table>
@@ -451,7 +451,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 <?php endif; ?>
 
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Posted vouchers</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/ledgers.php')) ?>">Ledgers</a> <a class="mbw-view-all" href="<?= e(url('admin/day-book.php')) ?>">Day Book</a> <a class="mbw-view-all" href="<?= e(url('admin/voucher-form.php')) ?>">＋ New Voucher</a></div></div>
     <form method="get" action="<?= e(url('admin/accounting.php')) ?>" class="mbw-filter-bar">
         <?php if (!empty($_GET['fiscal_year_id'])): ?><input type="hidden" name="fiscal_year_id" value="<?= (int) $_GET['fiscal_year_id'] ?>"><?php endif; ?>

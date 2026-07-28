@@ -168,7 +168,7 @@ foreach ($bankAccounts as $bankRow) {
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <div class="admin-grid">
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Create Company</h2></div>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -191,7 +191,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </form>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Create Fiscal Year</h2></div>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -214,7 +214,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 </div>
 
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Companies</h2></div>
     <div style="overflow-x:auto">
     <table>
@@ -260,7 +260,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
-<section class="mbw-card" id="banks">
+<section class="mbw-card" data-collapsible id="banks">
     <div class="mbw-card-head"><h2>Company Bank Accounts</h2><?php if ($editBankAccount): ?><a class="mbw-view-all" href="<?= e(url('admin/companies.php#banks')) ?>">Cancel edit</a><?php endif; ?></div>
     <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
         Each company can keep several bank accounts. Invoices issued by a company print all its accounts marked
@@ -314,7 +314,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Fiscal Years</h2></div>
     <div style="overflow-x:auto">
     <table>

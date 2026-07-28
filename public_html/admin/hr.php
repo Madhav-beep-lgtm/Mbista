@@ -546,7 +546,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 }
             }
         ?>
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>Today</h2></div>
             <div class="actions">
                 <?php if (!$todayRow || !$todayRow['check_in_time']): ?>
@@ -568,7 +568,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </div>
         </section>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>My Recent Attendance</h2></div>
             <div style="overflow-x:auto">
             <table>
@@ -612,7 +612,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </form>
         </details>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>My Correction Requests</h2></div>
             <div style="overflow-x:auto">
             <table>
@@ -635,7 +635,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </div>
         </section>
     <?php else: ?>
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>Company Attendance</h2></div>
             <details class="feature-disclosure">
                 <summary>
@@ -663,7 +663,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </details>
         </section>
 
-            <section class="mbw-card">
+            <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head"><h2>Recent Records</h2></div>
                 <div style="overflow-x:auto">
                 <table>
@@ -690,7 +690,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 </div>
             </section>
 
-            <section class="mbw-card">
+            <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head"><h2>Correction Requests</h2></div>
                 <div style="overflow-x:auto">
                 <table>
@@ -738,7 +738,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 
 <?php if ($view === 'leave'): ?>
     <?php if ($role === 'admin'): ?>
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>Leave Types</h2></div>
             <details class="feature-disclosure">
                 <summary>
@@ -777,7 +777,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </div>
         </section>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>Leave Requests</h2></div>
             <div style="overflow-x:auto">
             <table>
@@ -861,7 +861,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </form>
         </details>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>My Leave Requests</h2></div>
             <div style="overflow-x:auto">
             <table>
@@ -888,7 +888,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 
 <?php if ($view === 'timesheets'): ?>
     <?php if ($role === 'admin'): ?>
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>Timesheets Pending Approval</h2></div>
             <div style="overflow-x:auto">
             <table>
@@ -930,7 +930,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </div>
         </section>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>Staff Utilization (Approved Entries)</h2></div>
             <div style="overflow-x:auto">
             <table>
@@ -987,7 +987,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </form>
         </details>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>My Timesheet Entries</h2></div>
             <form method="post" style="margin-bottom:12px;">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

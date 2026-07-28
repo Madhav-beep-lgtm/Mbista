@@ -174,5 +174,84 @@ ok(str_contains($trade, 'jw_page_head('), 'The trade page uses the shared docume
 ok(substr_count($trade, 'jw_summary_rail(') === 2, 'Both the purchase and the sale carry a summary rail');
 ok(str_contains($trade, 'jw_summary_rail_script();'), 'And the live-totals script is emitted');
 
+echo "\n7. Long pages fold into sections instead of scrolling forever\n";
+/*
+ * Settings and masters screens stack a dozen cards each. Every card that opts
+ * in with data-collapsible folds to its heading, and the choice is remembered
+ * per page — so a shop that lives in Taxes finds Taxes open and the rest away.
+ */
+ok(str_contains($mainJs, '[data-collapsible]'), 'The script looks for opted-in cards');
+ok(str_contains($mainJs, 'mbw-card-body'), 'And wraps the part it hides');
+ok(str_contains($portal, '.is-collapsed .mbw-card-body'), 'The stylesheet hides it');
+ok(str_contains($portal, '@media print'), 'But a printed page shows everything, whatever is folded on screen');
+
+/*
+ * The next two are not cosmetic.
+ *
+ * The body is re-homed into the HEADING'S parent, not the card's. On some
+ * screens the heading sits INSIDE the form, and appending to the card would
+ * lift those fields out of the form and stop them posting at all.
+ */
+ok(str_contains($mainJs, 'const host = head.parentNode;') && str_contains($mainJs, 'host.appendChild(body);'),
+    'The hidden body stays inside whatever container the heading is in, so form fields keep posting');
+/*
+ * And a panel you can drag by its heading must not also collapse on a heading
+ * click: dragging it and letting go IS a click, so the card would fold every
+ * single time somebody moved it.
+ */
+ok(str_contains($mainJs, "if (!card.hasAttribute('data-draggable'))"),
+    'A draggable panel folds only from its chevron, so dragging it does not collapse it');
+
+$jewellery = (string) file_get_contents($root . '/public_html/admin/jewellery.php');
+ok(substr_count($jewellery, 'data-collapsible') >= 15, 'The jewellery screens are segregated');
+ok(str_contains($jewellery, 'data-collapsible data-collapsed'),
+    'With the secondary sections folded to begin with');
+
+$unmarked = [];
+foreach (['hospitality', 'workspace', 'hr', 'fixed-assets', 'accounting-inventory', 'jewellery-workshop'] as $page) {
+    $path = $root . '/public_html/admin/' . $page . '.php';
+    if (is_file($path) && !str_contains((string) file_get_contents($path), 'data-collapsible')) {
+        $unmarked[] = $page;
+    }
+}
+ok($unmarked === [], 'And so is every other card-heavy module'
+    . ($unmarked === [] ? '' : ' — not ' . implode(', ', $unmarked)));
+
+echo "\n8. Every master dropdown offers \"+ Add new\"\n";
+/*
+ * A clerk halfway through a bill finds the customer is not on the list. Without
+ * this the only way out is to abandon the document, go and create the record,
+ * and start again.
+ */
+ok(str_contains($mainJs, '+ Add new'), 'The option exists');
+ok(str_contains($mainJs, 'select.appendChild(option)'),
+    'Appended LAST, so arrowing through a list never lands on it by accident');
+ok(str_contains($mainJs, '_blank'), 'It opens in a new tab, so the half-filled document survives');
+ok(str_contains($mainJs, 'data-last-value'), 'And the dropdown goes back to what was chosen before');
+
+/*
+ * The exclusions the user asked for, which are also just correct: a filter list
+ * is for narrowing what you are looking at, not for creating anything.
+ */
+ok(str_contains($mainJs, "!== 'post'"), 'Only data-entry forms get it — a GET form is a filter');
+ok(str_contains($mainJs, '.jw-filter'), 'The filter bar is skipped explicitly');
+ok(str_contains($mainJs, "indexOf('report')"), 'And report pages get none of it');
+
+/*
+ * A dropdown that sends you to a page which does not exist is worse than one
+ * that sends you nowhere, so every target is checked against the filesystem.
+ */
+preg_match_all("~'(admin/[a-z-]+\.php[^']*)'~", $mainJs, $addNewTargets);
+$targets = array_unique($addNewTargets[1]);
+ok(count($targets) >= 6, 'Several master screens are mapped (' . count($targets) . ')');
+$missingTargets = [];
+foreach ($targets as $target) {
+    if (!is_file($root . '/public_html/' . explode('?', $target)[0])) {
+        $missingTargets[] = $target;
+    }
+}
+ok($missingTargets === [], 'Every one of them is a page that exists'
+    . ($missingTargets === [] ? '' : ' — missing ' . implode(', ', $missingTargets)));
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

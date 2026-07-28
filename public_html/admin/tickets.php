@@ -401,7 +401,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 ?>
 
 <?php if ($ticketId === 0): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Filters</h2>
         </div>
@@ -429,7 +429,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </form>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Support tickets</h2>
         </div>
@@ -493,7 +493,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
         </div>
     </section>
 <?php else: ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2><?= e($ticket['ticket_no']) ?> - <?= e($ticket['subject']) ?></h2>
             <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/tickets.php')) ?>">&larr; Back to tickets</a></div>
@@ -537,7 +537,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
     </section>
 
         <?php if ($role === 'admin' && ($ticket['request_type'] ?? 'none') !== 'none'): ?>
-            <section class="mbw-card">
+            <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head">
                     <h2>Process request</h2>
                 </div>
@@ -571,7 +571,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </section>
         <?php endif; ?>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head">
                 <h2>Update ticket</h2>
             </div>
@@ -606,7 +606,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </form>
         </section>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head">
                 <h2>Conversation</h2>
             </div>

@@ -574,7 +574,7 @@ $pageHero = ['icon' => 'users'];
 $bodyClass = 'admin-layout accounting-module-page payroll-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<section class="mbw-card" aria-label="Enrol employee">
+<section class="mbw-card" data-collapsible aria-label="Enrol employee">
     <div class="mbw-card-head">
         <h2><?= $editEmployee ? 'Edit payroll profile' : 'Add employee to payroll' ?></h2>
         <div class="mbw-card-tools">
@@ -718,7 +718,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <?php if (($editEmployee ?? null) && $isAdmin): ?>
-<section class="mbw-card" aria-label="Tax profile and projections" id="taxprofile">
+<section class="mbw-card" data-collapsible aria-label="Tax profile and projections" id="taxprofile">
     <div class="mbw-card-head"><h2>Tax Profile &amp; Projections — <?= e($editEmployee['employee_code']) ?> (<?= e($fiscalYear['label'] ?? '') ?>)</h2></div>
     <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
         These figures feed the PROJECTED annual tax only — they never post to accounting or Salary Payable.
@@ -843,7 +843,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 <?php endif; ?>
 
-<section class="mbw-card" aria-label="Enrolled employees">
+<section class="mbw-card" data-collapsible aria-label="Enrolled employees">
     <div class="mbw-card-head"><h2>Enrolled Employees (<?= count($employees) ?>)</h2></div>
     <div style="overflow-x:auto">
     <table>
@@ -884,7 +884,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 .pr-adjust-form label{display:grid;gap:3px;font-size:12px;font-weight:600}
 .pr-adjust-form input{min-height:34px}.pr-adjust-form small{color:var(--mbw-muted,#5b6b64);font-weight:400;font-size:11px}
 </style>
-<section class="mbw-card" aria-label="Advances and loans">
+<section class="mbw-card" data-collapsible aria-label="Advances and loans">
     <div class="mbw-card-head"><h2>Advances / Loans</h2></div>
     <form method="post" class="workspace-form-grid" style="margin-bottom:14px">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

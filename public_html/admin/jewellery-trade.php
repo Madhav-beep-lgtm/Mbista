@@ -538,7 +538,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         <?php endif; ?>
     <?php endif; ?>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Purchases (<?= count($docs) ?>)</h2></div>
         <?php jw_render_filter_bar([
             'hidden' => ['view' => 'purchases'],
@@ -763,7 +763,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         <?php endif; ?>
     <?php endif; ?>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2></div>
         <?php jw_render_filter_bar([
             'hidden' => ['view' => 'sales'],
@@ -856,7 +856,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         <?php endforeach; ?>
     </section>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Bill-wise Outstanding</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Party</th><th>Bill</th><th>Type</th><th>Date</th><th class="is-numeric">Billed</th><th class="is-numeric">Settled</th><th class="is-numeric">Outstanding</th><th>Status</th></tr></thead>
@@ -884,7 +884,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     </section>
 
     <?php if ($canEdit && $settleParty > 0): ?>
-    <section class="mbw-card" data-draggable style="margin-top:14px">
+    <section class="mbw-card" data-collapsible data-draggable style="margin-top:14px">
         <div class="mbw-card-head">
             <h2>Settle Bills</h2>
             <a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=bills')) ?>">Cancel</a>
@@ -959,7 +959,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     </section>
     <?php endif; ?>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Recent Settlements (<?= count($settlements) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>No.</th><th>Date</th><th>Party</th><th>Direction</th><th>Mode</th><th class="is-numeric">Amount</th><th>Status</th><th></th></tr></thead>

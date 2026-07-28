@@ -184,7 +184,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </nav>
 
 <?php if ($tab === 'overview'): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Client Business Type</h2><span class="frm-optional">Drives the statement formats and available features for this client</span></div>
         <form method="post" style="display:flex;gap:8px;flex-wrap:wrap">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -200,7 +200,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <article class="mbw-kpi"><div><span class="mbw-kpi-label"><?= e($label) ?></span><div class="mbw-kpi-value"><?= e($fmtMoney((float) $amount)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e($booksFy['label'] ?? '') ?></span></span></div><span class="mbw-chip tone-<?= e($tone) ?>"><?= icon($iconName) ?></span></article>
         <?php endforeach; ?>
     </section>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Recent Activity</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e($booksUrl('vouchers')) ?>">All Vouchers</a></div></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th>Voucher No.</th><th>Type</th><th>Narration</th><th class="is-numeric">Amount</th><th>Status</th></tr></thead>
@@ -213,7 +213,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </table></div>
     </section>
 <?php elseif ($tab === 'vouchers'): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>New Entry</h2><span class="frm-optional"><?= $access === 'direct' ? 'Posts immediately (Super Admin / serving admin)' : 'Requires the client\'s approval before posting' ?></span></div>
         <form method="post" class="frm-grid frm-grid-4">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -237,7 +237,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <div style="grid-column:1/-1"><button type="submit"><?= icon('journal') ?><?= $access === 'direct' ? 'Post Entry' : 'Submit for Client Approval' ?></button></div>
         </form>
     </section>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Voucher Register</h2><span class="mbw-pill tone-gray"><?= count($booksVouchers) ?> shown</span></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th>Voucher No.</th><th>Type</th><th>Narration</th><th class="is-numeric">Amount</th><th>Status</th><th></th></tr></thead>

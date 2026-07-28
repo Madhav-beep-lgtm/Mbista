@@ -410,7 +410,7 @@ jw_filter_bar_styles();
 
 <?php if ($view === 'orders'): ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-draggable>
+    <section class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head">
             <h2><?= $editOrder ? 'Edit Order — ' . e((string) $editOrder['order_no']) : 'New Order' ?></h2>
             <?php if ($editOrder): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">New order</a><?php endif; ?>
@@ -509,7 +509,7 @@ jw_filter_bar_styles();
     <?php endif; ?>
 
     <?php if ($editOrder && $canEdit): ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head">
             <h2>Advance on <?= e((string) $editOrder['order_no']) ?></h2>
         </div>
@@ -651,7 +651,7 @@ jw_filter_bar_styles();
     </section>
     <?php endif; ?>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Orders (<?= count($orders) ?>)</h2></div>
         <?php jw_render_filter_bar([
             'hidden' => ['view' => 'orders'],
@@ -732,7 +732,7 @@ jw_filter_bar_styles();
 
 <?php elseif ($view === 'karigars'): ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-draggable>
+    <section class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head">
             <h2><?= $editKarigar ? 'Edit Kaligad — ' . e((string) $editKarigar['code']) : 'Add Kaligad' ?></h2>
             <?php if ($editKarigar): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=karigars')) ?>">Add new</a><?php endif; ?>
@@ -775,7 +775,7 @@ jw_filter_bar_styles();
     </section>
     <?php endif; ?>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Kaligads (<?= count($karigars) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Code</th><th>Name</th><th>Engagement</th><th>Making</th><th class="is-numeric">Allowed wastage</th><th class="is-numeric">Metal held (fine)</th><th class="is-numeric">Work needs</th><th class="is-numeric">Excess / shortfall</th><th class="is-numeric">Wages payable</th><th>Status</th><th></th></tr></thead>
@@ -818,7 +818,7 @@ jw_filter_bar_styles();
 
 <?php elseif ($view === 'assignments'): ?>
     <?php if ($canPost): ?>
-    <section class="mbw-card" data-draggable>
+    <section class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head"><h2>Issue Metal to a Kaligad</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -911,7 +911,7 @@ jw_filter_bar_styles();
     <?php endif; ?>
 
     <?php if ($receiveTarget && (string) $receiveTarget['status'] === 'issued' && $canPost): ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head">
             <h2>Receive Back — <?= e((string) $receiveTarget['issue_no']) ?> (<?= e((string) $receiveTarget['karigar_name']) ?>)</h2>
             <a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=assignments')) ?>">Cancel</a>
@@ -971,7 +971,7 @@ jw_filter_bar_styles();
     </section>
     <?php endif; ?>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Assignments (<?= count($assignments) ?>)</h2></div>
         <?php jw_render_filter_bar([
             'hidden' => ['view' => 'assignments'],
@@ -1037,7 +1037,7 @@ jw_filter_bar_styles();
     <div class="notice" style="margin-bottom:14px">
         These orders have come back from the kaligad and are finished, but the customer has not collected them yet.
     </div>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Received but Not Delivered (<?= count($pending) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Order</th><th>Customer</th><th>Received on</th><th class="is-numeric">Weight back</th><th class="is-numeric">Days waiting</th><th>Promised</th><th></th></tr></thead>
@@ -1070,7 +1070,7 @@ jw_filter_bar_styles();
 
 <?php elseif ($view === 'refinery'): ?>
     <?php if ($canPost): ?>
-    <section class="mbw-card" data-draggable>
+    <section class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head"><h2>Send Metal for Refining</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1112,7 +1112,7 @@ jw_filter_bar_styles();
     </section>
     <?php endif; ?>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Refinery Jobs (<?= count($jobs) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Job</th><th>Refiner</th><th>Issued</th><th class="is-numeric">Out (fine)</th><th class="is-numeric">Back (fine)</th><th class="is-numeric">Loss (fine)</th><th class="is-numeric">Charges</th><th>Status</th><th></th></tr></thead>
@@ -1149,7 +1149,7 @@ jw_filter_bar_styles();
 
     <?php $receiveJob = jewellery_refinery_job($companyId, (int) ($_GET['receive'] ?? 0)); ?>
     <?php if ($receiveJob && (string) $receiveJob['status'] === 'issued' && $canPost): ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head">
             <h2>Receive Refined Metal — <?= e((string) $receiveJob['job_no']) ?></h2>
             <a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=refinery')) ?>">Cancel</a>

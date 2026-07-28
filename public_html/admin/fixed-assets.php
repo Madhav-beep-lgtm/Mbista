@@ -2055,7 +2055,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <input type="hidden" name="action" value="save_revaluation_batch">
                     <input type="hidden" name="batch_id" value="<?= e((int) $revaluationBatch['id']) ?>">
 
-                    <section class="mbw-card">
+                    <section class="mbw-card" data-collapsible>
                         <div class="mbw-card-head">
                             <div>
                                 <span class="fa-eyebrow">Batch details</span>
@@ -2101,7 +2101,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         </div>
                     </section>
 
-                    <section class="mbw-card">
+                    <section class="mbw-card" data-collapsible>
                         <div class="mbw-card-head">
                             <div>
                                 <span class="fa-eyebrow">Class-wide asset list</span>
@@ -2334,7 +2334,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php endif; ?>
                 </section>
 
-                <section class="mbw-card">
+                <section class="mbw-card" data-collapsible>
                     <div class="mbw-card-head">
                         <div>
                             <span class="fa-eyebrow">Complete history</span>
@@ -2438,7 +2438,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             if ((int) $ln['posted'] === 0) { $nextUnposted = $ln; break; }
         }
         ?>
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>Lease <?= e($activeLease['contract_ref']) ?> — schedule</h2>
                 <div class="mbw-card-tools"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=leases')) ?>">Back to leases</a></div></div>
             <?php if ($nextUnposted): ?>
@@ -2492,7 +2492,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     $leases->execute(['cid' => $companyId]);
     $leases = $leases->fetchAll(PDO::FETCH_ASSOC);
     ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>New lease (IFRS 16)</h2></div>
         <?php
         $leaseDefRou = fa_resolve_mapping($companyId, 'rou_asset');
@@ -2544,7 +2544,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <div class="workspace-span-2"><button type="submit"><?= icon('contracts') ?>Create lease + ROU asset</button></div>
         </form>
     </section>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Leases</h2></div>
         <div class="rc-table-scroll"><table class="rc-table">
             <thead><tr><th>Ref</th><th>ROU asset</th><th class="align-right">Initial liability</th><th class="align-right">ROU initial</th><th>Term</th><th>Rate</th><th>Status</th><th></th></tr></thead>
@@ -2572,7 +2572,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     ?>
     <?php $detailAcquisitionUnposted = in_array((int) $detailAsset['id'], $unpostedAcquisitionIds, true); ?>
     <?php if ($detailAcquisitionUnposted): ?>
-        <section class="mbw-card" style="border-left:4px solid #c0392b">
+        <section class="mbw-card" data-collapsible style="border-left:4px solid #c0392b">
             <div class="mbw-card-head"><h2>Acquisition not posted to the ledger</h2></div>
             <p style="margin:0 0 10px">This asset sits in the register, but its acquisition voucher was never posted, so the books do not yet show the asset cost. Choose the two ledgers and post it now (Dr asset cost / Cr funded-from). The choice sticks to this asset only.</p>
             <?php
@@ -2595,7 +2595,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </form>
         </section>
     <?php endif; ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2><?= e($detailAsset['name']) ?> <span class="mbw-pill tone-gray"><?= e($detailAsset['asset_code']) ?></span><?php if ($detailAcquisitionUnposted): ?> <span class="mbw-pill tone-red">GL not posted</span><?php endif; ?></h2>
             <div class="mbw-card-tools"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php')) ?>">Back to register</a></div></div>
         <div class="users-view-grid">
@@ -2811,7 +2811,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     $catStmt->execute(['cid' => $companyId]);
     $categories = $catStmt->fetchAll(PDO::FETCH_ASSOC);
     ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Add asset category</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -2825,7 +2825,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </form>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Asset Categories</h2></div>
         <div class="rc-table-scroll"><table class="rc-table">
             <thead><tr><th>Name</th><th>Class</th><th>Measurement model</th><th>Default method</th><th class="align-right">Default life</th><th class="align-right">Default rate</th><th>Status</th><th></th></tr></thead>
@@ -2856,7 +2856,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 
 <?php else: ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Register a fixed asset</h2><span class="frm-optional">The ledgers you choose here belong to THIS asset only — registration posts Dr asset cost / Cr funded-from immediately</span></div>
         <?php
         $regDefCost = fa_resolve_mapping($companyId, 'ppe_cost');
@@ -2897,7 +2897,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </form>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Asset Register</h2>
             <div class="mbw-card-tools">
                 <form method="get" style="display:flex;gap:8px;align-items:center">

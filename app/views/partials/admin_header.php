@@ -215,7 +215,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#064e3b">
     <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="/assets/css/style.css?v=20260718h">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260718h">
+    <link rel="stylesheet" href="/assets/css/portal.css?v=20260728">
     <link rel="stylesheet" href="/assets/css/theme-brown.css?v=20260718h">
     <link rel="stylesheet" href="/assets/css/theme-sahakari-green.css?v=20260718h">
     <link rel="stylesheet" href="/assets/css/text-contrast-only.css?v=20260718s">

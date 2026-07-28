@@ -859,7 +859,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px">
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>Top Menu Items (month to date)</h2><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=gp')) ?>">All items →</a></div>
             <div style="overflow-x:auto"><table>
                 <thead><tr><th>Item</th><th class="is-numeric">Net Sales</th><th class="is-numeric">Est. GP</th><th class="is-numeric">GP %</th></tr></thead>
@@ -871,7 +871,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </tbody>
             </table></div>
         </section>
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>Category-wise (month to date)</h2></div>
             <div style="overflow-x:auto"><table>
                 <thead><tr><th>Category</th><th class="is-numeric">Net Sales</th><th class="is-numeric">Est. Cost</th><th class="is-numeric">Est. GP</th><th class="is-numeric">Weighted GP %</th><th class="is-numeric">Sales Contrib.</th></tr></thead>
@@ -901,7 +901,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $ingredients = $ingredientsStmt->fetchAll();
     ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2><?= $editIngredient ? 'Edit Ingredient' : 'Add Ingredient' ?></h2><?php if ($editIngredient): ?><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=ingredients')) ?>">Cancel</a><?php endif; ?></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -931,7 +931,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </form>
     </section>
     <?php endif; ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Ingredient Master (<?= count($ingredients) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Units</th><th class="is-numeric">Cost / purchase unit</th><th class="is-numeric">Cost / recipe unit</th><th>Wastage / Yield</th><th>Effective</th><th>Used in</th><th>Status</th><th></th></tr></thead>
@@ -975,7 +975,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $menuItems = $menuItemsStmt->fetchAll();
     ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2><?= $editMenuItem ? 'Edit Menu Item' : 'Add Menu Item' ?></h2><?php if ($editMenuItem): ?><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=menu-items')) ?>">Cancel</a><?php endif; ?></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1001,7 +1001,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </form>
     </section>
     <?php endif; ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Menu Items (<?= count($menuItems) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Code</th><th>Name</th><th>Category</th><th class="is-numeric">Std. price</th><th>Unit</th><th>Recipes</th><th>Status</th><th></th></tr></thead>
@@ -1061,7 +1061,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $allIngredients = $allIngredients->fetchAll();
     ?>
     <?php if ($canEdit && (!$openRecipe || (string) $openRecipe['status'] === 'draft')): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2><?= $openRecipe ? 'Edit Draft Recipe — ' . e($openRecipe['mi_code'] ?? $openRecipe['menu_item_code']) . ' v' . (int) $openRecipe['version'] : 'New Recipe (saved as draft)' ?></h2>
             <?php if ($openRecipe): ?><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=recipes')) ?>">Close</a><?php endif; ?></div>
         <form method="post" class="workspace-form-grid" id="recipe-form">
@@ -1116,7 +1116,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php endif; ?>
 
     <?php if ($openRecipe && $recipeCostSheet): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Recipe Cost Sheet — <?= e(($openRecipe['mi_code'] ?? $openRecipe['menu_item_code']) . ' v' . $openRecipe['version']) ?>
             <span class="mbw-pill <?= $openRecipe['status'] === 'active' ? 'tone-green' : ($openRecipe['status'] === 'draft' ? 'tone-amber' : 'tone-gray') ?>"><?= e(ucfirst((string) $openRecipe['status'])) ?></span></h2>
             <div class="mbw-card-tools">
@@ -1171,7 +1171,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
     <?php endif; ?>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Recipes (<?= count($recipes) ?>)</h2><?php if ($menuFilter > 0): ?><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=recipes')) ?>">Show all</a><?php endif; ?></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Menu item</th><th>Recipe</th><th>Version</th><th>Effective</th><th class="is-numeric">Portions</th><th>Status</th><th></th></tr></thead>
@@ -1216,7 +1216,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $allMenuItems->execute(['cid' => $companyId]);
     $allMenuItems = $allMenuItems->fetchAll();
     ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Unmapped Sales Items (<?= count($queue) ?>)</h2>
             <form method="get" style="display:flex;gap:8px;align-items:center">
                 <input type="hidden" name="view" value="mapping">
@@ -1268,7 +1268,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </table></div>
         <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Mapping never changes the original sales record. Different sales descriptions can map to the same menu item.</p>
     </section>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Approved Mappings &amp; Ignores</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Match</th><th>Menu item</th><th>Status</th><th>Effective</th><th>Notes / reason</th></tr></thead>
@@ -1298,7 +1298,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $runs = $runsStmt->fetchAll();
     $statusTones = ['costed' => 'tone-green', 'unmapped' => 'tone-amber', 'ignored' => 'tone-gray', 'missing_recipe' => 'tone-red', 'draft_recipe' => 'tone-amber', 'missing_cost' => 'tone-red', 'invalid_conversion' => 'tone-red', 'no_quantity' => 'tone-gray'];
     ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Daily Costing</h2>
             <form method="get" style="display:flex;gap:8px;align-items:center">
                 <input type="hidden" name="view" value="costing">
@@ -1332,7 +1332,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </p>
         <?php endif; ?>
     </section>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Costing Lines (<?= count($costingLines) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th>Invoice</th><th>Sales item</th><th>Menu item</th><th class="is-numeric">Net qty</th><th class="is-numeric">Gross</th><th class="is-numeric">Disc.</th><th class="is-numeric">VAT</th><th class="is-numeric">Net sales</th><th>Recipe</th><th class="is-numeric">Unit cost</th><th class="is-numeric">Est. cost</th><th class="is-numeric">Est. GP</th><th class="is-numeric">GP %</th><th>Status</th></tr></thead>
@@ -1377,7 +1377,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $prevComparable = $prevFrom >= $fyStart;
     $prevSummary = $prevComparable ? hospitality_summary($companyId, $prevFrom, $prevTo) : null;
     ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2><?= $view === 'gp' ? 'Estimated Gross Profit' : 'Hospitality Reports' ?> — <?= e(($fiscalYear['label'] ?? '') . ' · ' . $rangeFrom . ' → ' . $rangeTo) ?></h2>
             <div class="mbw-card-tools">
                 <form method="get" style="display:flex;gap:8px;align-items:center">
@@ -1415,7 +1415,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
 
     <?php if ($prevSummary !== null): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Comparison with previous equivalent period (<?= e($prevFrom . ' → ' . $prevTo) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Measure</th><th class="is-numeric">Current</th><th class="is-numeric">Previous</th><th class="is-numeric">Change</th><th class="is-numeric">Change %</th></tr></thead>
@@ -1441,7 +1441,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <div class="notice">Previous-period comparison: N/A — the preceding equivalent period falls outside the selected fiscal year.</div>
     <?php endif; ?>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Category-Wise Estimated GP</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Category</th><th class="is-numeric">Items</th><th class="is-numeric">Net qty</th><th class="is-numeric">Gross</th><th class="is-numeric">Disc.</th><th class="is-numeric">VAT</th><th class="is-numeric">Net sales</th><th class="is-numeric">Est. cost</th><th class="is-numeric">Est. GP</th><th class="is-numeric">Weighted GP %</th><th class="is-numeric">Sales contrib.</th><th class="is-numeric">GP contrib.</th></tr></thead>
@@ -1473,7 +1473,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px" title="Weighted = total GP ÷ total net sales. A simple average of item percentages would treat a tiny item like a large one.">Weighted GP % = category estimated GP ÷ category net sales × 100 (never a plain average of item GP percentages).</p>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Item-Wise Estimated GP</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Menu item</th><th class="is-numeric">Qty</th><th class="is-numeric">Ret.</th><th class="is-numeric">Net qty</th><th class="is-numeric">Net sales</th><th class="is-numeric">Avg price</th><th class="is-numeric">Avg cost</th><th class="is-numeric">Est. cost</th><th class="is-numeric">Est. GP</th><th class="is-numeric">GP %</th><th class="is-numeric">Sales contrib.</th><th class="is-numeric">GP contrib.</th><th class="is-numeric">Txns</th><th>Last sale</th></tr></thead>
@@ -1501,7 +1501,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </table></div>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Period-Wise Trend (daily)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th class="is-numeric">Net sales</th><th class="is-numeric">Est. cost</th><th class="is-numeric">Est. GP</th><th class="is-numeric">Weighted GP %</th></tr></thead>
@@ -1515,7 +1515,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </table></div>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Exceptions (<?= count($exceptions) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th>Invoice</th><th>Sales item</th><th class="is-numeric">Net sales</th><th>Status</th><th>Detail</th></tr></thead>
@@ -1535,7 +1535,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </table></div>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Method &amp; Disclaimer</h2></div>
         <p style="font-size:12.5px;color:var(--mbw-muted);line-height:1.7;margin:0">
             Costing basis: <?= e((string) $settings['costing_basis'] === 'sale_date' ? 'recipe and ingredient costs in force on the SALE date' : 'costs at calculation date') ?>.
@@ -1607,7 +1607,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php if ($salesPreviewProblem !== null): ?>
         <div class="notice error" style="margin-bottom:14px"><?= e($salesPreviewProblem) ?></div>
     <?php endif; ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Ledger Mapping &amp; VAT (<?= count($ledgerMapRows) ?> categor<?= count($ledgerMapRows) === 1 ? 'y' : 'ies' ?>)</h2></div>
         <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
             One row per category, exactly as written in the sheet (Food, Beverage, Bar…). Each category's totals post to ITS OWN ledgers —
@@ -1673,7 +1673,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </p>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Upload Daily Sales Sheet</h2></div>
         <?php if (!$canPost): ?>
             <div class="notice error">You do not have permission to post sales (hospitality create permission needed).</div>
@@ -1706,7 +1706,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </table></div>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Upload History (<?= count($uploadHistory) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>#</th><th>File</th><th>Dates</th><th class="is-numeric">Rows</th><th class="is-numeric">Vouchers</th><th class="is-numeric">Gross</th><th class="is-numeric">Discount</th><th class="is-numeric">VAT</th><th class="is-numeric">Receivable</th><th>Status</th><th>Posted</th><th>Recipe costing</th></tr></thead>
@@ -1763,7 +1763,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $savedRunsStmt->execute(['cid' => $companyId]);
     $savedRuns = $savedRunsStmt->fetchAll();
     ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2><?= icon('reports') ?> Saved Costing Runs (<?= count($savedRuns) ?>)</h2>
             <a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=reports')) ?>">Open Reports →</a>
         </div>
@@ -1806,7 +1806,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $previewErrors = (int) $salesPreview['error_count'];
     $previewTotals = $salesPreview['totals'];
     ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Preview — check before posting</h2><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Upload a different sheet</a></div>
         <section class="mbw-kpi-grid" aria-label="Sheet summary">
             <?php foreach ([
@@ -1830,7 +1830,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <?php endif; ?>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Voucher per Day</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th class="is-numeric">Rows</th><th class="is-numeric">Dr Receivable</th><th class="is-numeric">Dr Discount</th><th>Cr Sales ledger(s)</th><th class="is-numeric">Cr VAT</th></tr></thead>
@@ -1854,7 +1854,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </table></div>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Rows (<?= count($salesPreview['rows']) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Sheet row</th><th>Date</th><th>Category</th><th>Item</th><th class="is-numeric">Qty</th><th class="is-numeric">Amount</th><th class="is-numeric">Discount</th><th class="is-numeric">VAT</th><th class="is-numeric">Taxable</th><th>Sales ledger</th><th>Status</th></tr></thead>
@@ -1917,7 +1917,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             $invLedgerList = $invLedgerStmt->fetchAll(PDO::FETCH_ASSOC);
         }
     ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Inventory Posting Ledgers</h2></div>
         <p class="frm-optional" style="margin:0 0 12px">
             The same rows the Inventory module reads — set here or there, it is one setting.
@@ -1969,7 +1969,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </table></div>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Hospitality Settings (this client only)</h2></div>
         <?php if (!$canEdit): ?><div class="notice">You have view-only access to these settings.</div><?php endif; ?>
         <form method="post" class="workspace-form-grid" <?= $canEdit ? '' : 'style="pointer-events:none;opacity:.7"' ?>>

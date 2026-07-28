@@ -342,7 +342,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
     </section>
 
     <?php if ($role === 'admin' && $clients !== [] && $activeComplianceTypes !== []): ?>
-    <section class="mbw-card" style="margin-bottom:16px;">
+    <section class="mbw-card" data-collapsible style="margin-bottom:16px;">
         <div class="mbw-card-head">
             <h2>Create Deadline</h2>
         </div>
@@ -400,7 +400,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
     </section>
     <?php endif; ?>
 
-    <section class="mbw-card" style="margin-bottom:16px;">
+    <section class="mbw-card" data-collapsible style="margin-bottom:16px;">
         <div class="mbw-card-head">
             <h2>Filters</h2>
         </div>
@@ -431,7 +431,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             </form>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Compliance Deadlines</h2>
         </div>
@@ -502,7 +502,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 <?php endif; ?>
 
 <?php if ($view === 'types' && $role === 'admin'): ?>
-    <section class="mbw-card" style="margin-bottom:16px;">
+    <section class="mbw-card" data-collapsible style="margin-bottom:16px;">
         <div class="mbw-card-head">
             <h2>Create Type</h2>
         </div>
@@ -525,7 +525,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
         </details>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Compliance Types</h2>
         </div>
@@ -587,7 +587,7 @@ $overdueStmt = db()->prepare("SELECT cd.statutory_due_date, ct.name AS type_name
 $overdueStmt->execute(['cid' => $companyId]);
 $overdueDeadlines = $overdueStmt->fetchAll();
 ?>
-<section class="mbw-card" aria-label="Government interest and fines calculator">
+<section class="mbw-card" data-collapsible aria-label="Government interest and fines calculator">
     <div class="mbw-card-head">
         <h2><?= icon('analytics') ?>Government Interest &amp; Fines (calculator)</h2>
         <div class="mbw-card-tools"><span class="mbw-pill tone-amber">Calculates only — posts nothing until an admin does</span></div>

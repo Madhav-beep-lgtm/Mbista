@@ -1837,7 +1837,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <a class="mbw-kpi" href="<?= e(url('admin/workspace.php?view=tasks')) ?>"><div><span class="mbw-kpi-label">Tracked Tasks</span><div class="mbw-kpi-value"><?= e((string) $totalTasks) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">all statuses</span></span></div><span class="mbw-chip tone-amber"><?= icon('tasks') ?></span></a>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Work Modules</h2>
         </div>
@@ -1854,7 +1854,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <?php if ($view === 'clients'): ?>
-    <section class="mbw-card" id="clients">
+    <section class="mbw-card" data-collapsible id="clients">
         <div class="mbw-card-head">
             <h2>Clients</h2>
         </div>
@@ -1910,7 +1910,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         
 
         <?php if ($selectedClient && $clientMode === 'view'): ?>
-            <section class="mbw-card">
+            <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head">
                     <h2>Client Profile</h2>
                     <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/workspace.php?view=clients')) ?>">Back to List</a></div>
@@ -2008,7 +2008,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
 
         <?php if ($unlinkedCustomers !== []): ?>
-            <section class="mbw-card">
+            <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head">
                     <h2>Customer Logins Without a Client Profile</h2>
                 </div>
@@ -2042,7 +2042,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
 
         <?php if ($otherPortalClients !== []): ?>
-            <section class="mbw-card">
+            <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head">
                     <h2>Clients in Other Portals You Manage</h2>
                 </div>
@@ -2067,7 +2067,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </section>
         <?php endif; ?>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head">
                 <h2>Recent Client Profiles</h2>
             </div>
@@ -2120,7 +2120,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <?php if ($view === 'industries'): ?>
-    <section class="mbw-card" id="industries">
+    <section class="mbw-card" data-collapsible id="industries">
         <div class="mbw-card-head">
             <h2>Industry Management</h2>
         </div>
@@ -2168,7 +2168,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <?php if ($view === 'service-providers'): ?>
-    <section class="mbw-card" id="service-providers">
+    <section class="mbw-card" data-collapsible id="service-providers">
         <div class="mbw-card-head">
             <h2>Service Provider Entity Management</h2>
         </div>
@@ -2210,7 +2210,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <?php if ($view === 'teams'): ?>
-    <section class="mbw-card" id="teams">
+    <section class="mbw-card" data-collapsible id="teams">
         <div class="mbw-card-head">
             <h2>Teams</h2>
         </div>
@@ -2244,7 +2244,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
         
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head">
                 <h2>Team List</h2>
             </div>
@@ -2278,7 +2278,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <?php if ($view === 'contracts'): ?>
-    <section class="mbw-card" id="contracts">
+    <section class="mbw-card" data-collapsible id="contracts">
         <div class="mbw-card-head">
             <h2>Service Contracts</h2>
         </div>
@@ -2346,7 +2346,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
         
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head">
                 <h2>Recent Service Contracts</h2>
             </div>
@@ -2410,7 +2410,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <?php if ($view === 'tasks'): ?>
-    <section class="mbw-card" id="tasks">
+    <section class="mbw-card" data-collapsible id="tasks">
         <div class="mbw-card-head">
             <h2>Tasks</h2>
         </div>
@@ -2767,7 +2767,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </form>
         </div>
 
-        <section class="mbw-card" style="margin-top:20px;">
+        <section class="mbw-card" data-collapsible style="margin-top:20px;">
             <div class="mbw-card-head">
                 <h2>Task List</h2>
             </div>
@@ -2917,7 +2917,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <?php if ($view === 'invoices'): ?>
-     <section class="mbw-card" id="invoices">
+     <section class="mbw-card" data-collapsible id="invoices">
          <div class="mbw-card-head">
              <h2>Invoices</h2>
          </div>
@@ -2971,7 +2971,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
              </div>
          
 
-             <section class="mbw-card">
+             <section class="mbw-card" data-collapsible>
                  <div class="mbw-card-head">
                      <h2>Recent Invoices</h2>
                  </div>
@@ -3014,7 +3014,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <?php if ($view === 'staff'): ?>
-    <section class="mbw-card" id="staff">
+    <section class="mbw-card" data-collapsible id="staff">
         <div class="mbw-card-head">
             <h2>Staff Workload</h2>
             <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/workspace.php?view=teams')) ?>">Manage Teams</a></div>

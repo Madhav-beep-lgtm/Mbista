@@ -325,7 +325,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 </div>
 
 <?php if ($view === 'requests'): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Request a document from a client</h2>
         </div>
@@ -370,7 +370,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
         <?php endif; ?>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Requests</h2>
         </div>
@@ -438,7 +438,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 <?php endif; ?>
 
 <?php if ($view === 'library'): ?>
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Upload to the library</h2>
         </div>
@@ -487,7 +487,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
         <?php endif; ?>
     </section>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Documents</h2>
         </div>

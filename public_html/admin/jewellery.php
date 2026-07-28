@@ -780,7 +780,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $defaultMetalId = (int) ($settings['default_metal_id'] ?? 0);
     ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-draggable>
+    <section class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head"><h2>Quote a Rate</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -825,7 +825,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
     <?php endif; ?>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Rates on <?= e(app_date($rateDate)) ?> (<?= count($rows) ?>)</h2>
             <form method="get" style="display:flex;gap:6px;align-items:center">
@@ -888,7 +888,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 <?php elseif ($view === 'items'): ?>
     <?php $itemCategories = jewellery_categories_list($companyId); ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-draggable>
+    <section class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head">
             <h2><?= $editItem ? 'Edit Item — ' . e((string) $editItem['code']) : 'Add Item' ?></h2>
             <?php if ($editItem): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery.php?view=items')) ?>">Cancel</a><?php endif; ?>
@@ -974,7 +974,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
     <?php endif; ?>
 
-    <section class="mbw-card">
+    <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Items (<?= count($items) ?>)</h2>
             <form method="get" style="display:flex;gap:6px;align-items:center">
@@ -1050,7 +1050,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
 
     <?php if ($canEdit): ?>
-    <section class="mbw-card" style="margin-bottom:14px">
+    <section class="mbw-card" data-collapsible style="margin-bottom:14px">
         <div class="mbw-card-head">
             <h2>Upload Opening Stock from a Spreadsheet</h2>
             <a class="button soft" style="min-height:32px" href="<?= e(url('admin/jewellery.php?view=opening&template=xlsx')) ?>">Download template</a>
@@ -1075,7 +1075,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             else { $errorCount++; }
         }
     ?>
-    <section class="mbw-card" style="margin-bottom:14px">
+    <section class="mbw-card" data-collapsible style="margin-bottom:14px">
         <div class="mbw-card-head">
             <h2>Preview — <?= e((string) $importBatch['original_name']) ?></h2>
         </div>
@@ -1193,7 +1193,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php endif; ?>
 
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-draggable>
+    <section class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head"><h2>Record Opening Stock</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1217,7 +1217,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
     <?php endif; ?>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Opening Stock — <?= e((string) $fiscalYear['label']) ?> (<?= count($openingRows) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Value</th><th>Posted</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
@@ -1278,7 +1278,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <?php endforeach; ?>
     </section>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Metal Position as at <?= e(app_date($todayInFy)) ?></h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Metal</th><th>Purity</th><th>Held by</th><th class="is-numeric">Pieces</th><th class="is-numeric">Fine weight</th><th class="is-numeric">Value</th></tr></thead>
@@ -1301,7 +1301,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </table></div>
     </section>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Stock by Item (<?= count($stockRows) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Item</th><th>Purity</th><th class="is-numeric">Pieces</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine (total)</th><th class="is-numeric">Fine (own)</th><th class="is-numeric">With others</th><th class="is-numeric">Value</th><th class="is-numeric">Avg cost / fine</th><th></th></tr></thead>
@@ -1326,7 +1326,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
 
     <?php if ($ledgerItem && $itemLedger): ?>
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head">
             <h2>Stock Ledger — <?= e((string) $ledgerItem['code']) ?> <?= e((string) $ledgerItem['name']) ?></h2>
             <a class="mbw-view-all" href="<?= e(url('admin/jewellery.php?view=stock')) ?>">Close</a>
@@ -1364,7 +1364,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
 <?php elseif ($view === 'masters'): ?>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px">
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible>
             <div class="mbw-card-head"><h2>Item Categories (<?= count($categories) ?>)</h2></div>
             <div style="overflow-x:auto"><table>
                 <thead><tr><th>Name</th><th class="is-numeric">Order</th><th class="is-numeric">Items</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
@@ -1413,7 +1413,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <?php endif; ?>
         </section>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible data-collapsed>
             <div class="mbw-card-head"><h2>Weight Units (<?= count($units) ?>)</h2></div>
             <div style="overflow-x:auto"><table>
                 <thead><tr><th>Code</th><th>Name</th><th class="is-numeric">Grams</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
@@ -1447,7 +1447,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <?php endif; ?>
         </section>
 
-        <section class="mbw-card">
+        <section class="mbw-card" data-collapsible data-collapsed>
             <div class="mbw-card-head"><h2>Metals &amp; Stones (<?= count($metals) ?>)</h2></div>
             <div style="overflow-x:auto"><table>
                 <thead><tr><th>Code</th><th>Name</th><th>Kind</th><th>Purity</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
@@ -1498,7 +1498,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </section>
     </div>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible data-collapsed style="margin-top:14px">
         <div class="mbw-card-head"><h2>Purity Grades (<?= count($purities) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Metal</th><th>Code</th><th>Name</th><th class="is-numeric">Fineness /1000</th><th>Default</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
@@ -1543,7 +1543,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
 
 <?php elseif ($view === 'settings'): ?>
-    <section class="mbw-card" data-draggable>
+    <section class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head"><h2>Module Settings</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1603,7 +1603,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </form>
     </section>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible data-collapsed style="margin-top:14px">
         <div class="mbw-card-head"><h2>Taxes</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Seq</th><th>Code</th><th>Name</th><th>Rate</th><th>Charged on</th><th>Applies to</th><th>Documents</th><th>In force</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
@@ -1703,7 +1703,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <?php endif; ?>
     </section>
 
-    <section class="mbw-card" style="margin-top:14px">
+    <section class="mbw-card" data-collapsible data-collapsed style="margin-top:14px">
         <div class="mbw-card-head"><h2>Posting Ledgers</h2></div>
         <?php if ($canEdit && $mappingGaps !== []): ?>
         <div class="mbw-note tone-amber" style="margin:0 0 12px">

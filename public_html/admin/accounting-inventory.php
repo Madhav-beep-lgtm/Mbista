@@ -1839,7 +1839,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         return $item + ['val' => $v];
     }, $items);
     ?>
-    <section class="mbw-card" aria-label="Valuation and NRV">
+    <section class="mbw-card" data-collapsible aria-label="Valuation and NRV">
         <div class="mbw-card-head">
             <h2>Valuation &amp; NRV (IAS 2)</h2>
             <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Cost from perpetual layers; NRV uses each item's assessment or its sales rate as the selling price.</span></div>
@@ -1889,7 +1889,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         </div>
     </section>
 
-    <section class="mbw-card" aria-label="Post NRV assessment">
+    <section class="mbw-card" data-collapsible aria-label="Post NRV assessment">
         <div class="mbw-card-head">
             <h2>Post NRV Assessment</h2>
             <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Computes lower of cost and net realisable value (IAS 2.28-33) and posts a write-down or a capped reversal.</span></div>
@@ -1924,7 +1924,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 <?php endif; ?>
 
 <?php if ($invView === 'inventory'): ?>
-<details class="mbw-card" aria-label="Help and workflow">
+<details class="mbw-card" data-collapsible aria-label="Help and workflow">
     <summary class="mbw-card-head" style="cursor:pointer"><h2>Help &amp; Workflow</h2><span class="mbw-card-tools" style="color:var(--mbw-muted);font-size:12.5px">Process flow and item types — click to open</span></summary>
     <div class="inventory-process-grid" style="margin-bottom:14px">
         <?php foreach ($inventoryProcessSteps as $index => $process): ?>
@@ -1943,7 +1943,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 <?php endif; ?>
 
 <?php if (in_array($invView, ['inventory', 'manufacturing'], true)): ?>
-<section class="mbw-card" aria-label="Inventory workbench">
+<section class="mbw-card" data-collapsible aria-label="Inventory workbench">
     <div class="mbw-card-head inventory-workbench-head">
     <div>
         <h2><?= $invView === 'manufacturing' ? 'Manufacturing Workspace' : 'Inventory Workspace' ?></h2>
@@ -2536,7 +2536,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 <?php endif; ?>
 
 <?php if ($invView === 'inventory'): ?>
-<section class="mbw-card" id="item-stock-summary">
+<section class="mbw-card" data-collapsible id="item-stock-summary">
     <div class="mbw-card-head">
         <h2>Item Stock Summary<?= $lowOnly ? ' — low stock only' : '' ?></h2>
         <div class="mbw-card-tools">
@@ -2573,7 +2573,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 </section>
 
 <?php if ($showWarehouseStockCard): ?>
-<section class="mbw-card" aria-label="Stock by warehouse">
+<section class="mbw-card" data-collapsible aria-label="Stock by warehouse">
     <div class="mbw-card-head"><h2>Stock by Warehouse</h2></div>
     <div class="rc-table-scroll">
         <table class="rc-table">
@@ -2595,7 +2595,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 </section>
 <?php endif; ?>
 
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head">
         <h2>Recent Stock Movements</h2>
         <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=stock-movement')) ?>">Movement report &#8594;</a></div>
@@ -2641,7 +2641,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 
 <?php endif; ?>
 <?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing'): ?>
-    <section class="mbw-card" id="manufacturing-orders">
+    <section class="mbw-card" data-collapsible id="manufacturing-orders">
         <div class="mbw-card-head">
             <h2>Manufacturing Orders<?= $openOrderCount > 0 ? ' — ' . $openOrderCount . ' in progress' : '' ?></h2>
             <div class="mbw-card-tools">
@@ -2693,7 +2693,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         : [];
     ?>
     <?php if ($varianceRows !== []): ?>
-    <section class="mbw-card" id="production-variances">
+    <section class="mbw-card" data-collapsible id="production-variances">
         <div class="mbw-card-head"><h2>Production Variances</h2><div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Actual vs BOM standard. Positive = unfavourable.</span></div></div>
         <div class="rc-table-scroll"><table class="rc-table">
             <thead><tr><th>Order</th><th>Variance</th><th class="align-right">Standard</th><th class="align-right">Actual</th><th class="align-right">Variance</th></tr></thead>

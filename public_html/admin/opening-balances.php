@@ -192,7 +192,7 @@ $pageSubtitle = 'Balances brought forward from the previous fiscal year — revi
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head">
         <h2>Opening balance status</h2>
         <div class="mbw-card-tools">
@@ -298,7 +298,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <?php if ($batch): ?>
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Opening balance detail</h2></div>
     <form method="get" class="workspace-form-grid" style="margin-bottom:12px">
         <label>Account type
@@ -407,7 +407,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </style>
 </section>
 
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Sub-ledger reconciliation</h2></div>
     <div style="overflow-x:auto">
     <table>
@@ -491,7 +491,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <?php $invObRows = inv_ob_rows($companyId, $fiscalYearId); $invObTotal = 0.0; foreach ($invObRows as $ior) { $invObTotal += (float) $ior['amount']; } ?>
-<section class="mbw-card" aria-label="Inventory opening balances">
+<section class="mbw-card" data-collapsible aria-label="Inventory opening balances">
     <div class="mbw-card-head">
         <h2><?= icon('box') ?>Inventory Opening (per item)</h2>
         <div class="mbw-card-tools">
@@ -559,7 +559,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <?php if ($auditLogs !== []): ?>
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Adjustment &amp; audit trail</h2></div>
     <div style="overflow-x:auto">
     <table>
@@ -580,7 +580,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 <?php endif; ?>
 <?php else: ?>
-<section class="mbw-card">
+<section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Preview — opening balances that would be generated</h2></div>
     <p class="muted">No opening-balance batch exists for this fiscal year yet. The figures below are the balances carried forward from the previous fiscal year (asset/liability/equity accounts only; income and expense accounts always open at zero). Click <strong>Generate opening balances</strong> above to create the reviewable batch.</p>
     <div style="overflow-x:auto">

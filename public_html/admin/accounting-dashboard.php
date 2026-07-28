@@ -832,7 +832,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <?php if ($isGroupDashboard): ?>
-<section class="mbw-card" aria-label="Group companies snapshot">
+<section class="mbw-card" data-collapsible aria-label="Group companies snapshot">
     <div class="mbw-card-head">
         <h2>Group Companies Snapshot</h2>
         <span class="mbw-info"><?= icon('about') ?></span>
@@ -903,7 +903,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php endif; ?>
 
 <div class="mbw-row-charts">
-    <section class="mbw-card" aria-label="Profit and loss overview">
+    <section class="mbw-card" data-collapsible aria-label="Profit and loss overview">
         <div class="mbw-card-head">
             <h2>Profit &amp; Loss Overview</h2>
             <span class="mbw-info"><?= icon('about') ?></span>
@@ -929,7 +929,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </section>
 
-    <section class="mbw-card" aria-label="Cash flow summary">
+    <section class="mbw-card" data-collapsible aria-label="Cash flow summary">
         <div class="mbw-card-head">
             <h2>Cash Flow Summary</h2>
             <span class="mbw-info"><?= icon('about') ?></span>
@@ -961,7 +961,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
     </section>
 
-    <section class="mbw-card" aria-label="Upcoming due">
+    <section class="mbw-card" data-collapsible aria-label="Upcoming due">
         <div class="mbw-card-head">
             <h2>Upcoming Due</h2>
             <span class="mbw-info"><?= icon('about') ?></span>
@@ -995,7 +995,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 </div>
 
-<section class="mbw-card" aria-label="Quick actions">
+<section class="mbw-card" data-collapsible aria-label="Quick actions">
     <div class="mbw-card-head"><h2>Quick Actions</h2></div>
     <div class="mbw-qa-grid">
         <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=journal')) ?>">
@@ -1046,7 +1046,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <div class="mbw-row-tables">
-    <section class="mbw-card" aria-label="Recent transactions">
+    <section class="mbw-card" data-collapsible aria-label="Recent transactions">
         <div class="mbw-card-head">
             <h2>Recent Transactions</h2>
             <span class="mbw-info"><?= icon('about') ?></span>
@@ -1074,7 +1074,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </section>
 
-    <section class="mbw-card" aria-label="Bank accounts">
+    <section class="mbw-card" data-collapsible aria-label="Bank accounts">
         <div class="mbw-card-head">
             <h2>Bank Accounts</h2>
             <span class="mbw-info"><?= icon('about') ?></span>
@@ -1106,7 +1106,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php if (!$isGroupDashboard): ?>
 <div class="mbw-row-tables">
     <?php foreach ([['title' => 'Receivables Aging', 'totalLabel' => 'Total Outstanding', 'total' => $receivableAgingTotal, 'buckets' => $receivableAging, 'report' => 'party-wise'], ['title' => 'Payables Aging', 'totalLabel' => 'Total Payable', 'total' => $payableAgingTotal, 'buckets' => $payableAging, 'report' => 'party-wise']] as $aging): ?>
-        <section class="mbw-card" aria-label="<?= e($aging['title']) ?>">
+        <section class="mbw-card" data-collapsible aria-label="<?= e($aging['title']) ?>">
             <div class="mbw-card-head">
                 <h2><?= e($aging['title']) ?></h2>
                 <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(accounting_dashboard_report_url($aging['report'], $fiscalYearId, $fromDate, $toDate, $businessType)) ?>">Details</a></div>
@@ -1138,7 +1138,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </div>
 
 <div class="mbw-row-tables">
-    <section class="mbw-card" aria-label="Top expense groups">
+    <section class="mbw-card" data-collapsible aria-label="Top expense groups">
         <div class="mbw-card-head">
             <h2>Top Expense Groups</h2>
             <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(accounting_dashboard_report_url('group-report', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>">View Report</a></div>
@@ -1153,7 +1153,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 
     <?php if ($showInventoryFeatures): ?>
-        <section class="mbw-card" aria-label="Inventory alerts">
+        <section class="mbw-card" data-collapsible aria-label="Inventory alerts">
             <div class="mbw-card-head">
                 <h2>Inventory Alerts</h2>
                 <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/accounting-inventory.php')) ?>">View All</a></div>

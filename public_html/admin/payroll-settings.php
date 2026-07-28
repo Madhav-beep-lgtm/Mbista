@@ -349,7 +349,7 @@ $pageHero = ['icon' => 'settings'];
 $bodyClass = 'admin-layout accounting-module-page payroll-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<section class="mbw-card" aria-label="Ledger mappings">
+<section class="mbw-card" data-collapsible aria-label="Ledger mappings">
     <div class="mbw-card-head"><h2>Ledger Mappings &amp; Workflow</h2></div>
     <form method="post" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -377,7 +377,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
 </section>
 
-<section class="mbw-card" aria-label="Pay components" id="components">
+<section class="mbw-card" data-collapsible aria-label="Pay components" id="components">
     <div class="mbw-card-head"><h2>Pay Components</h2></div>
     <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
         Every pay head is a component with its OWN accounting treatment. Amounts are suggestions only — payroll
@@ -482,7 +482,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
-<section class="mbw-card" aria-label="Overtime and service charge" id="otsc">
+<section class="mbw-card" data-collapsible aria-label="Overtime and service charge" id="otsc">
     <div class="mbw-card-head"><h2>Overtime &amp; Service Charge</h2></div>
     <form method="post" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -527,7 +527,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
 </section>
 
-<section class="mbw-card" aria-label="Income tax configuration" id="tax">
+<section class="mbw-card" data-collapsible aria-label="Income tax configuration" id="tax">
     <div class="mbw-card-head"><h2>Income Tax Configuration — <?= e($fiscalYear['label'] ?? '') ?></h2></div>
     <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
         Slabs and limits are versioned and effective-dated. Enter values from the official IRD publication of the Income Tax Act, 2058 as amended by the applicable Finance Act — cite it in the legal reference. Published versions are immutable; calculated runs keep the version snapshot they used.
