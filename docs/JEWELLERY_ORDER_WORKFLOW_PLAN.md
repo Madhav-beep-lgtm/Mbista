@@ -125,25 +125,25 @@ notes and anything else the shop names. The advance *sources* the prompt lists
 (opening balance, previous order, excess from a previous invoice) are not
 modes — they are the allocation problem in D.
 
-### D. Advance allocation table (§8, §9) — the core change
+### D. Advance allocation table (§8, §9) — **SHIPPED** (migration 094)
 
-A new append-only table:
+`jewellery_advance_allocations` (sale_id, settlement_id, amount): each row is
+one decision — this bill took this much from that advance entry. The billing
+screen lists every open advance the customer holds — this order's, a previous
+order's — and the user **ticks entries and types amounts**; ticking the rows
+IS the advance figure, so there is no second field to disagree. Per entry:
 
 ```
-jewellery_advance_allocations
-    sale_id          which bill consumed it
-    settlement_id    which advance entry it came from
-    amount           how much of that entry
-    allocated_at / allocated_by
+remaining = amount − allocations on non-cancelled sales
+                   − FIFO share of that order's refunds
 ```
 
-Billing then shows every open advance on that customer — this order's,
-a previous order's, an opening balance, an unallocated excess — and the user
-**ticks the entries and types the amounts**. Nothing is applied automatically.
-`sales.advance_amount` becomes the sum of the rows, so existing bills stay
-correct and nothing already stored has to change.
-
-This makes §8's summary computable: received, allocated, remaining.
+Drafts reserve their share; one rupee can never fund two bills; an entry
+funding a bill refuses to unpost until the sale is unwound. Legacy callers
+that still send the single number get it spread oldest-first across the
+delivering order's own entries so the invariant (advance_amount = sum of
+rows) holds for every sale — the screen never takes that path. Sales already
+stored were back-filled by the same FIFO rule in the repair step.
 
 ### E. Fine weight beside actual weight (§5)
 

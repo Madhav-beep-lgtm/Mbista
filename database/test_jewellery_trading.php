@@ -42,7 +42,7 @@ function jwt_cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
-        foreach (['jewellery_settlement_allocations', 'jewellery_settlements', 'jewellery_bills',
+        foreach (['jewellery_advance_allocations', 'jewellery_settlement_tenders', 'jewellery_settlement_allocations', 'jewellery_settlements', 'jewellery_bills',
                   'jewellery_sale_exchanges', 'jewellery_sale_lines', 'jewellery_sales',
                   'jewellery_purchase_lines', 'jewellery_purchases',                   'jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items', 'jewellery_daily_rates',
                   'inventory_ledger_mappings', 'jewellery_settings', 'jewellery_purities',

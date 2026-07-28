@@ -52,7 +52,7 @@ function jwadv_cleanup(): void
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
         foreach (['jewellery_line_taxes', 'jewellery_item_taxes', 'jewellery_taxes',
-                  'jewellery_settlement_allocations', 'jewellery_settlements', 'jewellery_bills',
+                  'jewellery_advance_allocations', 'jewellery_settlement_tenders', 'jewellery_settlement_allocations', 'jewellery_settlements', 'jewellery_bills',
                   'jewellery_order_receipts', 'jewellery_order_assignments', 'jewellery_orders',
                   'jewellery_karigars', 'jewellery_sale_exchanges', 'jewellery_sale_lines', 'jewellery_sales',
                   'jewellery_purchase_lines', 'jewellery_purchases', 'jewellery_stock_txns',
@@ -515,6 +515,102 @@ $dlv5 = jewellery_deliver_order($cid, $order4, $sale5, $uid);
 ok($dlv5['ok'] && ($dlv5['status'] ?? '') === 'closed'
     && (string) jewellery_order($cid, $order4)['status'] === 'closed',
     'Nothing left to collect: delivered and CLOSED in the same stroke');
+
+echo "\n11. WHICH advances paid the bill — entry by entry, chosen, never guessed\n";
+// The sale in section 4 applied 280,000 the old way: one number, no entries
+// named. The engine now spreads that oldest-first across the order's own
+// entries as it saves, so the invariant — advance_amount is the sum of its
+// rows — holds even for callers that never heard of allocations.
+$saleAllocs = jewellery_sale_advance_allocations($cid, $sale);
+ok(count($saleAllocs) === 2, 'The legacy one-number call left TWO rows — one per entry it drew on');
+ok(near((float) $saleAllocs[0]['amount'], 100000.0) && (int) $saleAllocs[0]['settlement_id'] === $advCash,
+    'Oldest first: the 1 Aug cash advance gave its whole 100,000');
+ok(near((float) $saleAllocs[1]['amount'], 180000.0) && (int) $saleAllocs[1]['settlement_id'] === $advMetal,
+    'Then the 2 Aug old-gold advance gave its 180,000');
+
+// Section 6 left order2's 200,000 entry applied 100,500 and refunded 99,500.
+// Nothing remains, and the picker must not offer it.
+$openNow = jewellery_open_advances($cid, $customer);
+$openIds = array_map('intval', array_column($openNow, 'id'));
+ok(!in_array($bigAdvance, $openIds, true),
+    'An entry consumed by a bill and a refund together offers nothing — the refund spread works');
+
+// Two fresh orders, an advance on each, and ONE bill that draws on both —
+// the previous-order advance the old model could never reach.
+$order5 = jewellery_save_order($cid, $fy, [
+    'order_date' => '2026-08-05', 'party_id' => $customer, 'item_id' => $chain,
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'expected_gross_weight' => 1, 'making_basis' => 'flat', 'making_rate' => 0, 'status' => 'confirmed',
+], [], $uid);
+$order6 = jewellery_save_order($cid, $fy, [
+    'order_date' => '2026-08-06', 'party_id' => $customer, 'item_id' => $chain,
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'expected_gross_weight' => 1, 'making_basis' => 'flat', 'making_rate' => 0, 'status' => 'confirmed',
+], [], $uid);
+$adv5 = jewellery_save_settlement($cid, $fy, [
+    'settlement_date' => '2026-08-05', 'party_id' => $customer, 'order_id' => $order5, 'is_advance' => 1,
+    'direction' => 'received', 'mode' => 'cash', 'amount' => 30000, 'ledger_id' => $cash,
+], [], $uid);
+ok(jewellery_post_settlement($cid, $adv5, $uid)['ok'], 'A 30,000 advance stands on order 5');
+$adv6 = jewellery_save_settlement($cid, $fy, [
+    'settlement_date' => '2026-08-06', 'party_id' => $customer, 'order_id' => $order6, 'is_advance' => 1,
+    'direction' => 'received', 'mode' => 'cash', 'amount' => 20000, 'ledger_id' => $cash,
+], [], $uid);
+ok(jewellery_post_settlement($cid, $adv6, $uid)['ok'], 'A 20,000 advance stands on order 6');
+
+$prefill6 = jewellery_order_sale_prefill($cid, $order6);
+$sale6 = jewellery_save_sale($cid, $fy, [
+    'sale_date' => '2026-10-15', 'party_id' => $customer, 'settle_mode' => 'credit',
+    'deliver_order_id' => $order6,
+    // No advance_amount — the ticked entries ARE the number.
+    'advance_allocations' => [
+        ['settlement_id' => $adv6, 'amount' => 20000],
+        ['settlement_id' => $adv5, 'amount' => 15000],
+    ],
+], [$prefill6['line']], [], $uid);
+$sale6Row = jewellery_sale($cid, $sale6);
+ok(near((float) $sale6Row['advance_amount'], 35000.0),
+    'The bill draws 20,000 from ITS order and 15,000 from the PREVIOUS one — 35,000 applied');
+ok(count(jewellery_sale_advance_allocations($cid, $sale6)) === 2, 'Both decisions are on record');
+
+$open5 = null;
+foreach (jewellery_open_advances($cid, $customer) as $o) { if ((int) $o['id'] === $adv5) { $open5 = $o; } }
+ok($open5 !== null && near((float) $open5['remaining'], 15000.0),
+    'Order 5\'s entry shows 15,000 left — a DRAFT bill already reserves its share');
+
+ok(threw(static fn () => jewellery_save_sale($cid, $fy, [
+        'sale_date' => '2026-10-16', 'party_id' => $customer, 'settle_mode' => 'credit',
+        'advance_allocations' => [['settlement_id' => $adv5, 'amount' => 20000]],
+    ], [['item_id' => $chain, 'gross_weight' => 1, 'rate' => 100000]], [], $uid)),
+    'Taking 20,000 from an entry holding 15,000 is refused — one rupee cannot fund two bills');
+ok(threw(static fn () => jewellery_save_sale($cid, $fy, [
+        'sale_date' => '2026-10-16', 'party_id' => $customer, 'settle_mode' => 'credit',
+        'advance_amount' => 10000,
+        'advance_allocations' => [['settlement_id' => $adv5, 'amount' => 15000]],
+    ], [['item_id' => $chain, 'gross_weight' => 1, 'rate' => 100000]], [], $uid)),
+    'Entries that disagree with the stated total are refused, not silently corrected');
+
+// Another customer's advance is not this customer's money.
+db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type, status) VALUES (:c,'ACUS2','Second Customer','customer','active')")
+    ->execute(['c' => $cid]);
+$customer2 = (int) db()->lastInsertId();
+ok(threw(static fn () => jewellery_save_sale($cid, $fy, [
+        'sale_date' => '2026-10-16', 'party_id' => $customer2, 'settle_mode' => 'credit',
+        'advance_allocations' => [['settlement_id' => $adv5, 'amount' => 1000]],
+    ], [['item_id' => $chain, 'gross_weight' => 1, 'rate' => 100000]], [], $uid)),
+    'A bill for one customer cannot spend an advance another customer holds');
+
+// The advance is spoken for; the entry can no longer be quietly reversed.
+$rGuard = jewellery_unpost_settlement($cid, $adv5, $uid);
+ok(!$rGuard['ok'] && str_contains((string) $rGuard['error'], 'applied to a bill'),
+    'An advance funding a bill refuses to unpost — unwind the sale first');
+
+// Posting the cross-order bill discharges the WHOLE 35,000 from the
+// customer's advance account — one ledger, many entries, one debit.
+$rs6 = jewellery_post_sale($cid, $sale6, $uid);
+ok($rs6['ok'], 'The cross-order bill posts' . ($rs6['ok'] ? '' : ' — ' . $rs6['error']));
+$vs6 = voucher_ledgers((int) $rs6['voucher_id']);
+ok(near($vs6[$advLedger] ?? 0, 35000.0), 'Applying it debits the advance liability 35,000');
 
 jwadv_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";

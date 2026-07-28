@@ -2786,6 +2786,84 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Which advances paid which bill (migration 094)', static function (): void {
+        // The sale's advance_amount was one number; which advance ENTRIES it
+        // consumed was never recorded, so it could not be shown on the bill,
+        // audited from the entry's side, or drawn from another order's
+        // advance. Each row below says: this sale took this much from that
+        // settlement entry, and the sale's number becomes the sum of its rows.
+        if (!accounting_repair_table_exists('jewellery_sales')
+            || !accounting_repair_table_exists('jewellery_settlements')) {
+            return;
+        }
+        $hadTable = accounting_repair_table_exists('jewellery_advance_allocations');
+        db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_advance_allocations` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `company_id` INT UNSIGNED NOT NULL,
+            `sale_id` INT UNSIGNED NOT NULL,
+            `settlement_id` INT UNSIGNED NOT NULL,
+            `amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+            `created_by` INT UNSIGNED DEFAULT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_jw_advalloc_sale` (`sale_id`),
+            KEY `idx_jw_advalloc_settlement` (`settlement_id`),
+            KEY `idx_jw_advalloc_company` (`company_id`),
+            CONSTRAINT `fk_jw_advalloc_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_jw_advalloc_sale` FOREIGN KEY (`sale_id`) REFERENCES `jewellery_sales` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_jw_advalloc_settlement` FOREIGN KEY (`settlement_id`) REFERENCES `jewellery_settlements` (`id`) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        if ($hadTable || !accounting_repair_column_exists('jewellery_settlements', 'order_id')) {
+            return;
+        }
+        // First arrival: every sale already stored gets its one number spread
+        // OLDEST-FIRST across the delivering order's own posted advance
+        // entries — the exact pool the old cap drew on, made explicit. FIFO
+        // because money held longest is applied first, which is what a shop
+        // does and what a customer expects of it. Deterministic, so replaying
+        // the reconstruction on another copy of the books gives the same rows.
+        $sales = db()->query("SELECT s.id, s.company_id, s.advance_amount,
+                COALESCE(NULLIF(s.order_id, 0), o.id) AS order_id
+            FROM jewellery_sales s
+            LEFT JOIN jewellery_orders o ON o.delivered_sale_id = s.id AND o.company_id = s.company_id
+            WHERE s.advance_amount > 0.005 AND s.status <> 'cancelled'
+            ORDER BY s.company_id, s.id")->fetchAll(PDO::FETCH_ASSOC);
+        $entriesStmt = db()->prepare("SELECT id, amount FROM jewellery_settlements
+            WHERE company_id = :cid AND order_id = :oid AND is_advance = 1
+              AND direction = 'received' AND status = 'posted'
+            ORDER BY settlement_date ASC, id ASC");
+        $insert = db()->prepare('INSERT INTO jewellery_advance_allocations (company_id, sale_id, settlement_id, amount)
+            VALUES (:cid, :sid, :stid, :amount)');
+        $used = [];
+        foreach ($sales as $sale) {
+            $orderId = (int) ($sale['order_id'] ?? 0);
+            if ($orderId <= 0) {
+                continue; // an advance applied with no order on record — nothing to reconstruct from
+            }
+            $left = round((float) $sale['advance_amount'], 2);
+            $entriesStmt->execute(['cid' => (int) $sale['company_id'], 'oid' => $orderId]);
+            foreach ($entriesStmt->fetchAll(PDO::FETCH_ASSOC) as $entry) {
+                if ($left <= 0.005) {
+                    break;
+                }
+                $entryId = (int) $entry['id'];
+                $room = round((float) $entry['amount'] - ($used[$entryId] ?? 0.0), 2);
+                if ($room <= 0.005) {
+                    continue;
+                }
+                $take = min($room, $left);
+                $insert->execute(['cid' => (int) $sale['company_id'], 'sid' => (int) $sale['id'],
+                    'stid' => $entryId, 'amount' => $take]);
+                $used[$entryId] = ($used[$entryId] ?? 0.0) + $take;
+                $left = round($left - $take, 2);
+            }
+            // $left > 0 here means the old books applied more than the order's
+            // entries ever held (refunds crossing, hand edits). The rows record
+            // what CAN be traced; the sale's own number is untouched either way.
+        }
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

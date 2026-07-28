@@ -394,6 +394,26 @@ function jewellery_order_advance_available(int $companyId, int $orderId, int $ex
     if (!column_exists('jewellery_sales', 'advance_amount')) {
         return $held;
     }
+    // With the allocation table on record (migration 094), what an order's
+    // entries have already funded is the sum of their rows — the same answer
+    // the old advance_amount join gave, but readable entry by entry and
+    // immune to an advance being counted against two orders.
+    if (table_exists('jewellery_advance_allocations')) {
+        $sql = "SELECT COALESCE(SUM(a.amount), 0)
+            FROM jewellery_advance_allocations a
+            INNER JOIN jewellery_settlements st ON st.id = a.settlement_id
+            INNER JOIN jewellery_sales s ON s.id = a.sale_id
+            WHERE a.company_id = :cid AND st.order_id = :oid AND s.status <> 'cancelled'";
+        $params = ['cid' => $companyId, 'oid' => $orderId];
+        if ($excludeSaleId > 0) {
+            $sql .= ' AND a.sale_id <> :sid';
+            $params['sid'] = $excludeSaleId;
+        }
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
+
+        return jw_round_money($held - (float) $stmt->fetchColumn());
+    }
     $sql = "SELECT COALESCE(SUM(s.advance_amount), 0) FROM jewellery_sales s
         INNER JOIN jewellery_orders o ON o.delivered_sale_id = s.id
         WHERE s.company_id = :cid AND o.id = :oid AND s.status <> 'cancelled'";
@@ -406,6 +426,127 @@ function jewellery_order_advance_available(int $companyId, int $orderId, int $ex
     $stmt->execute($params);
 
     return jw_round_money($held - (float) $stmt->fetchColumn());
+}
+
+/**
+ * Every advance the customer still holds, ENTRY BY ENTRY — this order's, a
+ * previous order's, all of it — with what each entry has left to give.
+ *
+ * This is the list the billing screen puts in front of the user, because
+ * WHICH advance pays a bill is a decision a person makes, not one the engine
+ * may guess at. Per entry:
+ *
+ *     remaining = amount − its allocation rows − its share of order refunds
+ *
+ * Refunds are recorded against the ORDER, not against an entry, so each
+ * order's refund total is spread across its entries' unallocated money
+ * oldest-first — the same deterministic rule the 094 backfill used — which
+ * keeps the sum of entry remainders exactly equal to the order-level figure
+ * the module has always shown.
+ *
+ * @return array rows: settlement fields + order_no, mode label parts, and
+ *               `remaining`; only rows with remaining > 0 are returned.
+ */
+function jewellery_open_advances(int $companyId, int $partyId, int $excludeSaleId = 0): array
+{
+    if ($partyId <= 0 || !column_exists('jewellery_settlements', 'order_id')) {
+        return [];
+    }
+    $allocTable = table_exists('jewellery_advance_allocations');
+    $allocJoin = '';
+    $params = ['cid' => $companyId, 'pid' => $partyId];
+    if ($allocTable) {
+        $exclude = '';
+        if ($excludeSaleId > 0) {
+            $exclude = ' AND a.sale_id <> :xsid';
+            $params['xsid'] = $excludeSaleId;
+        }
+        $allocJoin = "LEFT JOIN (SELECT a.settlement_id, SUM(a.amount) AS allocated
+                FROM jewellery_advance_allocations a
+                INNER JOIN jewellery_sales sl ON sl.id = a.sale_id
+                WHERE a.company_id = :cid2 AND sl.status <> 'cancelled'$exclude
+                GROUP BY a.settlement_id) alloc ON alloc.settlement_id = st.id";
+        $params['cid2'] = $companyId;
+    }
+    $stmt = db()->prepare("SELECT st.*, o.order_no,
+            COALESCE(alloc.allocated, 0) AS allocated,
+            i.sku AS item_code, p.code AS purity_code, u.code AS unit_code
+        FROM jewellery_settlements st
+        LEFT JOIN jewellery_orders o ON o.id = st.order_id
+        LEFT JOIN inventory_items i ON i.id = st.item_id
+        LEFT JOIN jewellery_purities p ON p.id = st.purity_id
+        LEFT JOIN jewellery_units u ON u.id = st.unit_id
+        $allocJoin
+        WHERE st.company_id = :cid AND st.party_id = :pid
+          AND st.is_advance = 1 AND st.direction = 'received' AND st.status = 'posted'
+        ORDER BY st.settlement_date ASC, st.id ASC");
+    // A missing alloc table leaves `allocated` unselected — patch it to 0.
+    if (!$allocTable) {
+        $stmt = db()->prepare("SELECT st.*, o.order_no, 0 AS allocated,
+                i.sku AS item_code, p.code AS purity_code, u.code AS unit_code
+            FROM jewellery_settlements st
+            LEFT JOIN jewellery_orders o ON o.id = st.order_id
+            LEFT JOIN inventory_items i ON i.id = st.item_id
+            LEFT JOIN jewellery_purities p ON p.id = st.purity_id
+            LEFT JOIN jewellery_units u ON u.id = st.unit_id
+            WHERE st.company_id = :cid AND st.party_id = :pid
+              AND st.is_advance = 1 AND st.direction = 'received' AND st.status = 'posted'
+            ORDER BY st.settlement_date ASC, st.id ASC");
+        $params = ['cid' => $companyId, 'pid' => $partyId];
+    }
+    $stmt->execute($params);
+    $entries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($entries === []) {
+        return [];
+    }
+
+    // Each order's refunds, to be spread across that order's entries.
+    $refundStmt = db()->prepare("SELECT COALESCE(order_id, 0) AS order_id, SUM(amount) AS refunded
+        FROM jewellery_settlements
+        WHERE company_id = :cid AND party_id = :pid
+          AND is_advance = 1 AND direction = 'paid' AND status = 'posted'
+        GROUP BY COALESCE(order_id, 0)");
+    $refundStmt->execute(['cid' => $companyId, 'pid' => $partyId]);
+    $refunds = [];
+    foreach ($refundStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $refunds[(int) $row['order_id']] = (float) $row['refunded'];
+    }
+
+    $open = [];
+    foreach ($entries as $entry) {
+        $unallocated = jw_round_money((float) $entry['amount'] - (float) $entry['allocated']);
+        // The refund walks the order's entries in the same oldest-first order
+        // this query returns them, eating unallocated money as it goes.
+        $orderKey = (int) ($entry['order_id'] ?? 0);
+        if ($unallocated > 0 && ($refunds[$orderKey] ?? 0.0) > 0.005) {
+            $bite = min($unallocated, $refunds[$orderKey]);
+            $unallocated = jw_round_money($unallocated - $bite);
+            $refunds[$orderKey] = jw_round_money($refunds[$orderKey] - $bite);
+        }
+        if ($unallocated > 0.005) {
+            $entry['remaining'] = $unallocated;
+            $open[] = $entry;
+        }
+    }
+
+    return $open;
+}
+
+/** The advance entries a sale drew on, with enough context to print them. */
+function jewellery_sale_advance_allocations(int $companyId, int $saleId): array
+{
+    if (!table_exists('jewellery_advance_allocations')) {
+        return [];
+    }
+    $stmt = db()->prepare('SELECT a.*, st.settlement_no, st.settlement_date, st.mode, st.order_id, o.order_no
+        FROM jewellery_advance_allocations a
+        INNER JOIN jewellery_settlements st ON st.id = a.settlement_id
+        LEFT JOIN jewellery_orders o ON o.id = st.order_id
+        WHERE a.sale_id = :sid AND a.company_id = :cid
+        ORDER BY st.settlement_date ASC, st.id ASC');
+    $stmt->execute(['sid' => $saleId, 'cid' => $companyId]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 /**
@@ -1423,15 +1564,68 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
     if ($received < 0) {
         throw new RuntimeException('The amount received cannot be negative.');
     }
-    // The fourth way a sale can be paid for: an advance already taken against
-    // the order being delivered. It is capped at what is actually still held,
-    // so the same advance can never be applied to two sales.
+    // The fourth way a sale can be paid for: an advance the customer already
+    // put down. WHICH entries fund it is a decision a person makes — the
+    // billing screen lists every open advance the customer holds (this
+    // order's, a previous order's, an opening advance) and the user ticks
+    // entries and types amounts, which arrive here as advance_allocations.
+    // Each entry is capped at what it still holds, so the same rupee can
+    // never fund two bills.
     $deliverOrderId = (int) ($header['deliver_order_id'] ?? 0);
     $advanceApplied = jw_round_money((float) ($header['advance_amount'] ?? 0));
     if ($advanceApplied < 0) {
         throw new RuntimeException('An advance applied cannot be negative.');
     }
-    if ($advanceApplied > 0) {
+    $advanceAllocations = [];
+    foreach ((array) ($header['advance_allocations'] ?? []) as $allocRow) {
+        $allocSettlementId = (int) ($allocRow['settlement_id'] ?? 0);
+        $allocAmount = jw_round_money((float) ($allocRow['amount'] ?? 0));
+        if ($allocSettlementId <= 0 || $allocAmount == 0.0) {
+            continue;
+        }
+        if ($allocAmount < 0) {
+            throw new RuntimeException('An advance allocation cannot be negative.');
+        }
+        // Two rows naming the same entry are one decision written twice.
+        $advanceAllocations[$allocSettlementId] = jw_round_money(($advanceAllocations[$allocSettlementId] ?? 0.0) + $allocAmount);
+    }
+
+    if ($advanceAllocations !== []) {
+        if (!table_exists('jewellery_advance_allocations')) {
+            throw new RuntimeException('This database has not been upgraded to record which advances pay a bill. '
+                . 'Run the accounting repair, then save again.');
+        }
+        $openEntries = [];
+        foreach (jewellery_open_advances($companyId, (int) $partyId, $saleId) as $openEntry) {
+            $openEntries[(int) $openEntry['id']] = $openEntry;
+        }
+        $allocTotal = 0.0;
+        foreach ($advanceAllocations as $allocSettlementId => $allocAmount) {
+            $openEntry = $openEntries[$allocSettlementId] ?? null;
+            if ($openEntry === null) {
+                throw new RuntimeException('An allocation names an advance this customer does not hold — '
+                    . 'it may belong to someone else, be unposted, or be used up.');
+            }
+            if ($allocAmount > (float) $openEntry['remaining'] + 0.005) {
+                throw new RuntimeException('Advance ' . $openEntry['settlement_no'] . ' only has '
+                    . number_format((float) $openEntry['remaining'], 2) . ' left — cannot take '
+                    . number_format($allocAmount, 2) . ' from it.');
+            }
+            $allocTotal = jw_round_money($allocTotal + $allocAmount);
+        }
+        if ($advanceApplied <= 0) {
+            // Ticking the entries IS the number; no second field to disagree.
+            $advanceApplied = $allocTotal;
+        } elseif (abs($allocTotal - $advanceApplied) > 0.005) {
+            throw new RuntimeException('The advance entries chosen (' . number_format($allocTotal, 2)
+                . ') do not add up to the advance applied (' . number_format($advanceApplied, 2) . ').');
+        }
+    } elseif ($advanceApplied > 0) {
+        // The old single-number call, kept for callers that predate the
+        // allocation table: capped against the delivering order's own pool,
+        // then spread oldest-first across that pool's entries so the invariant
+        // — advance_amount is the sum of its rows — holds for every sale. The
+        // billing screen never takes this path; it always names the entries.
         if ($deliverOrderId <= 0) {
             throw new RuntimeException('An advance can only be applied to the order it was taken against.');
         }
@@ -1439,6 +1633,21 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
         if ($advanceApplied > $available + 0.005) {
             throw new RuntimeException('Only ' . number_format($available, 2) . ' of advance is still held against this order — '
                 . 'cannot apply ' . number_format($advanceApplied, 2) . '.');
+        }
+        if (table_exists('jewellery_advance_allocations')) {
+            $left = $advanceApplied;
+            foreach (jewellery_open_advances($companyId, (int) $partyId, $saleId) as $openEntry) {
+                if ((int) ($openEntry['order_id'] ?? 0) !== $deliverOrderId || $left <= 0.005) {
+                    continue;
+                }
+                $take = min((float) $openEntry['remaining'], $left);
+                $advanceAllocations[(int) $openEntry['id']] = jw_round_money($take);
+                $left = jw_round_money($left - $take);
+            }
+            if ($left > 0.005) {
+                throw new RuntimeException('The advance applied could not be traced to this customer\'s own '
+                    . 'advance entries on this order. Check the order and the customer match.');
+            }
         }
     }
 
@@ -1594,6 +1803,23 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
                 'fine' => $row['fine_weight'], 'rate' => $row['rate'], 'amount' => $row['amount'],
                 'notes' => $row['notes'] !== '' ? $row['notes'] : null,
             ]);
+        }
+
+        // WHICH advance entries fund this bill — rewritten wholesale on every
+        // revision of the draft, like the lines above; posting freezes them
+        // because a posted sale cannot be saved. The sale's advance_amount is
+        // the sum of these rows, and jewellery_open_advances() subtracts them
+        // entry by entry, which is what stops one rupee funding two bills.
+        if (table_exists('jewellery_advance_allocations')) {
+            db()->prepare('DELETE FROM jewellery_advance_allocations WHERE sale_id = :sid AND company_id = :cid')
+                ->execute(['sid' => $saleId, 'cid' => $companyId]);
+            $advAllocStmt = db()->prepare('INSERT INTO jewellery_advance_allocations
+                    (company_id, sale_id, settlement_id, amount, created_by)
+                VALUES (:cid, :sid, :stid, :amount, :by)');
+            foreach ($advanceAllocations as $allocSettlementId => $allocAmount) {
+                $advAllocStmt->execute(['cid' => $companyId, 'sid' => $saleId,
+                    'stid' => $allocSettlementId, 'amount' => $allocAmount, 'by' => $userId ?: null]);
+            }
         }
 
         // Record WHICH sale is billing this order, here in the engine rather
@@ -2838,6 +3064,22 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
 /** Reverse a posted settlement and re-open the bills it had settled. */
 function jewellery_unpost_settlement(int $companyId, int $settlementId, int $userId = 0): array
 {
+    // An advance that has already paid part of a bill cannot be pulled out
+    // from under it — the bill's settlement identity would be standing on
+    // money that no longer exists. Unwind the sale (or revise its advance
+    // entries) first; then the entry is free to reverse.
+    if (table_exists('jewellery_advance_allocations')) {
+        $appliedStmt = db()->prepare("SELECT COALESCE(SUM(a.amount), 0)
+            FROM jewellery_advance_allocations a
+            INNER JOIN jewellery_sales s ON s.id = a.sale_id
+            WHERE a.company_id = :cid AND a.settlement_id = :stid AND s.status <> 'cancelled'");
+        $appliedStmt->execute(['cid' => $companyId, 'stid' => $settlementId]);
+        $applied = jw_round_money((float) $appliedStmt->fetchColumn());
+        if ($applied > 0.005) {
+            return ['ok' => false, 'error' => number_format($applied, 2)
+                . ' of this advance has already been applied to a bill. Unwind that sale first.'];
+        }
+    }
     $allocations = jewellery_settlement_allocations($companyId, $settlementId);
     $result = jw_unpost_document($companyId, 'jewellery_settlements', 'jewellery_settlement', $settlementId, $userId);
     if ($result['ok']) {

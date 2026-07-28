@@ -103,6 +103,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'paid_qr' => (float) ($_POST['paid_qr'] ?? 0),
                 'deliver_order_id' => (int) ($_POST['deliver_order_id'] ?? 0),
                 'advance_amount' => (float) ($_POST['advance_amount'] ?? 0),
+                // WHICH advance entries pay this bill — the rows the user put
+                // an amount against on the picker. The engine validates each
+                // against what the entry still holds and takes their sum as
+                // the advance applied.
+                'advance_allocations' => (static function (): array {
+                    $rows = [];
+                    foreach ((array) ($_POST['adv_alloc_id'] ?? []) as $index => $settlementId) {
+                        $rows[] = ['settlement_id' => (int) $settlementId,
+                            'amount' => (float) ($_POST['adv_alloc_amount'][$index] ?? 0)];
+                    }
+                    return $rows;
+                })(),
                 'settle_mode' => (string) ($_POST['settle_mode'] ?? 'cash'),
                 'settle_ledger_id' => (int) ($_POST['settle_ledger_id'] ?? 0),
             ], jw_posted_lines($_POST, 'l'), jw_posted_lines($_POST, 'x'), $userId);
@@ -356,6 +368,8 @@ $lineTemplates = in_array($view, ['purchases', 'sales'], true)
 $saleParty = (int) ($_GET['for_party'] ?? ($editDoc['party_id'] ?? 0));
 $openOrders = [];
 $orderPrefill = null;
+$openAdvances = [];
+$editAdvanceAllocs = [];
 if ($view === 'sales') {
     if ($saleParty > 0) {
         $openOrders = jewellery_open_orders_for_party($companyId, $saleParty);
@@ -374,6 +388,17 @@ if ($view === 'sales') {
             }
         } else {
             flash('error', $prefill['error']);
+        }
+    }
+    // Every advance this customer still holds, entry by entry — this order's,
+    // a previous order's, all of it. The user ticks WHICH entries pay this
+    // bill; nothing is applied on their behalf.
+    if ($saleParty > 0) {
+        $openAdvances = jewellery_open_advances($companyId, $saleParty, (int) ($editDoc['id'] ?? 0));
+        if (!empty($editDoc['id'])) {
+            foreach (jewellery_sale_advance_allocations($companyId, (int) $editDoc['id']) as $allocRow) {
+                $editAdvanceAllocs[(int) $allocRow['settlement_id']] = (float) $allocRow['amount'];
+            }
         }
     }
 }
@@ -711,13 +736,6 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 </table></div>
                 <?php if ($orderPrefill): ?>
                     <input type="hidden" name="deliver_order_id" value="<?= (int) $orderPrefill['order']['id'] ?>">
-                    <?php $advanceHeld = jewellery_order_advance_available($companyId, (int) $orderPrefill['order']['id'], (int) ($editDoc['id'] ?? 0)); ?>
-                    <?php if ($advanceHeld > 0.005): ?>
-                    <label style="display:block;margin-top:10px">Advance to apply (<?= e($sym) ?>)
-                        <input type="number" name="advance_amount" step="0.01" min="0" max="<?= e((string) $advanceHeld) ?>"
-                               value="<?= e((string) ($editDoc['advance_amount'] ?? $advanceHeld)) ?>" style="max-width:220px">
-                    </label>
-                    <?php endif; ?>
                     <div class="mbw-note tone-green" style="margin-top:10px">
                         <p style="margin:0">
                             <strong><?= e((string) $orderPrefill['order']['order_no']) ?> is filled in below.</strong>
@@ -725,14 +743,49 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                             <?php if ($orderPrefill['received']): ?>
                                 The weight billed is what actually came back from the kaligad, not the estimate.
                             <?php endif; ?>
-                            <?php if ((float) $orderPrefill['advance_amount'] > 0): ?>
-                                An advance of <?= e($sym) ?> <?= $fmt((float) $orderPrefill['advance_amount']) ?> was taken on this
-                                order — enter it as cash received, or leave it on the customer's balance to net off.
-                            <?php endif; ?>
                             Posting this sale marks the order delivered — goods leave the shop only against a posted bill.
                         </p>
                     </div>
                 <?php endif; ?>
+            </fieldset>
+            <?php endif; ?>
+            <?php if ($openAdvances !== []): ?>
+            <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px;margin:12px 0">
+                <legend style="padding:0 6px;font-weight:600">Advances this customer holds — tick what pays this bill</legend>
+                <p style="margin:0 0 8px;color:var(--mbw-muted,#64748b)">
+                    Every entry still held is listed — this order's, earlier orders', all of it.
+                    Nothing is applied unless you put an amount against it.
+                </p>
+                <div style="overflow-x:auto"><table>
+                    <thead><tr><th>Date</th><th>Ref</th><th>Order</th><th>How it was paid</th>
+                        <th class="is-numeric">Still held</th><th class="is-numeric" style="min-width:140px">Apply (<?= e($sym) ?>)</th><th></th></tr></thead>
+                    <tbody>
+                        <?php foreach ($openAdvances as $adv): ?>
+                        <tr>
+                            <td><?= e(app_date((string) $adv['settlement_date'])) ?></td>
+                            <td><?= e((string) $adv['settlement_no']) ?></td>
+                            <td><?= e((string) ($adv['order_no'] ?? '—')) ?></td>
+                            <td><?= e(jw_tender_mode_label((string) $adv['mode'])) ?>
+                                <?php if ((string) $adv['mode'] === 'metal'): ?>
+                                    <small><?= e((string) ($adv['item_code'] ?? '')) ?> <?= e((string) ($adv['purity_code'] ?? '')) ?></small>
+                                <?php endif; ?></td>
+                            <td class="is-numeric"><?= $fmt((float) $adv['remaining']) ?></td>
+                            <td class="is-numeric">
+                                <input type="hidden" name="adv_alloc_id[]" value="<?= (int) $adv['id'] ?>">
+                                <input type="number" name="adv_alloc_amount[]" class="jw-advalloc-amount"
+                                       step="0.01" min="0" max="<?= e((string) $adv['remaining']) ?>"
+                                       value="<?= e((string) ($editAdvanceAllocs[(int) $adv['id']] ?? '0')) ?>"
+                                       style="max-width:130px">
+                            </td>
+                            <td><button type="button" class="button soft jw-advalloc-fill" data-remaining="<?= e((string) $adv['remaining']) ?>"
+                                        style="min-height:28px;padding:2px 10px" title="Apply all of this entry">All</button></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table></div>
+                <div style="text-align:right;margin-top:8px">
+                    <strong>Advance applied: <?= e($sym) ?> <span id="jw-advalloc-total">0.00</span></strong>
+                </div>
             </fieldset>
             <?php endif; ?>
             <?php $renderLineRows('l', $editLines, max($lineSlots, count($editLines) + 1), 'Items sold', $renderGridToolbar('sale')); ?>
@@ -1021,6 +1074,33 @@ document.addEventListener("change", function (event) {
     if (!base) { return; }
     window.location.href = base + (party > 0 ? "&for_party=" + party : "");
 });
+
+// The advance picker: the running total of what the user has chosen to apply,
+// and an "All" button per entry that fills in what that entry still holds.
+// Applying an advance is a choice made row by row — there is no field that
+// applies money without naming where it comes from.
+(function () {
+    function total() {
+        var out = document.getElementById("jw-advalloc-total");
+        if (!out) { return; }
+        var sum = 0;
+        Array.prototype.forEach.call(document.querySelectorAll(".jw-advalloc-amount"), function (amount) {
+            sum += parseFloat(amount.value) || 0;
+        });
+        out.textContent = sum.toFixed(2);
+    }
+    document.addEventListener("input", function (event) {
+        if (event.target.classList.contains("jw-advalloc-amount")) { total(); }
+    });
+    document.addEventListener("click", function (event) {
+        var fill = event.target.closest(".jw-advalloc-fill");
+        if (!fill) { return; }
+        var row = fill.closest("tr");
+        var amount = row && row.querySelector(".jw-advalloc-amount");
+        if (amount) { amount.value = fill.getAttribute("data-remaining") || "0"; total(); }
+    });
+    total();
+})();
 </script>
 
 <?php

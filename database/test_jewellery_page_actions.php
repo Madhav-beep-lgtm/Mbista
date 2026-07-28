@@ -27,7 +27,10 @@ function cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
-        foreach (['jewellery_settlement_tenders', 'jewellery_settlement_allocations', 'jewellery_settlements',
+        foreach (['jewellery_line_taxes', 'jewellery_advance_allocations', 'jewellery_settlement_tenders',
+                  'jewellery_settlement_allocations', 'jewellery_settlements', 'jewellery_bills',
+                  'jewellery_sale_exchanges', 'jewellery_sale_lines', 'jewellery_sales',
+                  'jewellery_purchase_lines', 'jewellery_purchases',
                   'jewellery_order_lines', 'jewellery_orders',
                   'jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items', 'jewellery_daily_rates',
                   'inventory_ledger_mappings', 'jewellery_settings', 'jewellery_purities', 'jewellery_metals',
@@ -266,6 +269,36 @@ $r = $run(['action' => 'save_advance', 'back_view' => 'orders', 'order_id' => (s
     'tender_gross_weight' => ['0'],
 ], 'jewellery-workshop.php');
 ok($r['kind'] === 'ERROR', 'Cash without naming the till is refused on the POST path too — ' . $r['msg']);
+
+// --- Trade: the advance picker's rows cross the POST path -------------------
+// The customer above holds the 50,000 mixed advance (5,000 of it refunded)
+// and the 25,000 cheque advance. A bill is drafted drawing 10,000 from the
+// mixed entry — the parallel arrays the picker posts must arrive as one
+// allocation, and the sale's advance figure must be their sum.
+$r = $run(['action' => 'save_sale', 'back_view' => 'sales',
+    'sale_date' => '2026-08-10', 'party_id' => (string) $postCustomer, 'settle_mode' => 'credit',
+    'l_item_id' => [(string) $itemId], 'l_qty_pieces' => ['1'],
+    'l_purity_id' => [(string) $p22], 'l_unit_id' => [(string) $tola],
+    'l_gross_weight' => ['1'], 'l_rate' => ['100000'],
+    'adv_alloc_id' => [(string) $mixedId], 'adv_alloc_amount' => ['10000'],
+], 'jewellery-trade.php');
+ok($r['kind'] === 'SUCCESS', 'save_sale with a ticked advance entry — ' . $r['msg']);
+$pickedSale = $q("SELECT id FROM jewellery_sales WHERE company_id=$cid AND party_id=$postCustomer ORDER BY id DESC LIMIT 1");
+ok($q("SELECT COUNT(*) FROM jewellery_advance_allocations WHERE company_id=$cid
+        AND sale_id=$pickedSale AND settlement_id=$mixedId AND amount=10000.00") === 1,
+    'The ticked entry arrived as one allocation row');
+ok($q("SELECT COUNT(*) FROM jewellery_sales WHERE id=$pickedSale AND advance_amount=10000.00") === 1,
+    'And the sale\'s advance figure is the sum of what was ticked');
+
+$r = $run(['action' => 'save_sale', 'back_view' => 'sales',
+    'sale_date' => '2026-08-10', 'party_id' => (string) $postCustomer, 'settle_mode' => 'credit',
+    'l_item_id' => [(string) $itemId], 'l_qty_pieces' => ['1'],
+    'l_purity_id' => [(string) $p22], 'l_unit_id' => [(string) $tola],
+    'l_gross_weight' => ['1'], 'l_rate' => ['100000'],
+    'adv_alloc_id' => [(string) $mixedId], 'adv_alloc_amount' => ['90000'],
+], 'jewellery-trade.php');
+ok($r['kind'] === 'ERROR' && str_contains($r['msg'], 'left'),
+    'Over-drawing an entry is refused on the POST path too — ' . $r['msg']);
 
 cleanup();
 echo "\n==================================================\n";
