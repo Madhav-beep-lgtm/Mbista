@@ -444,6 +444,78 @@ ok((string) jewellery_settlement($cid, $advCheque)['mode'] === 'cheque',
 ok(jewellery_post_settlement($cid, $advCheque, $uid)['ok'], 'And posts to the ledger the user picked');
 ok(near(jewellery_order_advances($cid, $order3)['total'], 75000.0), 'The order now holds 75,000 across both advances');
 
+echo "\n10. The order's status ends in words that mean something\n";
+// invoiced = the bill is in the books, goods not yet handed over.
+// delivered = handed over, money still owed.
+// closed    = handed over AND paid — actually finished, even when the last
+//             payment lands a month later.
+$order4 = jewellery_save_order($cid, $fy, [
+    'order_date' => '2026-08-01', 'party_id' => $customer, 'item_id' => $chain,
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'expected_gross_weight' => 1, 'making_basis' => 'flat', 'making_rate' => 0, 'status' => 'confirmed',
+], [], $uid);
+$prefill4 = jewellery_order_sale_prefill($cid, $order4);
+$sale4 = jewellery_save_sale($cid, $fy, [
+    'sale_date' => '2026-10-10', 'party_id' => $customer, 'settle_mode' => 'credit',
+    'deliver_order_id' => $order4,
+], [$prefill4['line']], [], $uid);
+ok((int) db()->query("SELECT order_id FROM jewellery_sales WHERE id=$sale4")->fetchColumn() === $order4,
+    'The sale remembers WHICH order it bills, on its own row');
+ok((string) jewellery_order($cid, $order4)['status'] === 'confirmed',
+    'A draft bill changes nothing — the order stands as it was');
+
+ok(jewellery_post_sale($cid, $sale4, $uid)['ok'], 'The sale posts');
+ok((string) jewellery_order($cid, $order4)['status'] === 'invoiced',
+    "Posting marks the order INVOICED — billed, goods not yet handed over");
+ok(!jewellery_cancel_order($cid, $order4, '', $uid)['ok'],
+    'An invoiced order cannot be cancelled out from under its bill');
+
+$dlv4 = jewellery_deliver_order($cid, $order4, $sale4, $uid);
+ok($dlv4['ok'] && (string) jewellery_order($cid, $order4)['status'] === 'delivered',
+    'Handed over with money still owed: DELIVERED, not closed');
+
+// The balance arrives a month later, and its settlement closes the order.
+$bill4 = (int) db()->query("SELECT id FROM jewellery_bills WHERE company_id=$cid
+    AND source_type='jewellery_sale' AND source_id=$sale4")->fetchColumn();
+$due4 = (float) db()->query("SELECT balance_amount FROM jewellery_sales WHERE id=$sale4")->fetchColumn();
+$settle4 = jewellery_save_settlement($cid, $fy, [
+    'settlement_date' => '2026-11-10', 'party_id' => $customer,
+    'direction' => 'received', 'mode' => 'cash', 'amount' => $due4, 'ledger_id' => $cash,
+], [['bill_id' => $bill4, 'amount' => $due4]], $uid);
+ok(jewellery_post_settlement($cid, $settle4, $uid)['ok'], 'The day-30 payment posts');
+ok((string) jewellery_order($cid, $order4)['status'] === 'closed',
+    'Paid off, the delivered order CLOSES itself — nobody had to remember to');
+
+// Reversing that payment reopens the bill, and the order steps back with it.
+ok(jewellery_unpost_settlement($cid, $settle4, $uid)['ok'], 'The payment is reversed');
+ok((string) jewellery_order($cid, $order4)['status'] === 'delivered',
+    'The order steps back to delivered — goods gone, money owed again');
+
+// And unposting the SALE walks the whole thing back to the workshop's answer.
+ok(jewellery_unpost_sale($cid, $sale4, $uid)['ok'], 'The sale itself is unposted');
+ok((string) jewellery_order($cid, $order4)['status'] === 'confirmed',
+    'With no bill in the books the order is simply confirmed again');
+
+// Paid in full at the counter: delivery and closing are one stroke.
+$prefill5 = jewellery_order_sale_prefill($cid, $order4);
+$sale5 = jewellery_save_sale($cid, $fy, [
+    'sale_date' => '2026-10-12', 'party_id' => $customer, 'settle_mode' => 'cash',
+    'settle_ledger_id' => $cash, 'received_amount' => (float) $prefill5['order_total'] ?: null,
+    'deliver_order_id' => $order4,
+], [$prefill5['line']], [], $uid);
+$sale5Row = jewellery_sale($cid, $sale5);
+// Pay the bill exactly: received = total, so nothing is left owing.
+$sale5 = jewellery_save_sale($cid, $fy, [
+    'id' => $sale5, 'sale_date' => '2026-10-12', 'party_id' => $customer, 'settle_mode' => 'cash',
+    'settle_ledger_id' => $cash, 'received_amount' => (float) $sale5Row['total_amount'],
+    'deliver_order_id' => $order4,
+], [$prefill5['line']], [], $uid);
+ok(jewellery_post_sale($cid, $sale5, $uid)['ok'], 'A fully paid counter sale posts');
+$dlv5 = jewellery_deliver_order($cid, $order4, $sale5, $uid);
+ok($dlv5['ok'] && ($dlv5['status'] ?? '') === 'closed'
+    && (string) jewellery_order($cid, $order4)['status'] === 'closed',
+    'Nothing left to collect: delivered and CLOSED in the same stroke');
+
 jwadv_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

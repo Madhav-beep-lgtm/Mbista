@@ -2646,6 +2646,14 @@ function accounting_module_repair_database(): array
             || !accounting_repair_table_exists('jewellery_order_assignments')) {
             return;
         }
+        // 'partially_received' once migration 093 has widened the enum to hold
+        // it; the old 'assigned' before that. This step runs BEFORE the 093
+        // step on a fresh upgrade, so the first pass writes the old word and
+        // 093's own backfill immediately corrects it — every later pass writes
+        // the right word directly.
+        $status = db()->query("SHOW COLUMNS FROM `jewellery_orders` LIKE 'status'")->fetch(PDO::FETCH_ASSOC);
+        $partial = stripos((string) ($status['Type'] ?? ''), "'partially_received'") !== false
+            ? 'partially_received' : 'assigned';
         db()->exec("UPDATE `jewellery_orders` o
             INNER JOIN (
                 SELECT l.`order_id`,
@@ -2659,10 +2667,11 @@ function accounting_module_repair_database(): array
             ) t ON t.`order_id` = o.`id`
                SET o.`status` = CASE
                     WHEN t.came_back >= t.total_items THEN 'received'
+                    WHEN t.came_back > 0              THEN '$partial'
                     WHEN t.out_now > 0                THEN 'assigned'
                     ELSE 'confirmed'
                END
-             WHERE o.`status` IN ('assigned', 'received')");
+             WHERE o.`status` IN ('assigned', 'partially_received', 'received')");
     });
 
     $run('One payment split across several ways of paying (migration 092)', static function (): void {
@@ -2717,6 +2726,63 @@ function accounting_module_repair_database(): array
             db()->exec("ALTER TABLE `jewellery_settlements`
                 MODIFY COLUMN `mode` ENUM('cash','bank','card','cheque','qr','wallet','metal','adjustment','other','mixed')
                     NOT NULL DEFAULT 'cash'");
+        }
+    });
+
+    $run('Order status vocabulary and the sale-order link (migration 093)', static function (): void {
+        // Four states of affairs had no word: partially_received (two of five
+        // pieces back), invoiced (billed, not yet handed over), closed
+        // (delivered AND paid), and the sale's own knowledge of which order it
+        // delivers — which used to live in a POST field and die with the
+        // request, so a sale posted after being drafted never delivered its
+        // order at all.
+        if (!accounting_repair_table_exists('jewellery_orders')
+            || !accounting_repair_table_exists('jewellery_sales')) {
+            return;
+        }
+        $status = db()->query("SHOW COLUMNS FROM `jewellery_orders` LIKE 'status'")->fetch(PDO::FETCH_ASSOC);
+        if ($status && stripos((string) ($status['Type'] ?? ''), "'closed'") === false) {
+            db()->exec("ALTER TABLE `jewellery_orders`
+                MODIFY COLUMN `status` ENUM('draft','confirmed','assigned','partially_received','received',
+                    'invoiced','delivered','closed','cancelled') NOT NULL DEFAULT 'draft'");
+        }
+        $hadLink = accounting_repair_column_exists('jewellery_sales', 'order_id');
+        accounting_repair_add_column('jewellery_sales', 'order_id',
+            '`order_id` INT UNSIGNED DEFAULT NULL AFTER `party_id`');
+        accounting_repair_add_index('jewellery_sales', 'idx_jw_sales_order',
+            'KEY `idx_jw_sales_order` (`company_id`, `order_id`)');
+        accounting_repair_add_constraint('jewellery_sales', 'fk_jw_sales_order',
+            '`fk_jw_sales_order` FOREIGN KEY (`order_id`) REFERENCES `jewellery_orders` (`id`) ON DELETE SET NULL');
+        if (!$hadLink) {
+            // First arrival of the column: history gets the link back-filled
+            // from the delivery record, and the statuses the old vocabulary
+            // could not express are recomputed once, exactly as migration 093
+            // writes them.
+            db()->exec("UPDATE `jewellery_sales` s
+                INNER JOIN `jewellery_orders` o ON o.`delivered_sale_id` = s.`id` AND o.`company_id` = s.`company_id`
+                  SET s.`order_id` = o.`id`
+                WHERE s.`order_id` IS NULL");
+            db()->exec("UPDATE `jewellery_orders` o
+                INNER JOIN (
+                    SELECT l.`order_id`,
+                           COUNT(*) AS total_items,
+                           SUM(CASE WHEN a.`status` = 'received' THEN 1 ELSE 0 END) AS came_back
+                      FROM `jewellery_order_lines` l
+                      LEFT JOIN `jewellery_order_assignments` a
+                             ON a.`id` = l.`assignment_id` AND a.`company_id` = l.`company_id`
+                     GROUP BY l.`order_id`
+                ) t ON t.`order_id` = o.`id`
+                   SET o.`status` = 'partially_received'
+                 WHERE o.`status` = 'assigned'
+                   AND t.came_back > 0
+                   AND t.came_back < t.total_items");
+            db()->exec("UPDATE `jewellery_orders` o
+                INNER JOIN `jewellery_sales` s ON s.`id` = o.`delivered_sale_id` AND s.`company_id` = o.`company_id`
+                LEFT JOIN `jewellery_bills` b ON b.`source_type` = 'jewellery_sale' AND b.`source_id` = s.`id`
+                      AND b.`company_id` = o.`company_id`
+                  SET o.`status` = 'closed'
+                WHERE o.`status` = 'delivered'
+                  AND (b.`id` IS NULL OR b.`status` = 'settled')");
         }
     });
 

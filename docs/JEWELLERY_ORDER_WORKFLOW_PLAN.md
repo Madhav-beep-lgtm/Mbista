@@ -81,22 +81,31 @@ Each numbered item is one commit, tested, reviewed before the next starts.
 from whatever the company already uses. Requires a decision — see
 [Open questions](#open-questions).
 
-### B. Status vocabulary (§1)
+### B. Status vocabulary (§1) — **SHIPPED** (migration 093)
 
-Extend the enum with `partially_received`, `invoiced` and `closed`.
-`jewellery_sync_order_status()` gains the corresponding rules:
+The enum gained `partially_received`, `invoiced` and `closed`, derived as:
 
 ```
 partially_received   some items back, not all
 received             every item back
 invoiced             a posted sale exists, goods not yet handed over
-delivered            handed over
-closed               delivered and the balance is nil
+delivered            handed over, balance still owed
+closed               delivered and the balance is nil — automatic, both at
+                     delivery and when a later settlement clears the bill
+                     (jw_refresh_bill), stepping back if that settlement
+                     is reversed
 ```
 
-`assigned` keeps its meaning (metal is out with a kaligad = the prompt's
-"Gold Issued"/"In Production"). Existing rows are recomputed by a migration in
-the manner of 090.
+`assigned` keeps its meaning. Existing rows were recomputed in the manner
+of 090. The workshop's sync owns draft→received; `invoiced` onward belongs
+to the billing machinery and a person, and the sync never overwrites them.
+
+Shipping this fixed a real wiring break: the sale screen attempted delivery
+right after SAVING (a draft), which the engine rightly refuses, and nothing
+retried after posting — so orders sold through the normal save-then-post flow
+sat on the ready-to-deliver board forever. The sale now carries
+`jewellery_sales.order_id` from the save, and the post_sale handler delivers
+(and auto-closes) on that durable link.
 
 ### C. Advance and payment modes (§7, §11) — **SHIPPED** (migration 092)
 

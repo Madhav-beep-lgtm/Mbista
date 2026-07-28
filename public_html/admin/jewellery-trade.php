@@ -106,18 +106,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'settle_mode' => (string) ($_POST['settle_mode'] ?? 'cash'),
                 'settle_ledger_id' => (int) ($_POST['settle_ledger_id'] ?? 0),
             ], jw_posted_lines($_POST, 'l'), jw_posted_lines($_POST, 'x'), $userId);
-            // Selling an order closes it. Doing it here rather than on posting
-            // means the counter sees the order leave the pending-delivery board
-            // the moment the bill is raised, which is when the piece changes
-            // hands.
-            $deliverOrderId = (int) ($_POST['deliver_order_id'] ?? 0);
-            $deliverNote = '';
-            if ($deliverOrderId > 0) {
-                $delivered = jewellery_deliver_order($companyId, $deliverOrderId, $id, $userId);
-                $deliverNote = $delivered['ok']
-                    ? ' Order marked delivered.'
-                    : ' The sale was saved, but the order could not be closed: ' . $delivered['error'];
-            }
+            // Delivery happens at POSTING, not here. This used to try now and
+            // fail every time: goods leave the shop only against a POSTED
+            // bill (jewellery_deliver_order refuses drafts), the save always
+            // produces a draft, and nothing ever tried again — so an order
+            // sold through the normal save-then-post flow sat on the
+            // ready-to-deliver board forever. The save stores the link on the
+            // sale; the post_sale handler below finishes the job.
+            $deliverNote = (int) ($_POST['deliver_order_id'] ?? 0) > 0
+                ? ' Posting the bill will mark the order delivered.' : '';
             flash('success', 'Sale saved as a draft.' . $deliverNote);
             redirect($back . '&edit=' . $id);
         } catch (Throwable $e) {
@@ -132,8 +129,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result = $action === 'post_purchase'
             ? jewellery_post_purchase($companyId, $id, $userId)
             : jewellery_post_sale($companyId, $id, $userId);
+        $deliverNote = '';
+        if ($action === 'post_sale' && $result['ok']) {
+            // The bill is posted, so the goods can go out on it. At the
+            // counter the two are one breath: the customer pays and walks out
+            // with the piece. The order the sale was raised against —
+            // remembered on the sale itself since the save — is delivered
+            // now, and closed in the same stroke when nothing is left to
+            // collect.
+            $postedSale = jewellery_sale($companyId, $id);
+            $deliverOrderId = (int) ($postedSale['order_id'] ?? 0);
+            if ($deliverOrderId > 0) {
+                $delivered = jewellery_deliver_order($companyId, $deliverOrderId, $id, $userId);
+                $deliverNote = $delivered['ok']
+                    ? (($delivered['status'] ?? '') === 'closed'
+                        ? ' Order delivered and closed — nothing left to collect.'
+                        : ' Order marked delivered.')
+                    : ' The order could not be marked delivered: ' . $delivered['error'];
+            }
+        }
         flash($result['ok'] ? 'success' : 'error', $result['ok']
-            ? ('Posted to the ledger (voucher #' . $result['voucher_id'] . ').') : $result['error']);
+            ? ('Posted to the ledger (voucher #' . $result['voucher_id'] . ').' . $deliverNote) : $result['error']);
         redirect($back);
     }
 
@@ -713,7 +729,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                 An advance of <?= e($sym) ?> <?= $fmt((float) $orderPrefill['advance_amount']) ?> was taken on this
                                 order — enter it as cash received, or leave it on the customer's balance to net off.
                             <?php endif; ?>
-                            Saving this sale marks the order delivered.
+                            Posting this sale marks the order delivered — goods leave the shop only against a posted bill.
                         </p>
                     </div>
                 <?php endif; ?>

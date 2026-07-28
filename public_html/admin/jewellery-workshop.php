@@ -436,7 +436,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
 $statusTone = ['draft' => 'tone-gray', 'confirmed' => 'tone-blue', 'assigned' => 'tone-amber',
-    'received' => 'tone-teal', 'delivered' => 'tone-green', 'cancelled' => 'tone-red'];
+    'partially_received' => 'tone-amber', 'received' => 'tone-teal', 'invoiced' => 'tone-blue',
+    'delivered' => 'tone-green', 'closed' => 'tone-green', 'cancelled' => 'tone-red'];
+// ucfirst('partially_received') is not a label a person should read.
+$statusLabel = static fn (string $s): string => ucwords(str_replace('_', ' ', $s));
 jw_line_grid_styles();
 jw_filter_bar_styles();
 ?>
@@ -727,7 +730,9 @@ jw_filter_bar_styles();
             'advanced' => [
                 ['label' => 'Status', 'html' => jw_filter_select('status', $filterStatus, [
                     'draft' => 'Draft', 'confirmed' => 'Confirmed', 'assigned' => 'Assigned',
-                    'received' => 'Received', 'delivered' => 'Delivered', 'cancelled' => 'Cancelled',
+                    'partially_received' => 'Partially Received', 'received' => 'Received',
+                    'invoiced' => 'Invoiced', 'delivered' => 'Delivered', 'closed' => 'Closed',
+                    'cancelled' => 'Cancelled',
                 ])],
                 ['label' => 'Customer', 'html' => jw_filter_select('party', (string) $filterParty,
                     array_column($parties, 'name', 'id'))],
@@ -749,7 +754,7 @@ jw_filter_bar_styles();
                         <td><?= e($row['metal_name'] . ' · ' . $row['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['expected_gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small></td>
                         <td><?= ($row['delivery_date'] ?? null) ? e(app_date((string) $row['delivery_date'])) : '—' ?></td>
-                        <td><span class="mbw-pill <?= e($statusTone[$row['status']] ?? 'tone-gray') ?>"><?= e(ucfirst((string) $row['status'])) ?></span></td>
+                        <td><span class="mbw-pill <?= e($statusTone[$row['status']] ?? 'tone-gray') ?>"><?= e($statusLabel((string) $row['status'])) ?></span></td>
                         <td style="white-space:nowrap">
                             <?php if ($canEdit): ?>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) ?>">Edit</a>
@@ -758,7 +763,7 @@ jw_filter_bar_styles();
                             <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?>
                                 <a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=assignments&order=' . (int) $row['id'])) ?>">Assign</a>
                             <?php endif; ?>
-                            <?php if ($canEdit && !in_array((string) $row['status'], ['delivered', 'cancelled'], true)): ?>
+                            <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?>
                                 <form method="post" style="display:inline-flex;gap:4px;align-items:center">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="postpone_order">

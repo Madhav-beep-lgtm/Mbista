@@ -160,7 +160,7 @@ if ($docType === 'order') {
         'Number' => (string) $doc['order_no'],
         'Ordered' => app_date((string) $doc['order_date']),
         'Customer' => (string) ($doc['party_name'] ?? $doc['customer_name'] ?? ''),
-        'Status' => ucfirst((string) $doc['status']),
+        'Status' => ucwords(str_replace('_', ' ', (string) $doc['status'])),
     ];
     if ((string) ($doc['delivery_date'] ?? '') !== '') {
         $meta['Promised'] = app_date((string) $doc['delivery_date']);

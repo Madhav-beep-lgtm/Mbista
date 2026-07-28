@@ -1607,6 +1607,13 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
             db()->prepare("UPDATE jewellery_orders SET delivered_sale_id = :sale
                 WHERE id = :id AND company_id = :cid AND status <> 'cancelled'")
                 ->execute(['sale' => $saleId, 'id' => $deliverOrderId, 'cid' => $companyId]);
+            // And on the sale's own side, so posting — a different request,
+            // long after the POST field that carried the order id has died —
+            // can still finish what the save started.
+            if (column_exists('jewellery_sales', 'order_id')) {
+                db()->prepare('UPDATE jewellery_sales SET order_id = :oid WHERE id = :id AND company_id = :cid')
+                    ->execute(['oid' => $deliverOrderId, 'id' => $saleId, 'cid' => $companyId]);
+            }
         }
 
         if ($ownsTransaction) {
@@ -1896,6 +1903,20 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
                 posted_by = :by, posted_at = NOW() WHERE id = :id AND company_id = :cid")
             ->execute(['v' => $voucherId, 'c' => $cogsTotal, 'by' => $userId ?: null, 'id' => $saleId, 'cid' => $companyId]);
 
+        // The order this sale bills, if any, is now INVOICED — the bill is in
+        // the books, whatever the workshop was doing. The word marks the
+        // boundary: from here on the order's status belongs to the billing
+        // machinery, and jewellery_sync_order_status() will not touch it.
+        // Delivery — the goods actually changing hands — remains its own act,
+        // jewellery_deliver_order(), which the sale screen performs on posting.
+        $orderId = (int) ($sale['order_id'] ?? 0);
+        if ($orderId > 0 && jw_order_status_storable('invoiced')) {
+            db()->prepare("UPDATE jewellery_orders SET status = 'invoiced'
+                    WHERE id = :oid AND company_id = :cid
+                      AND status IN ('draft', 'confirmed', 'assigned', 'partially_received', 'received')")
+                ->execute(['oid' => $orderId, 'cid' => $companyId]);
+        }
+
         if ($ownsTransaction) {
             db()->commit();
         }
@@ -1912,7 +1933,31 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
 
 function jewellery_unpost_sale(int $companyId, int $saleId, int $userId = 0): array
 {
-    return jw_unpost_document($companyId, 'jewellery_sales', 'jewellery_sale', $saleId, $userId);
+    $sale = jewellery_sale($companyId, $saleId);
+    $result = jw_unpost_document($companyId, 'jewellery_sales', 'jewellery_sale', $saleId, $userId);
+    if ($result['ok'] && $sale !== null) {
+        // The bill is out of the books, so the order it stood on goes back to
+        // the workshop's answer. Delivery is undone with it: 'delivered' was
+        // this sale's doing, and a draft is evidence of nothing — but the
+        // LINK (order_id, delivered_sale_id) survives, so posting again picks
+        // the same order back up.
+        $orderId = (int) ($sale['order_id'] ?? 0);
+        if ($orderId <= 0) {
+            $linked = db()->prepare('SELECT id FROM jewellery_orders WHERE delivered_sale_id = :sid AND company_id = :cid LIMIT 1');
+            $linked->execute(['sid' => $saleId, 'cid' => $companyId]);
+            $orderId = (int) ($linked->fetchColumn() ?: 0);
+        }
+        if ($orderId > 0) {
+            db()->prepare("UPDATE jewellery_orders SET status = 'received', delivered_at = NULL
+                    WHERE id = :oid AND company_id = :cid AND status IN ('invoiced', 'delivered', 'closed')")
+                ->execute(['oid' => $orderId, 'cid' => $companyId]);
+            // 'received' was only a guess to land on a workshop-owned status;
+            // the sync derives the true one from the items themselves.
+            jewellery_sync_order_status($companyId, $orderId);
+        }
+    }
+
+    return $result;
 }
 
 function jewellery_delete_sale(int $companyId, int $saleId): bool
@@ -2067,6 +2112,28 @@ function jw_refresh_bill(int $companyId, int $billId): void
 
     db()->prepare('UPDATE jewellery_bills SET settled_amount = :s, status = :st WHERE id = :id AND company_id = :cid')
         ->execute(['s' => $settled, 'st' => $status, 'id' => $billId, 'cid' => $companyId]);
+
+    // A delivered order is CLOSED the moment its bill is paid off — that is
+    // what closed means: goods gone AND money in. This runs on every bill
+    // refresh so the day-30 cheque closes the order the same way day-one cash
+    // would have. Symmetric on reversal: unposting the settlement reopens the
+    // bill, and the order steps back to delivered.
+    if (jw_order_status_storable('closed')) {
+        $srcStmt = db()->prepare("SELECT source_type, source_id FROM jewellery_bills WHERE id = :id AND company_id = :cid LIMIT 1");
+        $srcStmt->execute(['id' => $billId, 'cid' => $companyId]);
+        $src = $srcStmt->fetch(PDO::FETCH_ASSOC);
+        if ($src && (string) $src['source_type'] === 'jewellery_sale') {
+            if ($status === 'settled') {
+                db()->prepare("UPDATE jewellery_orders SET status = 'closed'
+                        WHERE company_id = :cid AND delivered_sale_id = :sid AND status = 'delivered'")
+                    ->execute(['cid' => $companyId, 'sid' => (int) $src['source_id']]);
+            } else {
+                db()->prepare("UPDATE jewellery_orders SET status = 'delivered'
+                        WHERE company_id = :cid AND delivered_sale_id = :sid AND status = 'closed'")
+                    ->execute(['cid' => $companyId, 'sid' => (int) $src['source_id']]);
+            }
+        }
+    }
 }
 
 /** Bills still carrying a balance, newest first — the allocation picker. */

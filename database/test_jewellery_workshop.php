@@ -1098,13 +1098,15 @@ $receiveOne = static function (int $assignmentId, string $day) use ($cidA, $fyA,
 };
 $got1 = $receiveOne($issues[0], '2026-08-20');
 ok($got1['ok'], 'The first piece comes back' . ($got1['ok'] ? '' : ' — ' . $got1['error']));
-ok($statusOf() === 'assigned',
-    'ONE piece back does NOT make the order received — two are still at the bench');
+// Since migration 093 the in-between state has its own word, so the counter
+// can answer "how many still to come?" without opening the order.
+ok($statusOf() === 'partially_received',
+    'ONE piece back does NOT make the order received — it is PARTIALLY received');
 ok(!in_array($threeOrder, array_map('intval', array_column(jewellery_pending_delivery($cidA), 'id')), true),
     'So it stays off the ready-to-deliver list, which is where the old bug did its damage');
 
 $got2 = $receiveOne($issues[1], '2026-08-21');
-ok($got2['ok'] && $statusOf() === 'assigned', 'Two back, one out: still not ready');
+ok($got2['ok'] && $statusOf() === 'partially_received', 'Two back, one out: still not ready');
 
 $got3 = $receiveOne($issues[2], '2026-08-22');
 ok($got3['ok'], 'The last piece comes back' . ($got3['ok'] ? '' : ' — ' . $got3['error']));
@@ -1114,7 +1116,7 @@ ok(in_array($threeOrder, array_map('intval', array_column(jewellery_pending_deli
 
 // Undoing a receipt has to walk back the same way.
 ok(jewellery_unpost_receipt($cidA, (int) $got3['receipt_id'], $userA)['ok'], 'The last receipt is unposted');
-ok($statusOf() === 'assigned', 'Which puts the order back to out-for-making, not stuck on received');
+ok($statusOf() === 'partially_received', 'Which puts the order back to partly-made, not stuck on received');
 
 // And cancelling ONE issue must not pretend the whole order left the workshop.
 $stillOut = jewellery_assignment($cidA, $issues[2]);
@@ -1123,10 +1125,10 @@ ok(jewellery_cancel_assignment($cidA, $issues[2], $userA)['ok'], 'Its issue is c
 /*
  * Cancelling that issue sent the metal back to the shop UNMADE, so the third
  * piece does not exist. Two of three are finished and one has not been started:
- * the order is in progress, and must NOT read as received — the customer asked
- * for three. It does not drop to "confirmed" either, because work has happened.
+ * the order is partially received, and must NOT read as received — the customer
+ * asked for three. It does not drop to "confirmed" either: work has happened.
  */
-ok($statusOf() === 'assigned',
+ok($statusOf() === 'partially_received',
     'A cancelled issue leaves the order in progress — not ready to deliver, and not back to square one');
 ok(!in_array($threeOrder, array_map('intval', array_column(jewellery_pending_delivery($cidA), 'id')), true),
     'So it is off the delivery list again: two pieces made is not three pieces made');
@@ -1141,9 +1143,9 @@ db()->prepare("UPDATE jewellery_orders SET status = 'received' WHERE id = :id AN
     ->execute(['id' => $threeOrder, 'cid' => $cidA]);
 ok($statusOf() === 'received', 'An order stored the way the old rule left it');
 accounting_module_repair_database();
-ok($statusOf() === 'assigned', 'Migration 090 corrects it from the items themselves');
+ok($statusOf() === 'partially_received', 'The repair corrects it from the items themselves');
 accounting_module_repair_database();
-ok($statusOf() === 'assigned', 'And running the repair twice does not drift it');
+ok($statusOf() === 'partially_received', 'And running the repair twice does not drift it');
 
 // It must correct in the other direction too, not just downgrade.
 db()->prepare("UPDATE jewellery_orders SET status = 'assigned' WHERE id = :id AND company_id = :cid")

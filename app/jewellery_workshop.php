@@ -508,9 +508,11 @@ function jewellery_orders_list(int $companyId, array $filters = []): array
         $params['kid'] = (int) $filters['karigar_id'];
     }
     if (!empty($filters['overdue_only'])) {
-        // Promised, past due, and still nobody has come in for it.
+        // Promised, past due, and still nobody has come in for it. An
+        // invoiced order STAYS listed — billed but not handed over is
+        // exactly what uncollected means.
         $sql .= " AND o.delivery_date IS NOT NULL AND o.delivery_date < :today
-            AND o.status NOT IN ('delivered', 'cancelled')";
+            AND o.status NOT IN ('delivered', 'closed', 'cancelled')";
         $params['today'] = date('Y-m-d');
     }
     if (trim((string) ($filters['search'] ?? '')) !== '') {
@@ -721,7 +723,10 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     }
 
     $totals = $computed['totals'];
-    $status = jw_enum($input['status'] ?? null, ['draft', 'confirmed', 'assigned', 'received', 'delivered', 'cancelled'], 'draft');
+    // The full vocabulary, or a re-save of a partially_received order would
+    // fall off the end of the whitelist and quietly become a draft again.
+    $status = jw_enum($input['status'] ?? null, ['draft', 'confirmed', 'assigned', 'partially_received',
+        'received', 'invoiced', 'delivered', 'closed', 'cancelled'], 'draft');
     $advance = max(0.0, jw_round_money((float) ($input['advance_amount'] ?? 0)));
     if ($advance > $totals['total_amount'] + 0.005) {
         throw new RuntimeException('The advance (' . number_format($advance, 2)
@@ -766,7 +771,7 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
             }
             // Once metal is out with a karigar the order's specification is what
             // the issue was measured against — changing it would rewrite history.
-            if (in_array((string) $existing['status'], ['assigned', 'received', 'delivered'], true)
+            if (in_array((string) $existing['status'], ['assigned', 'partially_received', 'received', 'invoiced', 'delivered', 'closed'], true)
                 && ((int) $existing['purity_id'] !== $purityId || (int) $existing['unit_id'] !== $unitId)) {
                 throw new RuntimeException('This order already has metal issued against it — its purity and unit can no longer be changed.');
             }
@@ -923,8 +928,13 @@ function jewellery_cancel_order(int $companyId, int $orderId, string $reason = '
     if ((string) $order['status'] === 'cancelled') {
         return ['ok' => false, 'error' => 'This order is already cancelled.'];
     }
-    if ((string) $order['status'] === 'delivered') {
+    if (in_array((string) $order['status'], ['delivered', 'closed'], true)) {
         return ['ok' => false, 'error' => 'This order has already been delivered.'];
+    }
+    // A posted bill stands on the order. Cancelling underneath it would leave
+    // the bill claiming to deliver an order that says it never happened.
+    if ((string) $order['status'] === 'invoiced') {
+        return ['ok' => false, 'error' => 'This order has been invoiced. Unpost that sale first, then cancel the order.'];
     }
 
     $outStmt = db()->prepare("SELECT COUNT(*) FROM jewellery_order_assignments
@@ -965,7 +975,7 @@ function jewellery_postpone_order(int $companyId, int $orderId, string $newDate,
     if (!$order) {
         return ['ok' => false, 'error' => 'Order not found for this company.'];
     }
-    if (in_array((string) $order['status'], ['delivered', 'cancelled'], true)) {
+    if (in_array((string) $order['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)) {
         return ['ok' => false, 'error' => 'A ' . $order['status'] . ' order cannot be rescheduled.'];
     }
     if ($newDate === '' || strtotime($newDate) === false) {
@@ -1121,7 +1131,7 @@ function jewellery_pending_order_lines(int $companyId): array
         LEFT JOIN jewellery_karigars k ON k.id = l.karigar_id
         LEFT JOIN accounting_parties ap ON ap.id = o.party_id
         WHERE l.company_id = :cid AND l.assignment_id IS NULL
-          AND o.status IN ('draft', 'confirmed', 'assigned')
+          AND o.status IN ('draft', 'confirmed', 'assigned', 'partially_received')
         ORDER BY COALESCE(l.delivery_date, '9999-12-31') ASC, o.order_no ASC, l.id ASC");
     $stmt->execute(['cid' => $companyId]);
 
@@ -1202,7 +1212,7 @@ function jewellery_overdue_orders(int $companyId, string $asOf = ''): array
         INNER JOIN jewellery_units u ON u.id = o.unit_id
         WHERE o.company_id = :cid
           AND o.delivery_date IS NOT NULL AND o.delivery_date < :asof2
-          AND o.status NOT IN ('delivered', 'cancelled')
+          AND o.status NOT IN ('delivered', 'closed', 'cancelled')
         ORDER BY o.delivery_date ASC, o.order_no ASC");
     $stmt->execute(['cid' => $companyId, 'asof' => $asOf, 'asof2' => $asOf]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1486,6 +1496,23 @@ function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $in
  *
  * @return string the status now stored against the order
  */
+/**
+ * Whether this database's orders.status column can hold $status. The wider
+ * vocabulary (partially_received, invoiced, closed) arrives with migration
+ * 093 / the repair step; writing one of them before that has run would be
+ * truncated to '' by MySQL rather than refused.
+ */
+function jw_order_status_storable(string $status): bool
+{
+    static $cache = null;
+    if ($cache === null) {
+        $col = db()->query("SHOW COLUMNS FROM `jewellery_orders` LIKE 'status'")->fetch(PDO::FETCH_ASSOC);
+        $cache = (string) ($col['Type'] ?? '');
+    }
+
+    return stripos($cache, "'" . $status . "'") !== false;
+}
+
 function jewellery_sync_order_status(int $companyId, int $orderId): string
 {
     if ($orderId <= 0) {
@@ -1497,9 +1524,10 @@ function jewellery_sync_order_status(int $companyId, int $orderId): string
     if ($current === '') {
         return '';
     }
-    // A delivered or cancelled order is finished with. Nothing the workshop
-    // does afterwards may quietly reopen it.
-    if (in_array($current, ['delivered', 'cancelled'], true)) {
+    // An invoiced, delivered, closed or cancelled order is out of the
+    // workshop's hands — those words belong to the billing machinery and to
+    // people. Nothing the bench does afterwards may quietly reopen one.
+    if (in_array($current, ['invoiced', 'delivered', 'closed', 'cancelled'], true)) {
         return $current;
     }
 
@@ -1534,12 +1562,18 @@ function jewellery_sync_order_status(int $companyId, int $orderId): string
 
     if ($total > 0 && $back >= $total) {
         $next = 'received';
+    } elseif ($back > 0) {
+        // Two of five pieces back is neither 'assigned' nor 'received', and
+        // saying either forced the counter to open the order to answer "how
+        // many still to come?". On a database not yet upgraded to hold the
+        // word, 'assigned' stands in — the pre-093 behaviour exactly.
+        $next = jw_order_status_storable('partially_received') ? 'partially_received' : 'assigned';
     } elseif ($outNow > 0) {
         $next = 'assigned';
     } else {
         // Nothing is out. An order that had reached the workshop goes back to
         // confirmed; one still being written up keeps the status it has.
-        $next = in_array($current, ['assigned', 'received'], true) ? 'confirmed' : $current;
+        $next = in_array($current, ['assigned', 'partially_received', 'received'], true) ? 'confirmed' : $current;
     }
 
     if ($next !== $current) {
@@ -1950,7 +1984,7 @@ function jewellery_open_orders_for_party(int $companyId, int $partyId): array
         INNER JOIN jewellery_units u ON u.id = o.unit_id
         INNER JOIN jewellery_metals m ON m.id = o.metal_id
         WHERE o.company_id = :cid AND o.party_id = :pid
-          AND o.status IN ('confirmed', 'assigned', 'received')
+          AND o.status IN ('confirmed', 'assigned', 'partially_received', 'received')
         ORDER BY o.status = 'received' DESC, o.order_date ASC, o.id ASC");
     $stmt->execute(['cid' => $companyId, 'pid' => $partyId]);
 
@@ -2084,7 +2118,7 @@ function jewellery_deliver_order(int $companyId, int $orderId, int $saleId, int 
     // picked off the shelf against an order, is delivered without ever having
     // been "received" from anyone. What is refused is delivering twice, or
     // delivering something that was cancelled.
-    if (in_array((string) $order['status'], ['delivered', 'cancelled'], true)) {
+    if (in_array((string) $order['status'], ['delivered', 'closed', 'cancelled'], true)) {
         return ['ok' => false, 'error' => 'This order is already ' . $order['status'] . '.'];
     }
 
@@ -2112,13 +2146,21 @@ function jewellery_deliver_order(int $companyId, int $orderId, int $saleId, int 
         return ['ok' => false, 'error' => 'That sale has not been posted yet, so nothing has actually left the shop.'];
     }
 
-    db()->prepare("UPDATE jewellery_orders SET status = 'delivered', delivered_sale_id = :sale, delivered_at = NOW()
+    // Delivered — and, when the bill left nothing to collect, CLOSED in the
+    // same breath. 'Delivered' with a balance is an order the shop is still
+    // waiting on; 'closed' is one it is finished with. The distinction is what
+    // lets a list of genuinely open orders exist without joining the bill.
+    // Settling the balance later closes it too — see jw_refresh_bill().
+    $status = (float) ($sale['balance_amount'] ?? 0) <= 0.005 && jw_order_status_storable('closed')
+        ? 'closed' : 'delivered';
+    db()->prepare("UPDATE jewellery_orders SET status = :status, delivered_sale_id = :sale, delivered_at = NOW()
         WHERE id = :id AND company_id = :cid")
-        ->execute(['sale' => $saleId ?: null, 'id' => $orderId, 'cid' => $companyId]);
+        ->execute(['status' => $status, 'sale' => $saleId ?: null, 'id' => $orderId, 'cid' => $companyId]);
     log_activity('company', $companyId, 'jewellery_order_delivered',
-        'Order ' . $order['order_no'] . ' delivered to the customer.', $userId);
+        'Order ' . $order['order_no'] . ' delivered to the customer.'
+        . ($status === 'closed' ? ' Paid in full — closed.' : ''), $userId);
 
-    return ['ok' => true, 'error' => ''];
+    return ['ok' => true, 'error' => '', 'status' => $status];
 }
 
 // ---------------------------------------------------------------------------

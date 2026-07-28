@@ -768,7 +768,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                         <td class="is-numeric"><?= $fmt((float) $r['total_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['advance_amount']) ?></td>
                         <td class="is-numeric"><strong><?= $fmt((float) $r['balance_due']) ?></strong></td>
-                        <td><span class="mbw-pill tone-gray"><?= e(ucfirst((string) $r['status'])) ?></span></td>
+                        <td><span class="mbw-pill tone-gray"><?= e(ucwords(str_replace('_', ' ', (string) $r['status']))) ?></span></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
