@@ -745,15 +745,63 @@ document.addEventListener('DOMContentLoaded', () => {
       item_id: 'admin/accounting-inventory.php?view=inventory',
       group_id: 'admin/chart-groups.php',
     },
+    hospitality: {
+      ingredient_id: 'admin/hospitality.php?view=ingredients',
+      menu_item_id: 'admin/hospitality.php?view=menu-items',
+      sales_item_id: 'admin/hospitality.php?view=menu-items',
+      recipe_id: 'admin/hospitality.php?view=recipes',
+      ledger_id: 'admin/chart-ledgers.php',
+    },
+    assets: {
+      category_id: 'admin/fixed-assets.php?view=categories',
+      buyer_party_id: 'admin/accounting-parties.php',
+      lessor_party_id: 'admin/accounting-parties.php',
+      ledger_id: 'admin/chart-ledgers.php',
+    },
+    hr: {
+      leave_type_id: 'admin/hr.php?view=leave',
+      client_id: 'admin/workspace.php?view=clients',
+    },
+    payroll: {
+      employee_id: 'admin/payroll-employees.php',
+      ledger_id: 'admin/chart-ledgers.php',
+    },
+    workspace: {
+      client_id: 'admin/workspace.php?view=clients',
+      team_id: 'admin/workspace.php?view=teams',
+      industry_id: 'admin/workspace.php?view=industries',
+      contract_id: 'admin/workspace.php?view=contracts',
+      compliance_type_id: 'admin/compliance.php?view=types',
+      type_id: 'admin/compliance.php?view=types',
+      fine_ledger_id: 'admin/chart-ledgers.php',
+      party_id: 'admin/accounting-parties.php',
+    },
   };
 
-  // Which module this page belongs to, for the map above.
+  // Which module this page belongs to, for the map above. Most specific first:
+  // "accounting-inventory" contains "accounting", and a page that matches two
+  // patterns should get the narrower one.
+  const MODULE_OF = [
+    ['jewellery', 'jewellery'],
+    ['hospitality', 'hospitality'],
+    ['fixed-assets', 'assets'],
+    ['payroll', 'payroll'],
+    ['hr.php', 'hr'],
+    ['workspace', 'workspace'],
+    ['compliance', 'workspace'],
+    ['tickets', 'workspace'],
+    ['service-agreements', 'workspace'],
+    ['documents', 'workspace'],
+    ['accounting', 'accounting'],
+    ['invoice', 'accounting'],
+    ['voucher', 'accounting'],
+    ['banking', 'accounting'],
+    ['chart-', 'accounting'],
+  ];
   const path = window.location.pathname;
   let moduleKey = null;
-  if (path.indexOf('jewellery') !== -1) {
-    moduleKey = 'jewellery';
-  } else if (path.indexOf('accounting') !== -1 || path.indexOf('voucher') !== -1 || path.indexOf('banking') !== -1) {
-    moduleKey = 'accounting';
+  for (let i = 0; i < MODULE_OF.length; i += 1) {
+    if (path.indexOf(MODULE_OF[i][0]) !== -1) { moduleKey = MODULE_OF[i][1]; break; }
   }
   if (!moduleKey) { return; }
 

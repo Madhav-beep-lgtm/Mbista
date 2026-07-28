@@ -241,17 +241,46 @@ ok(str_contains($mainJs, "indexOf('report')"), 'And report pages get none of it'
  * A dropdown that sends you to a page which does not exist is worse than one
  * that sends you nowhere, so every target is checked against the filesystem.
  */
-preg_match_all("~'(admin/[a-z-]+\.php[^']*)'~", $mainJs, $addNewTargets);
+preg_match_all("~'(admin/[a-z0-9-]+\.php(?:\?view=[a-z0-9-]+)?)'~", $mainJs, $addNewTargets);
 $targets = array_unique($addNewTargets[1]);
-ok(count($targets) >= 6, 'Several master screens are mapped (' . count($targets) . ')');
+ok(count($targets) >= 15, 'Master screens are mapped across the app (' . count($targets) . ')');
+
+/*
+ * Checking the FILE exists is not enough — it let me ship links to
+ * accounting.php?tab=ledgers, a tab that page never had. So when a target names
+ * a view, that view has to be one the page actually knows about.
+ */
 $missingTargets = [];
 foreach ($targets as $target) {
-    if (!is_file($root . '/public_html/' . explode('?', $target)[0])) {
-        $missingTargets[] = $target;
+    [$targetFile, $targetQuery] = array_pad(explode('?', $target, 2), 2, '');
+    $targetPath = $root . '/public_html/' . $targetFile;
+    if (!is_file($targetPath)) {
+        $missingTargets[] = $target . ' (no such page)';
+        continue;
+    }
+    if ($targetQuery === '') {
+        continue;
+    }
+    $targetView = substr($targetQuery, strlen('view='));
+    $targetSource = (string) file_get_contents($targetPath);
+    // Either the page branches on that view, or it links to it itself.
+    if (!str_contains($targetSource, "'" . $targetView . "'") && !str_contains($targetSource, 'view=' . $targetView)) {
+        $missingTargets[] = $target . ' (no such view)';
     }
 }
-ok($missingTargets === [], 'Every one of them is a page that exists'
-    . ($missingTargets === [] ? '' : ' — missing ' . implode(', ', $missingTargets)));
+ok($missingTargets === [], 'And every one goes to a page and a view that exist'
+    . ($missingTargets === [] ? '' : ' — ' . implode(', ', $missingTargets)));
+
+// The module lookup must cover the modules the map defines, or a whole map
+// entry sits there unreachable.
+$mappedModules = [];
+foreach (['jewellery', 'accounting', 'hospitality', 'assets', 'hr', 'payroll', 'workspace'] as $moduleKey) {
+    if (str_contains($mainJs, $moduleKey . ': {') && str_contains($mainJs, "'" . $moduleKey . "'],")) {
+        $mappedModules[] = $moduleKey;
+    }
+}
+ok(count($mappedModules) >= 7,
+    'Every module in the map is reachable from a path pattern (' . implode(', ', $mappedModules) . ')');
 
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
