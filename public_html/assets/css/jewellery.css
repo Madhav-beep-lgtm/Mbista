@@ -245,3 +245,125 @@ table.jw-lines .jw-derived {
     color: var(--mbw-muted, #64748b);
     font-size: .88rem;
 }
+
+/* --- the reports filter bar ---------------------------------------------
+   ---------------------------------------------------------------------------
+   These three export buttons used to be .button.soft, a class five stylesheets
+   have an opinion about. The last word went to a dark green gradient from
+   style.css while the text kept a dark ink colour, so they rendered as three
+   empty green rectangles — the labels were in the HTML the whole time, just
+   painted the same colour as what was behind them.
+
+   So they get their own class. Everything below is a token, which is what makes
+   it follow the light/dark switch instead of being right in one of them; and
+   the colours are stated explicitly rather than inherited, so no other sheet
+   can leave the text and the background agreeing with each other again.
+
+   !important is used deliberately and only here: two of the sheets that
+   currently win use it, and a rule that loses is worse than no rule.
+   --------------------------------------------------------------------------- */
+
+.jw-report-filter {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.jw-report-filter label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: .8rem;
+    font-weight: 600;
+    color: var(--mbw-muted, #64748b);
+}
+
+.jw-report-filter input,
+.jw-report-filter select {
+    min-height: 38px;
+    color: var(--mbw-text, #231f1c);
+    background: var(--mbw-card, #fff);
+    border: 1px solid var(--mbw-border, #d9e2ec);
+    border-radius: 8px;
+    padding: 6px 10px;
+}
+
+/* Apply: the one thing on this bar that submits, so it is the only solid one. */
+.jw-report-filter .jw-report-apply {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+    padding: 8px 18px;
+    border: 1px solid var(--mbw-primary, #08634a) !important;
+    border-radius: 9px;
+    background: var(--mbw-primary, #08634a) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font: inherit;
+    font-size: .86rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.jw-report-filter .jw-report-apply:hover {
+    background: var(--mbw-heading, #064e3b) !important;
+    border-color: var(--mbw-heading, #064e3b) !important;
+}
+
+.jw-report-filter .jw-report-apply svg {
+    width: 15px;
+    height: 15px;
+    color: currentColor;
+}
+
+.jw-report-exports {
+    display: inline-flex;
+    gap: 8px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+/* The exports only fetch a copy of what is already on screen, so they are
+   outlined rather than solid — the eye should land on Apply first. */
+.jw-report-exports .jw-export {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+    padding: 8px 14px;
+    border: 1px solid var(--mbw-border, #d9e2ec) !important;
+    border-radius: 9px;
+    background: var(--mbw-card, #ffffff) !important;
+    color: var(--mbw-primary, #08634a) !important;
+    -webkit-text-fill-color: var(--mbw-primary, #08634a) !important;
+    font-size: .84rem;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.jw-report-exports .jw-export:hover {
+    background: var(--mbw-green-soft, #e5f6ec) !important;
+    border-color: var(--mbw-primary, #08634a) !important;
+}
+
+.jw-report-exports .jw-export:focus-visible {
+    outline: 2px solid var(--mbw-primary, #08634a);
+    outline-offset: 2px;
+}
+
+.jw-report-exports .jw-export svg {
+    width: 15px;
+    height: 15px;
+    color: currentColor;
+    flex: 0 0 auto;
+}
+
+/* The label is the button. Losing it to a stray colour rule is the bug this
+   whole block exists to stop happening again. */
+.jw-report-exports .jw-export span {
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+}

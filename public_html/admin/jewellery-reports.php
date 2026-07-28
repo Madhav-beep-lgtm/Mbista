@@ -205,6 +205,11 @@ $pageHero = ['icon' => 'reports'];
 $bodyClass = 'admin-layout accounting-module-page';
 $pageBreadcrumb = [['Home', 'admin/index.php'], ['Jewellery', 'admin/jewellery.php'], ['Reports', 'admin/jewellery-reports.php']];
 include __DIR__ . '/../../app/views/partials/admin_header.php';
+// The module skin. Without it this page fell back to the generic admin cascade,
+// where .button.soft is fought over by five stylesheets — which is how the CSV,
+// Excel and Print buttons ended up as three unreadable green rectangles.
+require_once __DIR__ . '/../../app/views/partials/jewellery_page_head.php';
+jw_page_styles();
 
 $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
 $baseUnitCode = (string) ((jewellery_base_unit($companyId) ?? [])['code'] ?? 'unit');
@@ -225,7 +230,7 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
 </nav>
 
 <section class="mbw-card">
-    <form method="get" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+    <form method="get" class="jw-report-filter">
         <input type="hidden" name="view" value="<?= e($view) ?>">
         <label>From<input type="date" name="from" value="<?= e($from) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
         <label>To<input type="date" name="to" value="<?= e($to) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
@@ -254,12 +259,17 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                        value="<?= $statementRate > 0 ? e((string) $statementRate) : '' ?>">
             </label>
         <?php endif; ?>
-        <button type="submit" class="button secondary" style="min-height:36px">Apply</button>
+        <button type="submit" class="jw-report-apply"><?= icon('search') ?> Apply</button>
         <?php if ($canExport && in_array($view, ['sales', 'purchases', 'inventory', 'vat', 'bills', 'karigar', 'statement'], true)): ?>
-            <span style="display:inline-flex;gap:6px;align-items:end">
-                <a class="button soft" style="min-height:36px" href="<?= e($exportUrl($view, 'csv')) ?>"><?= icon('documents') ?> CSV</a>
-                <a class="button soft" style="min-height:36px" href="<?= e($exportUrl($view, 'xlsx')) ?>">Excel</a>
-                <a class="button soft" style="min-height:36px" target="_blank" rel="noopener" href="<?= e($exportUrl($view, 'print')) ?>">PDF / Print</a>
+            <?php
+                // Their own class rather than .button.soft, whose colours five
+                // stylesheets disagree about. Each says what it does in words as
+                // well as a glyph — an icon-only button is a guess.
+            ?>
+            <span class="jw-report-exports">
+                <a class="jw-export" href="<?= e($exportUrl($view, 'csv')) ?>"><?= icon('documents') ?><span>CSV</span></a>
+                <a class="jw-export" href="<?= e($exportUrl($view, 'xlsx')) ?>"><?= icon('analytics') ?><span>Excel</span></a>
+                <a class="jw-export" target="_blank" rel="noopener" href="<?= e($exportUrl($view, 'print')) ?>"><?= icon('printer') ?><span>PDF / Print</span></a>
             </span>
         <?php endif; ?>
     </form>

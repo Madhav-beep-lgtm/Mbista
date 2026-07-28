@@ -117,6 +117,10 @@ foreach ([
     ['sales_stone', 'SALS', 'Sales Stone', 'income'],
     ['vat_output', 'VATO', 'VAT Output', 'liabilities'],
     ['vat_input', 'VATI', 'VAT Input', 'assets'],
+    // Needed now this suite raises a real bill: delivery goes through a sale,
+    // and a sale levies the Skills Development tax on its own account.
+    ['spt_output', 'SPTO', 'SD Tax Output', 'liabilities'],
+    ['spt_input', 'SPTI', 'SD Tax Input', 'assets'],
 ] as [$purpose, $code, $name, $master]) {
     $L[$purpose] = $mkLedger($cidA, $code, $name, $master);
     jewellery_save_mapping($cidA, $purpose, $L[$purpose], $userA);
@@ -348,11 +352,43 @@ echo "\n8. Received but not delivered\n";
 $pending = jewellery_pending_delivery($cidA);
 ok(count($pending) === 1, 'One order is finished but still in the shop');
 ok((int) $pending[0]['id'] === $order, 'It is the order we made');
-$delivered = jewellery_deliver_order($cidA, $order, 0, $userA);
-ok($delivered['ok'], 'It can be marked delivered');
+/*
+ * GOODS LEAVE THE SHOP ONLY AGAINST A BILL.
+ *
+ * "Mark delivered" used to take no sale at all, and the board's button sent
+ * none — so it closed the order and billed nobody: no revenue, no VAT, no
+ * receivable, and the ornament still in stock as far as the books knew. The
+ * customer walked out with gold the accounts believed was in the safe.
+ */
+$noBill = jewellery_deliver_order($cidA, $order, 0, $userA);
+ok(!$noBill['ok'] && stripos($noBill['error'], 'billing') !== false,
+    'It cannot be delivered without a bill — billing it is the only way goods leave');
+ok((string) jewellery_order($cidA, $order)['status'] !== 'delivered',
+    'And the order is untouched by the attempt');
+
+// A draft bill is not evidence of anything: it can still be edited or thrown
+// away, and nothing has moved.
+$draftSale = jewellery_save_sale($cidA, $fyA, [
+    'sale_date' => '2026-08-28', 'party_id' => $customer,
+    'settle_mode' => 'cash', 'settle_ledger_id' => $cash, 'received_amount' => 0,
+], [[
+    'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'qty_pieces' => 1, 'gross_weight' => 1, 'rate' => 150000,
+]], [], $userA);
+$onDraft = jewellery_deliver_order($cidA, $order, $draftSale, $userA);
+ok(!$onDraft['ok'] && stripos($onDraft['error'], 'posted') !== false,
+    'Nor against a bill nobody has posted — nothing has actually left the shop yet');
+
+// Posted, and now it is real.
+$postRes = jewellery_post_sale($cidA, $draftSale, $userA);
+ok($postRes['ok'], 'The bill posts' . ($postRes['ok'] ? '' : ' — ' . $postRes['error']));
+$delivered = jewellery_deliver_order($cidA, $order, $draftSale, $userA);
+ok($delivered['ok'], 'And THEN the order can be delivered' . ($delivered['ok'] ? '' : ' — ' . $delivered['error']));
 ok((string) jewellery_order($cidA, $order)['status'] === 'delivered', 'The order is now delivered');
-ok(jewellery_pending_delivery($cidA) === [], 'And drops off the pending board');
-ok(!jewellery_deliver_order($cidA, $order, 0, $userA)['ok'], 'It cannot be delivered twice');
+ok((int) jewellery_order($cidA, $order)['delivered_sale_id'] === $draftSale,
+    'And it records WHICH bill the goods went out on, so the two cannot drift apart');
+ok(jewellery_pending_delivery($cidA) === [], 'It drops off the pending board');
+ok(!jewellery_deliver_order($cidA, $order, $draftSale, $userA)['ok'], 'It cannot be delivered twice');
 
 echo "\n9. Assignment cancellation\n";
 $r3 = jewellery_issue_to_karigar($cidA, $fyA, ['karigar_id' => $kContractor, 'item_id' => $chain,

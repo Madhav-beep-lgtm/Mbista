@@ -2018,7 +2018,7 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
 }
 
 /** Mark a received order delivered, optionally tying it to the sale raised. */
-function jewellery_deliver_order(int $companyId, int $orderId, int $saleId = 0, int $userId = 0): array
+function jewellery_deliver_order(int $companyId, int $orderId, int $saleId, int $userId = 0): array
 {
     $order = jewellery_order($companyId, $orderId);
     if (!$order) {
@@ -2026,14 +2026,34 @@ function jewellery_deliver_order(int $companyId, int $orderId, int $saleId = 0, 
     }
     // Not every order goes out to a kaligad. A piece made in-house, or simply
     // picked off the shelf against an order, is delivered without ever having
-    // been "received" from anyone — and the bill raised for it is the evidence
-    // that it changed hands. What is refused is delivering twice, or delivering
-    // something that was cancelled.
+    // been "received" from anyone. What is refused is delivering twice, or
+    // delivering something that was cancelled.
     if (in_array((string) $order['status'], ['delivered', 'cancelled'], true)) {
         return ['ok' => false, 'error' => 'This order is already ' . $order['status'] . '.'];
     }
-    if ($saleId > 0 && !jewellery_sale($companyId, $saleId)) {
+
+    // GOODS LEAVE THE SHOP ONLY AGAINST A BILL.
+    //
+    // This used to accept no sale at all, and the delivery board's button sent
+    // none — so "mark delivered" closed the order, handed the piece over, and
+    // billed nobody. No revenue, no VAT, no receivable, and the ornament still
+    // sitting in stock as far as the books knew. The customer walked out with
+    // gold the accounts still believed was in the safe.
+    //
+    // Delivery is now what a SALE does. There is no other way to it, which is
+    // why the sale id has no default any more: a caller must say which bill the
+    // goods went out on, and be unable to compile if it has not got one.
+    if ($saleId <= 0) {
+        return ['ok' => false, 'error' => 'An order is delivered by billing it. Raise the sale for this order and the delivery is recorded with it.'];
+    }
+    $sale = jewellery_sale($companyId, $saleId);
+    if (!$sale) {
         return ['ok' => false, 'error' => 'That sale does not belong to this company.'];
+    }
+    // A draft bill is not evidence of anything: it can still be changed or
+    // thrown away. Only a posted one has moved the stock and the money.
+    if ((string) ($sale['status'] ?? '') !== 'posted') {
+        return ['ok' => false, 'error' => 'That sale has not been posted yet, so nothing has actually left the shop.'];
     }
 
     db()->prepare("UPDATE jewellery_orders SET status = 'delivered', delivered_sale_id = :sale, delivered_at = NOW()

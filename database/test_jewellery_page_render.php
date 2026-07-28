@@ -286,6 +286,56 @@ if ($dead !== []) {
     echo '        not seen in these views: ' . implode(', ', $dead) . "\n";
 }
 
+echo "\nThe reports toolbar says what its buttons do\n";
+/*
+ * Those three export buttons rendered as empty green rectangles. The labels
+ * were in the HTML the whole time — the page simply never loaded the module
+ * stylesheet, so .button.soft fell through to a generic rule that painted dark
+ * text on a dark green gradient.
+ *
+ * A screenshot is the only thing that catches "same colour as the background",
+ * so what is checked here is the part that CAN be: the page pulls in the skin
+ * that styles them, and every button carries a word as well as a glyph.
+ */
+$reportHtml = $renderedHtml['jewellery-reports.php?view=inventory'] ?? '';
+ok($reportHtml !== '', 'The reports page rendered');
+/*
+ * Asserted against the SOURCE, not this rendered output. jw_page_styles() emits
+ * the link once per process and this harness renders every page in one, so an
+ * earlier page has already consumed it by the time we get here. A real request
+ * renders one page and gets its own link.
+ */
+$reportSource = (string) file_get_contents($root . '/public_html/admin/jewellery-reports.php');
+ok(str_contains($reportSource, 'jewellery_page_head.php') && str_contains($reportSource, 'jw_page_styles();'),
+    'It pulls in the module stylesheet — not doing so is what made the buttons unreadable');
+ok(str_contains($reportHtml, 'jw-report-filter'), 'The filter bar uses the module class');
+ok(str_contains($reportHtml, 'jw-report-exports'),
+    'And the exports have their own class, not .button.soft that five stylesheets argue over');
+
+$missingLabels = [];
+foreach (['CSV', 'Excel', 'PDF / Print', 'Apply'] as $label) {
+    if (!str_contains($reportHtml, $label)) { $missingLabels[] = $label; }
+}
+ok($missingLabels === [], 'Every button on the bar is labelled in words'
+    . ($missingLabels === [] ? '' : ' — missing ' . implode(', ', $missingLabels)));
+
+// An icon that silently resolves to nothing would leave a button looking bare.
+$toolbarAt = strpos($reportHtml, 'jw-report-exports');
+$toolbar = $toolbarAt === false ? '' : substr($reportHtml, $toolbarAt, 1400);
+ok(substr_count($toolbar, '<svg') >= 3, 'And each export button draws its icon ('
+    . substr_count($toolbar, '<svg') . ' found)');
+
+// The stylesheet has to state both halves. A rule that sets a background and
+// lets the text colour be inherited is how this broke in the first place.
+$skinCss = (string) file_get_contents($root . '/public_html/assets/css/jewellery.css');
+ok(str_contains($skinCss, '.jw-report-exports .jw-export'), 'The skin styles them');
+$exportAt = strpos($skinCss, '.jw-report-exports .jw-export {');
+$exportRule = $exportAt === false ? '' : substr($skinCss, $exportAt, 700);
+ok(str_contains($exportRule, 'background') && str_contains($exportRule, 'color'),
+    'Stating BOTH the background and the text colour, so they cannot end up agreeing');
+ok(substr_count($skinCss, 'var(--mbw-') > 20,
+    'And in tokens, so the bar follows the light/dark switch rather than being right in one');
+
 // ---------------------------------------------------------------------------
 // The print / preview controller, once per document type. It exits via
 // export_print(), so each is run in a child process — an exit() in-process

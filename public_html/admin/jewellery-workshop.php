@@ -263,12 +263,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
-    if ($action === 'deliver_order') {
-        require_permission('jewellery', 'post');
-        $result = jewellery_deliver_order($companyId, (int) ($_POST['order_id'] ?? 0), (int) ($_POST['sale_id'] ?? 0), $userId);
-        flash($result['ok'] ? 'success' : 'error', $result['ok'] ? 'Order marked delivered.' : $result['error']);
-        redirect($back);
-    }
+    // There is no "deliver_order" action here any more. Delivery is something a
+    // SALE does — jewellery-trade.php records it when the bill posts — and an
+    // action on this page that closed an order without one is exactly how goods
+    // used to leave the shop unbilled. The engine would refuse it now, but a
+    // dead endpoint named after a forbidden operation is an invitation to wire
+    // it back up.
 
     if ($action === 'issue_refinery') {
         require_permission('jewellery', 'post');
@@ -1079,13 +1079,17 @@ jw_filter_bar_styles();
                         <td><?= ($row['delivery_date'] ?? null) ? e(app_date((string) $row['delivery_date'])) : '—' ?></td>
                         <td>
                             <?php if ($canPost): ?>
-                                <form method="post" data-confirm="Mark this order delivered to the customer?">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="deliver_order">
-                                    <input type="hidden" name="back_view" value="delivery">
-                                    <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button secondary" style="min-height:30px;padding:3px 10px">Mark delivered</button>
-                                </form>
+                                <?php
+                                    // Handing the goods over IS the sale. This used to be a
+                                    // button that closed the order and billed nobody, so the
+                                    // customer walked out with gold the books still had in
+                                    // stock. It now opens the bill for this order, filled in
+                                    // from it, and the delivery is recorded when that posts.
+                                ?>
+                                <a class="button secondary" style="min-height:30px;padding:3px 10px"
+                                   href="<?= e(url('admin/jewellery-trade.php?view=sales&sell_order=' . (int) $row['id'])) ?>">
+                                    <?= icon('invoice') ?> Bill &amp; deliver
+                                </a>
                             <?php endif; ?>
                         </td>
                     </tr>
