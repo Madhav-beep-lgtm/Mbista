@@ -449,10 +449,31 @@ function jw_posted_lines(array $post, string $prefix): array
     return $lines;
 }
 
-/** Next document number for a jewellery table (JS-00001, JP-00007, ...). */
-function jw_next_no(int $companyId, string $table, string $column, string $prefix): string
+/**
+ * Next document number for a jewellery table (JS-00001, JP-00007, ...).
+ *
+ * A `$series` turns the flat sequence into a per-series one:
+ *
+ *     jw_next_no(1, 'jewellery_orders', 'order_no', 'ORD')          ORD-00001
+ *     jw_next_no(1, 'jewellery_orders', 'order_no', 'ORD', '2083')  ORD-2083-000001
+ *
+ * The two live side by side without colliding, because each counts only the
+ * numbers shaped like itself: a series scans `PREFIX-2083-%`, and the flat form
+ * scans `^PREFIX-[0-9]+$` — which is why the flat form uses a REGEXP rather
+ * than the LIKE it used to. Without that guard the first series number would be
+ * read as the flat sequence's latest (it sorts longest-first), and the flat
+ * sequence would jump to the series' count and start colliding with numbers
+ * already issued.
+ *
+ * Series numbers are padded to six digits, not five. A series restarts every
+ * year, so its numbers are smaller and would look inconsistent beside the flat
+ * ones they replace; six digits also matches the reference format a jewellery
+ * house is used to seeing.
+ */
+function jw_next_no(int $companyId, string $table, string $column, string $prefix, ?string $series = null): string
 {
     $prefix = strtoupper(preg_replace('/[^A-Z0-9]/i', '', $prefix) ?: 'JW');
+    $series = $series === null ? null : (preg_replace('/[^0-9]/', '', $series) ?: null);
     $allowed = ['jewellery_purchases' => 'purchase_no', 'jewellery_sales' => 'sale_no',
         'jewellery_settlements' => 'settlement_no', 'jewellery_orders' => 'order_no',
         'jewellery_order_assignments' => 'issue_no', 'jewellery_order_receipts' => 'receipt_no',
@@ -461,16 +482,25 @@ function jw_next_no(int $companyId, string $table, string $column, string $prefi
         throw new RuntimeException('Refusing to number an unknown document table.');
     }
 
-    $stmt = db()->prepare("SELECT `$column` FROM `$table` WHERE company_id = :cid AND `$column` LIKE :like
-        ORDER BY LENGTH(`$column`) DESC, `$column` DESC LIMIT 1");
-    $stmt->execute(['cid' => $companyId, 'like' => $prefix . '-%']);
+    if ($series !== null) {
+        $stmt = db()->prepare("SELECT `$column` FROM `$table` WHERE company_id = :cid AND `$column` LIKE :like
+            ORDER BY LENGTH(`$column`) DESC, `$column` DESC LIMIT 1");
+        $stmt->execute(['cid' => $companyId, 'like' => $prefix . '-' . $series . '-%']);
+    } else {
+        // $prefix is already reduced to A-Z0-9, so it is safe in the pattern.
+        $stmt = db()->prepare("SELECT `$column` FROM `$table` WHERE company_id = :cid AND `$column` REGEXP :re
+            ORDER BY LENGTH(`$column`) DESC, `$column` DESC LIMIT 1");
+        $stmt->execute(['cid' => $companyId, 're' => '^' . $prefix . '-[0-9]+$']);
+    }
     $last = (string) ($stmt->fetchColumn() ?: '');
     $next = 1;
     if ($last !== '' && preg_match('/-(\d+)$/', $last, $m)) {
         $next = (int) $m[1] + 1;
     }
 
-    return $prefix . '-' . str_pad((string) $next, 5, '0', STR_PAD_LEFT);
+    return $series !== null
+        ? $prefix . '-' . $series . '-' . str_pad((string) $next, 6, '0', STR_PAD_LEFT)
+        : $prefix . '-' . str_pad((string) $next, 5, '0', STR_PAD_LEFT);
 }
 
 // ---------------------------------------------------------------------------

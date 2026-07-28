@@ -413,6 +413,48 @@ function jw_wastage_split(float $issuedFine, float $receivedFine, float $allowed
 // Orders
 // ---------------------------------------------------------------------------
 
+/**
+ * The fiscal-year segment of an order reference — the "2083" in
+ * ORD-2083-000001.
+ *
+ * It is the BIKRAM SAMBAT year the fiscal year OPENS in, which is how a Nepali
+ * house names its year: आ.व. २०८३/८४ is "eighty-three" in conversation, on the
+ * file cover and on the order slip. Taking it from the fiscal year's start date
+ * rather than from the order date is the whole point — an order written in
+ * Chaitra falls in the year that opened the previous Shrawan, and numbering it
+ * by its own BS year would file it under a year that had not begun yet.
+ *
+ * Two fallbacks, in order:
+ *
+ *   - no fiscal year on hand (the column is nullable, and a test rig may not
+ *     make one), so the order's own date stands in;
+ *   - a date outside the BS conversion table (BS 2000–2090, AD 1943–2033), so
+ *     the AD year stands in rather than the reference losing its segment
+ *     altogether and dropping back into the flat sequence mid-year.
+ *
+ * The segment therefore always has four digits, and the sequence under it
+ * restarts each year.
+ */
+function jewellery_order_series(int $companyId, ?int $fiscalYearId, string $orderDate): string
+{
+    $basis = '';
+    if ($fiscalYearId !== null && $fiscalYearId > 0) {
+        $stmt = db()->prepare('SELECT start_date FROM fiscal_years WHERE id = :id AND company_id = :cid LIMIT 1');
+        $stmt->execute(['id' => $fiscalYearId, 'cid' => $companyId]);
+        $basis = (string) ($stmt->fetchColumn() ?: '');
+    }
+    if ($basis === '') {
+        $basis = $orderDate;
+    }
+    if ($basis === '' || strtotime($basis) === false) {
+        $basis = date('Y-m-d');
+    }
+
+    $bs = ad_to_bs(substr($basis, 0, 10));
+
+    return (string) ($bs[0] ?? (int) date('Y', (int) strtotime($basis)));
+}
+
 function jewellery_order(int $companyId, int $orderId): ?array
 {
     $stmt = db()->prepare('SELECT o.*, ap.name AS party_name, m.name AS metal_name,
@@ -778,7 +820,21 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
             db()->prepare('DELETE FROM jewellery_order_lines WHERE order_id = :oid AND company_id = :cid')
                 ->execute(['oid' => $orderId, 'cid' => $companyId]);
         } else {
-            $no = trim((string) ($input['order_no'] ?? '')) ?: jw_next_no($companyId, 'jewellery_orders', 'order_no', (string) ($settings['order_no_prefix'] ?? 'JO'));
+            // ORD-2083-000001. The order reference is the one key every later
+            // document hangs off — the issue, the receipt, the advance, the
+            // bill, the delivery — so it is worth being readable by the person
+            // holding the slip. The fiscal year in the middle tells them which
+            // year's file to open before they have looked anything up, and it
+            // restarts the count each year so the number stays short.
+            //
+            // The prefix is still the company's own (jewellery_settings), so a
+            // shop already numbering JO- keeps its letters and only gains the
+            // year. Numbers issued before this stay exactly as they are.
+            $no = trim((string) ($input['order_no'] ?? '')) ?: jw_next_no(
+                $companyId, 'jewellery_orders', 'order_no',
+                (string) ($settings['order_no_prefix'] ?? 'JO'),
+                jewellery_order_series($companyId, $fiscalYearId ?: null, $orderDate)
+            );
             db()->prepare('INSERT INTO jewellery_orders (company_id, fiscal_year_id, order_no, order_date, delivery_date, party_id,
                     customer_name, customer_phone, item_id, metal_id, purity_id, unit_id, expected_gross_weight, expected_fine_weight,
                     design_no, description, making_basis, making_rate, advance_amount, status, notes,

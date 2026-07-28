@@ -186,6 +186,33 @@ ok(threw(static fn () => jewellery_save_order($cidA, $fyA, ['order_date' => '202
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola], [], $userA)),
     'An order with neither party nor customer name is rejected');
 
+// The reference the customer is given and every later document hangs off.
+// Company A's fiscal year opens 2026-07-16, which is Ashadh 2083, so the
+// segment is 2083 — the year the shop calls it, not the year the order was
+// written in.
+ok(jewellery_order_series($cidA, $fyA, '2026-08-05') === '2083',
+    'The order series is the BS year the FISCAL YEAR opens in (2083)');
+ok(jewellery_order_series($cidA, 0, '2027-03-10') === '2083',
+    'With no fiscal year to go on it falls back to the order date');
+ok(preg_match('/^JO-2083-\d{6}$/', (string) $orderRow['order_no']) === 1,
+    'A new order numbers PREFIX-<fiscal year>-<6 digits>: ' . $orderRow['order_no']);
+$seriesFirst = jw_next_no($cidA, 'jewellery_orders', 'order_no', 'ORD', '2083');
+ok($seriesFirst === 'ORD-2083-000001', 'A fresh series starts at 000001, not at the flat count');
+ok(jw_next_no($cidA, 'jewellery_orders', 'order_no', 'JO', '2084') === 'JO-2084-000001',
+    'Each fiscal year restarts its own count');
+
+// A shop that already numbers JO-00001 must keep issuing flat numbers from
+// where it left off, and the series numbers sitting beside them must not drag
+// that count forward into numbers it has already given out.
+db()->prepare('INSERT INTO jewellery_orders (company_id, fiscal_year_id, order_no, order_date, party_id,
+        metal_id, purity_id, unit_id, status) VALUES (:cid, :fy, :no, :d, :p, :m, :pu, :u, :s)')
+    ->execute(['cid' => $cidA, 'fy' => $fyA, 'no' => 'JO-00007', 'd' => '2026-08-05',
+        'p' => $customer, 'm' => $gold, 'pu' => $p22, 'u' => $tola, 's' => 'draft']);
+ok(jw_next_no($cidA, 'jewellery_orders', 'order_no', 'JO') === 'JO-00008',
+    'The flat sequence carries on from JO-00007, ignoring the year-series numbers');
+db()->prepare('DELETE FROM jewellery_orders WHERE company_id = :cid AND order_no = :no')
+    ->execute(['cid' => $cidA, 'no' => 'JO-00007']);
+
 echo "\n3. Issue metal to a karigar\n";
 $ownBefore = jw_item_balance($cidA, $chain, null, 'stock')['fine_weight'];
 $r = jewellery_issue_to_karigar($cidA, $fyA, [
