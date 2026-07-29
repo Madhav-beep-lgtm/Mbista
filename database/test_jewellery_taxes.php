@@ -282,6 +282,55 @@ $otherTax->execute(['cid' => $cid, 'cid2' => $cid]);
 ok((int) $otherTax->fetchColumn() === 0, 'No item is tagged with another company\'s tax');
 ok(jewellery_tax($cid + 999999, (int) $vat['id']) === null, 'A tax cannot be read through the wrong company');
 
+echo "\n10. A base that once counted the wastage twice\n";
+// The live bill that found it: metal 67,355.47 (wastage inside, as the metal
+// figure has been since 083), making 1,700 — and an SD Taxable printed at
+// 79,571.84, because 'metal_wastage_making' added the 10,516.37 of wastage a
+// SECOND time. The Non Taxable row went NEGATIVE by the same amount: a
+// statutory totals block contradicting itself on its face.
+jewellery_save_tax($cid, ['id' => (int) $spt['id'], 'base' => 'metal_wastage_making'] + $spt);
+$dbl = jw_charge_line_taxes(
+    ['metal' => 100000, 'wastage' => 5000, 'making' => 10000, 'stone' => 0],
+    jewellery_taxes_list($cid, 'sale', '2026-08-01'), [], true, 'full_value');
+ok(near($dbl['other'], 550.0),
+    'metal_wastage_making charges 0.5% of 110,000 — the wastage is already inside the metal');
+$sdCharge = null;
+foreach ($dbl['taxes'] as $t) { if (!$t['is_vat']) { $sdCharge = $t; } }
+ok($sdCharge !== null && near((float) $sdCharge['base_amount'], 110000.0),
+    'And the printed base reads 110,000, not 115,000');
+
+// Documents the OLD arithmetic already wrote are put right by the repair —
+// bases only. The tax charged reached the ledger; it is history and stays.
+$wSale = jewellery_save_sale($cid, $fy, ['sale_date' => '2026-08-05', 'party_id' => $customer,
+    'settle_mode' => 'credit'],
+    [['item_id' => $chain, 'gross_weight' => 2, 'wastage_weight' => 0.5, 'rate' => 10000]], [], $uid);
+$wRow = jewellery_sale($cid, $wSale);
+ok(near((float) $wRow['sd_taxable_amount'], 25000.0),
+    'A fresh bill stores the honest base: 2.5 total weight x 10,000 = 25,000');
+ok(near((float) $wRow['non_taxable_amount'], 0.0), 'And nothing is left outside the two taxes');
+
+// Corrupt the stored rows exactly as the old engine did — base inflated by
+// the wastage value, header inflated with it, non-taxable driven negative.
+$chargedAmountBefore = (float) db()->query("SELECT amount FROM jewellery_line_taxes
+    WHERE doc_type='sale' AND doc_id=$wSale AND output_purpose <> 'vat_output'")->fetchColumn();
+db()->exec("UPDATE jewellery_line_taxes SET base_amount = base_amount + 5000
+    WHERE doc_type='sale' AND doc_id=$wSale AND output_purpose <> 'vat_output'");
+db()->exec("UPDATE jewellery_sales SET sd_taxable_amount = sd_taxable_amount + 5000,
+    non_taxable_amount = non_taxable_amount - 5000 WHERE id=$wSale");
+accounting_module_repair_database();
+$wFixed = jewellery_sale($cid, $wSale);
+ok(near((float) $wFixed['sd_taxable_amount'], 25000.0),
+    'The repair re-derives the stored SD base from the line: 25,000 again');
+ok(near((float) $wFixed['non_taxable_amount'], 0.0), 'The negative Non Taxable is gone');
+$chargedAmountAfter = (float) db()->query("SELECT amount FROM jewellery_line_taxes
+    WHERE doc_type='sale' AND doc_id=$wSale AND output_purpose <> 'vat_output'")->fetchColumn();
+ok(near($chargedAmountBefore, $chargedAmountAfter),
+    'And the tax CHARGED is untouched — what reached the ledger is history');
+accounting_module_repair_database();
+ok(near((float) jewellery_sale($cid, $wSale)['sd_taxable_amount'], 25000.0),
+    'Running the repair again changes nothing');
+jewellery_save_tax($cid, ['id' => (int) $spt['id'], 'base' => 'metal_making'] + $spt);
+
 jwtax_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

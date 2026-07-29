@@ -2910,6 +2910,70 @@ function accounting_module_repair_database(): array
              WHERE `net_gold_weight` = 0 AND `received_gross_weight` > 0");
     });
 
+    $run('SD base no longer counts the wastage twice (migration 096)', static function (): void {
+        // Since 083 the metal amount already carries the wastage, but the tax
+        // base 'metal_wastage_making' still added the wastage value on top —
+        // so bills printed an SD Taxable Amt inflated by exactly the wastage
+        // and a NEGATIVE Non Taxable Amt absorbing the difference. The engine
+        // is fixed; this corrects what is stored. The tax AMOUNT charged is
+        // history and stays; only the printed/reported bases are re-derived.
+        if (!accounting_repair_table_exists('jewellery_line_taxes')
+            || !accounting_repair_table_exists('jewellery_taxes')) {
+            return;
+        }
+        foreach ([['sale', 'jewellery_sale_lines', 'jewellery_sales'],
+                  ['purchase', 'jewellery_purchase_lines', 'jewellery_purchases']] as [$docType, $lineTable, $headTable]) {
+            // Which documents carried the bad base at all — scoped first, so
+            // the header rewrite below never touches an unaffected bill.
+            $affectedStmt = db()->prepare("SELECT DISTINCT lt.doc_id
+                FROM jewellery_line_taxes lt
+                INNER JOIN jewellery_taxes t ON t.id = lt.tax_id AND t.base = 'metal_wastage_making'
+                WHERE lt.doc_type = :dt");
+            $affectedStmt->execute(['dt' => $docType]);
+            $affected = array_map('intval', $affectedStmt->fetchAll(PDO::FETCH_COLUMN));
+            if ($affected === []) {
+                continue;
+            }
+
+            // The line bases, re-derived from the lines they were charged on.
+            // Absolute assignment: running this twice converges.
+            db()->exec("UPDATE jewellery_line_taxes lt
+                INNER JOIN jewellery_taxes t ON t.id = lt.tax_id AND t.base = 'metal_wastage_making'
+                INNER JOIN `$lineTable` l ON l.id = lt.line_id
+                   SET lt.base_amount = ROUND(l.metal_amount + l.making_amount, 2)
+                 WHERE lt.doc_type = '$docType'
+                   AND lt.base_amount <> ROUND(l.metal_amount + l.making_amount, 2)");
+
+            // The header block the bill prints, re-derived exactly as the
+            // engine derives it: SD taxable is the sum of every non-VAT base
+            // on the document, and non-taxable is what neither tax reached.
+            $sdStmt = db()->prepare("SELECT COALESCE(SUM(base_amount), 0) FROM jewellery_line_taxes
+                WHERE doc_type = :dt AND doc_id = :did AND output_purpose <> 'vat_output'");
+            $headStmt = db()->prepare("SELECT metal_amount, making_amount, stone_amount, diamond_amount,
+                    other_charges, discount, vatable_amount, sd_taxable_amount, non_taxable_amount
+                FROM `$headTable` WHERE id = :did");
+            $fixStmt = db()->prepare("UPDATE `$headTable`
+                SET sd_taxable_amount = :sd, non_taxable_amount = :nt WHERE id = :did");
+            foreach ($affected as $docId) {
+                $sdStmt->execute(['dt' => $docType, 'did' => $docId]);
+                $sdTaxable = round((float) $sdStmt->fetchColumn(), 2);
+                $headStmt->execute(['did' => $docId]);
+                $head = $headStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$head) {
+                    continue;
+                }
+                $nonTaxable = round((float) $head['metal_amount'] + (float) $head['making_amount']
+                    + (float) $head['stone_amount'] + (float) $head['diamond_amount']
+                    + (float) $head['other_charges'] - (float) $head['discount']
+                    - $sdTaxable - (float) $head['vatable_amount'], 2);
+                if (abs((float) $head['sd_taxable_amount'] - $sdTaxable) > 0.005
+                    || abs((float) $head['non_taxable_amount'] - $nonTaxable) > 0.005) {
+                    $fixStmt->execute(['sd' => $sdTaxable, 'nt' => $nonTaxable, 'did' => $docId]);
+                }
+            }
+        }
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

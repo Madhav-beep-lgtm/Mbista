@@ -1221,7 +1221,7 @@ function jewellery_tax_bases(): array
         'stone_diamond' => 'Stone + diamond + other diamond',
         'wastage' => 'Wastage value only',
         'metal_making' => 'Metal + making',
-        'metal_wastage_making' => 'Metal + wastage + making',
+        'metal_wastage_making' => 'Metal (wastage included) + making',
         'subtotal' => 'Whole line before tax',
         'subtotal_with_taxes' => 'Whole line including taxes charged before this one',
     ];
@@ -1471,7 +1471,15 @@ function jw_charge_line_taxes(array $parts, array $taxes, array $itemTaxIds, boo
             'stone_diamond' => $stoneSide,
             'wastage' => $wastage,
             'metal_making' => jw_round_money($metal + $making),
-            'metal_wastage_making' => jw_round_money($metal + $wastage + $making),
+            // The metal figure ALREADY CARRIES the wastage — the total weight
+            // is priced as one number, the way the bill does it — so this base
+            // must not add $wastage on top. It did, and every bill with
+            // wastage printed an SD Taxable Amt inflated by exactly the
+            // wastage value, with a NEGATIVE Non Taxable Amt absorbing the
+            // difference. The base keeps its name and its meaning — the whole
+            // metal value, wastage and all, plus making — which today is
+            // simply metal + making.
+            'metal_wastage_making' => jw_round_money($metal + $making),
             'subtotal_with_taxes' => jw_round_money($subtotal + $runningTax),
             default => $subtotal,
         };
