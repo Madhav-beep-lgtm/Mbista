@@ -169,21 +169,70 @@ if ($docType === 'order') {
         $meta['Phone'] = (string) $doc['customer_phone'];
     }
 
-    $rows[] = ['What', 'Detail'];
-    $rows[] = ['Item', (string) ($doc['item_name'] ?? $doc['description'] ?? '')];
-    $rows[] = ['Purity', (string) ($doc['purity_code'] ?? '')];
-    $rows[] = ['Expected weight', $weight($doc['expected_gross_weight']) . ' ' . (string) ($doc['unit_code'] ?? '')];
-    $rows[] = ['Design no', (string) ($doc['design_no'] ?? '')];
-    $rows[] = ['Making basis', (string) $doc['making_basis'] . ' @ ' . $money($doc['making_rate'])];
+    if ((string) ($doc['design_no'] ?? '') !== '') {
+        $meta['Design no'] = (string) $doc['design_no'];
+    }
+
+    // The order is multi-item now, and the paper has to say what the screen
+    // says: every piece with its own weights, stones, kaligad and money —
+    // the customer's copy of what was agreed, item by item.
+    $orderLines = jewellery_order_line_rows($companyId, $docId);
+    if ($orderLines !== []) {
+        $rows[] = ['Item', 'Purity', 'Unit', 'Pieces', 'Gross wt', 'Stone wt', 'Net wt', 'Fine wt',
+            'Rate', 'Metal', 'Making', 'Stone / diamond', 'VAT', 'Line total', 'Kaligad', 'Promised'];
+        foreach ($orderLines as $line) {
+            $rows[] = [
+                (string) ($line['item_code'] ?? '') . ' — ' . (string) ($line['item_name'] ?? ''),
+                (string) ($line['purity_code'] ?? ''), (string) ($line['unit_code'] ?? ''),
+                $line['qty_pieces'], $weight($line['gross_weight']), $weight($line['stone_weight'] ?? 0),
+                $weight($line['net_weight'] ?? $line['gross_weight']), $weight($line['fine_weight']),
+                $money($line['rate']), $money($line['metal_amount']), $money($line['making_amount']),
+                $money((float) ($line['stone_amount'] ?? 0) + (float) ($line['diamond_amount'] ?? 0)
+                    + (float) ($line['other_diamond_amount'] ?? 0)),
+                $money($line['vat_amount'] ?? 0), $money($line['line_total']),
+                (string) ($line['karigar_code'] ?? ''),
+                ($line['delivery_date'] ?? null) ? app_date((string) $line['delivery_date']) : '',
+            ];
+        }
+        // The quote, as its own labelled rows in the last two columns the way
+        // the sale print does it — one array serves paper and spreadsheet.
+        $quoteRows = [
+            ['Metal', $doc['metal_amount'] ?? 0],
+            ['Making', $doc['making_amount'] ?? 0],
+            ['Stone / diamond', (float) ($doc['stone_amount'] ?? 0) + (float) ($doc['diamond_amount'] ?? 0)],
+            ['Other charges', $doc['other_charges'] ?? 0],
+            ['Discount', -(float) ($doc['discount'] ?? 0)],
+            ['Skills Promotion Tax', $doc['tax_amount'] ?? 0],
+            ['VAT', $doc['vat_amount'] ?? 0],
+            ['QUOTED TOTAL', $doc['total_amount'] ?? 0],
+        ];
+        foreach ($quoteRows as [$label, $value]) {
+            if (abs((float) $value) < 0.005 && $label !== 'QUOTED TOTAL') {
+                continue;
+            }
+            $rows[] = ['', '', '', '', '', '', '', '', '', '', '', '', '', '', $label, $money($value)];
+        }
+        $advanceCols = static fn (string $label, float $value): array =>
+            ['', '', '', '', '', '', '', '', '', '', '', '', '', '', $label, number_format($value, 2)];
+    } else {
+        // An order taken before orders had line items — print what the header
+        // knows, the way this page always did for it.
+        $rows[] = ['What', 'Detail'];
+        $rows[] = ['Item', (string) ($doc['item_name'] ?? $doc['description'] ?? '')];
+        $rows[] = ['Purity', (string) ($doc['purity_code'] ?? '')];
+        $rows[] = ['Expected weight', $weight($doc['expected_gross_weight']) . ' ' . (string) ($doc['unit_code'] ?? '')];
+        $rows[] = ['Making basis', (string) $doc['making_basis'] . ' @ ' . $money($doc['making_rate'])];
+        $advanceCols = static fn (string $label, float $value): array => [$label, number_format($value, 2)];
+    }
 
     $advances = jewellery_order_advances($companyId, $docId);
     foreach ($advances['rows'] as $adv) {
-        $rows[] = [((string) $adv['direction'] === 'paid' ? 'Advance refunded' : 'Advance received')
-            . ' (' . (string) $adv['mode'] . ') ' . (string) $adv['settlement_no'],
-            $money($adv['amount'])];
+        $rows[] = $advanceCols(((string) $adv['direction'] === 'paid' ? 'Advance refunded' : 'Advance received')
+            . ' (' . jw_tender_mode_label((string) $adv['mode']) . ') ' . (string) $adv['settlement_no'],
+            (float) $adv['amount']);
     }
-    $rows[] = ['Advance held', $money($advances['total'])];
-    $rows[] = ['Advance still unapplied', $money(jewellery_order_advance_available($companyId, $docId))];
+    $rows[] = $advanceCols('Advance held', (float) $advances['total']);
+    $rows[] = $advanceCols('Advance still unapplied', jewellery_order_advance_available($companyId, $docId));
 }
 
 if ($docType === 'receipt') {

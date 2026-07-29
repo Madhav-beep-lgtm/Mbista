@@ -169,9 +169,16 @@ jewellery_receive_from_karigar($cid, $fyId, ['assignment_id' => (int) $assign['a
 // A second assignment left OUT, so the receive screen has something to show.
 $assign2 = jewellery_issue_to_karigar($cid, $fyId, ['karigar_id' => $karigar, 'item_id' => $chain,
     'unit_id' => $tola, 'issued_gross_weight' => 3, 'issue_date' => '2026-08-21', 'making_rate' => 1000], $adminId);
+// Two items on the order, so the printed preview exercises the items table —
+// the shape every order takes now — rather than the legacy header-only card.
 $order2 = jewellery_save_order($cid, $fyId, ['order_date' => '2026-08-22', 'customer_name' => 'Second Customer',
-    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'expected_gross_weight' => 4,
-    'status' => 'confirmed'], [], $adminId);
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'status' => 'confirmed'], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'rate' => 160000, 'making_amount' => 3000],
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'rate' => 160000, 'making_amount' => 2000],
+], $adminId);
 
 $job = jewellery_issue_to_refinery($cid, $fyId, ['party_id' => $supplier, 'item_id' => $oldGold,
     'unit_id' => $tola, 'issued_gross_weight' => 5, 'issue_date' => '2026-09-01'], $adminId);
@@ -401,24 +408,32 @@ register_shutdown_function(static function (): void {
     while (ob_get_level() > 0) { $html = ob_get_clean() . $html; }
     $dirty = stripos($html, 'Fatal error') !== false || stripos($html, 'Warning:') !== false
         || stripos($html, 'Uncaught') !== false;
-    fwrite(STDOUT, strlen($html) . '|' . ($dirty ? 'DIRTY' : 'CLEAN'));
+    // An optional needle the caller expects in the output — how the harness
+    // proves a document printed its CONTENT, not merely a page.
+    $needle = (string) ($GLOBALS['argv'][7] ?? '');
+    $found = $needle === '' ? '' : '|' . (stripos($html, $needle) !== false ? 'HAS' : 'MISSING');
+    fwrite(STDOUT, strlen($html) . '|' . ($dirty ? 'DIRTY' : 'CLEAN') . $found);
 });
 ob_start();
 include __DIR__ . '/../public_html/admin/' . $probeScript;
 PROBE);
 
 foreach ([
-    ['sale', $s2, 'Sale', 'jewellery-print.php'],
-    ['purchase', $p1, 'Purchase', 'jewellery-print.php'],
-    ['order', $order2, 'Order', 'jewellery-print.php'],
-    ['sale', $s2, 'Tax invoice', 'jewellery-invoice.php'],
-] as [$docKind, $docId, $label, $script]) {
+    ['sale', $s2, 'Sale', 'jewellery-print.php', ''],
+    ['purchase', $p1, 'Purchase', 'jewellery-print.php', ''],
+    // The order prints its ITEMS now — the needle proves the table is there,
+    // not merely that a page came back.
+    ['order', $order2, 'Order', 'jewellery-print.php', 'Line total'],
+    ['sale', $s2, 'Tax invoice', 'jewellery-invoice.php', ''],
+] as [$docKind, $docId, $label, $script, $needle]) {
     $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($runner) . ' '
         . (int) $cid . ' ' . (int) $fyId . ' ' . (int) $adminId . ' '
-        . escapeshellarg($docKind) . ' ' . (int) $docId . ' ' . escapeshellarg($script);
+        . escapeshellarg($docKind) . ' ' . (int) $docId . ' ' . escapeshellarg($script)
+        . ($needle !== '' ? ' ' . escapeshellarg($needle) : '');
     $out = trim((string) shell_exec($cmd . ' 2>&1'));
-    [$len, $state] = array_pad(explode('|', $out), 2, '');
-    $ok = is_numeric($len) && (int) $len > 400 && $state === 'CLEAN';
+    [$len, $state, $found] = array_pad(explode('|', $out), 3, '');
+    $ok = is_numeric($len) && (int) $len > 400 && $state === 'CLEAN'
+        && ($needle === '' || $found === 'HAS');
     ok($ok, str_pad($label . ' preview renders', 44) . ' ' . ($ok ? $len . ' bytes' : $out));
 }
 @unlink($runner);

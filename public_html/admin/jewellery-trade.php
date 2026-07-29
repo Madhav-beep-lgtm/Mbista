@@ -723,7 +723,10 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         <td style="white-space:nowrap">
                             <?php if ($isDraft && $canEdit): ?>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-trade.php?view=purchases&edit=' . (int) $row['id'])) ?>">Edit</a>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=purchase&id=' . (int) $row['id'])) ?>">Preview</a>
+                            <?php endif; ?>
+                            <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=purchase&id=' . (int) $row['id'])) ?>">Preview</a>
+                            <?php if ($canExport): ?>
+                                <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-print.php?doc=purchase&id=' . (int) $row['id'] . '&format=xlsx')) ?>">Excel</a>
                             <?php endif; ?>
                             <?php if ($isDraft && $canPost): ?>
                                 <?php // Posting goes through the confirmation card above: the
@@ -970,8 +973,14 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         <td style="white-space:nowrap">
                             <?php if ($isDraft && $canEdit): ?>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-trade.php?view=sales&edit=' . (int) $row['id'])) ?>">Edit</a>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'])) ?>">Preview</a>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-invoice.php?id=' . (int) $row['id'])) ?>">Invoice</a>
+                            <?php endif; ?>
+                            <?php // The invoice exists most of all AFTER posting — viewing and
+                                  // exporting it must never require the edit right, and a
+                                  // posted bill is exactly the one a customer asks a copy of. ?>
+                            <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'])) ?>">Preview</a>
+                            <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-invoice.php?id=' . (int) $row['id'])) ?>">Invoice</a>
+                            <?php if ($canExport): ?>
+                                <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'] . '&format=xlsx')) ?>">Excel</a>
                             <?php endif; ?>
                             <?php if ($isDraft && $canPost): ?>
                                 <?php // Posting goes through the confirmation card above: the
