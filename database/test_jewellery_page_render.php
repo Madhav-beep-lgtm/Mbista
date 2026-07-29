@@ -85,7 +85,12 @@ foreach ([
     ['sales_making', 'SALK', 'Sales Making', 'income'], ['sales_stone', 'SALS', 'Sales Stone', 'income'],
     ['sales_discount', 'SALD', 'Sales Discount', 'expenses'], ['other_charges', 'OTHC', 'Other Charges', 'income'],
     ['cogs', 'COGS', 'COGS', 'expenses'], ['vat_input', 'VATI', 'VAT Input', 'assets'],
-    ['vat_output', 'VATO', 'VAT Output', 'liabilities'], ['opening_equity', 'OPEQ', 'Opening Equity', 'equity'],
+    ['vat_output', 'VATO', 'VAT Output', 'liabilities'],
+    // Without these two the fixture's sales could not actually post — which
+    // the posting-confirmation card then reported, honestly, on screen.
+    ['spt_input', 'SPTI', 'Skills Promotion Tax Input', 'assets'],
+    ['spt_output', 'SPTO', 'Skills Promotion Tax Output', 'liabilities'],
+    ['opening_equity', 'OPEQ', 'Opening Equity', 'equity'],
     ['rounding', 'ROUN', 'Rounding', 'expenses'], ['making_expense', 'MAKE', 'Making Charges', 'expenses'],
     ['wastage_loss', 'WAST', 'Wastage Loss', 'expenses'], ['karigar_payable', 'KARP', 'Karigar Payable', 'liabilities'],
     ['refinery_loss', 'RFLS', 'Refining Loss', 'expenses'], ['refinery_charges', 'RFCH', 'Refinery Charges', 'expenses'],
@@ -138,6 +143,10 @@ jewellery_post_sale($cid, $s1, $adminId);
 $s2 = jewellery_save_sale($cid, $fyId, ['sale_date' => '2026-08-12', 'received_amount' => 0, 'customer_name' => 'Walk-in Buyer',
     'party_id' => $customer], [['item_id' => $chain, 'gross_weight' => 2, 'rate' => 160000]], [], $adminId);
 jewellery_post_sale($cid, $s2, $adminId);
+// A draft left unposted, so the posting-confirmation screen has something to
+// show: the Post button leads to the mapping, never straight to the ledger.
+$s3 = jewellery_save_sale($cid, $fyId, ['sale_date' => '2026-08-13', 'received_amount' => 0, 'customer_name' => 'Confirm Screen Buyer',
+    'party_id' => $customer], [['item_id' => $chain, 'gross_weight' => 1, 'rate' => 160000]], [], $adminId);
 
 // A settlement against the supplier bill, so the bills view has history.
 $supBill = $q("SELECT id FROM jewellery_bills WHERE company_id=$cid AND bill_type='purchase' LIMIT 1");
@@ -194,7 +203,9 @@ $pages = [
 // interesting template code lives.
 $extraParams = [
     'jewellery.php' => ['items' => ['edit' => $chain], 'stock' => ['item' => $chain], 'rates' => ['date' => '2026-08-01']],
-    'jewellery-trade.php' => ['purchases' => ['edit' => $p1], 'sales' => ['edit' => $s2], 'bills' => ['party' => $supplier]],
+    'jewellery-trade.php' => ['purchases' => ['edit' => $p1],
+        // The draft's edit form AND the posting-confirmation card on one page.
+        'sales' => ['edit' => $s3, 'confirm_post' => $s3], 'bills' => ['party' => $supplier]],
     'jewellery-workshop.php' => ['orders' => ['edit' => $order2], 'karigars' => ['edit' => $karigar],
         'assignments' => ['receive' => (int) $assign2['assignment_id'], 'wt' => '2.9'],
         'refinery' => ['receive' => (int) $job2['job_id']]],
@@ -302,6 +313,18 @@ echo "\nThe reports toolbar says what its buttons do\n";
  */
 $reportHtml = $renderedHtml['jewellery-reports.php?view=inventory'] ?? '';
 ok($reportHtml !== '', 'The reports page rendered');
+
+/*
+ * The posting-confirmation card: a draft's Post button leads to the mapping,
+ * and the mapping is on the page — ledger legs, stock movement, and a confirm
+ * button that says what it commits. Nothing posts sight unseen.
+ */
+$confirmHtml = $renderedHtml['jewellery-trade.php?view=sales'] ?? '';
+ok(str_contains($confirmHtml, 'confirm where it lands'), 'The confirmation card renders for a draft sale');
+ok(str_contains($confirmHtml, 'Confirm &amp; Post'), 'With a confirm button that commits exactly what is shown');
+ok(str_contains($confirmHtml, 'Sales Metal') || str_contains($confirmHtml, 'JSALM'),
+    'And the derived revenue ledger is named on it before anything posts');
+ok(str_contains($confirmHtml, 'Post…'), 'The list buttons lead to the card, not straight to the ledger');
 /*
  * Asserted against the SOURCE, not this rendered output. jw_page_styles() emits
  * the link once per process and this harness renders every page in one, so an

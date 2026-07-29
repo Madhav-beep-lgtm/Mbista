@@ -239,7 +239,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'default_wastage_pct' => $wastage,
             'rate_source' => (string) ($_POST['rate_source'] ?? '') === 'manual' ? 'manual' : 'last_known',
             'allow_negative_stock' => isset($_POST['allow_negative_stock']) ? 1 : 0,
-            'auto_post' => isset($_POST['auto_post']) ? 1 : 0,
+            // auto_post is deliberately NOT here. The checkbox claimed to
+            // control automatic ledger posting and controlled nothing — no
+            // code ever read it. Posting is always explicit: a draft, then a
+            // confirmation with the ledger legs on screen.
             'sale_no_prefix' => strtoupper(trim((string) ($_POST['sale_no_prefix'] ?? 'JS'))) ?: 'JS',
             'purchase_no_prefix' => strtoupper(trim((string) ($_POST['purchase_no_prefix'] ?? 'JP'))) ?: 'JP',
             'order_no_prefix' => strtoupper(trim((string) ($_POST['order_no_prefix'] ?? 'JO'))) ?: 'JO',
@@ -1597,7 +1600,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label>Order prefix<input type="text" name="order_no_prefix" maxlength="20" value="<?= e((string) ($settings['order_no_prefix'] ?? 'JO')) ?>"></label>
             <label>Karigar issue prefix<input type="text" name="issue_no_prefix" maxlength="20" value="<?= e((string) ($settings['issue_no_prefix'] ?? 'JI')) ?>"></label>
             <label>Refinery prefix<input type="text" name="refinery_no_prefix" maxlength="20" value="<?= e((string) ($settings['refinery_no_prefix'] ?? 'JR')) ?>"></label>
-            <label class="frm-check"><input type="checkbox" name="auto_post" <?= (int) ($settings['auto_post'] ?? 1) === 1 ? 'checked' : '' ?>> Post entries to the ledger automatically</label>
+            <?php // The "post automatically" checkbox is gone: nothing ever read it,
+                  // and a setting that promises silent posting has no place in a
+                  // workflow where every posting is confirmed with its mapping shown. ?>
             <label class="frm-check"><input type="checkbox" name="allow_negative_stock" <?= (int) ($settings['allow_negative_stock'] ?? 0) === 1 ? 'checked' : '' ?>> Allow negative stock</label>
             <div style="grid-column:1/-1"><button type="submit" class="button" <?= $canEdit ? '' : 'disabled' ?>>Save Settings</button></div>
         </form>

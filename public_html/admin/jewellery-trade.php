@@ -422,6 +422,31 @@ if ($view === 'sales') {
     }
 }
 
+// Posting is confirmed with the mapping ON THE SCREEN. The Post button leads
+// here, the draft is dry-posted and rolled back, and the ledger legs and
+// stock movements it WOULD write are laid out for the user to confirm.
+// Nothing reaches the ledger sight unseen.
+$confirmPost = null;
+if (in_array($view, ['sales', 'purchases'], true) && $canPost) {
+    $confirmPostId = (int) ($_GET['confirm_post'] ?? 0);
+    if ($confirmPostId > 0) {
+        $confirmDocType = $view === 'sales' ? 'sale' : 'purchase';
+        $confirmDoc = $view === 'sales'
+            ? jewellery_sale($companyId, $confirmPostId)
+            : jewellery_purchase($companyId, $confirmPostId);
+        if ($confirmDoc && (string) $confirmDoc['status'] === 'draft') {
+            $confirmPost = [
+                'doc' => $confirmDoc,
+                'doc_type' => $confirmDocType,
+                'no' => (string) ($confirmDoc[$confirmDocType . '_no'] ?? ''),
+                'preview' => jewellery_preview_posting($companyId, $confirmDocType, $confirmPostId),
+            ];
+        } elseif ($confirmDoc) {
+            flash('error', 'That document is already posted.');
+        }
+    }
+}
+
 $outstanding = [];
 $settlements = [];
 $settleParty = (int) ($_GET['party'] ?? 0);
@@ -462,6 +487,68 @@ jw_filter_bar_styles();
         <a class="mbw-tab <?= $view === $tabView ? 'is-active' : '' ?>" href="<?= e(url('admin/jewellery-trade.php?view=' . $tabView)) ?>"><?= icon($tabIcon) ?> <?= $tabLabel ?></a>
     <?php endforeach; ?>
 </nav>
+
+<?php if ($confirmPost !== null): ?>
+<?php // The mapping, confirmed before it is committed. The legs below are the
+      // REAL posting, dry-run and rolled back — not a hand-built imitation of
+      // it — so what the user confirms is what the ledger receives. ?>
+<section class="mbw-card" style="margin-bottom:14px;border:2px solid var(--mbw-accent,#0f766e)">
+    <div class="mbw-card-head">
+        <h2>Post <?= e($confirmPost['no']) ?> — confirm where it lands</h2>
+        <a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=' . $view)) ?>">Cancel</a>
+    </div>
+    <?php if (!$confirmPost['preview']['ok']): ?>
+        <div class="notice"><strong>This document cannot be posted:</strong> <?= e((string) $confirmPost['preview']['error']) ?></div>
+    <?php else: ?>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Ledger</th><th class="is-numeric">Debit (<?= e($sym) ?>)</th><th class="is-numeric">Credit (<?= e($sym) ?>)</th><th>Against</th></tr></thead>
+            <tbody>
+                <?php foreach ($confirmPost['preview']['legs'] as $leg): ?>
+                    <tr>
+                        <td><?= e(((string) ($leg['ledger_code'] ?? '') !== '' ? $leg['ledger_code'] . ' — ' : '') . (string) $leg['ledger_name']) ?></td>
+                        <td class="is-numeric"><?= (string) $leg['entry_type'] === 'debit' ? $fmt((float) $leg['amount']) : '' ?></td>
+                        <td class="is-numeric"><?= (string) $leg['entry_type'] === 'credit' ? $fmt((float) $leg['amount']) : '' ?></td>
+                        <td><small><?= e((string) ($leg['memo'] ?? '')) ?></small></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+            <tfoot><tr>
+                <th>Balanced</th>
+                <th class="is-numeric"><?= $fmt((float) $confirmPost['preview']['debit_total']) ?></th>
+                <th class="is-numeric"><?= $fmt((float) $confirmPost['preview']['credit_total']) ?></th>
+                <th></th>
+            </tr></tfoot>
+        </table></div>
+        <?php if ($confirmPost['preview']['stock'] !== []): ?>
+            <h3 style="margin:12px 0 6px;font-size:0.95rem">And in stock</h3>
+            <div style="overflow-x:auto"><table>
+                <thead><tr><th>Item</th><th>Purity</th><th>Direction</th>
+                    <th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Value (<?= e($sym) ?>)</th></tr></thead>
+                <tbody>
+                    <?php foreach ($confirmPost['preview']['stock'] as $move): ?>
+                        <tr>
+                            <td><?= e((string) $move['item_code']) ?> <small><?= e((string) $move['item_name']) ?></small></td>
+                            <td><?= e((string) ($move['purity_code'] ?? '')) ?></td>
+                            <td><span class="mbw-pill <?= (string) $move['direction'] === 'in' ? 'tone-green' : 'tone-amber' ?>"><?= (string) $move['direction'] === 'in' ? 'Into stock' : 'Out of stock' ?></span></td>
+                            <td class="is-numeric"><?= $fmt((float) $move['gross_weight'], 4) ?> <small><?= e((string) ($move['unit_code'] ?? '')) ?></small></td>
+                            <td class="is-numeric"><?= $fmt((float) $move['fine_weight'], 4) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) $move['amount']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table></div>
+        <?php endif; ?>
+        <form method="post" style="margin-top:12px;display:flex;gap:10px;align-items:center">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="<?= $confirmPost['doc_type'] === 'sale' ? 'post_sale' : 'post_purchase' ?>">
+            <input type="hidden" name="back_view" value="<?= e($view) ?>">
+            <input type="hidden" name="doc_id" value="<?= (int) $confirmPost['doc']['id'] ?>">
+            <button type="submit" class="button">Confirm &amp; Post — exactly the entries above</button>
+            <a class="button soft" href="<?= e(url('admin/jewellery-trade.php?view=' . $view)) ?>">Cancel</a>
+        </form>
+    <?php endif; ?>
+</section>
+<?php endif; ?>
 
 <?php
 /**
@@ -639,13 +726,10 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=purchase&id=' . (int) $row['id'])) ?>">Preview</a>
                             <?php endif; ?>
                             <?php if ($isDraft && $canPost): ?>
-                                <form method="post" style="display:inline">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="post_purchase">
-                                    <input type="hidden" name="back_view" value="purchases">
-                                    <input type="hidden" name="doc_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button secondary" style="min-height:30px;padding:3px 10px">Post</button>
-                                </form>
+                                <?php // Posting goes through the confirmation card above: the
+                                      // ledger legs are shown, then committed — never blind. ?>
+                                <a class="button secondary" style="min-height:30px;padding:3px 10px"
+                                   href="<?= e(url('admin/jewellery-trade.php?view=purchases&confirm_post=' . (int) $row['id'])) ?>">Post…</a>
                             <?php elseif (!$isDraft && $canPost): ?>
                                 <form method="post" style="display:inline" data-confirm="Unpost this purchase? Its voucher and stock movements will be removed.">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -890,13 +974,10 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-invoice.php?id=' . (int) $row['id'])) ?>">Invoice</a>
                             <?php endif; ?>
                             <?php if ($isDraft && $canPost): ?>
-                                <form method="post" style="display:inline">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="post_sale">
-                                    <input type="hidden" name="back_view" value="sales">
-                                    <input type="hidden" name="doc_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button secondary" style="min-height:30px;padding:3px 10px">Post</button>
-                                </form>
+                                <?php // Posting goes through the confirmation card above: the
+                                      // ledger legs are shown, then committed — never blind. ?>
+                                <a class="button secondary" style="min-height:30px;padding:3px 10px"
+                                   href="<?= e(url('admin/jewellery-trade.php?view=sales&confirm_post=' . (int) $row['id'])) ?>">Post…</a>
                             <?php elseif (!$isDraft && $canPost): ?>
                                 <form method="post" style="display:inline" data-confirm="Unpost this sale? Its voucher, COGS and stock movements will be removed.">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

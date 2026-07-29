@@ -397,6 +397,37 @@ ok(threw(static fn () => jewellery_save_purchase($cidA, $fyA, ['purchase_date' =
 ok((int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$cidB")->fetchColumn() === 0, 'No voucher ever reached company B');
 ok(jewellery_sales_list($cidB) === [], 'Company B has no sales');
 
+echo "\n13. The mapping is shown before it is committed\n";
+// The preview IS the posting, dry-run and rolled back — so what the user
+// confirms and what the ledger then receives cannot be two different things.
+$previewSale = jewellery_save_sale($cidA, $fyA, [
+    'sale_date' => '2026-09-01', 'party_id' => $customer, 'settle_mode' => 'cash',
+    'settle_ledger_id' => $cash, 'received_amount' => 160000,
+], [['item_id' => $chain, 'gross_weight' => 1, 'rate' => 160000]], [], $userA);
+$preview = jewellery_preview_posting($cidA, 'sale', $previewSale);
+ok($preview['ok'], 'A draft sale previews' . ($preview['ok'] ? '' : ' — ' . $preview['error']));
+ok($preview['legs'] !== [] && near($preview['debit_total'], $preview['credit_total']),
+    'The preview shows balanced ledger legs: Dr ' . number_format((float) $preview['debit_total'], 2));
+ok($preview['stock'] !== [], 'And the stock movement the posting would make');
+$stillDraft = jewellery_sale($cidA, $previewSale);
+ok((string) $stillDraft['status'] === 'draft', 'Previewing posts NOTHING — the sale is still a draft');
+ok((int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$cidA
+        AND source_type='jewellery_sale' AND source_id=$previewSale")->fetchColumn() === 0,
+    'No voucher exists for it');
+
+// Post for real and hold the preview to its word.
+$rPost = jewellery_post_sale($cidA, $previewSale, $userA);
+ok($rPost['ok'], 'The sale then posts');
+$actualLegs = db()->query("SELECT e.entry_type, e.amount FROM voucher_entries e
+    WHERE e.voucher_id = " . (int) $rPost['voucher_id'] . " ORDER BY e.entry_type = 'credit', e.id")->fetchAll(PDO::FETCH_ASSOC);
+$previewShape = array_map(static fn (array $l): string => $l['entry_type'] . ':' . number_format((float) $l['amount'], 2), $preview['legs']);
+$actualShape = array_map(static fn (array $l): string => $l['entry_type'] . ':' . number_format((float) $l['amount'], 2), $actualLegs);
+ok($previewShape === $actualShape,
+    'The posted voucher is LEG FOR LEG what the preview promised');
+ok(!jewellery_preview_posting($cidA, 'sale', $previewSale)['ok'],
+    'A posted sale refuses to preview — there is nothing left to confirm');
+ok(!jewellery_preview_posting($cidA, 'unknown', 1)['ok'], 'An unknown document type is refused');
+
 jwt_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

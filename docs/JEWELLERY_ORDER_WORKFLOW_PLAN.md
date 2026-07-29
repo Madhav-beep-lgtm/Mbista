@@ -178,12 +178,25 @@ Four new views on `jewellery-reports.php`, four `jw_report_*` functions:
 
 All four export CSV / Excel / print from the same queries the screen renders.
 
-### G. Mapping confirmation for auto-posted documents (ground rule 8)
+### G. Mapping confirmation before posting (ground rule 8) — **SHIPPED**
 
-Turn `auto_post` into a per-document confirmation step rather than a silent
-default: the document is saved as a draft, the proposed voucher lines are
-displayed, and posting is a second action. Sequenced last because it touches
-purchases, sales and settlements as well as orders.
+The Post button on a draft sale or purchase now leads to a confirmation card:
+the ledger legs (which account debited, which credited, balanced totals) and
+the stock movements the posting would make, with a "Confirm & Post — exactly
+the entries above" button. The preview IS the posting — dry-run inside a
+transaction and rolled back — so what the user confirms and what the ledger
+receives are the same code path and can never drift apart
+(`jewellery_preview_posting()`, proven leg-for-leg in the trading suite).
+
+Forms where the user already names every mapping — the advance tender grid,
+the settlement form with its bill-by-bill allocations, the kaligad issue form,
+the receive screen with its preview-then-confirm — were rule-8 compliant as
+built: submitting them IS the confirmation.
+
+The `auto_post` settings checkbox turned out to be dead — no code ever read
+it. It promised silent posting and delivered nothing; it has been removed
+rather than implemented, since a setting that silences the confirmation has
+no place in this workflow.
 
 ## Open questions
 

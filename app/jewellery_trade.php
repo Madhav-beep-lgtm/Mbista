@@ -3182,3 +3182,108 @@ function jewellery_delete_settlement(int $companyId, int $settlementId): bool
 
     return $stmt->rowCount() > 0;
 }
+
+// ---------------------------------------------------------------------------
+// Posting preview — the mapping shown before it is committed
+// ---------------------------------------------------------------------------
+
+/**
+ * What posting this draft WOULD write, without writing it.
+ *
+ * Nothing here re-implements the posting rules. The document is posted for
+ * real inside a transaction, the voucher legs and stock movements it produced
+ * are read back, and the transaction is ROLLED BACK — so the preview a user
+ * confirms and the posting that then happens are the same code path, and the
+ * two can never drift apart. A preview function that rebuilt the legs by hand
+ * would agree with the posting only until someone changed one of them.
+ *
+ * This is what makes the Post button honest: the proposed mapping — which
+ * ledger is debited, which credited, what moves in stock — is on the screen
+ * before the user commits, and confirming it is the manual step the workflow
+ * requires. Nothing posts sight unseen.
+ *
+ * The rollback also discards the activity log line and the id the voucher
+ * briefly held; an id gap in AUTO_INCREMENT is the whole cost of the honesty.
+ */
+function jewellery_preview_posting(int $companyId, string $docType, int $docId): array
+{
+    $posters = [
+        'sale' => 'jewellery_post_sale',
+        'purchase' => 'jewellery_post_purchase',
+        'settlement' => 'jewellery_post_settlement',
+    ];
+    $sources = [
+        'sale' => 'jewellery_sale',
+        'purchase' => 'jewellery_purchase',
+        'settlement' => 'jewellery_settlement',
+    ];
+    $poster = $posters[$docType] ?? null;
+    if ($poster === null) {
+        return ['ok' => false, 'error' => 'Unknown document type.'];
+    }
+    if (db()->inTransaction()) {
+        // Joining a caller's transaction would make their work part of the
+        // rollback. A preview inside other writes has no honest meaning.
+        return ['ok' => false, 'error' => 'A posting preview cannot run inside another transaction.'];
+    }
+
+    db()->beginTransaction();
+    try {
+        $result = $poster($companyId, $docId, 0);
+        if (!($result['ok'] ?? false)) {
+            db()->rollBack();
+
+            return ['ok' => false, 'error' => (string) ($result['error'] ?? 'This document cannot be posted.')];
+        }
+
+        $voucherId = (int) ($result['voucher_id'] ?? 0);
+        $legs = [];
+        $debitTotal = 0.0;
+        $creditTotal = 0.0;
+        if ($voucherId > 0) {
+            $legStmt = db()->prepare('SELECT e.entry_type, e.amount, e.memo,
+                    l.name AS ledger_name, l.code AS ledger_code
+                FROM voucher_entries e
+                INNER JOIN ledgers l ON l.id = e.ledger_id
+                WHERE e.voucher_id = :vid
+                ORDER BY e.entry_type = \'credit\', e.id');
+            $legStmt->execute(['vid' => $voucherId]);
+            foreach ($legStmt->fetchAll(PDO::FETCH_ASSOC) as $leg) {
+                $legs[] = $leg;
+                if ((string) $leg['entry_type'] === 'debit') {
+                    $debitTotal += (float) $leg['amount'];
+                } else {
+                    $creditTotal += (float) $leg['amount'];
+                }
+            }
+        }
+
+        $stockStmt = db()->prepare('SELECT t.direction, t.txn_type, t.gross_weight, t.fine_weight, t.amount,
+                t.holder_type, i.sku AS item_code, i.name AS item_name, p.code AS purity_code, u.code AS unit_code
+            FROM jewellery_stock_txns t
+            INNER JOIN inventory_items i ON i.id = t.item_id
+            LEFT JOIN jewellery_purities p ON p.id = t.purity_id
+            LEFT JOIN jewellery_units u ON u.id = t.unit_id
+            WHERE t.company_id = :cid AND t.source_type = :src AND t.source_id = :sid
+            ORDER BY t.id');
+        $stockStmt->execute(['cid' => $companyId, 'src' => $sources[$docType], 'sid' => $docId]);
+        $stock = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        db()->rollBack();
+
+        return [
+            'ok' => true,
+            'error' => '',
+            'legs' => $legs,
+            'stock' => $stock,
+            'debit_total' => jw_round_money($debitTotal),
+            'credit_total' => jw_round_money($creditTotal),
+        ];
+    } catch (Throwable $previewException) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+
+        return ['ok' => false, 'error' => $previewException->getMessage()];
+    }
+}
