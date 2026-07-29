@@ -327,7 +327,12 @@ $reportMeta = [
     'pdf_url' => rc_url(['view' => 'print']),
     'excel_url' => rc_url(['export' => 'csv']),
 ];
-$reportNumberedTitle = (isset($report['number']) ? $report['number'] . '. ' : '') . ($report['title'] ?? $reportLabel);
+// The section number ("5." on the Ledger Report) belongs to a BOUND SET of
+// financial statements, where the reader flips between numbered sections. A
+// report exported on its own is not section five of anything — the number
+// only made people ask what the other four were. The bar keeps the report's
+// name, which a printed page does need; the number stays off it.
+$reportNumberedTitle = (string) ($report['title'] ?? $reportLabel);
 
 if (isset($_GET['view']) && $_GET['view'] === 'print') {
     // The print view carries the full report — it must not bypass the export

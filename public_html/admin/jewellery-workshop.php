@@ -477,7 +477,7 @@ jw_filter_bar_styles();
                 <label>Promised delivery<input type="date" name="delivery_date" value="<?= e((string) ($editOrder['delivery_date'] ?? '')) ?>"></label>
                 <label>Existing customer
                     <select name="party_id">
-                        <option value="0">— new customer, type the name →</option>
+                        <option value="0">— new customer →</option>
                         <?php foreach ($parties as $p): ?>
                             <option value="<?= (int) $p['id'] ?>" <?= (int) ($editOrder['party_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
                         <?php endforeach; ?>
@@ -912,19 +912,27 @@ jw_filter_bar_styles();
                     <?php endforeach; ?>
                 </select>
             </label>
-            <label style="grid-column:1/-1">Against order items
+            <div style="grid-column:1/-1">
                 <?php $pendingLines = jewellery_pending_order_lines($companyId); ?>
-                <select name="order_line_ids[]" multiple size="<?= max(3, min(8, count($pendingLines))) ?>">
+                <?php if ($pendingLines !== []): ?>
+                <span style="display:block;font-weight:600;margin-bottom:4px">Against order items — tick what this issue covers</span>
+                <?php // Checkboxes, not a ctrl-click multi-select: picking several
+                      // items must not need a keyboard trick nobody at a counter
+                      // knows, and each row reads as one line with room to breathe. ?>
+                <div style="max-height:220px;overflow-y:auto;border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:6px 10px">
                     <?php foreach ($pendingLines as $ol): ?>
-                        <option value="<?= (int) $ol['id'] ?>" <?= (int) ($_GET['line'] ?? 0) === (int) $ol['id'] ? 'selected' : '' ?>>
-                            <?= e($ol['order_no'] . ' · ' . $ol['item_code']
-                                . ' · ' . $fmt((float) $ol['gross_weight'], 3) . ' ' . $ol['unit_code']
-                                . ($ol['karigar_code'] ? ' · ' . $ol['karigar_code'] : '')
-                                . ($ol['delivery_date'] ? ' · due ' . app_date((string) $ol['delivery_date']) : '')) ?>
-                        </option>
+                        <label style="display:flex;align-items:center;gap:8px;padding:4px 2px;font-weight:400;cursor:pointer">
+                            <input type="checkbox" name="order_line_ids[]" value="<?= (int) $ol['id'] ?>"
+                                   style="width:auto;min-height:0;margin:0" <?= (int) ($_GET['line'] ?? 0) === (int) $ol['id'] ? 'checked' : '' ?>>
+                            <span><strong><?= e((string) $ol['order_no']) ?></strong> · <?= e((string) $ol['item_code']) ?>
+                                · <?= $fmt((float) $ol['gross_weight'], 3) ?> <?= e((string) $ol['unit_code']) ?>
+                                <?= $ol['karigar_code'] ? '· ' . e((string) $ol['karigar_code']) : '' ?>
+                                <?= $ol['delivery_date'] ? '· <small>due ' . e(app_date((string) $ol['delivery_date'])) . '</small>' : '' ?></span>
+                        </label>
                     <?php endforeach; ?>
-                </select>
-            </label>
+                </div>
+                <?php endif; ?>
+            </div>
             <label>Against order
                 <select name="order_id">
                     <option value="0">— none —</option>

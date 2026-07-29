@@ -629,7 +629,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 </label>
                 <label>Existing party
                     <select name="party_id">
-                        <option value="0">— new party, type the name →</option>
+                        <option value="0">— new party →</option>
                         <?php foreach ($parties as $p): ?>
                             <option value="<?= (int) $p['id'] ?>" <?= (int) ($editDoc['party_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
                         <?php endforeach; ?>
@@ -782,7 +782,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <label>Existing customer
                     <select name="party_id" id="jw-sale-party"
                             data-orders-url="<?= e(url('admin/jewellery-trade.php?view=sales')) ?>">
-                        <option value="0">— new customer, type the name →</option>
+                        <option value="0">— new customer →</option>
                         <?php foreach ($parties as $p): ?>
                             <option value="<?= (int) $p['id'] ?>" <?= $saleParty === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
                         <?php endforeach; ?>

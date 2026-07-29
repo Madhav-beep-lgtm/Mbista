@@ -448,6 +448,33 @@ function icon(string $name): string
             'viewBox' => '0 0 24 24',
             'paths' => ['M21 2l-2 2', 'M15.5 7.5L19 4', 'M21 2l-8.6 8.6', 'M11.4 10.6a5 5 0 1 0 2 2z'],
         ],
+        // Names the jewellery module uses. An unknown name renders the bare
+        // fallback circle, which is how "fine weight" tiles ended up wearing
+        // a plain ring for months — every name used must exist here.
+        'scale' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M12 3v18', 'M8 21h8', 'M4 7h16', 'M6 7l-3 6a3 3 0 0 0 6 0z', 'M18 7l-3 6a3 3 0 0 0 6 0z'],
+        ],
+        'printer' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M6 9V3h12v6', 'M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2', 'M6 14h12v7H6z'],
+        ],
+        'invoice' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M5 2h14v20l-2.5-1.5L14 22l-2-1.5L10 22l-2.5-1.5L5 22z', 'M9 7h6', 'M9 11h6', 'M9 15h3'],
+        ],
+        'link' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7', 'M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7'],
+        ],
+        'external' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6', 'M15 3h6v6', 'M10 14L21 3'],
+        ],
+        'coins' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M8 9a6 3 0 1 0 0-6 6 3 0 0 0 0 6', 'M2 6v4c0 1.66 2.69 3 6 3s6-1.34 6-3V6', 'M14 13.5c.63.95 2.68 1.5 5 1.5', 'M10 13v4c0 1.66 2.69 3 6 3s6-1.34 6-3v-4', 'M22 13c0 1.66-2.69 3-6 3s-6-1.34-6-3'],
+        ],
     ];
 
     $icon = $icons[$name] ?? [
