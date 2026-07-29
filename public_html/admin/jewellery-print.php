@@ -84,9 +84,12 @@ if ($docType === 'sale' || $docType === 'purchase') {
     }
 
     // Totals as their own labelled rows, so the same array prints and exports.
+    // The wastage is INSIDE the metal figure — the total weight is priced as
+    // one number — so its row says so, or the stack reads as if
+    // Metal + Wastage + Making should add to the total when they must not.
     $totalRows = [
-        ['Metal', $doc['metal_amount']],
-        ['Wastage', $doc['wastage_amount'] ?? 0],
+        ['Metal (wastage included)', $doc['metal_amount']],
+        ['of which wastage', $doc['wastage_amount'] ?? 0],
         ['Making', $doc['making_amount']],
         ['Stone', $doc['stone_amount']],
         ['Other charges', $doc['other_charges']],
