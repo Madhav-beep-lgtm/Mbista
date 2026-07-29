@@ -1343,14 +1343,15 @@ function jewellery_seed_taxes(int $companyId): void
 
     $settings = jewellery_settings($companyId);
 
-    // Skills Promotion Tax: 0.5% of metal + wastage + making. Charged first,
-    // and punched by hand on the document because the shop totals it before
-    // entering it.
+    // Skills Promotion Tax: 0.5% of metal + making. The levy's own name is
+    // SPT — it was seeded as "SD" (Skills Development) for a while, and the
+    // bill printed "SD Tax" off that code until the shop pointed out it is
+    // not SD. The repair renames rows already seeded the old way.
     jewellery_save_tax($companyId, [
-        'code' => 'SD',
-        'name' => 'Skills Development Tax',
+        'code' => 'SPT',
+        'name' => 'Skills Promotion Tax',
         'rate' => 0.5,
-        // The bill's "SD Taxable Amt" is metal + making. The metal figure
+        // The bill's "SPT Taxable Amt" is metal + making. The metal figure
         // already carries the wastage, because the total weight is priced as
         // one number.
         'base' => 'metal_making',
@@ -1361,7 +1362,7 @@ function jewellery_seed_taxes(int $companyId): void
         'output_purpose' => 'spt_output',
         'input_purpose' => 'spt_input',
         'active' => 1,
-        'notes' => 'SD Taxable Amt on the bill: metal (total weight x rate) plus making charge. Stones are excluded.',
+        'notes' => 'SPT Taxable Amt on the bill: metal (total weight x rate) plus making charge. Stones are excluded.',
     ]);
 
     // VAT last, on everything including the tax above, and only on items

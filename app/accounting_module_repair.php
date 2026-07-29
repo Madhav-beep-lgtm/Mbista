@@ -2974,6 +2974,31 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('The levy is called by its name: SPT, not SD (migration 097)', static function (): void {
+        // The 0.5% levy is the Skills PROMOTION Tax. It was seeded coded "SD"
+        // (Skills Development), and the bill printed "SD Tax" off that code —
+        // wrong name on a statutory document. New books seed SPT; this
+        // renames what the old seed wrote, in the register and in the stored
+        // per-line tax rows the reports group by. Nothing about the money
+        // changes — same tax, same rate, same rows, right name.
+        if (!accounting_repair_table_exists('jewellery_taxes')) {
+            return;
+        }
+        // Guarded per company: if a company somehow already holds an SPT code,
+        // renaming its SD row would collide with the unique (company, code)
+        // key, so that company is left for a person to look at.
+        db()->exec("UPDATE jewellery_taxes t
+            SET t.code = 'SPT', t.name = 'Skills Promotion Tax'
+            WHERE t.code = 'SD' AND t.output_purpose = 'spt_output'
+              AND NOT EXISTS (SELECT 1 FROM (SELECT company_id FROM jewellery_taxes WHERE code = 'SPT') s
+                              WHERE s.company_id = t.company_id)");
+        if (accounting_repair_table_exists('jewellery_line_taxes')) {
+            db()->exec("UPDATE jewellery_line_taxes
+                SET tax_code = 'SPT', tax_name = 'Skills Promotion Tax'
+                WHERE tax_code = 'SD' AND output_purpose = 'spt_output'");
+        }
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

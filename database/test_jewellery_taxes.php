@@ -95,8 +95,8 @@ echo "\n1. The seeded tax register\n";
 $taxes = jewellery_taxes_list($cid);
 ok(count($taxes) === 2, 'Two taxes are seeded');
 $spt = null; $vat = null;
-foreach ($taxes as $t) { if ($t['code'] === 'SD') { $spt = $t; } if ($t['code'] === 'VAT') { $vat = $t; } }
-ok($spt !== null && (float) $spt['rate'] === 0.5, 'Skills Development Tax is seeded at 0.5%');
+foreach ($taxes as $t) { if ($t['code'] === 'SPT') { $spt = $t; } if ($t['code'] === 'VAT') { $vat = $t; } }
+ok($spt !== null && (float) $spt['rate'] === 0.5, 'Skills Promotion Tax is seeded at 0.5%');
 ok($spt !== null && $spt['base'] === 'metal_making', 'Its base is metal + making — the bill\'s "SD Taxable Amt"');
 ok($spt !== null && (int) $spt['manual_entry'] === 0, 'It is worked out, not punched — the bill shows it computed');
 ok($vat !== null && $vat['base'] === 'stone_diamond', 'VAT is charged on the stone side alone');
@@ -118,7 +118,7 @@ $charged = jw_charge_line_taxes(
 ok(near($charged['other'], 550.0), 'SD ignores the stone: 0.5% of 110,000 = 550');
 ok(near($charged['vat'], 2600.0), 'VAT is charged on the 20,000 stone alone = 2,600');
 ok(near($charged['total'], 3150.0), 'The two together are 3,150');
-ok(count($charged['taxes']) === 2 && $charged['taxes'][0]['tax_code'] === 'SD',
+ok(count($charged['taxes']) === 2 && $charged['taxes'][0]['tax_code'] === 'SPT',
     'They are returned in charging order, SD first');
 
 $untagged = jw_charge_line_taxes(

@@ -186,11 +186,11 @@ $taxRows = db()->query("SELECT tax_code, base_amount, amount FROM jewellery_line
     WHERE company_id=$cid AND doc_type='sale' AND doc_id=$sale ORDER BY sequence")->fetchAll(PDO::FETCH_ASSOC);
 $byCode = [];
 foreach ($taxRows as $t) { $byCode[(string) $t['tax_code']] = $t; }
-ok(isset($byCode['SD']) && near((float) $byCode['SD']['base_amount'], 69091.70),
+ok(isset($byCode['SPT']) && near((float) $byCode['SPT']['base_amount'], 69091.70),
     'SD is charged on 69,091.70 — the gold and the labour');
 ok(isset($byCode['VAT']) && near((float) $byCode['VAT']['base_amount'], 232.60),
     'VAT is charged on 232.60 — the stone alone');
-ok(isset($byCode['VAT']) && (float) $byCode['VAT']['base_amount'] < (float) $byCode['SD']['base_amount'],
+ok(isset($byCode['VAT']) && (float) $byCode['VAT']['base_amount'] < (float) $byCode['SPT']['base_amount'],
     'And the two bases are disjoint: VAT is NOT levied on top of the SD tax');
 
 echo "\nPosting\n";
@@ -318,9 +318,9 @@ echo "\nThe tax register files what was actually charged\n";
 $register = jw_report_vat_register($cid, '2026-07-16', '2027-07-15');
 $byCode2 = [];
 foreach ($register['by_tax'] as $t) { $byCode2[(string) $t['tax_code']] = $t; }
-ok(isset($byCode2['VAT']) && isset($byCode2['SD']),
+ok(isset($byCode2['VAT']) && isset($byCode2['SPT']),
     'Both taxes appear — a register that knew only about VAT could not be filed');
-ok(isset($byCode2['SD']) && near((float) $byCode2['SD']['output_amount'], 345.46 + jw_round_money((jw_round_money(1.78 * 22645.062) + 1000.00) * 0.005)),
+ok(isset($byCode2['SPT']) && near((float) $byCode2['SPT']['output_amount'], 345.46 + jw_round_money((jw_round_money(1.78 * 22645.062) + 1000.00) * 0.005)),
     'The SD levy is registered on its own base, separately from VAT');
 ok(isset($byCode2['VAT']) && near((float) $byCode2['VAT']['output_base'], 232.60 + 45500.00),
     'The VAT base is the stone side of both bills — 45,732.60, NOT the whole bill value');
@@ -408,8 +408,12 @@ ok($has('69,091.70') && $has('345.46'), 'SD Taxable Amt 69,091.70 and SD Tax 345
 ok($has('30.24'), 'VAT 30.24 prints');
 ok($has('69,700.00'), 'Net Total 69,700.00 prints');
 ok($has(npr_amount_in_words(69700.00)), 'And the amount in words agrees with it');
-ok($has('SD Taxable Amt') && $has('Vatable Amt') && $has('Non Taxable Amt'),
-    'The totals block is named the way the law names it');
+// The levy is the Skills PROMOTION Tax. The bill printed "SD Tax" until the
+// shop pointed out that is not its name — a statutory document must call the
+// tax what the law calls it.
+ok($has('SPT Taxable Amt') && $has('Skills Promotion Tax') && $has('Vatable Amt') && $has('Non Taxable Amt'),
+    'The totals block is named the way the law names it — SPT, not SD');
+ok(!$has('SD Tax'), 'And "SD Tax" appears nowhere on the bill');
 ok($has('Cash') && $has('Card') && $has('Advance') && $has('Cheque')
     && $has('Credit') && $has('QR/Transfer') && $has('Purchase'),
     'The seven tender columns are all on the paper');

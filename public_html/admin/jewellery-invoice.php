@@ -344,8 +344,10 @@ header('Content-Type: text/html; charset=utf-8');
       <table class="totals">
         <tr><td class="lbl">&nbsp;</td><td class="amt"><b>Amount</b></td></tr>
         <tr><td class="lbl">Non Taxable Amt</td><td class="amt"><?= $n2($sale['non_taxable_amount'] ?? 0) ?></td></tr>
-        <tr><td class="lbl">SD Taxable Amt</td><td class="amt"><?= $n2($sale['sd_taxable_amount'] ?? 0) ?></td></tr>
-        <tr><td class="lbl">SD Tax <?= $esc(rtrim(rtrim(number_format($sdRate, 3), '0'), '.')) ?>%</td>
+        <?php // SPT, written out once — the levy is the Skills PROMOTION Tax,
+              // and a statutory bill must not misname the tax it charges. ?>
+        <tr><td class="lbl">SPT Taxable Amt</td><td class="amt"><?= $n2($sale['sd_taxable_amount'] ?? 0) ?></td></tr>
+        <tr><td class="lbl">Skills Promotion Tax <?= $esc(rtrim(rtrim(number_format($sdRate, 3), '0'), '.')) ?>%</td>
             <td class="amt"><?= $n2($sale['tax_amount'] ?? 0) ?></td></tr>
         <tr><td class="lbl">Vatable Amt</td><td class="amt"><?= $n2($sale['vatable_amount'] ?? 0) ?></td></tr>
         <tr><td class="lbl">Vat Amt <?= $esc(rtrim(rtrim(number_format($vatRate, 3), '0'), '.')) ?>%</td>
