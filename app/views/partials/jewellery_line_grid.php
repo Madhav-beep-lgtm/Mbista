@@ -102,19 +102,28 @@ table.jw-lines td.c-del button {
 table.jw-lines td.c-del button:hover { background: var(--mbw-red-soft, #fdeaea); }
 .jw-lines-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 
-/* Fields sit in a row and wrap to the next, and every box lines up with its
-   neighbours whatever sits under it. Without the label being a flex column with
-   the control pushed to the bottom, one field carrying a note under it drags
-   its own box upward and the row reads as a staircase. */
+/* Every control hangs directly under its one-line caption, and anything that
+   arrives BELOW a control — above all the Bikram Sambat hint nepali-date.js
+   injects under every date input — hangs below it without moving it.
+
+   The previous rule bottom-aligned the controls (margin-top: auto), which
+   built the exact staircase it was written to prevent: the injected hint sat
+   between a date input and the cell floor and shoved that input UP, an empty
+   hint shoved its input up a few pixels, and a plain field sat flush on the
+   floor — three different heights across one row. Top-aligned, the hint has
+   nothing to shove: it simply occupies the spare depth of the row. */
 .workspace-form-grid > label {
     display: flex;
     flex-direction: column;
+    justify-content: flex-start;
+    gap: 5px;
     min-width: 0;
 }
 .workspace-form-grid > label > input,
 .workspace-form-grid > label > select,
-.workspace-form-grid > label > textarea { margin-top: auto; }
-.workspace-form-grid > label > .frm-optional { order: 3; margin-top: 4px; }
+.workspace-form-grid > label > textarea { margin-top: 0; }
+.workspace-form-grid > label > .bs-date-hint { margin-top: 2px; }
+.workspace-form-grid > label > .frm-optional { margin-top: 2px; }
 </style>
     <?php
 }
