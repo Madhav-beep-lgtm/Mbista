@@ -203,8 +203,11 @@ header('Content-Type: text/html; charset=utf-8');
         <th rowspan="2" style="width:74px">Rate/Gm<br>(Tola)</th>
         <th rowspan="2" style="width:72px">Amount</th>
         <th rowspan="2" style="width:58px">Making</th>
+        <?php // One Diamond pair, not two. The "Other Diamond" columns sat
+              // empty on nearly every bill; where a line does carry other
+              // diamonds, their carats and value fold into the Diamond pair
+              // below, so nothing a customer was charged for leaves the paper. ?>
         <th colspan="2">Diamond</th>
-        <th colspan="2">Other Diamond</th>
         <th colspan="2">Stone</th>
         <th rowspan="2" style="width:76px">Total<br>Amount</th>
       </tr>
@@ -214,8 +217,6 @@ header('Content-Type: text/html; charset=utf-8');
         <th style="width:48px">Net Wt</th>
         <th style="width:44px">Wast</th>
         <th style="width:50px">Total Wt</th>
-        <th style="width:38px">Crt</th>
-        <th style="width:52px">Amt</th>
         <th style="width:38px">Crt</th>
         <th style="width:52px">Amt</th>
         <th style="width:38px">Crt</th>
@@ -255,10 +256,8 @@ header('Content-Type: text/html; charset=utf-8');
         </td>
         <td class="n"><?= $m($line['metal_amount']) ?></td>
         <td class="n"><?= $m($line['making_amount']) ?></td>
-        <td class="n"><?= $w($line['diamond_carat'], 3) ?></td>
-        <td class="n"><?= $m($line['diamond_amount']) ?></td>
-        <td class="n"><?= $w($line['other_diamond_carat'], 3) ?></td>
-        <td class="n"><?= $m($line['other_diamond_amount']) ?></td>
+        <td class="n"><?= $w((float) $line['diamond_carat'] + (float) $line['other_diamond_carat'], 3) ?></td>
+        <td class="n"><?= $m((float) $line['diamond_amount'] + (float) $line['other_diamond_amount']) ?></td>
         <td class="n"><?= $w($line['stone_carat']) ?></td>
         <td class="n"><?= $m($line['stone_amount']) ?></td>
         <td class="n"><?= $n2((float) $line['metal_amount'] + (float) $line['making_amount']
@@ -278,12 +277,12 @@ header('Content-Type: text/html; charset=utf-8');
         <td class="n"><?= $w($ex['gross_weight'], 3) ?></td>
         <td class="n"><?= $n3((float) $ex['rate'] / $unitGrams($ex)) ?></td>
         <td class="n">(<?= $n2($ex['amount']) ?>)</td>
-        <td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+        <td></td><td></td><td></td><td></td><td></td>
         <td class="n">(<?= $n2($ex['amount']) ?>)</td>
       </tr>
       <?php endforeach; ?>
       <?php for ($blank = count($lines) + count($exchanges); $blank < 6; $blank++): ?>
-      <tr><?php for ($c = 0; $c < 21; $c++): ?><td>&nbsp;</td><?php endfor; ?></tr>
+      <tr><?php for ($c = 0; $c < 19; $c++): ?><td>&nbsp;</td><?php endfor; ?></tr>
       <?php endfor; ?>
     </tbody>
   </table>
