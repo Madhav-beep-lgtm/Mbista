@@ -862,3 +862,288 @@ function jw_report_summary(int $companyId, string $from, string $to): array
         'pending_delivery' => $pendingDelivery,
     ];
 }
+
+// ---------------------------------------------------------------------------
+// Order workflow reports — the order's whole life on one line
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per order: where it stands, what it weighs (actual AND fine), what
+ * it comes to, and how the money against it looks.
+ *
+ * This single query IS several of the reports a shop asks for — they differ
+ * only in the status filter:
+ *
+ *     Order Status            no filter
+ *     Pending Manufacturing   confirmed / assigned / partially_received
+ *     Completed Orders        received onwards
+ *     Pending Delivery        received, invoiced
+ *     Customer Order History  party filter
+ */
+function jw_report_order_status(int $companyId, string $from, string $to, array $filters = []): array
+{
+    $hasAlloc = table_exists('jewellery_advance_allocations');
+    $advanceSelect = $hasAlloc
+        ? "COALESCE((SELECT SUM(a.amount) FROM jewellery_advance_allocations a
+                INNER JOIN jewellery_sales sl ON sl.id = a.sale_id
+                INNER JOIN jewellery_settlements st2 ON st2.id = a.settlement_id
+                WHERE st2.order_id = o.id AND a.company_id = o.company_id AND sl.status <> 'cancelled'), 0)"
+        : '0';
+    $sql = "SELECT o.id, o.order_no, o.order_date, o.delivery_date, o.status,
+                COALESCE(ap.name, o.customer_name, 'Walk-in') AS party_label, o.party_id,
+                m.name AS metal_name, p.code AS purity_code, u.code AS unit_code,
+                o.expected_gross_weight, o.expected_fine_weight, o.total_amount,
+                (SELECT COUNT(*) FROM jewellery_order_lines l WHERE l.order_id = o.id) AS item_count,
+                COALESCE((SELECT SUM(st.amount * IF(st.direction = 'received', 1, -1))
+                    FROM jewellery_settlements st
+                    WHERE st.order_id = o.id AND st.company_id = o.company_id
+                      AND st.is_advance = 1 AND st.status = 'posted'), 0) AS advance_held,
+                $advanceSelect AS advance_applied,
+                s.sale_no, s.sale_date, s.total_amount AS billed_amount, s.balance_amount
+            FROM jewellery_orders o
+            INNER JOIN jewellery_metals m ON m.id = o.metal_id
+            INNER JOIN jewellery_purities p ON p.id = o.purity_id
+            INNER JOIN jewellery_units u ON u.id = o.unit_id
+            LEFT JOIN accounting_parties ap ON ap.id = o.party_id
+            LEFT JOIN jewellery_sales s ON s.id = o.delivered_sale_id
+            WHERE o.company_id = :cid AND o.order_date BETWEEN :from AND :to";
+    $params = ['cid' => $companyId, 'from' => $from, 'to' => $to];
+    if (($filters['status'] ?? '') !== '') {
+        $sql .= ' AND o.status = :status';
+        $params['status'] = (string) $filters['status'];
+    }
+    if (!empty($filters['party_id'])) {
+        $sql .= ' AND o.party_id = :pid';
+        $params['pid'] = (int) $filters['party_id'];
+    }
+    $sql .= ' ORDER BY o.order_date ASC, o.id ASC';
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $totals = ['orders' => count($rows), 'expected_fine' => 0.0, 'total_amount' => 0.0,
+        'advance_held' => 0.0, 'advance_applied' => 0.0, 'by_status' => []];
+    foreach ($rows as $index => $row) {
+        $rows[$index]['advance_unapplied'] = jw_round_money((float) $row['advance_held'] - (float) $row['advance_applied']);
+        $totals['expected_fine'] += (float) $row['expected_fine_weight'];
+        $totals['total_amount'] += (float) $row['total_amount'];
+        $totals['advance_held'] += (float) $row['advance_held'];
+        $totals['advance_applied'] += (float) $row['advance_applied'];
+        $totals['by_status'][(string) $row['status']] = ($totals['by_status'][(string) $row['status']] ?? 0) + 1;
+    }
+    $totals['expected_fine'] = jw_round_weight($totals['expected_fine']);
+    foreach (['total_amount', 'advance_held', 'advance_applied'] as $key) {
+        $totals[$key] = jw_round_money($totals[$key]);
+    }
+
+    return ['rows' => $rows, 'totals' => $totals];
+}
+
+/**
+ * The workshop register: every issue in the period and what has come back
+ * against it. An issue with no receipt IS the metal still out — so this one
+ * table, filtered and grouped, answers Gold Issued to Kaligad, Gold Pending
+ * Return, Kaligad-wise Production and Purity-wise Manufacturing.
+ */
+function jw_report_workshop(int $companyId, string $from, string $to, array $filters = []): array
+{
+    $sql = "SELECT a.id, a.issue_no, a.issue_date, a.expected_return_date, a.status,
+                a.issued_gross_weight, a.issued_fine_weight, a.issued_amount,
+                k.code AS karigar_code, k.name AS karigar_name,
+                o.order_no, i.sku AS item_code, p.code AS purity_code, u.code AS unit_code,
+                r.receipt_no, r.receive_date, r.received_gross_weight, r.received_fine_weight,
+                r.wastage_fine_weight, r.excess_wastage_fine, r.making_amount, r.net_payable
+            FROM jewellery_order_assignments a
+            INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
+            INNER JOIN inventory_items i ON i.id = a.item_id
+            INNER JOIN jewellery_purities p ON p.id = a.purity_id
+            INNER JOIN jewellery_units u ON u.id = a.unit_id
+            LEFT JOIN jewellery_orders o ON o.id = a.order_id
+            LEFT JOIN jewellery_order_receipts r ON r.assignment_id = a.id AND r.status = 'posted'
+            WHERE a.company_id = :cid AND a.issue_date BETWEEN :from AND :to
+              AND a.status <> 'cancelled'";
+    $params = ['cid' => $companyId, 'from' => $from, 'to' => $to];
+    if (!empty($filters['karigar_id'])) {
+        $sql .= ' AND a.karigar_id = :kid';
+        $params['kid'] = (int) $filters['karigar_id'];
+    }
+    if (!empty($filters['pending_only'])) {
+        $sql .= " AND a.status = 'issued'";
+    }
+    $sql .= ' ORDER BY a.issue_date ASC, a.id ASC';
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $totals = ['issued_fine' => 0.0, 'received_fine' => 0.0, 'pending_fine' => 0.0,
+        'wastage_fine' => 0.0, 'making_amount' => 0.0];
+    $byKarigar = [];
+    $byPurity = [];
+    $tally = static function (array &$bucket, string $key, array $row, float $pending): void {
+        $bucket[$key] = $bucket[$key] ?? ['label' => $key, 'issues' => 0, 'issued_fine' => 0.0,
+            'received_fine' => 0.0, 'pending_fine' => 0.0, 'wastage_fine' => 0.0, 'making_amount' => 0.0];
+        $bucket[$key]['issues']++;
+        $bucket[$key]['issued_fine'] += (float) $row['issued_fine_weight'];
+        $bucket[$key]['received_fine'] += (float) ($row['received_fine_weight'] ?? 0);
+        $bucket[$key]['pending_fine'] += $pending;
+        $bucket[$key]['wastage_fine'] += (float) ($row['wastage_fine_weight'] ?? 0);
+        $bucket[$key]['making_amount'] += (float) ($row['making_amount'] ?? 0);
+    };
+    foreach ($rows as $index => $row) {
+        $issuedFine = (float) $row['issued_fine_weight'];
+        $pending = (string) $row['status'] === 'issued' ? $issuedFine : 0.0;
+        $rows[$index]['pending_fine'] = jw_round_weight($pending);
+        $totals['issued_fine'] += $issuedFine;
+        $totals['received_fine'] += (float) ($row['received_fine_weight'] ?? 0);
+        $totals['pending_fine'] += $pending;
+        $totals['wastage_fine'] += (float) ($row['wastage_fine_weight'] ?? 0);
+        $totals['making_amount'] += (float) ($row['making_amount'] ?? 0);
+        $tally($byKarigar, $row['karigar_code'] . ' — ' . $row['karigar_name'], $row, $pending);
+        $tally($byPurity, (string) $row['purity_code'], $row, $pending);
+    }
+    foreach (['issued_fine', 'received_fine', 'pending_fine', 'wastage_fine'] as $key) {
+        $totals[$key] = jw_round_weight($totals[$key]);
+    }
+    $totals['making_amount'] = jw_round_money($totals['making_amount']);
+
+    return ['rows' => $rows, 'totals' => $totals,
+        'by_karigar' => array_values($byKarigar), 'by_purity' => array_values($byPurity)];
+}
+
+/**
+ * The advance register and its adjustments — both sides of the same rows.
+ *
+ * Every advance ENTRY in the period, with what it has funded and what it
+ * still holds; and every ADJUSTMENT — an allocation row saying "this bill
+ * took this much from that entry", the record migration 094 made possible.
+ * History is never netted away: a fully-consumed entry still lists, showing
+ * where every rupee of it went.
+ */
+function jw_report_advance_register(int $companyId, string $from, string $to, array $filters = []): array
+{
+    if (!column_exists('jewellery_settlements', 'is_advance')) {
+        return ['rows' => [], 'adjustments' => [],
+            'totals' => ['received' => 0.0, 'refunded' => 0.0, 'allocated' => 0.0, 'remaining' => 0.0]];
+    }
+    $sql = "SELECT st.id, st.settlement_no, st.settlement_date, st.direction, st.mode, st.amount,
+                st.gross_weight, st.fine_weight, st.status,
+                COALESCE(ap.name, 'Unknown') AS party_label, st.party_id,
+                o.order_no, i.sku AS item_code, p.code AS purity_code, u.code AS unit_code
+            FROM jewellery_settlements st
+            LEFT JOIN accounting_parties ap ON ap.id = st.party_id
+            LEFT JOIN jewellery_orders o ON o.id = st.order_id
+            LEFT JOIN inventory_items i ON i.id = st.item_id
+            LEFT JOIN jewellery_purities p ON p.id = st.purity_id
+            LEFT JOIN jewellery_units u ON u.id = st.unit_id
+            WHERE st.company_id = :cid AND st.is_advance = 1 AND st.status = 'posted'
+              AND st.settlement_date BETWEEN :from AND :to";
+    $params = ['cid' => $companyId, 'from' => $from, 'to' => $to];
+    if (!empty($filters['party_id'])) {
+        $sql .= ' AND st.party_id = :pid';
+        $params['pid'] = (int) $filters['party_id'];
+    }
+    $sql .= ' ORDER BY st.settlement_date ASC, st.id ASC';
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $allocated = [];
+    $adjustments = [];
+    if (table_exists('jewellery_advance_allocations') && $rows !== []) {
+        $ids = implode(',', array_map(static fn (array $r): int => (int) $r['id'], $rows));
+        $aStmt = db()->prepare("SELECT a.settlement_id, a.amount, a.created_at,
+                s.sale_no, s.sale_date, s.status AS sale_status, st.settlement_no,
+                COALESCE(ap.name, s.customer_name, 'Walk-in') AS party_label
+            FROM jewellery_advance_allocations a
+            INNER JOIN jewellery_sales s ON s.id = a.sale_id
+            INNER JOIN jewellery_settlements st ON st.id = a.settlement_id
+            LEFT JOIN accounting_parties ap ON ap.id = s.party_id
+            WHERE a.company_id = :cid AND a.settlement_id IN ($ids) AND s.status <> 'cancelled'
+            ORDER BY s.sale_date ASC, a.id ASC");
+        $aStmt->execute(['cid' => $companyId]);
+        foreach ($aStmt->fetchAll(PDO::FETCH_ASSOC) as $alloc) {
+            $allocated[(int) $alloc['settlement_id']] = ($allocated[(int) $alloc['settlement_id']] ?? 0.0) + (float) $alloc['amount'];
+            $adjustments[] = $alloc;
+        }
+    }
+
+    $totals = ['received' => 0.0, 'refunded' => 0.0, 'allocated' => 0.0, 'remaining' => 0.0];
+    foreach ($rows as $index => $row) {
+        $isReceipt = (string) $row['direction'] === 'received';
+        $used = jw_round_money($allocated[(int) $row['id']] ?? 0.0);
+        $rows[$index]['allocated'] = $isReceipt ? $used : 0.0;
+        $rows[$index]['remaining'] = $isReceipt ? jw_round_money((float) $row['amount'] - $used) : 0.0;
+        if ($isReceipt) {
+            $totals['received'] += (float) $row['amount'];
+            $totals['allocated'] += $used;
+        } else {
+            $totals['refunded'] += (float) $row['amount'];
+        }
+    }
+    // What the period's entries still hold, after what they funded and what
+    // was handed back. Refunds are period-scoped like everything else here.
+    $totals['remaining'] = jw_round_money($totals['received'] - $totals['allocated'] - $totals['refunded']);
+    foreach (['received', 'refunded', 'allocated'] as $key) {
+        $totals[$key] = jw_round_money($totals[$key]);
+    }
+
+    return ['rows' => $rows, 'adjustments' => $adjustments, 'totals' => $totals];
+}
+
+/**
+ * What each delivered order actually made, all the costs on one line: the
+ * bill's revenue and its cost of metal sold, and the workshop's wages and
+ * unrecovered wastage for THAT order's assignments. The making charge on the
+ * bill was meant to cover the wages — this puts the two side by side so the
+ * shop can see whether it did.
+ */
+function jw_report_order_profitability(int $companyId, string $from, string $to): array
+{
+    $sql = "SELECT o.id, o.order_no, o.order_date, o.status,
+                COALESCE(ap.name, o.customer_name, 'Walk-in') AS party_label,
+                s.sale_no, s.sale_date,
+                COALESCE((SELECT SUM(l.metal_amount + l.making_amount + l.stone_amount
+                        + l.diamond_amount + l.other_diamond_amount + l.allocated_adjust)
+                    FROM jewellery_sale_lines l WHERE l.sale_id = s.id), 0) AS revenue,
+                COALESCE((SELECT SUM(l.cogs_amount) FROM jewellery_sale_lines l WHERE l.sale_id = s.id), 0) AS cogs,
+                COALESCE((SELECT SUM(r.making_amount)
+                    FROM jewellery_order_receipts r
+                    INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id
+                    WHERE a.order_id = o.id AND r.status = 'posted'), 0) AS karigar_wages,
+                COALESCE((SELECT SUM(r.wastage_amount - r.recovery_amount)
+                    FROM jewellery_order_receipts r
+                    INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id
+                    WHERE a.order_id = o.id AND r.status = 'posted'), 0) AS wastage_borne
+            FROM jewellery_orders o
+            INNER JOIN jewellery_sales s ON s.id = o.delivered_sale_id AND s.status = 'posted'
+            LEFT JOIN accounting_parties ap ON ap.id = o.party_id
+            WHERE o.company_id = :cid AND s.sale_date BETWEEN :from AND :to
+            ORDER BY s.sale_date ASC, o.id ASC";
+    $stmt = db()->prepare($sql);
+    $stmt->execute(['cid' => $companyId, 'from' => $from, 'to' => $to]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $totals = ['revenue' => 0.0, 'cogs' => 0.0, 'karigar_wages' => 0.0, 'wastage_borne' => 0.0, 'profit' => 0.0];
+    foreach ($rows as $index => $row) {
+        // COGS carries the metal at cost; the wages and the wastage the shop
+        // bore are FURTHER real costs of getting this order made. The metal
+        // already counted once in COGS is not counted again here — wages and
+        // wastage-borne are the workshop's money legs, not its metal legs.
+        $profit = jw_round_money((float) $row['revenue'] - (float) $row['cogs']
+            - (float) $row['karigar_wages'] - (float) $row['wastage_borne']);
+        $rows[$index]['profit'] = $profit;
+        $rows[$index]['margin_pct'] = (float) $row['revenue'] > 0
+            ? round($profit / (float) $row['revenue'] * 100, 2) : null;
+        $totals['revenue'] += (float) $row['revenue'];
+        $totals['cogs'] += (float) $row['cogs'];
+        $totals['karigar_wages'] += (float) $row['karigar_wages'];
+        $totals['wastage_borne'] += (float) $row['wastage_borne'];
+        $totals['profit'] += $profit;
+    }
+    foreach ($totals as $key => $value) {
+        $totals[$key] = jw_round_money($value);
+    }
+    $totals['margin_pct'] = $totals['revenue'] > 0 ? round($totals['profit'] / $totals['revenue'] * 100, 2) : null;
+
+    return ['rows' => $rows, 'totals' => $totals];
+}

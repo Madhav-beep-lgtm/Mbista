@@ -25,7 +25,8 @@ $userId = (int) ($currentUser['id'] ?? 0);
 $canExport = user_can_do('jewellery', 'export');
 $canPost = user_can_do('jewellery', 'post');
 
-$allowedViews = ['summary', 'sales', 'purchases', 'inventory', 'vat', 'karigar', 'statement', 'bills', 'uncollected'];
+$allowedViews = ['summary', 'sales', 'purchases', 'inventory', 'vat', 'karigar', 'statement', 'bills', 'uncollected',
+    'orders', 'workshop', 'advreg', 'profit'];
 $view = jw_enum($_GET['view'] ?? null, $allowedViews, 'summary');
 
 $clampDate = static function (string $date) use ($fyStart, $fyEnd): string {
@@ -50,6 +51,12 @@ $statement = null;
 if ($view === 'statement' && $karigarId > 0) {
     $statement = jw_report_karigar_statement($companyId, $karigarId, $from, $to, ['fine_rate' => $statementRate]);
 }
+// The order-workflow reports' own filters. Status vocabulary matches the
+// order enum; 'pending' narrows the workshop register to metal still out.
+$orderStatusFilter = jw_enum($_GET['status'] ?? null,
+    ['draft', 'confirmed', 'assigned', 'partially_received', 'received', 'invoiced', 'delivered', 'closed', 'cancelled', ''], '');
+$pendingOnly = (string) ($_GET['pending'] ?? '') === '1';
+$workshopGroup = jw_enum($_GET['wgroup'] ?? null, ['none', 'karigar', 'purity'], 'none');
 
 // Revaluing writes to the ledger, so it is a POST like every other posting.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -166,6 +173,58 @@ if (isset($_GET['export']) && $canExport) {
         $meta['Closing fine'] = number_format((float) $ledger['closing_fine'], 4);
         export_dispatch($format, 'kaligad-ledger-' . $stamp, $data, 'Kaligad Ledger', $meta);
     }
+    if ($view === 'orders') {
+        $report = jw_report_order_status($companyId, $from, $to, ['status' => $orderStatusFilter]);
+        $data = [['Order', 'Date', 'Customer', 'Items', 'Metal', 'Purity', 'Expected wt', 'Fine wt', 'Unit',
+            'Quoted', 'Advance held', 'Advance applied', 'Unapplied', 'Bill', 'Billed', 'Balance due', 'Promised', 'Status']];
+        foreach ($report['rows'] as $r) {
+            $data[] = [$r['order_no'], $r['order_date'], $r['party_label'], $r['item_count'], $r['metal_name'],
+                $r['purity_code'], $r['expected_gross_weight'], $r['expected_fine_weight'], $r['unit_code'],
+                $r['total_amount'], $r['advance_held'], $r['advance_applied'], $r['advance_unapplied'],
+                $r['sale_no'], $r['billed_amount'], $r['balance_amount'], $r['delivery_date'], $r['status']];
+        }
+        export_dispatch($format, 'jewellery-order-status-' . $stamp, $data, 'Order Status', $meta);
+    }
+    if ($view === 'workshop') {
+        $report = jw_report_workshop($companyId, $from, $to,
+            ['karigar_id' => $karigarId, 'pending_only' => $pendingOnly]);
+        $data = [['Issue', 'Date', 'Kaligad', 'Order', 'Item', 'Purity', 'Issued gross', 'Issued fine',
+            'Receipt', 'Received on', 'Received gross', 'Received fine', 'Still out (fine)', 'Wastage fine', 'Wages', 'Status']];
+        foreach ($report['rows'] as $r) {
+            $data[] = [$r['issue_no'], $r['issue_date'], $r['karigar_code'] . ' — ' . $r['karigar_name'],
+                $r['order_no'], $r['item_code'], $r['purity_code'], $r['issued_gross_weight'], $r['issued_fine_weight'],
+                $r['receipt_no'], $r['receive_date'], $r['received_gross_weight'], $r['received_fine_weight'],
+                $r['pending_fine'], $r['wastage_fine_weight'], $r['making_amount'], $r['status']];
+        }
+        export_dispatch($format, 'jewellery-workshop-' . $stamp, $data,
+            $pendingOnly ? 'Gold Pending Return' : 'Gold Issued to Kaligad', $meta);
+    }
+    if ($view === 'advreg') {
+        $report = jw_report_advance_register($companyId, $from, $to);
+        $data = [['Entry', 'Date', 'Customer', 'Order', 'Direction', 'Mode', 'Amount', 'Weight', 'Purity',
+            'Funded bills', 'Still held']];
+        foreach ($report['rows'] as $r) {
+            $data[] = [$r['settlement_no'], $r['settlement_date'], $r['party_label'], $r['order_no'],
+                $r['direction'], $r['mode'], $r['amount'], $r['gross_weight'], $r['purity_code'],
+                $r['allocated'], $r['remaining']];
+        }
+        $data[] = [];
+        $data[] = ['Adjustment: entry', 'Applied to bill', 'Bill date', 'Customer', 'Amount'];
+        foreach ($report['adjustments'] as $a) {
+            $data[] = [$a['settlement_no'], $a['sale_no'], $a['sale_date'], $a['party_label'], $a['amount']];
+        }
+        export_dispatch($format, 'jewellery-advance-register-' . $stamp, $data, 'Advance Register', $meta);
+    }
+    if ($view === 'profit') {
+        $report = jw_report_order_profitability($companyId, $from, $to);
+        $data = [['Order', 'Ordered', 'Customer', 'Bill', 'Billed on', 'Revenue', 'COGS', 'Kaligad wages',
+            'Wastage borne', 'Order profit', 'Margin %']];
+        foreach ($report['rows'] as $r) {
+            $data[] = [$r['order_no'], $r['order_date'], $r['party_label'], $r['sale_no'], $r['sale_date'],
+                $r['revenue'], $r['cogs'], $r['karigar_wages'], $r['wastage_borne'], $r['profit'], $r['margin_pct']];
+        }
+        export_dispatch($format, 'jewellery-order-profit-' . $stamp, $data, 'Order Profitability', $meta);
+    }
     if ($view === 'statement' && $karigarId > 0) {
         // The statement exports as ONE table — metal, then money, then what it
         // comes to — because that is what gets put on the counter between the
@@ -214,13 +273,17 @@ jw_page_styles();
 $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
 $baseUnitCode = (string) ((jewellery_base_unit($companyId) ?? [])['code'] ?? 'unit');
 $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin/jewellery-reports.php?view=' . $v
-    . '&from=' . $from . '&to=' . $to . '&karigar=' . $karigarId . '&fine_rate=' . $statementRate . '&export=' . $format);
+    . '&from=' . $from . '&to=' . $to . '&karigar=' . $karigarId . '&fine_rate=' . $statementRate
+    . '&status=' . urlencode($orderStatusFilter) . '&pending=' . ($pendingOnly ? '1' : '')
+    . '&wgroup=' . $workshopGroup . '&export=' . $format);
 ?>
 
 <nav class="mbw-tabbar" aria-label="Jewellery report sections" style="flex-wrap:wrap">
     <a class="mbw-tab" href="<?= e(url('admin/jewellery.php')) ?>"><?= icon('dashboard') ?> Jewellery Home</a>
     <?php foreach ([
-        'summary' => 'Summary', 'sales' => 'Sales Detailed', 'purchases' => 'Purchase Detailed',
+        'summary' => 'Summary', 'orders' => 'Order Status', 'workshop' => 'Gold Out / Workshop',
+        'advreg' => 'Advance Register', 'profit' => 'Order Profitability',
+        'sales' => 'Sales Detailed', 'purchases' => 'Purchase Detailed',
         'inventory' => 'Inventory Detailed', 'vat' => 'VAT Register', 'karigar' => 'Kaligad Ledger',
         'statement' => 'Kaligad Statement',
         'bills' => 'Bill-wise', 'uncollected' => 'Uncollected Orders',
@@ -243,10 +306,38 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                 </select>
             </label>
         <?php endif; ?>
-        <?php if ($view === 'karigar' || $view === 'statement'): ?>
+        <?php if ($view === 'orders'): ?>
+            <label>Status
+                <select name="status">
+                    <option value="">— all —</option>
+                    <?php foreach (['draft' => 'Draft', 'confirmed' => 'Confirmed', 'assigned' => 'With kaligad',
+                        'partially_received' => 'Partially received', 'received' => 'Received',
+                        'invoiced' => 'Invoiced', 'delivered' => 'Delivered', 'closed' => 'Closed',
+                        'cancelled' => 'Cancelled'] as $k => $v): ?>
+                        <option value="<?= e($k) ?>" <?= $orderStatusFilter === $k ? 'selected' : '' ?>><?= e($v) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+        <?php endif; ?>
+        <?php if ($view === 'workshop'): ?>
+            <label>Show
+                <select name="pending">
+                    <option value="">Everything issued</option>
+                    <option value="1" <?= $pendingOnly ? 'selected' : '' ?>>Only metal still out</option>
+                </select>
+            </label>
+            <label>Group by
+                <select name="wgroup">
+                    <?php foreach (['none' => 'Each issue', 'karigar' => 'Kaligad-wise', 'purity' => 'Purity-wise'] as $k => $v): ?>
+                        <option value="<?= e($k) ?>" <?= $workshopGroup === $k ? 'selected' : '' ?>><?= e($v) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+        <?php endif; ?>
+        <?php if ($view === 'karigar' || $view === 'statement' || $view === 'workshop'): ?>
             <label>Kaligad
                 <select name="karigar">
-                    <option value="0">— choose —</option>
+                    <option value="0">— <?= $view === 'workshop' ? 'all' : 'choose' ?> —</option>
                     <?php foreach ($karigars as $k): ?>
                         <option value="<?= (int) $k['id'] ?>" <?= $karigarId === (int) $k['id'] ? 'selected' : '' ?>><?= e($k['code'] . ' — ' . $k['name']) ?></option>
                     <?php endforeach; ?>
@@ -260,7 +351,8 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
             </label>
         <?php endif; ?>
         <button type="submit" class="jw-report-apply"><?= icon('search') ?> Apply</button>
-        <?php if ($canExport && in_array($view, ['sales', 'purchases', 'inventory', 'vat', 'bills', 'karigar', 'statement'], true)): ?>
+        <?php if ($canExport && in_array($view, ['sales', 'purchases', 'inventory', 'vat', 'bills', 'karigar', 'statement',
+            'uncollected', 'orders', 'workshop', 'advreg', 'profit'], true)): ?>
             <?php
                 // Their own class rather than .button.soft, whose colours five
                 // stylesheets disagree about. Each says what it does in words as
@@ -778,6 +870,244 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
                 <th class="is-numeric"><?= $fmt($uncollected['totals']['advance']) ?></th>
                 <th class="is-numeric"><?= $fmt($uncollected['totals']['balance']) ?></th>
                 <th></th>
+            </tr></tfoot>
+        </table></div>
+    </section>
+
+<?php elseif ($view === 'orders'): ?>
+    <?php $report = jw_report_order_status($companyId, $from, $to, ['status' => $orderStatusFilter]); ?>
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
+        <div class="mbw-card-head"><h2>Order Status (<?= count($report['rows']) ?> orders<?=
+            $orderStatusFilter !== '' ? ', ' . e(str_replace('_', ' ', $orderStatusFilter)) . ' only' : '' ?>)</h2></div>
+        <?php if ($report['totals']['by_status'] !== []): ?>
+            <p style="margin:0 0 10px;color:var(--mbw-muted,#64748b)">
+                <?php foreach ($report['totals']['by_status'] as $bsKey => $bsCount): ?>
+                    <span class="mbw-pill tone-gray" style="margin-right:6px"><?= e(ucwords(str_replace('_', ' ', (string) $bsKey))) ?>: <?= (int) $bsCount ?></span>
+                <?php endforeach; ?>
+            </p>
+        <?php endif; ?>
+        <div style="overflow-x:auto"><table>
+            <thead><tr>
+                <th>Order</th><th>Date</th><th>Customer</th><th class="is-numeric">Items</th><th>Purity</th>
+                <th class="is-numeric">Expected wt</th><th class="is-numeric">Quoted</th>
+                <th class="is-numeric">Advance held</th><th class="is-numeric">Applied</th>
+                <th>Bill</th><th class="is-numeric">Balance due</th><th>Promised</th><th>Status</th>
+            </tr></thead>
+            <tbody>
+                <?php if ($report['rows'] === []): ?><tr><td colspan="13">No orders in this period.</td></tr><?php endif; ?>
+                <?php foreach ($report['rows'] as $r): ?>
+                    <tr>
+                        <td><a href="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $r['id'])) ?>"><?= e($r['order_no']) ?></a></td>
+                        <td><?= e(app_date((string) $r['order_date'])) ?></td>
+                        <td><?= e($r['party_label']) ?></td>
+                        <td class="is-numeric"><?= (int) $r['item_count'] ?: 1 ?></td>
+                        <td><?= e($r['purity_code']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['expected_gross_weight'], 4) ?> <small><?= e($r['unit_code']) ?></small>
+                            <br><small><?= $fmt((float) $r['expected_fine_weight'], 4) ?> fine</small></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['total_amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['advance_held']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['advance_applied']) ?><?php
+                            if ((float) $r['advance_unapplied'] > 0.005): ?><br><small class="tone-amber"><?= $fmt((float) $r['advance_unapplied']) ?> unapplied</small><?php endif; ?></td>
+                        <td><?= $r['sale_no'] !== null ? e((string) $r['sale_no']) : '—' ?></td>
+                        <td class="is-numeric"><?= $r['balance_amount'] !== null ? $fmt((float) $r['balance_amount']) : '—' ?></td>
+                        <td><?= ($r['delivery_date'] ?? null) ? e(app_date((string) $r['delivery_date'])) : '—' ?></td>
+                        <td><span class="mbw-pill tone-gray"><?= e(ucwords(str_replace('_', ' ', (string) $r['status']))) ?></span></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+            <tfoot><tr>
+                <th colspan="5">Total</th>
+                <th class="is-numeric"><?= $fmt($report['totals']['expected_fine'], 4) ?> fine</th>
+                <th class="is-numeric"><?= $fmt($report['totals']['total_amount']) ?></th>
+                <th class="is-numeric"><?= $fmt($report['totals']['advance_held']) ?></th>
+                <th class="is-numeric"><?= $fmt($report['totals']['advance_applied']) ?></th>
+                <th colspan="4"></th>
+            </tr></tfoot>
+        </table></div>
+    </section>
+
+<?php elseif ($view === 'workshop'): ?>
+    <?php $report = jw_report_workshop($companyId, $from, $to,
+        ['karigar_id' => $karigarId, 'pending_only' => $pendingOnly]); ?>
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
+        <div class="mbw-card-head"><h2><?= $pendingOnly ? 'Gold Pending Return' : 'Gold Issued to Kaligad' ?>
+            (<?= count($report['rows']) ?> issues)</h2></div>
+        <?php if ($workshopGroup !== 'none'): ?>
+            <?php $groups = $workshopGroup === 'karigar' ? $report['by_karigar'] : $report['by_purity']; ?>
+            <div style="overflow-x:auto"><table>
+                <thead><tr>
+                    <th><?= $workshopGroup === 'karigar' ? 'Kaligad' : 'Purity' ?></th>
+                    <th class="is-numeric">Issues</th><th class="is-numeric">Issued fine</th>
+                    <th class="is-numeric">Received fine</th><th class="is-numeric">Still out</th>
+                    <th class="is-numeric">Wastage fine</th><th class="is-numeric">Wages</th>
+                </tr></thead>
+                <tbody>
+                    <?php if ($groups === []): ?><tr><td colspan="7">Nothing issued in this period.</td></tr><?php endif; ?>
+                    <?php foreach ($groups as $g): ?>
+                        <tr>
+                            <td><?= e($g['label']) ?></td>
+                            <td class="is-numeric"><?= (int) $g['issues'] ?></td>
+                            <td class="is-numeric"><?= $fmt(jw_round_weight($g['issued_fine']), 4) ?></td>
+                            <td class="is-numeric"><?= $fmt(jw_round_weight($g['received_fine']), 4) ?></td>
+                            <td class="is-numeric"><strong><?= $fmt(jw_round_weight($g['pending_fine']), 4) ?></strong></td>
+                            <td class="is-numeric"><?= $fmt(jw_round_weight($g['wastage_fine']), 4) ?></td>
+                            <td class="is-numeric"><?= $fmt(jw_round_money($g['making_amount'])) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table></div>
+        <?php else: ?>
+            <div style="overflow-x:auto"><table>
+                <thead><tr>
+                    <th>Issue</th><th>Date</th><th>Kaligad</th><th>Order</th><th>Item</th><th>Purity</th>
+                    <th class="is-numeric">Issued</th><th class="is-numeric">Received back</th>
+                    <th class="is-numeric">Still out (fine)</th><th class="is-numeric">Wastage</th>
+                    <th class="is-numeric">Wages</th><th>Status</th>
+                </tr></thead>
+                <tbody>
+                    <?php if ($report['rows'] === []): ?><tr><td colspan="12">Nothing issued in this period.</td></tr><?php endif; ?>
+                    <?php foreach ($report['rows'] as $r): ?>
+                        <tr>
+                            <td><?= e($r['issue_no']) ?></td>
+                            <td><?= e(app_date((string) $r['issue_date'])) ?></td>
+                            <td><?= e($r['karigar_code']) ?> <small><?= e($r['karigar_name']) ?></small></td>
+                            <td><?= $r['order_no'] !== null ? e((string) $r['order_no']) : '—' ?></td>
+                            <td><?= e($r['item_code']) ?></td>
+                            <td><?= e($r['purity_code']) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) $r['issued_gross_weight'], 4) ?> <small><?= e($r['unit_code']) ?></small>
+                                <br><small><?= $fmt((float) $r['issued_fine_weight'], 4) ?> fine</small></td>
+                            <td class="is-numeric"><?php if ($r['receipt_no'] !== null): ?>
+                                <?= $fmt((float) $r['received_gross_weight'], 4) ?>
+                                <br><small><?= $fmt((float) $r['received_fine_weight'], 4) ?> fine</small>
+                            <?php else: ?>—<?php endif; ?></td>
+                            <td class="is-numeric"><?= (float) $r['pending_fine'] > 0 ? '<strong>' . $fmt((float) $r['pending_fine'], 4) . '</strong>' : '—' ?></td>
+                            <td class="is-numeric"><?= $r['wastage_fine_weight'] !== null ? $fmt((float) $r['wastage_fine_weight'], 4) : '—' ?></td>
+                            <td class="is-numeric"><?= $r['making_amount'] !== null ? $fmt((float) $r['making_amount']) : '—' ?></td>
+                            <td><span class="mbw-pill <?= (string) $r['status'] === 'issued' ? 'tone-amber' : 'tone-green' ?>"><?= e(ucfirst((string) $r['status'])) ?></span></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+                <tfoot><tr>
+                    <th colspan="6">Total</th>
+                    <th class="is-numeric"><?= $fmt($report['totals']['issued_fine'], 4) ?> fine</th>
+                    <th class="is-numeric"><?= $fmt($report['totals']['received_fine'], 4) ?> fine</th>
+                    <th class="is-numeric"><?= $fmt($report['totals']['pending_fine'], 4) ?></th>
+                    <th class="is-numeric"><?= $fmt($report['totals']['wastage_fine'], 4) ?></th>
+                    <th class="is-numeric"><?= $fmt($report['totals']['making_amount']) ?></th>
+                    <th></th>
+                </tr></tfoot>
+            </table></div>
+        <?php endif; ?>
+    </section>
+
+<?php elseif ($view === 'advreg'): ?>
+    <?php $report = jw_report_advance_register($companyId, $from, $to); ?>
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
+        <div class="mbw-card-head"><h2>Advance Register (<?= count($report['rows']) ?> entries)</h2></div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr>
+                <th>Entry</th><th>Date</th><th>Customer</th><th>Order</th><th>Direction</th><th>How paid</th>
+                <th class="is-numeric">Amount</th><th class="is-numeric">Weight</th>
+                <th class="is-numeric">Funded bills</th><th class="is-numeric">Still held</th>
+            </tr></thead>
+            <tbody>
+                <?php if ($report['rows'] === []): ?><tr><td colspan="10">No advances in this period.</td></tr><?php endif; ?>
+                <?php foreach ($report['rows'] as $r): ?>
+                    <?php $isRefund = (string) $r['direction'] === 'paid'; ?>
+                    <tr>
+                        <td><?= e($r['settlement_no']) ?></td>
+                        <td><?= e(app_date((string) $r['settlement_date'])) ?></td>
+                        <td><?= e($r['party_label']) ?></td>
+                        <td><?= $r['order_no'] !== null ? e((string) $r['order_no']) : '—' ?></td>
+                        <td><span class="mbw-pill <?= $isRefund ? 'tone-red' : 'tone-green' ?>"><?= $isRefund ? 'Refunded' : 'Received' ?></span></td>
+                        <td><?= e(jw_tender_mode_label((string) $r['mode'])) ?><?php if ((string) $r['mode'] === 'metal'): ?>
+                            <small><?= e((string) ($r['item_code'] ?? '')) ?> <?= e((string) ($r['purity_code'] ?? '')) ?></small><?php endif; ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['amount']) ?></td>
+                        <td class="is-numeric"><?= (float) $r['gross_weight'] > 0
+                            ? $fmt((float) $r['gross_weight'], 4) . ' <small>' . e((string) ($r['unit_code'] ?? '')) . '</small><br><small>'
+                                . $fmt((float) $r['fine_weight'], 4) . ' fine</small>'
+                            : '—' ?></td>
+                        <td class="is-numeric"><?= $isRefund ? '—' : $fmt((float) $r['allocated']) ?></td>
+                        <td class="is-numeric"><?= $isRefund ? '—' : '<strong>' . $fmt((float) $r['remaining']) . '</strong>' ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+            <tfoot><tr>
+                <th colspan="6">Received <?= $fmt($report['totals']['received']) ?> · Refunded <?= $fmt($report['totals']['refunded']) ?></th>
+                <th colspan="2"></th>
+                <th class="is-numeric"><?= $fmt($report['totals']['allocated']) ?></th>
+                <th class="is-numeric"><?= $fmt($report['totals']['remaining']) ?></th>
+            </tr></tfoot>
+        </table></div>
+    </section>
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
+        <div class="mbw-card-head"><h2>Advance Adjustment Register (<?= count($report['adjustments']) ?> applications)</h2></div>
+        <p style="margin:0 0 10px;color:var(--mbw-muted,#64748b)">
+            Each row is one decision made at billing: this bill took this much from that advance entry.
+            Nothing here is ever deleted — a reversed bill releases the money, and the entry shows it held again.
+        </p>
+        <div style="overflow-x:auto"><table>
+            <thead><tr>
+                <th>Advance entry</th><th>Applied to bill</th><th>Bill date</th><th>Customer</th>
+                <th class="is-numeric">Amount</th><th>Bill status</th>
+            </tr></thead>
+            <tbody>
+                <?php if ($report['adjustments'] === []): ?><tr><td colspan="6">No advances have been applied in this period.</td></tr><?php endif; ?>
+                <?php foreach ($report['adjustments'] as $a): ?>
+                    <tr>
+                        <td><?= e($a['settlement_no']) ?></td>
+                        <td><?= e($a['sale_no']) ?></td>
+                        <td><?= e(app_date((string) $a['sale_date'])) ?></td>
+                        <td><?= e($a['party_label']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $a['amount']) ?></td>
+                        <td><span class="mbw-pill <?= (string) $a['sale_status'] === 'posted' ? 'tone-green' : 'tone-gray' ?>"><?= e(ucfirst((string) $a['sale_status'])) ?></span></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+    </section>
+
+<?php elseif ($view === 'profit'): ?>
+    <?php $report = jw_report_order_profitability($companyId, $from, $to); ?>
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
+        <div class="mbw-card-head"><h2>Order Profitability (<?= count($report['rows']) ?> delivered orders)</h2></div>
+        <p style="margin:0 0 10px;color:var(--mbw-muted,#64748b)">
+            Revenue and cost of metal come from the bill; kaligad wages and the wastage the shop bore come
+            from the workshop receipts of the same order. The making charge was meant to cover the wages —
+            here the two sit side by side.
+        </p>
+        <div style="overflow-x:auto"><table>
+            <thead><tr>
+                <th>Order</th><th>Customer</th><th>Bill</th><th>Billed on</th>
+                <th class="is-numeric">Revenue</th><th class="is-numeric">COGS</th>
+                <th class="is-numeric">Kaligad wages</th><th class="is-numeric">Wastage borne</th>
+                <th class="is-numeric">Order profit</th><th class="is-numeric">Margin %</th>
+            </tr></thead>
+            <tbody>
+                <?php if ($report['rows'] === []): ?><tr><td colspan="10">No orders were billed in this period.</td></tr><?php endif; ?>
+                <?php foreach ($report['rows'] as $r): ?>
+                    <tr>
+                        <td><a href="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $r['id'])) ?>"><?= e($r['order_no']) ?></a></td>
+                        <td><?= e($r['party_label']) ?></td>
+                        <td><?= e($r['sale_no']) ?></td>
+                        <td><?= e(app_date((string) $r['sale_date'])) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['revenue']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['cogs']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['karigar_wages']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $r['wastage_borne']) ?></td>
+                        <td class="is-numeric"><strong><?= $fmt((float) $r['profit']) ?></strong></td>
+                        <td class="is-numeric"><?= $r['margin_pct'] !== null ? $fmt((float) $r['margin_pct']) : 'N/A' ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+            <tfoot><tr>
+                <th colspan="4">Total</th>
+                <th class="is-numeric"><?= $fmt($report['totals']['revenue']) ?></th>
+                <th class="is-numeric"><?= $fmt($report['totals']['cogs']) ?></th>
+                <th class="is-numeric"><?= $fmt($report['totals']['karigar_wages']) ?></th>
+                <th class="is-numeric"><?= $fmt($report['totals']['wastage_borne']) ?></th>
+                <th class="is-numeric"><?= $fmt($report['totals']['profit']) ?></th>
+                <th class="is-numeric"><?= $report['totals']['margin_pct'] !== null ? $fmt((float) $report['totals']['margin_pct']) : 'N/A' ?></th>
             </tr></tfoot>
         </table></div>
     </section>

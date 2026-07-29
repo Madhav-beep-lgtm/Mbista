@@ -159,13 +159,24 @@ printed bill (per-line fine under net, plus a fine-gold-equivalent total in
 grams), the orders list, the ready-to-deliver board, and the receive-back
 preview. Inventory and stock reports already carried both.
 
-### F. Order reports (§14)
+### F. Order reports (§14) — **SHIPPED**
 
-New views on `jewellery-reports.php`, functions in `app/jewellery_reports.php`,
-following `jw_report_*` exactly: Order Status, Pending Manufacturing, Gold
-Issued to Kaligad, Gold Pending Return, Advance Register, Advance Adjustment
-Register, Order Profitability. Kaligad-wise Production and Purity-wise
-Manufacturing are groupings of the same query.
+Four new views on `jewellery-reports.php`, four `jw_report_*` functions:
+
+- **Order Status** (`?view=orders`) — one row per order with actual AND fine
+  weight, quote, advance held/applied/unapplied, bill and balance; the status
+  filter makes it Pending Manufacturing, Completed Orders, Pending Delivery
+  or Customer Order History.
+- **Gold Out / Workshop** (`?view=workshop`) — every issue and what came back;
+  "only metal still out" is Gold Pending Return; grouped kaligad-wise or
+  purity-wise for the production registers.
+- **Advance Register** (`?view=advreg`) — every entry with what it funded and
+  what it still holds, plus the Adjustment Register: one row per allocation,
+  the record 094 made possible.
+- **Order Profitability** (`?view=profit`) — bill revenue and COGS beside the
+  workshop's wages and borne wastage for the same order.
+
+All four export CSV / Excel / print from the same queries the screen renders.
 
 ### G. Mapping confirmation for auto-posted documents (ground rule 8)
 

@@ -185,7 +185,8 @@ $pages = [
     'jewellery.php' => ['dashboard', 'rates', 'items', 'opening', 'stock', 'masters', 'settings'],
     'jewellery-trade.php' => ['purchases', 'sales', 'bills'],
     'jewellery-workshop.php' => ['orders', 'assignments', 'delivery', 'karigars', 'refinery'],
-    'jewellery-reports.php' => ['summary', 'sales', 'purchases', 'inventory', 'vat', 'karigar', 'statement', 'bills', 'uncollected'],
+    'jewellery-reports.php' => ['summary', 'sales', 'purchases', 'inventory', 'vat', 'karigar', 'statement', 'bills', 'uncollected',
+        'orders', 'workshop', 'advreg', 'profit'],
     // Shared components live on these two as well now.
     'accounting-inventory.php' => ['inventory'],
 ];
@@ -198,7 +199,9 @@ $extraParams = [
         'assignments' => ['receive' => (int) $assign2['assignment_id'], 'wt' => '2.9'],
         'refinery' => ['receive' => (int) $job2['job_id']]],
     'jewellery-reports.php' => ['karigar' => ['karigar' => $karigar], 'sales' => ['group' => 'category'],
-        'statement' => ['karigar' => $karigar, 'fine_rate' => 120000]],
+        'statement' => ['karigar' => $karigar, 'fine_rate' => 120000],
+        // The workshop register grouped kaligad-wise, which is its richest branch.
+        'workshop' => ['wgroup' => 'karigar'], 'orders' => ['status' => '']],
 ];
 
 $renderedHtml = [];
@@ -320,8 +323,10 @@ ok($missingLabels === [], 'Every button on the bar is labelled in words'
     . ($missingLabels === [] ? '' : ' — missing ' . implode(', ', $missingLabels)));
 
 // An icon that silently resolves to nothing would leave a button looking bare.
+// 2200 bytes: three anchors whose hrefs now carry the order-report filters
+// (status, pending, wgroup) as well as the period — the icons sit further in.
 $toolbarAt = strpos($reportHtml, 'jw-report-exports');
-$toolbar = $toolbarAt === false ? '' : substr($reportHtml, $toolbarAt, 1400);
+$toolbar = $toolbarAt === false ? '' : substr($reportHtml, $toolbarAt, 2200);
 ok(substr_count($toolbar, '<svg') >= 3, 'And each export button draws its icon ('
     . substr_count($toolbar, '<svg') . ' found)');
 
