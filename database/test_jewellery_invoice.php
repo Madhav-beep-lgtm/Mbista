@@ -302,8 +302,10 @@ $diaSale = jewellery_save_sale($cid, $fy, [
 $diaRow = jewellery_sale($cid, $diaSale);
 ok(near((float) $diaRow['vatable_amount'], 45500.00),
     'Vatable Amt gathers diamond + other diamond + stone = 45,500.00');
-ok(near((float) $diaRow['sd_taxable_amount'], jw_round_money(2.0 * 22645.062) + 1000.00),
-    'SD Taxable Amt stays metal + making — the diamonds are not in it');
+// 1.1 ct of set stones (0.75 + 0.25 + 0.1) with no typed stone weight convert
+// themselves: 0.22 g of the 2 g piece is rock, and the metal is 1.78 g.
+ok(near((float) $diaRow['sd_taxable_amount'], jw_round_money(1.78 * 22645.062) + 1000.00),
+    'SD Taxable Amt stays metal + making — and the stones\' 0.22 g is not metal');
 ok(near((float) $diaRow['vat_amount'], 5915.00), 'VAT 13% of 45,500.00 = 5,915.00');
 $diaPost = jewellery_post_sale($cid, $diaSale, $uid);
 ok($diaPost['ok'], 'A bill with diamonds posts' . ($diaPost['ok'] ? '' : ' — ' . $diaPost['error']));
@@ -318,7 +320,7 @@ $byCode2 = [];
 foreach ($register['by_tax'] as $t) { $byCode2[(string) $t['tax_code']] = $t; }
 ok(isset($byCode2['VAT']) && isset($byCode2['SD']),
     'Both taxes appear — a register that knew only about VAT could not be filed');
-ok(isset($byCode2['SD']) && near((float) $byCode2['SD']['output_amount'], 345.46 + jw_round_money((jw_round_money(2.0 * 22645.062) + 1000.00) * 0.005)),
+ok(isset($byCode2['SD']) && near((float) $byCode2['SD']['output_amount'], 345.46 + jw_round_money((jw_round_money(1.78 * 22645.062) + 1000.00) * 0.005)),
     'The SD levy is registered on its own base, separately from VAT');
 ok(isset($byCode2['VAT']) && near((float) $byCode2['VAT']['output_base'], 232.60 + 45500.00),
     'The VAT base is the stone side of both bills — 45,732.60, NOT the whole bill value');

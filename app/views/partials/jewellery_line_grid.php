@@ -238,7 +238,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                             . $fmt((float) $stock['fine_weight'], 3) . ' fine'
                                         : '';
                                 ?>
-                                <option value="<?= (int) $it['id'] ?>" title="<?= e($it['code'] . ' — ' . $it['name'] . $left) ?>" <?= (int) ($row['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name'] . $left) ?></option>
+                                <option value="<?= (int) $it['id'] ?>" data-type="<?= e((string) ($it['item_type'] ?? '')) ?>" title="<?= e($it['code'] . ' — ' . $it['name'] . $left) ?>" <?= (int) ($row['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name'] . $left) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </td>
@@ -375,6 +375,48 @@ function jw_line_grid_scripts(): void
         } else {
             resetRow(target);
         }
+    });
+
+    // Stones are weighed in CARATS at the counter, but the Less column is in
+    // the line's own unit. Typing the carats fills the Less box — visibly,
+    // and editable, exactly as the engine will derive it (1 ct = 0.2 g) — so
+    // 25 ct on a gram line shows 5.0000 coming off the metal before anything
+    // is saved. A Less figure typed BY HAND always wins; and a loose stone
+    // line (its whole gross IS carats) is left alone.
+    document.addEventListener("input", function (event) {
+        var field = event.target;
+        var name = field.name || "";
+        if (/_stone_weight\[\]$/.test(name) && !field.dataset.jwAuto) {
+            delete field.dataset.jwDerived;
+            return;
+        }
+        if (!/_(stone|diamond|other_diamond)_carat\[\]$/.test(name)) { return; }
+        var row = field.closest("tr");
+        if (!row) { return; }
+        var itemSelect = row.querySelector('select[name$="_item_id[]"]');
+        var chosenItem = itemSelect && itemSelect.options[itemSelect.selectedIndex];
+        if (!chosenItem || chosenItem.getAttribute("data-type") !== "ornament") { return; }
+        var less = row.querySelector('input[name$="_stone_weight[]"]');
+        if (!less) { return; }
+        var current = parseFloat(less.value) || 0;
+        if (current > 0 && !less.dataset.jwDerived) { return; }
+        var unitSelect = row.querySelector('select[name$="_unit_id[]"]');
+        var chosenUnit = unitSelect && unitSelect.options[unitSelect.selectedIndex];
+        var grams = chosenUnit ? parseFloat(chosenUnit.getAttribute("data-grams")) : 1;
+        if (!isFinite(grams) || grams <= 0) { grams = 1; }
+        // Every kind of set stone is rock: stones, diamonds and other
+        // diamonds sum into the one Less figure, exactly as the engine does.
+        var carats = 0;
+        ["_stone_carat", "_diamond_carat", "_other_diamond_carat"].forEach(function (suffix) {
+            var caratField = row.querySelector('input[name$="' + suffix + '[]"]');
+            var v = caratField ? parseFloat(caratField.value) : 0;
+            if (isFinite(v) && v > 0) { carats += v; }
+        });
+        less.dataset.jwDerived = "1";
+        less.dataset.jwAuto = "1";
+        less.value = carats > 0 ? (carats * 0.2 / grams).toFixed(4) : "0";
+        less.dispatchEvent(new Event("input", { bubbles: true }));
+        delete less.dataset.jwAuto;
     });
 })();
 </script>

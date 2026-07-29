@@ -428,6 +428,45 @@ ok(!jewellery_preview_posting($cidA, 'sale', $previewSale)['ok'],
     'A posted sale refuses to preview — there is nothing left to confirm');
 ok(!jewellery_preview_posting($cidA, 'unknown', 1)['ok'], 'An unknown document type is refused');
 
+echo "\n14. Stones typed in carats convert into the line's own unit\n";
+// The counter weighs stones in carats; the bill weighs the piece in grams or
+// tola. 1 ct = 0.2 g, everywhere — so a typed carat figure with no stone
+// weight beside it converts itself, and the metal is never priced over rock.
+$gm = (int) db()->query("SELECT id FROM jewellery_units WHERE company_id=$cidA AND code='GM'")->fetchColumn();
+$caratSale = jewellery_save_sale($cidA, $fyA, [
+    'sale_date' => '2026-09-02', 'party_id' => $customer, 'settle_mode' => 'credit',
+], [['item_id' => $chain, 'unit_id' => $gm, 'gross_weight' => 20, 'stone_carat' => 25,
+    'rate' => 15000, 'stone_amount' => 50000]], [], $userA);
+$caratLine = db()->query("SELECT * FROM jewellery_sale_lines WHERE sale_id = $caratSale")->fetch(PDO::FETCH_ASSOC);
+ok(near((float) $caratLine['stone_weight'], 5.0), '25 ct on a gram line knocks 5.000 g off the metal');
+ok(near((float) $caratLine['net_weight'], 15.0), 'Net metal is 20 − 5 = 15 g');
+ok(near((float) $caratLine['stone_carat'], 25.0), 'And the carats still print as carats');
+
+$caratTola = jewellery_save_sale($cidA, $fyA, [
+    'sale_date' => '2026-09-02', 'party_id' => $customer, 'settle_mode' => 'credit',
+], [['item_id' => $chain, 'gross_weight' => 2, 'stone_carat' => 25,
+    'rate' => 160000, 'stone_amount' => 50000]], [], $userA);
+$tolaLine = db()->query("SELECT * FROM jewellery_sale_lines WHERE sale_id = $caratTola")->fetch(PDO::FETCH_ASSOC);
+ok(near((float) $tolaLine['stone_weight'], 25 * 0.2 / 11.6638, 0.0002),
+    'On a tola line the same 25 ct converts through grams: 0.4287 tola');
+
+// A typed stone WEIGHT wins — the carats are then display only.
+$typedBoth = jewellery_save_sale($cidA, $fyA, [
+    'sale_date' => '2026-09-02', 'party_id' => $customer, 'settle_mode' => 'credit',
+], [['item_id' => $chain, 'unit_id' => $gm, 'gross_weight' => 20, 'stone_weight' => 6,
+    'stone_carat' => 25, 'rate' => 15000, 'stone_amount' => 50000]], [], $userA);
+$bothLine = db()->query("SELECT * FROM jewellery_sale_lines WHERE sale_id = $typedBoth")->fetch(PDO::FETCH_ASSOC);
+ok(near((float) $bothLine['stone_weight'], 6.0), 'A stone weight typed by hand is never overridden by the carats');
+
+// A LOOSE stone line is untouched: its whole gross IS carats, there is no
+// metal to knock anything off, and its carats drive its own stock.
+$looseSale = jewellery_save_sale($cidA, $fyA, [
+    'sale_date' => '2026-09-02', 'party_id' => $customer, 'settle_mode' => 'credit',
+], [['item_id' => $diamond, 'gross_weight' => 3, 'stone_carat' => 3, 'stone_amount' => 200000]], [], $userA);
+$looseLine = db()->query("SELECT * FROM jewellery_sale_lines WHERE sale_id = $looseSale")->fetch(PDO::FETCH_ASSOC);
+ok(near((float) $looseLine['stone_weight'], 0.0) && near((float) $looseLine['net_weight'], 3.0),
+    'A loose diamond keeps its carats as its weight — nothing is subtracted from itself');
+
 jwt_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

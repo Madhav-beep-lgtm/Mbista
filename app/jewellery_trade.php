@@ -713,7 +713,8 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
             continue;
         }
         $unitId = (int) ($line['unit_id'] ?? $item['unit_id']);
-        if (!jewellery_unit($companyId, $unitId)) {
+        $unit = jewellery_unit($companyId, $unitId);
+        if (!$unit) {
             $errors[] = 'Line ' . ($index + 1) . ': unknown weight unit.';
             continue;
         }
@@ -736,6 +737,21 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
         // carried, not assumed away. Leave stone weight at zero and net is
         // gross, which is exactly how every document written so far behaves.
         $stoneWeight = jw_round_weight((float) ($line['stone_weight'] ?? 0));
+        // Stones are weighed in CARATS at the counter, but the bill weighs the
+        // piece in grams or tola. A carat is 0.2 g everywhere on earth, so the
+        // typed carat figures — stones, diamonds and other diamonds alike, all
+        // of them rock set into the piece — convert themselves into the line's
+        // own unit when no stone weight was typed: 25 ct on a gram line knocks
+        // 5.000 g off the metal, and the gold rate is never charged on rock.
+        // Ornaments only: a LOOSE stone line (item_type 'stone') is weighed in
+        // carats as its gross, has no metal to knock anything off, and its
+        // carats already drive its own stock.
+        $caratsTyped = jw_round_weight((float) ($line['stone_carat'] ?? 0)
+            + (float) ($line['diamond_carat'] ?? 0) + (float) ($line['other_diamond_carat'] ?? 0));
+        if ($stoneWeight <= 0 && $caratsTyped > 0 && (string) ($item['item_type'] ?? '') === 'ornament') {
+            $unitGrams = (float) ($unit['grams'] ?? 1) ?: 1.0;
+            $stoneWeight = jw_round_weight($caratsTyped * 0.2 / $unitGrams);
+        }
         if ($stoneWeight < 0) {
             $errors[] = 'Line ' . ($index + 1) . ': stone weight cannot be negative.';
             continue;

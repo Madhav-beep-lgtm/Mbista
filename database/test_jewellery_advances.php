@@ -356,7 +356,10 @@ $vatSale = jewellery_save_sale($cid, $fy, [
     // keys, and a prefilled line now carries a stone_amount of its own.
 ], [['stone_amount' => 5000.0, 'stone_carat' => 0.5] + $prefillLater['line']], [], $uid);
 $vatSaleRow = jewellery_sale($cid, $vatSale);
-ok(near((float) $vatSaleRow['metal_amount'], 100000.0), 'Same ordered rate honoured');
+// The half-carat stone converts itself: 0.1 g = 0.0086 tola of the piece is
+// rock, so the ordered RATE is honoured on the metal that is actually metal.
+ok(near((float) $vatSaleRow['metal_amount'], 99140.0),
+    'Same ordered rate honoured — on the 0.9914 tola of it that is gold');
 // VAT rides on the STONE side, so the line carries a stone for it to bite on.
 ok(near((float) $vatSaleRow['vat_amount'], 650.0),
     'And VAT IS charged on the stone — 13% of 5,000 — because it is in force on the sale date');

@@ -589,19 +589,24 @@ $multi = jewellery_save_order($cidA, $fyA, [
 $multiRow = jewellery_order($cidA, $multi);
 $multiLines = jewellery_order_line_rows($cidA, $multi);
 ok(count($multiLines) === 2, 'Both items are on the ONE order');
-ok(near((float) $multiRow['metal_amount'], 450000.0), 'Metal is 3 tola at 150,000 = 450,000 across the two lines');
+// The second line carries 1.65 ct of set stones (1.25 diamond + 0.4 stone)
+// and no typed stone weight, so the carats convert themselves: 1.65 × 0.2 g
+// = 0.33 g = 0.0283 tola of the piece is ROCK, and the gold rate is not
+// charged on it. Metal line 2 = (1 − 0.0283) × 150,000 = 145,755.
+ok(near((float) $multiRow['metal_amount'], 445755.0),
+    'Metal is 445,755 — the set stones\' 0.0283 tola is not billed at the gold rate');
 ok(near((float) $multiRow['making_amount'], 6500.0), 'Making is 4,000 + 2,500');
 ok(near((float) $multiRow['expected_gross_weight'], 3.0), 'And the header weight is the whole order, not just its first piece');
 
 // The two taxes, on their own bases, exactly as the bill will charge them.
-ok(near((float) $multiRow['sd_taxable_amount'], 456500.0),
-    'SD taxable amt = metal + making = 456,500 — the diamond is NOT in it');
-ok(near((float) $multiRow['tax_amount'], 2282.50), 'Skills Promotion Tax at 0.5% = 2,282.50');
+ok(near((float) $multiRow['sd_taxable_amount'], 452255.0),
+    'SD taxable amt = metal + making = 452,255 — the diamond is NOT in it');
+ok(near((float) $multiRow['tax_amount'], 2261.28), 'Skills Promotion Tax at 0.5% = 2,261.28');
 ok(near((float) $multiRow['vatable_amount'], 60800.0),
     'Vatable amt = diamond + stone = 60,800 — the gold and the labour are NOT in it');
 ok(near((float) $multiRow['vat_amount'], 7904.0), 'VAT at 13% of 60,800 = 7,904.00');
-ok(near((float) $multiRow['total_amount'], 450000.0 + 6500.0 + 60800.0 + 2282.50 + 7904.0),
-    'And the total payable quoted to the customer is 527,486.50');
+ok(near((float) $multiRow['total_amount'], 445755.0 + 6500.0 + 60800.0 + 2261.28 + 7904.0),
+    'And the total payable quoted to the customer is 523,220.28');
 
 // The quote has to survive into the bill, or it was never a quote.
 $multiPrefill = jewellery_order_sale_prefill($cidA, $multi);
