@@ -1281,6 +1281,37 @@ $plainRow = db()->query("SELECT received_gross_weight, net_gold_weight FROM jewe
 ok($plainRow && near((float) $plainRow['net_gold_weight'], (float) $plainRow['received_gross_weight']),
     'A stoneless receipt has net gold = gross, same meaning as every receipt before 095');
 
+// Clearing the weight while stones are typed used to preview a NEGATIVE net
+// gold and a recovery larger than everything issued.
+ok(!jewellery_preview_receipt($cidA, $stoneAid, 0, null, null, 0.6)['ok'],
+    'Stones typed against a cleared weight are refused, not previewed as negative gold');
+
+// And the stones follow the piece onto the BILL. An order is made, comes back
+// stone-set, and the sale prefill must carry the receipt\'s stone weight —
+// or the bill prices the whole scale weight as gold and draws more fine out
+// of stock than the receipt ever put in.
+$stoneOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-08-28', 'party_id' => $customer, 'item_id' => $chain,
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'expected_gross_weight' => 2, 'making_basis' => 'flat', 'making_rate' => 5000, 'status' => 'confirmed',
+], [], $userA);
+$stoneOrderIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'order_id' => $stoneOrder, 'item_id' => $chain, 'purity_id' => $p22,
+    'unit_id' => $tola, 'issued_gross_weight' => 2, 'issue_date' => '2026-08-28',
+    'making_basis' => 'flat', 'making_rate' => 5000,
+], $userA);
+ok($stoneOrderIssue['ok'], 'Metal goes out against the stone order');
+$stoneOrderRec = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => (int) $stoneOrderIssue['assignment_id'], 'received_item_id' => $chain,
+    'received_purity_id' => $p22, 'received_gross_weight' => 2.2, 'stone_weight' => 0.5,
+    'qty_pieces' => 1, 'receive_date' => '2026-08-29',
+], $userA);
+ok($stoneOrderRec['ok'], 'It comes back stone-set: 2.2 gross, 0.5 stone');
+$stonePrefill = jewellery_order_sale_prefill($cidA, $stoneOrder);
+ok($stonePrefill['ok'] && near((float) $stonePrefill['line']['gross_weight'], 2.2)
+    && near((float) $stonePrefill['line']['stone_weight'], 0.5),
+    'The bill prefills the receipt\'s stones with its weight — rock is not billed at the gold rate');
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

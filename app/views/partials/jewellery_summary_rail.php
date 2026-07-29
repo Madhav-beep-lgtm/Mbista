@@ -31,8 +31,9 @@ function jw_summary_rail(array $ctx): void
                 <div class="jw-summary-row"><span>Gross weight</span><strong data-jw-sum="gross">0.000</strong></div>
                 <div class="jw-summary-row"><span>Net weight</span><strong data-jw-sum="net">0.000</strong></div>
                 <?php // The pure-metal content of what is on the document, shown WITH the
-                      // actual weights — a 22K figure and a 24K figure only compare in fine. ?>
-                <div class="jw-summary-row"><span>Fine equivalent</span><strong data-jw-sum="fine">0.000</strong></div>
+                      // actual weights — a 22K figure and a 24K figure only compare in
+                      // fine, and only GRAMS sum honestly across rows in mixed units. ?>
+                <div class="jw-summary-row"><span>Fine equivalent (g)</span><strong data-jw-sum="fine">0.000</strong></div>
                 <div class="jw-summary-row"><span>Charged weight</span><strong data-jw-sum="charged">0.000</strong></div>
                 <div class="jw-summary-row"><span>Metal</span><strong data-jw-sum="metal">0.00</strong></div>
                 <div class="jw-summary-row"><span>Making</span><strong data-jw-sum="making">0.00</strong></div>
@@ -140,14 +141,19 @@ function jw_summary_rail_script(): void
             totals.items += 1;
             totals.gross += gross;
             totals.net += net;
-            // The pure-metal content: net × fineness ÷ 1000, read off the
-            // purity the row actually chose — actual weight and fine
-            // equivalent shown together, which is how a jewellery figure is
-            // read.
+            // The pure-metal content, reduced to GRAMS: net × fineness ÷ 1000
+            // × the row's own unit factor. Rows can carry different units — a
+            // 10 g chain beside a 1 tola ring — and their fine weights cannot
+            // be added in their own units; grams is the one figure that sums
+            // honestly, and it is the same figure the printed bill totals.
             var puritySelect = row.querySelector('select[name="' + prefix + '_purity_id[]"]');
             var chosenPurity = puritySelect && puritySelect.options[puritySelect.selectedIndex];
             var fineness = chosenPurity ? parseFloat(chosenPurity.getAttribute('data-fineness')) : 0;
-            if (isFinite(fineness) && fineness > 0) { totals.fine += net * fineness / 1000; }
+            var unitSelect = row.querySelector('select[name="' + prefix + '_unit_id[]"]');
+            var chosenUnit = unitSelect && unitSelect.options[unitSelect.selectedIndex];
+            var unitGrams = chosenUnit ? parseFloat(chosenUnit.getAttribute('data-grams')) : 1;
+            if (!isFinite(unitGrams) || unitGrams <= 0) { unitGrams = 1; }
+            if (isFinite(fineness) && fineness > 0) { totals.fine += net * fineness / 1000 * unitGrams; }
             totals.charged += charged;
             totals.metal += charged * rate;
             totals.making += num(row, prefix + '_making_amount');

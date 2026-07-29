@@ -300,6 +300,22 @@ $r = $run(['action' => 'save_sale', 'back_view' => 'sales',
 ok($r['kind'] === 'ERROR' && str_contains($r['msg'], 'left'),
     'Over-drawing an entry is refused on the POST path too — ' . $r['msg']);
 
+// A form that never rendered the advance picker must not strip the draft's
+// advance on re-save. No adv_alloc arrays at all means "the picker was not
+// there", not "the user cleared it".
+$r = $run(['action' => 'save_sale', 'back_view' => 'sales',
+    'sale_id' => (string) $pickedSale,
+    'sale_date' => '2026-08-10', 'party_id' => (string) $postCustomer, 'settle_mode' => 'credit',
+    'l_item_id' => [(string) $itemId], 'l_qty_pieces' => ['1'],
+    'l_purity_id' => [(string) $p22], 'l_unit_id' => [(string) $tola],
+    'l_gross_weight' => ['1'], 'l_rate' => ['100000'],
+], 'jewellery-trade.php');
+ok($r['kind'] === 'SUCCESS', 'Re-saving the draft without the picker — ' . $r['msg']);
+ok($q("SELECT COUNT(*) FROM jewellery_sales WHERE id=$pickedSale AND advance_amount=10000.00") === 1,
+    'The advance survives: no picker on the form is not the user clearing it');
+ok($q("SELECT COUNT(*) FROM jewellery_advance_allocations WHERE sale_id=$pickedSale AND amount=10000.00") === 1,
+    'And its allocation row survives with it');
+
 cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

@@ -107,9 +107,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // an amount against on the picker. The engine validates each
                 // against what the entry still holds and takes their sum as
                 // the advance applied.
-                'advance_allocations' => (static function (): array {
+                //
+                // NO PICKER AT ALL is not the same as a picker cleared to
+                // zero. When the form never rendered the fieldset (no open
+                // advances listed — a state a half-run upgrade can produce),
+                // re-saving the draft must keep the allocations it already
+                // has, not silently strip the advance off the bill. Clearing
+                // an advance is done by zeroing its row ON the picker.
+                'advance_allocations' => (static function () use ($companyId): array {
+                    if (!isset($_POST['adv_alloc_id'])) {
+                        $draftId = (int) ($_POST['sale_id'] ?? 0);
+                        if ($draftId > 0) {
+                            $kept = [];
+                            foreach (jewellery_sale_advance_allocations($companyId, $draftId) as $existingRow) {
+                                $kept[] = ['settlement_id' => (int) $existingRow['settlement_id'],
+                                    'amount' => (float) $existingRow['amount']];
+                            }
+                            return $kept;
+                        }
+                        return [];
+                    }
                     $rows = [];
-                    foreach ((array) ($_POST['adv_alloc_id'] ?? []) as $index => $settlementId) {
+                    foreach ((array) $_POST['adv_alloc_id'] as $index => $settlementId) {
                         $rows[] = ['settlement_id' => (int) $settlementId,
                             'amount' => (float) ($_POST['adv_alloc_amount'][$index] ?? 0)];
                     }

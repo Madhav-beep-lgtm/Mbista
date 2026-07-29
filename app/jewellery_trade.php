@@ -1813,6 +1813,55 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
         if (table_exists('jewellery_advance_allocations')) {
             db()->prepare('DELETE FROM jewellery_advance_allocations WHERE sale_id = :sid AND company_id = :cid')
                 ->execute(['sid' => $saleId, 'cid' => $companyId]);
+            if ($advanceAllocations !== []) {
+                // The friendly per-entry check ran OUTSIDE this transaction, so
+                // two counters ticking the same entry at the same moment would
+                // both have passed it. Lock the entries themselves — the second
+                // writer waits here until the first commits — then re-check
+                // against what the entries now hold. This check is terse where
+                // the earlier one explains; by the time it fires, the polite
+                // answer has already been given to whoever was second.
+                $lockedIds = implode(',', array_map('intval', array_keys($advanceAllocations)));
+                $lockStmt = db()->query("SELECT id, amount, order_id FROM jewellery_settlements
+                    WHERE id IN ($lockedIds) AND company_id = " . (int) $companyId . " FOR UPDATE");
+                $lockedEntries = [];
+                foreach ($lockStmt->fetchAll(PDO::FETCH_ASSOC) as $lockedRow) {
+                    $lockedEntries[(int) $lockedRow['id']] = $lockedRow;
+                }
+                $othersStmt = db()->prepare("SELECT a.settlement_id, COALESCE(SUM(a.amount), 0) AS total
+                    FROM jewellery_advance_allocations a
+                    INNER JOIN jewellery_sales s2 ON s2.id = a.sale_id
+                    WHERE a.company_id = :cid AND a.settlement_id IN ($lockedIds)
+                      AND s2.status <> 'cancelled' AND a.sale_id <> :sid
+                    GROUP BY a.settlement_id");
+                $othersStmt->execute(['cid' => $companyId, 'sid' => $saleId]);
+                $othersByEntry = [];
+                foreach ($othersStmt->fetchAll(PDO::FETCH_ASSOC) as $otherRow) {
+                    $othersByEntry[(int) $otherRow['settlement_id']] = (float) $otherRow['total'];
+                }
+                $drawByOrder = [];
+                foreach ($advanceAllocations as $allocSettlementId => $allocAmount) {
+                    $lockedEntry = $lockedEntries[$allocSettlementId] ?? null;
+                    if ($lockedEntry === null) {
+                        throw new RuntimeException('An advance entry on this bill no longer exists.');
+                    }
+                    if ($allocAmount > (float) $lockedEntry['amount'] - ($othersByEntry[$allocSettlementId] ?? 0.0) + 0.005) {
+                        throw new RuntimeException('Another bill drew on the same advance while this one was being saved. '
+                            . 'Reopen the advance picker and choose again.');
+                    }
+                    $orderKey = (int) ($lockedEntry['order_id'] ?? 0);
+                    $drawByOrder[$orderKey] = jw_round_money(($drawByOrder[$orderKey] ?? 0.0) + $allocAmount);
+                }
+                // And per order: entry room alone cannot see refunds, which are
+                // recorded against the order. With the entries locked above,
+                // nobody else can move this pool until we commit.
+                foreach ($drawByOrder as $orderKey => $draw) {
+                    if ($orderKey > 0 && $draw > jewellery_order_advance_available($companyId, $orderKey, $saleId) + 0.005) {
+                        throw new RuntimeException('A refund or another bill consumed part of this advance while '
+                            . 'this bill was being saved. Reopen the advance picker and choose again.');
+                    }
+                }
+            }
             $advAllocStmt = db()->prepare('INSERT INTO jewellery_advance_allocations
                     (company_id, sale_id, settlement_id, amount, created_by)
                 VALUES (:cid, :sid, :stid, :amount, :by)');
@@ -2795,6 +2844,23 @@ function jewellery_save_settlement(int $companyId, int $fiscalYearId, array $hea
     }
     $isAdvance = !empty($header['is_advance']) && $orderId > 0 ? 1 : 0;
 
+    // A REFUND CAN ONLY HAND BACK WHAT IS STILL FREE. What a bill has drawn
+    // (posted or draft — a draft is a bill being written) is spoken for; the
+    // unpost guard already refuses to pull an entry out from under a bill,
+    // and an uncapped refund was the same money leaving by the other door:
+    // the customer keeps the advance on their bill AND takes it home in cash.
+    // Checked again at posting, which is when the money actually moves.
+    if ($isAdvance === 1 && $direction === 'paid') {
+        // A posted settlement cannot reach here (revision is refused above),
+        // and a draft never reduced the pool — so the available figure needs
+        // no adding-back for the row being revised.
+        $refundable = jewellery_order_advance_available($companyId, $orderId);
+        if ($amount > $refundable + 0.005) {
+            throw new RuntimeException('Only ' . number_format(max(0.0, $refundable), 2)
+                . ' of this order\'s advance is still free to refund — the rest is already applied to a bill.');
+        }
+    }
+
     $params = [
         'cid' => $companyId, 'fy' => $fiscalYearId ?: null,
         'date' => (string) ($header['settlement_date'] ?? date('Y-m-d')),
@@ -2882,6 +2948,17 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
     }
     if ((string) $settlement['status'] !== 'draft') {
         return ['ok' => false, 'error' => 'This settlement is already posted.'];
+    }
+    // The refund cap, checked again HERE because this is when the money
+    // actually leaves. Between saving the draft and posting it, a bill may
+    // have drawn on the same advance — the save-time check cannot know that.
+    if ((int) ($settlement['is_advance'] ?? 0) === 1 && (string) $settlement['direction'] === 'paid'
+        && (int) ($settlement['order_id'] ?? 0) > 0) {
+        $refundable = jewellery_order_advance_available($companyId, (int) $settlement['order_id']);
+        if ((float) $settlement['amount'] > $refundable + 0.005) {
+            return ['ok' => false, 'error' => 'Only ' . number_format(max(0.0, $refundable), 2)
+                . ' of this order\'s advance is still free to refund — a bill has drawn on it since this refund was written.'];
+        }
     }
 
     $ownsTransaction = !db()->inTransaction();

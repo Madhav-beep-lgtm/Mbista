@@ -1688,7 +1688,11 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
     if ($stoneWeight < 0) {
         return ['ok' => false, 'error' => 'A stone weight cannot be negative.'];
     }
-    if ($stoneWeight >= jw_round_weight($receivedGross) && $receivedGross > 0) {
+    // Unconditional: with the gross cleared to zero and stones typed in, the
+    // old gross > 0 escape let the preview compute a NEGATIVE net gold — and
+    // show a wastage recovery larger than everything issued, on a piece
+    // nobody had weighed yet.
+    if ($stoneWeight > 0 && $stoneWeight >= jw_round_weight($receivedGross)) {
         return ['ok' => false, 'error' => 'The stones cannot weigh as much as the whole piece — check the two weights.'];
     }
 
@@ -1703,6 +1707,13 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
     // silently move with the day's rate.
     $avgRate = $issuedFine > 0 ? jw_round_rate((float) $assignment['issued_amount'] / $issuedFine) : 0.0;
     $metalValue = jw_round_money($receivedFine * $avgRate);
+    // The making charge stays on the GROSS — deliberately, and unlike the
+    // fine/wastage arithmetic above. A piece-rate (per_unit_weight) pays for
+    // the piece the kaligad worked, and setting stones IS work: the scale
+    // weight of the finished piece is what the rate was quoted against. The
+    // percent_of_metal basis, by contrast, is a share OF THE METAL and rides
+    // on $metalValue, which is net-gold only. The two bases measure different
+    // things because they price different things.
     $making = jw_making_charge((string) $assignment['making_basis'], (float) $assignment['making_rate'], $receivedGross, $metalValue);
     $wastageAmount = jw_round_money($split['wastage_fine'] * $avgRate);
     $recovery = jw_round_money($split['excess_fine'] * $avgRate);
@@ -2051,6 +2062,11 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
     $received = $receipt->fetch(PDO::FETCH_ASSOC) ?: null;
 
     $gross = jw_round_weight((float) ($received['received_gross_weight'] ?? $order['expected_gross_weight']));
+    // The stones the receipt weighed apart. The bill's line must carry them,
+    // or the sale would price the whole scale weight as gold — charging the
+    // customer gold rate for rock, and drawing more fine out of stock than
+    // the receipt ever put in.
+    $stoneWeight = jw_round_weight((float) ($received['stone_weight'] ?? 0));
     $itemId = (int) ($received['received_item_id'] ?? $order['item_id']);
     $purityId = (int) ($received['received_purity_id'] ?? $order['purity_id']);
 
@@ -2095,7 +2111,10 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
             'unit_id' => (int) $orderLine['unit_id'],
             'qty_pieces' => (float) $orderLine['qty_pieces'] ?: 1,
             'gross_weight' => $lineGross,
-            'stone_weight' => (float) $orderLine['stone_weight'],
+            // What actually came back governs the first line's stones, exactly
+            // as it governs its weight; the order's own estimate stands only
+            // until there is a receipt to go on.
+            'stone_weight' => $isFirst && $received !== null ? $stoneWeight : (float) $orderLine['stone_weight'],
             'wastage_pct' => (float) $orderLine['wastage_pct'],
             'wastage_weight' => $isFirst ? 0.0 : (float) $orderLine['wastage_weight'],
             'rate' => $lineRate,
@@ -2118,6 +2137,7 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
             'unit_id' => (int) $order['unit_id'],
             'qty_pieces' => 1,
             'gross_weight' => $gross,
+            'stone_weight' => $stoneWeight,
             'rate' => $rate,
             'making_amount' => $making,
         ];

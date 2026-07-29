@@ -612,6 +612,37 @@ ok($rs6['ok'], 'The cross-order bill posts' . ($rs6['ok'] ? '' : ' — ' . $rs6[
 $vs6 = voucher_ledgers((int) $rs6['voucher_id']);
 ok(near($vs6[$advLedger] ?? 0, 35000.0), 'Applying it debits the advance liability 35,000');
 
+echo "\n12. The books cannot be talked out of an advance twice\n";
+// The backfill is guarded PER SALE, not by the table existing — so rows that
+// go missing (a crash mid-backfill, 094.sql applied by hand before the
+// repair) are reconstructed on the next repair, and rows that exist are
+// never dealt out again.
+db()->prepare('DELETE FROM jewellery_advance_allocations WHERE sale_id = :sid')->execute(['sid' => $sale]);
+accounting_module_repair_database();
+$rebuilt = jewellery_sale_advance_allocations($cid, $sale);
+ok(count($rebuilt) === 2 && near((float) $rebuilt[0]['amount'], 100000.0) && near((float) $rebuilt[1]['amount'], 180000.0),
+    'A sale stripped of its rows gets them back from the repair, same FIFO, same amounts');
+accounting_module_repair_database();
+ok(count(jewellery_sale_advance_allocations($cid, $sale)) === 2
+    && count(jewellery_sale_advance_allocations($cid, $sale6)) === 2,
+    'Running the repair again deals nothing out twice — every sale keeps exactly its rows');
+
+// The refund door. Order 5 holds 30,000, of which 15,000 already funds
+// sale 6's bill. Only the free 15,000 can be handed back.
+ok(threw(static fn () => jewellery_save_settlement($cid, $fy, [
+        'settlement_date' => '2026-10-20', 'party_id' => $customer, 'order_id' => $order5, 'is_advance' => 1,
+        'direction' => 'paid', 'mode' => 'cash', 'amount' => 20000, 'ledger_id' => $cash,
+    ], [], $uid)),
+    'Refunding 20,000 when a bill holds 15,000 of it is refused — money on a bill cannot also go home in cash');
+$refund5 = jewellery_save_settlement($cid, $fy, [
+    'settlement_date' => '2026-10-20', 'party_id' => $customer, 'order_id' => $order5, 'is_advance' => 1,
+    'direction' => 'paid', 'mode' => 'cash', 'amount' => 15000, 'ledger_id' => $cash,
+], [], $uid);
+ok(jewellery_post_settlement($cid, $refund5, $uid)['ok'], 'The free 15,000 refunds without complaint');
+$open5After = null;
+foreach (jewellery_open_advances($cid, $customer) as $o) { if ((int) $o['id'] === $adv5) { $open5After = $o; } }
+ok($open5After === null, 'Funded by the bill and refunded in cash, order 5\'s entry now offers nothing');
+
 jwadv_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

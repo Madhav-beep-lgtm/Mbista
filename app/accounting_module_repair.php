@@ -2796,7 +2796,6 @@ function accounting_module_repair_database(): array
             || !accounting_repair_table_exists('jewellery_settlements')) {
             return;
         }
-        $hadTable = accounting_repair_table_exists('jewellery_advance_allocations');
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_advance_allocations` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
             `company_id` INT UNSIGNED NOT NULL,
@@ -2814,29 +2813,58 @@ function accounting_module_repair_database(): array
             CONSTRAINT `fk_jw_advalloc_settlement` FOREIGN KEY (`settlement_id`) REFERENCES `jewellery_settlements` (`id`) ON DELETE RESTRICT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-        if ($hadTable || !accounting_repair_column_exists('jewellery_settlements', 'order_id')) {
+        if (!accounting_repair_column_exists('jewellery_settlements', 'order_id')) {
             return;
         }
-        // First arrival: every sale already stored gets its one number spread
-        // OLDEST-FIRST across the delivering order's own posted advance
-        // entries — the exact pool the old cap drew on, made explicit. FIFO
-        // because money held longest is applied first, which is what a shop
-        // does and what a customer expects of it. Deterministic, so replaying
-        // the reconstruction on another copy of the books gives the same rows.
+        // Every sale that applied an advance but has NO rows saying which
+        // entries funded it gets its one number spread OLDEST-FIRST across the
+        // delivering order's own posted advance entries — the exact pool the
+        // old cap drew on, made explicit. FIFO because money held longest is
+        // applied first, which is what a shop does and what a customer expects
+        // of it. Deterministic, so replaying the reconstruction on another
+        // copy of the books gives the same rows.
+        //
+        // GUARDED PER SALE, not by the table's existence. The table can exist
+        // with the backfill still owed — 094.sql applied by hand before the
+        // repair runs, or a crash mid-loop (CREATE TABLE is DDL and commits
+        // regardless). A table-existence guard then skipped the backfill
+        // FOREVER, and every already-applied advance read as still held: the
+        // picker offered it again and the shop credited the customer twice.
+        // The NOT EXISTS makes re-running always safe and always complete.
         $sales = db()->query("SELECT s.id, s.company_id, s.advance_amount,
                 COALESCE(NULLIF(s.order_id, 0), o.id) AS order_id
             FROM jewellery_sales s
             LEFT JOIN jewellery_orders o ON o.delivered_sale_id = s.id AND o.company_id = s.company_id
             WHERE s.advance_amount > 0.005 AND s.status <> 'cancelled'
+              AND NOT EXISTS (SELECT 1 FROM jewellery_advance_allocations a WHERE a.sale_id = s.id)
             ORDER BY s.company_id, s.id")->fetchAll(PDO::FETCH_ASSOC);
+        if ($sales === []) {
+            return;
+        }
         $entriesStmt = db()->prepare("SELECT id, amount FROM jewellery_settlements
             WHERE company_id = :cid AND order_id = :oid AND is_advance = 1
               AND direction = 'received' AND status = 'posted'
             ORDER BY settlement_date ASC, id ASC");
         $insert = db()->prepare('INSERT INTO jewellery_advance_allocations (company_id, sale_id, settlement_id, amount)
             VALUES (:cid, :sid, :stid, :amount)');
+        // What each entry has already given — seeded from rows ALREADY stored,
+        // so a partial earlier run (or live sales saved since the table
+        // appeared) cannot be handed out a second time.
         $used = [];
+        $usedStmt = db()->query('SELECT settlement_id, SUM(amount) AS total FROM jewellery_advance_allocations GROUP BY settlement_id');
+        foreach ($usedStmt->fetchAll(PDO::FETCH_ASSOC) as $usedRow) {
+            $used[(int) $usedRow['settlement_id']] = (float) $usedRow['total'];
+        }
+        $seen = [];
         foreach ($sales as $sale) {
+            $saleId = (int) $sale['id'];
+            // The delivered_sale_id join can return one sale twice when two
+            // orders point at the same bill; processing the duplicate would
+            // allocate the sale's number a second time from the next entries.
+            if (isset($seen[$saleId])) {
+                continue;
+            }
+            $seen[$saleId] = true;
             $orderId = (int) ($sale['order_id'] ?? 0);
             if ($orderId <= 0) {
                 continue; // an advance applied with no order on record — nothing to reconstruct from
@@ -2853,7 +2881,7 @@ function accounting_module_repair_database(): array
                     continue;
                 }
                 $take = min($room, $left);
-                $insert->execute(['cid' => (int) $sale['company_id'], 'sid' => (int) $sale['id'],
+                $insert->execute(['cid' => (int) $sale['company_id'], 'sid' => $saleId,
                     'stid' => $entryId, 'amount' => $take]);
                 $used[$entryId] = ($used[$entryId] ?? 0.0) + $take;
                 $left = round($left - $take, 2);

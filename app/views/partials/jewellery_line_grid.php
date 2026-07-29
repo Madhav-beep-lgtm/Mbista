@@ -253,9 +253,12 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         </select>
                     </td>
                     <td>
+                        <?php // data-grams: the unit's gram factor, so the rail can reduce
+                              // every row to grams before summing — lines in different
+                              // units cannot be added in their own units. ?>
                         <select name="<?= $prefix ?>_unit_id[]">
                             <?php foreach ($units as $u): ?>
-                                <option value="<?= (int) $u['id'] ?>" <?= (int) ($row['unit_id'] ?? (int) ($baseUnit['id'] ?? 0)) === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['code']) ?></option>
+                                <option value="<?= (int) $u['id'] ?>" data-grams="<?= e((string) (float) ($u['grams'] ?? 1)) ?>" <?= (int) ($row['unit_id'] ?? (int) ($baseUnit['id'] ?? 0)) === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['code']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </td>
