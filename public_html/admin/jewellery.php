@@ -277,6 +277,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    if ($action === 'delete_item') {
+        require_permission('jewellery', 'edit');
+        $result = jewellery_delete_item($companyId, (int) ($_POST['item_id'] ?? 0));
+        flash($result['ok'] ? 'success' : 'error', $result['ok'] ? 'Item deleted.' : $result['error']);
+        redirect('admin/jewellery.php?view=items');
+    }
+
     if ($action === 'save_item') {
         require_permission('jewellery', 'edit');
         try {
@@ -1002,7 +1009,19 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         <td><?= (int) $row['vat_applicable'] === 1 ? '<span class="mbw-pill tone-amber">' . e(str_replace('_', ' ', jw_item_vat_base($row, $settings))) . '</span>' : '<span class="mbw-pill tone-gray">Exempt</span>' ?></td>
                         <td class="is-numeric"><?= $fmt($rowBalance['fine_weight'], 4) ?></td>
                         <td><span class="mbw-pill <?= (string) $row['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= (string) $row['status'] === 'active' ? 'Active' : 'Off' ?></span></td>
-                        <?php if ($canEdit): ?><td><a class="mbw-view-all" href="<?= e(url('admin/jewellery.php?view=items&edit=' . (int) $row['id'])) ?>">Edit</a></td><?php endif; ?>
+                        <?php if ($canEdit): ?><td style="white-space:nowrap">
+                            <a class="mbw-view-all" href="<?= e(url('admin/jewellery.php?view=items&edit=' . (int) $row['id'])) ?>">Edit</a>
+                            <?php // Deletable only while untouched: one stock movement or
+                                  // document line makes the item part of the record, and
+                                  // the engine answers with "mark it inactive instead". ?>
+                            <form method="post" style="display:inline;margin-left:8px" data-confirm="Delete this item? Only one with no movements and no document lines can go.">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="delete_item">
+                                <input type="hidden" name="back_view" value="items">
+                                <input type="hidden" name="item_id" value="<?= (int) $row['id'] ?>">
+                                <button type="submit" class="button soft" style="min-height:26px;padding:2px 8px">Delete</button>
+                            </form>
+                        </td><?php endif; ?>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

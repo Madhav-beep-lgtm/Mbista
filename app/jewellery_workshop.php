@@ -517,9 +517,9 @@ function jewellery_orders_list(int $companyId, array $filters = []): array
     }
     if (trim((string) ($filters['search'] ?? '')) !== '') {
         $sql .= ' AND (o.order_no LIKE :q1 OR o.customer_name LIKE :q2
-            OR o.design_no LIKE :q3 OR ap.name LIKE :q4)';
+            OR o.design_no LIKE :q3 OR ap.name LIKE :q4 OR o.expected_item LIKE :q5)';
         $needle = '%' . trim((string) $filters['search']) . '%';
-        foreach (['q1', 'q2', 'q3', 'q4'] as $key) {
+        foreach (['q1', 'q2', 'q3', 'q4', 'q5'] as $key) {
             $params[$key] = $needle;
         }
     }
@@ -690,6 +690,7 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     // for a chain and a diamond ring is routinely two craftsmen and two dates.
     $lineKarigars = [];
     $lineDates = [];
+    $lineSizes = [];
     foreach ($computed['lines'] as $index => $lineRow) {
         $lineKarigarId = (int) ($lineRow['karigar_id'] ?? 0);
         if ($lineKarigarId > 0 && !jewellery_karigar($companyId, $lineKarigarId)) {
@@ -705,6 +706,12 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
             throw new RuntimeException('Item ' . ($index + 1) . ': it cannot be promised before the order was taken.');
         }
         $lineDates[$index] = $lineDate !== '' ? $lineDate : null;
+
+        // The measurement THIS piece is made to — ring size, chain length,
+        // bangle diameter. Free text: sizes are written a dozen ways, and a
+        // typed column would refuse most of them.
+        $lineSize = trim((string) ($lineRow['size'] ?? ''));
+        $lineSizes[$index] = $lineSize !== '' ? mb_substr($lineSize, 0, 60) : null;
     }
 
     // The order's own promise is the LAST of the item dates — the day the whole
@@ -742,6 +749,11 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         'item' => $firstItemId ?: null, 'metal' => $metalId, 'purity' => $purityId, 'unit' => $unitId,
         'gross' => jw_round_weight($grossTotal), 'fine' => jw_round_weight($fineTotal),
         'design' => trim((string) ($input['design_no'] ?? '')) ?: null,
+        // The customer's own words for what they ordered — "bridal set",
+        // "ring like my mother's" — kept apart from the description so search
+        // can find it and the slip can repeat it back. $keep, so a caller
+        // that does not mention it leaves it as it was.
+        'expected' => trim((string) $keep('expected_item', '')) ?: null,
         'description' => trim((string) ($input['description'] ?? '')) ?: null,
         'basis' => jw_enum($keep('making_basis', null), ['per_unit_weight', 'percent_of_metal', 'flat'], 'per_unit_weight'),
         'rate' => max(0.0, jw_round_rate((float) $keep('making_rate', 0))),
@@ -778,6 +790,7 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
             db()->prepare('UPDATE jewellery_orders SET order_date = :date, delivery_date = :delivery, party_id = :party,
                     customer_name = :cname, customer_phone = :cphone, item_id = :item, metal_id = :metal, purity_id = :purity,
                     unit_id = :unit, expected_gross_weight = :gross, expected_fine_weight = :fine, design_no = :design,
+                    expected_item = :expected,
                     description = :description, making_basis = :basis, making_rate = :rate, advance_amount = :advance,
                     status = :status, notes = :notes, fiscal_year_id = :fy,
                     metal_amount = :metalamt, wastage_amount = :wastageamt, making_amount = :makingamt,
@@ -840,14 +853,22 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                 (string) ($settings['order_no_prefix'] ?? 'JO'),
                 jewellery_order_series($companyId, $fiscalYearId ?: null, $orderDate)
             );
+            // A manually typed number must be unique per company; refusing it
+            // HERE gives the person a sentence instead of a duplicate-key
+            // stack trace, and never burns the auto sequence.
+            $dupCheck = db()->prepare('SELECT COUNT(*) FROM jewellery_orders WHERE company_id = :cid AND order_no = :no');
+            $dupCheck->execute(['cid' => $companyId, 'no' => $no]);
+            if ((int) $dupCheck->fetchColumn() > 0) {
+                throw new RuntimeException('Order number ' . $no . ' is already taken — leave the field blank to number it automatically.');
+            }
             db()->prepare('INSERT INTO jewellery_orders (company_id, fiscal_year_id, order_no, order_date, delivery_date, party_id,
                     customer_name, customer_phone, item_id, metal_id, purity_id, unit_id, expected_gross_weight, expected_fine_weight,
-                    design_no, description, making_basis, making_rate, advance_amount, status, notes,
+                    design_no, expected_item, description, making_basis, making_rate, advance_amount, status, notes,
                     metal_amount, wastage_amount, making_amount, stone_amount, diamond_amount, other_charges, discount,
                     taxable_amount, non_taxable_amount, sd_taxable_amount, vatable_amount, vat_amount, tax_amount,
                     manual_tax_amount, total_amount, created_by)
                 VALUES (:cid, :fy, :no, :date, :delivery, :party, :cname, :cphone, :item, :metal, :purity, :unit, :gross, :fine,
-                    :design, :description, :basis, :rate, :advance, :status, :notes,
+                    :design, :expected, :description, :basis, :rate, :advance, :status, :notes,
                     :metalamt, :wastageamt, :makingamt, :stoneamt, :diamondamt, :other, :discount,
                     :taxable, :nontax, :sdtaxable, :vatable, :vat, :tax, :mtax, :total, :by)')
                 ->execute($params + ['no' => $no, 'by' => $userId ?: null]);
@@ -855,12 +876,12 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         }
 
         $lineStmt = db()->prepare('INSERT INTO jewellery_order_lines (order_id, company_id, item_id, karigar_id,
-                delivery_date, assignment_id, purity_id, unit_id,
+                delivery_date, size, assignment_id, purity_id, unit_id,
                 qty_pieces, gross_weight, stone_weight, net_weight, fine_weight, rate, metal_amount,
                 wastage_pct, wastage_weight, total_weight, wastage_amount, making_amount, stone_amount,
                 stone_carat, diamond_amount, diamond_carat, other_diamond_amount, other_diamond_carat,
                 vat_base, vat_rate, vat_amount, tax_amount, allocated_adjust, line_total, notes)
-            VALUES (:oid, :cid, :item, :karigar, :ldelivery, :assignment, :purity, :unit,
+            VALUES (:oid, :cid, :item, :karigar, :ldelivery, :lsize, :assignment, :purity, :unit,
                 :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
                 :wpct, :wweight, :tweight, :wamount, :making, :stone,
                 :scarat, :diamond, :dcarat, :odiamond, :odcarat, :vbase, :vrate, :vamount, :tamount, :adjust, :ltotal, :notes)');
@@ -869,6 +890,7 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
             $lineStmt->execute([
                 'karigar' => $lineKarigars[$lineIndex] ?? null,
                 'ldelivery' => $lineDates[$lineIndex] ?? null,
+                'lsize' => $lineSizes[$lineIndex] ?? null,
                 'assignment' => $priorAssignments[$lineIndex] ?? null,
                 'oid' => $orderId, 'cid' => $companyId, 'item' => $row['item_id'], 'purity' => $row['purity_id'],
                 'unit' => $row['unit_id'], 'pieces' => $row['qty_pieces'], 'gross' => $row['gross_weight'],
@@ -1582,6 +1604,93 @@ function jewellery_sync_order_status(int $companyId, int $orderId): string
     }
 
     return $next;
+}
+
+/**
+ * Delete a CANCELLED assignment row from the register.
+ *
+ * Only a cancelled issue may go — and cancellation has ALREADY unwound it:
+ * jewellery_cancel_assignment deletes the issue voucher and its stock
+ * movements (mutation-guarded), so a cancelled row is the last trace and
+ * deleting it leaves nothing dangling. An issued assignment must be
+ * cancelled first (the metal is with the kaligad); a received one is history
+ * a receipt hangs off, and history is not deletable.
+ */
+function jewellery_delete_assignment(int $companyId, int $assignmentId): array
+{
+    $assignment = jewellery_assignment($companyId, $assignmentId);
+    if (!$assignment) {
+        return ['ok' => false, 'error' => 'Assignment not found for this company.'];
+    }
+    if ((string) $assignment['status'] !== 'cancelled') {
+        return ['ok' => false, 'error' => 'Only a cancelled issue can be deleted. '
+            . ((string) $assignment['status'] === 'issued'
+                ? 'Cancel it first — the metal is still with the kaligad.'
+                : 'This one was received; the receipt is its record.')];
+    }
+    $receipts = db()->prepare('SELECT COUNT(*) FROM jewellery_order_receipts WHERE assignment_id = :id AND company_id = :cid');
+    $receipts->execute(['id' => $assignmentId, 'cid' => $companyId]);
+    if ((int) $receipts->fetchColumn() > 0) {
+        return ['ok' => false, 'error' => 'A receipt hangs off this issue — it cannot be deleted.'];
+    }
+    // A line pointing at this assignment is released, not orphaned.
+    db()->prepare('UPDATE jewellery_order_lines SET assignment_id = NULL WHERE assignment_id = :id AND company_id = :cid')
+        ->execute(['id' => $assignmentId, 'cid' => $companyId]);
+    db()->prepare('DELETE FROM jewellery_order_assignments WHERE id = :id AND company_id = :cid')
+        ->execute(['id' => $assignmentId, 'cid' => $companyId]);
+
+    return ['ok' => true, 'error' => ''];
+}
+
+/**
+ * Delete a kaligad who never did anything — no issues, no wage bills. One
+ * with history keeps their row (mark them inactive instead): their name is
+ * on receipts, settlements and ledgers that must keep resolving.
+ */
+function jewellery_delete_karigar(int $companyId, int $karigarId): array
+{
+    $karigar = jewellery_karigar($companyId, $karigarId);
+    if (!$karigar) {
+        return ['ok' => false, 'error' => 'Kaligad not found for this company.'];
+    }
+    $issues = db()->prepare('SELECT COUNT(*) FROM jewellery_order_assignments WHERE karigar_id = :id AND company_id = :cid');
+    $issues->execute(['id' => $karigarId, 'cid' => $companyId]);
+    if ((int) $issues->fetchColumn() > 0) {
+        return ['ok' => false, 'error' => 'This kaligad has issues on record — mark them inactive instead of deleting.'];
+    }
+    if ((int) ($karigar['party_id'] ?? 0) > 0 && table_exists('jewellery_bills')) {
+        $bills = db()->prepare("SELECT COUNT(*) FROM jewellery_bills WHERE party_id = :pid AND company_id = :cid AND bill_type = 'karigar'");
+        $bills->execute(['pid' => (int) $karigar['party_id'], 'cid' => $companyId]);
+        if ((int) $bills->fetchColumn() > 0) {
+            return ['ok' => false, 'error' => 'Wage bills exist for this kaligad — mark them inactive instead of deleting.'];
+        }
+    }
+    db()->prepare('DELETE FROM jewellery_karigars WHERE id = :id AND company_id = :cid')
+        ->execute(['id' => $karigarId, 'cid' => $companyId]);
+
+    return ['ok' => true, 'error' => ''];
+}
+
+/**
+ * Delete a CANCELLED refinery job's register row — same rule as the
+ * assignment: cancellation already unwound the issue voucher and stock
+ * movements, so the row is the last trace and deleting it dangles nothing.
+ */
+function jewellery_delete_refinery_job(int $companyId, int $jobId): array
+{
+    $job = jewellery_refinery_job($companyId, $jobId);
+    if (!$job) {
+        return ['ok' => false, 'error' => 'Refinery job not found for this company.'];
+    }
+    if ((string) $job['status'] !== 'cancelled') {
+        return ['ok' => false, 'error' => 'Only a cancelled refinery job can be deleted. '
+            . ((string) $job['status'] === 'issued' ? 'Cancel it first — the metal is with the refiner.'
+                : 'This one was received; it is the record of the refining.')];
+    }
+    db()->prepare('DELETE FROM jewellery_refinery_jobs WHERE id = :id AND company_id = :cid')
+        ->execute(['id' => $jobId, 'cid' => $companyId]);
+
+    return ['ok' => true, 'error' => ''];
 }
 
 /** Cancel an issued assignment, pulling the metal back out of the karigar. */

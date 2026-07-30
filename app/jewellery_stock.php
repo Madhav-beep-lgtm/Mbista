@@ -408,6 +408,65 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
  * removed, unless the item already has metal movements, because those were
  * measured against its purity and unit.
  */
+/**
+ * Delete an item nothing has ever touched. An item with a single stock
+ * movement or document line is part of the record and keeps its row — mark
+ * it inactive instead; every register that names it must keep resolving.
+ */
+function jewellery_delete_item(int $companyId, int $itemId): array
+{
+    $item = jewellery_item($companyId, $itemId);
+    if (!$item) {
+        return ['ok' => false, 'error' => 'Item not found for this company.'];
+    }
+    $referees = [
+        ['jewellery_stock_txns', 'item_id', 'stock movements'],
+        ['jewellery_sale_lines', 'item_id', 'sale lines'],
+        ['jewellery_purchase_lines', 'item_id', 'purchase lines'],
+        ['jewellery_order_lines', 'item_id', 'order items'],
+        ['jewellery_order_assignments', 'item_id', 'kaligad issues'],
+        ['jewellery_refinery_jobs', 'item_id', 'refinery jobs'],
+        ['jewellery_settlements', 'item_id', 'settlements'],
+    ];
+    foreach ($referees as [$table, $column, $label]) {
+        if (!table_exists($table)) {
+            continue;
+        }
+        $check = db()->prepare("SELECT COUNT(*) FROM `$table` WHERE `$column` = :id AND company_id = :cid");
+        $check->execute(['id' => $itemId, 'cid' => $companyId]);
+        if ((int) $check->fetchColumn() > 0) {
+            return ['ok' => false, 'error' => 'This item is on ' . $label
+                . ' — it is part of the record. Mark it inactive instead.'];
+        }
+    }
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        db()->prepare('DELETE FROM jewellery_item_taxes WHERE item_id = :id AND company_id = :cid')
+            ->execute(['id' => $itemId, 'cid' => $companyId]);
+        db()->prepare('DELETE FROM inventory_ledger_mappings WHERE item_id = :id AND company_id = :cid')
+            ->execute(['id' => $itemId, 'cid' => $companyId]);
+        db()->prepare('DELETE FROM jewellery_item_profiles WHERE inventory_item_id = :id AND company_id = :cid')
+            ->execute(['id' => $itemId, 'cid' => $companyId]);
+        db()->prepare('DELETE FROM inventory_items WHERE id = :id AND company_id = :cid')
+            ->execute(['id' => $itemId, 'cid' => $companyId]);
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $deleteException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        // A foreign key nobody listed above is still a record — same answer.
+        return ['ok' => false, 'error' => 'Something still refers to this item — mark it inactive instead.'];
+    }
+
+    return ['ok' => true, 'error' => ''];
+}
+
 function jw_save_item_profile(int $companyId, int $inventoryItemId, array $input): void
 {
     if (!table_exists('jewellery_item_profiles') || $inventoryItemId <= 0) {

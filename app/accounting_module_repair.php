@@ -2999,6 +2999,22 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('What the customer asked for, and what size (migration 098)', static function (): void {
+        // expected_item: the customer's own words for the order ("bridal
+        // set", "ring like my mother's") — searchable, printable, apart from
+        // the description everything else was squeezed into. size: per ITEM,
+        // because one order carries a ring for her and a chain for him; plain
+        // text because sizes are written a dozen ways.
+        if (accounting_repair_table_exists('jewellery_orders')) {
+            accounting_repair_add_column('jewellery_orders', 'expected_item',
+                '`expected_item` VARCHAR(190) DEFAULT NULL AFTER `design_no`');
+        }
+        if (accounting_repair_table_exists('jewellery_order_lines')) {
+            accounting_repair_add_column('jewellery_order_lines', 'size',
+                '`size` VARCHAR(60) DEFAULT NULL AFTER `delivery_date`');
+        }
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

@@ -175,17 +175,24 @@ if ($docType === 'order') {
     if ((string) ($doc['design_no'] ?? '') !== '') {
         $meta['Design no'] = (string) $doc['design_no'];
     }
+    // The customer's own words for the order — the slip repeats them back.
+    if ((string) ($doc['expected_item'] ?? '') !== '') {
+        $meta['Expected item'] = (string) $doc['expected_item'];
+    }
 
     // The order is multi-item now, and the paper has to say what the screen
     // says: every piece with its own weights, stones, kaligad and money —
     // the customer's copy of what was agreed, item by item.
     $orderLines = jewellery_order_line_rows($companyId, $docId);
     if ($orderLines !== []) {
-        $rows[] = ['Item', 'Purity', 'Unit', 'Pieces', 'Gross wt', 'Stone wt', 'Net wt', 'Fine wt',
-            'Rate', 'Metal', 'Making', 'Stone / diamond', 'VAT', 'Line total', 'Kaligad', 'Promised'];
+        $rows[] = ['Item', 'Size', 'Purity', 'Unit', 'Pieces', 'Gross wt', 'Stone wt', 'Net wt', 'Fine wt',
+            'Rate', 'Metal', 'Making', 'Stone / diamond', 'VAT', 'Line total', 'Kaligad', 'Promised', 'Item note'];
         foreach ($orderLines as $line) {
             $rows[] = [
                 (string) ($line['item_code'] ?? '') . ' — ' . (string) ($line['item_name'] ?? ''),
+                // The size THIS piece is made to, and the customer's note for
+                // it — the two things the kaligad needs from the slip.
+                (string) ($line['size'] ?? ''),
                 (string) ($line['purity_code'] ?? ''), (string) ($line['unit_code'] ?? ''),
                 $line['qty_pieces'], $weight($line['gross_weight']), $weight($line['stone_weight'] ?? 0),
                 $weight($line['net_weight'] ?? $line['gross_weight']), $weight($line['fine_weight']),
@@ -195,6 +202,7 @@ if ($docType === 'order') {
                 $money($line['vat_amount'] ?? 0), $money($line['line_total']),
                 (string) ($line['karigar_code'] ?? ''),
                 ($line['delivery_date'] ?? null) ? app_date((string) $line['delivery_date']) : '',
+                (string) ($line['notes'] ?? ''),
             ];
         }
         // The quote, as its own labelled rows in the last two columns the way
@@ -209,14 +217,18 @@ if ($docType === 'order') {
             ['VAT', $doc['vat_amount'] ?? 0],
             ['QUOTED TOTAL', $doc['total_amount'] ?? 0],
         ];
+        // Labelled rows land in the LAST TWO of the table's 18 columns; one
+        // helper owns the padding, so a future column is one number here
+        // rather than a hunt through every totals row.
+        $padded = static fn (string $label, string $value): array =>
+            array_merge(array_fill(0, 16, ''), [$label, $value]);
         foreach ($quoteRows as [$label, $value]) {
             if (abs((float) $value) < 0.005 && $label !== 'QUOTED TOTAL') {
                 continue;
             }
-            $rows[] = ['', '', '', '', '', '', '', '', '', '', '', '', '', '', $label, $money($value)];
+            $rows[] = $padded($label, $money($value));
         }
-        $advanceCols = static fn (string $label, float $value): array =>
-            ['', '', '', '', '', '', '', '', '', '', '', '', '', '', $label, number_format($value, 2)];
+        $advanceCols = static fn (string $label, float $value): array => $padded($label, number_format($value, 2));
     } else {
         // An order taken before orders had line items — print what the header
         // knows, the way this page always did for it.

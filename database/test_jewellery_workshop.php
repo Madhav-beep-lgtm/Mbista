@@ -1317,6 +1317,83 @@ ok($stonePrefill['ok'] && near((float) $stonePrefill['line']['gross_weight'], 2.
     && near((float) $stonePrefill['line']['stone_weight'], 0.5),
     'The bill prefills the receipt\'s stones with its weight — rock is not billed at the gold rate');
 
+echo "\n24. What the customer asked for, sized per piece, numbered by hand\n";
+// expected_item is the customer's own words; size is per ITEM; the order
+// number can be the shop's own — and none of it may collide or vanish.
+$specOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-08-30', 'party_id' => $customer, 'order_no' => 'HAND-0042',
+    'expected_item' => 'Bridal set with matching bangles',
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'size' => 'ring 7', 'notes' => 'engrave "S+R"'],
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'rate' => 150000, 'size' => '22 inch', 'notes' => 'matte finish'],
+], $userA);
+$specRow = jewellery_order($cidA, $specOrder);
+ok((string) $specRow['order_no'] === 'HAND-0042', 'A hand-typed order number is honoured');
+ok((string) $specRow['expected_item'] === 'Bridal set with matching bangles',
+    'The customer\'s own words are stored apart from the description');
+$specLines = jewellery_order_line_rows($cidA, $specOrder);
+ok(count($specLines) === 2 && (string) $specLines[0]['size'] === 'ring 7' && (string) $specLines[1]['size'] === '22 inch',
+    'Each piece keeps ITS OWN size — a ring for her, a chain for him');
+ok((string) $specLines[0]['notes'] === 'engrave "S+R"' && (string) $specLines[1]['notes'] === 'matte finish',
+    'And its own note — the engraving goes on the right piece');
+
+ok(threw(static fn () => jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-08-30', 'party_id' => $customer, 'order_no' => 'HAND-0042',
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'status' => 'confirmed',
+], [], $userA)), 'A duplicate hand-typed number is refused with a sentence, not a stack trace');
+
+ok(in_array('HAND-0042', array_column(jewellery_orders_list($cidA, ['search' => 'Bridal set']), 'order_no'), true),
+    'Search finds the order by what the customer asked for');
+
+// Revising the order WITHOUT mentioning expected_item keeps it — the $keep
+// rule every header field obeys.
+jewellery_save_order($cidA, $fyA, ['id' => $specOrder, 'order_date' => '2026-08-30',
+    'party_id' => $customer, 'status' => 'confirmed'], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 1, 'rate' => 150000, 'size' => 'ring 7.5'],
+], $userA);
+$specAfter = jewellery_order($cidA, $specOrder);
+ok((string) $specAfter['expected_item'] === 'Bridal set with matching bangles',
+    'A revision that does not mention the expected item leaves it standing');
+ok((string) jewellery_order_line_rows($cidA, $specOrder)[0]['size'] === 'ring 7.5',
+    'And the revised line carries its corrected size');
+
+echo "\n25. Deleting only what was never part of the record\n";
+// A fresh kaligad with no history may go; one with an issue on record stays.
+$freshK = jewellery_save_karigar($cidA, ['code' => 'K-DEL', 'name' => 'Never Used'], $userA);
+$rDel = jewellery_delete_karigar($cidA, $freshK);
+ok($rDel['ok'], 'A kaligad who never did anything deletes cleanly');
+$rDel = jewellery_delete_karigar($cidA, $kContractor);
+ok(!$rDel['ok'] && str_contains($rDel['error'], 'inactive'),
+    'One with issues on record is refused and pointed at inactive instead');
+
+// An issued assignment cannot be deleted; a cancelled one can — and its
+// paired metal movements stay on the books.
+$delIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 1, 'issue_date' => '2026-08-30', 'making_basis' => 'flat', 'making_rate' => 1000,
+], $userA);
+$delAid = (int) $delIssue['assignment_id'];
+$rDel = jewellery_delete_assignment($cidA, $delAid);
+ok(!$rDel['ok'] && str_contains($rDel['error'], 'Cancel it first'),
+    'An issued assignment refuses deletion — the metal is with the kaligad');
+jewellery_cancel_assignment($cidA, $delAid, $userA);
+// Cancellation already unwound the issue: its voucher and stock movements
+// are gone (mutation-guarded), so the register row is the LAST trace and
+// deleting it leaves nothing dangling.
+$residue = (int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns
+    WHERE company_id=$cidA AND source_type LIKE 'jewellery_karigar%' AND source_id=$delAid")->fetchColumn();
+ok($residue === 0, 'Cancellation already unwound the metal movements');
+$rDel = jewellery_delete_assignment($cidA, $delAid);
+ok($rDel['ok'], 'Cancelled, it deletes from the register');
+ok((int) db()->query("SELECT COUNT(*) FROM jewellery_order_assignments WHERE id=$delAid")->fetchColumn() === 0
+    && (int) db()->query("SELECT COUNT(*) FROM jewellery_order_lines
+        WHERE company_id=$cidA AND assignment_id=$delAid")->fetchColumn() === 0,
+    'And nothing is left pointing at it');
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

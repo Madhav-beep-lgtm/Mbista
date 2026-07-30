@@ -316,6 +316,56 @@ ok($q("SELECT COUNT(*) FROM jewellery_sales WHERE id=$pickedSale AND advance_amo
 ok($q("SELECT COUNT(*) FROM jewellery_advance_allocations WHERE sale_id=$pickedSale AND amount=10000.00") === 1,
     'And its allocation row survives with it');
 
+// --- Workshop: the advance is taken WHILE the order is written ---------------
+// The new-order form carries the tender grid; saving the order records and
+// posts the advance in the same submission — the customer is standing at the
+// counter with the money, not coming back for edit mode.
+$r = $run(['action' => 'save_order', 'back_view' => 'orders',
+    'order_date' => '2026-08-12', 'party_id' => (string) $postCustomer, 'status' => 'confirmed',
+    'expected_item' => 'Custom pendant', 'metal_id' => (string) $gold,
+    'purity_id' => (string) $p22, 'unit_id' => (string) $tola,
+    'l_item_id' => [(string) $itemId], 'l_qty_pieces' => ['1'],
+    'l_purity_id' => [(string) $p22], 'l_unit_id' => [(string) $tola],
+    'l_gross_weight' => ['1'], 'l_rate' => ['100000'],
+    'l_size' => ['ring 6'], 'l_notes' => ['polish bright'],
+    'advance_date' => '2026-08-12',
+    'tender_mode' => ['cash'], 'tender_label' => [''], 'tender_reference' => [''],
+    'tender_ledger_id' => [(string) $ldgCash], 'tender_item_id' => ['0'],
+    'tender_purity_id' => [(string) $p22], 'tender_unit_id' => [(string) $tola],
+    'tender_gross_weight' => ['0'], 'tender_amount' => ['7000'],
+], 'jewellery-workshop.php');
+ok($r['kind'] === 'SUCCESS' && str_contains($r['msg'], 'Advance received'),
+    'A new order takes its advance in the same submission — ' . $r['msg']);
+$newOrderId = $q("SELECT id FROM jewellery_orders WHERE company_id=$cid AND expected_item='Custom pendant' LIMIT 1");
+ok($newOrderId > 0, 'The order carries what the customer asked for');
+ok($q("SELECT COUNT(*) FROM jewellery_settlements WHERE company_id=$cid AND order_id=$newOrderId
+        AND is_advance=1 AND direction='received' AND status='posted' AND amount=7000.00") === 1,
+    'And a POSTED 7,000 advance is held against it');
+ok($q("SELECT COUNT(*) FROM jewellery_order_lines WHERE order_id=$newOrderId AND size='ring 6'") === 1,
+    'The piece keeps its size through the real POST path');
+
+// A refused save must not silently succeed — and (in the browser) the stash
+// refills the form. The stash lives in the session; here the refusal itself
+// is what the wire can prove.
+$r = $run(['action' => 'save_order', 'back_view' => 'orders',
+    'order_date' => '2026-08-12', 'party_id' => '0', 'customer_name' => '', 'status' => 'confirmed',
+    'metal_id' => (string) $gold, 'purity_id' => (string) $p22, 'unit_id' => (string) $tola,
+], 'jewellery-workshop.php');
+ok($r['kind'] === 'ERROR', 'An order without a customer is refused — ' . $r['msg']);
+
+// --- Items: delete only what was never touched -------------------------------
+$r = $run(['action' => 'save_item', 'back_view' => 'items', 'code' => 'DEL-1', 'name' => 'Never Touched',
+    'item_type' => 'ornament', 'metal_id' => (string) $gold, 'purity_id' => (string) $p22,
+    'unit_id' => (string) $tola, 'active' => '1']);
+ok($r['kind'] === 'SUCCESS', 'A throwaway item saves — ' . $r['msg']);
+$delItemId = $q("SELECT id FROM inventory_items WHERE company_id=$cid AND sku='DEL-1'");
+$r = $run(['action' => 'delete_item', 'back_view' => 'items', 'item_id' => (string) $delItemId]);
+ok($r['kind'] === 'SUCCESS' && $q("SELECT COUNT(*) FROM inventory_items WHERE id=$delItemId") === 0,
+    'Untouched, it deletes cleanly — ' . $r['msg']);
+$r = $run(['action' => 'delete_item', 'back_view' => 'items', 'item_id' => (string) $itemId]);
+ok($r['kind'] === 'ERROR' && str_contains($r['msg'], 'inactive'),
+    'An item with movements is refused and pointed at inactive — ' . $r['msg']);
+
 cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

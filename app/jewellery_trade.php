@@ -592,6 +592,9 @@ function jw_posted_lines(array $post, string $prefix): array
             // kaligads specialise, so one order routinely goes to several.
             'karigar_id' => (int) ($post[$prefix . '_karigar_id'][$index] ?? 0),
             'delivery_date' => (string) ($post[$prefix . '_delivery_date'][$index] ?? ''),
+            // The measurement THIS piece is made to — ring size, chain length,
+            // bangle diameter. Free text, because sizes are written a dozen ways.
+            'size' => (string) ($post[$prefix . '_size'][$index] ?? ''),
             // Which stored line this row IS, when the form is revising one.
             // Position is not identity — two rows can hold the same item — and
             // an order line that already has metal out with a kaligad has to be
@@ -906,10 +909,12 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
             'line_total' => jw_round_money($subtotal + $charge['total']),
             'notes' => (string) ($line['notes'] ?? ''),
             // Carried straight through for the ORDER, which assigns each item
-            // to its own kaligad and promises each its own date. Meaningless on
-            // a sale or a purchase, which simply ignore them.
+            // to its own kaligad, promises each its own date and makes each to
+            // its own size. Meaningless on a sale or a purchase, which simply
+            // ignore them.
             'karigar_id' => (int) ($line['karigar_id'] ?? 0),
             'delivery_date' => (string) ($line['delivery_date'] ?? ''),
+            'size' => trim((string) ($line['size'] ?? '')),
             'line_id' => (int) ($line['line_id'] ?? 0),
         ];
 

@@ -90,9 +90,12 @@ table.jw-lines .c-wt   { width: 92px; }
 table.jw-lines .c-rate { width: 118px; }
 table.jw-lines .c-crt  { width: 80px; }
 table.jw-lines .c-amt  { width: 108px; }
-/* Order grids only: which kaligad makes this piece and when it is promised. */
+/* Order grids only: which kaligad makes this piece, when it is promised, what
+   size it is made to, and the customer's note for THAT piece. */
 table.jw-lines .c-krg  { width: 104px; }
 table.jw-lines .c-date { width: 152px; }
+table.jw-lines .c-size { width: 96px; }
+table.jw-lines .c-note { width: 180px; }
 table.jw-lines .c-del  { width: 38px; text-align: center; }
 table.jw-lines td.c-del button {
     width: 24px; min-height: 24px; padding: 0; line-height: 1;
@@ -179,6 +182,8 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                 if ($withWorkshop) {
                     $cols[] = 'c-krg';
                     $cols[] = 'c-date';
+                    $cols[] = 'c-size';
+                    $cols[] = 'c-note';
                 }
                 $cols[] = 'c-del';
             ?>
@@ -200,7 +205,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         <th colspan="2">Stone</th>
                     <?php endif; ?>
                     <?php if ($withWorkshop): ?>
-                        <th colspan="2">Workshop</th>
+                        <th colspan="4">Workshop</th>
                     <?php endif; ?>
                     <th rowspan="2" class="c-del"></th>
                 </tr>
@@ -215,6 +220,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                     <?php endif; ?>
                     <?php if ($withWorkshop): ?>
                         <th class="c-krg">Kaligad</th><th class="c-date">Promised</th>
+                        <th class="c-size">Size</th><th class="c-note">Item note</th>
                     <?php endif; ?>
                 </tr>
             </thead>
@@ -309,6 +315,13 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                             <?php endif; ?>
                         </td>
                         <td><input type="date" name="<?= $prefix ?>_delivery_date[]" value="<?= e((string) ($row['delivery_date'] ?? '')) ?>"></td>
+                        <?php // Free text both: sizes are written a dozen ways (US 7,
+                              // 17 mm, 22"), and the note is the customer's wish for
+                              // THIS piece — engraving, finish, stone preference. ?>
+                        <td><input type="text" name="<?= $prefix ?>_size[]" maxlength="60" placeholder="ring 7 / 22&quot;"
+                                   value="<?= e((string) ($row['size'] ?? '')) ?>"></td>
+                        <td><input type="text" name="<?= $prefix ?>_notes[]" maxlength="255" placeholder="engraving, finish…"
+                                   value="<?= e((string) ($row['notes'] ?? '')) ?>"></td>
                     <?php endif; ?>
                     <td class="c-del">
                         <?php // Clearing the item empties the row, and an empty row is ignored on save. ?>

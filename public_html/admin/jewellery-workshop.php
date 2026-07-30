@@ -28,6 +28,22 @@ $sym = site_currency_symbol();
 $settings = jewellery_settings($companyId);
 $canEdit = user_can_do('jewellery', 'edit');
 $canPost = user_can_do('jewellery', 'post');
+$canExport = user_can_do('jewellery', 'export');
+
+// The list's own export links, carrying the CURRENT filters — the file holds
+// exactly the rows the screen shows, search and all.
+$exportLinks = static function () use (&$view): string {
+    $query = $_GET;
+    $query['view'] = $view;
+    $links = '';
+    foreach (['csv' => 'CSV', 'xlsx' => 'Excel'] as $format => $label) {
+        $query['export'] = $format;
+        $links .= '<a class="mbw-view-all" style="margin-left:10px" href="'
+            . e(url('admin/jewellery-workshop.php?' . http_build_query($query))) . '">' . $label . '</a>';
+    }
+
+    return $links;
+};
 
 $allowedViews = ['orders', 'karigars', 'assignments', 'delivery', 'refinery'];
 $view = jw_enum($_GET['view'] ?? null, $allowedViews, 'orders');
@@ -47,6 +63,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
     $back = 'admin/jewellery-workshop.php?view=' . urlencode((string) ($_POST['back_view'] ?? $view));
+
+    // Record ONE advance on an order from the tender rows the form posted —
+    // 20,000 cash, 15,000 on Fonepay and an old ring is one advance with
+    // three rows, not three advances. Shared by the take/refund forms AND
+    // the new-order form, which takes the advance while the order is being
+    // written instead of on a second visit in edit mode. Returns the flash
+    // message; throws when the engine refuses.
+    $recordOrderAdvance = static function (array $order, string $direction) use ($companyId, $fiscalYearId, $clampDate, $userId, $canPost): string {
+        if ((int) ($order['party_id'] ?? 0) <= 0) {
+            throw new RuntimeException('Give this order a customer first — an advance has to be held against somebody.');
+        }
+        $tenders = [];
+        foreach ((array) ($_POST['tender_amount'] ?? []) as $index => $tenderAmount) {
+            $tenders[] = [
+                'mode' => (string) ($_POST['tender_mode'][$index] ?? 'cash'),
+                'mode_label' => (string) ($_POST['tender_label'][$index] ?? ''),
+                'reference' => (string) ($_POST['tender_reference'][$index] ?? ''),
+                'amount' => (float) $tenderAmount,
+                'ledger_id' => (int) ($_POST['tender_ledger_id'][$index] ?? 0),
+                'item_id' => (int) ($_POST['tender_item_id'][$index] ?? 0),
+                'purity_id' => (int) ($_POST['tender_purity_id'][$index] ?? 0),
+                'unit_id' => (int) ($_POST['tender_unit_id'][$index] ?? 0),
+                'gross_weight' => (float) ($_POST['tender_gross_weight'][$index] ?? 0),
+            ];
+        }
+        // The total is the sum of what was actually handed over, so the
+        // counter can never type a figure the parts disagree with.
+        $amount = 0.0;
+        foreach ($tenders as $tenderRow) {
+            if ((float) $tenderRow['amount'] > 0) {
+                $amount += (float) $tenderRow['amount'];
+            }
+        }
+        $id = jewellery_save_settlement($companyId, $fiscalYearId, [
+            'settlement_date' => $clampDate((string) ($_POST['advance_date'] ?? '')),
+            'party_id' => (int) $order['party_id'],
+            'order_id' => (int) $order['id'],
+            'is_advance' => 1,
+            'direction' => $direction,
+            'amount' => jw_round_money($amount),
+            'tenders' => $tenders,
+            'notes' => ($direction === 'paid' ? 'Advance refunded on order ' : 'Advance on order ')
+                . (string) $order['order_no'],
+        ], [], $userId);
+        if (!$canPost) {
+            return 'Advance saved as a draft — someone with posting rights must post it.';
+        }
+        $posted = jewellery_post_settlement($companyId, $id, $userId);
+        if (!$posted['ok']) {
+            throw new RuntimeException($posted['error']);
+        }
+        $tookMetal = in_array('metal', array_column($tenders, 'mode'), true);
+
+        return $direction === 'paid'
+            ? 'Advance refunded and posted.'
+            : ($tookMetal ? 'Advance received and posted — the old gold\'s weight is in stock and its value is held for the customer.'
+                : 'Advance received and posted.');
+    };
 
     if ($action === 'save_karigar') {
         require_permission('jewellery', 'edit');
@@ -74,9 +148,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'save_order') {
         require_permission('jewellery', 'edit');
+        $isCreate = (int) ($_POST['order_id'] ?? 0) === 0;
         try {
-            jewellery_save_order($companyId, $fiscalYearId, [
+            $savedOrderId = jewellery_save_order($companyId, $fiscalYearId, [
                 'id' => (int) ($_POST['order_id'] ?? 0),
+                // Blank means "number it for me"; typed means the shop's own
+                // reference, refused with a sentence if it is already taken.
+                'order_no' => $isCreate ? (string) ($_POST['order_no'] ?? '') : '',
                 'order_date' => $clampDate((string) ($_POST['order_date'] ?? '')),
                 'delivery_date' => (string) ($_POST['delivery_date'] ?? ''),
                 'party_id' => (int) ($_POST['party_id'] ?? 0),
@@ -88,6 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'unit_id' => (int) ($_POST['unit_id'] ?? 0),
                 'expected_gross_weight' => (float) ($_POST['expected_gross_weight'] ?? 0),
                 'design_no' => (string) ($_POST['design_no'] ?? ''),
+                'expected_item' => (string) ($_POST['expected_item'] ?? ''),
                 'description' => (string) ($_POST['description'] ?? ''),
                 // making_basis / making_rate are deliberately NOT sent. What the
                 // customer is charged for labour is the making amount on each
@@ -103,8 +182,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // The items the customer is ordering, punched on the same grid
                 // the sale uses, so the quote and the bill cannot disagree.
             ], jw_posted_lines($_POST, 'l'), $userId);
+
+            // The advance the customer is putting down RIGHT NOW, tendered on
+            // the new-order form itself. Only on create — the edit page has
+            // its own take/refund forms — and only when something was typed.
+            $tenderTotal = 0.0;
+            foreach ((array) ($_POST['tender_amount'] ?? []) as $tenderAmount) {
+                $tenderTotal += max(0.0, (float) $tenderAmount);
+            }
+            if ($isCreate && $tenderTotal > 0.005) {
+                // The ORDER IS ALREADY SAVED. An advance the engine refuses
+                // must not unsave it — the counter fixes the advance on the
+                // edit page it is sent to, not by retyping the whole order.
+                try {
+                    flash('success', 'Order saved. ' . $recordOrderAdvance(jewellery_order($companyId, $savedOrderId) ?? [], 'received'));
+                } catch (Throwable $advanceError) {
+                    flash('error', 'The order is saved, but the advance was refused: ' . $advanceError->getMessage()
+                        . ' Record it from this page.');
+                }
+                redirect($back . '&edit=' . $savedOrderId);
+            }
             flash('success', 'Order saved.');
         } catch (Throwable $e) {
+            // NOTHING TYPED IS THROWN AWAY. The refusal and every field come
+            // back to the form together — a clerk sent back to a blank form
+            // retypes an entire order, and the second try earns new mistakes.
+            $_SESSION['jw_order_form_stash'] = $_POST;
             flash('error', $e->getMessage());
         }
         redirect($back);
@@ -115,6 +218,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $removed = jewellery_delete_order($companyId, (int) ($_POST['order_id'] ?? 0));
         flash($removed ? 'success' : 'error', $removed
             ? 'Order removed.' : 'Only an order with no karigar assignment can be removed.');
+        redirect($back);
+    }
+
+    if ($action === 'delete_assignment') {
+        require_permission('jewellery', 'edit');
+        $result = jewellery_delete_assignment($companyId, (int) ($_POST['assignment_id'] ?? 0));
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? 'Cancelled issue deleted — its cancellation had already unwound the metal movements.'
+            : $result['error']);
+        redirect($back);
+    }
+
+    if ($action === 'delete_karigar') {
+        require_permission('jewellery', 'edit');
+        $result = jewellery_delete_karigar($companyId, (int) ($_POST['karigar_id'] ?? 0));
+        flash($result['ok'] ? 'success' : 'error', $result['ok'] ? 'Kaligad deleted.' : $result['error']);
+        redirect($back);
+    }
+
+    if ($action === 'delete_refinery_job') {
+        require_permission('jewellery', 'edit');
+        $result = jewellery_delete_refinery_job($companyId, (int) ($_POST['job_id'] ?? 0));
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? 'Cancelled refinery job deleted — its cancellation had already unwound the metal movements.'
+            : $result['error']);
         redirect($back);
     }
 
@@ -152,60 +280,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$order) {
                 throw new RuntimeException('Order not found for this company.');
             }
-            if ((int) ($order['party_id'] ?? 0) <= 0) {
-                throw new RuntimeException('Give this order a customer first — an advance has to be held against somebody.');
-            }
-            // One payment, possibly made several ways at once — 20,000 cash,
-            // 15,000 on Fonepay and an old ring for the rest is ONE advance.
-            // Each grid row is one way the customer paid; blank rows are
-            // dropped, and the engine holds every row to the same rules the
-            // single-mode form was held to.
-            $tenders = [];
-            foreach ((array) ($_POST['tender_amount'] ?? []) as $index => $tenderAmount) {
-                $tenders[] = [
-                    'mode' => (string) ($_POST['tender_mode'][$index] ?? 'cash'),
-                    'mode_label' => (string) ($_POST['tender_label'][$index] ?? ''),
-                    'reference' => (string) ($_POST['tender_reference'][$index] ?? ''),
-                    'amount' => (float) $tenderAmount,
-                    'ledger_id' => (int) ($_POST['tender_ledger_id'][$index] ?? 0),
-                    'item_id' => (int) ($_POST['tender_item_id'][$index] ?? 0),
-                    'purity_id' => (int) ($_POST['tender_purity_id'][$index] ?? 0),
-                    'unit_id' => (int) ($_POST['tender_unit_id'][$index] ?? 0),
-                    'gross_weight' => (float) ($_POST['tender_gross_weight'][$index] ?? 0),
-                ];
-            }
-            // The total is the sum of what was actually handed over, so the
-            // counter can never type a figure the parts disagree with.
-            $amount = 0.0;
-            foreach ($tenders as $tenderRow) {
-                if ((float) $tenderRow['amount'] > 0) {
-                    $amount += (float) $tenderRow['amount'];
-                }
-            }
-            $id = jewellery_save_settlement($companyId, $fiscalYearId, [
-                'settlement_date' => $clampDate((string) ($_POST['advance_date'] ?? '')),
-                'party_id' => (int) $order['party_id'],
-                'order_id' => $orderId,
-                'is_advance' => 1,
-                'direction' => $action === 'refund_advance' ? 'paid' : 'received',
-                'amount' => jw_round_money($amount),
-                'tenders' => $tenders,
-                'notes' => ($action === 'refund_advance' ? 'Advance refunded on order ' : 'Advance on order ')
-                    . (string) $order['order_no'],
-            ], [], $userId);
-            if ($canPost) {
-                $posted = jewellery_post_settlement($companyId, $id, $userId);
-                if (!$posted['ok']) {
-                    throw new RuntimeException($posted['error']);
-                }
-                $tookMetal = in_array('metal', array_column($tenders, 'mode'), true);
-                flash('success', $action === 'refund_advance'
-                    ? 'Advance refunded and posted.'
-                    : ($tookMetal ? 'Advance received and posted — the old gold\'s weight is in stock and its value is held for the customer.'
-                        : 'Advance received and posted.'));
-            } else {
-                flash('success', 'Advance saved as a draft — someone with posting rights must post it.');
-            }
+            flash('success', $recordOrderAdvance($order, $action === 'refund_advance' ? 'paid' : 'received'));
         } catch (Throwable $e) {
             flash('error', $e->getMessage());
         }
@@ -393,6 +468,30 @@ $orderAdvances = $editOrder ? jewellery_order_advances($companyId, (int) $editOr
     : ['rows' => [], 'cash_total' => 0.0, 'metal_total' => 0.0, 'total' => 0.0];
 $advanceAvailable = $editOrder ? jewellery_order_advance_available($companyId, (int) $editOrder['id']) : 0.0;
 $orderLines = $editOrder ? jewellery_order_line_rows($companyId, (int) $editOrder['id']) : [];
+
+// A save the engine refused comes back WITH EVERYTHING THE CLERK TYPED. The
+// handler stashed the POST; the form is refilled from it once, then the
+// stash is burned — a refresh after that is a deliberate fresh start, not a
+// replay of the failure. Editing an existing order wins over the stash: its
+// stored rows are the truth being revised.
+$orderStash = $_SESSION['jw_order_form_stash'] ?? null;
+unset($_SESSION['jw_order_form_stash']);
+if ($view === 'orders' && $editOrder === null && is_array($orderStash)) {
+    $editOrder = null; // stays a NEW order — the stash only refills fields
+    $orderFormPrefill = $orderStash;
+    $orderLines = jw_posted_lines($orderStash, 'l');
+} else {
+    $orderFormPrefill = null;
+}
+// The form reads header values through this: the stashed value when a refused
+// save is being corrected, else the stored order being edited, else blank.
+$orderField = static function (string $key, $fallback = '') use (&$editOrder, &$orderFormPrefill) {
+    if (is_array($orderFormPrefill) && array_key_exists($key, $orderFormPrefill)) {
+        return $orderFormPrefill[$key];
+    }
+
+    return $editOrder[$key] ?? $fallback;
+};
 // What is on the shelf, shown on the item options the same way the sale form
 // shows it — an order for a piece the shop already has is filled off the tray.
 $orderOnHand = [];
@@ -431,6 +530,64 @@ if ($receiveTarget && (string) $receiveTarget['status'] === 'issued') {
 $pending = $view === 'delivery' ? jewellery_pending_delivery($companyId) : [];
 $jobs = $view === 'refinery' ? jewellery_refinery_jobs_list($companyId) : [];
 
+// ---------------------------------------------------------------------------
+// Export — the LIST the screen is showing, exactly as filtered
+// ---------------------------------------------------------------------------
+// Driven by the same arrays the tables below render, so the file on disk and
+// the rows on screen can never disagree. Spreadsheets leave the building, so
+// this takes the export right, exactly as the reports page does.
+$exportFormat = jw_enum($_GET['export'] ?? null, ['csv', 'xlsx', 'print'], '');
+if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] ?? '') !== '') {
+    require_permission('jewellery', 'export');
+    require_once __DIR__ . '/../../app/export_engine.php';
+    $stamp = date('Ymd');
+    $exportMeta = ['Company' => (string) ($company['name'] ?? ''), 'Currency' => $sym];
+    if ($view === 'orders') {
+        $data = [['Order', 'Date', 'Customer', 'Expected item', 'Metal', 'Purity', 'Expected wt', 'Fine wt', 'Unit',
+            'Quoted total', 'Advance quoted', 'Promised', 'Status']];
+        foreach ($orders as $r) {
+            $data[] = [$r['order_no'], $r['order_date'],
+                (string) ($r['party_name'] ?? $r['customer_name'] ?? 'Walk-in'),
+                (string) ($r['expected_item'] ?? ''), $r['metal_name'], $r['purity_code'],
+                $r['expected_gross_weight'], $r['expected_fine_weight'], $r['unit_code'],
+                $r['total_amount'] ?? 0, $r['advance_amount'] ?? 0, $r['delivery_date'], $r['status']];
+        }
+        export_dispatch($exportFormat, 'jewellery-orders-' . $stamp, $data, 'Orders', $exportMeta);
+    }
+    if ($view === 'assignments') {
+        $data = [['Issue', 'Date', 'Kaligad', 'Order', 'Item', 'Purity', 'Issued gross', 'Issued fine',
+            'Expected return', 'Status']];
+        foreach ($assignments as $r) {
+            $data[] = [$r['issue_no'], $r['issue_date'], (string) ($r['karigar_name'] ?? $r['karigar_code'] ?? ''),
+                (string) ($r['order_no'] ?? ''), (string) ($r['item_code'] ?? ''), (string) ($r['purity_code'] ?? ''),
+                $r['issued_gross_weight'], $r['issued_fine_weight'],
+                (string) ($r['expected_return_date'] ?? ''), $r['status']];
+        }
+        export_dispatch($exportFormat, 'jewellery-issues-' . $stamp, $data, 'Kaligad Issues', $exportMeta);
+    }
+    if ($view === 'karigars') {
+        $data = [['Code', 'Name', 'Phone', 'Engagement', 'Making basis', 'Making rate',
+            'Wastage allowed %', 'Status']];
+        foreach ($karigars as $r) {
+            $data[] = [$r['code'], $r['name'], (string) ($r['phone'] ?? ''), $r['engagement_type'],
+                (string) ($r['default_making_basis'] ?? ''), $r['default_making_rate'] ?? 0,
+                $r['wastage_allowed_pct'] ?? 0, $r['status']];
+        }
+        export_dispatch($exportFormat, 'jewellery-kaligads-' . $stamp, $data, 'Kaligads', $exportMeta);
+    }
+    if ($view === 'refinery') {
+        $data = [['Job', 'Refiner', 'Issued', 'Out (fine)', 'Back (fine)', 'Loss (fine)', 'Surplus (fine)',
+            'Charges', 'Status']];
+        foreach ($jobs as $r) {
+            $data[] = [$r['job_no'], (string) ($r['party_name'] ?? ''), $r['issue_date'],
+                $r['issued_fine_weight'], $r['received_fine_weight'] ?? 0, $r['loss_fine_weight'] ?? 0,
+                $r['surplus_fine_weight'] ?? 0, $r['charges_amount'] ?? 0, $r['status']];
+        }
+        export_dispatch($exportFormat, 'jewellery-refinery-' . $stamp, $data, 'Refinery Jobs', $exportMeta);
+    }
+    // A view without an export (delivery) simply falls through to the screen.
+}
+
 $pageTitle = 'Jewellery — Orders, Kaligad & Refinery';
 $pageSubtitle = 'Daily order management, metal issued to kaligads, wage and wastage settlement, and refinery jobs.';
 $pageHero = ['icon' => 'coins'];
@@ -460,161 +617,12 @@ jw_filter_bar_styles();
 </nav>
 
 <?php if ($view === 'orders'): ?>
-    <?php if ($canEdit): ?>
-    <section class="mbw-card" data-collapsible data-draggable>
-        <div class="mbw-card-head">
-            <h2><?= $editOrder ? 'Edit Order — ' . e((string) $editOrder['order_no']) : 'New Order' ?></h2>
-            <?php if ($editOrder): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">New order</a><?php endif; ?>
-        </div>
-        <form method="post">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="save_order">
-            <input type="hidden" name="back_view" value="orders">
-            <input type="hidden" name="order_id" value="<?= (int) ($editOrder['id'] ?? 0) ?>">
-            <div class="workspace-form-grid">
-                <label>Order date<input type="date" name="order_date" value="<?= e((string) ($editOrder['order_date'] ?? $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required>
-                </label>
-                <label>Promised delivery<input type="date" name="delivery_date" value="<?= e((string) ($editOrder['delivery_date'] ?? '')) ?>"></label>
-                <label>Existing customer
-                    <select name="party_id">
-                        <option value="0">— new customer →</option>
-                        <?php foreach ($parties as $p): ?>
-                            <option value="<?= (int) $p['id'] ?>" <?= (int) ($editOrder['party_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Customer name<input type="text" name="customer_name" maxlength="190" value="<?= e((string) ($editOrder['customer_name'] ?? '')) ?>" placeholder="Creates the customer and their ledger"></label>
-                <label>Phone<input type="text" name="customer_phone" maxlength="60" value="<?= e((string) ($editOrder['customer_phone'] ?? '')) ?>"></label>
-                <label>Address<input type="text" name="customer_address" maxlength="255"></label>
-                <label>Design no.<input type="text" name="design_no" maxlength="60" value="<?= e((string) ($editOrder['design_no'] ?? '')) ?>"></label>
-                <label>Other charges (<?= e($sym) ?>)<input type="number" name="other_charges" step="0.01" min="0" value="<?= e((string) ($editOrder['other_charges'] ?? '0')) ?>"></label>
-                <label>Discount (<?= e($sym) ?>)<input type="number" name="discount" step="0.01" min="0" value="<?= e((string) ($editOrder['discount'] ?? '0')) ?>"></label>
-                <label>Skills Promotion Tax (<?= e($sym) ?>)<input type="number" name="manual_tax_amount" step="0.01" min="0" placeholder="auto" value="<?= e((string) ($editOrder['manual_tax_amount'] ?? '')) ?>">
-                </label>
-                <label>Advance taken (<?= e($sym) ?>)<input type="number" name="advance_amount" step="0.01" min="0" value="<?= e((string) ($editOrder['advance_amount'] ?? '0')) ?>"></label>
-                <label>Status
-                    <select name="status">
-                        <?php foreach (['draft' => 'Draft', 'confirmed' => 'Confirmed', 'cancelled' => 'Cancelled'] as $k => $v): ?>
-                            <option value="<?= e($k) ?>" <?= (string) ($editOrder['status'] ?? 'confirmed') === $k ? 'selected' : '' ?>><?= e($v) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label style="grid-column:1/-1">Description<input type="text" name="description" maxlength="255" value="<?= e((string) ($editOrder['description'] ?? '')) ?>"></label>
-            </div>
-
-            <?php
-                // The SAME grid the sale uses. One customer can order a ring and
-                // a chain and a pair of bangles on one order; each is a line,
-                // and each is priced by the engine that will bill it.
-                jw_render_line_grid('l', $orderLines, max(3, count($orderLines) + 2), 'Items ordered', [
-                    'items' => $items, 'purities' => $purities, 'units' => $units,
-                    'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $orderOnHand,
-                    // Handing over a kaligad list is what turns on the two
-                    // workshop columns: who makes each piece, and when it is due.
-                    'karigars' => $karigars,
-                ]);
-            ?>
-
-
-            <?php if ($editOrder && (float) $editOrder['total_amount'] > 0): ?>
-                <?php
-                    $orderTotal = (float) $editOrder['total_amount'];
-                    $orderAdvanceHeld = (float) $orderAdvances['total'];
-                    $stillPayable = round($orderTotal - $orderAdvanceHeld, 2);
-                ?>
-                <div style="margin-top:12px;border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px">
-                    <h3 style="margin:0 0 8px;font-size:1rem">What the customer pays</h3>
-                    <div style="overflow-x:auto"><table style="max-width:520px">
-                        <tbody>
-                            <?php foreach ([
-                                ['Metal', (float) $editOrder['metal_amount']],
-                                ['Making', (float) $editOrder['making_amount']],
-                                ['Stone / diamond', (float) $editOrder['stone_amount'] + (float) $editOrder['diamond_amount']],
-                                ['Other charges', (float) $editOrder['other_charges']],
-                                ['Discount', -(float) $editOrder['discount']],
-                                ['Non taxable amt', (float) $editOrder['non_taxable_amount']],
-                                ['SD taxable amt', (float) $editOrder['sd_taxable_amount']],
-                                ['Skills Promotion Tax', (float) $editOrder['tax_amount']],
-                                ['Vatable amt', (float) $editOrder['vatable_amount']],
-                                ['VAT', (float) $editOrder['vat_amount']],
-                            ] as [$quoteLabel, $quoteValue]): ?>
-                                <?php if (abs($quoteValue) < 0.005) { continue; } ?>
-                                <tr><td><?= e($quoteLabel) ?></td><td class="is-numeric"><?= $fmt($quoteValue) ?></td></tr>
-                            <?php endforeach; ?>
-                            <tr style="border-top:2px solid var(--mbw-border,#d9e2ec)">
-                                <td><strong>Total payable</strong></td>
-                                <td class="is-numeric"><strong><?= e($sym) ?> <?= $fmt($orderTotal) ?></strong></td>
-                            </tr>
-                            <?php if ($orderAdvanceHeld > 0.005): ?>
-                                <tr><td>Less advance already taken</td><td class="is-numeric">(<?= $fmt($orderAdvanceHeld) ?>)</td></tr>
-                                <tr><td><strong>Due on delivery</strong></td><td class="is-numeric"><strong><?= e($sym) ?> <?= $fmt($stillPayable) ?></strong></td></tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table></div>
-                </div>
-            <?php endif; ?>
-
-            <div style="margin-top:12px"><button type="submit" class="button"><?= $editOrder ? 'Update Order' : 'Create Order' ?></button></div>
-        </form>
-    </section>
-    <?php endif; ?>
-
-    <?php if ($editOrder && $canEdit): ?>
-    <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head">
-            <h2>Advance on <?= e((string) $editOrder['order_no']) ?></h2>
-        </div>
-
-        <div class="mbw-stat-row" style="margin-bottom:14px">
-            <div class="mbw-stat"><span>Cash / bank held</span><strong><?= e($sym) ?> <?= $fmt((float) $orderAdvances['cash_total']) ?></strong></div>
-            <div class="mbw-stat"><span>Old gold held</span><strong><?= e($sym) ?> <?= $fmt((float) $orderAdvances['metal_total']) ?></strong></div>
-            <div class="mbw-stat"><span>Total advance</span><strong><?= e($sym) ?> <?= $fmt((float) $orderAdvances['total']) ?></strong></div>
-            <div class="mbw-stat"><span>Still unapplied</span><strong><?= e($sym) ?> <?= $fmt((float) $advanceAvailable) ?></strong></div>
-        </div>
-
-        <?php if ($orderAdvances['rows'] !== []): ?>
-        <div style="overflow-x:auto"><table>
-            <thead><tr><th>Date</th><th>Ref</th><th>What</th><th class="is-numeric">Weight</th><th class="is-numeric">Value</th></tr></thead>
-            <tbody>
-                <?php foreach ($orderAdvances['rows'] as $adv): ?>
-                    <tr>
-                        <td><?= e(app_date((string) $adv['settlement_date'])) ?></td>
-                        <td><?= e((string) $adv['settlement_no']) ?></td>
-                        <td>
-                            <?= (string) $adv['direction'] === 'paid' ? 'Refunded' : 'Received' ?> —
-                            <?php if ((string) $adv['mode'] === 'mixed'): ?>
-                                <?php
-                                    // One payment, several ways at once: name each part,
-                                    // because 'mixed' alone tells the counter nothing.
-                                    $advParts = [];
-                                    foreach (jewellery_settlement_tenders($companyId, (int) $adv['id']) as $advTender) {
-                                        $advParts[] = jw_tender_mode_label((string) $advTender['mode'], $advTender['mode_label'] ?? null)
-                                            . ' ' . number_format((float) $advTender['amount'], 2);
-                                    }
-                                ?>
-                                <small><?= e(implode(' + ', $advParts)) ?></small>
-                            <?php else: ?>
-                                <?= e(jw_tender_mode_label((string) $adv['mode'])) ?>
-                                <?php if ((string) $adv['mode'] === 'metal'): ?>
-                                    <small><?= e((string) ($adv['item_code'] ?? '')) ?> <?= e((string) ($adv['purity_code'] ?? '')) ?></small>
-                                <?php endif; ?>
-                            <?php endif; ?>
-                        </td>
-                        <td class="is-numeric"><?= (float) $adv['gross_weight'] > 0
-                            ? $fmt((float) $adv['gross_weight'], 4) . ' ' . e((string) ($adv['unit_code'] ?? '')) : '—' ?></td>
-                        <td class="is-numeric"><?= (string) $adv['direction'] === 'paid' ? '(' . $fmt((float) $adv['amount']) . ')' : $fmt((float) $adv['amount']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table></div>
-        <?php endif; ?>
-
-        <?php
-        // The ways ONE payment was made, a row per way. A customer putting
-        // down 50,000 hands over cash, taps Fonepay and puts an old ring on
-        // the scale in the same minute — that is one advance with three rows,
-        // not three advances. Shared by the take and refund forms; the engine
-        // holds every row to the single-mode form's old rules.
+    <?php
+        // One advance can be paid several ways at once — 20,000 cash, 15,000
+        // on Fonepay and an old ring for the rest is ONE advance, not three.
+        // Defined HERE, above the form, because the same grid now serves the
+        // NEW order form (the advance is taken while the order is written,
+        // not on a second visit) and the edit page's take/refund forms.
         $tenderGrid = static function (string $goldWord) use ($cashBankLedgers, $items, $purities, $units, $editOrder, $sym): void { ?>
             <fieldset class="jw-lines-box" style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:6px 0;min-width:0;grid-column:1/-1">
                 <legend style="padding:0 6px;font-weight:600">How it is paid — several ways at once is fine</legend>
@@ -628,7 +636,7 @@ jw_filter_bar_styles();
                         <th style="min-width:70px">Unit</th>
                         <th style="min-width:90px">Weight</th>
                         <th style="min-width:100px">Amount (<?= e($sym) ?>)</th>
-                        <th></th>
+                        <th style="width:38px"></th>
                     </tr></thead>
                     <tbody>
                         <tr>
@@ -687,7 +695,240 @@ jw_filter_bar_styles();
                     <strong>Total: <?= e($sym) ?> <span class="jw-tender-total">0.00</span></strong>
                 </div>
             </fieldset>
-        <?php }; ?>
+        <?php };
+    ?>
+    <?php if ($canEdit): ?>
+    <section class="mbw-card" data-collapsible data-draggable>
+        <div class="mbw-card-head">
+            <h2><?= $editOrder ? 'Edit Order — ' . e((string) $editOrder['order_no']) : 'New Order' ?></h2>
+            <?php if ($editOrder): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">New order</a><?php endif; ?>
+        </div>
+        <form method="post" data-jw-order-form>
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_order">
+            <input type="hidden" name="back_view" value="orders">
+            <input type="hidden" name="order_id" value="<?= (int) ($editOrder['id'] ?? 0) ?>">
+            <div class="workspace-form-grid">
+                <?php // Every header input reads through $orderField(): the value the
+                      // clerk typed when a refused save is being corrected, else the
+                      // stored order being revised, else blank. ?>
+                <label>Order date<input type="date" name="order_date" data-jw-required="Order date" value="<?= e((string) ($orderField('order_date', $todayInFy) ?: $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required>
+                </label>
+                <label>Promised delivery<input type="date" name="delivery_date" value="<?= e((string) $orderField('delivery_date')) ?>"></label>
+                <label>Existing customer
+                    <select name="party_id" data-jw-customer-select>
+                        <option value="0">— new customer →</option>
+                        <?php foreach ($parties as $p): ?>
+                            <option value="<?= (int) $p['id'] ?>" <?= (int) $orderField('party_id', 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Customer name<input type="text" name="customer_name" data-jw-customer-name maxlength="190" value="<?= e((string) $orderField('customer_name')) ?>" placeholder="Creates the customer and their ledger"></label>
+                <label>Phone<input type="text" name="customer_phone" maxlength="60" value="<?= e((string) $orderField('customer_phone')) ?>"></label>
+                <label>Address<input type="text" name="customer_address" maxlength="255"></label>
+                <?php // The reference is usually minted by the engine (JO-2083-000001);
+                      // typing one keeps a shop's own numbering. Uniqueness is enforced
+                      // on save with a sentence, not a stack trace. On edit the number
+                      // is identity and stays read-only. ?>
+                <label>Order no.<input type="text" name="order_no" maxlength="60"
+                        value="<?= e((string) $orderField('order_no')) ?>"
+                        <?= $editOrder ? 'readonly' : 'placeholder="auto — e.g. JO-2083-000001"' ?>></label>
+                <?php // What the customer actually said — "bridal set", "ring like my
+                      // mother's" — searchable and printed on the slip. ?>
+                <label>Expected item<input type="text" name="expected_item" maxlength="190"
+                        placeholder="e.g. Gold ring, bridal set, diamond pendant"
+                        value="<?= e((string) $orderField('expected_item')) ?>"></label>
+                <label>Design no.<input type="text" name="design_no" maxlength="60" value="<?= e((string) $orderField('design_no')) ?>"></label>
+                <label>Other charges (<?= e($sym) ?>)<input type="number" name="other_charges" step="0.01" min="0" value="<?= e((string) $orderField('other_charges', '0')) ?>"></label>
+                <label>Discount (<?= e($sym) ?>)<input type="number" name="discount" step="0.01" min="0" value="<?= e((string) $orderField('discount', '0')) ?>"></label>
+                <label>Skills Promotion Tax (<?= e($sym) ?>)<input type="number" name="manual_tax_amount" step="0.01" min="0" placeholder="auto" value="<?= e((string) $orderField('manual_tax_amount', '')) ?>">
+                </label>
+                <label>Advance taken (<?= e($sym) ?>)<input type="number" name="advance_amount" step="0.01" min="0" value="<?= e((string) $orderField('advance_amount', '0')) ?>"></label>
+                <label>Status
+                    <select name="status">
+                        <?php foreach (['draft' => 'Draft', 'confirmed' => 'Confirmed', 'cancelled' => 'Cancelled'] as $k => $v): ?>
+                            <option value="<?= e($k) ?>" <?= (string) $orderField('status', 'confirmed') === $k ? 'selected' : '' ?>><?= e($v) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label style="grid-column:1/-1">Description<input type="text" name="description" maxlength="255" value="<?= e((string) $orderField('description')) ?>"></label>
+            </div>
+
+            <?php
+                // The SAME grid the sale uses. One customer can order a ring and
+                // a chain and a pair of bangles on one order; each is a line,
+                // and each is priced by the engine that will bill it.
+                jw_render_line_grid('l', $orderLines, max(3, count($orderLines) + 2), 'Items ordered', [
+                    'items' => $items, 'purities' => $purities, 'units' => $units,
+                    'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $orderOnHand,
+                    // Handing over a kaligad list is what turns on the two
+                    // workshop columns: who makes each piece, and when it is due.
+                    'karigars' => $karigars,
+                ]);
+            ?>
+
+
+            <?php if ($editOrder && (float) $editOrder['total_amount'] > 0): ?>
+                <?php
+                    $orderTotal = (float) $editOrder['total_amount'];
+                    $orderAdvanceHeld = (float) $orderAdvances['total'];
+                    $stillPayable = round($orderTotal - $orderAdvanceHeld, 2);
+                ?>
+                <div style="margin-top:12px;border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px">
+                    <h3 style="margin:0 0 8px;font-size:1rem">What the customer pays</h3>
+                    <div style="overflow-x:auto"><table style="max-width:520px">
+                        <tbody>
+                            <?php foreach ([
+                                ['Metal', (float) $editOrder['metal_amount']],
+                                ['Making', (float) $editOrder['making_amount']],
+                                ['Stone / diamond', (float) $editOrder['stone_amount'] + (float) $editOrder['diamond_amount']],
+                                ['Other charges', (float) $editOrder['other_charges']],
+                                ['Discount', -(float) $editOrder['discount']],
+                                ['Non taxable amt', (float) $editOrder['non_taxable_amount']],
+                                ['SD taxable amt', (float) $editOrder['sd_taxable_amount']],
+                                ['Skills Promotion Tax', (float) $editOrder['tax_amount']],
+                                ['Vatable amt', (float) $editOrder['vatable_amount']],
+                                ['VAT', (float) $editOrder['vat_amount']],
+                            ] as [$quoteLabel, $quoteValue]): ?>
+                                <?php if (abs($quoteValue) < 0.005) { continue; } ?>
+                                <tr><td><?= e($quoteLabel) ?></td><td class="is-numeric"><?= $fmt($quoteValue) ?></td></tr>
+                            <?php endforeach; ?>
+                            <tr style="border-top:2px solid var(--mbw-border,#d9e2ec)">
+                                <td><strong>Total payable</strong></td>
+                                <td class="is-numeric"><strong><?= e($sym) ?> <?= $fmt($orderTotal) ?></strong></td>
+                            </tr>
+                            <?php if ($orderAdvanceHeld > 0.005): ?>
+                                <tr><td>Less advance already taken</td><td class="is-numeric">(<?= $fmt($orderAdvanceHeld) ?>)</td></tr>
+                                <tr><td><strong>Due on delivery</strong></td><td class="is-numeric"><strong><?= e($sym) ?> <?= $fmt($stillPayable) ?></strong></td></tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table></div>
+                </div>
+            <?php endif; ?>
+
+            <?php if (!$editOrder): ?>
+                <?php // The advance is taken WHILE the order is written — the customer
+                      // is standing at the counter with the money in hand, not coming
+                      // back after somebody re-opens the order in edit mode. Rows left
+                      // at zero mean no advance; anything entered is recorded and
+                      // posted together with the order, split across as many ways of
+                      // paying as the customer actually used. ?>
+                <div style="margin-top:12px;border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px">
+                    <h3 style="margin:0 0 4px;font-size:1rem">Advance taken now — optional</h3>
+                    <p style="margin:0 0 8px;color:var(--mbw-muted,#64748b)">
+                        Leave the amounts at zero if nothing is being put down.
+                        The advance posts with the order and is held for this customer.
+                    </p>
+                    <div class="workspace-form-grid">
+                        <label>Advance date<input type="date" name="advance_date" value="<?= e($todayInFy) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+                        <?php $tenderGrid('Old gold'); ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <div style="margin-top:12px"><button type="submit" class="button"><?= $editOrder ? 'Update Order' : 'Create Order' ?></button></div>
+        </form>
+    </section>
+    <style>
+        .jw-field-invalid { border-color: var(--mbw-red, #e5484d) !important; box-shadow: 0 0 0 2px rgba(229, 72, 77, 0.15); }
+        .jw-form-errors { border: 1px solid var(--mbw-red, #e5484d); background: var(--mbw-red-soft, #fdeaea);
+            color: #7d2426; border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
+    </style>
+    <script>
+    // The save button never clears a half-finished order. What is missing is
+    // NAMED, the field is marked and focused, and nothing leaves the page
+    // until it is whole — the server's own checks remain behind this, and a
+    // server-side refusal comes back with every typed value intact.
+    (function () {
+        var form = document.querySelector("[data-jw-order-form]");
+        if (!form) { return; }
+        form.addEventListener("submit", function (event) {
+            var problems = [];
+            form.querySelectorAll(".jw-field-invalid").forEach(function (field) {
+                field.classList.remove("jw-field-invalid");
+            });
+            var existingBox = form.querySelector(".jw-form-errors");
+            if (existingBox) { existingBox.remove(); }
+
+            var orderDate = form.querySelector('[name="order_date"]');
+            if (orderDate && !orderDate.value) {
+                problems.push({ field: orderDate, message: "Order date is required." });
+            }
+            var partySelect = form.querySelector("[data-jw-customer-select]");
+            var nameInput = form.querySelector("[data-jw-customer-name]");
+            var hasParty = partySelect && parseInt(partySelect.value, 10) > 0;
+            var hasName = nameInput && nameInput.value.trim() !== "";
+            if (!hasParty && !hasName) {
+                problems.push({ field: nameInput || partySelect,
+                    message: "Choose an existing customer or type the new customer's name." });
+            }
+
+            if (problems.length === 0) { return; }
+            event.preventDefault();
+            var box = document.createElement("div");
+            box.className = "jw-form-errors";
+            box.innerHTML = "<strong>The order is not saved yet:</strong><ul style=\"margin:6px 0 0 18px\">"
+                + problems.map(function (p) { return "<li>" + p.message + "</li>"; }).join("")
+                + "</ul>";
+            form.insertBefore(box, form.firstChild);
+            problems.forEach(function (p) { if (p.field) { p.field.classList.add("jw-field-invalid"); } });
+            if (problems[0].field) { problems[0].field.focus(); }
+            box.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+    })();
+    </script>
+    <?php endif; ?>
+
+    <?php if ($editOrder && $canEdit): ?>
+    <section class="mbw-card" data-collapsible style="margin-top:14px">
+        <div class="mbw-card-head">
+            <h2>Advance on <?= e((string) $editOrder['order_no']) ?></h2>
+        </div>
+
+        <div class="mbw-stat-row" style="margin-bottom:14px">
+            <div class="mbw-stat"><span>Cash / bank held</span><strong><?= e($sym) ?> <?= $fmt((float) $orderAdvances['cash_total']) ?></strong></div>
+            <div class="mbw-stat"><span>Old gold held</span><strong><?= e($sym) ?> <?= $fmt((float) $orderAdvances['metal_total']) ?></strong></div>
+            <div class="mbw-stat"><span>Total advance</span><strong><?= e($sym) ?> <?= $fmt((float) $orderAdvances['total']) ?></strong></div>
+            <div class="mbw-stat"><span>Still unapplied</span><strong><?= e($sym) ?> <?= $fmt((float) $advanceAvailable) ?></strong></div>
+        </div>
+
+        <?php if ($orderAdvances['rows'] !== []): ?>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Date</th><th>Ref</th><th>What</th><th class="is-numeric">Weight</th><th class="is-numeric">Value</th></tr></thead>
+            <tbody>
+                <?php foreach ($orderAdvances['rows'] as $adv): ?>
+                    <tr>
+                        <td><?= e(app_date((string) $adv['settlement_date'])) ?></td>
+                        <td><?= e((string) $adv['settlement_no']) ?></td>
+                        <td>
+                            <?= (string) $adv['direction'] === 'paid' ? 'Refunded' : 'Received' ?> —
+                            <?php if ((string) $adv['mode'] === 'mixed'): ?>
+                                <?php
+                                    // One payment, several ways at once: name each part,
+                                    // because 'mixed' alone tells the counter nothing.
+                                    $advParts = [];
+                                    foreach (jewellery_settlement_tenders($companyId, (int) $adv['id']) as $advTender) {
+                                        $advParts[] = jw_tender_mode_label((string) $advTender['mode'], $advTender['mode_label'] ?? null)
+                                            . ' ' . number_format((float) $advTender['amount'], 2);
+                                    }
+                                ?>
+                                <small><?= e(implode(' + ', $advParts)) ?></small>
+                            <?php else: ?>
+                                <?= e(jw_tender_mode_label((string) $adv['mode'])) ?>
+                                <?php if ((string) $adv['mode'] === 'metal'): ?>
+                                    <small><?= e((string) ($adv['item_code'] ?? '')) ?> <?= e((string) ($adv['purity_code'] ?? '')) ?></small>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                        </td>
+                        <td class="is-numeric"><?= (float) $adv['gross_weight'] > 0
+                            ? $fmt((float) $adv['gross_weight'], 4) . ' ' . e((string) ($adv['unit_code'] ?? '')) : '—' ?></td>
+                        <td class="is-numeric"><?= (string) $adv['direction'] === 'paid' ? '(' . $fmt((float) $adv['amount']) . ')' : $fmt((float) $adv['amount']) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+        <?php endif; ?>
+
 
         <h3 style="margin:16px 0 8px">Take an advance</h3>
         <form method="post" class="workspace-form-grid">
@@ -724,7 +965,7 @@ jw_filter_bar_styles();
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Orders (<?= count($orders) ?>)</h2></div>
+        <div class="mbw-card-head"><h2>Orders (<?= count($orders) ?>)</h2><span><?= $canExport ? $exportLinks() : '' ?></span></div>
         <?php jw_render_filter_bar([
             'hidden' => ['view' => 'orders'],
             'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
@@ -858,7 +1099,7 @@ jw_filter_bar_styles();
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Kaligads (<?= count($karigars) ?>)</h2></div>
+        <div class="mbw-card-head"><h2>Kaligads (<?= count($karigars) ?>)</h2><span><?= $canExport ? $exportLinks() : '' ?></span></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Code</th><th>Name</th><th>Engagement</th><th>Making</th><th class="is-numeric">Metal held (fine)</th><th class="is-numeric">Work needs</th><th class="is-numeric">Excess / shortfall</th><th class="is-numeric">Wages payable</th><th>Status</th><th></th></tr></thead>
             <tbody>
@@ -889,7 +1130,19 @@ jw_filter_bar_styles();
                         <td class="is-numeric"><?= $pos['wages_payable'] > 0 ? $fmt($pos['wages_payable']) : '—' ?></td>
                         <td><span class="mbw-pill <?= (string) $row['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= e(ucfirst((string) $row['status'])) ?></span></td>
                         <td>
-                            <?php if ($canEdit): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=karigars&edit=' . (int) $row['id'])) ?>">Edit</a><?php endif; ?>
+                            <?php if ($canEdit): ?>
+                                <a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=karigars&edit=' . (int) $row['id'])) ?>">Edit</a>
+                                <?php // Deletable only while untouched — a kaligad with
+                                      // issues or wage bills keeps their row and is marked
+                                      // inactive instead; the engine says which. ?>
+                                <form method="post" style="display:inline" data-confirm="Delete this kaligad? Only one with no issues and no wage bills can go.">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="delete_karigar">
+                                    <input type="hidden" name="back_view" value="karigars">
+                                    <input type="hidden" name="karigar_id" value="<?= (int) $row['id'] ?>">
+                                    <button type="submit" class="button soft" style="min-height:28px;padding:2px 10px">Delete</button>
+                                </form>
+                            <?php endif; ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -1072,7 +1325,7 @@ jw_filter_bar_styles();
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Assignments (<?= count($assignments) ?>)</h2></div>
+        <div class="mbw-card-head"><h2>Assignments (<?= count($assignments) ?>)</h2><span><?= $canExport ? $exportLinks() : '' ?></span></div>
         <?php jw_render_filter_bar([
             'hidden' => ['view' => 'assignments'],
             'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
@@ -1124,6 +1377,18 @@ jw_filter_bar_styles();
                                     <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Reverse receipt</button>
                                 </form>
                                 <?php endif; ?>
+                            <?php endif; ?>
+                            <?php if ((string) $row['status'] === 'cancelled' && $canEdit): ?>
+                                <?php // A cancelled issue's row may leave the register; its
+                                      // paired metal movements stay on the books as the
+                                      // net-zero record that it happened. ?>
+                                <form method="post" style="display:inline" data-confirm="Delete this cancelled issue from the register?">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="delete_assignment">
+                                    <input type="hidden" name="back_view" value="assignments">
+                                    <input type="hidden" name="assignment_id" value="<?= (int) $row['id'] ?>">
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Delete</button>
+                                </form>
                             <?php endif; ?>
                         </td>
                     </tr>
@@ -1220,7 +1485,7 @@ jw_filter_bar_styles();
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Refinery Jobs (<?= count($jobs) ?>)</h2></div>
+        <div class="mbw-card-head"><h2>Refinery Jobs (<?= count($jobs) ?>)</h2><span><?= $canExport ? $exportLinks() : '' ?></span></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Job</th><th>Refiner</th><th>Issued</th><th class="is-numeric">Out (fine)</th><th class="is-numeric">Back (fine)</th><th class="is-numeric">Loss / extra (fine)</th><th class="is-numeric">Charges</th><th>Status</th><th></th></tr></thead>
             <tbody>
@@ -1254,6 +1519,15 @@ jw_filter_bar_styles();
                                     <input type="hidden" name="back_view" value="refinery">
                                     <input type="hidden" name="job_id" value="<?= (int) $row['id'] ?>">
                                     <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Cancel</button>
+                                </form>
+                            <?php endif; ?>
+                            <?php if ((string) $row['status'] === 'cancelled' && $canEdit): ?>
+                                <form method="post" style="display:inline" data-confirm="Delete this cancelled job from the register?">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="delete_refinery_job">
+                                    <input type="hidden" name="back_view" value="refinery">
+                                    <input type="hidden" name="job_id" value="<?= (int) $row['id'] ?>">
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Delete</button>
                                 </form>
                             <?php endif; ?>
                         </td>
