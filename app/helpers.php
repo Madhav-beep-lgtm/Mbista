@@ -2341,6 +2341,88 @@ function admin_count(): int
     return (int) db()->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn();
 }
 
+/**
+ * Where the nightly backup last reported in, read from backup-status.json.
+ *
+ * The candidates are checked in the same order the backup script resolves its
+ * own directory: the .env's BACKUP_DIR, then the script's default of
+ * $HOME/db-backups, then the old storage/backups fallback. The audit used to
+ * look ONLY in storage/backups while the script wrote to $HOME/db-backups —
+ * so a server backing up perfectly every night reported "no backup has ever
+ * run", which is the exact false alarm that teaches people to ignore alarms.
+ *
+ * @return array{path: string, status: ?array} the path consulted (the first
+ *         candidate that HAS a status file, else the first candidate), and
+ *         the decoded status or null when none has ever been written.
+ */
+function backup_status_read(): array
+{
+    $candidates = [];
+    $configured = (string) (function_exists('env') ? env('BACKUP_DIR', '') : '');
+    if ($configured !== '') {
+        $candidates[] = rtrim($configured, '/\\');
+    }
+    $home = (string) (getenv('HOME') ?: '');
+    if ($home !== '') {
+        $candidates[] = rtrim($home, '/\\') . '/db-backups';
+    }
+    $candidates[] = dirname(__DIR__) . '/storage/backups';
+
+    foreach ($candidates as $dir) {
+        $path = $dir . '/backup-status.json';
+        if (is_file($path)) {
+            $decoded = json_decode((string) file_get_contents($path), true);
+
+            return ['path' => $path, 'status' => is_array($decoded) ? $decoded : null];
+        }
+    }
+
+    return ['path' => $candidates[0] . '/backup-status.json', 'status' => null];
+}
+
+/**
+ * The one-line backup warning for the admin header, or null when all is well.
+ *
+ * A backup that silently stops is only found out on restore day — the worst
+ * possible moment. The status file turns "stopped" into a fact; this puts the
+ * fact where somebody looks every day, instead of in a CLI audit nobody runs.
+ *
+ * "Never configured" nags in production only: a development machine without a
+ * cron is normal, and a permanent banner there would train the eye to skip
+ * the same banner where it matters.
+ */
+function backup_health_warning(): ?string
+{
+    $read = backup_status_read();
+    $status = $read['status'];
+
+    if ($status === null) {
+        if ((string) (function_exists('env') ? env('APP_ENV', 'production') : 'production') !== 'production') {
+            return null;
+        }
+
+        return 'No database backup has ever reported in. Set up the nightly cron '
+            . '(cPanel → Cron Jobs → deploy/backup-database.sh) — until then, a disk failure loses everything.';
+    }
+
+    $state = (string) ($status['state'] ?? 'unknown');
+    $ranAt = (string) ($status['at'] ?? '');
+    $ageHours = $ranAt !== '' && strtotime($ranAt) !== false
+        ? (time() - strtotime($ranAt)) / 3600 : PHP_FLOAT_MAX;
+
+    if ($state !== 'ok') {
+        return 'The last database backup FAILED'
+            . ($ranAt !== '' ? ' (' . $ranAt . ')' : '')
+            . ': ' . (string) ($status['detail'] ?? 'see backup-database.log') . '.';
+    }
+    if ($ageHours > 48) {
+        return 'The last good database backup is ' . (int) round($ageHours / 24)
+            . ' days old — the nightly job has stopped. Check the cron entry.';
+    }
+
+    return null;
+}
+
 function create_order(array $data): int
 {
     $stmt = db()->prepare('INSERT INTO orders (company_id, user_id, plan_id, full_name, email, phone, domain_name, billing_cycle, amount, payment_method, payment_status, transaction_id, status, notes) VALUES (:company_id, :user_id, :plan_id, :full_name, :email, :phone, :domain_name, :billing_cycle, :amount, :payment_method, :payment_status, :transaction_id, :status, :notes)');

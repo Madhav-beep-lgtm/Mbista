@@ -559,6 +559,12 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     </div>
                 </div>
             <?php endif; ?>
+            <?php // A backup that silently stopped surfaces HERE, where staff look
+                  // every day — not in a CLI audit nobody runs. Clients never see
+                  // it; the server's backups are not their concern. ?>
+            <?php if (!$headerIsCustomer && ($backupWarning = backup_health_warning()) !== null): ?>
+                <div class="notice error flash-notice"><strong>Backups:</strong> <?= e($backupWarning) ?></div>
+            <?php endif; ?>
             <?php if ($message = flash('success')): ?>
                 <div class="notice success flash-notice"><?= e($message) ?></div>
             <?php endif; ?>

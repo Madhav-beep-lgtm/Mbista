@@ -6,6 +6,15 @@
 #   Schedule: 15 2 * * *     (02:15 every night)
 #   Command:  /bin/bash /home/YOUR_CPANEL_USER/repositories/Mbista/deploy/backup-database.sh
 #
+# NIGHTLY MEANS A DAY OF ENTRIES AT RISK. Shared hosting offers no binary log,
+# so the restore point is the last dump: a disk that dies at 18:00 takes the
+# whole day's bills with it. The dump is cheap (--single-transaction, no
+# locks), so run it every six hours if a day is too much to lose:
+#
+#   Schedule: 15 2,8,14,20 * * *
+#
+# Rotation already copes — BACKUP_KEEP_DAYS ages out by file date either way.
+#
 # Replace the path with your repository path, shown in
 # cPanel -> Git Version Control -> Manage -> Repository Path.
 #
@@ -289,6 +298,47 @@ find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_*.sql.gz*" -mtime "+$BA
 # The file archives age out on the same schedule, so a dump and its files are
 # never kept apart — half a backup restores to a shop with broken documents.
 find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_files_*.tar.gz*" -mtime "+$BACKUP_KEEP_DAYS" -print -delete >>"$LOG" 2>&1
+
+# ---------------------------------------------------------------------------
+# Prune the append-only log tables — ONLY after a verified backup
+# ---------------------------------------------------------------------------
+# security_events gains a row per login attempt and activity_logs a row per
+# action, forever; on shared hosting they walk straight into the disk quota,
+# at which point INSERTs fail and posting transactions fail with them. They
+# are pruned HERE, after the dump has been verified, so every row deleted
+# tonight exists in the backup written tonight — the audit trail moves into
+# the archive, it does not vanish.
+#
+#   LOG_RETENTION_SECURITY_DAYS  in .env, default 180; 0 keeps forever
+#   LOG_RETENTION_ACTIVITY_DAYS  in .env, default 400; 0 keeps forever
+#
+# Batched DELETEs so the table is never locked for long on a live shop, and
+# every failure is a warning — housekeeping must never fail the backup.
+RET_SECURITY="$(env_value LOG_RETENTION_SECURITY_DAYS)"; RET_SECURITY="${RET_SECURITY:-180}"
+RET_ACTIVITY="$(env_value LOG_RETENTION_ACTIVITY_DAYS)"; RET_ACTIVITY="${RET_ACTIVITY:-400}"
+
+prune_table() {
+    TABLE="$1"; DAYS="$2"
+    case "$DAYS" in (*[!0-9]*|'') log "WARNING: retention for $TABLE is not a number ('$DAYS') — skipped"; return 0;; esac
+    [ "$DAYS" -eq 0 ] && { log "$TABLE: retention 0 — kept forever"; return 0; }
+    if ! command -v mysql >/dev/null 2>&1; then
+        log "WARNING: mysql client not found — $TABLE not pruned"
+        return 0
+    fi
+    PRUNED_TOTAL=0
+    while :; do
+        ROWS="$(MYSQL_PWD="$DB_PASS" mysql --host="$DB_HOST" --user="$DB_USER" -N -e \
+            "DELETE FROM \`$TABLE\` WHERE created_at < NOW() - INTERVAL $DAYS DAY LIMIT 5000; SELECT ROW_COUNT();" \
+            "$DB_NAME" 2>>"$LOG")" || { log "WARNING: pruning $TABLE failed — see log"; return 0; }
+        ROWS="$(printf '%s' "$ROWS" | tr -dc '0-9')"
+        PRUNED_TOTAL=$((PRUNED_TOTAL + ${ROWS:-0}))
+        [ "${ROWS:-0}" -lt 5000 ] && break
+    done
+    log "$TABLE: pruned $PRUNED_TOTAL row(s) older than $DAYS days (all inside tonight's verified dump)"
+}
+
+prune_table security_events "$RET_SECURITY"
+prune_table activity_logs "$RET_ACTIVITY"
 
 REMAINING="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_*.sql.gz*" | wc -l | tr -d ' ')"
 log "done — $REMAINING backup(s) held, keeping $BACKUP_KEEP_DAYS days"

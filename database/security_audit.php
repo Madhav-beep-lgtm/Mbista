@@ -197,12 +197,13 @@ if (!$looksLocal) {
 echo "\nBackups\n";
 echo str_repeat('-', 72) . "\n";
 
-$backupDir = (string) (function_exists('env') ? env('BACKUP_DIR', '') : '');
-if ($backupDir === '') {
-    $backupDir = dirname(__DIR__) . '/storage/backups';
-}
-$statusPath = rtrim($backupDir, '/\\') . '/backup-status.json';
-$status = is_file($statusPath) ? json_decode((string) file_get_contents($statusPath), true) : null;
+// Resolved by the SAME candidate walk the backup script uses (env BACKUP_DIR,
+// then $HOME/db-backups, then storage/backups). Looking in only one place
+// while the script wrote to another made a working backup report as "never
+// ran" — the false alarm that teaches people to ignore alarms.
+$read = backup_status_read();
+$statusPath = $read['path'];
+$status = $read['status'];
 
 if (!is_array($status)) {
     printf("  %-20s %s\n", 'last run', 'NO RECORD at ' . $statusPath);
