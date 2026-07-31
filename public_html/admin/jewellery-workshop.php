@@ -1378,6 +1378,28 @@ jw_filter_bar_styles();
                     <?php endif; ?>
                     <tr><td>Recovered from wages</td><td class="is-numeric">− <?= e($sym) ?><?= $fmt($receivePreview['recovery_amount']) ?></td></tr>
                     <tr><td><strong>Net payable to the kaligad</strong></td><td class="is-numeric"><strong><?= e($sym) ?><?= $fmt($receivePreview['net_payable']) ?></strong><?= $receivePreview['net_payable'] < 0 ? ' <span class="mbw-pill tone-red">Kaligad owes the shop</span>' : '' ?></td></tr>
+                    <?php
+                    // The same wage in gold. Kaligads are very often paid in
+                    // metal — "keep two grams" — and the figure they will ask
+                    // for should be on the screen where it is agreed, not
+                    // worked out on the back of the receipt afterwards.
+                    $wageStatement = jewellery_wage_statement([
+                        'making_amount' => $receivePreview['making_amount'],
+                        'recovery_amount' => $receivePreview['recovery_amount'],
+                        'net_payable' => $receivePreview['net_payable'],
+                        'avg_fine_rate' => $receivePreview['avg_fine_rate'],
+                    ]);
+                    ?>
+                    <?php if ($wageStatement['convertible']): ?>
+                        <tr>
+                            <td>The same wage in gold<br><small><?= e(jewellery_wage_rate_note($wageStatement, $sym)) ?></small></td>
+                            <td class="is-numeric"><strong><?= $fmt((float) $wageStatement['net_payable_fine'], 4) ?></strong> fine
+                                <?php if ((float) $wageStatement['recovery_fine'] > 0.00005): ?>
+                                    <br><small>making <?= $fmt((float) $wageStatement['making_fine'], 4) ?> less <?= $fmt((float) $wageStatement['recovery_fine'], 4) ?> recovered</small>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
                 </tbody>
             </table></div>
             <form method="post" class="workspace-form-grid" style="margin-top:12px">

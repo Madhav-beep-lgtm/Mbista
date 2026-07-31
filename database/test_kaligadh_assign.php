@@ -303,6 +303,59 @@ ok($untyped['metal_lines'] === 1 && near($untyped['metal_fine'], 1.83),
     'A row with no kind counts as metal, which is what every issue used to be');
 
 // ---------------------------------------------------------------------------
+echo "\n9. The wage said in rupees and in gold, without the two drifting\n";
+// ---------------------------------------------------------------------------
+// Rupees are the truth and the metal is worked out from them, at the rate the
+// issue was valued at — the same rate the wastage is charged at, so a movement
+// in the day's gold price cannot silently change what was earned.
+ok(near(jewellery_wages_in_metal(139000.0, 139000.0), 1.0), 'A wage worth one fine unit converts to one');
+ok(near(jewellery_wages_in_metal(69500.0, 139000.0), 0.5), 'And half of it to a half');
+ok(near(jewellery_wages_in_metal(5000.0, 0.0), 0.0), 'With no rate there is no conversion, not a division by zero');
+ok(near(jewellery_wages_from_metal(2.0, 139000.0), 278000.0), 'Going the other way, two fine is worth two rates');
+// And here is the reason rupees are the truth rather than the gold. A weight
+// carries four decimals, so at 139,000 a fine unit the smallest weight the shop
+// can write is worth about Rs 14 — and a wage converted into gold and back
+// cannot return exactly. Whichever figure is derived has to be the one allowed
+// to lose that; making it the rupees would lose the wage itself.
+$roundTripped = jewellery_wages_from_metal(jewellery_wages_in_metal(12345.0, 139000.0), 139000.0);
+$lastDecimalWorth = 0.0001 * 139000.0;
+ok(abs($roundTripped - 12345.0) < $lastDecimalWorth,
+    'A wage converted to gold and back lands within one tick of the weight scale (' . number_format($roundTripped, 2) . ')');
+ok(abs($roundTripped - 12345.0) > 0.005,
+    'But NOT exactly — which is why the rupees are the truth and the gold is worked out from them');
+
+$receipt = ['making_amount' => 5000.0, 'recovery_amount' => 1390.0, 'net_payable' => 3610.0, 'avg_fine_rate' => 139000.0];
+$statement = jewellery_wage_statement($receipt);
+ok($statement['rate_basis'] === 'issue', 'A receipt with metal behind it converts at the rate that metal went out at');
+ok(near((float) $statement['making_fine'], 0.036), 'The making charge in fine');
+ok(near((float) $statement['recovery_fine'], 0.01), 'The wastage recovered, in fine');
+ok(near((float) $statement['net_payable_fine'], 0.026), 'And what he actually takes home, in fine');
+ok($statement['convertible'] === true, 'The screen may show it');
+
+// A work order: he found his own gold, so nothing was issued and there is no
+// issue rate. The day's board converts instead, and the answer says so.
+$workOrderReceipt = ['making_amount' => 5000.0, 'recovery_amount' => 0.0, 'net_payable' => 5000.0, 'avg_fine_rate' => 0.0];
+$boardStatement = jewellery_wage_statement($workOrderReceipt, 140000.0);
+ok($boardStatement['rate_basis'] === 'board', "With no metal issued, the day's board does the converting");
+ok(near((float) $boardStatement['net_payable_fine'], 0.0357), 'And the wage still comes out in gold');
+ok(str_contains(jewellery_wage_rate_note($boardStatement, 'Rs '), 'no metal was issued'),
+    'The note says why that rate was used, because the two are different statements');
+
+$noRate = jewellery_wage_statement($workOrderReceipt, 0.0);
+ok($noRate['rate_basis'] === 'none' && $noRate['convertible'] === false,
+    'With no rate anywhere the wage stands in rupees alone');
+ok(near((float) $noRate['net_payable'], 5000.0), 'Which is still the wage, in full');
+ok(str_contains(jewellery_wage_rate_note($noRate, 'Rs '), 'no gold rate available'),
+    'And the screen says so rather than showing a confident zero');
+
+// A kaligad who owes the shop more than he earned: the metal figure has to
+// carry the same sign, or a debt reads as a payment.
+$owing = jewellery_wage_statement(['making_amount' => 500.0, 'recovery_amount' => 1390.0,
+    'net_payable' => -890.0, 'avg_fine_rate' => 139000.0]);
+ok((float) $owing['net_payable_fine'] < 0, 'A kaligad who owes the shop owes it in gold too');
+ok(near((float) $owing['net_payable_fine'], -0.0064), 'To the same amount');
+
+// ---------------------------------------------------------------------------
 echo "\n" . str_repeat('-', 60) . "\n";
 echo "  $pass passed, $fail failed\n";
 exit($fail === 0 ? 0 : 1);

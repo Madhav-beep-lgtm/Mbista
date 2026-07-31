@@ -890,6 +890,87 @@ function jewellery_output_export_rows(array $rows, string $currency = ''): array
     return $out;
 }
 
+// ---------------------------------------------------------------------------
+// Wages, in rupees and in metal
+// ---------------------------------------------------------------------------
+
+/**
+ * A kaligad's wage said both ways.
+ *
+ * Wages are agreed in rupees — flat, per gram, or a share of the metal — and
+ * they are very often PAID in gold: "keep two grams". Both figures have to be
+ * on the screen, and only one of them can be the truth or they drift apart.
+ *
+ * Rupees are the truth. The metal is worked out from them, at the rate the
+ * issue itself was valued at, which is the same rate the wastage is charged at
+ * — so the wage and the wastage recovery are measured against one gold price
+ * and a movement in the day's rate cannot silently change what was earned.
+ *
+ * When there is no issue rate to divide by, there was no metal issued: a work
+ * order, where the kaligad found his own gold. Then the day's board is used
+ * instead, and the answer says so, because a wage converted at today's price is
+ * a different statement from one converted at the price the metal went out at.
+ *
+ * Pure: the rate is handed in.
+ */
+function jewellery_wages_in_metal(float $rupees, float $fineRate): float
+{
+    if ($fineRate <= 0.00005) {
+        return 0.0;
+    }
+
+    return jw_round_weight($rupees / $fineRate);
+}
+
+/** The reverse, for a shop that agrees the wage in gold and needs the rupees. */
+function jewellery_wages_from_metal(float $fineWeight, float $fineRate): float
+{
+    return jw_round_money($fineWeight * $fineRate);
+}
+
+/**
+ * The wage on one receipt, in rupees and in fine metal, saying which rate did
+ * the converting and why.
+ *
+ * $dayRate is only consulted when the receipt carries no rate of its own; the
+ * caller looks it up, so this stays testable without a rate board.
+ */
+function jewellery_wage_statement(array $receipt, float $dayRate = 0.0): array
+{
+    $making = round((float) ($receipt['making_amount'] ?? 0), 2);
+    $recovery = round((float) ($receipt['recovery_amount'] ?? 0), 2);
+    $netPayable = round((float) ($receipt['net_payable'] ?? 0), 2);
+    $issueRate = round((float) ($receipt['avg_fine_rate'] ?? 0), 4);
+
+    $rate = $issueRate > 0.00005 ? $issueRate : round($dayRate, 4);
+    $basis = $issueRate > 0.00005 ? 'issue' : ($rate > 0.00005 ? 'board' : 'none');
+
+    return [
+        'making_amount' => $making,
+        'recovery_amount' => $recovery,
+        'net_payable' => $netPayable,
+        'fine_rate' => $rate,
+        // 'issue' — the rate this metal went out at, and the same one the
+        // wastage was charged at. 'board' — the day's rate, because no metal
+        // went out. 'none' — neither, so the wage stands in rupees alone.
+        'rate_basis' => $basis,
+        'making_fine' => jewellery_wages_in_metal($making, $rate),
+        'recovery_fine' => jewellery_wages_in_metal($recovery, $rate),
+        'net_payable_fine' => jewellery_wages_in_metal($netPayable, $rate),
+        'convertible' => $rate > 0.00005,
+    ];
+}
+
+/** "at the issue rate" / "at today's board rate" — why this many grams. */
+function jewellery_wage_rate_note(array $statement, string $currency = ''): string
+{
+    return match ((string) $statement['rate_basis']) {
+        'issue' => 'at ' . $currency . number_format((float) $statement['fine_rate'], 2) . ' per fine — the rate this metal went out at',
+        'board' => 'at ' . $currency . number_format((float) $statement['fine_rate'], 2) . ' per fine — today\'s board rate, as no metal was issued',
+        default => 'no gold rate available, so the wage stands in ' . ($currency !== '' ? 'rupees' : 'money') . ' alone',
+    };
+}
+
 /** "Flat Rs 2,500" / "8% of metal" / "Rs 250 per gram" — the charge in words. */
 function jewellery_assign_making_charge_label(array $row, string $currency = ''): string
 {
