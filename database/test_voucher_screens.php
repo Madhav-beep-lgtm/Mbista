@@ -233,6 +233,22 @@ ok(str_contains($rendered['sales'], 'data-rate="4000.00"'), 'And a sales line at
 ok(str_contains($rendered['payment'], 'PMT/VCH-2026-27/0001'), 'The screen shows the number the voucher is about to take');
 
 // ---------------------------------------------------------------------------
+echo "\n3c. Every screen wires the two controls the shared shell owns\n";
+// ---------------------------------------------------------------------------
+//
+// The shell renders one Total field and one submit guard for all eight
+// screens, and each screen's own script has to drive them. A screen that
+// forgets shows a total stuck at 0.00 and — worse — can never be posted,
+// because the guard reads an attribute nobody ever set. That is exactly what
+// shipped on the contra screen, so it is asserted here from now on.
+foreach (array_keys(voucher_type_catalog()) as $wiredType) {
+    ok(substr_count($rendered[$wiredType], 'vch-display-total') >= 2,
+        voucher_type_label($wiredType) . ' fills the Total field as well as rendering it');
+    ok(str_contains($rendered[$wiredType], "setAttribute('data-balanced'"),
+        voucher_type_label($wiredType) . ' arms the submit guard, so it can actually be posted');
+}
+
+// ---------------------------------------------------------------------------
 echo "\n4. Posting through the engine numbers the series and balances the books\n";
 // ---------------------------------------------------------------------------
 // The customer's own ledger is created the first time they are billed, so it

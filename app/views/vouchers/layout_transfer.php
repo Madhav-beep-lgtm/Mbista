@@ -86,6 +86,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var to = document.getElementById('vch-to');
     var amount = document.getElementById('vch-amount');
     var preview = document.getElementById('vch-preview');
+    var form = document.getElementById('voucher-form');
 
     function label(select) {
         var option = select.options[select.selectedIndex];
@@ -96,7 +97,16 @@ document.addEventListener('DOMContentLoaded', function () {
         var fromName = label(from);
         var toName = label(to);
         var value = Number(amount.value) || 0;
+        var same = from.value !== '' && from.value === to.value;
         var ready = fromName !== '' && toName !== '' && value > 0;
+
+        // The Total field and the submit guard are updated on EVERY pass,
+        // including the ones that return early — a half-filled contra has to
+        // put the total back to zero and take the guard down with it.
+        var display = document.getElementById('vch-display-total');
+        if (display) { display.value = window.vchMoney(ready ? value : 0); }
+        form.setAttribute('data-balanced', (ready && !same) ? '1' : '0');
+
         preview.hidden = !ready;
         if (!ready) { return; }
         preview.querySelector('[data-preview-debit]').textContent = toName;
@@ -104,7 +114,6 @@ document.addEventListener('DOMContentLoaded', function () {
         preview.querySelectorAll('[data-preview-amount]').forEach(function (node) {
             node.textContent = window.vchMoney(value);
         });
-        var same = from.value !== '' && from.value === to.value;
         preview.classList.toggle('is-invalid', same);
         preview.querySelector('.vch-preview-label').textContent = same
             ? 'Both sides name the same account — money cannot move to where it already is'
