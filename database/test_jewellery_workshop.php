@@ -602,6 +602,29 @@ ok(near((float) $multiRow['expected_gross_weight'], 3.0), 'And the header weight
 ok(near((float) $multiRow['sd_taxable_amount'], 452255.0),
     'SD taxable amt = metal + making = 452,255 — the diamond is NOT in it');
 ok(near((float) $multiRow['tax_amount'], 2261.28), 'Skills Promotion Tax at 0.5% = 2,261.28');
+
+// AN ORDER WITH WASTAGE ON IT. The lines above carry none, so they never
+// exercised the double-count that reached a real bill: the metal figure
+// already contains the wastage (the total weight is priced as one number),
+// and a base that added the wastage again inflated the levy by 0.5% of it.
+// 2 tola + 25% wastage = 2.5 charged at 150,000 = 375,000 of metal, of which
+// 75,000 IS the wastage; making 5,000. The base is 380,000, not 455,000.
+$wasteOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-08-05', 'party_id' => $customer, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+     'gross_weight' => 2, 'wastage_pct' => 25, 'rate' => 150000, 'making_amount' => 5000],
+], $userA);
+$wasteRow = jewellery_order($cidA, $wasteOrder);
+ok(near((float) $wasteRow['metal_amount'], 375000.0),
+    'The metal figure carries the wastage: 2.5 total weight x 150,000 = 375,000');
+ok(near((float) $wasteRow['wastage_amount'], 75000.0), 'Of which 75,000 is the wastage, reported apart');
+ok(near((float) $wasteRow['sd_taxable_amount'], 380000.0),
+    'The SPT base is metal + making = 380,000 — the wastage is NOT added a second time');
+ok(near((float) $wasteRow['tax_amount'], 1900.0),
+    'So the levy is 0.5% of 380,000 = 1,900 — not 2,275, which is what counting it twice gave');
+ok(near((float) $wasteRow['total_amount'], 375000.0 + 5000.0 + 1900.0),
+    'And the quoted total adds up on its face: 381,900');
 ok(near((float) $multiRow['vatable_amount'], 60800.0),
     'Vatable amt = diamond + stone = 60,800 — the gold and the labour are NOT in it');
 ok(near((float) $multiRow['vat_amount'], 7904.0), 'VAT at 13% of 60,800 = 7,904.00');

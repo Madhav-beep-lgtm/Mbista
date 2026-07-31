@@ -3015,6 +3015,59 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Drafts do not post yesterday\'s wrong tax (migration 099)', static function (): void {
+        // 096 corrected the base and left the CHARGED tax alone, because on a
+        // posted document that figure is history. On a draft it is not: it is
+        // a pending instruction, and posting one saved before the fix would
+        // send the inflated levy to the ledger today. Drafts are therefore
+        // re-derived from the corrected base; posted rows are not touched by
+        // anything here.
+        if (!accounting_repair_table_exists('jewellery_line_taxes')) {
+            return;
+        }
+        foreach ([['sale', 'jewellery_sales'], ['purchase', 'jewellery_purchases']] as [$docType, $headTable]) {
+            if (!accounting_repair_table_exists($headTable)) {
+                continue;
+            }
+            db()->exec("UPDATE jewellery_line_taxes lt
+                INNER JOIN `$headTable` h ON h.id = lt.doc_id AND lt.doc_type = '$docType'
+                   SET lt.amount = ROUND(lt.base_amount * lt.rate / 100, 2)
+                 WHERE h.status = 'draft'
+                   AND lt.amount <> ROUND(lt.base_amount * lt.rate / 100, 2)");
+            // The header total is the sum of its lines' non-VAT taxes. A
+            // manually punched figure (manual_tax_amount) is the user's own
+            // and stays exactly as typed.
+            db()->exec("UPDATE `$headTable` h
+                SET h.tax_amount = COALESCE((SELECT SUM(lt.amount) FROM jewellery_line_taxes lt
+                        WHERE lt.doc_type = '$docType' AND lt.doc_id = h.id
+                          AND lt.output_purpose <> 'vat_output'), 0)
+                WHERE h.status = 'draft' AND h.manual_tax_amount IS NULL");
+        }
+
+        // Orders keep no line-tax rows — their quote is recomputed wholesale
+        // on save — so the header is re-derived here from the same rule the
+        // engine uses: the levy is charged on metal + making, and the metal
+        // figure already carries the wastage.
+        if (!accounting_repair_table_exists('jewellery_orders')
+            || !accounting_repair_column_exists('jewellery_orders', 'sd_taxable_amount')) {
+            return;
+        }
+        $rateStmt = db()->query("SELECT company_id, rate FROM jewellery_taxes
+            WHERE output_purpose = 'spt_output' AND active = 1");
+        foreach ($rateStmt->fetchAll(PDO::FETCH_ASSOC) as $rateRow) {
+            $companyId = (int) $rateRow['company_id'];
+            $rate = (float) $rateRow['rate'];
+            db()->prepare("UPDATE jewellery_orders
+                    SET sd_taxable_amount = ROUND(metal_amount + making_amount, 2),
+                        tax_amount = ROUND((metal_amount + making_amount) * :rate / 100, 2)
+                  WHERE company_id = :cid
+                    AND status IN ('draft', 'confirmed')
+                    AND manual_tax_amount IS NULL
+                    AND ABS(sd_taxable_amount - ROUND(metal_amount + making_amount, 2)) > 0.005")
+                ->execute(['rate' => $rate, 'cid' => $companyId]);
+        }
+    });
+
     $run('Item category master (migration 086)', static function (): void {
         db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_item_categories` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
