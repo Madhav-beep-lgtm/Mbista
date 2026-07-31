@@ -3237,5 +3237,20 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('One issue, several things in hand (migration 103)', static function (): void {
+        // Gold and the diamonds set into it go out together in one packet.
+        // Stones total apart from metal and carry NO fine weight — running a
+        // fine calculation over them would credit the kaligad with pure metal
+        // he never held and understate his wastage by exactly their weight.
+        if (!accounting_repair_table_exists('jewellery_order_assignments')) {
+            return;
+        }
+        accounting_repair_run_migration_file('103_assignment_components.sql', ['jewellery_assignment_components']);
+        accounting_repair_add_column('jewellery_order_assignments', 'issued_stone_carat',
+            '`issued_stone_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `issued_fine_weight`');
+        accounting_repair_add_column('jewellery_order_assignments', 'issued_stone_amount',
+            '`issued_stone_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `issued_stone_carat`');
+    });
+
     return $errors;
 }

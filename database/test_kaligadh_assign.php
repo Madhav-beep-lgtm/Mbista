@@ -271,6 +271,38 @@ ok($exportedOutput['Remarks'] === 'Self order — ready to sale, showroom stock 
     'And carries the remark the screen shows');
 
 // ---------------------------------------------------------------------------
+echo "\n8. Gold and the stones set into it, on one issue and never mixed\n";
+// ---------------------------------------------------------------------------
+// The arithmetic that must never fold a diamond into a weight of gold, read in
+// one place. A stone's purity is the masters' standard 1000, so its stock fine
+// equals its carats — which is right for the stone's own balance and wrong for
+// everything the kaligad is answerable for.
+$components = [
+    ['component_kind' => 'metal', 'gross_weight' => 10.0, 'fine_weight' => 9.16, 'qty_carat' => 0.0, 'amount' => 91600.0],
+    ['component_kind' => 'metal', 'gross_weight' => 5.0, 'fine_weight' => 4.58, 'qty_carat' => 0.0, 'amount' => 45800.0],
+    ['component_kind' => 'stone', 'gross_weight' => 3.0, 'fine_weight' => 0.0, 'qty_carat' => 3.0, 'amount' => 30000.0],
+];
+$totals = jewellery_component_totals($components);
+ok($totals['metal_lines'] === 2 && $totals['stone_lines'] === 1, 'Two pieces of metal and one packet of stones are counted apart');
+ok(near($totals['metal_fine'], 13.74), 'The fine is the metal only — 9.16 + 4.58');
+ok(near($totals['metal_gross'], 15.0), 'And so is the gross weight');
+ok(near($totals['stone_carat'], 3.0), 'The stones total in carats, on their own');
+ok(near($totals['metal_amount'], 137400.0) && near($totals['stone_amount'], 30000.0),
+    'Each side carries its own value');
+
+$stonesOnly = jewellery_component_totals([$components[2]]);
+ok(near($stonesOnly['metal_fine'], 0.0) && near($stonesOnly['metal_gross'], 0.0),
+    'An issue of nothing but stones puts no fine gold on the kaligad at all');
+ok(near($stonesOnly['stone_carat'], 3.0), 'Though he is holding the stones');
+ok(jewellery_component_totals([])['metal_lines'] === 0, 'An issue with nothing on it totals to nothing');
+
+// A component row that forgot to say which it is counts as metal, because that
+// is what an issue was before stones could be put on one.
+$untyped = jewellery_component_totals([['gross_weight' => 2.0, 'fine_weight' => 1.83, 'amount' => 100.0]]);
+ok($untyped['metal_lines'] === 1 && near($untyped['metal_fine'], 1.83),
+    'A row with no kind counts as metal, which is what every issue used to be');
+
+// ---------------------------------------------------------------------------
 echo "\n" . str_repeat('-', 60) . "\n";
 echo "  $pass passed, $fail failed\n";
 exit($fail === 0 ? 0 : 1);

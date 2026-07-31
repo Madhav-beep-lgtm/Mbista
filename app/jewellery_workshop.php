@@ -327,11 +327,23 @@ function jewellery_karigar_position(int $companyId, int $karigarId, string $asOf
  */
 function jewellery_holder_metal_position(int $companyId, string $holderType, int $holderId, string $asOf = ''): array
 {
-    $sql = "SELECT direction, unit_id, fine_weight, amount FROM jewellery_stock_txns
-        WHERE company_id = :cid AND holder_type = :ht AND holder_id = :hid";
+    // A stone is not metal, and the fine figure is a METAL accountability: it
+    // is what the wastage on a round trip is measured against. A diamond's
+    // purity is the masters' standard 1000, so its "fine" equals its carats —
+    // add those in and a kaligad holding three carats looks to be holding
+    // 0.6 g of gold he was never given, and owes wastage on it.
+    //
+    // The VALUE still counts them. He really is holding the shop's diamonds,
+    // and that is a real receivable whatever they are made of.
+    $sql = "SELECT t.direction, t.unit_id, t.fine_weight, t.amount,
+            COALESCE(m.metal_kind, 'metal') AS metal_kind
+        FROM jewellery_stock_txns t
+        LEFT JOIN jewellery_item_profiles j ON j.inventory_item_id = t.item_id
+        LEFT JOIN jewellery_metals m ON m.id = j.metal_id
+        WHERE t.company_id = :cid AND t.holder_type = :ht AND t.holder_id = :hid";
     $params = ['cid' => $companyId, 'ht' => $holderType, 'hid' => $holderId];
     if ($asOf !== '') {
-        $sql .= ' AND txn_date <= :d';
+        $sql .= ' AND t.txn_date <= :d';
         $params['d'] = $asOf;
     }
     $stmt = db()->prepare($sql);
@@ -341,14 +353,23 @@ function jewellery_holder_metal_position(int $companyId, string $holderType, int
     $baseUnit = jewellery_base_unit($companyId);
     $fine = 0.0;
     $value = 0.0;
+    $stoneCarat = 0.0;
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $sign = (string) $row['direction'] === 'in' ? 1 : -1;
-        $fine += $sign * jw_weight_in_base((float) $row['fine_weight'], (int) $row['unit_id'], $unitMap, $baseUnit);
         $value += $sign * (float) $row['amount'];
+        if ((string) $row['metal_kind'] === 'stone') {
+            // Carats, in their own column, counted in the unit they were
+            // weighed in — never folded into a weight of gold.
+            $stoneCarat += $sign * (float) $row['fine_weight']
+                * (($unitMap[(int) $row['unit_id']]['grams'] ?? 0.2) / 0.2);
+            continue;
+        }
+        $fine += $sign * jw_weight_in_base((float) $row['fine_weight'], (int) $row['unit_id'], $unitMap, $baseUnit);
     }
 
     return [
         'fine_weight' => jw_round_weight($fine),
+        'stone_carat' => jw_round_weight($stoneCarat),
         'metal_value' => jw_round_money($value),
         'base_unit' => $baseUnit,
     ];

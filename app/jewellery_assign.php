@@ -493,6 +493,242 @@ function jewellery_assign_export_rows(array $rows, string $kind, string $currenc
     return $out;
 }
 
+// ---------------------------------------------------------------------------
+// Issue components — one issue, several things in the kaligad's hand
+// ---------------------------------------------------------------------------
+
+/** Everything handed over on one issue, in the order it went. */
+function jewellery_assignment_components(int $companyId, int $assignmentId): array
+{
+    if (!table_exists('jewellery_assignment_components')) {
+        return [];
+    }
+    $stmt = db()->prepare('SELECT c.*, i.sku AS item_code, i.name AS item_name,
+            m.code AS metal_code, m.name AS metal_name,
+            p.code AS purity_code, p.fineness, u.code AS unit_code, u.grams AS unit_grams
+        FROM jewellery_assignment_components c
+        INNER JOIN inventory_items i ON i.id = c.item_id
+        LEFT JOIN jewellery_item_profiles ip ON ip.inventory_item_id = i.id
+        LEFT JOIN jewellery_metals m ON m.id = ip.metal_id
+        LEFT JOIN jewellery_purities p ON p.id = c.purity_id
+        LEFT JOIN jewellery_units u ON u.id = c.unit_id
+        WHERE c.company_id = :cid AND c.assignment_id = :aid
+        ORDER BY c.id ASC');
+    $stmt->execute(['cid' => $companyId, 'aid' => $assignmentId]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Hand one thing over on an issue — a bar of gold, or a packet of diamonds.
+ *
+ * The metal path is the existing instalment issue, unchanged: the stock moves,
+ * a voucher hangs off the movement, and the header's issued fine grows. What is
+ * new is that the item, purity and unit come from the COMPONENT rather than
+ * from the assignment header, so one issue can carry gold at 22K and diamonds
+ * in carats without either pretending to be the other.
+ *
+ * A stone carries no fine weight, and its carats never touch issued_fine_weight
+ * — see migration 103. It totals into the header's own stone columns instead.
+ */
+function jewellery_issue_component(int $companyId, int $fiscalYearId, int $assignmentId, array $input, int $userId = 0): array
+{
+    if (!table_exists('jewellery_assignment_components')) {
+        return ['ok' => false, 'error' => 'This database has not been upgraded to carry issue components yet. Run the accounting repair first.'];
+    }
+    $assignment = jewellery_assignment($companyId, $assignmentId);
+    if (!$assignment) {
+        return ['ok' => false, 'error' => 'Assignment not found for this company.'];
+    }
+    if ((string) $assignment['status'] !== 'issued') {
+        return ['ok' => false, 'error' => 'This assignment has already been received or cancelled — nothing more can be handed over on it.'];
+    }
+
+    $item = jewellery_item($companyId, (int) ($input['item_id'] ?? 0));
+    if (!$item) {
+        return ['ok' => false, 'error' => 'Choose an item that belongs to this company.'];
+    }
+    $karigar = jewellery_karigar($companyId, (int) $assignment['karigar_id']);
+    if (!$karigar) {
+        return ['ok' => false, 'error' => 'That assignment points at a kaligad this company does not have.'];
+    }
+
+    // The masters already know a diamond from a bar of gold. Asking the person
+    // as well would only let the two disagree.
+    $isStone = (string) ($item['metal_kind'] ?? 'metal') === 'stone';
+    $purityId = (int) ($input['purity_id'] ?? 0) ?: (int) ($item['purity_id'] ?? 0);
+    $purity = jewellery_purity($companyId, $purityId);
+    if (!$purity) {
+        return ['ok' => false, 'error' => 'Choose the purity this is being handed over at.'];
+    }
+    if ((int) $purity['metal_id'] !== (int) ($item['metal_id'] ?? 0)) {
+        return ['ok' => false, 'error' => 'The purity must belong to the item\'s own metal.'];
+    }
+    $unitId = (int) ($input['unit_id'] ?? 0) ?: (int) ($item['unit_id'] ?? 0);
+    $unit = jewellery_unit($companyId, $unitId);
+    if (!$unit) {
+        return ['ok' => false, 'error' => 'Choose the unit this is weighed in.'];
+    }
+
+    $gross = jw_round_weight((float) ($input['gross_weight'] ?? 0));
+    if ($gross <= 0) {
+        return ['ok' => false, 'error' => 'Enter the weight being handed over.'];
+    }
+    // Stones are weighed in carats; the carat figure is kept beside the weight
+    // so what went out and what comes back can be compared in one unit.
+    $carat = $isStone ? jw_round_weight($gross * ((float) $unit['grams'] / 0.2)) : 0.0;
+
+    // TWO fine weights, and the difference is the whole point.
+    //
+    // The STOCK ledger gets the natural one. A stone's purity is the masters'
+    // standard 1000, so its fine equals its weight — and it has to, or issuing
+    // a diamond out would leave the diamond item's own balance overstated by
+    // exactly what left the safe.
+    //
+    // The ASSIGNMENT HEADER gets fine gold only. issued_fine_weight is the base
+    // every wastage calculation reads, and stones do not waste: counting them
+    // would credit the kaligad with pure metal he never held.
+    $stockFine = jw_fine_weight($gross, (float) $purity['fineness']);
+    $fine = $isStone ? 0.0 : $stockFine;
+
+    $issueDate = (string) ($input['issue_date'] ?? date('Y-m-d'));
+    $balance = jw_item_balance($companyId, (int) $item['id'], $issueDate, '');
+    // Valued the same way for both, on the stock fine — which for a stone is
+    // its carats, so the average rate is a rate per carat.
+    $amount = jw_round_money($stockFine * (float) $balance['avg_fine_rate']);
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        $no = (string) $assignment['issue_no'];
+        $common = [
+            'item_id' => (int) $item['id'], 'txn_type' => 'issue_karigar', 'txn_date' => $issueDate, 'ref_no' => $no,
+            'purity_id' => $purityId, 'unit_id' => $unitId,
+            'gross_weight' => $gross, 'fine_weight' => $stockFine, 'amount' => $amount,
+            'source_type' => 'jewellery_karigar_issue', 'source_id' => $assignmentId,
+            'voucher_id' => null, 'created_by' => $userId,
+        ];
+        $outId = jw_record_stock_txn($companyId, $common + ['direction' => 'out', 'holder_type' => 'stock']);
+        $inId = jw_record_stock_txn($companyId, $common + ['direction' => 'in',
+            'holder_type' => 'karigar', 'holder_id' => (int) $assignment['karigar_id']]);
+
+        // Same posting as any other hand-over: the value moves from own stock
+        // to what the kaligad is holding. Sourced on the OUT movement, which is
+        // unique per component — the assignment id is already claimed by the
+        // first instalment's voucher.
+        $voucherId = null;
+        $karigarLedgerId = jw_karigar_metal_ledger_id($companyId, $karigar);
+        $ownStockLedgerId = jw_item_stock_ledger_id($companyId, $item);
+        if ($amount > 0 && $karigarLedgerId > 0 && $ownStockLedgerId > 0) {
+            $entries = jw_build_entries([
+                ['ledger_id' => $karigarLedgerId, 'amount' => $amount, 'memo' => ($isStone ? 'Stones' : 'Metal') . ' with ' . $karigar['code']],
+                ['ledger_id' => $ownStockLedgerId, 'amount' => -$amount, 'memo' => 'Issued to kaligad ' . $karigar['code']],
+            ]);
+            if ($entries !== []) {
+                $voucherId = create_voucher_with_entries([
+                    'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
+                    'voucher_no' => $no . '/' . $outId,
+                    'voucher_type' => 'journal', 'voucher_date' => $issueDate,
+                    'source_type' => 'jewellery_karigar_issue_add', 'source_id' => $outId,
+                    'party_id' => (int) ($karigar['party_id'] ?? 0) ?: null,
+                    'narration' => ($isStone ? 'Stones' : 'Metal') . ' issued to kaligad ' . $karigar['name'] . ' (' . $no . ')',
+                    'total_amount' => $amount, 'status' => 'posted', 'posted_by' => $userId ?: null,
+                ], $entries);
+                db()->prepare('UPDATE jewellery_stock_txns SET voucher_id = :v WHERE id IN (:o, :i)')
+                    ->execute(['v' => $voucherId, 'o' => $outId, 'i' => $inId]);
+            }
+        }
+
+        db()->prepare('INSERT INTO jewellery_assignment_components
+                (company_id, assignment_id, item_id, component_kind, purity_id, unit_id,
+                 gross_weight, fine_weight, qty_carat, rate, amount, issue_date,
+                 stock_txn_out, stock_txn_in, voucher_id, notes, created_by)
+                VALUES (:cid, :aid, :item, :kind, :purity, :unit,
+                 :gross, :fine, :carat, :rate, :amount, :idate, :o, :i, :v, :notes, :uid)')
+            ->execute([
+                'cid' => $companyId, 'aid' => $assignmentId, 'item' => (int) $item['id'],
+                'kind' => $isStone ? 'stone' : 'metal', 'purity' => $purityId, 'unit' => $unitId,
+                'gross' => $gross, 'fine' => $fine, 'carat' => $carat,
+                'rate' => $gross > 0 ? jw_round_rate($amount / $gross) : 0.0, 'amount' => $amount,
+                'idate' => $issueDate, 'o' => $outId, 'i' => $inId, 'v' => $voucherId,
+                'notes' => trim((string) ($input['notes'] ?? '')) ?: null, 'uid' => $userId ?: null,
+            ]);
+
+        // Metal grows the fine the kaligad is answerable for; stones grow their
+        // own total and touch no fine weight at all.
+        db()->prepare('UPDATE jewellery_order_assignments
+                SET issued_gross_weight = issued_gross_weight + :gross,
+                    issued_fine_weight = issued_fine_weight + :fine,
+                    issued_stone_carat = issued_stone_carat + :carat,
+                    issued_stone_amount = issued_stone_amount + :stone_amount,
+                    issued_amount = issued_amount + :metal_amount,
+                    issue_stock_txn_out = COALESCE(issue_stock_txn_out, :o),
+                    issue_stock_txn_in = COALESCE(issue_stock_txn_in, :i),
+                    issue_voucher_id = COALESCE(issue_voucher_id, :v)
+                WHERE id = :id AND company_id = :cid')
+            ->execute([
+                'gross' => $isStone ? 0 : $gross,
+                'fine' => $fine,
+                'carat' => $carat,
+                'stone_amount' => $isStone ? $amount : 0,
+                'metal_amount' => $isStone ? 0 : $amount,
+                'o' => $outId, 'i' => $inId, 'v' => $voucherId,
+                'id' => $assignmentId, 'cid' => $companyId,
+            ]);
+
+        log_activity('jewellery_assignment', $assignmentId, 'component_issued',
+            ($isStone ? 'Stones' : 'Metal') . ' issued on ' . $no . ': ' . number_format($gross, 4) . ' ' . (string) $unit['code'], $userId ?: null);
+
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+
+        return ['ok' => false, 'error' => $exception->getMessage()];
+    }
+
+    return ['ok' => true, 'error' => '', 'assignment_id' => $assignmentId,
+        'kind' => $isStone ? 'stone' : 'metal', 'fine_weight' => $fine,
+        'qty_carat' => $carat, 'amount' => $amount];
+}
+
+/**
+ * What one issue is holding, metal and stones apart.
+ *
+ * Pure: it is handed the components, so the arithmetic that must never mix the
+ * two can be read and tested in one place.
+ */
+function jewellery_component_totals(array $components): array
+{
+    $totals = ['metal_gross' => 0.0, 'metal_fine' => 0.0, 'metal_amount' => 0.0,
+        'stone_carat' => 0.0, 'stone_amount' => 0.0, 'metal_lines' => 0, 'stone_lines' => 0];
+    foreach ($components as $component) {
+        if ((string) ($component['component_kind'] ?? 'metal') === 'stone') {
+            $totals['stone_lines']++;
+            $totals['stone_carat'] += (float) ($component['qty_carat'] ?? 0);
+            $totals['stone_amount'] += (float) ($component['amount'] ?? 0);
+            continue;
+        }
+        $totals['metal_lines']++;
+        $totals['metal_gross'] += (float) ($component['gross_weight'] ?? 0);
+        $totals['metal_fine'] += (float) ($component['fine_weight'] ?? 0);
+        $totals['metal_amount'] += (float) ($component['amount'] ?? 0);
+    }
+    foreach (['metal_gross', 'metal_fine', 'stone_carat'] as $key) {
+        $totals[$key] = round($totals[$key], 4);
+    }
+    foreach (['metal_amount', 'stone_amount'] as $key) {
+        $totals[$key] = round($totals[$key], 2);
+    }
+
+    return $totals;
+}
+
 /**
  * Pieces made for the showroom that have come back and are now sellable.
  *
