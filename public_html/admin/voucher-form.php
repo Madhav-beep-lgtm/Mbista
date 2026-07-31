@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/voucher_types.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -21,21 +22,35 @@ $userId = (int) ($currentUser['id'] ?? 0);
 $currency = site_currency_symbol();
 $hasVoucherApprovals = column_exists('vouchers', 'approval_state');
 $hasFormMeta = column_exists('vouchers', 'priority');
+$hasTypeMeta = column_exists('vouchers', 'reference_date');
 
-$formTypes = [
-    'journal' => 'Journal Voucher', 'payment' => 'Payment Voucher', 'receipt' => 'Receipt Voucher',
-    'sales' => 'Sales Voucher', 'purchase' => 'Purchase Voucher', 'contra' => 'Contra Voucher',
-    'debit_note' => 'Debit Note', 'credit_note' => 'Credit Note',
-];
+$voucherTypes = voucher_type_catalog();
 $departments = ['Accounts & Finance', 'Administration', 'Operations', 'Consulting', 'Training', 'Sales & Marketing'];
 $locations = ['Head Office', 'Branch Office', 'Client Site'];
 $costCentres = ['General', 'Accounting Services', 'Advisory', 'Training', 'Administration'];
 $paymentTermsOptions = ['Due on receipt', 'Net 7', 'Net 15', 'Net 30', 'Net 45', 'Advance'];
-$taxCategories = ['Standard VAT 13%', 'VAT Exempt', 'Zero Rated', 'No Tax'];
-$prefillType = isset($formTypes[(string) ($_GET['type'] ?? '')]) ? (string) $_GET['type'] : 'journal';
+
+/**
+ * The party ledger a trade voucher settles against, creating it under Trade
+ * Receivables / Trade Payables if this is the party's first document.
+ */
+$resolvePartyLedger = static function (int $companyId, int $partyId, string $side): int {
+    if ($partyId <= 0) {
+        return 0;
+    }
+    $ledgerId = function_exists('ensure_party_ledger') ? ensure_party_ledger($companyId, $partyId, $side) : 0;
+    if ($ledgerId > 0) {
+        return $ledgerId;
+    }
+    // No per-party ledger could be made — the generic AR/AP ledger still holds
+    // the balance, which is where this system kept it before parties existed.
+    $fallback = get_mapped_ledger($companyId, $side === 'payable' ? 'default_accounts_payable' : 'default_accounts_receivable');
+
+    return (int) ($fallback['id'] ?? 0);
+};
 
 // ---------------------------------------------------------------------------
-// Submit handler: Save as Draft or Submit for Approval / Post.
+// Submit: compose the entries this type implies, then save or post.
 // ---------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
@@ -48,6 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash('error', 'The fiscal-year context changed after this form was opened (' . ($staleFy['label'] ?? '#' . $formContextFy) . ' → ' . ($fiscalYear['label'] ?? '#' . $fiscalYearId) . '), possibly from another browser tab. Nothing was saved — please review the form and submit again.');
         redirect('admin/voucher-form.php');
     }
+
     $editVoucherId = (int) ($_POST['voucher_id'] ?? 0);
     if ($editVoucherId > 0) {
         if (!user_can('edit')) {
@@ -63,8 +79,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('accounting', 'create');
     }
 
+    $existingVoucher = null;
+    if ($editVoucherId > 0) {
+        $existingStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $existingStmt->execute(['id' => $editVoucherId, 'company_id' => $companyId]);
+        $existingVoucher = $existingStmt->fetch() ?: null;
+        if (!$existingVoucher) {
+            flash('error', 'Voucher not found for this company.');
+            redirect('admin/accounting.php');
+        }
+        $blocker = voucher_mutation_blocker($existingVoucher);
+        if ($blocker !== null) {
+            flash('error', $blocker);
+            redirect('admin/accounting.php');
+        }
+    }
+
+    // The type is fixed once a voucher carries a number from that type's
+    // series: a payment renumbered as a journal would leave a hole in one
+    // series and a stranger in the other.
+    $voucherType = $existingVoucher !== null
+        ? (string) $existingVoucher['voucher_type']
+        : (string) ($_POST['voucher_type'] ?? 'journal');
+    if (!voucher_type_exists($voucherType)) {
+        flash('error', 'Select a valid voucher type.');
+        redirect('admin/voucher-form.php');
+    }
+    $spec = voucher_type_spec($voucherType);
+
     $saveMode = (string) ($_POST['save_mode'] ?? 'submit');
-    $voucherType = (string) ($_POST['voucher_type'] ?? 'journal');
+    $isDraft = $saveMode === 'draft';
+    $formReturnUrl = $editVoucherId > 0 ? 'admin/voucher-form.php?edit=' . $editVoucherId : voucher_type_url($voucherType);
+
     $voucherDate = (string) ($_POST['voucher_date'] ?? date('Y-m-d'));
     $postingDate = (string) ($_POST['posting_date'] ?? $voucherDate);
     $narration = trim((string) ($_POST['narration'] ?? ''));
@@ -75,88 +121,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $location = in_array((string) ($_POST['location'] ?? ''), $locations, true) ? (string) $_POST['location'] : null;
     $costCentre = in_array((string) ($_POST['cost_centre'] ?? ''), $costCentres, true) ? (string) $_POST['cost_centre'] : null;
     $paymentTerms = in_array((string) ($_POST['payment_terms'] ?? ''), $paymentTermsOptions, true) ? (string) $_POST['payment_terms'] : null;
-    $taxCategory = in_array((string) ($_POST['tax_category'] ?? ''), $taxCategories, true) ? (string) $_POST['tax_category'] : null;
-    $dueDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($_POST['due_date'] ?? '')) ? (string) $_POST['due_date'] : null;
+    $dueDate = voucher_date_or_null((string) ($_POST['due_date'] ?? ''));
     $exchangeRate = max(0.0001, round((float) ($_POST['exchange_rate'] ?? 1), 4));
+    $referenceNo = substr(trim((string) ($_POST['reference_no'] ?? '')), 0, 120);
 
-    $formReturnUrl = $editVoucherId > 0 ? 'admin/voucher-form.php?edit=' . $editVoucherId : 'admin/voucher-form.php?type=' . $voucherType;
+    // Anything rejected below comes back typed in, not blank.
+    $_SESSION['voucher_retry'] = ['type' => $voucherType, 'input' => $_POST];
 
-    if (!isset($formTypes[$voucherType])) {
-        flash('error', 'Select a valid form type.');
-        redirect('admin/voucher-form.php');
-    }
+    $problems = [];
     if ($title === '') {
-        flash('error', 'Title / description is required.');
-        redirect($formReturnUrl);
+        $problems[] = 'Give the voucher a title — it is what the register shows.';
     }
     if (is_period_locked($companyId, $fiscalYearId, $voucherDate !== '' ? $voucherDate : date('Y-m-d'))) {
-        flash('error', 'This transaction date is inside a locked accounting period.');
-        redirect($formReturnUrl);
+        $problems[] = 'This transaction date is inside a locked accounting period.';
     }
 
-    // Entry lines — same validation contract as the classic voucher form.
-    $ledgerIds = $_POST['ledger_id'] ?? [];
-    $entryTypes = $_POST['entry_type'] ?? [];
-    $amounts = $_POST['amount'] ?? [];
-    $memos = $_POST['memo'] ?? [];
-    $lineCostCentres = $_POST['line_cost_centre'] ?? [];
-    $lineTaxes = $_POST['line_tax'] ?? [];
-    $lineReferences = $_POST['line_reference'] ?? [];
+    $ledgerDirectory = voucher_ledger_directory($companyId);
 
-    $entries = [];
+    // A trade voucher settles either against the party's own ledger or against
+    // cash. The party ledger is resolved here, where the database lives, so the
+    // composer stays pure.
+    $composeInput = $_POST;
+    if ((string) $spec['layout'] === 'trade') {
+        $settlementMode = (string) ($_POST['settlement_mode'] ?? 'party') === 'cash' ? 'cash' : 'party';
+        $composeInput['settlement_mode'] = $settlementMode;
+        if ($settlementMode === 'party') {
+            $partyLedgerId = $resolvePartyLedger($companyId, $partyId, (string) $spec['party_ledger_side']);
+            $composeInput['settlement_ledger_id'] = $partyLedgerId;
+            if ($partyLedgerId > 0 && !isset($ledgerDirectory[$partyLedgerId])) {
+                // ensure_party_ledger may have just created it.
+                $ledgerDirectory = voucher_ledger_directory($companyId);
+            }
+        }
+    }
+
+    $composed = voucher_compose($voucherType, $composeInput, $ledgerDirectory, $isDraft);
+    $problems = array_merge($problems, $composed['errors']);
+    $entries = $composed['entries'];
+    if ($problems === [] && $entries === []) {
+        $problems[] = $isDraft
+            ? 'There is nothing on this voucher to save yet.'
+            : 'This voucher has no lines to post.';
+    }
+    if ($problems !== []) {
+        flash('error', $spec['label'] . ' not saved. ' . implode(' ', $problems));
+        redirect($formReturnUrl);
+    }
+    unset($_SESSION['voucher_retry']);
+
     $debitTotal = 0.0;
-    $creditTotal = 0.0;
-    $cashBankViolation = false;
-    foreach ($ledgerIds as $index => $ledgerIdRaw) {
-        $ledgerId = (int) $ledgerIdRaw;
-        $entryType = (string) ($entryTypes[$index] ?? '');
-        $amount = round((float) ($amounts[$index] ?? 0), 2);
-        if ($ledgerId <= 0 || $amount <= 0 || !in_array($entryType, ['debit', 'credit'], true)) {
-            continue;
-        }
-        $ledgerCheck = db()->prepare("SELECT l.id, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank
-            FROM ledgers l LEFT JOIN ledger_groups g ON g.id = l.group_id
-            WHERE l.id = :id AND l.company_id = :company_id AND l.status = 'active' LIMIT 1");
-        $ledgerCheck->execute(['id' => $ledgerId, 'company_id' => $companyId]);
-        $ledgerRow = $ledgerCheck->fetch();
-        if (!$ledgerRow) {
-            continue;
-        }
-        $isCashOrBank = (int) $ledgerRow['is_cash_or_bank'] === 1;
-        $mustBeCashOrBank = $voucherType === 'contra'
-            || ($voucherType === 'payment' && $entryType === 'credit')
-            || ($voucherType === 'receipt' && $entryType === 'debit');
-        if ($mustBeCashOrBank && !$isCashOrBank) {
-            $cashBankViolation = true;
-        }
-        $entries[] = [
-            'ledger_id' => $ledgerId,
-            'entry_type' => $entryType,
-            'amount' => $amount,
-            'memo' => trim((string) ($memos[$index] ?? '')),
-            'cost_centre' => trim((string) ($lineCostCentres[$index] ?? '')),
-            'tax_code' => trim((string) ($lineTaxes[$index] ?? '')),
-            'line_reference' => trim((string) ($lineReferences[$index] ?? '')),
-        ];
-        if ($entryType === 'debit') {
-            $debitTotal += $amount;
-        } else {
-            $creditTotal += $amount;
+    foreach ($entries as $entry) {
+        if ($entry['entry_type'] === 'debit') {
+            $debitTotal += (float) $entry['amount'];
         }
     }
-    if ($cashBankViolation) {
-        flash('error', 'Payment, receipt, and contra vouchers can only use ledgers created under a Bank/Cash group.');
-        redirect($formReturnUrl);
-    }
-    $isDraft = $saveMode === 'draft';
-    if ($isDraft && $entries === []) {
-        flash('error', 'Add at least one ledger line before saving a draft.');
-        redirect($formReturnUrl);
-    }
-    if (!$isDraft && (count($entries) < 2 || round($debitTotal, 2) !== round($creditTotal, 2))) {
-        flash('error', 'The voucher needs at least two ledger lines and total debit must equal total credit.');
-        redirect($formReturnUrl);
-    }
+    $totalAmount = round(max($debitTotal, (float) $composed['total']), 2);
 
     // Staff accountants in a client's books never self-post — see accounting.php.
     $staffForcedApproval = $hasVoucherApprovals && staff_accountant_forces_approval();
@@ -166,22 +185,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $newStatus = $isDraft ? 'draft' : ($needsApproval ? 'draft' : 'posted');
     $newApprovalState = $isDraft ? 'draft' : ($needsApproval ? 'pending_approval' : 'approved');
 
+    $typeMeta = array_merge([
+        'reference_date' => null,
+        'instrument_type' => null,
+        'instrument_no' => null,
+        'instrument_date' => null,
+        'return_reason' => null,
+    ], $composed['header']);
+
     try {
         if ($editVoucherId > 0) {
             // === Edit: replace the header and lines, keep voucher_no and the
             // source link so auto-post idempotency (UNIQUE source) still holds.
-            $existingStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :company_id LIMIT 1');
-            $existingStmt->execute(['id' => $editVoucherId, 'company_id' => $companyId]);
-            $existingVoucher = $existingStmt->fetch();
-            if (!$existingVoucher) {
-                flash('error', 'Voucher not found for this company.');
-                redirect('admin/accounting.php');
-            }
-            $blocker = voucher_mutation_blocker($existingVoucher);
-            if ($blocker !== null) {
-                flash('error', $blocker);
-                redirect('admin/accounting.php');
-            }
             $voucherNo = (string) $existingVoucher['voucher_no'];
 
             // The transaction DATE decides the fiscal year. Re-derive it exactly
@@ -210,15 +225,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $updateSql = 'UPDATE vouchers SET voucher_type = :voucher_type, voucher_date = :voucher_date, fiscal_year_id = :fiscal_year_id, narration = :narration, total_amount = :total_amount, status = :status';
             $updateParams = [
                 'voucher_type' => $voucherType,
-                'voucher_date' => $voucherDate !== '' ? $voucherDate : date('Y-m-d'),
+                'voucher_date' => $editVoucherDate,
                 'fiscal_year_id' => $editFiscalYearId,
                 'narration' => $fullNarration,
-                'total_amount' => $debitTotal,
+                'total_amount' => $totalAmount,
                 'status' => $newStatus,
             ];
             if (column_exists('vouchers', 'party_id')) {
                 $updateSql .= ', party_id = :party_id';
                 $updateParams['party_id'] = $partyId > 0 ? $partyId : null;
+            }
+            if (column_exists('vouchers', 'reference_no')) {
+                $updateSql .= ', reference_no = :reference_no';
+                $updateParams['reference_no'] = $referenceNo !== '' ? $referenceNo : null;
             }
             if ($hasVoucherApprovals) {
                 $updateSql .= ', approval_state = :approval_state, approved_by = :approved_by, approved_at = :approved_at, posted_by = :posted_by, posted_at = :posted_at, rejection_reason = NULL';
@@ -250,32 +269,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->commit();
             $voucherId = $editVoucherId;
         } else {
-            $voucherNo = strtoupper(substr($voucherType, 0, 2)) . '-' . date('Ymd-His');
-            $voucherId = create_voucher_with_entries([
-                'company_id' => $companyId,
-                'fiscal_year_id' => $fiscalYearId,
-                'voucher_no' => $voucherNo,
-                'voucher_type' => $voucherType,
-                'source_type' => 'voucher_form',
-                'source_id' => null,
-                'party_id' => $partyId > 0 ? $partyId : null,
-                'reference_no' => null,
-                'voucher_date' => $voucherDate !== '' ? $voucherDate : date('Y-m-d'),
-                'narration' => $fullNarration,
-                'total_amount' => $debitTotal,
-                'status' => $newStatus,
-                'approval_state' => $newApprovalState,
-                'submitted_by' => $userId,
-                'approved_by' => (!$isDraft && !$needsApproval) ? $userId : null,
-                'approved_at' => (!$isDraft && !$needsApproval) ? date('Y-m-d H:i:s') : null,
-                'posted_by' => (!$isDraft && !$needsApproval) ? $userId : null,
-                'posted_at' => (!$isDraft && !$needsApproval) ? date('Y-m-d H:i:s') : null,
-            ], array_map(static fn (array $entry): array => [
-                'ledger_id' => $entry['ledger_id'],
-                'entry_type' => $entry['entry_type'],
-                'amount' => $entry['amount'],
-                'memo' => $entry['memo'],
-            ], $entries));
+            // voucher_no is UNIQUE per company: two people saving a payment in
+            // the same second means one INSERT loses, and takes the next number.
+            $voucherId = 0;
+            $voucherNo = '';
+            for ($attempt = 0; $attempt < 5; $attempt++) {
+                $voucherNo = voucher_next_number($companyId, $fiscalYearId, $voucherType, $attempt);
+                try {
+                    $voucherId = create_voucher_with_entries([
+                        'company_id' => $companyId,
+                        'fiscal_year_id' => $fiscalYearId,
+                        'voucher_no' => $voucherNo,
+                        'voucher_type' => $voucherType,
+                        'source_type' => 'voucher_form',
+                        'source_id' => null,
+                        'party_id' => $partyId > 0 ? $partyId : null,
+                        'reference_no' => $referenceNo !== '' ? $referenceNo : null,
+                        'voucher_date' => $voucherDate !== '' ? $voucherDate : date('Y-m-d'),
+                        'narration' => $fullNarration,
+                        'total_amount' => $totalAmount,
+                        'status' => $newStatus,
+                        'approval_state' => $newApprovalState,
+                        'submitted_by' => $userId,
+                        'approved_by' => (!$isDraft && !$needsApproval) ? $userId : null,
+                        'approved_at' => (!$isDraft && !$needsApproval) ? date('Y-m-d H:i:s') : null,
+                        'posted_by' => (!$isDraft && !$needsApproval) ? $userId : null,
+                        'posted_at' => (!$isDraft && !$needsApproval) ? date('Y-m-d H:i:s') : null,
+                    ], array_map(static fn (array $entry): array => [
+                        'ledger_id' => $entry['ledger_id'],
+                        'entry_type' => $entry['entry_type'],
+                        'amount' => $entry['amount'],
+                        'memo' => $entry['memo'],
+                    ], $entries));
+                    break;
+                } catch (PDOException $duplicate) {
+                    if ((string) $duplicate->getCode() !== '23000' || $attempt === 4) {
+                        throw $duplicate;
+                    }
+                }
+            }
         }
 
         if ($voucherId > 0 && !$isDraft && $staffForcedApproval) {
@@ -283,17 +315,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($voucherId > 0) {
             $eventAction = $editVoucherId > 0 ? 'voucher_edited' : 'voucher_posted';
-            security_event($eventAction, 'success', 'Voucher #' . $voucherId . ($editVoucherId > 0 ? ' edited via guided form.' : ($staffForcedApproval && !$isDraft ? ' submitted for client/admin approval via guided form.' : ' posted via guided form.')), $companyId, $userId);
+            security_event($eventAction, 'success', $spec['label'] . ' #' . $voucherId . ($editVoucherId > 0 ? ' edited.' : ($staffForcedApproval && !$isDraft ? ' submitted for client/admin approval.' : ' posted.')), $companyId, $userId);
+        }
+
+        if ($voucherId > 0 && $hasTypeMeta) {
+            db()->prepare('UPDATE vouchers SET reference_date = :reference_date, instrument_type = :instrument_type,
+                instrument_no = :instrument_no, instrument_date = :instrument_date, return_reason = :return_reason
+                WHERE id = :id AND company_id = :company_id')->execute([
+                'reference_date' => $typeMeta['reference_date'],
+                'instrument_type' => $typeMeta['instrument_type'],
+                'instrument_no' => $typeMeta['instrument_no'],
+                'instrument_date' => $typeMeta['instrument_date'],
+                'return_reason' => $typeMeta['return_reason'],
+                'id' => $voucherId,
+                'company_id' => $companyId,
+            ]);
         }
 
         if ($voucherId > 0 && $hasFormMeta) {
             db()->prepare('UPDATE vouchers SET priority = :priority, department = :department, location = :location,
                 cost_centre = :cost_centre, posting_date = :posting_date, due_date = :due_date,
-                payment_terms = :payment_terms, exchange_rate = :exchange_rate, tax_category = :tax_category
+                payment_terms = :payment_terms, exchange_rate = :exchange_rate
                 WHERE id = :id AND company_id = :company_id')->execute([
                 'priority' => $priority, 'department' => $department, 'location' => $location,
                 'cost_centre' => $costCentre, 'posting_date' => $postingDate ?: null, 'due_date' => $dueDate,
-                'payment_terms' => $paymentTerms, 'exchange_rate' => $exchangeRate, 'tax_category' => $taxCategory,
+                'payment_terms' => $paymentTerms, 'exchange_rate' => $exchangeRate,
                 'id' => $voucherId, 'company_id' => $companyId,
             ]);
             if (column_exists('voucher_entries', 'cost_centre')) {
@@ -345,31 +391,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $savedVerb = $isDraft ? ' saved as draft.' : ($needsApproval ? ' submitted for approval.' : ' posted.');
         if ($editVoucherId > 0) {
-            log_activity('voucher', $voucherId, 'voucher_edited', $formTypes[$voucherType] . ' ' . $voucherNo . ' edited and' . $savedVerb, $userId ?: null);
-            flash('success', $formTypes[$voucherType] . ' ' . $voucherNo . ' updated and' . $savedVerb);
+            log_activity('voucher', $voucherId, 'voucher_edited', $spec['label'] . ' ' . $voucherNo . ' edited and' . $savedVerb, $userId ?: null);
+            flash('success', $spec['label'] . ' ' . $voucherNo . ' updated and' . $savedVerb);
         } else {
-            log_activity('voucher', $voucherId, $isDraft ? 'voucher_draft_saved' : 'voucher_form_submitted', $formTypes[$voucherType] . ' ' . $voucherNo . $savedVerb, $userId ?: null);
-            flash('success', $isDraft
-                ? $formTypes[$voucherType] . ' saved as draft (' . $voucherNo . ').'
-                : ($needsApproval ? $formTypes[$voucherType] . ' submitted for approval (' . $voucherNo . ').' : $formTypes[$voucherType] . ' posted (' . $voucherNo . ').'));
+            log_activity('voucher', $voucherId, $isDraft ? 'voucher_draft_saved' : 'voucher_form_submitted', $spec['label'] . ' ' . $voucherNo . $savedVerb, $userId ?: null);
+            flash('success', $spec['label'] . ' ' . $voucherNo . $savedVerb);
+        }
+        if ($composed['warnings'] !== []) {
+            flash('info', implode(' ', $composed['warnings']));
         }
         redirect('admin/accounting.php');
     } catch (Throwable $exception) {
         if (db()->inTransaction()) {
             db()->rollBack();
         }
+        $_SESSION['voucher_retry'] = ['type' => $voucherType, 'input' => $_POST];
         flash('error', 'Could not save the voucher: ' . $exception->getMessage());
         redirect($formReturnUrl);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Edit mode: load an existing voucher (any status) into the form.
+// Edit mode: load an existing voucher (any status) into its own screen.
 // ---------------------------------------------------------------------------
 $editVoucher = null;
 $editEntries = [];
-$editTitle = '';
-$editNarration = '';
 $editId = (int) ($_GET['edit'] ?? 0);
 if ($editId > 0) {
     if (!user_can('edit')) {
@@ -391,8 +437,108 @@ if ($editId > 0) {
     $editEntriesStmt = db()->prepare('SELECT * FROM voucher_entries WHERE voucher_id = :id ORDER BY id ASC');
     $editEntriesStmt->execute(['id' => $editId]);
     $editEntries = $editEntriesStmt->fetchAll();
+}
 
-    $prefillType = isset($formTypes[(string) $editVoucher['voucher_type']]) ? (string) $editVoucher['voucher_type'] : $prefillType;
+$retry = $_SESSION['voucher_retry'] ?? null;
+unset($_SESSION['voucher_retry']);
+
+$type = 'journal';
+if ($editVoucher !== null && voucher_type_exists((string) $editVoucher['voucher_type'])) {
+    $type = (string) $editVoucher['voucher_type'];
+} elseif (is_array($retry) && voucher_type_exists((string) ($retry['type'] ?? ''))) {
+    $type = (string) $retry['type'];
+} elseif (voucher_type_exists((string) ($_GET['type'] ?? ''))) {
+    $type = (string) $_GET['type'];
+}
+$spec = voucher_type_spec($type);
+
+$ledgerDirectory = voucher_ledger_directory($companyId);
+$optionsAll = voucher_ledgers_for_role($ledgerDirectory, 'any');
+$optionsCashBank = voucher_ledgers_for_role($ledgerDirectory, 'cash_bank');
+$optionsTax = voucher_ledgers_for_role($ledgerDirectory, 'tax');
+$optionsValue = ($spec['layout'] ?? '') === 'trade'
+    ? voucher_ledgers_for_role($ledgerDirectory, (string) $spec['value_role'])
+    : $optionsAll;
+// Better an unfiltered list than an empty one: a company whose chart does not
+// use the seeded groups would otherwise see a dropdown with nothing in it.
+if ($optionsValue === []) {
+    $optionsValue = $optionsAll;
+}
+if ($optionsTax === []) {
+    $optionsTax = array_values(array_filter($optionsAll, static fn (array $ledger): bool => !empty($ledger['roles']['liability']) || !empty($ledger['roles']['tax'])));
+}
+
+// Parties, narrowed to the side this type deals with, each carrying the ledger
+// their balance already sits in (0 when they have never been billed).
+$partyOptions = [];
+if (table_exists('accounting_parties')) {
+    $partyKind = (string) ($spec['party_kind'] ?? '');
+    $partySql = "SELECT id, code, name, party_type, ledger_id" . (column_exists('accounting_parties', 'payable_ledger_id') ? ', payable_ledger_id' : '')
+        . " FROM accounting_parties WHERE company_id = :company_id AND status = 'active'";
+    if ($partyKind === 'customer') {
+        $partySql .= " AND party_type IN ('customer', 'both')";
+    } elseif ($partyKind === 'supplier') {
+        $partySql .= " AND party_type IN ('supplier', 'both')";
+    }
+    $partySql .= ' ORDER BY name ASC';
+    $partyStmt = db()->prepare($partySql);
+    $partyStmt->execute(['company_id' => $companyId]);
+    $wantsPayable = ($spec['party_ledger_side'] ?? '') === 'payable' || $partyKind === 'supplier';
+    foreach ($partyStmt->fetchAll() as $party) {
+        $party['side_ledger_id'] = $wantsPayable
+            ? (int) ($party['payable_ledger_id'] ?? 0)
+            : (int) ($party['ledger_id'] ?? 0);
+        $partyOptions[] = $party;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// What the screen opens with: a rejected submission, an existing voucher, or
+// this type's own sensible defaults.
+// ---------------------------------------------------------------------------
+$fyStartBound = (string) ($fiscalYear['start_date'] ?? '');
+$fyEndBound = (string) ($fiscalYear['end_date'] ?? '');
+$defaultEntryDate = date('Y-m-d');
+if ($fyStartBound !== '' && $fyEndBound !== '' && ($defaultEntryDate < $fyStartBound || $defaultEntryDate > $fyEndBound)) {
+    // Today falls outside the selected year — propose its last day rather than
+    // silently posting into a different year.
+    $defaultEntryDate = $fyEndBound;
+}
+
+$editTitle = '';
+$editNarration = '';
+$decomposeFailed = false;
+
+if (is_array($retry) && (string) ($retry['type'] ?? '') === $type) {
+    $prefill = voucher_prefill_from_input($type, (array) ($retry['input'] ?? []));
+    $editTitle = (string) $prefill['title'];
+    $editNarration = (string) $prefill['narration'];
+} elseif ($editVoucher !== null) {
+    $prefill = voucher_decompose($type, $editVoucher, $editEntries, $ledgerDirectory);
+    $decomposeFailed = empty($prefill['ok']);
+    if ($decomposeFailed) {
+        // An auto-posted voucher, or one from before these screens existed,
+        // whose lines do not fit this type's shape. It is still editable — as a
+        // plain debit/credit grid, which can express anything.
+        $prefill = voucher_decompose('journal', $editVoucher, $editEntries, $ledgerDirectory);
+        $spec = voucher_type_spec('journal');
+    }
+    $prefill['party_id'] = (int) ($editVoucher['party_id'] ?? 0);
+    $prefill['reference_no'] = (string) ($editVoucher['reference_no'] ?? '');
+    $prefill['reference_date'] = (string) ($editVoucher['reference_date'] ?? '');
+    $prefill['instrument_type'] = (string) ($editVoucher['instrument_type'] ?? '');
+    $prefill['instrument_no'] = (string) ($editVoucher['instrument_no'] ?? '');
+    $prefill['instrument_date'] = (string) ($editVoucher['instrument_date'] ?? '');
+    $prefill['return_reason'] = (string) ($editVoucher['return_reason'] ?? '');
+    $prefill['voucher_date'] = (string) ($editVoucher['voucher_date'] ?? $defaultEntryDate);
+    $prefill['posting_date'] = (string) ($editVoucher['posting_date'] ?? $editVoucher['voucher_date'] ?? $defaultEntryDate);
+    $prefill['due_date'] = (string) ($editVoucher['due_date'] ?? '');
+    $prefill['priority'] = (string) ($editVoucher['priority'] ?? 'medium');
+    $prefill['department'] = (string) ($editVoucher['department'] ?? '');
+    $prefill['location'] = (string) ($editVoucher['location'] ?? '');
+    $prefill['cost_centre'] = (string) ($editVoucher['cost_centre'] ?? '');
+    $prefill['payment_terms'] = (string) ($editVoucher['payment_terms'] ?? '');
+
     // The guided form stores "Title — narration" in one column; split it back.
     $editTitle = (string) ($editVoucher['narration'] ?? '');
     $splitAt = strpos($editTitle, ' — ');
@@ -400,40 +546,54 @@ if ($editId > 0) {
         $editNarration = substr($editTitle, $splitAt + strlen(' — '));
         $editTitle = substr($editTitle, 0, $splitAt);
     }
+} else {
+    $prefill = [
+        'voucher_date' => $defaultEntryDate,
+        'posting_date' => $defaultEntryDate,
+        'priority' => 'medium',
+        'tax_mode' => 'exclusive',
+        'tax_rate' => 13.0,
+        'tax_ledger_id' => (int) ($optionsTax[0]['id'] ?? 0),
+        'settlement_mode' => 'party',
+    ];
+    $mappedTax = get_mapped_ledger($companyId, 'default_tax_payable');
+    if ($mappedTax && isset($ledgerDirectory[(int) $mappedTax['id']])) {
+        $prefill['tax_ledger_id'] = (int) $mappedTax['id'];
+    }
 }
+
 $editSourceType = (string) ($editVoucher['source_type'] ?? '');
 $editIsAutoPosted = $editVoucher && $editSourceType !== '' && $editSourceType !== 'voucher_form';
-
-// ---------------------------------------------------------------------------
-// Form data.
-// ---------------------------------------------------------------------------
-$ledgerStmt = db()->prepare("SELECT l.id, l.code, l.name, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank, g.master_key
-    FROM ledgers l LEFT JOIN ledger_groups g ON g.id = l.group_id
-    WHERE l.company_id = :company_id AND l.status = 'active' ORDER BY l.name ASC");
-$ledgerStmt->execute(['company_id' => $companyId]);
-$ledgers = $ledgerStmt->fetchAll();
-
-$parties = [];
-if (table_exists('accounting_parties')) {
-    $partyStmt = db()->prepare("SELECT id, code, name, party_type FROM accounting_parties WHERE company_id = :company_id AND status = 'active' ORDER BY name ASC");
-    $partyStmt->execute(['company_id' => $companyId]);
-    $parties = $partyStmt->fetchAll();
-}
-$fiscalYears = fiscal_years_for_company($companyId, false);
-
-// Accounting periods = months of the current fiscal year.
-$periods = [];
-$periodCursor = new DateTimeImmutable(date('Y-m-01', strtotime((string) $fiscalYear['start_date'])));
-$periodEnd = new DateTimeImmutable(date('Y-m-01', strtotime((string) $fiscalYear['end_date'])));
-while ($periodCursor <= $periodEnd && count($periods) < 18) {
-    $periods[] = $periodCursor->format('M Y');
-    $periodCursor = $periodCursor->modify('+1 month');
-}
-$currentPeriod = date('M Y');
 $canApprove = user_can('approve');
+$nextNumberPreview = $editVoucher ? (string) $editVoucher['voucher_no'] : voucher_next_number($companyId, $fiscalYearId, $type);
 
-$pageTitle = $editVoucher ? 'Edit Voucher ' . (string) $editVoucher['voucher_no'] : 'New Voucher';
-$pageSubtitle = $editVoucher ? 'Editing replaces the voucher\'s lines and re-applies the posting/approval rules.' : 'Reusable form template for all modules across the ERP system.';
+/** Ledger <option> tags, grouped so a long chart stays navigable. */
+$renderLedgerOptions = static function (array $ledgers, int $selectedId = 0): string {
+    $html = '';
+    $currentGroup = null;
+    foreach ($ledgers as $ledger) {
+        $group = (string) ($ledger['group_name'] ?? '');
+        if ($group !== $currentGroup) {
+            if ($currentGroup !== null) {
+                $html .= '</optgroup>';
+            }
+            $html .= '<optgroup label="' . e($group !== '' ? $group : 'Ungrouped') . '">';
+            $currentGroup = $group;
+        }
+        $html .= '<option value="' . (int) $ledger['id'] . '"' . ((int) $ledger['id'] === $selectedId ? ' selected' : '') . '>'
+            . e((string) $ledger['name']) . ' (' . e((string) $ledger['code']) . ')</option>';
+    }
+    if ($currentGroup !== null) {
+        $html .= '</optgroup>';
+    }
+
+    return $html;
+};
+
+$pageTitle = $editVoucher ? 'Edit ' . $spec['label'] . ' ' . (string) $editVoucher['voucher_no'] : 'New ' . $spec['label'];
+$pageSubtitle = $editVoucher
+    ? 'Editing replaces the voucher\'s lines and re-applies the posting and approval rules.'
+    : (string) $spec['blurb'];
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
@@ -445,191 +605,110 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a class="mbw-tab" href="<?= e(url('admin/voucher-import.php')) ?>"><?= icon('upload') ?>Import from Excel</a>
 </nav>
 
+<?php if ($editVoucher === null): ?>
+    <?php include __DIR__ . '/../../app/views/vouchers/type_strip.php'; ?>
+<?php endif; ?>
+
 <?php if ($editIsAutoPosted): ?>
     <div class="notice">This voucher was auto-posted from <strong><?= e(str_replace('_', ' ', $editSourceType)) ?><?= !empty($editVoucher['source_id']) ? ' #' . (int) $editVoucher['source_id'] : '' ?></strong>. Editing changes only the books — the source document stays as it is.</div>
 <?php endif; ?>
+<?php if ($decomposeFailed): ?>
+    <div class="notice">These lines do not fit the <?= e(voucher_type_label((string) $editVoucher['voucher_type'])) ?> screen — they were posted by another part of the system. They are shown as a plain debit/credit grid, which can express anything.</div>
+<?php endif; ?>
 
-<?php
-// Default the entry date INSIDE the selected fiscal year: when today falls
-// outside it, the year-end date is proposed instead of silently posting
-// today's date into a different year. The engine re-validates on save.
-$fyStartBound = (string) ($fiscalYear['start_date'] ?? '');
-$fyEndBound = (string) ($fiscalYear['end_date'] ?? '');
-$defaultEntryDate = date('Y-m-d');
-if ($fyStartBound !== '' && $fyEndBound !== '' && ($defaultEntryDate < $fyStartBound || $defaultEntryDate > $fyEndBound)) {
-    $defaultEntryDate = $fyEndBound;
-}
-?>
-<form method="post" action="<?= e(url('admin/voucher-form.php' . ($editVoucher ? '?edit=' . (int) $editVoucher['id'] : ''))) ?>" enctype="multipart/form-data" id="voucher-form">
+<form method="post" action="<?= e(url('admin/voucher-form.php' . ($editVoucher ? '?edit=' . (int) $editVoucher['id'] : ''))) ?>" enctype="multipart/form-data" id="voucher-form" data-balanced="0">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <input type="hidden" name="save_mode" id="frm-save-mode" value="submit">
     <input type="hidden" name="context_fiscal_year_id" value="<?= (int) $fiscalYearId ?>">
+    <input type="hidden" name="voucher_type" value="<?= e($spec['key']) ?>">
     <?php if ($editVoucher): ?><input type="hidden" name="voucher_id" value="<?= (int) $editVoucher['id'] ?>"><?php endif; ?>
+
     <div class="frm-main">
-        <section class="mbw-card frm-section" data-step-target="1">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-blue"><?= icon('journal') ?></span><h2>Basic Information</h2></div>
+        <section class="mbw-card frm-section vch-head-card tone-<?= e((string) $spec['tone']) ?>">
+            <div class="frm-section-head">
+                <span class="mbw-chip is-square tone-<?= e((string) $spec['tone']) ?>"><?= icon((string) $spec['icon']) ?></span>
+                <h2><?= e((string) $spec['label']) ?></h2>
+                <span class="frm-optional"><?= e((string) $spec['blurb']) ?></span>
+            </div>
             <div class="frm-grid frm-grid-4">
-                <label>Form Type <em>*</em>
-                    <select name="voucher_type" id="frm-type" required>
-                        <option value="">Select form type</option>
-                        <?php foreach ($formTypes as $typeValue => $typeLabel): ?>
-                            <option value="<?= e($typeValue) ?>" <?= $typeValue === $prefillType ? 'selected' : '' ?>><?= e($typeLabel) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                <label>Voucher no.
+                    <input type="text" value="<?= e($nextNumberPreview) ?>" disabled title="<?= $editVoucher ? 'A voucher keeps its number for life' : 'The next number in this type\'s series — issued when you save' ?>">
                 </label>
-                <label>Reference No.
-                    <input type="text" value="<?= $editVoucher ? e((string) $editVoucher['voucher_no']) : 'Auto-generated' ?>" disabled title="<?= $editVoucher ? 'The voucher number never changes on edit' : 'A voucher number is generated automatically on save' ?>">
+                <label>Voucher date <em>*</em>
+                    <input type="date" name="voucher_date" id="frm-date" value="<?= e((string) ($prefill['voucher_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?> required>
                 </label>
-                <label>Title / Description <em>*</em>
-                    <input type="text" name="title" id="frm-title" maxlength="180" placeholder="Enter title or description" value="<?= e($editTitle) ?>" required>
-                </label>
-                <label>Priority
-                    <?php $editPriority = (string) ($editVoucher['priority'] ?? 'medium'); ?>
-                    <select name="priority">
-                        <option value="low" <?= $editPriority === 'low' ? 'selected' : '' ?>>Low</option>
-                        <option value="medium" <?= $editPriority === 'medium' || !in_array($editPriority, ['low', 'high'], true) ? 'selected' : '' ?>>● Medium</option>
-                        <option value="high" <?= $editPriority === 'high' ? 'selected' : '' ?>>High</option>
-                    </select>
+                <label class="frm-span-3">Title <em>*</em>
+                    <input type="text" name="title" id="frm-title" maxlength="180" placeholder="<?= e((string) $spec['title_hint']) ?>" value="<?= e($editTitle) ?>" required>
                 </label>
             </div>
         </section>
 
-        <section class="mbw-card frm-section" data-step-target="2">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-purple"><?= icon('companies') ?></span><h2>Organization Context</h2></div>
+        <?php include __DIR__ . '/../../app/views/vouchers/layout_' . $spec['layout'] . '.php'; ?>
+
+        <section class="mbw-card frm-section" data-collapsible>
+            <div class="frm-section-head">
+                <span class="mbw-chip is-square tone-purple"><?= icon('sliders') ?></span>
+                <h2>Filing &amp; notes</h2>
+                <span class="frm-optional">Where this voucher belongs in the organisation, and anything worth writing down</span>
+            </div>
             <div class="frm-grid frm-grid-4">
-                <label>Company <em>*</em>
-                    <select id="frm-company" required>
-                        <option value="<?= $companyId ?>" selected><?= e($company['name']) ?></option>
+                <label>Posting date
+                    <input type="date" name="posting_date" value="<?= e((string) ($prefill['posting_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?>>
+                </label>
+                <label>Fiscal year
+                    <select disabled title="The fiscal year comes from your current portal context">
+                        <option selected><?= e((string) $fiscalYear['label']) ?> (<?= e((string) $fiscalYear['start_date']) ?> – <?= e((string) $fiscalYear['end_date']) ?>)</option>
+                    </select>
+                </label>
+                <label>Total (<?= e(trim($currency)) ?>)
+                    <input type="text" id="vch-display-total" value="0.00" disabled title="Worked out from the lines above">
+                </label>
+                <label>Priority
+                    <?php $editPriority = (string) ($prefill['priority'] ?? 'medium'); ?>
+                    <select name="priority">
+                        <option value="low" <?= $editPriority === 'low' ? 'selected' : '' ?>>Low</option>
+                        <option value="medium" <?= !in_array($editPriority, ['low', 'high'], true) ? 'selected' : '' ?>>Medium</option>
+                        <option value="high" <?= $editPriority === 'high' ? 'selected' : '' ?>>High</option>
                     </select>
                 </label>
                 <label>Department
                     <select name="department">
-                        <option value="">Select department</option>
-                        <?php foreach ($departments as $dept): ?><option <?= (string) ($editVoucher['department'] ?? '') === $dept ? 'selected' : '' ?>><?= e($dept) ?></option><?php endforeach; ?>
+                        <option value="">—</option>
+                        <?php foreach ($departments as $dept): ?><option <?= (string) ($prefill['department'] ?? '') === $dept ? 'selected' : '' ?>><?= e($dept) ?></option><?php endforeach; ?>
                     </select>
                 </label>
                 <label>Location
                     <select name="location">
-                        <option value="">Select location</option>
-                        <?php foreach ($locations as $loc): ?><option <?= (string) ($editVoucher['location'] ?? '') === $loc ? 'selected' : '' ?>><?= e($loc) ?></option><?php endforeach; ?>
+                        <option value="">—</option>
+                        <?php foreach ($locations as $loc): ?><option <?= (string) ($prefill['location'] ?? '') === $loc ? 'selected' : '' ?>><?= e($loc) ?></option><?php endforeach; ?>
                     </select>
                 </label>
-                <label>Cost Centre
+                <label>Cost centre
                     <select name="cost_centre">
-                        <option value="">Select cost centre</option>
-                        <?php foreach ($costCentres as $cc): ?><option <?= (string) ($editVoucher['cost_centre'] ?? '') === $cc ? 'selected' : '' ?>><?= e($cc) ?></option><?php endforeach; ?>
+                        <option value="">—</option>
+                        <?php foreach ($costCentres as $cc): ?><option <?= (string) ($prefill['cost_centre'] ?? '') === $cc ? 'selected' : '' ?>><?= e($cc) ?></option><?php endforeach; ?>
                     </select>
                 </label>
+                <?php if (in_array($spec['key'], ['sales', 'purchase'], true)): ?>
+                    <label>Payment terms
+                        <select name="payment_terms">
+                            <option value="">—</option>
+                            <?php foreach ($paymentTermsOptions as $term): ?><option <?= (string) ($prefill['payment_terms'] ?? '') === $term ? 'selected' : '' ?>><?= e($term) ?></option><?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Due date<input type="date" name="due_date" value="<?= e((string) ($prefill['due_date'] ?? '')) ?>"></label>
+                <?php endif; ?>
+                <label>Exchange rate<input type="number" name="exchange_rate" value="1.0000" step="0.0001" min="0.0001" title="NPR books — leave at 1 unless this voucher was struck in another currency"></label>
             </div>
-        </section>
-
-        <section class="mbw-card frm-section" data-step-target="2">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-amber"><?= icon('calendar') ?></span><h2>Dates &amp; Period</h2></div>
-            <div class="frm-grid frm-grid-4">
-                <label>Transaction Date <em>*</em><input type="date" name="voucher_date" id="frm-date" value="<?= e((string) ($editVoucher['voucher_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?> required></label>
-                <label>Posting Date <em>*</em><input type="date" name="posting_date" value="<?= e((string) ($editVoucher['posting_date'] ?? $editVoucher['voucher_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?> required></label>
-                <label>Fiscal Year <em>*</em>
-                    <select disabled title="The fiscal year comes from your current portal context">
-                        <option selected><?= e($fiscalYear['label']) ?> (<?= e((string) $fiscalYear['start_date']) ?> – <?= e((string) $fiscalYear['end_date']) ?>)</option>
-                    </select>
-                </label>
-                <label>Accounting Period <em>*</em>
-                    <select name="accounting_period">
-                        <?php foreach ($periods as $period): ?>
-                            <option <?= $period === $currentPeriod ? 'selected' : '' ?>><?= e($period) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-            </div>
-        </section>
-
-        <section class="mbw-card frm-section" data-step-target="3">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-teal"><?= icon('wallet') ?></span><h2>Financial Details</h2></div>
-            <div class="frm-grid frm-grid-4">
-                <label>Currency <em>*</em>
-                    <select disabled><option selected>NPR - Nepalese Rupee</option></select>
-                </label>
-                <label>Exchange Rate<input type="number" name="exchange_rate" value="<?= e(number_format((float) ($editVoucher['exchange_rate'] ?? 1), 4, '.', '')) ?>" step="0.0001" min="0.0001"></label>
-                <label>Payment Terms
-                    <select name="payment_terms">
-                        <option value="">Select terms</option>
-                        <?php foreach ($paymentTermsOptions as $term): ?><option <?= (string) ($editVoucher['payment_terms'] ?? '') === $term ? 'selected' : '' ?>><?= e($term) ?></option><?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Due Date<input type="date" name="due_date" value="<?= e((string) ($editVoucher['due_date'] ?? '')) ?>"></label>
-                <label>Total Amount
-                    <input type="text" id="frm-display-total" value="<?= e($currency) ?>0.00" disabled title="Calculated from the ledger lines below">
-                </label>
-                <label class="frm-span-3">Narration
-                    <input type="text" name="narration" maxlength="255" placeholder="Enter narration (optional)" id="frm-narration" value="<?= e($editNarration) ?>">
-                </label>
-            </div>
-        </section>
-
-        <section class="mbw-card frm-section" data-step-target="3">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-green"><?= icon('clients') ?></span><h2>Related Party / Ledger Selection</h2></div>
-            <div class="frm-grid frm-grid-4">
-                <label>Party
-                    <select name="party_id" id="frm-party">
-                        <option value="0">Select ledger or party</option>
-                        <?php foreach ($parties as $party): ?>
-                            <option value="<?= (int) $party['id'] ?>" <?= (int) ($editVoucher['party_id'] ?? 0) === (int) $party['id'] ? 'selected' : '' ?> data-type="<?= e(ucfirst((string) $party['party_type'])) ?>"><?= e($party['name']) ?> (<?= e($party['code']) ?>)</option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Party Type
-                    <input type="text" id="frm-party-type" value="" placeholder="Select type" disabled>
-                </label>
-                <label>Tax Category
-                    <select name="tax_category">
-                        <option value="">Select tax category</option>
-                        <?php foreach ($taxCategories as $cat): ?><option <?= (string) ($editVoucher['tax_category'] ?? '') === $cat ? 'selected' : '' ?>><?= e($cat) ?></option><?php endforeach; ?>
-                    </select>
-                </label>
-                <label class="frm-toggle-wrap">Tax Inclusive
-                    <span class="frm-toggle"><input type="checkbox" name="tax_inclusive" value="1" id="frm-tax-inclusive"><i></i></span>
-                </label>
-            </div>
-        </section>
-
-        <section class="mbw-card frm-section" data-step-target="3">
-            <div class="frm-section-head">
-                <span class="mbw-chip is-square tone-blue"><?= icon('layers') ?></span>
-                <h2>Multiple Ledger Entries</h2>
-                <span class="frm-optional">Voucher lines — total debit must equal total credit</span>
-                <label class="frm-toggle-wrap frm-head-toggle">Enable Multi-ledger
-                    <span class="frm-toggle"><input type="checkbox" id="frm-multiledger" checked><i></i></span>
-                </label>
-            </div>
-            <div id="frm-entries-wrap">
-                <div style="overflow-x:auto">
-                    <table class="frm-entries" id="frm-entries-table">
-                        <thead>
-                            <tr><th style="width:36px">SN</th><th>Ledger / Party <em>*</em></th><th>Description</th><th>Cost Centre</th><th>Tax</th><th class="is-numeric">Debit (<?= e(trim($currency)) ?>)</th><th class="is-numeric">Credit (<?= e(trim($currency)) ?>)</th><th>Reference</th><th style="width:40px"></th></tr>
-                        </thead>
-                        <tbody id="frm-entry-rows"></tbody>
-                    </table>
-                </div>
-                <div class="frm-entries-foot">
-                    <button type="button" class="button soft" id="frm-add-line">＋ Add Line</button>
-                    <div class="frm-entry-totals">
-                        <span>Total Debit (<?= e(trim($currency)) ?>) <strong id="frm-total-debit">0.00</strong></span>
-                        <span>Total Credit (<?= e(trim($currency)) ?>) <strong id="frm-total-credit">0.00</strong></span>
-                        <span class="mbw-pill tone-gray" id="frm-balance-pill">Enter lines</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="mbw-card frm-section" data-step-target="4">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-purple"><?= icon('documents') ?></span><h2>Notes &amp; Attachments</h2></div>
             <div class="frm-grid frm-grid-2">
-                <label>Notes<textarea name="notes" rows="4" placeholder="Enter notes or additional information"></textarea></label>
+                <label>Narration
+                    <textarea name="narration" rows="3" maxlength="255" placeholder="Anything the next person reading this voucher should know"><?= e($editNarration) ?></textarea>
+                </label>
                 <label>Attachments
                     <span class="frm-dropzone" id="frm-dropzone">
                         <?= icon('documents') ?>
                         <strong>Drag &amp; drop files here <u>or click to upload</u></strong>
-                        <small>PDF, Excel, JPG, PNG (Max. 10MB)</small>
+                        <small>PDF, Excel, JPG, PNG (max. 10MB each)</small>
                         <input type="file" name="attachments[]" id="frm-attachments" multiple accept=".pdf,.xls,.xlsx,.csv,.jpg,.jpeg,.png">
                         <span id="frm-file-list"></span>
                     </span>
@@ -637,207 +716,44 @@ if ($fyStartBound !== '' && $fyEndBound !== '' && ($defaultEntryDate < $fyStartB
             </div>
         </section>
 
-        <section class="mbw-card frm-section" data-step-target="5">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-teal"><?= icon('admin') ?></span><h2>Approval &amp; Review</h2><span class="frm-optional">(Preview)</span></div>
+        <section class="mbw-card frm-section">
+            <div class="frm-section-head"><span class="mbw-chip is-square tone-teal"><?= icon('admin') ?></span><h2>Approval &amp; review</h2></div>
             <div class="frm-grid frm-grid-4 frm-approvers">
-                <div><small>Prepared By</small><strong><?= e($currentUser['name'] ?? 'User') ?></strong><span><?= e(date('m/d/Y h:i A')) ?></span></div>
-                <div><small>Review By</small><strong class="frm-muted">Not assigned yet</strong></div>
-                <div><small>Approve By</small><strong class="frm-muted"><?= $canApprove ? e($currentUser['name'] ?? 'You') . ' (auto)' : 'Not assigned yet' ?></strong></div>
-                <div><small>Post By</small><strong class="frm-muted"><?= $canApprove ? e($currentUser['name'] ?? 'You') . ' (auto)' : 'Not assigned yet' ?></strong></div>
+                <div><small>Prepared by</small><strong><?= e((string) ($currentUser['name'] ?? 'User')) ?></strong><span><?= e(date('d M Y, h:i A')) ?></span></div>
+                <div><small>Approved by</small><strong class="frm-muted"><?= $canApprove ? e((string) ($currentUser['name'] ?? 'You')) . ' (on save)' : 'Pending assignment' ?></strong></div>
+                <div><small>Posted by</small><strong class="frm-muted"><?= $canApprove ? e((string) ($currentUser['name'] ?? 'You')) . ' (on save)' : 'Pending approval' ?></strong></div>
+                <div><small>Series</small><strong class="frm-muted"><?= e((string) $spec['prefix']) ?> · <?= e(voucher_series_code($fiscalYear)) ?></strong></div>
             </div>
         </section>
 
         <div class="frm-footer mbw-card">
-            <button type="submit" class="button secondary" onclick="document.getElementById('frm-save-mode').value='draft'"><?= icon('documents') ?>Save as Draft</button>
+            <button type="submit" class="button secondary" onclick="document.getElementById('frm-save-mode').value='draft'"><?= icon('save') ?>Save as draft</button>
             <a class="button secondary" href="<?= e(url('admin/accounting.php')) ?>">Cancel</a>
-            <button type="submit" class="button frm-submit" onclick="document.getElementById('frm-save-mode').value='submit'"><?= icon('chevron-right') ?><?= $editVoucher ? ($canApprove ? 'Save & Post Changes' : 'Save & Submit for Approval') : ($canApprove ? 'Post Voucher' : 'Submit for Approval') ?></button>
+            <button type="submit" class="button frm-submit" onclick="document.getElementById('frm-save-mode').value='submit'"><?= icon('chevron-right') ?><?= $editVoucher ? ($canApprove ? 'Save &amp; post changes' : 'Save &amp; submit for approval') : ($canApprove ? 'Post ' . e((string) $spec['short']) : 'Submit for approval') ?></button>
         </div>
     </div>
-
 </form>
 
+<?php include __DIR__ . '/../../app/views/vouchers/grid_script.php'; ?>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    var currency = <?= json_encode($currency) ?>;
-    var ledgerOptions = <?= json_encode(array_map(static fn (array $l): array => ['id' => (int) $l['id'], 'label' => $l['name'] . ' (' . $l['code'] . ')'], $ledgers), JSON_UNESCAPED_SLASHES) ?>;
-    var costCentres = <?= json_encode($costCentres) ?>;
-    var taxCodes = ['', 'VAT 13%', 'Exempt', 'Zero Rated'];
-    var rowsHost = document.getElementById('frm-entry-rows');
-    var rowCount = 0;
-
-    function buildSelect(name, options, placeholder) {
-        var select = document.createElement('select');
-        select.name = name;
-        var opt0 = document.createElement('option');
-        opt0.value = '';
-        opt0.textContent = placeholder;
-        select.appendChild(opt0);
-        options.forEach(function (item) {
-            var opt = document.createElement('option');
-            if (typeof item === 'object') { opt.value = item.id; opt.textContent = item.label; }
-            else { opt.value = item; opt.textContent = item === '' ? placeholder : item; }
-            if (item !== '') { select.appendChild(opt); }
-        });
-        return select;
-    }
-
-    function addRow(defaultType, prefill) {
-        rowCount++;
-        var tr = document.createElement('tr');
-        var tdSn = document.createElement('td');
-        tdSn.textContent = rowCount;
-        tr.appendChild(tdSn);
-
-        var tdLedger = document.createElement('td');
-        var ledgerSelect = buildSelect('ledger_id[]', ledgerOptions, 'Select ledger/party');
-        tdLedger.appendChild(ledgerSelect);
-        tr.appendChild(tdLedger);
-
-        var tdDesc = document.createElement('td');
-        var desc = document.createElement('input');
-        desc.type = 'text'; desc.name = 'memo[]'; desc.placeholder = 'Enter description';
-        tdDesc.appendChild(desc); tr.appendChild(tdDesc);
-
-        var tdCc = document.createElement('td');
-        var ccSelect = buildSelect('line_cost_centre[]', costCentres, 'Select cost centre');
-        tdCc.appendChild(ccSelect);
-        tr.appendChild(tdCc);
-
-        var tdTax = document.createElement('td');
-        var taxSelect = buildSelect('line_tax[]', taxCodes, 'Select tax');
-        tdTax.appendChild(taxSelect);
-        tr.appendChild(tdTax);
-
-        var typeInput = document.createElement('input');
-        typeInput.type = 'hidden'; typeInput.name = 'entry_type[]'; typeInput.value = defaultType || 'debit';
-        var amountInput = document.createElement('input');
-        amountInput.type = 'hidden'; amountInput.name = 'amount[]'; amountInput.value = '0';
-
-        var tdDr = document.createElement('td'); tdDr.className = 'is-numeric';
-        var dr = document.createElement('input');
-        dr.type = 'number'; dr.step = '0.01'; dr.min = '0'; dr.placeholder = '0.00'; dr.className = 'frm-num frm-dr';
-        tdDr.appendChild(dr); tr.appendChild(tdDr);
-
-        var tdCr = document.createElement('td'); tdCr.className = 'is-numeric';
-        var cr = document.createElement('input');
-        cr.type = 'number'; cr.step = '0.01'; cr.min = '0'; cr.placeholder = '0.00'; cr.className = 'frm-num frm-cr';
-        tdCr.appendChild(cr); tr.appendChild(tdCr);
-
-        var tdRef = document.createElement('td');
-        var ref = document.createElement('input');
-        ref.type = 'text'; ref.name = 'line_reference[]'; ref.placeholder = 'Enter reference';
-        tdRef.appendChild(ref);
-        tdRef.appendChild(typeInput);
-        tdRef.appendChild(amountInput);
-        tr.appendChild(tdRef);
-
-        var tdDel = document.createElement('td');
-        var del = document.createElement('button');
-        del.type = 'button'; del.className = 'frm-del'; del.setAttribute('aria-label', 'Remove line'); del.innerHTML = '&#128465;';
-        del.addEventListener('click', function () { tr.remove(); renumber(); recalc(); });
-        tdDel.appendChild(del); tr.appendChild(tdDel);
-
-        function sync() {
-            var drVal = parseFloat(dr.value) || 0;
-            var crVal = parseFloat(cr.value) || 0;
-            if (drVal > 0 && document.activeElement === dr) { cr.value = ''; crVal = 0; }
-            if (crVal > 0 && document.activeElement === cr) { dr.value = ''; drVal = 0; }
-            typeInput.value = crVal > 0 ? 'credit' : 'debit';
-            amountInput.value = String(drVal > 0 ? drVal : crVal);
-            recalc();
-        }
-        dr.addEventListener('input', sync);
-        cr.addEventListener('input', sync);
-
-        if (prefill) {
-            ledgerSelect.value = String(prefill.ledger_id || '');
-            desc.value = prefill.memo || '';
-            ccSelect.value = prefill.cost_centre || '';
-            taxSelect.value = prefill.tax_code || '';
-            ref.value = prefill.line_reference || '';
-            var prefillAmount = Number(prefill.amount) || 0;
-            if (prefill.entry_type === 'credit') { cr.value = prefillAmount; } else { dr.value = prefillAmount; }
-            typeInput.value = prefill.entry_type === 'credit' ? 'credit' : 'debit';
-            amountInput.value = String(prefillAmount);
-        }
-        rowsHost.appendChild(tr);
-    }
-
-    function renumber() {
-        rowCount = 0;
-        rowsHost.querySelectorAll('tr').forEach(function (tr) {
-            rowCount++;
-            tr.querySelector('td').textContent = rowCount;
-        });
-    }
-
-    function recalc() {
-        var totalDr = 0, totalCr = 0, lineCount = 0;
-        rowsHost.querySelectorAll('tr').forEach(function (tr) {
-            var drVal = parseFloat((tr.querySelector('.frm-dr') || {}).value) || 0;
-            var crVal = parseFloat((tr.querySelector('.frm-cr') || {}).value) || 0;
-            totalDr += drVal; totalCr += crVal;
-            if ((drVal > 0 || crVal > 0) && (tr.querySelector('select[name="ledger_id[]"]') || {}).value) { lineCount++; }
-        });
-        document.getElementById('frm-total-debit').textContent = totalDr.toFixed(2);
-        document.getElementById('frm-total-credit').textContent = totalCr.toFixed(2);
-        var pill = document.getElementById('frm-balance-pill');
-        var balanced = totalDr > 0 && Math.abs(totalDr - totalCr) < 0.005;
-        pill.textContent = balanced ? '✓ Balanced' : (totalDr === 0 && totalCr === 0 ? 'Enter lines' : 'Not balanced');
-        pill.className = 'mbw-pill ' + (balanced ? 'tone-green' : (totalDr === 0 && totalCr === 0 ? 'tone-gray' : 'tone-red'));
-        document.getElementById('frm-display-total').value = currency + totalDr.toFixed(2);
-    }
-
-
-
-    var partySelect = document.getElementById('frm-party');
-    if (partySelect) {
-        partySelect.addEventListener('change', function () {
-            var opt = partySelect.options[partySelect.selectedIndex];
-            document.getElementById('frm-party-type').value = opt && opt.getAttribute('data-type') ? opt.getAttribute('data-type') : '';
-        });
-    }
-
-    var multiToggle = document.getElementById('frm-multiledger');
-    multiToggle.addEventListener('change', function () {
-        document.getElementById('frm-entries-wrap').style.display = multiToggle.checked ? '' : 'none';
-    });
-
-    document.getElementById('frm-add-line').addEventListener('click', function () { addRow('debit'); });
-
     var attach = document.getElementById('frm-attachments');
-    attach.addEventListener('change', function () {
-        var names = Array.prototype.map.call(attach.files, function (f) { return f.name; });
-        document.getElementById('frm-file-list').textContent = names.length ? names.join(', ') : '';
-    });
+    if (attach) {
+        attach.addEventListener('change', function () {
+            var names = Array.prototype.map.call(attach.files, function (file) { return file.name; });
+            document.getElementById('frm-file-list').textContent = names.length ? names.join(', ') : '';
+        });
+    }
 
+    // A draft may be anything. A posting may not, and the server says so too —
+    // this only saves the person the round trip.
     document.getElementById('voucher-form').addEventListener('submit', function (event) {
-        var mode = document.getElementById('frm-save-mode').value;
-        if (mode === 'draft') { return; }
-        var balanced = document.getElementById('frm-balance-pill').classList.contains('tone-green');
-        if (!balanced) {
+        if (document.getElementById('frm-save-mode').value === 'draft') { return; }
+        if (this.getAttribute('data-balanced') !== '1') {
             event.preventDefault();
-            alert('Total debit must equal total credit before submitting. Use Save as Draft to keep your work.');
+            alert('This voucher is not complete yet — check the totals shown above. Use "Save as draft" to keep what you have typed.');
         }
     });
-
-    var existingLines = <?= json_encode(array_map(static fn (array $line): array => [
-        'ledger_id' => (int) $line['ledger_id'],
-        'entry_type' => (string) $line['entry_type'],
-        'amount' => (float) $line['amount'],
-        'memo' => (string) ($line['memo'] ?? ''),
-        'cost_centre' => (string) ($line['cost_centre'] ?? ''),
-        'tax_code' => (string) ($line['tax_code'] ?? ''),
-        'line_reference' => (string) ($line['line_reference'] ?? ''),
-    ], $editEntries), JSON_UNESCAPED_SLASHES) ?>;
-    if (existingLines.length) {
-        existingLines.forEach(function (line) { addRow(line.entry_type, line); });
-    } else {
-        addRow('debit');
-        addRow('credit');
-        addRow('debit');
-    }
-    recalc();
 });
 </script>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

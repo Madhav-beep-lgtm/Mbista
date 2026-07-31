@@ -151,6 +151,18 @@ function accounting_module_repair_database(): array
         accounting_repair_add_index('vouchers', 'idx_vouchers_party', 'KEY `idx_vouchers_party` (`party_id`)');
     });
 
+    $run('Provision per-type voucher fields (migration 100)', static function (): void {
+        // The supplier's own bill number and date, the cheque on a payment, and
+        // the reason behind a debit or credit note. Each belongs to one type of
+        // voucher, and none of them fits in the narration.
+        accounting_repair_add_column('vouchers', 'reference_date', '`reference_date` DATE DEFAULT NULL AFTER `reference_no`');
+        accounting_repair_add_column('vouchers', 'instrument_type', '`instrument_type` VARCHAR(30) DEFAULT NULL AFTER `reference_date`');
+        accounting_repair_add_column('vouchers', 'instrument_no', '`instrument_no` VARCHAR(80) DEFAULT NULL AFTER `instrument_type`');
+        accounting_repair_add_column('vouchers', 'instrument_date', '`instrument_date` DATE DEFAULT NULL AFTER `instrument_no`');
+        accounting_repair_add_column('vouchers', 'return_reason', '`return_reason` VARCHAR(255) DEFAULT NULL AFTER `instrument_date`');
+        accounting_repair_add_index('vouchers', 'idx_vouchers_type_date', 'KEY `idx_vouchers_type_date` (`company_id`, `voucher_type`, `voucher_date`)');
+    });
+
     $run('Provision access-control schema (migration 033)', static function (): void {
         // company_memberships (+ backfill), security_events, users.sessions_valid_from.
         if (function_exists('access_control_ensure_schema')) {

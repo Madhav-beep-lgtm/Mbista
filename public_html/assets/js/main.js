@@ -744,6 +744,17 @@ document.addEventListener('DOMContentLoaded', () => {
       ledger_id: 'admin/chart-ledgers.php',
       item_id: 'admin/accounting-inventory.php?view=inventory',
       group_id: 'admin/chart-groups.php',
+      // The specialised voucher screens name each ledger slot for the job it
+      // does — the bank a payment leaves, the head a sale credits — so every
+      // one has to be listed for itself.
+      'ledger_id[]': 'admin/chart-ledgers.php',
+      'tender_ledger[]': 'admin/chart-ledgers.php',
+      'line_ledger[]': 'admin/chart-ledgers.php',
+      'value_ledger[]': 'admin/chart-ledgers.php',
+      contra_from_ledger: 'admin/chart-ledgers.php',
+      contra_to_ledger: 'admin/chart-ledgers.php',
+      settlement_ledger_id: 'admin/chart-ledgers.php',
+      tax_ledger_id: 'admin/chart-ledgers.php',
     },
     hospitality: {
       ingredient_id: 'admin/hospitality.php?view=ingredients',

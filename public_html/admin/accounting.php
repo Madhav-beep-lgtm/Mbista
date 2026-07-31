@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/voucher_types.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -406,24 +407,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php endif; ?>
 
 <section class="mbw-card" data-collapsible>
-    <div class="mbw-card-head"><h2>Create Vouchers</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/settings.php')) ?>">Fiscal setup moved to Settings</a></div></div>
+    <div class="mbw-card-head">
+        <h2><?= approvals_enabled() && !user_can('approve') ? 'Submit a voucher' : 'Post a voucher' ?></h2>
+        <div class="mbw-card-tools"><span class="mbw-view-all">Each type has its own screen</span></div>
+    </div>
     <div class="mbw-qa-grid" id="post-voucher">
-        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php')) ?>">
-            <span class="mbw-chip is-square tone-green"><?= icon('receipt-voucher') ?></span>
-            <div><strong><?= approvals_enabled() && !user_can('approve') ? 'Submit Voucher' : 'Post Voucher' ?></strong><span>Guided form with validation checklist &amp; attachments</span></div>
-        </a>
-        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=journal')) ?>">
-            <span class="mbw-chip is-square tone-blue"><?= icon('journal') ?></span>
-            <div><strong>Journal Voucher</strong><span>Create new journal entry</span></div>
-        </a>
-        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=receipt')) ?>">
-            <span class="mbw-chip is-square tone-teal"><?= icon('trend-up') ?></span>
-            <div><strong>Receipt Voucher</strong><span>Record money received</span></div>
-        </a>
-        <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=payment')) ?>">
-            <span class="mbw-chip is-square tone-amber"><?= icon('card') ?></span>
-            <div><strong>Payment Voucher</strong><span>Record money paid out</span></div>
-        </a>
+        <?php foreach (voucher_type_catalog() as $qaTypeKey => $qaType): ?>
+            <a class="mbw-qa" href="<?= e(url(voucher_type_url($qaTypeKey))) ?>">
+                <span class="mbw-chip is-square tone-<?= e((string) $qaType['tone']) ?>"><?= icon((string) $qaType['icon']) ?></span>
+                <div><strong><?= e((string) $qaType['label']) ?></strong><span><?= e((string) $qaType['blurb']) ?></span></div>
+            </a>
+        <?php endforeach; ?>
     </div>
 </section>
 
@@ -460,7 +454,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <select name="vtype" class="field-compact" aria-label="Voucher type">
             <option value="">All types</option>
             <?php foreach ($voucherTypeOptions as $voucherTypeOption): ?>
-                <option value="<?= e($voucherTypeOption) ?>" <?= $vType === $voucherTypeOption ? 'selected' : '' ?>><?= e(ucfirst($voucherTypeOption)) ?></option>
+                <option value="<?= e($voucherTypeOption) ?>" <?= $vType === $voucherTypeOption ? 'selected' : '' ?>><?= e(voucher_type_label((string) $voucherTypeOption)) ?></option>
             <?php endforeach; ?>
         </select>
         <select name="vstatus" class="field-compact" aria-label="Status">
@@ -488,7 +482,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <tr>
                     <td><?= e($voucher['voucher_date'] ?? date('Y-m-d', strtotime((string) $voucher['posted_at']))) ?></td>
                     <td><?= e($voucher['voucher_no']) ?></td>
-                    <td><?= e($voucher['voucher_type']) ?></td>
+                    <td><?php $vRowType = voucher_type_spec((string) $voucher['voucher_type']); ?><span class="mbw-pill tone-<?= e((string) $vRowType['tone']) ?>"><?= e((string) $vRowType['short']) ?></span></td>
                     <td><?= e($voucher['party_name'] ?? '') ?></td>
                     <td><?= e($voucher['reference_no'] ?? '') ?></td>
                     <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $voucher['total_amount'], 2)) ?></td>

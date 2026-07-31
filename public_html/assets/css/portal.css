@@ -2171,6 +2171,325 @@ body.admin-layout .frm-footer .frm-submit {
   margin-left: auto;
 }
 
+/* ===========================================================================
+   Specialised voucher screens
+   Each voucher type gets its own shape, the way Tally gives one to each of its
+   F-keys. These styles carry the type bar, the screens that are not a plain
+   debit/credit grid, and the running totals each of them shows.
+   =========================================================================== */
+
+/* The palette collapses cyan onto teal and orange onto amber, as the KPI icons
+   already do — the brand is green and gold, and eight distinct hues would
+   fight it. */
+.mbw-chip.tone-cyan   { background: var(--mbw-teal-soft);  color: var(--mbw-teal); }
+.mbw-chip.tone-orange { background: var(--mbw-amber-soft); color: var(--mbw-amber); }
+body.admin-layout .mbw-pill.tone-cyan   { background: var(--mbw-teal-soft);  color: var(--mbw-teal); }
+body.admin-layout .mbw-pill.tone-orange { background: var(--mbw-amber-soft); color: var(--mbw-amber); }
+body.admin-layout .mbw-pill.tone-gray   { background: var(--mbw-gray-soft);  color: var(--mbw-muted); }
+
+/* Voucher type bar */
+body.admin-layout .vch-typebar {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 1100px) {
+  body.admin-layout .vch-typebar { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  body.admin-layout .vch-typebar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+body.admin-layout .vch-type {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 10px 6px 8px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 12px;
+  background: var(--mbw-card);
+  color: var(--mbw-muted);
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+body.admin-layout .vch-type:hover {
+  border-color: var(--mbw-primary);
+  transform: translateY(-1px);
+}
+
+body.admin-layout .vch-type.is-active {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-primary-soft);
+}
+
+body.admin-layout .vch-type-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--mbw-card-soft);
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .vch-type.tone-green  .vch-type-icon { background: var(--mbw-green-soft);   color: var(--mbw-green); }
+body.admin-layout .vch-type.tone-red    .vch-type-icon { background: var(--mbw-red-soft);     color: var(--mbw-red); }
+body.admin-layout .vch-type.tone-blue   .vch-type-icon { background: var(--mbw-primary-soft); color: var(--mbw-primary); }
+body.admin-layout .vch-type.tone-amber  .vch-type-icon,
+body.admin-layout .vch-type.tone-orange .vch-type-icon { background: var(--mbw-amber-soft);   color: var(--mbw-amber); }
+body.admin-layout .vch-type.tone-purple .vch-type-icon { background: var(--mbw-purple-soft);  color: var(--mbw-purple); }
+body.admin-layout .vch-type.tone-teal   .vch-type-icon,
+body.admin-layout .vch-type.tone-cyan   .vch-type-icon { background: var(--mbw-teal-soft);    color: var(--mbw-teal); }
+
+body.admin-layout .vch-type-icon .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+body.admin-layout .vch-type-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mbw-heading);
+  text-align: center;
+  line-height: 1.2;
+}
+
+body.admin-layout .vch-type-key {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--mbw-muted);
+  letter-spacing: 0.02em;
+}
+
+/* The card that carries the type's own question gets a little more presence
+   than the filing details below it. */
+body.admin-layout .vch-focus {
+  border-left: 3px solid var(--mbw-primary);
+}
+
+body.admin-layout .vch-head-card .frm-section-head h2 {
+  font-size: 16px;
+}
+
+/* Contra: two accounts and an arrow between them */
+body.admin-layout .vch-transfer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) minmax(0, 0.7fr);
+  align-items: end;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  body.admin-layout .vch-transfer { grid-template-columns: minmax(0, 1fr); }
+  body.admin-layout .vch-transfer-arrow { display: none; }
+}
+
+body.admin-layout .vch-transfer-side,
+body.admin-layout .vch-transfer-amount {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .vch-transfer select,
+body.admin-layout .vch-transfer input {
+  min-height: 38px;
+  font-size: 13px;
+}
+
+body.admin-layout .vch-transfer-note {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .vch-transfer-arrow {
+  display: grid;
+  place-items: center;
+  height: 38px;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .vch-transfer-arrow .ui-icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* What a contra will actually post, before it posts it */
+body.admin-layout .vch-preview {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border: 1px dashed var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card-soft);
+}
+
+body.admin-layout .vch-preview.is-invalid {
+  border-color: var(--mbw-red);
+  border-style: solid;
+}
+
+body.admin-layout .vch-preview-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mbw-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+body.admin-layout .vch-preview.is-invalid .vch-preview-label {
+  color: var(--mbw-red);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+body.admin-layout .vch-preview-line {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12.5px;
+}
+
+body.admin-layout .vch-preview-line em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--mbw-muted);
+  min-width: 18px;
+}
+
+body.admin-layout .vch-preview-line strong {
+  color: var(--mbw-heading);
+  font-weight: 600;
+}
+
+body.admin-layout .vch-preview-line b {
+  color: var(--mbw-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sales and purchase: credit or cash, chosen as two cards not a dropdown */
+body.admin-layout .vch-settlement {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 700px) {
+  body.admin-layout .vch-settlement { grid-template-columns: minmax(0, 1fr); }
+}
+
+body.admin-layout .vch-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card);
+  cursor: pointer;
+}
+
+body.admin-layout .vch-radio.is-on {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-primary-soft);
+}
+
+body.admin-layout .vch-radio input {
+  margin-top: 3px;
+  accent-color: var(--mbw-primary);
+}
+
+body.admin-layout .vch-radio span {
+  display: grid;
+  gap: 2px;
+}
+
+body.admin-layout .vch-radio strong {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .vch-radio small {
+  font-size: 11px;
+  color: var(--mbw-muted);
+}
+
+/* Line grids */
+body.admin-layout .vch-table select,
+body.admin-layout .vch-table input {
+  width: 100%;
+}
+
+body.admin-layout .vch-table th em {
+  color: var(--mbw-red);
+  font-style: normal;
+}
+
+body.admin-layout .frm-del:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* What a trade voucher adds up to */
+body.admin-layout .vch-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  body.admin-layout .vch-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+body.admin-layout .vch-summary > div {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  background: var(--mbw-card-soft);
+}
+
+body.admin-layout .vch-summary > div.is-total {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-primary-soft);
+}
+
+body.admin-layout .vch-summary small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .vch-summary strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--mbw-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+body.admin-layout .vch-summary-note strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+body.admin-layout .vch-warning {
+  margin-top: 12px;
+}
+
 /* Right rail cards */
 body.admin-layout .frm-rail-card {
   padding: 14px 16px;

@@ -184,6 +184,8 @@ function Run-PermanentTests {
         "database\test_fixed_assets.php",
         "database\test_manufacturing.php",
         "database\test_lifecycle_and_nrv.php",
+        "database\test_voucher_types.php",
+        "database\test_voucher_screens.php",
         "database\test_acceptance_suite.php"
     )
 
