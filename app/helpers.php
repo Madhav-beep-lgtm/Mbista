@@ -2370,11 +2370,36 @@ function backup_status_read(): array
     if ($configured !== '') {
         $candidates[] = rtrim($configured, '/\\');
     }
+
+    // THE APP'S OWN LOCATION IS THE RELIABLE ONE.
+    //
+    // The backup writes to $HOME/db-backups, and the first version of this
+    // looked there via getenv('HOME') — which is a SHELL variable. PHP under
+    // Apache and PHP-FPM usually has no HOME at all, so on the very server
+    // this was written for, that candidate silently evaporated and the search
+    // fell through to storage/backups, where the backup script has never
+    // written anything. The banner then said "no backup has ever reported in"
+    // to a shop backing up perfectly every night: the exact false alarm this
+    // function's own comment warns about, reintroduced one line lower down.
+    //
+    // The deploy puts app/ one level below the account root ($HOME/app), so
+    // dirname(__DIR__) IS $HOME on a deployed server — no environment
+    // variable required, and it is already being computed here.
+    $appBase = dirname(__DIR__);
+    $candidates[] = $appBase . '/db-backups';
+
     $home = (string) (getenv('HOME') ?: '');
+    if ($home === '' && function_exists('posix_getpwuid') && function_exists('posix_geteuid')) {
+        $account = @posix_getpwuid(posix_geteuid());
+        $home = (string) ($account['dir'] ?? '');
+    }
     if ($home !== '') {
         $candidates[] = rtrim($home, '/\\') . '/db-backups';
     }
-    $candidates[] = dirname(__DIR__) . '/storage/backups';
+    // One level further up, for a layout that puts app/ deeper than the
+    // account root.
+    $candidates[] = dirname($appBase) . '/db-backups';
+    $candidates[] = $appBase . '/storage/backups';
 
     foreach ($candidates as $dir) {
         $path = $dir . '/backup-status.json';
@@ -2409,8 +2434,13 @@ function backup_health_warning(): ?string
             return null;
         }
 
-        return 'No database backup has ever reported in. Set up the nightly cron '
-            . '(cPanel → Cron Jobs → deploy/backup-database.sh) — until then, a disk failure loses everything.';
+        // Name the file that was LOOKED FOR. "Set up the cron" is advice for
+        // somebody who has not; somebody who just did needs to know where the
+        // app expected the answer, because that is the only thing that tells
+        // them the two halves are pointed at different directories.
+        return 'No database backup has ever reported in — nothing found at ' . $read['path'] . '. '
+            . 'Set up the nightly cron (cPanel → Cron Jobs → deploy/backup-database.sh), '
+            . 'or set BACKUP_DIR in .env if it writes elsewhere. Until then, a disk failure loses everything.';
     }
 
     $state = (string) ($status['state'] ?? 'unknown');
