@@ -631,11 +631,14 @@ function jw_next_no(int $companyId, string $table, string $column, string $prefi
 {
     $prefix = strtoupper(preg_replace('/[^A-Z0-9]/i', '', $prefix) ?: 'JW');
     $series = $series === null ? null : (preg_replace('/[^0-9]/', '', $series) ?: null);
-    $allowed = ['jewellery_purchases' => 'purchase_no', 'jewellery_sales' => 'sale_no',
-        'jewellery_settlements' => 'settlement_no', 'jewellery_orders' => 'order_no',
-        'jewellery_order_assignments' => 'issue_no', 'jewellery_order_receipts' => 'receipt_no',
-        'jewellery_refinery_jobs' => 'job_no'];
-    if (($allowed[$table] ?? '') !== $column) {
+    // An assignment carries two numbers: the work it is (assignment_no) and the
+    // metal that may later go out against it (issue_no). Everything else has
+    // one. The list stays a whitelist — the column is interpolated below.
+    $allowed = ['jewellery_purchases' => ['purchase_no'], 'jewellery_sales' => ['sale_no'],
+        'jewellery_settlements' => ['settlement_no'], 'jewellery_orders' => ['order_no'],
+        'jewellery_order_assignments' => ['issue_no', 'assignment_no'],
+        'jewellery_order_receipts' => ['receipt_no'], 'jewellery_refinery_jobs' => ['job_no']];
+    if (!in_array($column, $allowed[$table] ?? [], true)) {
         throw new RuntimeException('Refusing to number an unknown document table.');
     }
 

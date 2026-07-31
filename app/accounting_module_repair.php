@@ -3192,5 +3192,50 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Kaligad assignment carries the piece it asks for (migration 102)', static function (): void {
+        // The ornament's specification, kept apart from the metal handed over:
+        // a shop assigns work long before any bar leaves the safe, and assigns
+        // work with no customer at all to keep the showroom stocked.
+        if (!accounting_repair_table_exists('jewellery_order_assignments')) {
+            return;
+        }
+        accounting_repair_add_column('jewellery_order_assignments', 'assignment_no',
+            '`assignment_no` VARCHAR(60) DEFAULT NULL AFTER `issue_no`');
+        accounting_repair_add_column('jewellery_order_assignments', 'assign_kind',
+            "`assign_kind` ENUM('customer','self') NOT NULL DEFAULT 'customer' AFTER `assignment_no`");
+        accounting_repair_add_column('jewellery_order_assignments', 'category',
+            "`category` ENUM('gold','diamond','other') NOT NULL DEFAULT 'gold' AFTER `assign_kind`");
+        accounting_repair_add_column('jewellery_order_assignments', 'size_design',
+            '`size_design` VARCHAR(120) DEFAULT NULL AFTER `category`');
+        accounting_repair_add_column('jewellery_order_assignments', 'expected_ornament',
+            '`expected_ornament` VARCHAR(190) DEFAULT NULL AFTER `size_design`');
+        accounting_repair_add_column('jewellery_order_assignments', 'expected_gross_weight',
+            '`expected_gross_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `expected_ornament`');
+        accounting_repair_add_column('jewellery_order_assignments', 'expected_stone_weight',
+            '`expected_stone_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `expected_gross_weight`');
+        accounting_repair_add_column('jewellery_order_assignments', 'expected_net_weight',
+            '`expected_net_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `expected_stone_weight`');
+
+        // Every assignment already made keeps a number to be known by — its
+        // issue number, which is what the table has always shown.
+        db()->exec("UPDATE `jewellery_order_assignments`
+               SET `assignment_no` = `issue_no`
+             WHERE `assignment_no` IS NULL OR `assignment_no` = ''");
+        db()->exec('UPDATE `jewellery_order_assignments`
+               SET `expected_gross_weight` = `issued_gross_weight`,
+                   `expected_net_weight` = `issued_gross_weight`
+             WHERE `expected_gross_weight` = 0 AND `issued_gross_weight` > 0');
+
+        accounting_repair_add_index('jewellery_order_assignments', 'uniq_jw_assignment_no',
+            'UNIQUE KEY `uniq_jw_assignment_no` (`company_id`, `assignment_no`)');
+        accounting_repair_add_index('jewellery_order_assignments', 'idx_jw_assign_kind',
+            'KEY `idx_jw_assign_kind` (`company_id`, `assign_kind`, `issue_date`)');
+
+        if (accounting_repair_table_exists('jewellery_settings')) {
+            accounting_repair_add_column('jewellery_settings', 'assign_no_prefix',
+                "`assign_no_prefix` VARCHAR(20) NOT NULL DEFAULT 'KA' AFTER `issue_no_prefix`");
+        }
+    });
+
     return $errors;
 }
