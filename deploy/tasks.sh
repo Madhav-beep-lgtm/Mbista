@@ -48,4 +48,42 @@ cp -f secure_uploads/kyc/.htaccess "$APP_BASE/secure_uploads/kyc/.htaccess"
 # Provide the .env template; the real .env is created once by hand and never touched.
 cp -f .env.example "$APP_BASE/.env.example"
 
+# ---------------------------------------------------------------------------
+# The nightly backup installs ITSELF.
+#
+# backup-database.sh was written to be armed once by hand in cPanel -> Cron
+# Jobs. It never was — the app's own banner reported "no database backup has
+# ever reported in" for weeks, which is exactly the failure that banner exists
+# to catch, and exactly the kind of one-time manual step that never gets done.
+#
+# A deploy already runs inside the account with the user's crontab in reach,
+# so it arms the job itself. Idempotent by grep: the line goes in once, and
+# re-deploying finds it and leaves it alone. A crontab that cannot be read or
+# written (some hosts forbid it) is REPORTED, not fatal — a deploy must not
+# fail over a scheduling nicety, and the banner keeps nagging until it works.
+# ---------------------------------------------------------------------------
+BACKUP_SCRIPT="$(pwd)/deploy/backup-database.sh"
+CRON_LINE="15 2 * * * /bin/bash $BACKUP_SCRIPT >/dev/null 2>&1"
+
+if command -v crontab >/dev/null 2>&1; then
+    CURRENT_CRON="$(crontab -l 2>/dev/null || true)"
+    if printf '%s\n' "$CURRENT_CRON" | grep -qF 'deploy/backup-database.sh'; then
+        echo "deploy: nightly backup cron already installed"
+    elif printf '%s\n%s\n' "$CURRENT_CRON" "$CRON_LINE" | grep -v '^[[:space:]]*$' | crontab - 2>/dev/null; then
+        echo "deploy: nightly backup cron installed (02:15 daily)"
+    else
+        echo "deploy: WARNING could not write crontab — set the nightly backup up by hand:"
+        echo "deploy:   $CRON_LINE"
+    fi
+else
+    echo "deploy: WARNING no crontab command — set the nightly backup up by hand:"
+    echo "deploy:   $CRON_LINE"
+fi
+
+# Where the backup writes, kept out of the web root and readable only by the
+# account: a dump is every row in the business, and a world-readable one in a
+# guessable place is the whole database published.
+mkdir -p "$HOME/db-backups"
+chmod 700 "$HOME/db-backups" 2>/dev/null || true
+
 echo "deploy: done"

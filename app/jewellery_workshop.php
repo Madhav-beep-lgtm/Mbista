@@ -1362,9 +1362,21 @@ function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $in
     if (!jewellery_unit($companyId, $unitId)) {
         return ['ok' => false, 'error' => 'The weight unit must belong to this company.'];
     }
+    // NO WEIGHT IS A WORK ORDER, NOT AN ERROR.
+    //
+    // A shop tells a kaligad "make me five chains" and hands him metal next
+    // week — or hands him nothing at all, because he works from his own and
+    // sells the finished piece back. Requiring a weight here forced every such
+    // instruction to be invented as a fictional issue, which put metal on the
+    // kaligad's holding that he was never given.
+    //
+    // So an assignment with zero weight records the WORK: who is making what,
+    // by when, at what wage. No metal moves, no voucher posts, the kaligad's
+    // holding is untouched. Metal can follow later
+    // (jewellery_issue_metal_to_assignment), or never.
     $gross = jw_round_weight((float) ($input['issued_gross_weight'] ?? 0));
-    if ($gross <= 0) {
-        return ['ok' => false, 'error' => 'Enter the weight being issued.'];
+    if ($gross < 0) {
+        return ['ok' => false, 'error' => 'A weight being issued cannot be negative.'];
     }
     $orderId = (int) ($input['order_id'] ?? 0) ?: null;
     if ($orderId !== null && !jewellery_order($companyId, $orderId)) {
@@ -1443,14 +1455,23 @@ function jewellery_issue_to_karigar(int $companyId, int $fiscalYearId, array $in
             }
         }
 
-        $common = [
-            'item_id' => $itemId, 'txn_type' => 'issue_karigar', 'txn_date' => $issueDate, 'ref_no' => $no,
-            'purity_id' => $purityId, 'unit_id' => $unitId, 'gross_weight' => $gross, 'fine_weight' => $fine,
-            'amount' => $issuedAmount, 'source_type' => 'jewellery_karigar_issue', 'source_id' => $assignmentId,
-            'voucher_id' => $voucherId, 'created_by' => $userId,
-        ];
-        $outId = jw_record_stock_txn($companyId, $common + ['direction' => 'out', 'holder_type' => 'stock']);
-        $inId = jw_record_stock_txn($companyId, $common + ['direction' => 'in', 'holder_type' => 'karigar', 'holder_id' => $karigarId]);
+        // A work order moves NO metal, so it writes no stock rows: the
+        // kaligad's holding must show what he was actually handed, and a
+        // zero-weight pair would put him on the metal register holding
+        // nothing, which reads as a settled issue rather than as work
+        // outstanding.
+        $outId = null;
+        $inId = null;
+        if ($gross > 0) {
+            $common = [
+                'item_id' => $itemId, 'txn_type' => 'issue_karigar', 'txn_date' => $issueDate, 'ref_no' => $no,
+                'purity_id' => $purityId, 'unit_id' => $unitId, 'gross_weight' => $gross, 'fine_weight' => $fine,
+                'amount' => $issuedAmount, 'source_type' => 'jewellery_karigar_issue', 'source_id' => $assignmentId,
+                'voucher_id' => $voucherId, 'created_by' => $userId,
+            ];
+            $outId = jw_record_stock_txn($companyId, $common + ['direction' => 'out', 'holder_type' => 'stock']);
+            $inId = jw_record_stock_txn($companyId, $common + ['direction' => 'in', 'holder_type' => 'karigar', 'holder_id' => $karigarId]);
+        }
 
         // REMEMBER the ledger this issue debited. The receipt must credit THIS
         // ledger, not whatever the kaligad's name and the mappings resolve to
@@ -1693,6 +1714,144 @@ function jewellery_delete_refinery_job(int $companyId, int $jobId): array
     return ['ok' => true, 'error' => ''];
 }
 
+/**
+ * Hand metal to a kaligad who already has the work.
+ *
+ * The counterpart of the zero-weight work order. "Make me five chains" goes
+ * out on Sunday; the gold follows on Wednesday, or in three instalments, or
+ * never because he works from his own. Each hand-over is the same movement
+ * the original issue makes — stock out of the shop, into his holding, valued
+ * at the weighted-average cost of that moment — added to what the assignment
+ * already records.
+ *
+ * ADDED, not replaced. issued_gross_weight is the total he is answerable for,
+ * and the receipt settles wastage against exactly that, so a second hand-over
+ * must raise it rather than overwrite it. The stock-txn ids on the assignment
+ * keep pointing at the FIRST movement (they are what the reversal path
+ * unwinds); each later movement is found by source_type/source_id like every
+ * other row, so nothing is lost by not having its own column.
+ *
+ * The item, purity and unit are the assignment's own — a kaligad cannot be
+ * handed 22K against an issue measured in 24K, because the receipt settles
+ * one fineness.
+ */
+function jewellery_issue_metal_to_assignment(int $companyId, int $fiscalYearId, int $assignmentId, array $input, int $userId = 0): array
+{
+    $assignment = jewellery_assignment($companyId, $assignmentId);
+    if (!$assignment) {
+        return ['ok' => false, 'error' => 'Assignment not found for this company.'];
+    }
+    if ((string) $assignment['status'] !== 'issued') {
+        return ['ok' => false, 'error' => 'This assignment has already been received or cancelled — metal cannot be added to it.'];
+    }
+
+    $gross = jw_round_weight((float) ($input['issued_gross_weight'] ?? 0));
+    if ($gross <= 0) {
+        return ['ok' => false, 'error' => 'Enter the weight being handed over.'];
+    }
+
+    $item = jewellery_item($companyId, (int) $assignment['item_id']);
+    $karigar = jewellery_karigar($companyId, (int) $assignment['karigar_id']);
+    if (!$item || !$karigar) {
+        return ['ok' => false, 'error' => 'That assignment points at an item or kaligad this company does not have.'];
+    }
+    $purity = jewellery_purity($companyId, (int) $assignment['purity_id']);
+    if (!$purity) {
+        return ['ok' => false, 'error' => 'That assignment points at a purity this company does not have.'];
+    }
+
+    $fine = jw_fine_weight($gross, (float) $purity['fineness']);
+    $issueDate = (string) ($input['issue_date'] ?? date('Y-m-d'));
+    // Valued at the cost of the metal TODAY, not at what the first hand-over
+    // cost — this is a second movement of different metal.
+    $balance = jw_item_balance($companyId, (int) $item['id'], $issueDate, '');
+    $amount = jw_round_money($fine * $balance['avg_fine_rate']);
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        $no = (string) $assignment['issue_no'];
+
+        // THE STOCK MOVES FIRST, and the voucher hangs off the movement.
+        //
+        // vouchers carries UNIQUE (source_type, source_id), so a second
+        // hand-over cannot post another voucher against the same assignment
+        // id — the first instalment already claimed it. Each instalment is
+        // therefore sourced on its OWN stock row, unique by construction,
+        // under its own source_type. Cancelling the assignment still finds
+        // every one of them: through the voucher_id carried on the stock rows
+        // it is already deleting.
+        $common = [
+            'item_id' => (int) $item['id'], 'txn_type' => 'issue_karigar', 'txn_date' => $issueDate, 'ref_no' => $no,
+            'purity_id' => (int) $assignment['purity_id'], 'unit_id' => (int) $assignment['unit_id'],
+            'gross_weight' => $gross, 'fine_weight' => $fine, 'amount' => $amount,
+            'source_type' => 'jewellery_karigar_issue', 'source_id' => $assignmentId,
+            'voucher_id' => null, 'created_by' => $userId,
+        ];
+        $outId = jw_record_stock_txn($companyId, $common + ['direction' => 'out', 'holder_type' => 'stock']);
+        $inId = jw_record_stock_txn($companyId, $common + ['direction' => 'in',
+            'holder_type' => 'karigar', 'holder_id' => (int) $assignment['karigar_id']]);
+
+        $voucherId = null;
+        $karigarLedgerId = jw_karigar_metal_ledger_id($companyId, $karigar);
+        $ownStockLedgerId = jw_item_stock_ledger_id($companyId, $item);
+        if ($amount > 0 && $karigarLedgerId > 0 && $ownStockLedgerId > 0) {
+            $entries = jw_build_entries([
+                ['ledger_id' => $karigarLedgerId, 'amount' => $amount, 'memo' => 'Metal with ' . $karigar['code']],
+                ['ledger_id' => $ownStockLedgerId, 'amount' => -$amount, 'memo' => 'Issued to karigar ' . $karigar['code']],
+            ]);
+            if ($entries !== []) {
+                $voucherId = create_voucher_with_entries([
+                    'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
+                    'voucher_no' => $no . '/' . $outId,
+                    'voucher_type' => 'journal', 'voucher_date' => $issueDate,
+                    'source_type' => 'jewellery_karigar_issue_add', 'source_id' => $outId,
+                    'party_id' => (int) ($karigar['party_id'] ?? 0) ?: null,
+                    'narration' => 'Further metal issued to karigar ' . $karigar['name'] . ' (' . $no . ')',
+                    'total_amount' => $amount, 'status' => 'posted', 'posted_by' => $userId ?: null,
+                ], $entries);
+                db()->prepare('UPDATE jewellery_stock_txns SET voucher_id = :v WHERE id IN (:o, :i)')
+                    ->execute(['v' => $voucherId, 'o' => $outId, 'i' => $inId]);
+            }
+        }
+
+        // The totals he is answerable for. COALESCE because an assignment that
+        // never moved metal has NULL where the first movement's ids would be.
+        db()->prepare('UPDATE jewellery_order_assignments
+                SET issued_gross_weight = issued_gross_weight + :gross,
+                    issued_fine_weight = issued_fine_weight + :fine,
+                    issued_amount = issued_amount + :amount,
+                    issue_stock_txn_out = COALESCE(issue_stock_txn_out, :o),
+                    issue_stock_txn_in = COALESCE(issue_stock_txn_in, :i),
+                    issue_voucher_id = COALESCE(issue_voucher_id, :v),
+                    metal_ledger_id = COALESCE(metal_ledger_id, :ml)
+                WHERE id = :id AND company_id = :cid')
+            ->execute(['gross' => $gross, 'fine' => $fine, 'amount' => $amount,
+                'o' => $outId, 'i' => $inId, 'v' => $voucherId,
+                'ml' => $voucherId ? $karigarLedgerId : null,
+                'id' => $assignmentId, 'cid' => $companyId]);
+
+        log_activity('company', $companyId, 'jewellery_karigar_issue_added',
+            'Further metal issued on ' . $no . ': ' . number_format($gross, 4), $userId);
+
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+
+        return ['ok' => true, 'error' => '', 'assignment_id' => $assignmentId,
+            'issued_fine_weight' => $fine, 'issued_amount' => $amount];
+    } catch (Throwable $issueException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+
+        return ['ok' => false, 'error' => $issueException->getMessage()];
+    }
+}
+
+
 /** Cancel an issued assignment, pulling the metal back out of the karigar. */
 function jewellery_cancel_assignment(int $companyId, int $assignmentId, int $userId = 0): array
 {
@@ -1709,13 +1868,32 @@ function jewellery_cancel_assignment(int $companyId, int $assignmentId, int $use
         db()->beginTransaction();
     }
     try {
-        $voucherId = (int) ($assignment['issue_voucher_id'] ?? 0);
-        if ($voucherId > 0) {
+        // EVERY voucher this issue posted, not merely the first.
+        //
+        // Metal goes out in instalments — "make five chains" on Sunday, the
+        // gold on Wednesday and more on Friday — and each hand-over posts its
+        // own voucher. Reversing only the one recorded on the assignment
+        // stranded the rest: the kaligad's metal ledger kept a debit for
+        // metal that had just been pulled back out of him. The stock rows
+        // carry the voucher that moved them, so they are the roll.
+        $voucherIds = [];
+        $primaryVoucherId = (int) ($assignment['issue_voucher_id'] ?? 0);
+        if ($primaryVoucherId > 0) {
+            $voucherIds[$primaryVoucherId] = $primaryVoucherId;
+        }
+        $vidStmt = db()->prepare("SELECT DISTINCT voucher_id FROM jewellery_stock_txns
+            WHERE company_id = :cid AND source_type = 'jewellery_karigar_issue' AND source_id = :sid
+              AND voucher_id IS NOT NULL");
+        $vidStmt->execute(['cid' => $companyId, 'sid' => $assignmentId]);
+        foreach ($vidStmt->fetchAll(PDO::FETCH_COLUMN) as $foundId) {
+            $voucherIds[(int) $foundId] = (int) $foundId;
+        }
+        foreach ($voucherIds as $voucherId) {
             $vStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :cid LIMIT 1');
             $vStmt->execute(['id' => $voucherId, 'cid' => $companyId]);
             $voucher = $vStmt->fetch(PDO::FETCH_ASSOC);
             if ($voucher) {
-                $blocker = voucher_mutation_blocker($voucher, ['jewellery_karigar_issue']);
+                $blocker = voucher_mutation_blocker($voucher, ['jewellery_karigar_issue', 'jewellery_karigar_issue_add']);
                 if ($blocker !== null) {
                     throw new RuntimeException($blocker);
                 }

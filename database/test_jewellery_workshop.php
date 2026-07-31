@@ -1241,6 +1241,89 @@ $blankRec = jewellery_receive_from_karigar($cidA, $fyA, [
 ok($blankRec['ok'] && (float) $blankRec['recovery_amount'] > 0,
     'A blank allowance forgives nothing — he bears the shortfall, which is the rule');
 
+echo "\n24. Work can be assigned without handing over any metal\n";
+// "Make me five chains" is an instruction, not a metal movement. The shop
+// hands the gold over next week, or in instalments, or never — some kaligads
+// work from their own. Requiring a weight forced every such job to be
+// invented as a fictional issue, putting metal on the kaligad's holding that
+// he was never given.
+$ownFineBefore = jw_item_balance($cidA, $chain, null, 'stock')['fine_weight'];
+$heldBefore = (float) jewellery_holder_metal_position($cidA, 'karigar', $kContractor)['fine_weight'];
+$workOrder = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issue_date' => '2026-08-30', 'making_basis' => 'flat', 'making_rate' => 6000,
+    'notes' => 'Five chains, own pattern',
+], $userA);
+ok($workOrder['ok'], 'An assignment with NO weight is accepted' . ($workOrder['ok'] ? '' : ' — ' . $workOrder['error']));
+$workAid = (int) $workOrder['assignment_id'];
+$workRow = jewellery_assignment($cidA, $workAid);
+ok($workRow && near((float) $workRow['issued_gross_weight'], 0.0) && (string) $workRow['status'] === 'issued',
+    'It stands as an open job with nothing issued against it');
+ok(near(jw_item_balance($cidA, $chain, null, 'stock')['fine_weight'], $ownFineBefore),
+    'The shop\'s own stock is untouched — no metal moved');
+ok((int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns WHERE company_id=$cidA
+        AND source_type='jewellery_karigar_issue' AND source_id=$workAid")->fetchColumn() === 0,
+    'And no stock movement was written — a work order is not an issue');
+ok((int) ($workRow['issue_voucher_id'] ?? 0) === 0, 'No voucher either: nothing of value changed hands');
+ok(jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => -1, 'issue_date' => '2026-08-30',
+], $userA)['ok'] === false, 'A NEGATIVE weight is still refused — blank means none, not nonsense');
+
+// The metal follows, against the same issue.
+$later = jewellery_issue_metal_to_assignment($cidA, $fyA, $workAid,
+    ['issued_gross_weight' => 2, 'issue_date' => '2026-08-31'], $userA);
+ok($later['ok'], 'Metal is handed over later against that work' . ($later['ok'] ? '' : ' — ' . $later['error']));
+$workRow2 = jewellery_assignment($cidA, $workAid);
+ok(near((float) $workRow2['issued_gross_weight'], 2.0) && near((float) $workRow2['issued_fine_weight'], 1.832),
+    'The assignment now answers for 2 tola / 1.832 fine');
+ok(near((float) jewellery_holder_metal_position($cidA, 'karigar', $kContractor)['fine_weight'], $heldBefore + 1.832),
+    'And the kaligad\'s holding rose by exactly that');
+
+// A second instalment ADDS; it never replaces.
+$later2 = jewellery_issue_metal_to_assignment($cidA, $fyA, $workAid,
+    ['issued_gross_weight' => 1, 'issue_date' => '2026-08-31'], $userA);
+ok($later2['ok'] && near((float) jewellery_assignment($cidA, $workAid)['issued_gross_weight'], 3.0),
+    'A second hand-over adds to the total, it does not overwrite it'
+    . ($later2['ok'] ? '' : ' — ' . $later2['error']));
+ok(jewellery_issue_metal_to_assignment($cidA, $fyA, $workAid,
+    ['issued_gross_weight' => 0], $userA)['ok'] === false,
+    'Handing over nothing is refused — that is what the work order already said');
+
+// Received, the job settles against what was ACTUALLY issued.
+$workBack = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => $workAid, 'received_item_id' => $chain, 'received_purity_id' => $p22,
+    'received_gross_weight' => 3, 'qty_pieces' => 5, 'receive_date' => '2026-09-01',
+], $userA);
+ok($workBack['ok'], 'The finished pieces come back against the work order' . ($workBack['ok'] ? '' : ' — ' . $workBack['error']));
+ok(near((float) $workBack['making_amount'], 6000.0), 'His wage is the flat rate the job was assigned at');
+ok(jewellery_issue_metal_to_assignment($cidA, $fyA, $workAid,
+    ['issued_gross_weight' => 1], $userA)['ok'] === false,
+    'Nothing can be added to an issue that has already come back');
+
+// Cancelling a multi-instalment issue must unwind EVERY hand-over. Reversing
+// only the first left the kaligad's metal ledger holding a debit for gold
+// that had just been taken back off him.
+$multiIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 1, 'issue_date' => '2026-09-02', 'making_basis' => 'flat', 'making_rate' => 1000,
+], $userA);
+ok($multiIssue['ok'], 'An issue goes out with one tola');
+$multiAid = (int) $multiIssue['assignment_id'];
+ok(jewellery_issue_metal_to_assignment($cidA, $fyA, $multiAid,
+    ['issued_gross_weight' => 1, 'issue_date' => '2026-09-03'], $userA)['ok'],
+    'A second tola follows on another day');
+$heldWithBoth = (float) jewellery_holder_metal_position($cidA, 'karigar', $kContractor)['fine_weight'];
+$cancelMulti = jewellery_cancel_assignment($cidA, $multiAid, $userA);
+ok($cancelMulti['ok'], 'The whole issue is cancelled' . ($cancelMulti['ok'] ? '' : ' — ' . $cancelMulti['error']));
+ok(near((float) jewellery_holder_metal_position($cidA, 'karigar', $kContractor)['fine_weight'], $heldWithBoth - 1.832),
+    'BOTH tola come back off his holding, not just the first');
+ok((int) db()->query("SELECT COUNT(*) FROM vouchers v
+        INNER JOIN voucher_entries e ON e.voucher_id = v.id
+        WHERE v.company_id=$cidA AND v.source_type='jewellery_karigar_issue_add'
+          AND v.source_id IN (SELECT id FROM jewellery_stock_txns WHERE source_id=$multiAid)")->fetchColumn() === 0,
+    'And every voucher the instalments posted is gone with it');
+
 echo "\n23. Stones are not gold — the receipt weighs them apart\n";
 // 2 tola of 22K goes out (1.832 fine). Back comes a stone-set piece: 2.1 on
 // the scale, of which 0.6 is stone. The metal returned is 1.5 tola = 1.374

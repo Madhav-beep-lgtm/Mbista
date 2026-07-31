@@ -337,6 +337,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    if ($action === 'issue_metal_later') {
+        require_permission('jewellery', 'post');
+        $result = jewellery_issue_metal_to_assignment($companyId, $fiscalYearId,
+            (int) ($_POST['assignment_id'] ?? 0), [
+                'issued_gross_weight' => (float) ($_POST['issued_gross_weight'] ?? 0),
+                'issue_date' => $clampDate((string) ($_POST['issue_date'] ?? '')),
+            ], $userId);
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? ('Metal handed over: ' . number_format((float) $result['issued_fine_weight'], 4) . ' fine added to this issue.')
+            : $result['error']);
+        redirect($back);
+    }
+
     if ($action === 'cancel_assignment') {
         require_permission('jewellery', 'post');
         $result = jewellery_cancel_assignment($companyId, (int) ($_POST['assignment_id'] ?? 0), $userId);
@@ -1218,7 +1231,13 @@ jw_filter_bar_styles();
             <label>Item                <select name="item_id" required>
                     <?php foreach ($items as $it): ?>
                         <?php $onHand = $itemOnHand[(int) $it['id']]; ?>
-                        <option value="<?= (int) $it['id'] ?>" <?= $onHand['fine_weight'] <= 0 ? 'disabled' : '' ?>><?= e($it['code'] . ' — ' . $it['name']) ?> (<?= $onHand['fine_weight'] > 0 ? $fmt($onHand['fine_weight'], 4) . ' fine on hand' : 'no stock' ?>)</option>
+                        <?php // Selectable whatever the stock says. An item with none on
+                              // hand can still be WORK ("make five chains") — the engine
+                              // refuses to move metal it has not got, which is the right
+                              // place for that rule; a disabled option refused the work
+                              // order too. Gold, silver, diamond — any item the shop
+                              // keeps can be given to a kaligad. ?>
+                        <option value="<?= (int) $it['id'] ?>"><?= e($it['code'] . ' — ' . $it['name']) ?> (<?= $onHand['fine_weight'] > 0 ? $fmt($onHand['fine_weight'], 4) . ' fine on hand' : 'no stock — work order only' ?>)</option>
                     <?php endforeach; ?>
                 </select>
             </label>
@@ -1236,7 +1255,12 @@ jw_filter_bar_styles();
                     <?php endforeach; ?>
                 </select>
             </label>
-            <label>Gross weight issued<input type="number" name="issued_gross_weight" step="0.0001" min="0.0001" required></label>
+            <?php // Blank is a WORK ORDER: the kaligad is given the job, not the
+                  // metal. He can be handed metal later against the same issue,
+                  // in as many instalments as the shop likes, or never — some
+                  // kaligads work from their own and sell the finished piece back. ?>
+            <label>Gross weight issued <small class="frm-optional">optional — leave blank to assign the work only</small>
+                <input type="number" name="issued_gross_weight" step="0.0001" min="0" placeholder="none — work order"></label>
             <label>Issue date<input type="date" name="issue_date" value="<?= e($todayInFy) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required></label>
             <label>Expected return<input type="date" name="expected_return_date"></label>
             <?php // Nothing is forgiven at issue time; see the receive screen. ?>
@@ -1248,12 +1272,16 @@ jw_filter_bar_styles();
                 </select>
             </label>
             <label>Making rate<input type="number" name="making_rate" step="0.0001" min="0" value="0"></label>
-            <div style="grid-column:1/-1"><button type="submit" class="button" <?= $activeKarigars === [] || $items === [] || $issuableFine <= 0 ? 'disabled' : '' ?>>Issue Metal</button></div>
+            <?php // Empty stock no longer blocks the form: the work order needs no
+                  // metal, and the engine refuses a metal issue it cannot cover. ?>
+            <div style="grid-column:1/-1"><button type="submit" class="button" <?= $activeKarigars === [] || $items === [] ? 'disabled' : '' ?>>Assign / Issue</button></div>
         </form>
         <?php if ($issuableFine <= 0): ?>
             <div class="notice" style="margin-top:12px">
-                <strong>There is no metal in stock to issue.</strong>
-                Metal has to arrive before it can go out to a kaligad — record it as
+                <strong>There is no metal in stock to issue — but the work can still be assigned.</strong>
+                Leave the weight blank and this records the job only: who is making what, by when,
+                at what wage. Hand the metal over later from the assignment list.
+                To issue metal now, it has to arrive first — record it as
                 <a href="<?= e(url('admin/jewellery.php?view=opening')) ?>">Opening Stock</a> if you already held it when the books started,
                 or as a <a href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">Purchase</a> if you bought it.
                 Issuing does not create metal; it only moves it from your own stock into the kaligad's hands.
@@ -1373,6 +1401,30 @@ jw_filter_bar_styles();
                                     <input type="hidden" name="assignment_id" value="<?= (int) $row['id'] ?>">
                                     <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Cancel</button>
                                 </form>
+                            <?php endif; ?>
+                            <?php if ((string) $row['status'] === 'issued' && $canPost): ?>
+                                <?php // Hand metal over against work already assigned — the
+                                      // second half of the work order. Shown on every open
+                                      // issue, because metal goes out in instalments as
+                                      // often as it goes out all at once. ?>
+                                <details style="display:inline-block;vertical-align:middle">
+                                    <summary class="button soft" style="min-height:30px;padding:3px 10px;list-style:none;cursor:pointer">
+                                        <?= (float) $row['issued_gross_weight'] > 0 ? 'Issue more' : 'Issue metal' ?>
+                                    </summary>
+                                    <form method="post" style="display:flex;gap:6px;align-items:end;margin-top:6px">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="issue_metal_later">
+                                        <input type="hidden" name="back_view" value="assignments">
+                                        <input type="hidden" name="assignment_id" value="<?= (int) $row['id'] ?>">
+                                        <label style="font-size:11px">Weight
+                                            <input type="number" name="issued_gross_weight" step="0.0001" min="0.0001"
+                                                   required style="max-width:110px" placeholder="<?= e((string) $row['unit_code']) ?>"></label>
+                                        <label style="font-size:11px">Date
+                                            <input type="date" name="issue_date" value="<?= e($todayInFy) ?>"
+                                                   min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" style="max-width:150px"></label>
+                                        <button type="submit" class="button secondary" style="min-height:30px;padding:3px 10px">Hand over</button>
+                                    </form>
+                                </details>
                             <?php endif; ?>
                             <?php if ((string) $row['status'] === 'received' && $canPost): ?>
                                 <?php $rcptId = (int) db()->query("SELECT id FROM jewellery_order_receipts
