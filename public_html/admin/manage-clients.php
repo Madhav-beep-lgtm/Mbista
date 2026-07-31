@@ -162,12 +162,34 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <?php if ($otherPortalClients !== []): ?>
-    <div class="notice">
-        <strong><?= e((string) count($otherPortalClients)) ?> client<?= count($otherPortalClients) > 1 ? 's' : '' ?></strong>
-        you manage <?= count($otherPortalClients) > 1 ? 'are' : 'is' ?> listed under a different portal:
-        <?php foreach ($otherPortalClients as $i => $otherClient): ?><?= $i > 0 ? ', ' : ' ' ?><em><?= e($otherClient['organization_name']) ?></em> (<?= e($otherClient['serving_company']) ?>)<?php endforeach; ?>.
-        Switch the portal from the sidebar to manage <?= count($otherPortalClients) > 1 ? 'them' : 'it' ?>.
-    </div>
+    <?php
+        // GROUPED BY THE PORTAL THEY LIVE IN, because that is the thing the
+        // reader has to act on: they switch portals, not clients. Inlined as
+        // one sentence, nine clients ran to five lines of prose in which the
+        // same portal name appeared four times and the actual instruction —
+        // "switch the portal" — arrived last, after the reader had given up.
+        $byPortal = [];
+        foreach ($otherPortalClients as $otherClient) {
+            $byPortal[(string) $otherClient['serving_company']][] = (string) $otherClient['organization_name'];
+        }
+        ksort($byPortal);
+    ?>
+    <details class="notice">
+        <summary style="cursor:pointer">
+            <strong><?= e((string) count($otherPortalClients)) ?> client<?= count($otherPortalClients) > 1 ? 's' : '' ?></strong>
+            you manage <?= count($otherPortalClients) > 1 ? 'are' : 'is' ?> under
+            <?= count($byPortal) > 1 ? e((string) count($byPortal)) . ' other portals' : 'another portal' ?>.
+            Switch portal from the sidebar to manage <?= count($otherPortalClients) > 1 ? 'them' : 'it' ?>.
+        </summary>
+        <ul style="margin:8px 0 0;padding-left:18px">
+            <?php foreach ($byPortal as $portalName => $clientNames): ?>
+                <li style="margin-bottom:4px">
+                    <strong><?= e($portalName) ?></strong>
+                    <span style="color:var(--mbw-muted,#64748b)">— <?= e(implode(', ', $clientNames)) ?></span>
+                </li>
+            <?php endforeach; ?>
+        </ul>
+    </details>
 <?php endif; ?>
 
 <section class="mbw-card" aria-label="Clients">
