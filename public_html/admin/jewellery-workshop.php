@@ -353,6 +353,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    // Hand over one thing on an issue — a bar of gold, or a packet of stones.
+    // A superset of issue_metal_later, which stays for the callers that only
+    // ever mean the assignment's own metal.
+    if ($action === 'issue_component') {
+        require_permission('jewellery', 'post');
+        $result = jewellery_issue_component($companyId, $fiscalYearId,
+            (int) ($_POST['assignment_id'] ?? 0), [
+                'item_id' => (int) ($_POST['item_id'] ?? 0),
+                'gross_weight' => (float) ($_POST['gross_weight'] ?? 0),
+                'issue_date' => $clampDate((string) ($_POST['issue_date'] ?? '')),
+                'notes' => (string) ($_POST['notes'] ?? ''),
+            ], $userId);
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? ((string) $result['kind'] === 'stone'
+                ? 'Stones handed over: ' . number_format((float) $result['qty_carat'], 3) . ' ct added to this issue.'
+                : 'Metal handed over: ' . number_format((float) $result['fine_weight'], 4) . ' fine added to this issue.')
+            : $result['error']);
+        redirect($back);
+    }
+
     if ($action === 'cancel_assignment') {
         require_permission('jewellery', 'post');
         $result = jewellery_cancel_assignment($companyId, (int) ($_POST['assignment_id'] ?? 0), $userId);
@@ -1442,19 +1462,49 @@ jw_filter_bar_styles();
                                     <summary class="button soft" style="min-height:30px;padding:3px 10px;list-style:none;cursor:pointer">
                                         <?= (float) $row['issued_gross_weight'] > 0 ? 'Issue more' : 'Issue metal' ?>
                                     </summary>
-                                    <form method="post" style="display:flex;gap:6px;align-items:end;margin-top:6px">
+                                    <?php // Gold, or the stones set into it. One issue carries
+                                          // both, each weighed in its own unit — the item says
+                                          // which it is, so nobody has to declare it twice. ?>
+                                    <form method="post" style="display:flex;gap:6px;align-items:end;margin-top:6px;flex-wrap:wrap">
                                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                        <input type="hidden" name="action" value="issue_metal_later">
+                                        <input type="hidden" name="action" value="issue_component">
                                         <input type="hidden" name="back_view" value="assignments">
                                         <input type="hidden" name="assignment_id" value="<?= (int) $row['id'] ?>">
+                                        <label style="font-size:11px">What
+                                            <select name="item_id" style="max-width:190px">
+                                                <?php foreach ($items as $it): ?>
+                                                    <option value="<?= (int) $it['id'] ?>" <?= (int) $it['id'] === (int) $row['item_id'] ? 'selected' : '' ?>>
+                                                        <?= e((string) $it['code']) ?> — <?= e((string) $it['name']) ?><?= (string) ($it['metal_kind'] ?? '') === 'stone' ? ' (ct)' : '' ?>
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </select></label>
                                         <label style="font-size:11px">Weight
-                                            <input type="number" name="issued_gross_weight" step="0.0001" min="0.0001"
+                                            <input type="number" name="gross_weight" step="0.0001" min="0.0001"
                                                    required style="max-width:110px" placeholder="<?= e((string) $row['unit_code']) ?>"></label>
                                         <label style="font-size:11px">Date
                                             <input type="date" name="issue_date" value="<?= e($todayInFy) ?>"
                                                    min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" style="max-width:150px"></label>
                                         <button type="submit" class="button secondary" style="min-height:30px;padding:3px 10px">Hand over</button>
                                     </form>
+                                    <?php
+                                    // What is already in his hands on this issue, so a second
+                                    // hand-over is made knowing the first.
+                                    $handedOver = jewellery_assignment_components($companyId, (int) $row['id']);
+                                    ?>
+                                    <?php if ($handedOver !== []): ?>
+                                        <?php $handedTotals = jewellery_component_totals($handedOver); ?>
+                                        <div style="margin-top:6px;font-size:11px;color:var(--mbw-muted)">
+                                            Handed over so far:
+                                            <?php if ($handedTotals['metal_lines'] > 0): ?>
+                                                <strong><?= $fmt($handedTotals['metal_fine'], 4) ?></strong> fine metal
+                                            <?php endif; ?>
+                                            <?php if ($handedTotals['stone_lines'] > 0): ?>
+                                                <?= $handedTotals['metal_lines'] > 0 ? ' · ' : '' ?>
+                                                <strong><?= $fmt($handedTotals['stone_carat'], 3) ?></strong> ct stones
+                                            <?php endif; ?>
+                                            <?= ' (' . count($handedOver) . ' hand-over' . (count($handedOver) === 1 ? '' : 's') . ')' ?>
+                                        </div>
+                                    <?php endif; ?>
                                 </details>
                             <?php endif; ?>
                             <?php if ((string) $row['status'] === 'received' && $canPost): ?>
