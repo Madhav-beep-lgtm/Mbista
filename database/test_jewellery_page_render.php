@@ -307,6 +307,52 @@ if ($dead !== []) {
     echo '        not seen in these views: ' . implode(', ', $dead) . "\n";
 }
 
+echo "\nEvery icon the app asks for is actually drawn\n";
+/*
+ * icon() answers an unknown name with a fallback circle rather than an error,
+ * which is right — a missing glyph must never take a page down. But it is
+ * silent, and eight names went missing that way: the "fine weight" tiles wore
+ * a bare ring for months, and nobody could see a bug in a page that rendered.
+ *
+ * So the check is mechanical: collect every icon('name') in the app, and fail
+ * if any of them is not in the registry. Adding a call with a name nobody
+ * drew now breaks a test instead of shipping a circle.
+ */
+$iconSource = (string) file_get_contents($root . '/app/helpers.php');
+$iconStart = strpos($iconSource, 'function icon(string $name)');
+$iconBody = substr($iconSource, $iconStart, strpos($iconSource, "\n}", $iconStart) - $iconStart);
+preg_match_all("/^        '([a-z0-9-]+)' => \[/m", $iconBody, $iconMatches);
+$iconRegistry = array_flip($iconMatches[1]);
+ok(count($iconRegistry) > 50, 'The icon registry loaded (' . count($iconRegistry) . ' glyphs)');
+
+$iconUsed = [];
+foreach (array_merge(
+    glob($root . '/public_html/admin/*.php') ?: [],
+    glob($root . '/public_html/*.php') ?: [],
+    glob($root . '/app/views/partials/*.php') ?: [],
+    glob($root . '/app/*.php') ?: []
+) as $iconFile) {
+    preg_match_all("/icon\(\s*'([a-z0-9-]+)'/", (string) file_get_contents($iconFile), $iconHits);
+    foreach ($iconHits[1] as $iconName) {
+        $iconUsed[$iconName] = true;
+    }
+}
+$iconMissing = array_diff(array_keys($iconUsed), array_keys($iconRegistry));
+ok($iconMissing === [], 'Every icon name used across the app is drawn'
+    . ($iconMissing === [] ? ' (' . count($iconUsed) . ' names)' : ' — MISSING: ' . implode(', ', $iconMissing)));
+
+// A glyph that renders as an empty <svg> is as blank as a missing one.
+// Case-insensitive on the path command: 'm' is a RELATIVE moveto and just as
+// valid as 'M' — demanding the capital failed 'layers', which draws fine.
+$iconEmpty = [];
+foreach (array_keys($iconUsed) as $iconName) {
+    if (preg_match('/<path d="[Mm][\d\s.-]/', icon($iconName)) !== 1) {
+        $iconEmpty[] = $iconName;
+    }
+}
+ok($iconEmpty === [], 'And every one of them draws at least one path'
+    . ($iconEmpty === [] ? '' : ' — EMPTY: ' . implode(', ', $iconEmpty)));
+
 echo "\nThe reports toolbar says what its buttons do\n";
 /*
  * Those three export buttons rendered as empty green rectangles. The labels

@@ -1278,13 +1278,15 @@ jw_filter_bar_styles();
         </form>
         <?php if ($issuableFine <= 0): ?>
             <div class="notice" style="margin-top:12px">
-                <strong>There is no metal in stock to issue — but the work can still be assigned.</strong>
-                Leave the weight blank and this records the job only: who is making what, by when,
-                at what wage. Hand the metal over later from the assignment list.
-                To issue metal now, it has to arrive first — record it as
-                <a href="<?= e(url('admin/jewellery.php?view=opening')) ?>">Opening Stock</a> if you already held it when the books started,
-                or as a <a href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">Purchase</a> if you bought it.
-                Issuing does not create metal; it only moves it from your own stock into the kaligad's hands.
+                <?php // Short, because the form above now says the same thing where the
+                      // decision is made: the weight is marked optional, and the button
+                      // reads Assign / Issue. A paragraph repeating it under an
+                      // enabled form is noise. What stays is the two links, which
+                      // are the actual next step for stock that has not arrived. ?>
+                <strong>No metal in stock yet.</strong> The work can still be assigned — leave the weight blank.
+                To hand metal over, bring it in first:
+                <a href="<?= e(url('admin/jewellery.php?view=opening')) ?>">Opening Stock</a> or
+                <a href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">Purchase</a>.
             </div>
         <?php endif; ?>
     </section>
