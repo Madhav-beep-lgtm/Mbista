@@ -1500,6 +1500,45 @@ ok((int) db()->query("SELECT COUNT(*) FROM jewellery_order_assignments WHERE id=
         WHERE company_id=$cidA AND assignment_id=$delAid")->fetchColumn() === 0,
     'And nothing is left pointing at it');
 
+// ---------------------------------------------------------------------------
+// A work order: the kaligad is given the JOB and no metal. He works from his
+// own and sells the finished piece back — which the issue screen has always
+// offered ("leave the weight blank to assign the work only") and the receive
+// could not complete: it wrote a zero-weight movement to clear a holding that
+// was never created, and the stock ledger rightly refused it. So the work
+// could be handed out and never taken back.
+//
+// Last in the file on purpose: it adds a receipt and a wage, and the position
+// and ledger totals asserted above are counted to the paisa.
+// ---------------------------------------------------------------------------
+echo "\n17. A work order with no metal issued can still be received\n";
+$workOrder = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 0, 'issue_date' => '2026-10-01',
+    'making_basis' => 'flat', 'making_rate' => 400,
+], $userA);
+ok($workOrder['ok'], 'The work can be assigned with no metal at all' . ($workOrder['ok'] ? '' : ' — ' . $workOrder['error']));
+$workAssignment = jewellery_assignment($cidA, (int) $workOrder['assignment_id']);
+ok(near((float) $workAssignment['issued_gross_weight'], 0.0), 'And nothing goes out with it');
+$workRec = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => (int) $workOrder['assignment_id'], 'received_gross_weight' => 2,
+    'receive_date' => '2026-10-05',
+], $userA);
+ok($workRec['ok'], 'The finished piece comes back' . ($workRec['ok'] ? '' : ' — ' . $workRec['error']));
+// Keyed on the receipt id, not its number: the movements name their source, and
+// a wrong key here would make both counts zero and pass the first check for the
+// wrong reason.
+$workReceiptId = (int) ($workRec['receipt_id'] ?? 0);
+ok($workReceiptId > 0, 'The receipt is on file');
+ok((int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns WHERE company_id=$cidA
+    AND source_type='jewellery_order_receipt' AND source_id=$workReceiptId AND holder_type='karigar'")->fetchColumn() === 0,
+    'No holding is cleared, because none was ever created');
+ok((int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns WHERE company_id=$cidA
+    AND source_type='jewellery_order_receipt' AND source_id=$workReceiptId AND holder_type='stock' AND direction='in'")->fetchColumn() === 1,
+    'The piece he made from his own metal arrives in stock');
+$workVoucher = voucher_shape((int) $workRec['voucher_id']);
+ok(near($workVoucher['dr'], $workVoucher['cr']), 'And its voucher balances');
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

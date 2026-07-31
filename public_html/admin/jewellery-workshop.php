@@ -3,6 +3,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/jewellery_reports.php';
+// Ready to Sale and the output register both read the assignment kind, which
+// the assign engine owns.
+require_once __DIR__ . '/../../app/jewellery_assign.php';
 // The order form punches items on the SAME grid the sale does, so a quote and
 // the bill it becomes can never carry different columns.
 require_once __DIR__ . '/../../app/views/partials/jewellery_line_grid.php';
@@ -47,7 +50,7 @@ $exportLinks = static function () use (&$view): string {
     return $links;
 };
 
-$allowedViews = ['orders', 'karigars', 'assignments', 'delivery', 'refinery'];
+$allowedViews = ['orders', 'karigars', 'assignments', 'delivery', 'ready-to-sale', 'output', 'refinery'];
 $view = jw_enum($_GET['view'] ?? null, $allowedViews, 'orders');
 
 $clampDate = static function (string $date) use ($fyStart, $fyEnd): string {
@@ -543,6 +546,13 @@ if ($receiveTarget && (string) $receiveTarget['status'] === 'issued') {
     );
 }
 $pending = $view === 'delivery' ? jewellery_pending_delivery($companyId) : [];
+// A showroom piece comes back to the shelf, not to a collection queue, and the
+// output register is the two flows in one list — the only place they belong
+// together, because it asks about the shop's output as a whole.
+$readyToSale = $view === 'ready-to-sale' ? jewellery_ready_to_sale($companyId, $listFilters) : [];
+$output = $view === 'output'
+    ? jewellery_workshop_output($companyId, $listFilters + ['kind' => jw_enum($_GET['kind'] ?? null, ['customer', 'self'], '')])
+    : [];
 $jobs = $view === 'refinery' ? jewellery_refinery_jobs_list($companyId) : [];
 
 // ---------------------------------------------------------------------------
@@ -579,6 +589,24 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
                 (string) ($r['expected_return_date'] ?? ''), $r['status']];
         }
         export_dispatch($exportFormat, 'jewellery-issues-' . $stamp, $data, 'Kaligad Issues', $exportMeta);
+    }
+    if ($view === 'ready-to-sale') {
+        $data = [['Assignment', 'Kaligad', 'Ornament', 'Size/Design', 'Received on', 'Gross', 'Stone',
+            'Net', 'Fine', 'Purity', 'Making charge']];
+        foreach ($readyToSale as $r) {
+            $data[] = [$r['assignment_no'], (string) ($r['karigar_name'] ?? ''),
+                (string) ($r['expected_ornament'] ?: $r['item_name'] ?? ''), (string) ($r['size_design'] ?? ''),
+                (string) $r['receive_date'], $r['received_gross_weight'], $r['stone_weight'],
+                $r['net_gold_weight'], $r['received_fine_weight'], (string) ($r['purity_code'] ?? ''),
+                $r['making_amount'] ?? 0];
+        }
+        export_dispatch($exportFormat, 'jewellery-ready-to-sale-' . $stamp, $data, 'Ready to Sale', $exportMeta);
+    }
+    if ($view === 'output') {
+        // Through the shared flattener, so the register, its spreadsheet and
+        // its printed sheet carry the same columns in the same order.
+        export_dispatch($exportFormat, 'jewellery-workshop-output-' . $stamp,
+            jewellery_output_export_rows($output, $sym), 'Workshop Output', $exportMeta);
     }
     if ($view === 'karigars') {
         $data = [['Code', 'Name', 'Phone', 'Engagement', 'Making basis', 'Making rate',
@@ -624,7 +652,8 @@ jw_filter_bar_styles();
     <a class="mbw-tab" href="<?= e(url('admin/jewellery.php')) ?>"><?= icon('dashboard') ?> Jewellery Home</a>
     <?php foreach ([
         'orders' => ['Orders', 'journal'], 'assignments' => ['Kaligad Issue &amp; Receive', 'handshake'],
-        'delivery' => ['Ready to Deliver', 'box'], 'karigars' => ['Kaligads', 'teams'],
+        'delivery' => ['Ready to Deliver', 'box'], 'ready-to-sale' => ['Ready to Sale', 'cart'],
+        'output' => ['Workshop Output', 'reports'], 'karigars' => ['Kaligads', 'teams'],
         'refinery' => ['Refinery', 'layers'],
     ] as $tabView => [$tabLabel, $tabIcon]): ?>
         <a class="mbw-tab <?= $view === $tabView ? 'is-active' : '' ?>" href="<?= e(url('admin/jewellery-workshop.php?view=' . $tabView)) ?>"><?= icon($tabIcon) ?> <?= $tabLabel ?></a>
@@ -1497,6 +1526,102 @@ jw_filter_bar_styles();
                                     <?= icon('invoice') ?> Bill &amp; deliver
                                 </a>
                             <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+    </section>
+
+<?php elseif ($view === 'ready-to-sale'): ?>
+    <div class="notice" style="margin-bottom:14px">
+        Pieces made for the showroom, back from the kaligad and on the shelf. Nobody ordered these — they replace
+        minimum stock, so they wait for whoever walks in rather than for a name.
+    </div>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Ready to Sale (<?= count($readyToSale) ?>)</h2>
+            <div class="mbw-card-tools"><?= $canExport && $readyToSale !== [] ? 'Export' . $exportLinks() : '' ?></div>
+        </div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>Assignment</th><th>Ornament</th><th>Size / design</th><th>Kaligad</th>
+                <th>Received on</th><th class="is-numeric">Gross</th><th class="is-numeric">Stone</th>
+                <th class="is-numeric">Net</th><th class="is-numeric">Fine</th><th>Purity</th>
+                <th class="is-numeric">Making charge</th><th class="is-numeric">Days on shelf</th></tr></thead>
+            <tbody>
+                <?php if ($readyToSale === []): ?>
+                    <tr><td colspan="12" style="text-align:center;color:var(--mbw-muted);padding:18px">
+                        Nothing has come back for the showroom yet. Assign showroom work under
+                        <a href="<?= e(url('admin/jewellery-assign.php?kind=self')) ?>">Kaligad Assign</a>.
+                    </td></tr>
+                <?php endif; ?>
+                <?php foreach ($readyToSale as $row): ?>
+                    <tr>
+                        <td><strong><?= e((string) $row['assignment_no']) ?></strong><br><small><?= e((string) $row['receipt_no']) ?></small></td>
+                        <td><?= e((string) ($row['expected_ornament'] ?: $row['item_name'] ?? '')) ?></td>
+                        <td><?= e((string) ($row['size_design'] ?? '')) ?: '—' ?></td>
+                        <td><?= e((string) ($row['karigar_name'] ?? '')) ?></td>
+                        <td><?= e(app_date((string) $row['receive_date'])) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['received_gross_weight'], 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['stone_weight'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['net_gold_weight'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><strong><?= $fmt((float) $row['received_fine_weight'], 4) ?></strong></td>
+                        <td><?= e((string) ($row['purity_code'] ?? '')) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['making_amount'] ?? 0)) ?></td>
+                        <td class="is-numeric"><?= (int) ($row['days_on_shelf'] ?? 0) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+    </section>
+
+<?php elseif ($view === 'output'): ?>
+    <?php $outputKind = jw_enum($_GET['kind'] ?? null, ['customer', 'self'], ''); ?>
+    <div class="notice" style="margin-bottom:14px">
+        Everything the kaligads have finished, both kinds in one list, each with a remark saying where it went.
+    </div>
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Workshop Output (<?= count($output) ?>)</h2>
+            <div class="mbw-card-tools"><?= $canExport && $output !== [] ? 'Export' . $exportLinks() : '' ?></div>
+        </div>
+        <form method="get" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+            <input type="hidden" name="view" value="output">
+            <select name="kind" class="field-compact" aria-label="Kind">
+                <option value="">Both kinds</option>
+                <option value="customer" <?= $outputKind === 'customer' ? 'selected' : '' ?>>Customer ordered</option>
+                <option value="self" <?= $outputKind === 'self' ? 'selected' : '' ?>>Self ordered</option>
+            </select>
+            <input type="date" name="from" value="<?= e((string) ($_GET['from'] ?? '')) ?>" class="field-compact" aria-label="Received from">
+            <input type="date" name="to" value="<?= e((string) ($_GET['to'] ?? '')) ?>" class="field-compact" aria-label="Received to">
+            <button type="submit" class="button secondary"><?= icon('filter') ?> Filter</button>
+        </form>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th style="width:44px">SN</th><th>Assignment</th><th>Kaligad</th><th>Ornament</th>
+                <th>Received on</th><th class="is-numeric">Gross</th><th class="is-numeric">Net</th>
+                <th class="is-numeric">Fine</th><th class="is-numeric">Wastage</th>
+                <th class="is-numeric">Making charge</th><th>Remarks</th></tr></thead>
+            <tbody>
+                <?php if ($output === []): ?>
+                    <tr><td colspan="11" style="text-align:center;color:var(--mbw-muted);padding:18px">Nothing has been received back yet.</td></tr>
+                <?php endif; ?>
+                <?php foreach ($output as $index => $row): ?>
+                    <tr>
+                        <td><?= $index + 1 ?></td>
+                        <td><strong><?= e((string) $row['assignment_no']) ?></strong></td>
+                        <td><?= e((string) ($row['karigar_name'] ?? '')) ?></td>
+                        <td><?= e((string) ($row['expected_ornament'] ?: $row['item_name'] ?? '')) ?><?= ($row['size_design'] ?? '') !== '' ? '<br><small>' . e((string) $row['size_design']) . '</small>' : '' ?></td>
+                        <td><?= e(app_date((string) $row['receive_date'])) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['received_gross_weight'], 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['net_gold_weight'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['received_fine_weight'], 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['wastage_fine_weight'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['making_amount'] ?? 0)) ?></td>
+                        <td>
+                            <span class="mbw-pill tone-<?= (string) $row['assign_kind'] === 'self' ? 'purple' : 'blue' ?>">
+                                <?= (string) $row['assign_kind'] === 'self' ? 'Self' : 'Customer' ?>
+                            </span>
+                            <br><small><?= e((string) $row['remark']) ?></small>
                         </td>
                     </tr>
                 <?php endforeach; ?>

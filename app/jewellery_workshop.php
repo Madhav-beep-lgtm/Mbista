@@ -2216,15 +2216,23 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
 
         // --- metal leg -----------------------------------------------------
         // Everything issued leaves the karigar: what came back plus what was lost.
-        jw_record_stock_txn($companyId, [
-            'item_id' => (int) $assignment['item_id'], 'txn_type' => 'receive_karigar', 'direction' => 'out',
-            'txn_date' => $receiveDate, 'ref_no' => $no, 'holder_type' => 'karigar', 'holder_id' => (int) $assignment['karigar_id'],
-            'purity_id' => (int) $assignment['purity_id'], 'unit_id' => (int) $assignment['unit_id'],
-            'gross_weight' => (float) $assignment['issued_gross_weight'], 'fine_weight' => $preview['issued_fine'],
-            'amount' => (float) $assignment['issued_amount'],
-            'source_type' => 'jewellery_order_receipt', 'source_id' => $receiptId, 'voucher_id' => $voucherId,
-            'notes' => 'Karigar holding cleared', 'created_by' => $userId,
-        ]);
+        //
+        // Unless nothing was issued. A work order gives the kaligad the JOB and
+        // no metal — he works from his own and sells the finished piece back —
+        // and there is then no holding to clear. Writing the clearing movement
+        // anyway meant a zero-weight stock row, which the ledger rightly
+        // refuses, so a work order could be assigned and never received.
+        if ((float) $assignment['issued_gross_weight'] > 0) {
+            jw_record_stock_txn($companyId, [
+                'item_id' => (int) $assignment['item_id'], 'txn_type' => 'receive_karigar', 'direction' => 'out',
+                'txn_date' => $receiveDate, 'ref_no' => $no, 'holder_type' => 'karigar', 'holder_id' => (int) $assignment['karigar_id'],
+                'purity_id' => (int) $assignment['purity_id'], 'unit_id' => (int) $assignment['unit_id'],
+                'gross_weight' => (float) $assignment['issued_gross_weight'], 'fine_weight' => $preview['issued_fine'],
+                'amount' => (float) $assignment['issued_amount'],
+                'source_type' => 'jewellery_order_receipt', 'source_id' => $receiptId, 'voucher_id' => $voucherId,
+                'notes' => 'Karigar holding cleared', 'created_by' => $userId,
+            ]);
+        }
         // The finished piece arrives in own stock at issued cost less wastage.
         jw_record_stock_txn($companyId, [
             'item_id' => $receivedItemId, 'txn_type' => 'receive_karigar', 'direction' => 'in',

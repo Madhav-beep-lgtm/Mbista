@@ -493,6 +493,167 @@ function jewellery_assign_export_rows(array $rows, string $kind, string $currenc
     return $out;
 }
 
+/**
+ * Pieces made for the showroom that have come back and are now sellable.
+ *
+ * The mirror of Ready to Deliver. A customer's piece comes back and waits for
+ * the person who ordered it; a showroom piece comes back and waits for whoever
+ * walks in — so it belongs on the shelf, not in a collection queue, and this is
+ * the list the counter checks to know what is newly there.
+ *
+ * There is no "sold" flag to filter on, and there should not be: once the metal
+ * is in stock it is stock, and which physical chain leaves the case is the
+ * stock ledger's business, not this board's. The date filter is what keeps the
+ * list to the recent work.
+ */
+function jewellery_ready_to_sale(int $companyId, array $filters = []): array
+{
+    $sql = "SELECT a.id, a.assignment_no, a.issue_no, a.category, a.size_design, a.expected_ornament,
+            a.expected_gross_weight, a.expected_net_weight,
+            k.code AS karigar_code, k.name AS karigar_name,
+            r.id AS receipt_id, r.receipt_no, r.receive_date, r.received_gross_weight,
+            r.stone_weight, r.net_gold_weight, r.received_fine_weight, r.making_amount,
+            r.net_payable, r.status AS receipt_status,
+            i.sku AS item_code, i.name AS item_name,
+            p.code AS purity_code, u.code AS unit_code,
+            DATEDIFF(CURDATE(), r.receive_date) AS days_on_shelf
+        FROM jewellery_order_assignments a
+        INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
+        INNER JOIN jewellery_order_receipts r ON r.assignment_id = a.id
+        LEFT JOIN inventory_items i ON i.id = r.received_item_id
+        LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
+        LEFT JOIN jewellery_units u ON u.id = r.unit_id
+        WHERE a.company_id = :cid AND a.assign_kind = 'self'
+          AND a.status = 'received' AND r.status <> 'cancelled'";
+    $params = ['cid' => $companyId];
+
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($filters['from'] ?? '')) === 1) {
+        $sql .= ' AND r.receive_date >= :from';
+        $params['from'] = $filters['from'];
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($filters['to'] ?? '')) === 1) {
+        $sql .= ' AND r.receive_date <= :to';
+        $params['to'] = $filters['to'];
+    }
+    $sql .= ' ORDER BY r.receive_date DESC, r.id DESC';
+
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Every piece the workshop has produced, both kinds together, each carrying a
+ * remark that says where it is going.
+ *
+ * The two flows part company everywhere else on purpose — different screens,
+ * different fields, different rules. This is the one place they belong in one
+ * list, because the question it answers is about the shop's output as a whole:
+ * what did the kaligads make this month, and what happened to it.
+ */
+function jewellery_workshop_output(int $companyId, array $filters = []): array
+{
+    $sql = "SELECT a.assignment_no, a.assign_kind, a.category, a.size_design, a.expected_ornament,
+            k.code AS karigar_code, k.name AS karigar_name,
+            o.order_no, o.status AS order_status,
+            COALESCE(ap.name, o.customer_name, '') AS customer_name,
+            r.receipt_no, r.receive_date, r.received_gross_weight, r.stone_weight,
+            r.net_gold_weight, r.received_fine_weight, r.wastage_fine_weight,
+            r.excess_wastage_fine, r.making_amount, r.net_payable, r.status AS receipt_status,
+            i.sku AS item_code, i.name AS item_name,
+            p.code AS purity_code, u.code AS unit_code
+        FROM jewellery_order_assignments a
+        INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
+        INNER JOIN jewellery_order_receipts r ON r.assignment_id = a.id
+        LEFT JOIN jewellery_orders o ON o.id = a.order_id
+        LEFT JOIN accounting_parties ap ON ap.id = o.party_id
+        LEFT JOIN inventory_items i ON i.id = r.received_item_id
+        LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
+        LEFT JOIN jewellery_units u ON u.id = r.unit_id
+        WHERE a.company_id = :cid AND r.status <> 'cancelled'";
+    $params = ['cid' => $companyId];
+
+    $kind = (string) ($filters['kind'] ?? '');
+    if (in_array($kind, ['customer', 'self'], true)) {
+        $sql .= ' AND a.assign_kind = :kind';
+        $params['kind'] = $kind;
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($filters['from'] ?? '')) === 1) {
+        $sql .= ' AND r.receive_date >= :from';
+        $params['from'] = $filters['from'];
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($filters['to'] ?? '')) === 1) {
+        $sql .= ' AND r.receive_date <= :to';
+        $params['to'] = $filters['to'];
+    }
+    $sql .= ' ORDER BY r.receive_date DESC, r.id DESC';
+
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $index => $row) {
+        $rows[$index]['remark'] = jewellery_output_remark($row);
+    }
+
+    return $rows;
+}
+
+/**
+ * Where a finished piece is going, in one line a person can read.
+ *
+ * A customer's piece is going to the customer, and the order's own status says
+ * whether it still is: delivered means it has gone, anything else means it is
+ * waiting to be collected. A showroom piece is going on the shelf.
+ */
+function jewellery_output_remark(array $row): string
+{
+    if ((string) ($row['assign_kind'] ?? '') !== 'self') {
+        $orderNo = (string) ($row['order_no'] ?? '');
+        $customer = trim((string) ($row['customer_name'] ?? ''));
+        $who = $customer !== '' ? ' for ' . $customer : '';
+        $status = (string) ($row['order_status'] ?? '');
+        if (in_array($status, ['delivered', 'invoiced', 'closed'], true)) {
+            return 'Customer order ' . $orderNo . $who . ' — delivered';
+        }
+
+        return 'Customer order ' . $orderNo . $who . ' — ready to deliver';
+    }
+
+    return 'Self order — ready to sale, showroom stock replenishment';
+}
+
+/** The workshop-output register flattened for CSV, Excel and PDF. */
+function jewellery_output_export_rows(array $rows, string $currency = ''): array
+{
+    $out = [];
+    $serial = 0;
+    foreach ($rows as $row) {
+        $serial++;
+        $out[] = [
+            'SN' => $serial,
+            'Assignment Number' => (string) $row['assignment_no'],
+            'Kind' => (string) $row['assign_kind'] === 'self' ? 'Self ordered' : 'Customer ordered',
+            'Kaligadh Name' => trim((string) $row['karigar_code'] . ' — ' . (string) $row['karigar_name']),
+            'Receipt No' => (string) ($row['receipt_no'] ?? ''),
+            'Received On' => app_date((string) ($row['receive_date'] ?? '')),
+            'Ornament' => (string) ($row['expected_ornament'] ?: $row['item_name'] ?? ''),
+            'Size/Design' => (string) ($row['size_design'] ?? ''),
+            'Category' => jewellery_assign_categories()[(string) $row['category']] ?? (string) $row['category'],
+            'Gross Weight' => number_format((float) ($row['received_gross_weight'] ?? 0), 4, '.', ''),
+            'Stone / Diamond' => number_format((float) ($row['stone_weight'] ?? 0), 4, '.', ''),
+            'Net Weight' => number_format((float) ($row['net_gold_weight'] ?? 0), 4, '.', ''),
+            'Fine Weight' => number_format((float) ($row['received_fine_weight'] ?? 0), 4, '.', ''),
+            'Purity' => (string) ($row['purity_code'] ?? ''),
+            'Wastage (fine)' => number_format((float) ($row['wastage_fine_weight'] ?? 0), 4, '.', ''),
+            'Making Charge' => $currency . number_format((float) ($row['making_amount'] ?? 0), 2),
+            'Remarks' => (string) ($row['remark'] ?? ''),
+        ];
+    }
+
+    return $out;
+}
+
 /** "Flat Rs 2,500" / "8% of metal" / "Rs 250 per gram" — the charge in words. */
 function jewellery_assign_making_charge_label(array $row, string $currency = ''): string
 {

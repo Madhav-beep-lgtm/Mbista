@@ -236,6 +236,41 @@ ok(jewellery_assign_making_charge_label(['making_basis' => 'flat', 'making_rate'
     'No charge agreed reads as a dash, not as zero rupees');
 
 // ---------------------------------------------------------------------------
+echo "\n7. Where a finished piece is going, said in one line\n";
+// ---------------------------------------------------------------------------
+$customerWaiting = ['assign_kind' => 'customer', 'order_no' => 'JO-2083-000003',
+    'customer_name' => 'Sita Sharma', 'order_status' => 'received'];
+ok(jewellery_output_remark($customerWaiting) === 'Customer order JO-2083-000003 for Sita Sharma — ready to deliver',
+    'A customer piece back from the kaligad is ready to deliver, and names whose it is');
+foreach (['delivered', 'invoiced', 'closed'] as $goneStatus) {
+    ok(str_ends_with(jewellery_output_remark(['assign_kind' => 'customer', 'order_no' => 'JO-1',
+        'customer_name' => 'X', 'order_status' => $goneStatus]), '— delivered'),
+        "An order marked $goneStatus reads as delivered, not as still waiting");
+}
+ok(jewellery_output_remark(['assign_kind' => 'customer', 'order_no' => 'JO-9', 'customer_name' => '', 'order_status' => 'received'])
+    === 'Customer order JO-9 — ready to deliver',
+    'A walk-in with no name on the order does not get a dangling "for"');
+ok(jewellery_output_remark(['assign_kind' => 'self']) === 'Self order — ready to sale, showroom stock replenishment',
+    'A showroom piece is ready to sale, and says why it was made');
+
+$outputRow = [
+    'assignment_no' => 'KA-2083-000001', 'assign_kind' => 'self', 'karigar_code' => 'K-01',
+    'karigar_name' => 'Akshara', 'receipt_no' => 'JRC-00001', 'receive_date' => '2026-07-31',
+    'expected_ornament' => 'Gold chain', 'item_name' => 'Gold chain', 'size_design' => 'Chain 20 in',
+    'category' => 'gold', 'received_gross_weight' => 20, 'stone_weight' => 0, 'net_gold_weight' => 20,
+    'received_fine_weight' => 11.7, 'purity_code' => '14K', 'wastage_fine_weight' => 0,
+    'making_amount' => 3000, 'remark' => jewellery_output_remark(['assign_kind' => 'self']),
+];
+$outputCols = array_keys(jewellery_output_export_rows([$outputRow], 'Rs ')[0]);
+ok(in_array('Remarks', $outputCols, true), 'The output register exports a Remarks column');
+ok($outputCols[count($outputCols) - 1] === 'Remarks', 'And it is the last column, where a remark belongs');
+ok(in_array('Kind', $outputCols, true), 'The register says which kind each piece was');
+$exportedOutput = jewellery_output_export_rows([$outputRow], 'Rs ')[0];
+ok($exportedOutput['Kind'] === 'Self ordered', 'A showroom piece exports as self ordered');
+ok($exportedOutput['Remarks'] === 'Self order — ready to sale, showroom stock replenishment',
+    'And carries the remark the screen shows');
+
+// ---------------------------------------------------------------------------
 echo "\n" . str_repeat('-', 60) . "\n";
 echo "  $pass passed, $fail failed\n";
 exit($fail === 0 ? 0 : 1);
