@@ -290,14 +290,67 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Retention
+# Retention — dense recent history, thinned older history
 # ---------------------------------------------------------------------------
-# Only rotate away GOOD backups. A .FAILED file is evidence of a night that did
-# not work and is left for a human to look at.
+# Backing up hourly answers the question "how much work can I lose?" with ONE
+# HOUR instead of one day. Keeping every hourly copy for a month answers a
+# question nobody asked, with 720 files and a full disk — and a full disk on
+# shared hosting stops the INSERTs, which is its own way of losing data.
+#
+# So the copies thin out with age, the way a sensible archive does:
+#
+#   younger than BACKUP_DENSE_HOURS   every copy is kept
+#   older than that                   only every Nth hour of the day survives
+#   older than BACKUP_KEEP_DAYS       nothing survives
+#
+# BACKUP_KEEP_EVERY=12 keeps the 00:xx and 12:xx copies — two a day, which is
+# what "keep every 12th backup" means when the job runs hourly. Set it to 1 to
+# keep them all (the behaviour before this existed), or 24 for one a day.
+#
+# The HOUR IS READ FROM THE FILENAME, not from the file's timestamp: the name
+# carries YYYYMMDD_HHMMSS at the moment the dump was taken, and that is the
+# thing being reasoned about. A copy touched by a later rsync would otherwise
+# masquerade as a different hour.
+#
+# Only GOOD backups are rotated away. A .FAILED file is evidence of a run that
+# did not work and is left for a human to look at.
+BACKUP_DENSE_HOURS="$(env_value BACKUP_DENSE_HOURS)"; BACKUP_DENSE_HOURS="${BACKUP_DENSE_HOURS:-48}"
+BACKUP_KEEP_EVERY="$(env_value BACKUP_KEEP_EVERY)"; BACKUP_KEEP_EVERY="${BACKUP_KEEP_EVERY:-1}"
+
+# Anything past the outer limit goes, whatever hour it was taken at.
 find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_*.sql.gz*" -mtime "+$BACKUP_KEEP_DAYS" -print -delete >>"$LOG" 2>&1
 # The file archives age out on the same schedule, so a dump and its files are
 # never kept apart — half a backup restores to a shop with broken documents.
 find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_files_*.tar.gz*" -mtime "+$BACKUP_KEEP_DAYS" -print -delete >>"$LOG" 2>&1
+
+if [ "$BACKUP_KEEP_EVERY" -gt 1 ] 2>/dev/null; then
+    # The cutoff in seconds since the epoch. Everything newer is untouchable.
+    dense_cutoff=$(( $(date +%s) - BACKUP_DENSE_HOURS * 3600 ))
+    thinned=0
+    for old in "$BACKUP_DIR/${DB_NAME}_"*.sql.gz* "$BACKUP_DIR/${DB_NAME}_files_"*.tar.gz*; do
+        [ -f "$old" ] || continue
+        case "$old" in *.FAILED*) continue ;; esac
+
+        # ..._YYYYMMDD_HHMMSS.ext  ->  YYYYMMDD HH
+        base="$(basename "$old")"
+        stamp="$(printf '%s\n' "$base" | grep -oE '[0-9]{8}_[0-9]{6}' | head -1)"
+        [ -n "$stamp" ] || continue
+        day="${stamp%_*}"
+        hour="${stamp#*_}"; hour="${hour:0:2}"
+
+        # Its age, from the name. `date -d` is GNU; if it is not available the
+        # file is left alone rather than deleted on a guess.
+        taken="$(date -d "${day} ${hour}:00:00" +%s 2>/dev/null)" || continue
+        [ -n "$taken" ] || continue
+        [ "$taken" -lt "$dense_cutoff" ] || continue
+
+        # 10#$hour so 08 and 09 are not read as invalid octal.
+        if [ $(( 10#$hour % BACKUP_KEEP_EVERY )) -ne 0 ]; then
+            rm -f -- "$old" && thinned=$((thinned + 1))
+        fi
+    done
+    [ "$thinned" -gt 0 ] && log "thinned $thinned old copies (keeping every ${BACKUP_KEEP_EVERY}h beyond ${BACKUP_DENSE_HOURS}h)"
+fi
 
 # ---------------------------------------------------------------------------
 # Prune the append-only log tables — ONLY after a verified backup
