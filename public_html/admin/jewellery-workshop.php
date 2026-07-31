@@ -36,9 +36,11 @@ $exportLinks = static function () use (&$view): string {
     $query = $_GET;
     $query['view'] = $view;
     $links = '';
-    foreach (['csv' => 'CSV', 'xlsx' => 'Excel'] as $format => $label) {
+    // PDF is the print view — it opens in its own tab with a Print / Save as
+    // PDF button, the same road every jewellery document takes to paper.
+    foreach (['csv' => 'CSV', 'xlsx' => 'Excel', 'print' => 'PDF'] as $format => $label) {
         $query['export'] = $format;
-        $links .= '<a class="mbw-view-all" style="margin-left:10px" href="'
+        $links .= '<a class="mbw-view-all" style="margin-left:10px"' . ($format === 'print' ? ' target="_blank" rel="noopener"' : '') . ' href="'
             . e(url('admin/jewellery-workshop.php?' . http_build_query($query))) . '">' . $label . '</a>';
     }
 
@@ -1042,6 +1044,14 @@ jw_filter_bar_styles();
                                     <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
                                     <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:var(--mbw-red,#e5484d)" title="Delete this order">&times;</button>
                                 </form>
+                            <?php elseif ($canEdit): ?>
+                                <?php // The button is HERE, and it says why it will not fire. An
+                                      // order that reached the workshop or the customer is a
+                                      // financial record — its metal moved, its bill posted.
+                                      // The road back is cancel / unpost, never deletion. ?>
+                                <button type="button" class="button soft" disabled
+                                        style="min-height:30px;padding:3px 8px;opacity:.45;cursor:not-allowed"
+                                        title="A <?= e(str_replace('_', ' ', (string) $row['status'])) ?> order is a financial record — metal and money moved against it. Cancel or unpost the documents instead; deletion is not allowed.">&times;</button>
                             <?php endif; ?>
                         </td>
                     </tr>
