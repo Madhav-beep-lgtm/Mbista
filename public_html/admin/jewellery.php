@@ -994,14 +994,55 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </form>
         </div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Metal / Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Net</th><th>VAT</th><th class="is-numeric">In stock (fine)</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
+            <?php
+                // GROUPED BY ITEM GROUP, because that is how a shop thinks of
+                // its stock: "chain" is the thing, and under it sit the 22K
+                // chain and the 24K chain as separate items that must each be
+                // traced on their own. The group was already being stored (the
+                // category master, migration 086) and already steers the ledger
+                // mapping — item first, then its group, then the company-wide
+                // purpose — but the list only whispered it as a subtitle under
+                // the name, so nobody could see the shape of their own stock.
+                //
+                // Sorted here rather than in SQL: the list arrives filtered and
+                // searched, and re-sorting it in PHP keeps every one of those
+                // paths working without a second query.
+                $grouped = [];
+                foreach ($items as $groupRow) {
+                    $groupName = trim((string) ($groupRow['category'] ?? ''));
+                    $grouped[$groupName === '' ? '\u{2014} Ungrouped' : $groupName][] = $groupRow;
+                }
+                ksort($grouped, SORT_NATURAL | SORT_FLAG_CASE);
+                $serial = 0;
+            ?>
+            <thead><tr><th class="is-numeric" style="width:44px">SN</th><th>Item group</th><th>Item name</th><th>Item code</th><th>Type</th><th>Metal / Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Net</th><th>VAT</th><th class="is-numeric">In stock (fine)</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
             <tbody>
-                <?php if ($items === []): ?><tr><td colspan="<?= $canEdit ? 10 : 9 ?>">No items yet.</td></tr><?php endif; ?>
-                <?php foreach ($items as $row): ?>
+                <?php if ($items === []): ?><tr><td colspan="<?= $canEdit ? 12 : 11 ?>">No items yet.</td></tr><?php endif; ?>
+                <?php foreach ($grouped as $groupName => $groupRows): ?>
+                    <?php
+                        // The group's own line: how many items it holds and what
+                        // they come to in fine weight. A group is a thing a shop
+                        // asks about — "how much chain have I got?" — and the
+                        // answer is the sum of the items traced under it.
+                        $groupFine = 0.0;
+                        foreach ($groupRows as $groupItem) {
+                            $groupFine += (float) jw_item_balance($companyId, (int) $groupItem['id'], null, '')['fine_weight'];
+                        }
+                    ?>
+                    <tr style="background:var(--mbw-accent-soft,#eef7f1)">
+                        <td></td>
+                        <td colspan="<?= $canEdit ? 8 : 7 ?>"><strong><?= e((string) $groupName) ?></strong>
+                            <small style="color:var(--mbw-muted,#64748b)">— <?= count($groupRows) ?> item<?= count($groupRows) > 1 ? 's' : '' ?></small></td>
+                        <td class="is-numeric"><strong><?= $fmt($groupFine, 4) ?></strong></td>
+                        <td colspan="<?= $canEdit ? 2 : 1 ?>"></td>
+                    </tr>
+                <?php foreach ($groupRows as $row): ?>
                     <?php $rowBalance = jw_item_balance($companyId, (int) $row['id'], null, ''); ?>
                     <tr>
+                        <td class="is-numeric"><?= ++$serial ?></td>
+                        <td style="color:var(--mbw-muted,#64748b)"><?= e((string) $groupName) ?></td>
+                        <td><?= e($row['name']) ?></td>
                         <td><?= e($row['code']) ?></td>
-                        <td><?= e($row['name']) ?><?= ($row['category'] ?? '') !== '' ? '<br><small>' . e((string) $row['category']) . '</small>' : '' ?></td>
                         <td><?= e(ucfirst((string) $row['item_type'])) ?></td>
                         <td><?= e($row['metal_name'] . ' · ' . $row['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small></td>
@@ -1023,6 +1064,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             </form>
                         </td><?php endif; ?>
                     </tr>
+                <?php endforeach; ?>
                 <?php endforeach; ?>
             </tbody>
         </table></div>
