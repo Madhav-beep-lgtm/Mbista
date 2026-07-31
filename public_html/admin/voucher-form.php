@@ -124,6 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $dueDate = voucher_date_or_null((string) ($_POST['due_date'] ?? ''));
     $exchangeRate = max(0.0001, round((float) ($_POST['exchange_rate'] ?? 1), 4));
     $referenceNo = substr(trim((string) ($_POST['reference_no'] ?? '')), 0, 120);
+    $warehouseId = (int) ($_POST['warehouse_id'] ?? 0);
 
     // Anything rejected below comes back typed in, not blank.
     $_SESSION['voucher_retry'] = ['type' => $voucherType, 'input' => $_POST];
@@ -158,6 +159,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $composed = voucher_compose($voucherType, $composeInput, $ledgerDirectory, $isDraft);
     $problems = array_merge($problems, $composed['errors']);
     $entries = $composed['entries'];
+
+    // Stock is checked BEFORE anything is written. A voucher whose ledger
+    // entries are in the books and whose goods quietly are not is the one
+    // failure this whole feature exists to prevent.
+    if (!$isDraft && $problems === []) {
+        $problems = array_merge($problems, voucher_stock_preflight($companyId, $voucherType, $entries, $editVoucherId));
+    }
     if ($problems === [] && $entries === []) {
         $problems[] = $isDraft
             ? 'There is nothing on this voucher to save yet.'
@@ -343,20 +351,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'id' => $voucherId, 'company_id' => $companyId,
             ]);
             if (column_exists('voucher_entries', 'cost_centre')) {
+                // create_voucher_with_entries writes the four columns every
+                // posting engine shares; the per-line dimensions this form adds
+                // are matched back on by position, in the order they were sent.
+                $hasStockColumns = column_exists('voucher_entries', 'item_id');
                 $lineStmt = db()->prepare('SELECT id FROM voucher_entries WHERE voucher_id = :voucher_id ORDER BY id ASC');
                 $lineStmt->execute(['voucher_id' => $voucherId]);
-                $lineUpdate = db()->prepare('UPDATE voucher_entries SET cost_centre = :cost_centre, tax_code = :tax_code, line_reference = :line_reference WHERE id = :id');
+                $lineSql = 'UPDATE voucher_entries SET cost_centre = :cost_centre, tax_code = :tax_code, line_reference = :line_reference'
+                    . ($hasStockColumns ? ', item_id = :item_id, quantity = :quantity' : '')
+                    . ' WHERE id = :id';
+                $lineUpdate = db()->prepare($lineSql);
                 foreach ($lineStmt->fetchAll() as $lineIndex => $lineRow) {
                     $sourceEntry = $entries[$lineIndex] ?? null;
-                    if ($sourceEntry !== null) {
-                        $lineUpdate->execute([
-                            'cost_centre' => $sourceEntry['cost_centre'] !== '' ? $sourceEntry['cost_centre'] : null,
-                            'tax_code' => $sourceEntry['tax_code'] !== '' ? $sourceEntry['tax_code'] : null,
-                            'line_reference' => $sourceEntry['line_reference'] !== '' ? $sourceEntry['line_reference'] : null,
-                            'id' => (int) $lineRow['id'],
-                        ]);
+                    if ($sourceEntry === null) {
+                        continue;
                     }
+                    $lineParams = [
+                        'cost_centre' => $sourceEntry['cost_centre'] !== '' ? $sourceEntry['cost_centre'] : null,
+                        'tax_code' => $sourceEntry['tax_code'] !== '' ? $sourceEntry['tax_code'] : null,
+                        'line_reference' => $sourceEntry['line_reference'] !== '' ? $sourceEntry['line_reference'] : null,
+                        'id' => (int) $lineRow['id'],
+                    ];
+                    if ($hasStockColumns) {
+                        $lineParams['item_id'] = ((int) ($sourceEntry['item_id'] ?? 0)) ?: null;
+                        $lineParams['quantity'] = (float) ($sourceEntry['quantity'] ?? 0);
+                    }
+                    $lineUpdate->execute($lineParams);
                 }
+            }
+        }
+
+        if ($voucherId > 0 && column_exists('vouchers', 'warehouse_id')) {
+            db()->prepare('UPDATE vouchers SET warehouse_id = :warehouse_id WHERE id = :id AND company_id = :company_id')
+                ->execute(['warehouse_id' => $warehouseId > 0 ? $warehouseId : null, 'id' => $voucherId, 'company_id' => $companyId]);
+        }
+
+        // The goods follow the entry. Runs after the lines are stored because
+        // it reads them back — and after the transaction, because a stock
+        // problem must never roll back a voucher that is otherwise sound.
+        $stockNotes = [];
+        if ($voucherId > 0) {
+            $savedStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :company_id LIMIT 1');
+            $savedStmt->execute(['id' => $voucherId, 'company_id' => $companyId]);
+            $savedVoucher = $savedStmt->fetch();
+            if ($savedVoucher) {
+                $stockNotes = voucher_stock_sync($companyId, (int) $savedVoucher['fiscal_year_id'], $savedVoucher, $userId);
             }
         }
 
@@ -397,8 +436,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             log_activity('voucher', $voucherId, $isDraft ? 'voucher_draft_saved' : 'voucher_form_submitted', $spec['label'] . ' ' . $voucherNo . $savedVerb, $userId ?: null);
             flash('success', $spec['label'] . ' ' . $voucherNo . $savedVerb);
         }
-        if ($composed['warnings'] !== []) {
-            flash('info', implode(' ', $composed['warnings']));
+        $advisories = array_merge($composed['warnings'], $stockNotes);
+        if ($advisories !== []) {
+            flash('info', implode(' ', $advisories));
         }
         redirect('admin/accounting.php');
     } catch (Throwable $exception) {
@@ -466,6 +506,28 @@ if ($optionsValue === []) {
 }
 if ($optionsTax === []) {
     $optionsTax = array_values(array_filter($optionsAll, static fn (array $ledger): bool => !empty($ledger['roles']['liability']) || !empty($ledger['roles']['tax'])));
+}
+
+// Stock items, offered only on the four types that can actually move goods and
+// only when this company keeps any. Each carries the ledger its value belongs
+// in, so choosing an item on a purchase fills the line's ledger too.
+$itemOptions = [];
+$warehouseOptions = [];
+$stockMovementType = voucher_stock_movement_type($spec['key']);
+$stockDirection = $stockMovementType !== null ? voucher_stock_direction($stockMovementType) : '';
+if ($stockMovementType !== null && voucher_stock_ready()) {
+    $itemStmt = db()->prepare("SELECT id, sku, name, unit, sales_rate, purchase_rate, item_type, category, ledger_id
+        FROM inventory_items WHERE company_id = :company_id AND status = 'active' ORDER BY name ASC");
+    $itemStmt->execute(['company_id' => $companyId]);
+    foreach ($itemStmt->fetchAll() as $item) {
+        $item['stock_ledger_id'] = inv_item_stock_ledger_id($companyId, $item);
+        $itemOptions[] = $item;
+    }
+    if ($itemOptions !== [] && table_exists('warehouses')) {
+        $warehouseStmt = db()->prepare('SELECT id, name FROM warehouses WHERE company_id = :company_id AND is_active = 1 ORDER BY name ASC');
+        $warehouseStmt->execute(['company_id' => $companyId]);
+        $warehouseOptions = $warehouseStmt->fetchAll();
+    }
 }
 
 // Parties, narrowed to the side this type deals with, each carrying the ledger
@@ -538,6 +600,7 @@ if (is_array($retry) && (string) ($retry['type'] ?? '') === $type) {
     $prefill['location'] = (string) ($editVoucher['location'] ?? '');
     $prefill['cost_centre'] = (string) ($editVoucher['cost_centre'] ?? '');
     $prefill['payment_terms'] = (string) ($editVoucher['payment_terms'] ?? '');
+    $prefill['warehouse_id'] = (int) ($editVoucher['warehouse_id'] ?? 0);
 
     // The guided form stores "Title — narration" in one column; split it back.
     $editTitle = (string) ($editVoucher['narration'] ?? '');

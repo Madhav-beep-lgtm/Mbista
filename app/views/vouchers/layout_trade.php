@@ -60,6 +60,16 @@ $taxRate = (float) ($prefill['tax_rate'] ?? 13);
         <label><?= e((string) $spec['reference_date_label']) ?>
             <input type="date" name="reference_date" value="<?= e((string) ($prefill['reference_date'] ?? '')) ?>">
         </label>
+        <?php if ($warehouseOptions !== []): ?>
+            <label>Warehouse
+                <select name="warehouse_id" title="Where the goods <?= $stockDirection === 'in' ? 'landed' : 'left from' ?>. Leave blank to use each item's own default.">
+                    <option value="0">Each item's own default</option>
+                    <?php foreach ($warehouseOptions as $warehouse): ?>
+                        <option value="<?= (int) $warehouse['id'] ?>" <?= (int) ($prefill['warehouse_id'] ?? 0) === (int) $warehouse['id'] ? 'selected' : '' ?>><?= e((string) $warehouse['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+        <?php endif; ?>
     </div>
 
     <?php if ($partyOptions === []): ?>
@@ -88,11 +98,12 @@ $taxRate = (float) ($prefill['tax_rate'] ?? 13);
                 <thead>
                     <tr>
                         <th style="width:36px">SN</th>
-                        <th style="width:210px">Ledger <em>*</em></th>
+                        <?php if ($itemOptions !== []): ?><th style="width:190px">Item</th><?php endif; ?>
+                        <th style="width:200px">Ledger <em>*</em></th>
                         <th>Description</th>
                         <th class="is-numeric" style="width:100px">Qty</th>
                         <th class="is-numeric" style="width:120px">Rate</th>
-                        <th style="width:140px">Cost centre</th>
+                        <th style="width:130px">Cost centre</th>
                         <th class="is-numeric" style="width:150px">Amount (<?= e(trim($currency)) ?>) <em>*</em></th>
                         <th style="width:40px"></th>
                     </tr>
@@ -109,6 +120,20 @@ $taxRate = (float) ($prefill['tax_rate'] ?? 13);
         <template data-row-template>
             <tr>
                 <td data-sn>1</td>
+                <?php if ($itemOptions !== []): ?>
+                <td>
+                    <select name="value_item[]" data-field="item_id" class="vch-item">
+                        <option value="">No stock item</option>
+                        <?php foreach ($itemOptions as $item): ?>
+                            <option value="<?= (int) $item['id'] ?>"
+                                    data-name="<?= e((string) $item['name']) ?>"
+                                    data-unit="<?= e((string) $item['unit']) ?>"
+                                    data-rate="<?= e(number_format((float) $item[$spec['key'] === 'sales' || $spec['key'] === 'credit_note' ? 'sales_rate' : 'purchase_rate'], 2, '.', '')) ?>"
+                                    data-ledger="<?= (int) $item['stock_ledger_id'] ?>"><?= e((string) $item['name']) ?> (<?= e((string) $item['sku']) ?>)</option>
+                        <?php endforeach; ?>
+                    </select>
+                </td>
+                <?php endif; ?>
                 <td>
                     <select name="value_ledger[]" data-field="ledger_id" class="vch-ledger">
                         <option value="">Select ledger</option>
@@ -171,6 +196,12 @@ $taxRate = (float) ($prefill['tax_rate'] ?? 13);
         <div class="is-total"><small><?= $partyIsDebit ? 'Receivable' : 'Payable' ?> total</small><strong id="vch-sum-total">0.00</strong></div>
         <div class="vch-summary-note"><small><?= $partyIsDebit ? 'Debited to' : 'Credited to' ?></small><strong id="vch-sum-party">—</strong></div>
     </div>
+    <?php if ($itemOptions !== []): ?>
+        <p class="vch-stock-note" id="vch-stock-note" hidden>
+            <?= icon('inventory') ?>
+            <span data-stock-text></span>
+        </p>
+    <?php endif; ?>
 </section>
 
 <script>
@@ -203,16 +234,43 @@ document.addEventListener('DOMContentLoaded', function () {
         recalc();
     }
 
+    // Picking an item fills the row the way the counter would: its name, the
+    // rate it usually goes at, and — when goods are coming IN — the stock
+    // ledger their value belongs to. Nothing already typed is overwritten.
+    var stockDirection = <?= json_encode($stockDirection) ?>;
+    function applyItem(row) {
+        var itemSelect = row.querySelector('.vch-item');
+        if (!itemSelect || !itemSelect.value) { return; }
+        var option = itemSelect.options[itemSelect.selectedIndex];
+        var description = row.querySelector('[data-field="description"]');
+        var rateField = row.querySelector('.vch-rate');
+        var qtyField = row.querySelector('.vch-qty');
+        var ledgerField = row.querySelector('.vch-ledger');
+
+        if (description && description.value === '') { description.value = option.getAttribute('data-name') || ''; }
+        if (rateField && (Number(rateField.value) || 0) === 0) { rateField.value = option.getAttribute('data-rate') || ''; }
+        if (qtyField && (Number(qtyField.value) || 0) === 0) { qtyField.value = '1'; }
+        var stockLedger = option.getAttribute('data-ledger');
+        if (stockDirection === 'in' && ledgerField && ledgerField.value === '' && stockLedger && stockLedger !== '0'
+            && ledgerField.querySelector('option[value="' + stockLedger + '"]')) {
+            ledgerField.value = stockLedger;
+        }
+    }
+
     function recalc() {
         var mode = taxModeSelect.value;
         var rate = mode === 'none' ? 0 : (Number(taxRateInput.value) || 0);
         var taxable = 0;
         var tax = 0;
+        var stockLines = 0;
+        var stockUnits = 0;
 
         form.querySelectorAll('[data-rows] tr').forEach(function (row) {
             var qty = Number((row.querySelector('.vch-qty') || {}).value) || 0;
             var unitRate = Number((row.querySelector('.vch-rate') || {}).value) || 0;
             var amountField = row.querySelector('.vch-value-amount');
+            var itemSelect = row.querySelector('.vch-item');
+            if (itemSelect && itemSelect.value && qty > 0) { stockLines++; stockUnits += qty; }
             if (!amountField) { return; }
             // Quantity times rate wins whenever both are given: it is the figure
             // the person actually reasoned about.
@@ -245,6 +303,17 @@ document.addEventListener('DOMContentLoaded', function () {
         taxRateInput.disabled = mode === 'none';
         if (taxLedger) { taxLedger.required = mode !== 'none'; }
 
+        var stockNote = document.getElementById('vch-stock-note');
+        if (stockNote) {
+            stockNote.hidden = stockLines === 0;
+            stockNote.querySelector('[data-stock-text]').textContent = stockLines === 0 ? '' : (
+                'Posting this also moves ' + window.vchMoney(stockUnits).replace(/\.00$/, '')
+                + ' unit(s) across ' + stockLines + ' item line(s) '
+                + (stockDirection === 'in' ? 'into' : 'out of') + ' stock'
+                + (stockDirection === 'out' ? ', and posts what they cost against this sale.' : '.')
+            );
+        }
+
         var display = document.getElementById('vch-display-total');
         if (display) { display.value = window.vchMoney(total); }
         form.setAttribute('data-balanced', total > 0 && name !== '—' ? '1' : '0');
@@ -255,7 +324,12 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     form.addEventListener('vch:change', recalc);
     form.addEventListener('input', recalc);
-    form.addEventListener('change', recalc);
+    form.addEventListener('change', function (event) {
+        if (event.target && event.target.classList.contains('vch-item')) {
+            applyItem(event.target.closest('tr'));
+        }
+        recalc();
+    });
     applySettlement();
 });
 </script>

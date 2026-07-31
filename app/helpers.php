@@ -3280,11 +3280,26 @@ function delete_voucher_with_entries(int $voucherId, int $companyId, ?int $actor
             $registerNote = ' Its payment record was cancelled so the register matches the books.';
         }
 
+        // A sales or purchase voucher that moved goods gives them back. The
+        // foreign key would cascade the movement rows away on its own, but the
+        // cost layers would go on remembering them and the cost journal the
+        // movement posted would be left behind — so release it properly, and
+        // replay every item involved once the delete has committed.
+        $releasedItems = function_exists('voucher_stock_clear') ? voucher_stock_clear($companyId, $voucherId) : [];
+        if ($releasedItems !== []) {
+            $registerNote .= ' ' . count($releasedItems) . ' stock item(s) released back to the shelf.';
+        }
+
         db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :company_id')
             ->execute(['id' => $voucherId, 'company_id' => $companyId]);
 
         if ($ownsTransaction) {
             db()->commit();
+        }
+        // After the commit, so that a replay that cannot balance some legacy
+        // item's history never rolls back a deletion that already succeeded.
+        foreach ($releasedItems as $releasedItemId) {
+            inv_rebuild_item($companyId, (int) $releasedItemId);
         }
     } catch (Throwable $deleteException) {
         if ($ownsTransaction && db()->inTransaction()) {
@@ -3467,11 +3482,22 @@ function force_delete_voucher(int $voucherId, int $companyId, string $reason, ?i
                 break;
         }
 
-        // 3. The voucher itself (entries cascade on the FK).
+        // 3. Any stock this voucher moved, and the cost journals that carried
+        // its value — the foreign key would cascade the movements away on its
+        // own, but the layers and those journals would be left behind.
+        $forceReleasedItems = function_exists('voucher_stock_clear') ? voucher_stock_clear($companyId, $voucherId) : [];
+        if ($forceReleasedItems !== []) {
+            $notes[] = count($forceReleasedItems) . ' stock item(s) released back to the shelf';
+        }
+
+        // 4. The voucher itself (entries cascade on the FK).
         db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')->execute(['id' => $voucherId, 'cid' => $companyId]);
 
         if ($ownsTransaction) {
             db()->commit();
+        }
+        foreach ($forceReleasedItems as $releasedItemId) {
+            inv_rebuild_item($companyId, (int) $releasedItemId);
         }
     } catch (Throwable $forceException) {
         if ($ownsTransaction && db()->inTransaction()) {

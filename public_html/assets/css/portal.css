@@ -2490,6 +2490,27 @@ body.admin-layout .vch-warning {
   margin-top: 12px;
 }
 
+/* What a trade voucher will do to the shelf, said before it does it */
+body.admin-layout .vch-stock-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: var(--mbw-card-soft);
+  color: var(--mbw-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+body.admin-layout .vch-stock-note .ui-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--mbw-primary);
+  flex-shrink: 0;
+}
+
 /* Right rail cards */
 body.admin-layout .frm-rail-card {
   padding: 14px 16px;

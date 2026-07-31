@@ -163,6 +163,42 @@ function accounting_module_repair_database(): array
         accounting_repair_add_index('vouchers', 'idx_vouchers_type_date', 'KEY `idx_vouchers_type_date` (`company_id`, `voucher_type`, `voucher_date`)');
     });
 
+    $run('Provision voucher stock lines (migration 101)', static function (): void {
+        // A sales or purchase voucher names the goods it moved, so the stock
+        // rises and falls with the entry instead of being reconciled by hand.
+        accounting_repair_add_column('voucher_entries', 'item_id', '`item_id` INT UNSIGNED DEFAULT NULL AFTER `ledger_id`');
+        accounting_repair_add_column('voucher_entries', 'quantity', '`quantity` DECIMAL(14,3) NOT NULL DEFAULT 0.000 AFTER `item_id`');
+        accounting_repair_add_index('voucher_entries', 'idx_voucher_entries_item', 'KEY `idx_voucher_entries_item` (`item_id`)');
+        accounting_repair_add_column('vouchers', 'warehouse_id', '`warehouse_id` INT UNSIGNED DEFAULT NULL AFTER `location`');
+        // Distinct from voucher_id, which names the voucher carrying the
+        // movement's VALUE — for a sale that is the COGS journal, not the sale.
+        accounting_repair_add_column('inventory_transactions', 'source_voucher_id', '`source_voucher_id` INT UNSIGNED DEFAULT NULL AFTER `voucher_id`');
+        accounting_repair_add_index('inventory_transactions', 'idx_inventory_transactions_source_voucher', 'KEY `idx_inventory_transactions_source_voucher` (`source_voucher_id`)');
+        // The cascade matters: a deleted voucher must take its stock movements
+        // with it, or the shop's on-hand keeps counting goods no entry backs.
+        if (accounting_repair_table_exists('vouchers')) {
+            accounting_repair_add_constraint(
+                'inventory_transactions',
+                'fk_inventory_transactions_source_voucher',
+                'CONSTRAINT `fk_inventory_transactions_source_voucher` FOREIGN KEY (`source_voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE CASCADE'
+            );
+        }
+        if (accounting_repair_table_exists('inventory_items')) {
+            accounting_repair_add_constraint(
+                'voucher_entries',
+                'fk_voucher_entries_item',
+                'CONSTRAINT `fk_voucher_entries_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE SET NULL'
+            );
+        }
+        if (accounting_repair_table_exists('warehouses')) {
+            accounting_repair_add_constraint(
+                'vouchers',
+                'fk_vouchers_warehouse',
+                'CONSTRAINT `fk_vouchers_warehouse` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`) ON DELETE SET NULL'
+            );
+        }
+    });
+
     $run('Provision access-control schema (migration 033)', static function (): void {
         // company_memberships (+ backfill), security_events, users.sessions_valid_from.
         if (function_exists('access_control_ensure_schema')) {

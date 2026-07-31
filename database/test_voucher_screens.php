@@ -38,6 +38,9 @@ function vsc_cleanup(): void
         $companyId = (int) $companyId;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$companyId)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$companyId");
+        db()->exec("DELETE FROM inventory_cost_layers WHERE company_id=$companyId");
+        db()->exec("DELETE FROM inventory_transactions WHERE company_id=$companyId");
+        db()->exec("DELETE FROM inventory_items WHERE company_id=$companyId");
         db()->exec("DELETE FROM accounting_parties WHERE company_id=$companyId");
         db()->exec("DELETE FROM company_ledger_mappings WHERE company_id=$companyId");
         db()->exec("DELETE FROM ledgers WHERE company_id=$companyId");
@@ -88,6 +91,11 @@ $partyInsert->execute(['cid' => $cid, 'code' => 'C-001', 'name' => 'Altiora Pvt 
 $customerId = (int) db()->lastInsertId();
 $partyInsert->execute(['cid' => $cid, 'code' => 'S-001', 'name' => 'Nepal Traders', 'type' => 'supplier']);
 $supplierId = (int) db()->lastInsertId();
+
+// One stock item, so the trade screens show their item column.
+db()->prepare("INSERT INTO inventory_items (company_id, sku, name, item_type, valuation_method, unit, tax_rate, sales_rate, purchase_rate, opening_qty, opening_amount, status)
+    VALUES (:cid, 'SKU-1', 'Ceiling fan', 'trading_good', 'fifo', 'pcs', 13, 4000, 2500, 0, 0, 'active')")->execute(['cid' => $cid]);
+$stockItemId = (int) db()->lastInsertId();
 
 $adminId = (int) db()->query("SELECT id FROM users WHERE role IN ('admin','super_admin') ORDER BY id LIMIT 1")->fetchColumn();
 if ($adminId <= 0) {
@@ -208,6 +216,20 @@ ok(in_array($supplierId, $purchaseParties, true) && !in_array($customerId, $purc
 // One "vch-type-key" span per chip, and nowhere else on the page.
 ok(substr_count($rendered['journal'], 'vch-type-key') === 8, 'The type bar offers all eight types from every screen');
 ok(substr_count($rendered['journal'], 'Tally F7') === 1, 'And names the Tally key each one answers to');
+
+// ---------------------------------------------------------------------------
+echo "\n3b. Only the four types that move goods ask about them\n";
+// ---------------------------------------------------------------------------
+foreach (['sales', 'purchase', 'debit_note', 'credit_note'] as $goodsType) {
+    ok(str_contains($rendered[$goodsType], 'name="value_item[]"'), voucher_type_label($goodsType) . ' offers a stock item on its lines');
+}
+foreach (['contra', 'payment', 'receipt', 'journal'] as $moneyType) {
+    ok(!str_contains($rendered[$moneyType], 'name="value_item[]"'), voucher_type_label($moneyType) . ' does not, because it moves money and not goods');
+}
+$saleItems = vsc_options($rendered['sales'], 'value_item[]');
+ok(in_array($stockItemId, $saleItems, true), 'The item on file is offered for sale');
+ok(str_contains($rendered['purchase'], 'data-rate="2500.00"'), 'A purchase line offers the item at its purchase rate');
+ok(str_contains($rendered['sales'], 'data-rate="4000.00"'), 'And a sales line at its selling rate');
 ok(str_contains($rendered['payment'], 'PMT/VCH-2026-27/0001'), 'The screen shows the number the voucher is about to take');
 
 // ---------------------------------------------------------------------------

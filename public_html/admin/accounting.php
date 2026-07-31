@@ -97,6 +97,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             log_activity('voucher', $voucherId, 'rejected', 'Voucher rejected: ' . $rejectionReason, $userId);
             flash('success', 'Voucher rejected.');
         }
+        // The goods follow the decision. A sale approved now moves its stock
+        // for the first time; one rejected gives back the stock it was holding.
+        $decidedStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :company_id LIMIT 1');
+        $decidedStmt->execute(['id' => $voucherId, 'company_id' => $companyId]);
+        $decidedVoucher = $decidedStmt->fetch();
+        if ($decidedVoucher) {
+            $stockNotes = voucher_stock_sync($companyId, (int) $decidedVoucher['fiscal_year_id'], $decidedVoucher, $userId);
+            if ($stockNotes !== []) {
+                flash('info', implode(' ', $stockNotes));
+            }
+        }
         redirect('admin/accounting.php');
     }
 

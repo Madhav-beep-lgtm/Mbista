@@ -305,6 +305,7 @@ CREATE TABLE IF NOT EXISTS `vouchers` (
   `priority` ENUM('low', 'medium', 'high') NOT NULL DEFAULT 'medium',
   `department` VARCHAR(80) DEFAULT NULL,
   `location` VARCHAR(80) DEFAULT NULL,
+  `warehouse_id` INT UNSIGNED DEFAULT NULL,
   `cost_centre` VARCHAR(80) DEFAULT NULL,
   `total_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `status` ENUM('draft', 'posted', 'cancelled') NOT NULL DEFAULT 'posted',
@@ -335,6 +336,8 @@ CREATE TABLE IF NOT EXISTS `voucher_entries` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `voucher_id` INT UNSIGNED NOT NULL,
   `ledger_id` INT UNSIGNED NOT NULL,
+  `item_id` INT UNSIGNED DEFAULT NULL,
+  `quantity` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
   `entry_type` ENUM('debit', 'credit') NOT NULL,
   `amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `memo` VARCHAR(255) DEFAULT NULL,
@@ -347,6 +350,7 @@ CREATE TABLE IF NOT EXISTS `voucher_entries` (
   PRIMARY KEY (`id`),
   KEY `idx_voucher_entries_voucher` (`voucher_id`),
   KEY `idx_voucher_entries_ledger` (`ledger_id`),
+  KEY `idx_voucher_entries_item` (`item_id`),
   KEY `idx_voucher_entries_reconciled` (`ledger_id`, `reconciled_at`),
   CONSTRAINT `fk_voucher_entries_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_voucher_entries_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE CASCADE
@@ -1508,6 +1512,7 @@ CREATE TABLE IF NOT EXISTS `inventory_transactions` (
   `warehouse_id` INT UNSIGNED DEFAULT NULL,
   `to_warehouse_id` INT UNSIGNED DEFAULT NULL,
   `voucher_id` INT UNSIGNED DEFAULT NULL,
+  `source_voucher_id` INT UNSIGNED DEFAULT NULL,
   `transaction_type` ENUM('opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment', 'consume', 'produce', 'write_off', 'damage', 'expiry', 'warehouse_transfer', 'departmental_transfer', 'nrv_write_down', 'nrv_reversal') NOT NULL DEFAULT 'adjustment',
   `ref_no` VARCHAR(120) DEFAULT NULL,
   `transaction_date` DATE NOT NULL,
@@ -1521,11 +1526,13 @@ CREATE TABLE IF NOT EXISTS `inventory_transactions` (
   KEY `idx_inventory_transactions_company_date` (`company_id`, `transaction_date`),
   KEY `idx_inventory_transactions_item` (`item_id`),
   KEY `idx_inventory_transactions_voucher` (`voucher_id`),
+  KEY `idx_inventory_transactions_source_voucher` (`source_voucher_id`),
   KEY `idx_inventory_transactions_warehouse` (`warehouse_id`),
   CONSTRAINT `fk_inventory_transactions_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_inventory_transactions_fiscal_year` FOREIGN KEY (`fiscal_year_id`) REFERENCES `fiscal_years` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_inventory_transactions_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_inventory_transactions_voucher` FOREIGN KEY (`voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_inventory_transactions_source_voucher` FOREIGN KEY (`source_voucher_id`) REFERENCES `vouchers` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_inventory_transactions_warehouse` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_inventory_transactions_to_warehouse` FOREIGN KEY (`to_warehouse_id`) REFERENCES `warehouses` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -1890,6 +1897,17 @@ ALTER TABLE `users`
 ALTER TABLE `task_invoices`
   ADD CONSTRAINT `fk_task_invoices_accounting_party`
   FOREIGN KEY (`party_id`) REFERENCES `accounting_parties` (`id`) ON DELETE SET NULL;
+
+-- Stock lines on a voucher. Declared here rather than inline: inventory_items
+-- and warehouses are created further down this file, and a foreign key cannot
+-- point at a table that does not exist yet.
+ALTER TABLE `voucher_entries`
+  ADD CONSTRAINT `fk_voucher_entries_item`
+  FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE SET NULL;
+
+ALTER TABLE `vouchers`
+  ADD CONSTRAINT `fk_vouchers_warehouse`
+  FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`) ON DELETE SET NULL;
 
 -- ---------------------------------------------------------------------------
 -- Insight posts (migration 032): public website Insights publishing

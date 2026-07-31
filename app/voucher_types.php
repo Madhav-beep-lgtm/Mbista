@@ -684,9 +684,15 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
 
         $quantity = (float) voucher_input_row($input, 'value_qty', $index);
         $rate = (float) voucher_input_row($input, 'value_rate', $index);
+        $itemId = (int) voucher_input_row($input, 'value_item', $index);
         $description = voucher_input_row($input, 'value_description', $index);
         if ($quantity > 0 && $rate > 0) {
             $description = trim($description . ' — ' . rtrim(rtrim(number_format($quantity, 3, '.', ''), '0'), '.') . ' × ' . number_format($rate, 2), ' —');
+        }
+        // Stock only moves for a line that names both the goods and how many.
+        // An item with no quantity is a description, not a movement.
+        if ($itemId > 0 && $quantity <= 0) {
+            $result['errors'][] = 'Line ' . ($index + 1) . ' names an item but no quantity. Give the quantity, or clear the item.';
         }
 
         $valueEntries[] = voucher_entry(
@@ -696,7 +702,9 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
             $description,
             voucher_input_row($input, 'value_cost_centre', $index),
             $taxMode === 'none' ? '' : number_format($taxRate, 2) . '%',
-            ''
+            '',
+            $itemId,
+            $quantity
         );
         $taxableTotal += $taxable;
         $taxTotal += $lineTax;
@@ -813,8 +821,13 @@ function voucher_compose_journal(array $spec, array $input, array $ledgers, arra
     return $result;
 }
 
-/** One posted line, in the shape create_voucher_with_entries expects. */
-function voucher_entry(int $ledgerId, string $side, float $amount, string $memo = '', string $costCentre = '', string $taxCode = '', string $reference = ''): array
+/**
+ * One posted line, in the shape create_voucher_with_entries expects.
+ *
+ * item_id and quantity ride along on trade lines: they are what makes a
+ * purchase raise the stock as well as the payable.
+ */
+function voucher_entry(int $ledgerId, string $side, float $amount, string $memo = '', string $costCentre = '', string $taxCode = '', string $reference = '', int $itemId = 0, float $quantity = 0.0): array
 {
     return [
         'ledger_id' => $ledgerId,
@@ -824,6 +837,8 @@ function voucher_entry(int $ledgerId, string $side, float $amount, string $memo 
         'cost_centre' => substr(trim($costCentre), 0, 80),
         'tax_code' => substr(trim($taxCode), 0, 40),
         'line_reference' => substr(trim($reference), 0, 120),
+        'item_id' => max(0, $itemId),
+        'quantity' => round(max(0.0, $quantity), 3),
     ];
 }
 
@@ -962,10 +977,19 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
                 $tax = $entry;
                 continue;
             }
+            $quantity = (float) ($entry['quantity'] ?? 0);
+            $amount = (float) $entry['amount'];
+            // The memo carries "description — 4 × 500.00" only so the day book
+            // reads well; the columns are what the screen reopens with.
+            $description = (string) ($entry['memo'] ?? '');
+            $splitAt = $quantity > 0 ? strrpos($description, ' — ') : false;
             $values[] = [
                 'ledger_id' => (int) $entry['ledger_id'],
-                'amount' => (float) $entry['amount'],
-                'description' => (string) ($entry['memo'] ?? ''),
+                'item_id' => (int) ($entry['item_id'] ?? 0),
+                'qty' => $quantity > 0 ? rtrim(rtrim(number_format($quantity, 3, '.', ''), '0'), '.') : '',
+                'rate' => $quantity > 0 ? number_format($amount / $quantity, 2, '.', '') : '',
+                'amount' => $amount,
+                'description' => $splitAt !== false ? substr($description, 0, $splitAt) : $description,
                 'cost_centre' => (string) ($entry['cost_centre'] ?? ''),
             ];
         }
@@ -1076,6 +1100,7 @@ function voucher_prefill_from_input(string $type, array $input): array
     if ($layout === 'trade') {
         $prefill['settlement_mode'] = (string) ($input['settlement_mode'] ?? 'party') === 'cash' ? 'cash' : 'party';
         $prefill['settlement_ledger_id'] = (int) ($input['settlement_ledger_id'] ?? 0);
+        $prefill['warehouse_id'] = (int) ($input['warehouse_id'] ?? 0);
         $prefill['tax_mode'] = (string) ($input['tax_mode'] ?? 'exclusive');
         $prefill['tax_rate'] = (float) ($input['tax_rate'] ?? 13);
         $prefill['tax_ledger_id'] = (int) ($input['tax_ledger_id'] ?? 0);
@@ -1084,6 +1109,7 @@ function voucher_prefill_from_input(string $type, array $input): array
         for ($index = 0; $index < $rowCount; $index++) {
             $prefill['values'][] = [
                 'ledger_id' => voucher_input_row($input, 'value_ledger', $index),
+                'item_id' => voucher_input_row($input, 'value_item', $index),
                 'description' => voucher_input_row($input, 'value_description', $index),
                 'qty' => voucher_input_row($input, 'value_qty', $index),
                 'rate' => voucher_input_row($input, 'value_rate', $index),
