@@ -136,8 +136,6 @@ document.addEventListener('DOMContentLoaded', function () {
             pill.className = 'mbw-pill tone-red';
         }
 
-        var display = document.getElementById('vch-display-total');
-        if (display) { display.value = window.vchMoney(totalDebit); }
         form.setAttribute('data-balanced', balanced ? '1' : '0');
     }
 

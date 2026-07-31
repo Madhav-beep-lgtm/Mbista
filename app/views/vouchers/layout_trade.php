@@ -314,8 +314,6 @@ document.addEventListener('DOMContentLoaded', function () {
             );
         }
 
-        var display = document.getElementById('vch-display-total');
-        if (display) { display.value = window.vchMoney(total); }
         form.setAttribute('data-balanced', total > 0 && name !== '—' ? '1' : '0');
     }
 

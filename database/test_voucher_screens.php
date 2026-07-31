@@ -236,17 +236,23 @@ ok(str_contains($rendered['payment'], 'PMT/VCH-2026-27/0001'), 'The screen shows
 echo "\n3c. Every screen wires the two controls the shared shell owns\n";
 // ---------------------------------------------------------------------------
 //
-// The shell renders one Total field and one submit guard for all eight
-// screens, and each screen's own script has to drive them. A screen that
-// forgets shows a total stuck at 0.00 and — worse — can never be posted,
-// because the guard reads an attribute nobody ever set. That is exactly what
+// The shell renders one submit guard for all eight screens and each screen's
+// own script has to arm it. A screen that forgets can never be posted at all,
+// because the guard reads an attribute nobody ever set — which is exactly what
 // shipped on the contra screen, so it is asserted here from now on.
+//
+// Each screen also has to show its own running total, in its own words: the
+// two sides of a payment, the Dr/Cr of a journal, the summary of a sale, the
+// preview of a contra. There is no shared Total field any more, and a screen
+// that shows no figure at all leaves the person adding up in their head.
 foreach (array_keys(voucher_type_catalog()) as $wiredType) {
-    ok(substr_count($rendered[$wiredType], 'vch-display-total') >= 2,
-        voucher_type_label($wiredType) . ' fills the Total field as well as rendering it');
     ok(str_contains($rendered[$wiredType], "setAttribute('data-balanced'"),
         voucher_type_label($wiredType) . ' arms the submit guard, so it can actually be posted');
+    ok(str_contains($rendered[$wiredType], 'window.vchMoney('),
+        voucher_type_label($wiredType) . ' works out and shows its own running total');
 }
+ok(!str_contains($rendered['journal'], 'vch-display-total'),
+    'Nothing still writes to the Total field that was taken off the form');
 
 // ---------------------------------------------------------------------------
 echo "\n4. Posting through the engine numbers the series and balances the books\n";

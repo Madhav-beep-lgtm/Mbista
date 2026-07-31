@@ -167,9 +167,6 @@ document.addEventListener('DOMContentLoaded', function () {
         tenderTotalNode.textContent = window.vchMoney(tender);
         linesTotalNode.textContent = window.vchMoney(lines);
 
-        var display = document.getElementById('vch-display-total');
-        if (display) { display.value = window.vchMoney(tender); }
-
         if (tender === 0 && lines === 0) {
             pill.textContent = 'Enter lines';
             pill.className = 'mbw-pill tone-gray';

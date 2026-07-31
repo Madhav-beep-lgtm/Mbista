@@ -708,75 +708,35 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
         <?php include __DIR__ . '/../../app/views/vouchers/layout_' . $spec['layout'] . '.php'; ?>
 
-        <section class="mbw-card frm-section" data-collapsible>
+        <?php
+        // The organisation-context fields this card used to carry — posting
+        // date, priority, department, location, cost centre, exchange rate,
+        // payment terms — asked every voucher to answer questions almost
+        // nobody answered. What each type genuinely needs is on its own screen
+        // above, and every screen already shows its own running total in
+        // context. What is left is the one thing a voucher really does want
+        // beside it: the bill, the cheque, the delivery note.
+        //
+        // A narration already on a voucher is carried through hidden so that
+        // editing one never silently drops the sentence somebody wrote.
+        ?>
+        <?php if ($editNarration !== ''): ?>
+            <input type="hidden" name="narration" value="<?= e($editNarration) ?>">
+        <?php endif; ?>
+
+        <section class="mbw-card frm-section">
             <div class="frm-section-head">
-                <span class="mbw-chip is-square tone-purple"><?= icon('sliders') ?></span>
-                <h2>Filing &amp; notes</h2>
-                <span class="frm-optional">Where this voucher belongs in the organisation, and anything worth writing down</span>
+                <span class="mbw-chip is-square tone-purple"><?= icon('documents') ?></span>
+                <h2>Attachments</h2>
+                <span class="frm-optional">The bill, the cheque, the delivery note — anything that backs this entry</span>
             </div>
-            <div class="frm-grid frm-grid-4">
-                <label>Posting date
-                    <input type="date" name="posting_date" value="<?= e((string) ($prefill['posting_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?>>
-                </label>
-                <label>Fiscal year
-                    <select disabled title="The fiscal year comes from your current portal context">
-                        <option selected><?= e((string) $fiscalYear['label']) ?> (<?= e((string) $fiscalYear['start_date']) ?> – <?= e((string) $fiscalYear['end_date']) ?>)</option>
-                    </select>
-                </label>
-                <label>Total (<?= e(trim($currency)) ?>)
-                    <input type="text" id="vch-display-total" value="0.00" disabled title="Worked out from the lines above">
-                </label>
-                <label>Priority
-                    <?php $editPriority = (string) ($prefill['priority'] ?? 'medium'); ?>
-                    <select name="priority">
-                        <option value="low" <?= $editPriority === 'low' ? 'selected' : '' ?>>Low</option>
-                        <option value="medium" <?= !in_array($editPriority, ['low', 'high'], true) ? 'selected' : '' ?>>Medium</option>
-                        <option value="high" <?= $editPriority === 'high' ? 'selected' : '' ?>>High</option>
-                    </select>
-                </label>
-                <label>Department
-                    <select name="department">
-                        <option value="">—</option>
-                        <?php foreach ($departments as $dept): ?><option <?= (string) ($prefill['department'] ?? '') === $dept ? 'selected' : '' ?>><?= e($dept) ?></option><?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Location
-                    <select name="location">
-                        <option value="">—</option>
-                        <?php foreach ($locations as $loc): ?><option <?= (string) ($prefill['location'] ?? '') === $loc ? 'selected' : '' ?>><?= e($loc) ?></option><?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Cost centre
-                    <select name="cost_centre">
-                        <option value="">—</option>
-                        <?php foreach ($costCentres as $cc): ?><option <?= (string) ($prefill['cost_centre'] ?? '') === $cc ? 'selected' : '' ?>><?= e($cc) ?></option><?php endforeach; ?>
-                    </select>
-                </label>
-                <?php if (in_array($spec['key'], ['sales', 'purchase'], true)): ?>
-                    <label>Payment terms
-                        <select name="payment_terms">
-                            <option value="">—</option>
-                            <?php foreach ($paymentTermsOptions as $term): ?><option <?= (string) ($prefill['payment_terms'] ?? '') === $term ? 'selected' : '' ?>><?= e($term) ?></option><?php endforeach; ?>
-                        </select>
-                    </label>
-                    <label>Due date<input type="date" name="due_date" value="<?= e((string) ($prefill['due_date'] ?? '')) ?>"></label>
-                <?php endif; ?>
-                <label>Exchange rate<input type="number" name="exchange_rate" value="1.0000" step="0.0001" min="0.0001" title="NPR books — leave at 1 unless this voucher was struck in another currency"></label>
-            </div>
-            <div class="frm-grid frm-grid-2">
-                <label>Narration
-                    <textarea name="narration" rows="3" maxlength="255" placeholder="Anything the next person reading this voucher should know"><?= e($editNarration) ?></textarea>
-                </label>
-                <label>Attachments
-                    <span class="frm-dropzone" id="frm-dropzone">
-                        <?= icon('documents') ?>
-                        <strong>Drag &amp; drop files here <u>or click to upload</u></strong>
-                        <small>PDF, Excel, JPG, PNG (max. 10MB each)</small>
-                        <input type="file" name="attachments[]" id="frm-attachments" multiple accept=".pdf,.xls,.xlsx,.csv,.jpg,.jpeg,.png">
-                        <span id="frm-file-list"></span>
-                    </span>
-                </label>
-            </div>
+            <span class="frm-dropzone" id="frm-dropzone">
+                <?= icon('documents') ?>
+                <strong>Drag &amp; drop files here <u>or click to upload</u></strong>
+                <small>PDF, Excel, JPG, PNG (max. 10MB each)</small>
+                <input type="file" name="attachments[]" id="frm-attachments" multiple accept=".pdf,.xls,.xlsx,.csv,.jpg,.jpeg,.png">
+                <span id="frm-file-list"></span>
+            </span>
         </section>
 
         <section class="mbw-card frm-section">

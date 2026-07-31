@@ -100,11 +100,9 @@ document.addEventListener('DOMContentLoaded', function () {
         var same = from.value !== '' && from.value === to.value;
         var ready = fromName !== '' && toName !== '' && value > 0;
 
-        // The Total field and the submit guard are updated on EVERY pass,
-        // including the ones that return early — a half-filled contra has to
-        // put the total back to zero and take the guard down with it.
-        var display = document.getElementById('vch-display-total');
-        if (display) { display.value = window.vchMoney(ready ? value : 0); }
+        // The submit guard is set on EVERY pass, including the ones that
+        // return early — a contra emptied back out has to take the guard down
+        // with it, or a half-filled voucher stays postable.
         form.setAttribute('data-balanced', (ready && !same) ? '1' : '0');
 
         preview.hidden = !ready;
