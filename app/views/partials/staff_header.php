@@ -16,11 +16,11 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#064e3b">
     <link rel="manifest" href="/site.webmanifest">
-    <link rel="stylesheet" href="/assets/css/style.css?v=20260718h">
-    <link rel="stylesheet" href="/assets/css/portal.css?v=20260728">
-    <link rel="stylesheet" href="/assets/css/theme-brown.css?v=20260718h">
-    <link rel="stylesheet" href="/assets/css/theme-sahakari-green.css?v=20260718h">
-    <link rel="stylesheet" href="/assets/css/text-contrast-only.css?v=20260718s">
+    <link rel="stylesheet" href="<?= e(asset_url('assets/css/style.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('assets/css/portal.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('assets/css/theme-brown.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('assets/css/theme-sahakari-green.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('assets/css/text-contrast-only.css')) ?>">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <div class="admin-shell">

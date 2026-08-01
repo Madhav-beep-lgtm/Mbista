@@ -372,5 +372,28 @@ ok(preg_match('~\.mbw-tablewrap[^{]*\{[^}]*#[0-9a-fA-F]{3,6}\b~', $portalCss) !=
 ok(preg_match('~body\.admin-layout \.admin-main \{\s*\R\s*min-width: 0;~', $portalCss) === 1,
     'The main column agrees to shrink, so the page never scrolls sideways instead of the table');
 
+echo "\n10. A changed stylesheet actually reaches the browser\n";
+/*
+ * Assets carried a hand-typed stamp — portal.css?v=20260728 — which works
+ * exactly as long as somebody remembers to change it. Nobody does. The CSS is
+ * edited, the stamp stays, every browser that has been to the site keeps its
+ * old copy, and the fix is live on the server and invisible in the room. It
+ * cost an afternoon here: two CSS fixes shipped, neither reached the screen,
+ * and both were re-diagnosed as CSS bugs they were not.
+ *
+ * filemtime cannot be forgotten, and rsync -a preserves it across the deploy.
+ */
+$stamped = [];
+foreach (hygiene_php_files($root . '/app/views/partials') as $partial) {
+    $body = (string) file_get_contents($partial);
+    if (preg_match('~(href|src)="/assets/(?:css|js)/[^"]*\?v=[A-Za-z0-9]+"~', $body)) {
+        $stamped[] = basename($partial);
+    }
+}
+ok($stamped === [], 'No layout hand-types an asset version'
+    . ($stamped === [] ? '' : ': ' . implode(', ', array_unique($stamped))));
+ok(str_contains((string) file_get_contents($root . '/app/helpers.php'), 'function asset_url('),
+    'They go through asset_url(), which stamps each file with its own modified time');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

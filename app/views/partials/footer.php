@@ -9,6 +9,6 @@
         </span>
     </div>
 </footer>
-<script src="/assets/js/main.js?v=20260728c"></script>
+<script src="<?= e(asset_url('assets/js/main.js')) ?>"></script>
 </body>
 </html>

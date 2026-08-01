@@ -616,6 +616,31 @@ function url(string $path = ''): string
     return '/' . $path;
 }
 
+/**
+ * A stylesheet or script URL stamped with the file's own modified time.
+ *
+ * These used to carry a hand-typed date — portal.css?v=20260728 — which works
+ * exactly as long as somebody remembers to change it. Nobody does, every time.
+ * A stylesheet is edited, the stamp stays, and every browser that has been to
+ * the site keeps the old copy: the change is live on the server, invisible in
+ * the room, and the next hour goes on wondering why the fix did nothing.
+ *
+ * The mtime cannot be forgotten. rsync -a preserves it on deploy, so the stamp
+ * changes on exactly the files that changed and no others — caches keep what
+ * they should and drop what they must.
+ */
+function asset_url(string $path): string
+{
+    $path = ltrim($path, '/');
+    $absolute = __DIR__ . '/../public_html/' . $path;
+    // Root-relative, exactly as the hand-stamped links were: an absolute URL
+    // here would break every asset the moment APP_URL is wrong, and the stamp
+    // is the only thing that needed fixing.
+    $stamp = is_file($absolute) ? (string) filemtime($absolute) : (string) time();
+
+    return '/' . $path . '?v=' . $stamp;
+}
+
 function redirect(string $path): never
 {
     header('Location: ' . url($path));

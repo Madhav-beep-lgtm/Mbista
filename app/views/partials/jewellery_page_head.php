@@ -17,8 +17,9 @@ function jw_page_styles(): void
         return;
     }
     $done = true;
-    // Versioned so a deploy is not served yesterday's cached copy.
-    echo '<link rel="stylesheet" href="/assets/css/jewellery.css?v=20260728d">' . "\n";
+    // Versioned so a deploy is not served yesterday's cached copy. Already
+    // inside PHP here, so it is a call rather than a tag.
+    echo '<link rel="stylesheet" href="' . e(asset_url('assets/css/jewellery.css')) . '">' . "\n";
 }
 
 /**
