@@ -292,54 +292,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back . '&edit=' . $orderId);
     }
 
-    if ($action === 'issue_karigar') {
-        require_permission('jewellery', 'post');
-        $result = jewellery_issue_to_karigar($companyId, $fiscalYearId, [
-            'karigar_id' => (int) ($_POST['karigar_id'] ?? 0),
-            // The order ITEM, when one was picked. It overrides the item, purity
-            // and unit below, because those belong to what the customer ordered.
-            'order_line_ids' => (array) ($_POST['order_line_ids'] ?? []),
-            'order_id' => (int) ($_POST['order_id'] ?? 0),
-            'item_id' => (int) ($_POST['item_id'] ?? 0),
-            'purity_id' => (int) ($_POST['purity_id'] ?? 0),
-            'unit_id' => (int) ($_POST['unit_id'] ?? 0),
-            'issued_gross_weight' => (float) ($_POST['issued_gross_weight'] ?? 0),
-            'issue_date' => $clampDate((string) ($_POST['issue_date'] ?? '')),
-            'expected_return_date' => (string) ($_POST['expected_return_date'] ?? ''),
-            'wastage_allowed_pct' => (float) ($_POST['wastage_allowed_pct'] ?? 0),
-            'making_basis' => (string) ($_POST['making_basis'] ?? 'per_unit_weight'),
-            'making_rate' => (float) ($_POST['making_rate'] ?? 0),
-            'notes' => (string) ($_POST['notes'] ?? ''),
-        ], $userId);
-        flash($result['ok'] ? 'success' : 'error', $result['ok'] ? 'Metal issued to the karigar.' : $result['error']);
-        redirect($back);
-    }
-
-    if ($action === 'receive_karigar') {
-        require_permission('jewellery', 'post');
-        $result = jewellery_receive_from_karigar($companyId, $fiscalYearId, [
-            'assignment_id' => (int) ($_POST['assignment_id'] ?? 0),
-            'received_item_id' => (int) ($_POST['received_item_id'] ?? 0),
-            'received_purity_id' => (int) ($_POST['received_purity_id'] ?? 0),
-            'received_gross_weight' => (float) ($_POST['received_gross_weight'] ?? 0),
-            'stone_weight' => (float) ($_POST['stone_weight'] ?? 0),
-            'qty_pieces' => (float) ($_POST['qty_pieces'] ?? 0),
-            'receive_date' => $clampDate((string) ($_POST['receive_date'] ?? '')),
-            // Passed through as typed, blank included: blank means no allowance,
-            // which is the rule. Casting it to a float here would turn "nothing
-            // granted" into "0.0000 granted" — the same answer, but it would
-            // stop the engine telling the two apart.
-            'allow_wastage_fine' => (string) ($_POST['allow_wastage_fine'] ?? ''),
-            'notes' => (string) ($_POST['notes'] ?? ''),
-        ], $userId);
-        flash($result['ok'] ? 'success' : 'error', $result['ok']
-            ? ('Received. Wages ' . $sym . number_format((float) $result['making_amount'], 2)
-               . ', wastage recovery ' . $sym . number_format((float) $result['recovery_amount'], 2)
-               . ', net payable ' . $sym . number_format((float) $result['net_payable'], 2) . '.')
-            : $result['error']);
-        redirect($back);
-    }
-
     if ($action === 'issue_metal_later') {
         require_permission('jewellery', 'post');
         $result = jewellery_issue_metal_to_assignment($companyId, $fiscalYearId,
@@ -548,23 +500,8 @@ if ($view === 'orders' && table_exists('ledgers')) {
     $cashBankLedgers = $cashStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 $assignments = $view === 'assignments' ? jewellery_assignments_list($companyId, $listFilters) : [];
-$receiveTarget = $view === 'assignments' ? jewellery_assignment($companyId, (int) ($_GET['receive'] ?? 0)) : null;
-$receivePreview = null;
-// Wastage the shop chooses to let go on this return, in fine weight. Blank —
-// the normal case — means none: the kaligad bears what is missing.
-$allowWastage = trim((string) ($_GET['allow'] ?? ''));
-if ($receiveTarget && (string) $receiveTarget['status'] === 'issued') {
-    $receivePreview = jewellery_preview_receipt(
-        $companyId,
-        (int) $receiveTarget['id'],
-        (float) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight']),
-        null,
-        $allowWastage === '' ? null : (float) $allowWastage,
-        // Stones set into the piece, weighed apart — the wastage settles over
-        // the metal only.
-        (float) ($_GET['stone'] ?? 0)
-    );
-}
+// Assigning and receiving moved to their own pages; this view is the register
+// of what is OUT, so it no longer loads a receive preview.
 $pending = $view === 'delivery' ? jewellery_pending_delivery($companyId) : [];
 // A showroom piece comes back to the shelf, not to a collection queue, and the
 // output register is the two flows in one list — the only place they belong
@@ -671,7 +608,7 @@ jw_filter_bar_styles();
 <nav class="mbw-tabbar" aria-label="Jewellery workshop sections" style="flex-wrap:wrap">
     <a class="mbw-tab" href="<?= e(url('admin/jewellery.php')) ?>"><?= icon('dashboard') ?> Jewellery Home</a>
     <?php foreach ([
-        'orders' => ['Orders', 'journal'], 'assignments' => ['Kaligad Issue &amp; Receive', 'handshake'],
+        'orders' => ['Orders', 'journal'], 'assignments' => ['Metal Issued', 'scale'],
         'delivery' => ['Ready to Deliver', 'box'], 'ready-to-sale' => ['Ready to Sale', 'cart'],
         'output' => ['Workshop Output', 'reports'], 'karigars' => ['Kaligads', 'teams'],
         'refinery' => ['Refinery', 'layers'],
@@ -895,8 +832,12 @@ jw_filter_bar_styles();
     </section>
     <style>
         .jw-field-invalid { border-color: var(--mbw-red, #e5484d) !important; box-shadow: 0 0 0 2px rgba(229, 72, 77, 0.15); }
+        /* The text takes the red TOKEN, not a darker shade of it. A fixed dark
+           red reads well on the light theme's pale panel and disappears into
+           the dark theme's translucent one, which is the whole reason the
+           tokens exist. */
         .jw-form-errors { border: 1px solid var(--mbw-red, #e5484d); background: var(--mbw-red-soft, #fdeaea);
-            color: #7d2426; border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
+            color: var(--mbw-red, #e5484d); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
     </style>
     <script>
     // The save button never clears a half-finished order. What is missing is
@@ -1223,217 +1164,16 @@ jw_filter_bar_styles();
     </section>
 
 <?php elseif ($view === 'assignments'): ?>
-    <?php if ($canPost): ?>
-    <section class="mbw-card" data-collapsible data-draggable>
-        <div class="mbw-card-head"><h2>Issue Metal to a Kaligad</h2></div>
-        <form method="post" class="workspace-form-grid">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="issue_karigar">
-            <input type="hidden" name="back_view" value="assignments">
-            <label>Kaligad
-                <select name="karigar_id" required>
-                    <?php foreach ($activeKarigars as $k): ?>
-                        <option value="<?= (int) $k['id'] ?>"><?= e($k['code'] . ' — ' . $k['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <div style="grid-column:1/-1">
-                <?php $pendingLines = jewellery_pending_order_lines($companyId); ?>
-                <?php if ($pendingLines !== []): ?>
-                <span style="display:block;font-weight:600;margin-bottom:4px">Against order items — tick what this issue covers</span>
-                <?php // Checkboxes, not a ctrl-click multi-select: picking several
-                      // items must not need a keyboard trick nobody at a counter
-                      // knows, and each row reads as one line with room to breathe. ?>
-                <div style="max-height:220px;overflow-y:auto;border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:6px 10px">
-                    <?php foreach ($pendingLines as $ol): ?>
-                        <label style="display:flex;align-items:center;gap:8px;padding:4px 2px;font-weight:400;cursor:pointer">
-                            <input type="checkbox" name="order_line_ids[]" value="<?= (int) $ol['id'] ?>"
-                                   style="width:auto;min-height:0;margin:0" <?= (int) ($_GET['line'] ?? 0) === (int) $ol['id'] ? 'checked' : '' ?>>
-                            <span><strong><?= e((string) $ol['order_no']) ?></strong> · <?= e((string) $ol['item_code']) ?>
-                                · <?= $fmt((float) $ol['gross_weight'], 3) ?> <?= e((string) $ol['unit_code']) ?>
-                                <?= $ol['karigar_code'] ? '· ' . e((string) $ol['karigar_code']) : '' ?>
-                                <?= $ol['delivery_date'] ? '· <small>due ' . e(app_date((string) $ol['delivery_date'])) . '</small>' : '' ?></span>
-                        </label>
-                    <?php endforeach; ?>
-                </div>
-                <?php endif; ?>
-            </div>
-            <label>Against order
-                <select name="order_id">
-                    <option value="0">— none —</option>
-                    <?php foreach (jewellery_orders_list($companyId, ['status' => 'confirmed']) as $o): ?>
-                        <option value="<?= (int) $o['id'] ?>" <?= (int) ($_GET['order'] ?? 0) === (int) $o['id'] ? 'selected' : '' ?>><?= e($o['order_no']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <?php
-            // Metal can only be issued FROM own stock, so the dropdown says what
-            // is actually on hand. Without this the only feedback was a rejection
-            // after the fact, with no clue where the metal was meant to come from.
-            $itemOnHand = [];
-            $issuableFine = 0.0;
-            foreach ($items as $it) {
-                $itemOnHand[(int) $it['id']] = jw_item_balance($companyId, (int) $it['id'], null, 'stock');
-                $issuableFine += $itemOnHand[(int) $it['id']]['fine_weight'];
-            }
-            ?>
-            <label>Item                <select name="item_id" required>
-                    <?php foreach ($items as $it): ?>
-                        <?php $onHand = $itemOnHand[(int) $it['id']]; ?>
-                        <?php // Selectable whatever the stock says. An item with none on
-                              // hand can still be WORK ("make five chains") — the engine
-                              // refuses to move metal it has not got, which is the right
-                              // place for that rule; a disabled option refused the work
-                              // order too. Gold, silver, diamond — any item the shop
-                              // keeps can be given to a kaligad. ?>
-                        <option value="<?= (int) $it['id'] ?>"><?= e($it['code'] . ' — ' . $it['name']) ?> (<?= $onHand['fine_weight'] > 0 ? $fmt($onHand['fine_weight'], 4) . ' fine on hand' : 'no stock — work order only' ?>)</option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Purity
-                <select name="purity_id">
-                    <?php foreach ($purities as $p): ?>
-                        <option value="<?= (int) $p['id'] ?>"><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Unit
-                <select name="unit_id">
-                    <?php foreach ($units as $u): ?>
-                        <option value="<?= (int) $u['id'] ?>" <?= (int) $u['id'] === (int) ($baseUnit['id'] ?? 0) ? 'selected' : '' ?>><?= e($u['code']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <?php // Blank is a WORK ORDER: the kaligad is given the job, not the
-                  // metal. He can be handed metal later against the same issue,
-                  // in as many instalments as the shop likes, or never — some
-                  // kaligads work from their own and sell the finished piece back. ?>
-            <label>Gross weight issued <small class="frm-optional">optional — leave blank to assign the work only</small>
-                <input type="number" name="issued_gross_weight" step="0.0001" min="0" placeholder="none — work order"></label>
-            <label>Issue date<input type="date" name="issue_date" value="<?= e($todayInFy) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required></label>
-            <label>Expected return<input type="date" name="expected_return_date"></label>
-            <?php // Nothing is forgiven at issue time; see the receive screen. ?>
-            <label>Making basis
-                <select name="making_basis">
-                    <?php foreach (['per_unit_weight' => 'Per unit of weight', 'percent_of_metal' => '% of metal value', 'flat' => 'Flat'] as $k => $v): ?>
-                        <option value="<?= e($k) ?>"><?= e($v) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Making rate<input type="number" name="making_rate" step="0.0001" min="0" value="0"></label>
-            <?php // Empty stock no longer blocks the form: the work order needs no
-                  // metal, and the engine refuses a metal issue it cannot cover. ?>
-            <div style="grid-column:1/-1"><button type="submit" class="button" <?= $activeKarigars === [] || $items === [] ? 'disabled' : '' ?>>Assign / Issue</button></div>
-        </form>
-        <?php if ($issuableFine <= 0): ?>
-            <div class="notice" style="margin-top:12px">
-                <?php // Short, because the form above now says the same thing where the
-                      // decision is made: the weight is marked optional, and the button
-                      // reads Assign / Issue. A paragraph repeating it under an
-                      // enabled form is noise. What stays is the two links, which
-                      // are the actual next step for stock that has not arrived. ?>
-                <strong>No metal in stock yet.</strong> The work can still be assigned — leave the weight blank.
-                To hand metal over, bring it in first:
-                <a href="<?= e(url('admin/jewellery.php?view=opening')) ?>">Opening Stock</a> or
-                <a href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">Purchase</a>.
-            </div>
-        <?php endif; ?>
-    </section>
-    <?php endif; ?>
+    <?php // Assigning the work and receiving it back each have their own page
+          // now, because each is its own act with its own questions. What stays
+          // here is the register of what is OUT: the metal actually handed over,
+          // in as many instalments as the shop likes, and the cancel and reverse
+          // that only make sense against a live issue. ?>
+    <nav class="mbw-tabbar" style="margin-bottom:14px" aria-label="Where these moved">
+        <a class="mbw-tab" href="<?= e(url('admin/jewellery-assign.php')) ?>"><?= icon('handshake') ?>Assign work to a kaligad</a>
+        <a class="mbw-tab" href="<?= e(url('admin/jewellery-receive.php')) ?>"><?= icon('box') ?>Receive a finished piece</a>
+    </nav>
 
-    <?php if ($receiveTarget && (string) $receiveTarget['status'] === 'issued' && $canPost): ?>
-    <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head">
-            <h2>Receive Back — <?= e((string) $receiveTarget['issue_no']) ?> (<?= e((string) $receiveTarget['karigar_name']) ?>)</h2>
-            <a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=assignments')) ?>">Cancel</a>
-        </div>
-        <form method="get" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:12px">
-            <input type="hidden" name="view" value="assignments">
-            <input type="hidden" name="receive" value="<?= (int) $receiveTarget['id'] ?>">
-            <label>Weight received back (gross)<input type="number" name="wt" step="0.0001" min="0" value="<?= e((string) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight'])) ?>"></label>
-            <label>Of which stones<input type="number" name="stone" step="0.0001" min="0" value="<?= e((string) ($_GET['stone'] ?? '0')) ?>" placeholder="0.0000"></label>
-            <label>Wastage to allow (fine)<input type="number" name="allow" step="0.0001" min="0" value="<?= e($allowWastage) ?>" placeholder="0.0000"></label>
-            <button type="submit" class="button secondary" style="min-height:34px">Recalculate</button>
-        </form>
-        <?php if ($receivePreview && $receivePreview['ok']): ?>
-            <div style="overflow-x:auto"><table>
-                <tbody>
-                    <tr><td>Issued (fine)</td><td class="is-numeric"><?= $fmt($receivePreview['issued_fine'], 4) ?></td></tr>
-                    <?php if ((float) ($receivePreview['stone_weight'] ?? 0) > 0.00005): ?>
-                        <?php // Actual weight and fine equivalent, side by side — the ornament as weighed, the metal as the melt would prove it. ?>
-                        <tr><td>On the scale (gross)</td><td class="is-numeric"><?= $fmt((float) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight']), 4) ?></td></tr>
-                        <tr><td>Stones — not gold</td><td class="is-numeric">− <?= $fmt((float) $receivePreview['stone_weight'], 4) ?></td></tr>
-                        <tr><td>Metal returned (net gold)</td><td class="is-numeric"><?= $fmt((float) $receivePreview['net_gold_weight'], 4) ?></td></tr>
-                    <?php endif; ?>
-                    <tr><td>Received (fine)</td><td class="is-numeric"><?= $fmt($receivePreview['received_fine'], 4) ?></td></tr>
-                    <tr><td>Wastage (fine)</td><td class="is-numeric"><?= $fmt($receivePreview['wastage_fine'], 4) ?></td></tr>
-                    <tr><td>Wastage allowed<?= (float) $receivePreview['allowed_fine'] > 0.00005 ? ' — written off by the shop' : '' ?></td><td class="is-numeric"><?= $fmt($receivePreview['allowed_fine'], 4) ?></td></tr>
-                    <tr><td><strong>Wastage the kaligad bears (fine)</strong></td><td class="is-numeric"><strong><?= $fmt($receivePreview['excess_fine'], 4) ?></strong></td></tr>
-                    <?php if ((float) ($receivePreview['surplus_fine'] ?? 0) > 0.00005): ?>
-                        <tr><td>Metal the kaligad added (fine)</td><td class="is-numeric"><?= $fmt((float) $receivePreview['surplus_fine'], 4) ?></td></tr>
-                    <?php endif; ?>
-                    <tr><td>Making charge</td><td class="is-numeric"><?= e($sym) ?><?= $fmt($receivePreview['making_amount']) ?></td></tr>
-                    <?php if ((float) ($receivePreview['surplus_amount'] ?? 0) > 0.005): ?>
-                        <tr><td>Bought from the kaligad</td><td class="is-numeric">+ <?= e($sym) ?><?= $fmt((float) $receivePreview['surplus_amount']) ?></td></tr>
-                    <?php endif; ?>
-                    <tr><td>Recovered from wages</td><td class="is-numeric">− <?= e($sym) ?><?= $fmt($receivePreview['recovery_amount']) ?></td></tr>
-                    <tr><td><strong>Net payable to the kaligad</strong></td><td class="is-numeric"><strong><?= e($sym) ?><?= $fmt($receivePreview['net_payable']) ?></strong><?= $receivePreview['net_payable'] < 0 ? ' <span class="mbw-pill tone-red">Kaligad owes the shop</span>' : '' ?></td></tr>
-                    <?php
-                    // The same wage in gold. Kaligads are very often paid in
-                    // metal — "keep two grams" — and the figure they will ask
-                    // for should be on the screen where it is agreed, not
-                    // worked out on the back of the receipt afterwards.
-                    $wageStatement = jewellery_wage_statement([
-                        'making_amount' => $receivePreview['making_amount'],
-                        'recovery_amount' => $receivePreview['recovery_amount'],
-                        'net_payable' => $receivePreview['net_payable'],
-                        'avg_fine_rate' => $receivePreview['avg_fine_rate'],
-                    ]);
-                    ?>
-                    <?php if ($wageStatement['convertible']): ?>
-                        <tr>
-                            <td>The same wage in gold<br><small><?= e(jewellery_wage_rate_note($wageStatement, $sym)) ?></small></td>
-                            <td class="is-numeric"><strong><?= $fmt((float) $wageStatement['net_payable_fine'], 4) ?></strong> fine
-                                <?php if ((float) $wageStatement['recovery_fine'] > 0.00005): ?>
-                                    <br><small>making <?= $fmt((float) $wageStatement['making_fine'], 4) ?> less <?= $fmt((float) $wageStatement['recovery_fine'], 4) ?> recovered</small>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                    <?php endif; ?>
-                </tbody>
-            </table></div>
-            <form method="post" class="workspace-form-grid" style="margin-top:12px">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="receive_karigar">
-                <input type="hidden" name="back_view" value="assignments">
-                <input type="hidden" name="assignment_id" value="<?= (int) $receiveTarget['id'] ?>">
-                <input type="hidden" name="received_gross_weight" value="<?= e((string) ($_GET['wt'] ?? $receiveTarget['issued_gross_weight'])) ?>">
-                <input type="hidden" name="stone_weight" value="<?= e((string) ($_GET['stone'] ?? '0')) ?>">
-                <?php // Whatever the shop granted above is what gets saved — the figures on screen and the figures posted are the same ones. ?>
-                <input type="hidden" name="allow_wastage_fine" value="<?= e($allowWastage) ?>">
-                <label>Finished item
-                    <select name="received_item_id">
-                        <?php foreach ($items as $it): ?>
-                            <option value="<?= (int) $it['id'] ?>" <?= (int) $receiveTarget['item_id'] === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Received purity
-                    <select name="received_purity_id">
-                        <?php foreach ($purities as $p): ?>
-                            <option value="<?= (int) $p['id'] ?>" <?= (int) $receiveTarget['purity_id'] === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . '·' . $p['code']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Pieces<input type="number" name="qty_pieces" step="0.001" min="0" value="1"></label>
-                <label>Receive date<input type="date" name="receive_date" value="<?= e($todayInFy) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required></label>
-                <div style="grid-column:1/-1"><button type="submit" class="button">Confirm Receipt &amp; Post</button></div>
-            </form>
-        <?php else: ?>
-            <div class="notice"><?= e((string) ($receivePreview['error'] ?? 'Enter the weight received back.')) ?></div>
-        <?php endif; ?>
-    </section>
-    <?php endif; ?>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Assignments (<?= count($assignments) ?>)</h2><span><?= $canExport ? $exportLinks() : '' ?></span></div>
@@ -1466,7 +1206,11 @@ jw_filter_bar_styles();
                         <td><span class="mbw-pill <?= (string) $row['status'] === 'issued' ? 'tone-amber' : ((string) $row['status'] === 'received' ? 'tone-green' : 'tone-gray') ?>"><?= e(ucfirst((string) $row['status'])) ?></span></td>
                         <td style="white-space:nowrap">
                             <?php if ((string) $row['status'] === 'issued' && $canPost): ?>
-                                <a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=assignments&receive=' . (int) $row['id'])) ?>">Receive</a>
+                                <?php // Receiving is its own page now, on the tab for the
+                                      // kind of work this is: the customer one asks about
+                                      // an order, the showroom one has none to ask about. ?>
+                                <a class="button secondary" style="min-height:30px;padding:3px 10px"
+                                   href="<?= e(url('admin/jewellery-receive.php?kind=' . ((string) ($row['assign_kind'] ?? 'customer') === 'self' ? 'self' : 'customer') . '&receive=' . (int) $row['id'])) ?>">Receive</a>
                                 <form method="post" style="display:inline" data-confirm="Cancel this assignment? The issued metal returns to own stock.">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="cancel_assignment">

@@ -115,7 +115,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <nav class="mbw-tabbar" aria-label="Jewellery workshop">
     <a class="mbw-tab" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>"><?= icon('journal') ?>Orders</a>
     <a class="mbw-tab is-active" href="<?= e(url('admin/jewellery-assign.php')) ?>"><?= icon('handshake') ?>Kaligad Assign</a>
-    <a class="mbw-tab" href="<?= e(url('admin/jewellery-workshop.php?view=assignments')) ?>"><?= icon('scale') ?>Issue &amp; Receive</a>
+    <a class="mbw-tab" href="<?= e(url('admin/jewellery-workshop.php?view=assignments')) ?>"><?= icon('scale') ?>Metal Issued</a>
     <a class="mbw-tab" href="<?= e(url('admin/jewellery-workshop.php?view=delivery')) ?>"><?= icon('box') ?>Ready to Deliver</a>
     <a class="mbw-tab" href="<?= e(url('admin/jewellery-workshop.php?view=karigars')) ?>"><?= icon('teams') ?>Kaligads</a>
 </nav>

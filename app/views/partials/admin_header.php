@@ -172,7 +172,7 @@ if ($headerJewellery) {
         // in the menu: who is making what, then what was handed over for it.
         ['jewellery-assign.php', '', 'Kaligad Assign', 'handshake'],
         ['jewellery-receive.php', '', 'Kaligad Receive', 'box'],
-        ['jewellery-workshop.php', 'assignments', 'Kaligad Issue &amp; Receive', 'scale'],
+        ['jewellery-workshop.php', 'assignments', 'Metal Issued', 'scale'],
         ['jewellery-workshop.php', 'delivery', 'Ready to Deliver', 'box'],
         ['jewellery-workshop.php', 'karigars', 'Kaligads', 'teams'],
         ['jewellery-workshop.php', 'refinery', 'Refinery', 'layers'],
