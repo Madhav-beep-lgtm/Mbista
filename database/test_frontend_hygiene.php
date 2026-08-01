@@ -407,5 +407,116 @@ ok($stamped === [], 'No layout hand-types an asset version'
 ok(str_contains((string) file_get_contents($root . '/app/helpers.php'), 'function asset_url('),
     'They go through asset_url(), which stamps each file with its own modified time');
 
+echo "\n11. The topbar ends where its column ends\n";
+/*
+ * The topbar reaches the edge of the main column by cancelling that column's
+ * padding with an equal negative margin. Two numbers that must agree, written
+ * 4000 lines apart — so of course they stopped agreeing: a later "compact
+ * spacing" pass retuned .admin-main from 20/24 to 14/20 and left the topbar's
+ * -20/-24 behind. Eight pixels wider than its column, every admin page got a
+ * horizontal scrollbar, and nothing in the CSS looked wrong at either site.
+ *
+ * This reads the numbers the browser would end up with (last declaration wins,
+ * same specificity) and does the subtraction, rather than pinning the values.
+ * Retune the spacing freely; just retune both.
+ */
+$lastDecl = static function (string $selector, string $property) use ($portalCss): string {
+    $pattern = '~' . preg_quote($selector, '~') . '\s*\{[^}]*?\b' . preg_quote($property, '~') . ':\s*([^;}]+)~';
+
+    return preg_match_all($pattern, $portalCss, $m) ? trim(end($m[1])) : '';
+};
+// "14px 20px 22px" -> left/right 20px; "-14px -20px 12px" -> left/right -20px.
+$sides = static function (string $shorthand): ?float {
+    $parts = preg_split('~\s+~', trim($shorthand)) ?: [];
+    if (count($parts) < 2) { return null; }
+
+    return (float) $parts[1];
+};
+$mainPad = $sides($lastDecl('body.admin-layout .admin-main', 'padding'));
+$barMargin = $sides($lastDecl('body.admin-layout .admin-topbar', 'margin'));
+$barPad = $sides($lastDecl('body.admin-layout .admin-topbar', 'padding'));
+ok($mainPad !== null && $barMargin !== null,
+    'Both the column padding and the topbar margin are readable from the stylesheet');
+ok($mainPad !== null && $barMargin !== null && abs($mainPad + $barMargin) < 0.01,
+    "The topbar's negative margin cancels the column's padding exactly"
+    . ' (column ' . $mainPad . 'px, bar ' . $barMargin . 'px)');
+ok($barPad !== null && $mainPad !== null && abs($barPad - $mainPad) < 0.01,
+    'And it puts that padding back, so its contents still line up with the page below');
+
+echo "\n12. The sidebar collapses to a rail\n";
+/*
+ * Collapsed, it is a 62px icon rail rather than nothing: hiding it outright
+ * buys ~174px and costs every one of the twenty-odd destinations in it.
+ */
+$mainJs = (string) file_get_contents($root . '/public_html/assets/js/main.js');
+$boot = (string) file_get_contents($root . '/app/views/partials/sidebar_boot.php');
+$toggle = (string) file_get_contents($root . '/app/views/partials/sidebar_toggle.php');
+
+ok(str_contains($toggle, 'data-sidebar-toggle'), 'There is one shared control, not a copy per layout');
+$missingToggle = [];
+$missingBoot = [];
+foreach (['admin_header.php', 'staff_header.php', 'client_header.php'] as $layout) {
+    $source = (string) file_get_contents($root . '/app/views/partials/' . $layout);
+    if (!str_contains($source, "require __DIR__ . '/sidebar_toggle.php'")) { $missingToggle[] = $layout; }
+    if (!str_contains($source, "require __DIR__ . '/sidebar_boot.php'")) { $missingBoot[] = $layout; }
+}
+ok($missingToggle === [], 'Every shell that has a sidebar has the control'
+    . ($missingToggle === [] ? '' : ': ' . implode(', ', $missingToggle)));
+
+/*
+ * The restore has to happen inline, inside <body>, before the footer script.
+ * Left to main.js it would paint the full sidebar and then snap it shut on
+ * every single navigation, and one flash per page is worse than not
+ * remembering at all.
+ */
+ok($missingBoot === [], 'And restores the remembered state before first paint'
+    . ($missingBoot === [] ? '' : ': ' . implode(', ', $missingBoot)));
+foreach (['admin_header.php', 'staff_header.php', 'client_header.php'] as $layout) {
+    $source = (string) file_get_contents($root . '/app/views/partials/' . $layout);
+    $bodyAt = strpos($source, '<body class=');
+    $bootAt = strpos($source, "require __DIR__ . '/sidebar_boot.php'");
+    $shellAt = strpos($source, '<div class="admin-shell">');
+    ok($bodyAt !== false && $bootAt !== false && $shellAt !== false
+        && $bootAt > $bodyAt && $bootAt < $shellAt,
+        "$layout restores it after <body> opens and before the shell is drawn");
+}
+ok(str_contains($boot, 'localStorage.getItem') && str_contains($boot, 'sidebar-collapsed'),
+    'The restore reads the remembered choice and sets the class on <body>');
+ok(str_contains($boot, 'catch'), 'And survives private browsing, where storage throws');
+
+ok(preg_match('~body\.admin-layout\.sidebar-collapsed \.admin-shell \{[^}]*grid-template-columns:\s*62px~', $portalCss) === 1,
+    'Collapsed, the shell column becomes a rail rather than closing to zero');
+/*
+ * Labels go away with font-size: 0 on the link, not by wrapping each one in a
+ * span. There are around sixty of them across three partials, written as
+ * `<?= icon('x') ?>Label` — a bare text node with nothing to hang a class on.
+ * font-size: 0 collapses the text; the SVG is sized in px and does not move.
+ */
+ok(preg_match('~body\.admin-layout\.sidebar-collapsed \.admin-nav a \{[^}]*font-size:\s*0~', $portalCss) === 1,
+    'The labels collapse while the icons, sized in px, keep their size');
+ok(str_contains($mainJs, "link.setAttribute('title', label)"),
+    'And move to tooltips, so a bare icon can still be identified');
+ok(str_contains($mainJs, "localStorage.setItem(sidebarStorageKey"), 'The choice is remembered');
+ok(str_contains($mainJs, "aria-expanded") && str_contains($mainJs, "'Expand sidebar' : 'Collapse sidebar'"),
+    'The control says what pressing it will do, and says so to screen readers too');
+
+/*
+ * A submenu has nowhere to open on a 62px rail, so pressing a group there
+ * would be a dead click. It opens the sidebar and the group together.
+ */
+$navToggleHandler = strstr($mainJs, "toggle.addEventListener('click', (event) => {");
+$navToggleHandler = $navToggleHandler === false ? '' : substr($navToggleHandler, 0, 900);
+ok(str_contains($navToggleHandler, "classList.contains('sidebar-collapsed')")
+    && str_contains($navToggleHandler, 'setSidebarCollapsed(false)')
+    && str_contains($navToggleHandler, 'openOnlyNav(parent)'),
+    'Pressing a nav group on the rail opens the sidebar with it, instead of doing nothing visible');
+ok(str_contains($mainJs, "event.target.closest('input, textarea, select, [contenteditable=\"true\"]')"),
+    'And the keyboard shortcut never fires while somebody is typing');
+
+// Below 1100px the shell is one column and the sidebar sits above the content,
+// where a rail costs a full row of height and saves nothing.
+ok(preg_match('~@media \(max-width: 1100px\) \{\s*\R\s*body\.admin-layout\.sidebar-collapsed[^@]*\.admin-sidebar \{\s*\R\s*display: none~', $portalCss) === 1,
+    'On a narrow screen, where the sidebar stacks above the content, collapsed means gone');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

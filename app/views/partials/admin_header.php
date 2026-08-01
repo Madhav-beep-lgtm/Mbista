@@ -225,8 +225,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <link rel="stylesheet" href="<?= e(asset_url('assets/css/text-contrast-only.css')) ?>">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
+<?php require __DIR__ . '/sidebar_boot.php'; ?>
 <div class="admin-shell">
-    <aside class="admin-sidebar">
+    <aside class="admin-sidebar" id="adminSidebar">
         <a class="brand brand-admin" href="<?= e(url('admin/accounting-dashboard.php')) ?>">
             <?= brand_logo('light', 'mbw-logo mbw-logo-sidebar') ?>
             <span class="brand-admin-sub"><?= e(match ((string) ($currentUser['role'] ?? '')) {
@@ -402,6 +403,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
         $headerBreadcrumbHtml = (string) ob_get_clean();
         ?>
         <header class="admin-topbar">
+            <?php require __DIR__ . '/sidebar_toggle.php'; ?>
             <?php if ($pageHero !== false): ?>
                 <nav class="admin-topbar-crumbs" aria-label="Breadcrumb"><?= $headerBreadcrumbHtml ?></nav>
             <?php else: ?>

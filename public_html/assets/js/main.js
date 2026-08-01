@@ -395,6 +395,60 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Collapsing the whole sidebar down to an icon rail.
+  //
+  // The initial class is set by an inline script in the header partial, before
+  // first paint; everything from here on is the toggling. The rail hides the
+  // labels with CSS, so the labels move to title attributes — hovering an icon
+  // is then the only way left to read what it is.
+  const sidebarStorageKey = 'mbwSidebarCollapsed';
+  const sidebarToggles = Array.from(document.querySelectorAll('[data-sidebar-toggle]'));
+
+  const setSidebarCollapsed = (collapsed) => {
+    document.body.classList.toggle('sidebar-collapsed', collapsed);
+    const action = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    sidebarToggles.forEach((button) => {
+      button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      button.setAttribute('aria-label', action);
+      button.setAttribute('title', action + ' (Ctrl + B)');
+    });
+    try {
+      localStorage.setItem(sidebarStorageKey, collapsed ? '1' : '0');
+    } catch (error) {
+      // Private browsing denies storage; the rail still works this session.
+    }
+  };
+
+  if (sidebarToggles.length) {
+    document.querySelectorAll('.admin-nav a').forEach((link) => {
+      // Only supply a tooltip where there is none already, and only from the
+      // link's own text — an empty title on an icon is worse than no title.
+      const label = link.textContent.trim();
+      if (label !== '' && !link.hasAttribute('title')) {
+        link.setAttribute('title', label);
+      }
+    });
+
+    // Re-announce whatever the inline script restored, so the button's label
+    // and aria-expanded match the state it is actually in.
+    setSidebarCollapsed(document.body.classList.contains('sidebar-collapsed'));
+
+    sidebarToggles.forEach((button) => {
+      button.addEventListener('click', () => {
+        setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+      });
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) { return; }
+      if (event.key !== 'b' && event.key !== 'B') { return; }
+      // Never steal the key from somebody who is typing.
+      if (event.target.closest('input, textarea, select, [contenteditable="true"]')) { return; }
+      event.preventDefault();
+      setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+    });
+  }
+
   // Sidebar collapsible groups, one open at a time.
   //
   // They used to toggle independently, so every group a user ever opened stayed
@@ -452,6 +506,14 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       toggle.addEventListener('click', (event) => {
         event.preventDefault();
+        // On the collapsed rail the submenu has nowhere to appear, so pressing
+        // a group would look like a dead click. Open the sidebar and the group
+        // together instead.
+        if (document.body.classList.contains('sidebar-collapsed')) {
+          setSidebarCollapsed(false);
+          openOnlyNav(parent);
+          return;
+        }
         if (parent.classList.contains('is-open')) {
           setNavOpen(parent, false);
         } else {

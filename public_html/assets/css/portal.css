@@ -2781,14 +2781,12 @@ body.admin-layout ::-webkit-scrollbar-thumb {
     height: auto;
   }
 
-  body.admin-layout .admin-topbar {
-    margin: -16px -16px 14px;
-    padding: 10px 16px;
-  }
-
-  body.admin-layout .admin-main {
-    padding: 16px;
-  }
+  /* The topbar margin and the main column padding used to be retuned here too.
+     Both were already dead: the compact spacing pass further down re-declares
+     them at the same specificity and so wins at every width, media query or
+     not. Deleted rather than corrected — that pair only stays right while it
+     is written once, and two copies drifting apart is exactly what put a
+     horizontal scrollbar on every admin page. */
 
   body.admin-layout .admin-topbar-search {
     order: 5;
@@ -4381,8 +4379,16 @@ body.admin-layout .admin-content {
   gap: 14px;
 }
 
+/* The topbar bleeds to the edge of the main column by cancelling that column's
+   padding with a negative margin, so the two have to agree. The compact pass
+   above changed the padding from 20/24 to 14/20 and left the margin behind,
+   which pushed the bar 4px past the column on each side and put a horizontal
+   scrollbar on every admin page. Measured, not guessed: the bar's right edge
+   sat at 1444 in a 1440 viewport. */
 body.admin-layout .admin-topbar {
   min-height: 56px;
+  margin: -14px -20px 12px;
+  padding: 9px 20px;
 }
 
 body.admin-layout .admin-hero {
@@ -7074,4 +7080,129 @@ body.admin-layout .mbw-filter-bar .button {
 @media print {
   .is-collapsed .mbw-card-body { display: block; }
   .mbw-card-toggle { display: none; }
+}
+
+/* ==========================================================================
+   Collapsible sidebar
+   --------------------------------------------------------------------------
+   Collapsed, the sidebar becomes a 62px icon rail rather than disappearing.
+   Hiding it outright buys ~174px more and costs every one of the twenty-odd
+   destinations in it; the rail keeps them all one click away.
+
+   Labels are hidden with font-size: 0 on the link rather than by wrapping each
+   one in a span. There are around sixty of them across three header partials
+   and the markup is `<?= icon('x') ?>Label` — a bare text node. font-size: 0
+   collapses that text node while the SVG, which is sized in px, is untouched.
+   ========================================================================== */
+
+body.admin-layout .admin-shell {
+  transition: grid-template-columns 0.2s ease;
+}
+
+body.admin-layout.sidebar-collapsed .admin-shell {
+  grid-template-columns: 62px minmax(0, 1fr);
+}
+
+body.admin-layout.sidebar-collapsed .admin-sidebar {
+  padding-inline: 8px;
+  overflow-x: hidden;
+}
+
+/* The built-in lockup is a 320x64 SVG whose leading square is the mark and
+   whose remaining four fifths are the wordmark. Clipping the anchor to the
+   leading square therefore shows the mark alone, with no second asset to keep
+   in step with an admin-uploaded logo. */
+body.admin-layout.sidebar-collapsed .admin-sidebar .brand.brand-admin {
+  width: 38px;
+  margin-inline: auto;
+  overflow: hidden;
+  /* The expanded sidebar centres the lockup. Centred inside a 38px window the
+     clip lands in the middle of the wordmark, so the leading square has to be
+     pinned to the left edge here. */
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+body.admin-layout.sidebar-collapsed .admin-sidebar .mbw-logo-sidebar {
+  max-width: none;
+  align-self: flex-start;
+  margin-inline: 0 auto;
+}
+
+body.admin-layout.sidebar-collapsed .admin-sidebar .brand-admin-sub,
+body.admin-layout.sidebar-collapsed .admin-sidebar .brand strong,
+body.admin-layout.sidebar-collapsed .admin-sidebar .brand small,
+body.admin-layout.sidebar-collapsed .admin-sidebar-context,
+body.admin-layout.sidebar-collapsed .admin-nav-group,
+body.admin-layout.sidebar-collapsed .mbw-nav-caret,
+body.admin-layout.sidebar-collapsed .mbw-subnav {
+  display: none !important;
+}
+
+/* The nav is a grid, so its single column is as wide as its widest child and
+   every link stretches to match. One child is the client-accounting <select>,
+   which does not shrink: it held the column at 124px inside a 62px rail and
+   pushed the centred icons half outside the sidebar. Cap the column, and drop
+   the things that are not destinations — a dropdown is unusable at 62px, and
+   a group heading with no group under it is just a word. */
+body.admin-layout.sidebar-collapsed .admin-nav {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.admin-layout.sidebar-collapsed .admin-nav > *:not(a):not(.mbw-nav-parent) {
+  display: none !important;
+}
+
+body.admin-layout.sidebar-collapsed .admin-nav a {
+  justify-content: center;
+  gap: 0;
+  padding-inline: 0;
+  font-size: 0;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The active marker is a 3px bar down the left edge of a full-width link. On a
+   62px rail that reads as a stray line, so the whole tile carries the state. */
+body.admin-layout.sidebar-collapsed .admin-nav a.is-active::before {
+  display: none;
+}
+
+body.admin-layout.sidebar-collapsed .admin-nav a .ui-icon {
+  flex: 0 0 auto;
+}
+
+/* --- The control itself ---------------------------------------------------- */
+
+body.admin-layout .admin-sidebar-toggle {
+  flex: 0 0 auto;
+  margin-right: 2px;
+}
+
+body.admin-layout .admin-sidebar-toggle .ui-icon {
+  transition: transform 0.2s ease;
+}
+
+body.admin-layout.sidebar-collapsed .admin-sidebar-toggle .ui-icon {
+  transform: scaleX(-1);
+}
+
+/* --- Narrow screens -------------------------------------------------------- */
+
+/* Below 1100px the shell is a single column and the sidebar sits above the
+   content rather than beside it, so a rail would still cost a full row of
+   height for no gain. There, collapsed means gone. */
+@media (max-width: 1100px) {
+  body.admin-layout.sidebar-collapsed .admin-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.admin-layout.sidebar-collapsed .admin-sidebar {
+    display: none;
+  }
+}
+
+@media print {
+  body.admin-layout .admin-sidebar-toggle { display: none !important; }
 }

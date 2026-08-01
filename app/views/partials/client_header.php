@@ -26,8 +26,9 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     <link rel="stylesheet" href="<?= e(asset_url('assets/css/text-contrast-only.css')) ?>">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
+<?php require __DIR__ . '/sidebar_boot.php'; ?>
 <div class="admin-shell">
-    <aside class="admin-sidebar">
+    <aside class="admin-sidebar" id="adminSidebar">
         <a class="brand brand-admin" href="<?= e(url('dashboard.php')) ?>">
             <?= brand_logo('light', 'mbw-logo mbw-logo-sidebar') ?>
             <span class="brand-admin-sub">Client Portal</span>
@@ -67,6 +68,7 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     </aside>
     <section class="admin-main">
         <header class="admin-topbar">
+            <?php require __DIR__ . '/sidebar_toggle.php'; ?>
             <div class="admin-topbar-title">
                 <h1><?= e($pageTitle) ?></h1>
                 <p><?= $pageSubtitle !== '' ? e($pageSubtitle) : 'Signed in as ' . e($currentUser['name'] ?? 'Client') ?></p>

@@ -288,6 +288,10 @@ function icon(string $name): string
             'viewBox' => '0 0 24 24',
             'paths' => ['M3 6h18', 'M3 12h18', 'M3 18h18'],
         ],
+        'sidebar' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => ['M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z', 'M9 4v16'],
+        ],
         'close' => [
             'viewBox' => '0 0 24 24',
             'paths' => ['M18 6L6 18', 'M6 6l12 12'],
