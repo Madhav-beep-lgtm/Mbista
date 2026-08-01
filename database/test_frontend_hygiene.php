@@ -358,9 +358,21 @@ ok(str_contains($stickyBlock, 'position: sticky') && str_contains($stickyBlock, 
  * table scrolled correctly and looked exactly like a table that had been cut
  * off, which is worse than no attempt at all.
  */
-ok(str_contains($portalCss, '.mbw-tablewrap::-webkit-scrollbar')
-    && str_contains($portalCss, 'scrollbar-width: thin'),
-    'The wrapper shows a scrollbar rather than relying on paint behind the rows');
+// Scoped to the wrapper's own block. The first version of this looked for
+// "scrollbar-width" anywhere in the file and passed on the sidebar's copy —
+// an assertion that could never fail is not an assertion.
+$wrapBlock = strstr($portalCss, 'body.admin-layout .mbw-tablewrap {');
+$wrapBlock = $wrapBlock === false ? '' : substr($wrapBlock, 0, (int) strpos($wrapBlock, '}') + 1);
+ok(str_contains($wrapBlock, 'scrollbar-color:'),
+    'The wrapper colours its own scrollbar rather than relying on paint behind the rows');
+ok(str_contains($portalCss, '.mbw-tablewrap::-webkit-scrollbar'),
+    'With the webkit rules kept for engines that have no standard property');
+
+// The reason the grid could still push the page sideways after the wrapper was
+// added: a grid item's automatic minimum is its min-content, and the forms
+// these grids sit in compute to display:grid.
+ok(preg_match('~body\.admin-layout \.vch-grid \{\s*\R\s*min-width: 0;~', $portalCss) === 1,
+    'And the grid itself agrees to shrink, or the wrapper is handed all the width it asks for');
 ok(!preg_match('~\.mbw-tablewrap \{[^}]*background:\s*\R?\s*linear-gradient~', $portalCss),
     'And does not signal overflow with a background the table would hide');
 ok(preg_match('~\.mbw-tablewrap[^{]*\{[^}]*#[0-9a-fA-F]{3,6}\b~', $portalCss) !== 1,

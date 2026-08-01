@@ -2457,6 +2457,18 @@ body.admin-layout .frm-entries {
    works; this class adds what an inline style cannot — a signal that there is
    more to the right, and a scroll that does not drag the whole page with it
    when you reach the end. */
+/* The same automatic-minimum trap as .admin-content > *, two levels deeper and
+   the reason a grid could still push the page sideways. The forms these grids
+   live in compute to display:grid, so .vch-grid is a GRID ITEM — and a grid
+   item's min-width defaults to auto, which resolves to its min-content. The
+   min-content of a sixteen-column table is the sum of its columns, so the item
+   grew to 2218px inside a 1096px form and took the page with it. The wrapper
+   below then had nothing left to scroll: it had already been given all the
+   width it asked for. */
+body.admin-layout .vch-grid {
+  min-width: 0;
+}
+
 body.admin-layout .mbw-tablewrap {
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -2466,7 +2478,10 @@ body.admin-layout .mbw-tablewrap {
      on top of it and hide it completely. The table was scrolling correctly and
      looked exactly like a table that had been cut off. */
   padding-bottom: 2px;
-  scrollbar-width: thin;
+  /* scrollbar-color alone, without scrollbar-width: a thin bar is the easiest
+     one to miss, and missing it is the entire complaint this fixes. Chrome
+     ignores the ::-webkit rules below once either standard property is set, so
+     they remain only for the engines that have no standard path. */
   scrollbar-color: var(--mbw-primary) var(--mbw-card-soft);
 }
 
