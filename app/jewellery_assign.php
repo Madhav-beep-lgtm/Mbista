@@ -890,6 +890,68 @@ function jewellery_output_export_rows(array $rows, string $currency = ''): array
     return $out;
 }
 
+/**
+ * Work still out with a kaligad, of one kind, with everything the receive
+ * screen fills itself in from.
+ *
+ * The receive page asks for exactly one thing the assignment cannot tell it —
+ * what actually came back on the scale. Everything else is already known, so
+ * everything else is read rather than typed.
+ */
+function jewellery_open_assignments(int $companyId, string $kind): array
+{
+    $stmt = db()->prepare("SELECT a.id, a.assignment_no, a.issue_no, a.assign_kind, a.category,
+            a.size_design, a.expected_ornament, a.expected_gross_weight, a.expected_stone_weight,
+            a.expected_net_weight, a.issue_date, a.expected_return_date,
+            a.issued_gross_weight, a.issued_fine_weight, a.issued_stone_carat,
+            a.making_basis, a.making_rate, a.item_id, a.purity_id, a.unit_id, a.notes,
+            k.code AS karigar_code, k.name AS karigar_name,
+            o.order_no, o.order_date, o.delivery_date AS order_promise_date,
+            COALESCE(ap.name, o.customer_name, '') AS customer_name,
+            i.sku AS item_code, i.name AS item_name,
+            p.code AS purity_code, p.fineness,
+            u.code AS unit_code, u.grams AS unit_grams
+        FROM jewellery_order_assignments a
+        INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
+        LEFT JOIN jewellery_orders o ON o.id = a.order_id
+        LEFT JOIN accounting_parties ap ON ap.id = o.party_id
+        LEFT JOIN inventory_items i ON i.id = a.item_id
+        LEFT JOIN jewellery_purities p ON p.id = a.purity_id
+        LEFT JOIN jewellery_units u ON u.id = a.unit_id
+        WHERE a.company_id = :cid AND a.assign_kind = :kind AND a.status = 'issued'
+        ORDER BY COALESCE(a.expected_return_date, '9999-12-31') ASC, a.id ASC");
+    $stmt->execute(['cid' => $companyId, 'kind' => $kind === 'self' ? 'self' : 'customer']);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Carats to the weight unit the shop actually weighs in.
+ *
+ * A carat is a fifth of a gram everywhere on earth, so this is arithmetic and
+ * not a setting — but the shop may weigh in tola, and the receipt records the
+ * stone in the same unit as the metal it was set into. Both figures go on the
+ * screen: the carats the trade quotes, and the weight the scale shows.
+ */
+function jewellery_carat_to_unit(float $carat, float $unitGrams): float
+{
+    if ($unitGrams <= 0) {
+        return jw_round_weight($carat * 0.2);
+    }
+
+    return jw_round_weight($carat * 0.2 / $unitGrams);
+}
+
+/** And back, for a screen that was given the weight and wants the carats. */
+function jewellery_unit_to_carat(float $weight, float $unitGrams): float
+{
+    if ($unitGrams <= 0) {
+        return jw_round_weight($weight / 0.2);
+    }
+
+    return jw_round_weight($weight * $unitGrams / 0.2);
+}
+
 // ---------------------------------------------------------------------------
 // Wages, in rupees and in metal
 // ---------------------------------------------------------------------------

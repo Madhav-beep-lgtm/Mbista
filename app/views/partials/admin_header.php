@@ -88,7 +88,7 @@ $headerPageIcons = [
     'payment-gateways.php' => 'card',
     'insights.php' => 'insights',
     'jewellery.php' => 'coins', 'jewellery-trade.php' => 'coins',
-    'jewellery-workshop.php' => 'handshake', 'jewellery-assign.php' => 'handshake', 'jewellery-reports.php' => 'reports',
+    'jewellery-workshop.php' => 'handshake', 'jewellery-assign.php' => 'handshake', 'jewellery-receive.php' => 'box', 'jewellery-reports.php' => 'reports',
 ];
 $headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php', 'payroll-overtime.php', 'payroll-service-charge.php'];
 $headerPayrollActive = in_array($headerScript, $headerPayrollScripts, true);
@@ -152,7 +152,7 @@ if ($headerIsClientBooks) {
 }
 // The module spans four pages, so "is this section open?" keys off the script
 // rather than a single filename.
-$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-reports.php'];
+$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php'];
 $headerJewelleryActive = in_array($headerScript, $headerJewelleryScripts, true);
 $headerJewelleryView = (string) ($_GET['view'] ?? '');
 $headerJewelleryMenu = '';
@@ -171,6 +171,7 @@ if ($headerJewellery) {
         // Assigning the work comes before issuing the metal, and reads that way
         // in the menu: who is making what, then what was handed over for it.
         ['jewellery-assign.php', '', 'Kaligad Assign', 'handshake'],
+        ['jewellery-receive.php', '', 'Kaligad Receive', 'box'],
         ['jewellery-workshop.php', 'assignments', 'Kaligad Issue &amp; Receive', 'scale'],
         ['jewellery-workshop.php', 'delivery', 'Ready to Deliver', 'box'],
         ['jewellery-workshop.php', 'karigars', 'Kaligads', 'teams'],

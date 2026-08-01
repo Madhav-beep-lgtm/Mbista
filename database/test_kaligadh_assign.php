@@ -21,7 +21,13 @@ accounting_module_repair_database();
 
 $pass = 0; $fail = 0;
 function ok(bool $c, string $l): void { global $pass, $fail; if ($c) { $pass++; echo "  PASS  $l\n"; } else { $fail++; echo "  FAIL  $l\n"; } }
-function near(float $a, float $b): bool { return abs($a - $b) < 0.0005; }
+/**
+ * Close enough. The tolerance is a parameter because some of these figures are
+ * converted through a scale that carries four decimals, and a conversion back
+ * cannot land on the number it started from — see the carat and wage sections,
+ * where that limit is the point being made rather than a rounding nuisance.
+ */
+function near(float $a, float $b, float $tolerance = 0.0005): bool { return abs($a - $b) < $tolerance; }
 /** True when any complaint mentions $needle. */
 function said(array $result, string $needle): bool
 {
@@ -354,6 +360,29 @@ $owing = jewellery_wage_statement(['making_amount' => 500.0, 'recovery_amount' =
     'net_payable' => -890.0, 'avg_fine_rate' => 139000.0]);
 ok((float) $owing['net_payable_fine'] < 0, 'A kaligad who owes the shop owes it in gold too');
 ok(near((float) $owing['net_payable_fine'], -0.0064), 'To the same amount');
+
+// ---------------------------------------------------------------------------
+echo "\n10. Carats and the scale, which are two ways of saying one weight\n";
+// ---------------------------------------------------------------------------
+// The trade quotes stones in carats; the receipt records them in the same unit
+// as the metal they were set into. One is typed, both are shown.
+ok(near(jewellery_carat_to_unit(5.0, 1.0), 1.0), 'Five carats is one gram');
+ok(near(jewellery_carat_to_unit(1.0, 1.0), 0.2), 'And one carat is a fifth of one');
+ok(near(jewellery_carat_to_unit(5.0, 11.6638), 0.0857), 'On a tola scale the same five carats barely move the needle');
+ok(near(jewellery_unit_to_carat(1.0, 1.0), 5.0), 'Back the other way, a gram is five carats');
+// A tola scale carries four decimals, so one tick of it is nearly six
+// thousandths of a carat: 3.5 ct weighs 0.06 tola and reads back as 3.4991.
+// Which is why the carats are what the person types and the scale weight is
+// what is derived — the typed figure keeps its precision, and only the
+// derived one absorbs the scale.
+$caratTick = jewellery_unit_to_carat(0.0001, 11.6638);
+$caratRoundTrip = jewellery_unit_to_carat(jewellery_carat_to_unit(3.5, 11.6638), 11.6638);
+ok(near($caratRoundTrip, 3.5, $caratTick),
+    'A stone weighed in tola and quoted back lands within one tick of the scale (' . $caratRoundTrip . ' ct)');
+ok(abs($caratRoundTrip - 3.5) > 0.0005,
+    'But not exactly — so the carats are typed and the scale weight is worked out, never the reverse');
+ok(near(jewellery_carat_to_unit(5.0, 0.0), 1.0), 'A unit with no gram factor falls back to grams rather than dividing by zero');
+ok(near(jewellery_carat_to_unit(0.0, 11.6638), 0.0), 'No stones weigh nothing');
 
 // ---------------------------------------------------------------------------
 echo "\n" . str_repeat('-', 60) . "\n";
