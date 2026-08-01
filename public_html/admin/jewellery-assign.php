@@ -52,14 +52,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     require_permission('jewellery', 'edit');
     $postKind = jw_enum($_POST['assign_kind'] ?? null, ['customer', 'self'], 'customer');
-    $result = jewellery_save_assignment($companyId, $fiscalYearId, $_POST + ['assign_kind' => $postKind], $userId);
+    $result = jewellery_save_assignments($companyId, $fiscalYearId, $postKind, $_POST, $userId);
     if ($result['ok']) {
-        flash('success', 'Work assigned. The kaligad has the job; hand the metal over from Kaligad Issue when it goes.');
+        flash('success', $result['saved'] === 1
+            ? 'Work assigned. The kaligad has the job; hand the metal over from Metal Issued when it goes.'
+            : $result['saved'] . ' assignments saved. Hand the metal over from Metal Issued as each one goes.');
     } else {
-        // Typed rows come back typed, not blank — a fifteen-column row is not
-        // something anybody should have to enter twice.
+        // Typed rows come back typed, not blank — a grid of fifteen columns is
+        // not something anybody should have to enter twice.
         $_SESSION['jw_assign_retry'] = $_POST;
-        flash('error', 'Not assigned. ' . implode(' ', $result['errors']));
+        flash('error', implode(' ', $result['errors']));
     }
     redirect('admin/jewellery-assign.php?kind=' . $postKind);
 }
@@ -140,115 +142,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php endif; ?>
 
 <?php if ($canEdit): ?>
-<section class="mbw-card" data-collapsible>
+<section class="mbw-card">
     <div class="mbw-card-head">
         <h2>Add New — <?= e(jewellery_assign_kinds()[$kind]) ?></h2>
-        <div class="mbw-card-tools"><span class="mbw-view-all">Assignment number is issued on save</span></div>
+        <div class="mbw-card-tools"><span class="mbw-view-all">Every row is checked before any is saved</span></div>
     </div>
+    <?php // A grid, because the sheet this came from is a grid: five pieces
+          // handed out on a Sunday morning are five rows and one save. ?>
     <form method="post" id="jw-assign-form">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="assign_kind" value="<?= e($kind) ?>">
-        <div class="frm-grid frm-grid-4">
-            <label>Kaligadh name <em>*</em>
-                <select name="karigar_id" required>
-                    <option value="">Select kaligad</option>
-                    <?php foreach ($karigars as $k): ?>
-                        <option value="<?= (int) $k['id'] ?>" <?= (int) ($retry['karigar_id'] ?? 0) === (int) $k['id'] ? 'selected' : '' ?>><?= e($k['code'] . ' — ' . $k['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-
-            <?php if ($isCustomer): ?>
-                <label>Order number <em>*</em>
-                    <select name="order_id" id="jw-order" required>
-                        <option value="">Select order</option>
-                        <?php foreach ($orderPayload as $o): ?>
-                            <option value="<?= (int) $o['id'] ?>" <?= (int) ($retry['order_id'] ?? 0) === (int) $o['id'] ? 'selected' : '' ?>><?= e((string) $o['order_no']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Customer name
-                    <input type="text" id="jw-customer" value="" placeholder="From the order" disabled>
-                </label>
-                <label>Size / design
-                    <input type="text" id="jw-size" name="size_design" value="" placeholder="From the order" readonly>
-                </label>
-                <label class="frm-span-3">Expected ornament <em>*</em>
-                    <select name="order_line_id" id="jw-line" required>
-                        <option value="">Pick the order first</option>
-                    </select>
-                </label>
-            <?php else: ?>
-                <label>Size / design
-                    <input type="text" name="size_design" maxlength="120" placeholder="Ring 14, chain 22 in" value="<?= e((string) ($retry['size_design'] ?? '')) ?>">
-                </label>
-                <label>Expected ornament <em>*</em>
-                    <select name="item_id" id="jw-item" required>
-                        <option value="">Select finished stock item</option>
-                        <?php foreach ($stockItems as $it): ?>
-                            <option value="<?= (int) $it['id'] ?>" data-name="<?= e((string) $it['name']) ?>" <?= (int) ($retry['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['name'] . ' (' . $it['sku'] . ')') ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <input type="hidden" name="expected_ornament" id="jw-ornament-name" value="<?= e((string) ($retry['expected_ornament'] ?? '')) ?>">
-            <?php endif; ?>
-
-            <label>Category <em>*</em>
-                <select name="category">
-                    <?php foreach (jewellery_assign_categories() as $catKey => $catLabel): ?>
-                        <option value="<?= e($catKey) ?>" <?= (string) ($retry['category'] ?? 'gold') === $catKey ? 'selected' : '' ?>><?= e($catLabel) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Gross weight (with stone / diamond) <em>*</em>
-                <input type="number" name="expected_gross_weight" id="jw-gross" step="0.0001" min="0" placeholder="0.0000"
-                       value="<?= e((string) ($retry['expected_gross_weight'] ?? '')) ?>" <?= $isCustomer ? 'readonly' : 'required' ?>>
-            </label>
-            <label>Stone / diamond
-                <input type="number" name="expected_stone_weight" id="jw-stone" step="0.0001" min="0" placeholder="0.0000"
-                       value="<?= e((string) ($retry['expected_stone_weight'] ?? '')) ?>" <?= $isCustomer ? 'readonly' : '' ?>>
-            </label>
-            <label>Net weight
-                <input type="number" id="jw-net" step="0.0001" value="" placeholder="Gross − stone" disabled title="Always gross minus stone — never typed">
-            </label>
-            <label>Purity <em>*</em>
-                <?php if ($isCustomer): ?>
-                    <input type="text" id="jw-purity-label" value="" placeholder="From the order" disabled>
-                    <input type="hidden" name="purity_id" id="jw-purity">
-                <?php else: ?>
-                    <select name="purity_id" required>
-                        <option value="">Select purity</option>
-                        <?php foreach ($purities as $p): ?>
-                            <option value="<?= (int) $p['id'] ?>" <?= (int) ($retry['purity_id'] ?? 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['metal_code'] . ' · ' . $p['code']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                <?php endif; ?>
-            </label>
-
-            <label>Making charge basis
-                <select name="making_basis">
-                    <?php foreach (jewellery_assign_making_bases() as $basisKey => $basisLabel): ?>
-                        <option value="<?= e($basisKey) ?>" <?= (string) ($retry['making_basis'] ?? 'flat') === $basisKey ? 'selected' : '' ?>><?= e($basisLabel) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Making charge
-                <input type="number" name="making_rate" step="0.0001" min="0" placeholder="0.0000" value="<?= e((string) ($retry['making_rate'] ?? '')) ?>">
-            </label>
-            <label>Assigned date <em>*</em>
-                <input type="date" name="assigned_date" id="jw-assigned" value="<?= e((string) ($retry['assigned_date'] ?? $todayInFy)) ?>" required>
-                <?php if ($isCustomer): ?><small class="frm-optional" id="jw-assigned-hint">Not before the order was taken</small><?php endif; ?>
-            </label>
-            <label>Expected delivery
-                <input type="date" name="expected_delivery" id="jw-delivery" value="<?= e((string) ($retry['expected_delivery'] ?? '')) ?>">
-                <?php if ($isCustomer): ?><small class="frm-optional" id="jw-delivery-hint">Not beyond the customer's promise date</small><?php endif; ?>
-            </label>
-            <label class="frm-span-3">Description
-                <input type="text" name="description" maxlength="255" placeholder="Anything the kaligad should know about this piece" value="<?= e((string) ($retry['description'] ?? '')) ?>">
-            </label>
-        </div>
+        <?php include __DIR__ . '/../../app/views/jewellery/assign_grid.php'; ?>
         <div style="margin-top:12px">
-            <button type="submit" class="button" <?= $karigars === [] || ($isCustomer && $orderPayload === []) ? 'disabled' : '' ?>><?= icon('plus') ?>Add New</button>
+            <button type="submit" class="button" <?= $karigars === [] || ($isCustomer && $orderPayload === []) ? 'disabled' : '' ?>><?= icon('plus') ?>Save all rows</button>
         </div>
     </form>
 </section>
@@ -339,113 +245,5 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
-<?php if ($isCustomer): ?>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    // Picking an order number fills in everything the order already knows —
-    // the customer, the size, the piece and its weights. Nobody retypes what
-    // the order says, and the server reads them off the order again on save,
-    // so a tampered field cannot make an assignment disagree with its order.
-    var orders = <?= json_encode($orderPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
-    var byId = {};
-    orders.forEach(function (order) { byId[String(order.id)] = order; });
-
-    var orderSelect = document.getElementById('jw-order');
-    var lineSelect = document.getElementById('jw-line');
-    var customer = document.getElementById('jw-customer');
-    var size = document.getElementById('jw-size');
-    var gross = document.getElementById('jw-gross');
-    var stone = document.getElementById('jw-stone');
-    var net = document.getElementById('jw-net');
-    var purity = document.getElementById('jw-purity');
-    var purityLabel = document.getElementById('jw-purity-label');
-    var assigned = document.getElementById('jw-assigned');
-    var delivery = document.getElementById('jw-delivery');
-
-    function money(value) { return (Math.round((Number(value) || 0) * 10000) / 10000).toFixed(4); }
-
-    function recalcNet() {
-        var g = Number(gross.value) || 0;
-        var s = Number(stone.value) || 0;
-        net.value = g > 0 ? money(g - s) : '';
-    }
-
-    function applyOrder() {
-        var order = byId[orderSelect.value];
-        lineSelect.innerHTML = '';
-        if (!order) {
-            lineSelect.appendChild(new Option('Pick the order first', ''));
-            customer.value = '';
-            assigned.removeAttribute('min');
-            delivery.removeAttribute('max');
-            return;
-        }
-        customer.value = order.customer_name || '';
-        // The dates are fenced by the order's own: work cannot be assigned
-        // before it was taken, nor promised back after the customer was told.
-        if (order.order_date) { assigned.setAttribute('min', order.order_date); }
-        if (order.delivery_date) { delivery.setAttribute('max', order.delivery_date); }
-
-        lineSelect.appendChild(new Option('Select the item being made', ''));
-        order.lines.forEach(function (line) {
-            var label = line.item_name + ' (' + line.item_code + ') — ' + Number(line.gross_weight).toFixed(3) + ' ' + line.unit_code;
-            var option = new Option(label, line.id);
-            option.dataset.line = JSON.stringify(line);
-            lineSelect.appendChild(option);
-        });
-        if (order.lines.length === 1) { lineSelect.selectedIndex = 1; }
-        applyLine();
-    }
-
-    function applyLine() {
-        var option = lineSelect.options[lineSelect.selectedIndex];
-        var line = option && option.dataset.line ? JSON.parse(option.dataset.line) : null;
-        if (!line) {
-            gross.value = ''; stone.value = ''; net.value = '';
-            size.value = ''; purity.value = ''; purityLabel.value = '';
-            return;
-        }
-        gross.value = money(line.gross_weight);
-        stone.value = money(line.stone_weight);
-        size.value = line.size || '';
-        purity.value = line.purity_id;
-        purityLabel.value = line.purity_code || '';
-        if (line.delivery_date) { delivery.value = line.delivery_date; }
-        recalcNet();
-    }
-
-    orderSelect.addEventListener('change', applyOrder);
-    lineSelect.addEventListener('change', applyLine);
-    applyOrder();
-});
-</script>
-<?php else: ?>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    // Net is the one figure nobody types, on either flow: it is always the
-    // other two, so it is worked out in front of them as they type.
-    var gross = document.getElementById('jw-gross');
-    var stone = document.getElementById('jw-stone');
-    var net = document.getElementById('jw-net');
-    var item = document.getElementById('jw-item');
-    var ornament = document.getElementById('jw-ornament-name');
-
-    function recalc() {
-        var g = Number(gross.value) || 0;
-        var s = Number(stone.value) || 0;
-        net.value = g > 0 ? (Math.round((g - s) * 10000) / 10000).toFixed(4) : '';
-    }
-    [gross, stone].forEach(function (field) { field.addEventListener('input', recalc); });
-
-    // The piece's name follows the item chosen, so the printed sheet reads as
-    // an ornament and not as a stock code.
-    item.addEventListener('change', function () {
-        var option = item.options[item.selectedIndex];
-        ornament.value = (option && option.getAttribute('data-name')) || '';
-    });
-    if (item.value) { item.dispatchEvent(new Event('change')); }
-    recalc();
-});
-</script>
-<?php endif; ?>
+<?php include __DIR__ . '/../../app/views/jewellery/assign_grid_script.php'; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

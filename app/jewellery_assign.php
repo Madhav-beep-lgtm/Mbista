@@ -2,6 +2,11 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/jewellery_workshop.php';
+// voucher_input_row()/voucher_input_rows() read a grid's parallel arrays. They
+// are named for where they were written, not for what they know — there is
+// nothing about a voucher in them, and a second copy here would be a second
+// thing to keep right.
+require_once __DIR__ . '/voucher_types.php';
 
 /**
  * Putting the work in a kaligad's hands.
@@ -319,8 +324,14 @@ function jewellery_save_assignment(int $companyId, int $fiscalYearId, array $inp
         return ['ok' => false, 'errors' => ['The piece needs an item, a purity and a unit before it can be assigned.'], 'id' => 0];
     }
 
+    // A batch of rows saves under ONE transaction, so a bad fifth row cannot
+    // leave four assignments behind. When the caller owns the transaction, it
+    // owns the rollback too.
+    $ownsTransaction = !db()->inTransaction();
     try {
-        db()->beginTransaction();
+        if ($ownsTransaction) {
+            db()->beginTransaction();
+        }
         // voucher_no-style retry: assignment_no is UNIQUE per company, so two
         // counters saving in the same second means one loses and takes the next.
         $assignmentId = 0;
@@ -394,24 +405,177 @@ function jewellery_save_assignment(int $companyId, int $fiscalYearId, array $inp
                     'cid' => $companyId,
                 ]);
         }
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+
+        return ['ok' => false, 'errors' => ['Could not save the assignment: ' . $exception->getMessage()], 'id' => 0, 'order_id' => 0];
+    }
+
+    // The order's own status follows from its lines and reads them back, so it
+    // waits for the commit. In a batch the caller owns that, and syncs after.
+    if ($row['order_id'] > 0 && $ownsTransaction) {
+        jewellery_sync_order_status($companyId, (int) $row['order_id']);
+    }
+    log_activity('jewellery_assignment', $assignmentId, 'assigned',
+        'Work assigned to kaligad (' . $row['assign_kind'] . ').', $userId ?: null);
+
+    return ['ok' => true, 'errors' => [], 'id' => $assignmentId, 'order_id' => (int) $row['order_id']];
+}
+
+/**
+ * Save a whole grid of assignments — all of them, or none.
+ *
+ * The sheet is a table and the screen is a table, so a counter handing out five
+ * pieces on a Sunday morning types five rows and saves once. Which makes the
+ * failure mode the important part: a bad fifth row must not leave four
+ * assignments behind and a half-corrected grid on screen. So every row is
+ * checked first, and only if they all pass does anything get written, inside
+ * one transaction.
+ *
+ * Rows left wholly blank are skipped, not complained about — a grid that opens
+ * with three rows should not demand three assignments.
+ */
+function jewellery_save_assignments(int $companyId, int $fiscalYearId, string $kind, array $input, int $userId = 0): array
+{
+    $kind = $kind === 'self' ? 'self' : 'customer';
+    $rowCount = voucher_input_rows($input, 'karigar_id');
+    $rows = [];
+    $errors = [];
+    $claimedLines = [];
+
+    for ($index = 0; $index < $rowCount; $index++) {
+        $row = [
+            'assign_kind' => $kind,
+            'karigar_id' => (int) voucher_input_row($input, 'karigar_id', $index),
+            'order_id' => (int) voucher_input_row($input, 'order_id', $index),
+            'order_line_id' => (int) voucher_input_row($input, 'order_line_id', $index),
+            'item_id' => (int) voucher_input_row($input, 'item_id', $index),
+            'purity_id' => (int) voucher_input_row($input, 'purity_id', $index),
+            'unit_id' => (int) voucher_input_row($input, 'unit_id', $index),
+            'category' => voucher_input_row($input, 'category', $index),
+            'size_design' => voucher_input_row($input, 'size_design', $index),
+            'expected_ornament' => voucher_input_row($input, 'expected_ornament', $index),
+            'expected_gross_weight' => (float) voucher_input_row($input, 'expected_gross_weight', $index),
+            'expected_stone_weight' => (float) voucher_input_row($input, 'expected_stone_weight', $index),
+            'making_basis' => voucher_input_row($input, 'making_basis', $index),
+            'making_rate' => (float) voucher_input_row($input, 'making_rate', $index),
+            'assigned_date' => voucher_input_row($input, 'assigned_date', $index),
+            'expected_delivery' => voucher_input_row($input, 'expected_delivery', $index),
+            'description' => voucher_input_row($input, 'description', $index),
+        ];
+        // An untouched row is not an error. Only a row somebody started is.
+        $started = $row['karigar_id'] > 0 || $row['order_line_id'] > 0 || $row['item_id'] > 0
+            || $row['expected_gross_weight'] > 0 || $row['size_design'] !== '' || $row['expected_ornament'] !== '';
+        if (!$started) {
+            continue;
+        }
+
+        // The same ornament cannot go to two kaligads because it appears twice
+        // in the grid. The database would catch it on the second save; the
+        // person should hear it before anything is written.
+        if ($row['order_line_id'] > 0) {
+            if (isset($claimedLines[$row['order_line_id']])) {
+                $errors[] = 'Row ' . ($index + 1) . ': that item is already on row ' . $claimedLines[$row['order_line_id']] . ' of this grid.';
+                continue;
+            }
+            $claimedLines[$row['order_line_id']] = $index + 1;
+        }
+        $rows[] = ['line' => $index + 1, 'row' => $row];
+    }
+
+    if ($rows === [] && $errors === []) {
+        return ['ok' => false, 'saved' => 0, 'errors' => ['Fill at least one row before saving.']];
+    }
+
+    // Pass one: check every row against the database, writing nothing.
+    foreach ($rows as $entry) {
+        $checked = jewellery_assign_dry_run($companyId, $kind, $entry['row']);
+        foreach ($checked as $problem) {
+            $errors[] = 'Row ' . $entry['line'] . ': ' . $problem;
+        }
+    }
+    if ($errors !== []) {
+        return ['ok' => false, 'saved' => 0, 'errors' => $errors];
+    }
+
+    // Pass two: write them, all under one transaction.
+    $saved = 0;
+    $touchedOrders = [];
+    try {
+        db()->beginTransaction();
+        foreach ($rows as $entry) {
+            $result = jewellery_save_assignment($companyId, $fiscalYearId, $entry['row'], $userId);
+            if (!$result['ok']) {
+                throw new RuntimeException('Row ' . $entry['line'] . ': ' . implode(' ', $result['errors']));
+            }
+            $saved++;
+            if ((int) ($result['order_id'] ?? 0) > 0) {
+                $touchedOrders[(int) $result['order_id']] = true;
+            }
+        }
         db()->commit();
     } catch (Throwable $exception) {
         if (db()->inTransaction()) {
             db()->rollBack();
         }
 
-        return ['ok' => false, 'errors' => ['Could not save the assignment: ' . $exception->getMessage()], 'id' => 0];
+        return ['ok' => false, 'saved' => 0, 'errors' => [$exception->getMessage() . ' Nothing was saved.']];
     }
 
-    // Outside the transaction: the order's own status follows from its lines,
-    // and it reads them back.
-    if ($row['order_id'] > 0) {
-        jewellery_sync_order_status($companyId, (int) $row['order_id']);
+    // After the commit, because an order's status is read back off its lines.
+    foreach (array_keys($touchedOrders) as $orderId) {
+        jewellery_sync_order_status($companyId, $orderId);
     }
-    log_activity('jewellery_assignment', $assignmentId, 'assigned',
-        'Work assigned to kaligad (' . $row['assign_kind'] . ').', $userId ?: null);
 
-    return ['ok' => true, 'errors' => [], 'id' => $assignmentId];
+    return ['ok' => true, 'saved' => $saved, 'errors' => []];
+}
+
+/**
+ * Everything wrong with one row, without writing anything.
+ *
+ * The same lookups the save does, so what passes here passes there — the point
+ * of checking first is that the answer must not change between the two.
+ */
+function jewellery_assign_dry_run(int $companyId, string $kind, array $row): array
+{
+    $order = null;
+    $orderLine = null;
+    if ($kind === 'customer') {
+        $orderId = (int) ($row['order_id'] ?? 0);
+        if ($orderId > 0) {
+            $stmt = db()->prepare('SELECT * FROM jewellery_orders WHERE id = :id AND company_id = :cid LIMIT 1');
+            $stmt->execute(['id' => $orderId, 'cid' => $companyId]);
+            $order = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+        $lineId = (int) ($row['order_line_id'] ?? 0);
+        if ($lineId > 0) {
+            $stmt = db()->prepare('SELECT l.*, i.name AS item_name, p.fineness
+                FROM jewellery_order_lines l
+                INNER JOIN inventory_items i ON i.id = l.item_id
+                INNER JOIN jewellery_purities p ON p.id = l.purity_id
+                WHERE l.id = :id AND l.company_id = :cid LIMIT 1');
+            $stmt->execute(['id' => $lineId, 'cid' => $companyId]);
+            $orderLine = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            if ($orderLine && (int) ($orderLine['assignment_id'] ?? 0) > 0) {
+                return ['that item is already out with a kaligad.'];
+            }
+        }
+    }
+
+    $checked = jewellery_assign_validate($kind, $row, $order, $orderLine);
+    if (!$checked['ok']) {
+        return $checked['errors'];
+    }
+    if (!jewellery_karigar($companyId, (int) $checked['row']['karigar_id'])) {
+        return ['that kaligad does not belong to this company.'];
+    }
+
+    return [];
 }
 
 /**

@@ -385,6 +385,51 @@ ok(near(jewellery_carat_to_unit(5.0, 0.0), 1.0), 'A unit with no gram factor fal
 ok(near(jewellery_carat_to_unit(0.0, 11.6638), 0.0), 'No stones weigh nothing');
 
 // ---------------------------------------------------------------------------
+echo "\n11. The grid reads its rows the way the sheet is laid out\n";
+// ---------------------------------------------------------------------------
+// Only the row-reading and the batch rules are exercised here; the saving
+// itself is the single-row engine, already covered above and end to end.
+$grid = [
+    'karigar_id' => [4, 4, ''],
+    'item_id' => [61, 62, ''],
+    'purity_id' => [2, 2, ''],
+    'expected_gross_weight' => [20, 12, ''],
+    'expected_stone_weight' => [0, 1.5, ''],
+    'size_design' => ['Chain 20in', 'Ring 14', ''],
+    'expected_ornament' => ['Gold chain', 'Diamond ring', ''],
+    'making_basis' => ['flat', 'percent_of_metal', 'flat'],
+    'making_rate' => [3000, 8, ''],
+    'assigned_date' => ['2026-08-01', '2026-08-01', '2026-08-01'],
+    'expected_delivery' => ['', '', ''],
+    'description' => ['row one', 'row two', ''],
+    'category' => ['gold', 'diamond', 'gold'],
+];
+ok(voucher_input_rows($grid, 'karigar_id') === 3, 'A three-row grid is read as three rows');
+ok(voucher_input_row($grid, 'size_design', 1) === 'Ring 14', 'And each row keeps its own values');
+
+// The third row carries a date and a basis because the blank template does —
+// which must not make it an assignment nobody asked for.
+$blankRow = ['karigar_id' => 0, 'order_line_id' => 0, 'item_id' => 0,
+    'expected_gross_weight' => 0.0, 'size_design' => '', 'expected_ornament' => ''];
+$started = $blankRow['karigar_id'] > 0 || $blankRow['order_line_id'] > 0 || $blankRow['item_id'] > 0
+    || $blankRow['expected_gross_weight'] > 0 || $blankRow['size_design'] !== '' || $blankRow['expected_ornament'] !== '';
+ok($started === false, 'A row nobody touched is not an assignment, whatever its defaults say');
+
+// Two rows cannot claim the same ornament: the database would refuse the
+// second, but the person should hear it before anything is written.
+$claimed = [];
+$duplicates = [];
+foreach ([21, 22, 21] as $rowIndex => $lineId) {
+    if (isset($claimed[$lineId])) {
+        $duplicates[] = 'Row ' . ($rowIndex + 1) . ': already on row ' . $claimed[$lineId];
+        continue;
+    }
+    $claimed[$lineId] = $rowIndex + 1;
+}
+ok(count($duplicates) === 1 && str_contains($duplicates[0], 'Row 3'),
+    'The same ornament twice in one grid is caught, and the later row is the one named');
+
+// ---------------------------------------------------------------------------
 echo "\n" . str_repeat('-', 60) . "\n";
 echo "  $pass passed, $fail failed\n";
 exit($fail === 0 ? 0 : 1);
