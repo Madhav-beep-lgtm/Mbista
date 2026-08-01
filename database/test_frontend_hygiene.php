@@ -351,10 +351,26 @@ $stickyBlock = $stickyBlock === false ? '' : substr($stickyBlock, 0, 260);
 ok(str_contains($stickyBlock, 'position: sticky') && str_contains($stickyBlock, 'background:'),
     'The sticky header carries a background, so rows cannot show through it');
 
-// The wrapper paints an edge shade; it must do it in tokens like everything
-// else, or it will glow white against the dark theme.
-ok(preg_match('~\.mbw-tablewrap \{[^}]*#[0-9a-fA-F]{3,6}\b~', $portalCss) !== 1,
-    'And it paints itself from tokens, so it follows the theme');
+/*
+ * The scrollbar is the affordance, and it has to be VISIBLE. The first attempt
+ * signalled the overflow with a background gradient on the wrapper — which sits
+ * behind the table, where the opaque striped rows cover it completely. The
+ * table scrolled correctly and looked exactly like a table that had been cut
+ * off, which is worse than no attempt at all.
+ */
+ok(str_contains($portalCss, '.mbw-tablewrap::-webkit-scrollbar')
+    && str_contains($portalCss, 'scrollbar-width: thin'),
+    'The wrapper shows a scrollbar rather than relying on paint behind the rows');
+ok(!preg_match('~\.mbw-tablewrap \{[^}]*background:\s*\R?\s*linear-gradient~', $portalCss),
+    'And does not signal overflow with a background the table would hide');
+ok(preg_match('~\.mbw-tablewrap[^{]*\{[^}]*#[0-9a-fA-F]{3,6}\b~', $portalCss) !== 1,
+    'It paints itself from tokens, so it follows the theme');
+
+// A grid item's automatic minimum is its min-content, so a wide table can push
+// the whole main column past the viewport and set the PAGE scrolling sideways
+// instead of the table. Both levels have to agree to shrink.
+ok(preg_match('~body\.admin-layout \.admin-main \{\s*\R\s*min-width: 0;~', $portalCss) === 1,
+    'The main column agrees to shrink, so the page never scrolls sideways instead of the table');
 
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

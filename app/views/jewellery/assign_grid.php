@@ -37,7 +37,8 @@ declare(strict_types=1);
                     <th class="is-numeric" style="min-width:105px">Stone / diamond</th>
                     <th class="is-numeric" style="min-width:105px">Net weight</th>
                     <th style="min-width:130px">Purity <em>*</em></th>
-                    <th style="min-width:150px">Making charge</th>
+                    <th style="min-width:150px">Making basis</th>
+                    <th class="is-numeric" style="min-width:110px">Making charge</th>
                     <th style="min-width:145px">Assigned date <em>*</em></th>
                     <th style="min-width:145px">Expected delivery</th>
                     <th style="min-width:170px">Description</th>
@@ -118,12 +119,17 @@ declare(strict_types=1);
                     </select>
                 <?php endif; ?>
             </td>
+            <?php // Two cells, not two controls stacked in one. Stacking made
+                  // this the only column two lines tall, so every row in the
+                  // grid was double height to accommodate it. ?>
             <td>
-                <select name="making_basis[]" data-field="making_basis" style="margin-bottom:4px">
+                <select name="making_basis[]" data-field="making_basis">
                     <?php foreach (jewellery_assign_making_bases() as $basisKey => $basisLabel): ?>
                         <option value="<?= e($basisKey) ?>"><?= e($basisLabel) ?></option>
                     <?php endforeach; ?>
                 </select>
+            </td>
+            <td class="is-numeric">
                 <input type="number" name="making_rate[]" data-field="making_rate" class="frm-num" step="0.0001" min="0" placeholder="0.0000">
             </td>
             <td><input type="date" name="assigned_date[]" data-field="assigned_date" class="jw-assigned" value="<?= e($todayInFy) ?>"></td>

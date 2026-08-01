@@ -585,6 +585,15 @@ body.admin-layout .admin-content > * {
   min-width: 0;
 }
 
+/* The same trap one level up. .admin-main is the second grid item of
+   .admin-shell, and a grid item's automatic minimum is its min-content — so a
+   wide table could push the whole main column past the viewport and set the
+   PAGE scrolling sideways instead of the table. The track is already
+   minmax(0, 1fr); this is the item agreeing to it. */
+body.admin-layout .admin-main {
+  min-width: 0;
+}
+
 /* ==========================================================================
    Cards (mega-list of legacy card classes + new mbw-card)
    ========================================================================== */
@@ -2451,17 +2460,32 @@ body.admin-layout .frm-entries {
 body.admin-layout .mbw-tablewrap {
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  /* A soft edge on the right while there is more to see. background-attachment
-     local/scroll is the old shadow trick: the white covers are pinned to the
-     content and slide away at each end, so the shadows only show mid-scroll. */
-  background:
-    linear-gradient(to right, var(--mbw-card) 30%, rgba(255, 255, 255, 0)) left center,
-    linear-gradient(to left, var(--mbw-card) 30%, rgba(255, 255, 255, 0)) right center,
-    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)) left center,
-    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)) right center;
-  background-repeat: no-repeat;
-  background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
-  background-attachment: local, local, scroll, scroll;
+  /* The scrollbar is the affordance, so it is always there and always visible.
+     The first attempt at this used the background-gradient shadow trick — which
+     paints on the WRAPPER, behind the table, where the opaque striped rows sit
+     on top of it and hide it completely. The table was scrolling correctly and
+     looked exactly like a table that had been cut off. */
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mbw-primary) var(--mbw-card-soft);
+}
+
+body.admin-layout .mbw-tablewrap::-webkit-scrollbar {
+  height: 10px;
+}
+
+body.admin-layout .mbw-tablewrap::-webkit-scrollbar-track {
+  background: var(--mbw-card-soft);
+  border-radius: 6px;
+}
+
+body.admin-layout .mbw-tablewrap::-webkit-scrollbar-thumb {
+  background: var(--mbw-primary);
+  border-radius: 6px;
+}
+
+body.admin-layout .mbw-tablewrap::-webkit-scrollbar-thumb:hover {
+  background: var(--mbw-heading);
 }
 
 /* The header stays while the rows scroll under it. On a forty-row grid the
