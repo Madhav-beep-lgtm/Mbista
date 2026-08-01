@@ -188,6 +188,7 @@ function Run-PermanentTests {
         "database\test_voucher_stock.php",
         "database\test_voucher_screens.php",
         "database\test_kaligadh_assign.php",
+        "database\test_staff_company_reach.php",
         "database\test_acceptance_suite.php"
     )
 

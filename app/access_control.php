@@ -518,6 +518,84 @@ function staff_accountant_forces_approval(?array $user = null): bool
  *    to them personally or granted to them for accounting (migration 049).
  *  - Customer (client login): the books company of their own client profile.
  */
+/**
+ * Every active company, which is what an unrestricted staff member reaches.
+ */
+function access_control_all_company_ids(): array
+{
+    if (!table_exists('companies')) {
+        return [];
+    }
+
+    return array_map('intval', db()->query('SELECT id FROM companies WHERE is_active = 1')->fetchAll(PDO::FETCH_COLUMN));
+}
+
+/** Of the ids given, the ones that are still live. */
+function access_control_active_company_ids(array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
+    if ($ids === [] || !table_exists('companies')) {
+        return $ids;
+    }
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = db()->prepare('SELECT id FROM companies WHERE is_active = 1 AND id IN (' . $placeholders . ')');
+    $stmt->execute($ids);
+
+    return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+}
+
+/**
+ * The companies an admin has explicitly named for a staff member.
+ *
+ * Empty means unrestricted, NOT "no access" — the whole point of the change is
+ * that a staff member with nothing named reaches the group. A membership row
+ * is how an admin narrows that to one company or a handful.
+ */
+function staff_restricted_company_ids(int $userId): array
+{
+    if ($userId <= 0 || !table_exists('company_memberships')) {
+        return [];
+    }
+    $stmt = db()->prepare('SELECT company_id FROM company_memberships WHERE user_id = :uid AND is_active = 1');
+    $stmt->execute(['uid' => $userId]);
+
+    return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+}
+
+/**
+ * The staff (and optionally admins) who may be given work in a company.
+ *
+ * Group-wide by default, mirroring authorized_company_ids(): a staff member the
+ * super admin created under one company is offered by every other company's
+ * assignee lists, unless an admin has named the companies they work for.
+ */
+function assignable_staff_users(int $companyId, bool $includeAdmins = false): array
+{
+    if (!table_exists('users')) {
+        return [];
+    }
+    $roles = $includeAdmins ? "('staff', 'admin')" : "('staff')";
+    $stmt = db()->query("SELECT id, name, role, company_id FROM users
+        WHERE role IN $roles AND status = 'active' ORDER BY name ASC");
+
+    $people = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $person) {
+        // An admin is scoped by their own company tree, as they always were.
+        if ((string) $person['role'] === 'admin') {
+            if ($companyId <= 0 || in_array($companyId, authorized_company_ids($person), true)) {
+                $people[] = $person;
+            }
+            continue;
+        }
+        $restricted = staff_restricted_company_ids((int) $person['id']);
+        if ($restricted === [] || $companyId <= 0 || in_array($companyId, $restricted, true)) {
+            $people[] = $person;
+        }
+    }
+
+    return $people;
+}
+
 function authorized_company_ids(?array $user = null): array
 {
     $user = $user ?? current_user();
@@ -547,6 +625,28 @@ function authorized_company_ids(?array $user = null): array
     }
 
     $ids = [];
+
+    // STAFF ARE THE FIRM'S OWN PEOPLE, not one company's.
+    //
+    // A staff user belongs to whichever company created them, but the firm
+    // works as one: the same accountant posts for the parent, for a subsidiary
+    // and for a client's books in the same afternoon. Scoping them to a home
+    // company meant the super admin created a staff member and every other
+    // company could neither see them nor give them work.
+    //
+    // So staff reach the whole group by default, and company_memberships
+    // becomes a RESTRICTION rather than the only grant: the moment an admin
+    // names one or more companies for a staff member, those are the only ones
+    // they reach. Clients are untouched — a customer login still reaches
+    // exactly its own books, which is the branch further down.
+    if ($role === 'staff') {
+        $restricted = staff_restricted_company_ids($userId);
+        $cache[$cacheKey] = access_control_active_company_ids(
+            $restricted !== [] ? $restricted : access_control_all_company_ids()
+        );
+
+        return $cache[$cacheKey];
+    }
 
     // Home company and, for admins, everything beneath it in the group tree.
     $homeCompanyId = (int) ($user['company_id'] ?? 0);

@@ -243,9 +243,8 @@ if (table_exists('compliance_deadlines') && $clientIdsInScope !== []) {
         $deadlines[] = $deadline;
     }
 
-    $staffStmt = db()->prepare("SELECT id, name FROM users WHERE role IN ('staff', 'admin') AND status = 'active' AND company_id = :company_id ORDER BY name ASC");
-    $staffStmt->execute(['company_id' => $companyId]);
-    $staffUsers = $staffStmt->fetchAll();
+    // Group-wide for staff; admins stay scoped to their own company tree.
+    $staffUsers = assignable_staff_users($companyId, true);
 
     if (table_exists('documents')) {
         $docPlaceholders = implode(',', array_fill(0, count($clientIdsInScope), '?'));

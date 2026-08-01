@@ -24,9 +24,10 @@ if (!in_array($view, $allowedViews, true)) {
 }
 
 $staffUsers = [];
-$staffStmt = db()->prepare("SELECT id, name FROM users WHERE role = 'staff' AND status = 'active' AND company_id = :company_id ORDER BY name ASC");
-$staffStmt->execute(['company_id' => $companyId]);
-$staffUsers = $staffStmt->fetchAll();
+// Group-wide: staff are the firm's people, not one company's, so a staff
+// member the super admin created is offered here too. An admin narrows that
+// per person with company_memberships.
+$staffUsers = assignable_staff_users($companyId);
 
 $clients = [];
 if (table_exists('client_profiles')) {
@@ -109,8 +110,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/hr.php?view=attendance');
         }
 
-        $staffCheck = db()->prepare("SELECT id FROM users WHERE id = :id AND role = 'staff' AND company_id = :company_id LIMIT 1");
-        $staffCheck->execute(['id' => $staffUserId, 'company_id' => $companyId]);
+        // Group-wide, matching the list that offered them. A check still scoped to
+        // company_id would reject the very staff the dropdown now shows — and the
+        // restriction, where an admin has set one, is enforced by the list itself.
+        $staffCheck = db()->prepare("SELECT id FROM users WHERE id = :id AND role = 'staff' AND status = 'active' LIMIT 1");
+        $staffCheck->execute(['id' => $staffUserId]);
         if (!$staffCheck->fetch()) {
             flash('error', 'Invalid staff member.');
             redirect('admin/hr.php?view=attendance');

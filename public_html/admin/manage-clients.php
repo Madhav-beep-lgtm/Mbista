@@ -97,8 +97,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // grant them access to its books — authorized_company_ids() grants a
             // staffer any client where assigned_staff_user_id = their id, with no
             // company scope of its own.
-            $staffCheck = db()->prepare("SELECT id FROM users WHERE id = :id AND role = 'staff' AND company_id = :company_id LIMIT 1");
-            $staffCheck->execute(['id' => $staffId, 'company_id' => current_company_id()]);
+            // Group-wide, matching the list that offered them.
+            $staffCheck = db()->prepare("SELECT id FROM users WHERE id = :id AND role = 'staff' AND status = 'active' LIMIT 1");
+            $staffCheck->execute(['id' => $staffId]);
             if (!$staffCheck->fetch()) {
                 flash('error', 'Select a staff member from your own company.');
                 redirect('admin/manage-clients.php');
@@ -115,9 +116,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $clients = client_books_clients_for_scope();
 // Scope the assignable-staff roster to the active company. An unscoped query
 // leaked every other tenant's staff names/ids into this admin's dropdown.
-$staffStmt = db()->prepare("SELECT id, name FROM users WHERE role = 'staff' AND status = 'active' AND company_id = :company_id ORDER BY name ASC");
-$staffStmt->execute(['company_id' => current_company_id()]);
-$staffUsers = $staffStmt->fetchAll();
+// Group-wide: any of the firm's staff may be given a client to serve.
+$staffUsers = assignable_staff_users(current_company_id());
 
 // Clients this admin manages that live under a DIFFERENT portal: created while
 // another company context was active, so they are absent from the list below.
