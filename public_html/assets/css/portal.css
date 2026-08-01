@@ -2426,6 +2426,69 @@ body.admin-layout .vch-radio small {
   color: var(--mbw-muted);
 }
 
+/* ---------------------------------------------------------------------------
+   Wide tables: scroll, do not crush
+   ---------------------------------------------------------------------------
+   `table { width: 100% }` is right for a five-column list and wrong for a
+   sixteen-column grid. Inside an overflow-x wrapper it tells the table to fit
+   the wrapper, so the browser obeys by squeezing every column down to its
+   minimum and wrapping the text — the columns get narrower and narrower and
+   the scrollbar never appears. What a wide grid wants is the opposite: be as
+   wide as the content needs, and never NARROWER than the card.
+
+   Scoped to the grids rather than every table, because a table that genuinely
+   fits should still stretch to fill its card. */
+body.admin-layout .vch-table,
+body.admin-layout .frm-entries {
+  width: auto;
+  min-width: 100%;
+}
+
+/* The wrapper. Most call sites still say style="overflow-x:auto" inline, which
+   works; this class adds what an inline style cannot — a signal that there is
+   more to the right, and a scroll that does not drag the whole page with it
+   when you reach the end. */
+body.admin-layout .mbw-tablewrap {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  /* A soft edge on the right while there is more to see. background-attachment
+     local/scroll is the old shadow trick: the white covers are pinned to the
+     content and slide away at each end, so the shadows only show mid-scroll. */
+  background:
+    linear-gradient(to right, var(--mbw-card) 30%, rgba(255, 255, 255, 0)) left center,
+    linear-gradient(to left, var(--mbw-card) 30%, rgba(255, 255, 255, 0)) right center,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)) left center,
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)) right center;
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+/* The header stays while the rows scroll under it. On a forty-row grid the
+   column names are otherwise off the top by the time you are typing in them.
+   The background is not decoration: table headers are transparent by default,
+   and a see-through sticky header has rows sliding through the words. */
+body.admin-layout .mbw-tablewrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--mbw-card-soft);
+}
+
+/* And on a grid wide enough to scroll sideways, the row number goes with it,
+   so a row read across is still identifiable at the far right. */
+body.admin-layout .mbw-tablewrap .vch-table td[data-sn],
+body.admin-layout .mbw-tablewrap .vch-table th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--mbw-card);
+}
+
+body.admin-layout .mbw-tablewrap .vch-table thead th:first-child {
+  z-index: 3;
+}
+
 /* Line grids */
 body.admin-layout .vch-table select,
 body.admin-layout .vch-table input {

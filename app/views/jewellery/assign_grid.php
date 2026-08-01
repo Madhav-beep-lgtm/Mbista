@@ -20,7 +20,7 @@ declare(strict_types=1);
       // already picked on row one, and the rest of the grid is blank. ?>
 <div class="vch-grid jw-assign-grid" data-grid data-min-rows="3"
      data-prefill="<?= e(json_encode($gridPrefill ?? [], JSON_UNESCAPED_SLASHES)) ?>">
-    <div style="overflow-x:auto">
+    <div class="mbw-tablewrap">
         <table class="frm-entries vch-table">
             <thead>
                 <tr>

@@ -93,7 +93,7 @@ $taxRate = (float) ($prefill['tax_rate'] ?? 13);
     </div>
 
     <div class="vch-grid" data-grid data-min-rows="1" data-prefill="<?= e(json_encode($prefill['values'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
-        <div style="overflow-x:auto">
+        <div class="mbw-tablewrap">
             <table class="frm-entries vch-table">
                 <thead>
                     <tr>

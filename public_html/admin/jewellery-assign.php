@@ -192,7 +192,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
     </form>
 
-    <div style="overflow-x:auto">
+    <div class="mbw-tablewrap">
         <table>
             <thead>
                 <tr>

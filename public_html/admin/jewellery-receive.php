@@ -170,7 +170,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <h2>Out with a kaligad (<?= count($openAssignments) ?>)</h2>
         <div class="mbw-card-tools"><span class="mbw-view-all">Pick the assignment being received against</span></div>
     </div>
-    <div style="overflow-x:auto"><table>
+    <div class="mbw-tablewrap"><table>
         <thead><tr><th style="width:44px">SN</th><th>Assignment</th><th>Kaligadh</th>
             <?php if ($isCustomer): ?><th>Order</th><th>Customer</th><?php endif; ?>
             <th>Expected ornament</th><th>Size / design</th>
@@ -333,7 +333,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <input type="date" name="to" value="<?= e($filters['to']) ?>" class="field-compact" aria-label="Received to">
         <button type="submit" class="button secondary"><?= icon('filter') ?>Filter</button>
     </form>
-    <div style="overflow-x:auto"><table>
+    <div class="mbw-tablewrap"><table>
         <thead><tr><th style="width:44px">SN</th><th>Assignment</th><th>Kaligadh</th>
             <?php if ($isCustomer): ?><th>Order</th><th>Customer</th><?php endif; ?>
             <th>Ornament</th><th>Received on</th><th class="is-numeric">Gross</th>

@@ -328,5 +328,33 @@ ok(str_contains($mainJs, 'insertBefore(fresher, addNew)'),
 ok(str_contains($mainJs, "['view', 'tab'].forEach"),
     'The refresh re-fetches only view/tab — never ?delete= or ?edit=, which would re-run on the server');
 
+echo "\n9. A table too wide for its card scrolls instead of crushing\n";
+/*
+ * `table { width: 100% }` is right for a five-column list and quietly wrong for
+ * a sixteen-column grid: inside a scroll wrapper it tells the table to FIT, so
+ * the browser squeezes every column down to its minimum and wraps the words,
+ * and the scrollbar never appears. Nothing errors. It just gets harder to read
+ * every time a column is added — exactly the kind of rot this file is for.
+ */
+$portalCss = (string) file_get_contents($root . '/public_html/assets/css/portal.css');
+ok(str_contains($portalCss, '.mbw-tablewrap {') && str_contains($portalCss, 'overflow-x: auto;'),
+    'There is one wrapper class for wide tables to scroll inside');
+$gridWidth = strstr($portalCss, 'body.admin-layout .vch-table,');
+$gridWidth = $gridWidth === false ? '' : substr($gridWidth, 0, 160);
+ok(str_contains($gridWidth, 'width: auto') && str_contains($gridWidth, 'min-width: 100%'),
+    'Grid tables are as wide as their content and never narrower than the card');
+
+// A sticky header over a transparent background has the rows sliding through
+// the words, and table headers ARE transparent by default in this stylesheet.
+$stickyBlock = strstr($portalCss, '.mbw-tablewrap thead th');
+$stickyBlock = $stickyBlock === false ? '' : substr($stickyBlock, 0, 260);
+ok(str_contains($stickyBlock, 'position: sticky') && str_contains($stickyBlock, 'background:'),
+    'The sticky header carries a background, so rows cannot show through it');
+
+// The wrapper paints an edge shade; it must do it in tokens like everything
+// else, or it will glow white against the dark theme.
+ok(preg_match('~\.mbw-tablewrap \{[^}]*#[0-9a-fA-F]{3,6}\b~', $portalCss) !== 1,
+    'And it paints itself from tokens, so it follows the theme');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

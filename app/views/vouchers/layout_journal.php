@@ -19,7 +19,7 @@ declare(strict_types=1);
     </div>
 
     <div class="vch-grid" data-grid data-min-rows="2" data-prefill="<?= e(json_encode($prefill['journal'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
-        <div style="overflow-x:auto">
+        <div class="mbw-tablewrap">
             <table class="frm-entries vch-table">
                 <thead>
                     <tr>

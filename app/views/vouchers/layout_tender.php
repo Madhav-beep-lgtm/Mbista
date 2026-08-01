@@ -23,7 +23,7 @@ $isMoneyIn = $bankSide === 'debit';
     </div>
 
     <div class="vch-grid" data-grid data-min-rows="1" data-prefill="<?= e(json_encode($prefill['tender'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
-        <div style="overflow-x:auto">
+        <div class="mbw-tablewrap">
             <table class="frm-entries vch-table">
                 <thead>
                     <tr>
@@ -99,7 +99,7 @@ $isMoneyIn = $bankSide === 'debit';
     </div>
 
     <div class="vch-grid" data-grid data-min-rows="1" data-prefill="<?= e(json_encode($prefill['lines'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
-        <div style="overflow-x:auto">
+        <div class="mbw-tablewrap">
             <table class="frm-entries vch-table" id="vch-lines-table">
                 <thead>
                     <tr>

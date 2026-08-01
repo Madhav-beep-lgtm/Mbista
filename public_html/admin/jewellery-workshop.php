@@ -777,7 +777,7 @@ jw_filter_bar_styles();
                 ?>
                 <div style="margin-top:12px;border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px">
                     <h3 style="margin:0 0 8px;font-size:1rem">What the customer pays</h3>
-                    <div style="overflow-x:auto"><table style="max-width:520px">
+                    <div class="mbw-tablewrap"><table style="max-width:520px">
                         <tbody>
                             <?php foreach ([
                                 ['Metal', (float) $editOrder['metal_amount']],
@@ -898,7 +898,7 @@ jw_filter_bar_styles();
         </div>
 
         <?php if ($orderAdvances['rows'] !== []): ?>
-        <div style="overflow-x:auto"><table>
+        <div class="mbw-tablewrap"><table>
             <thead><tr><th>Date</th><th>Ref</th><th>What</th><th class="is-numeric">Weight</th><th class="is-numeric">Value</th></tr></thead>
             <tbody>
                 <?php foreach ($orderAdvances['rows'] as $adv): ?>
@@ -992,7 +992,7 @@ jw_filter_bar_styles();
                     $filterOverdue ? '1' : '', ['1' => 'Only these'], '— all —')],
             ],
         ]); ?>
-        <div style="overflow-x:auto"><table>
+        <div class="mbw-tablewrap"><table>
             <thead><tr><th>No.</th><th>Date</th><th>Customer</th><th>Metal</th><th class="is-numeric">Expected wt</th><th>Delivery</th><th>Status</th><th></th></tr></thead>
             <tbody>
                 <?php if ($orders === []): ?><tr><td colspan="8">No orders yet.</td></tr><?php endif; ?>
@@ -1117,7 +1117,7 @@ jw_filter_bar_styles();
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Kaligads (<?= count($karigars) ?>)</h2><span><?= $canExport ? $exportLinks() : '' ?></span></div>
-        <div style="overflow-x:auto"><table>
+        <div class="mbw-tablewrap"><table>
             <thead><tr><th>Code</th><th>Name</th><th>Engagement</th><th>Making</th><th class="is-numeric">Metal held (fine)</th><th class="is-numeric">Work needs</th><th class="is-numeric">Excess / shortfall</th><th class="is-numeric">Wages payable</th><th>Status</th><th></th></tr></thead>
             <tbody>
                 <?php if ($karigars === []): ?><tr><td colspan="11">No kaligads yet.</td></tr><?php endif; ?>
@@ -1195,7 +1195,7 @@ jw_filter_bar_styles();
                     array_column($karigars, 'code', 'id'))],
             ],
         ]); ?>
-        <div style="overflow-x:auto"><table>
+        <div class="mbw-tablewrap"><table>
             <thead><tr><th>Issue no.</th><th>Date</th><th>Kaligad</th><th>Order</th><th>Item</th><th class="is-numeric">Issued (fine)</th><th>Status</th><th></th></tr></thead>
             <tbody>
                 <?php if ($assignments === []): ?><tr><td colspan="9">Nothing issued yet.</td></tr><?php endif; ?>
@@ -1316,7 +1316,7 @@ jw_filter_bar_styles();
     </div>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Received but Not Delivered (<?= count($pending) ?>)</h2></div>
-        <div style="overflow-x:auto"><table>
+        <div class="mbw-tablewrap"><table>
             <thead><tr><th>Order</th><th>Customer</th><th>Received on</th><th class="is-numeric">Weight back</th><th class="is-numeric">Days waiting</th><th>Promised</th><th></th></tr></thead>
             <tbody>
                 <?php if ($pending === []): ?><tr><td colspan="7">Nothing is waiting for collection.</td></tr><?php endif; ?>
@@ -1363,7 +1363,7 @@ jw_filter_bar_styles();
             <h2>Ready to Sale (<?= count($readyToSale) ?>)</h2>
             <div class="mbw-card-tools"><?= $canExport && $readyToSale !== [] ? 'Export' . $exportLinks() : '' ?></div>
         </div>
-        <div style="overflow-x:auto"><table>
+        <div class="mbw-tablewrap"><table>
             <thead><tr><th>Assignment</th><th>Ornament</th><th>Size / design</th><th>Kaligad</th>
                 <th>Received on</th><th class="is-numeric">Gross</th><th class="is-numeric">Stone</th>
                 <th class="is-numeric">Net</th><th class="is-numeric">Fine</th><th>Purity</th>
@@ -1416,7 +1416,7 @@ jw_filter_bar_styles();
             <input type="date" name="to" value="<?= e((string) ($_GET['to'] ?? '')) ?>" class="field-compact" aria-label="Received to">
             <button type="submit" class="button secondary"><?= icon('filter') ?> Filter</button>
         </form>
-        <div style="overflow-x:auto"><table>
+        <div class="mbw-tablewrap"><table>
             <thead><tr><th style="width:44px">SN</th><th>Assignment</th><th>Kaligad</th><th>Ornament</th>
                 <th>Received on</th><th class="is-numeric">Gross</th><th class="is-numeric">Net</th>
                 <th class="is-numeric">Fine</th><th class="is-numeric">Wastage</th>
@@ -1495,7 +1495,7 @@ jw_filter_bar_styles();
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Refinery Jobs (<?= count($jobs) ?>)</h2><span><?= $canExport ? $exportLinks() : '' ?></span></div>
-        <div style="overflow-x:auto"><table>
+        <div class="mbw-tablewrap"><table>
             <thead><tr><th>Job</th><th>Refiner</th><th>Issued</th><th class="is-numeric">Out (fine)</th><th class="is-numeric">Back (fine)</th><th class="is-numeric">Loss / extra (fine)</th><th class="is-numeric">Charges</th><th>Status</th><th></th></tr></thead>
             <tbody>
                 <?php if ($jobs === []): ?><tr><td colspan="9">No refinery jobs yet.</td></tr><?php endif; ?>
