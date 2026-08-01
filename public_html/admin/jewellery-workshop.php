@@ -1016,7 +1016,11 @@ jw_filter_bar_styles();
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=order&id=' . (int) $row['id'])) ?>">Preview</a>
                             <?php endif; ?>
                             <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?>
-                                <a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=assignments&order=' . (int) $row['id'])) ?>">Assign</a>
+                                <?php // Assigning is its own page. The order rides along so
+                                      // the grid opens with this one already picked — the
+                                      // reason somebody pressed Assign on THIS row. ?>
+                                <a class="button secondary" style="min-height:30px;padding:3px 10px"
+                                   href="<?= e(url('admin/jewellery-assign.php?kind=customer&order=' . (int) $row['id'])) ?>">Assign</a>
                             <?php endif; ?>
                             <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?>
                                 <form method="post" style="display:inline-flex;gap:4px;align-items:center">

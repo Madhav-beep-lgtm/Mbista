@@ -143,17 +143,29 @@ declare(strict_types=1);
         var row = event.target.closest ? event.target.closest('tr') : null;
         if (row) { recalcNet(row); }
     });
-    // A row added after load starts empty, and its ornament list is empty until
-    // an order is picked — which is what applyOrder does for a blank select.
+    /**
+     * Give every row that has none an ornament list.
+     *
+     * Two cases need it and neither is a change event. A row added after load
+     * starts with an empty select; and row one may open with an order ALREADY
+     * picked, because somebody pressed Assign on that order — its list has to
+     * be built without anybody touching it.
+     */
+    function fillEmptyLists() {
+        if (!isCustomer) { return; }
+        form.querySelectorAll('[data-rows] tr').forEach(function (row) {
+            var lineSelect = cell(row, '.jw-line');
+            if (lineSelect && lineSelect.options.length === 0) { applyOrder(row); }
+        });
+    }
+
     form.addEventListener('vch:change', function () {
-        if (isCustomer) {
-            form.querySelectorAll('[data-rows] tr').forEach(function (row) {
-                var lineSelect = cell(row, '.jw-line');
-                if (lineSelect && lineSelect.options.length === 0) { applyOrder(row); }
-            });
-        }
+        fillEmptyLists();
         countFilled();
     });
+    // The grid builds its rows as the page parses, which is before this file
+    // runs — so the first pass is made here rather than waited for.
+    fillEmptyLists();
     countFilled();
 })();
 </script>

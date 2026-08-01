@@ -109,6 +109,21 @@ $orderPayload = $isCustomer ? jewellery_assign_order_payload($companyId) : [];
 $stockItems = $isCustomer ? [] : jewellery_assign_stock_items($companyId);
 $fmt = static fn (float $n, int $dp = 2): string => number_format($n, $dp);
 
+// Arriving from an order's own Assign button: that order opens already picked
+// on the first row, because it is the reason the button was pressed. Only if it
+// is still on the list — an order whose every item is already out with a
+// kaligad is not there, and the grid must not open on one with nothing to give.
+$presetOrderId = 0;
+if ($isCustomer && (int) ($_GET['order'] ?? 0) > 0) {
+    foreach ($orderPayload as $candidate) {
+        if ((int) $candidate['id'] === (int) $_GET['order']) {
+            $presetOrderId = (int) $candidate['id'];
+            break;
+        }
+    }
+}
+$gridPrefill = $presetOrderId > 0 ? [['order_id' => $presetOrderId]] : [];
+
 $pageTitle = 'Kaligad Assign';
 $pageSubtitle = 'Who is making what, to what size, by when — before any metal moves.';
 $bodyClass = 'admin-layout jewellery-module-page';
