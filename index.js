@@ -9,11 +9,12 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(express.json());
 
+// RECONCILED PRODUCTION POOL: Matching your live PHP configuration settings!
 const db = mysql.createPool({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",          
+    password: process.env.DB_PASS || process.env.DB_PASSWORD || "",          
+    database: process.env.DB_NAME || "mbista_altiora_complete_hosting",    
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
@@ -40,32 +41,6 @@ app.get("/api/plans", (req, res) => {
     });
 });
 
-// LEDGER 3: New Order Entry Processing Tunnel for the Mobile App!
-app.post("/api/orders", (req, res) => {
-    const { user_id, plan_id, total_amount } = req.body;
-
-    if (!user_id || !plan_id || !total_amount) {
-        return res.status(400).json({ success: false, error: "Validation Failure: Missing user_id, plan_id, or total_amount ledger fields." });
-    }
-
-    const queryStr = "INSERT INTO orders (user_id, plan_id, total_amount, status, created_at) VALUES (?, ?, ?, 'pending', NOW())";
-    db.query(queryStr, [user_id, plan_id, total_amount], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        
-        res.status(201).json({
-            success: true,
-            message: "Transaction Journal posted successfully.",
-            order_id: result.insertId,
-            audit_trail: {
-                buyer_id: user_id,
-                item_purchased: plan_id,
-                amount_billed: total_amount,
-                reconciliation: "Pending verification"
-            }
-        });
-    });
-});
-
 app.listen(PORT, () => {
-    console.log("🔒 Secured System active on http://localhost:" + PORT);
+    console.log("🔒 Secured System active.");
 });
