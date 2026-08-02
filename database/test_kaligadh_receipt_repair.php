@@ -319,6 +319,36 @@ ok((int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$cid
 ok(near(jw_item_balance($cid, $stone, null, 'karigar', $karigarId)['fine_weight'], 3.0),
     'The diamonds are back with the kaligad, all three carats of them');
 
+echo "\n8. A database that never ran migration 103 still gets its work orders checked\n";
+// The shape production was actually in. The guard demanded BOTH tables, so a
+// database without the components table was told "nothing to do" — while its
+// work orders sat there settled at zero. The stone half genuinely cannot apply
+// there; the other half always could.
+//
+// The table is moved aside rather than mocked, because the guard asks the
+// database and nothing else can answer for it. Restored by a shutdown handler
+// so a fatal error in between cannot leave it moved — and even then the schema
+// repair would put it back on the next page load.
+$restoreComponents = static function (): void {
+    if ((int) db()->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'jewellery_assignment_components_krrbak'")->fetchColumn() > 0) {
+        db()->exec('RENAME TABLE jewellery_assignment_components_krrbak TO jewellery_assignment_components');
+    }
+};
+register_shutdown_function($restoreComponents);
+db()->exec('RENAME TABLE jewellery_assignment_components TO jewellery_assignment_components_krrbak');
+$without = $run();
+$restoreComponents();
+ok((int) db()->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'jewellery_assignment_components'")->fetchColumn() === 1,
+    'The components table is back');
+ok(strpos($without, 'Nothing to do') === false,
+    'It does NOT give up — the work orders do not need that table');
+ok(strpos($without, 'migration 103 has not run') !== false,
+    'It says plainly which table is missing and what that rules out');
+ok(strpos($without, 'settled a work order at a ZERO rate') !== false,
+    'And it still reports the zero-rate work order, which is the whole point');
+
 krr_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

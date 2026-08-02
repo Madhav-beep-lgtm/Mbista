@@ -110,8 +110,22 @@ function kal_repair_ledger_net(int $voucherId, int $ledgerId): float
     return round((float) $stmt->fetchColumn(), 2);
 }
 
-if (!table_exists('jewellery_order_receipts') || !table_exists('jewellery_assignment_components')) {
-    exit("The jewellery workshop tables are not present (or migration 103 has not run). Nothing to do.\n");
+if (!table_exists('jewellery_order_receipts')) {
+    exit("The jewellery workshop tables are not present here. Nothing to do.\n");
+}
+
+// TWO FAULTS, AND ONLY ONE OF THEM NEEDS THIS TABLE.
+//
+// Components arrived with migration 103. A database that has not run it cannot
+// have the stone fault — there is nowhere a stone could have been recorded —
+// but it can certainly have work orders settled at a zero rate, which are read
+// off columns that have existed all along. Requiring the table for BOTH made
+// this script answer "nothing to do" to a shop with the other fault in its
+// books, which is the worst thing a diagnostic can say.
+$hasComponents = table_exists('jewellery_assignment_components');
+if (!$hasComponents) {
+    echo "NOTE: jewellery_assignment_components is absent — migration 103 has not run on this database,\n"
+        . "      so no stones can have been stranded. Work orders are still checked below.\n\n";
 }
 
 $companies = db()->query('SELECT id, name, code FROM companies WHERE is_active = 1 ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
@@ -123,7 +137,9 @@ foreach ($companies as $company) {
     $lines = [];
 
     // ---- 1. Stones still sitting on a kaligad's ledger ---------------------
-    $stmt = db()->prepare("SELECT r.id AS receipt_id, r.receipt_no, r.receive_date, r.voucher_id,
+    // Skipped whole where migration 103 has not run: issued_stone_amount is one
+    // of its columns, so this query would not even parse there.
+    $stmt = $hasComponents ? db()->prepare("SELECT r.id AS receipt_id, r.receipt_no, r.receive_date, r.voucher_id,
             r.fiscal_year_id, r.received_item_id, a.id AS assignment_id, a.issue_no,
             a.issued_amount, a.issued_stone_amount, a.metal_ledger_id, a.karigar_id,
             k.code AS karigar_code, k.name AS karigar_name
@@ -131,10 +147,12 @@ foreach ($companies as $company) {
         INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id
         INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
         WHERE r.company_id = :cid AND r.status = 'posted' AND COALESCE(a.issued_stone_amount, 0) > 0
-        ORDER BY r.receive_date ASC, r.id ASC");
-    $stmt->execute(['cid' => $cid]);
+        ORDER BY r.receive_date ASC, r.id ASC") : null;
+    if ($stmt !== null) {
+        $stmt->execute(['cid' => $cid]);
+    }
 
-    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    foreach (($stmt !== null ? $stmt->fetchAll(PDO::FETCH_ASSOC) : []) as $row) {
         $receiptId = (int) $row['receipt_id'];
         $stoneAmount = round((float) $row['issued_stone_amount'], 2);
         $issuedAmount = round((float) $row['issued_amount'], 2);
@@ -324,7 +342,7 @@ foreach ($companies as $company) {
     }
 
     // ---- 3. Metal components cleared off the wrong item (report only) ------
-    $wrongStmt = db()->prepare("SELECT r.receipt_no, r.receive_date, c.gross_weight,
+    $wrongStmt = $hasComponents ? db()->prepare("SELECT r.receipt_no, r.receive_date, c.gross_weight,
             ci.sku AS component_sku, ai.sku AS assignment_sku, k.code AS karigar_code
         FROM jewellery_assignment_components c
         INNER JOIN jewellery_order_assignments a ON a.id = c.assignment_id
@@ -333,9 +351,11 @@ foreach ($companies as $company) {
         INNER JOIN inventory_items ci ON ci.id = c.item_id
         INNER JOIN inventory_items ai ON ai.id = a.item_id
         WHERE c.company_id = :cid AND c.component_kind = 'metal' AND c.item_id <> a.item_id
-        ORDER BY r.receive_date ASC");
-    $wrongStmt->execute(['cid' => $cid]);
-    foreach ($wrongStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        ORDER BY r.receive_date ASC") : null;
+    if ($wrongStmt !== null) {
+        $wrongStmt->execute(['cid' => $cid]);
+    }
+    foreach (($wrongStmt !== null ? $wrongStmt->fetchAll(PDO::FETCH_ASSOC) : []) as $row) {
         // Register-only: the value was inside issued_amount all along, so the
         // ledger is right and only the weights sit on the wrong item. Left to a
         // person because it has never been seen in the wild — say so and this
