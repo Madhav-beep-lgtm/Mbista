@@ -68,3 +68,6 @@ NRV-Implementation-Audit.txt
 
 # Local agent/session config — never publish
 .claude/
+
+# Passenger's restart marker, written by deploy/tasks.sh on the server.
+tmp/

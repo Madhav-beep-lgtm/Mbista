@@ -86,4 +86,25 @@ fi
 mkdir -p "$HOME/db-backups"
 chmod 700 "$HOME/db-backups" 2>/dev/null || true
 
+# ---------------------------------------------------------------------------
+# The Node API, on accounts that run one
+# ---------------------------------------------------------------------------
+# Passenger — what cPanel's "Setup Node.js App" runs behind — starts the app
+# once and keeps that process alive, so a git pull changes the FILES and nothing
+# else. The running copy goes on serving the old code until it is told, and
+# "the fix is deployed but the API still does the old thing" is a long
+# afternoon with nothing to show for it. Touching tmp/restart.txt is how
+# Passenger is told; it picks the change up on the next request.
+#
+# Guarded on node_modules actually being there, so an account with no Node app
+# does nothing at all rather than litter the checkout with a tmp directory it
+# will never read.
+if [ -f "$(pwd)/index.js" ] && [ -d "$(pwd)/node_modules" ]; then
+    mkdir -p "$(pwd)/tmp"
+    touch "$(pwd)/tmp/restart.txt"
+    echo "deploy: signalled the Node API to restart (tmp/restart.txt)"
+else
+    echo "deploy: no Node API installed here — skipping its restart"
+fi
+
 echo "deploy: done"

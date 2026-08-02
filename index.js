@@ -1,4 +1,8 @@
-require("dotenv").config();
+// The path is explicit because cPanel's Passenger starts the app with a working
+// directory that is not necessarily this one. dotenv's default reads
+// process.cwd()/.env, so under Passenger it silently found nothing and every
+// setting fell back to its default — including the database name.
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 const express = require("express");
 const mysql = require("mysql2");
 const helmet = require("helmet");
@@ -6,11 +10,40 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+
+/*
+ * RUNNING UNDER PASSENGER (cPanel "Setup Node.js App")
+ * ---------------------------------------------------
+ * Passenger hands the application its listening address in PORT, and on cPanel
+ * that is frequently a UNIX SOCKET PATH rather than a number. app.listen(port,
+ * host) with a path in `port` does not throw — it quietly listens somewhere
+ * nobody is connecting to, and the app looks up while every request 502s.
+ *
+ * So: a numeric PORT is a port and gets the bind address; anything else is a
+ * path and is passed alone, because a socket has no host.
+ */
+const RAW_PORT = process.env.PORT || 3000;
+const PORT_IS_SOCKET = !/^\d+$/.test(String(RAW_PORT));
+const PORT = PORT_IS_SOCKET ? String(RAW_PORT) : Number(RAW_PORT);
 // 127.0.0.1, not 0.0.0.0. Binding every interface is how a "local" API quietly
 // starts answering the whole network; the default should be the safe one, and
-// opening it up should be a decision somebody typed.
+// opening it up should be a decision somebody typed. Under Passenger, Apache is
+// the only thing that reaches it anyway.
 const BIND = process.env.API_BIND || "127.0.0.1";
+
+/*
+ * BEHIND APACHE, EVERY REQUEST LOOKS LIKE IT CAME FROM APACHE.
+ *
+ * Without this, req.ip is the proxy's address for every caller alive — so the
+ * login throttle, which is keyed on it, would count the whole world's failures
+ * into one bucket and lock EVERYBODY out after five wrong passwords. A
+ * brute-force guard that turns into a denial of service on the first attack is
+ * worse than no guard.
+ *
+ * One hop by default: Apache. Trusting more than actually sits in front lets a
+ * caller forge X-Forwarded-For and hand itself a fresh bucket per attempt.
+ */
+app.set("trust proxy", Number(process.env.API_TRUST_PROXY || 1));
 
 app.use(helmet());
 app.use(express.json({ limit: "100kb" }));
@@ -307,13 +340,20 @@ app.use((req, res) => {
     res.status(404).json({ success: false, error: "No such endpoint." });
 });
 
-const server = app.listen(PORT, BIND, () => {
-    console.log("Read-only API on http://" + BIND + ":" + PORT);
+const onListening = () => {
+    console.log(PORT_IS_SOCKET
+        ? "Read-only API on socket " + PORT + " (Passenger)"
+        : "Read-only API on http://" + BIND + ":" + PORT);
     console.log("  database : " + (process.env.DB_NAME || "mbista_altiora_complete_hosting"));
     console.log("  auth     : POST /api/auth/login  ->  Authorization: Bearer <token>");
     console.log("  cors     : " + (CORS_ORIGINS.length ? CORS_ORIGINS.join(", ") : "off (set API_CORS_ORIGINS to allow a client)"));
     console.log("  routes   : /api/users  /api/plans  /api/trial-balance");
-});
+};
+// A socket takes no host; a port does. Passing BIND alongside a socket path is
+// what makes Node listen on nothing in particular.
+const server = PORT_IS_SOCKET
+    ? app.listen(PORT, onListening)
+    : app.listen(PORT, BIND, onListening);
 
 // Close the pool on the way out, so a restart mid-query does not leave the
 // connection sitting on the MySQL server until it times out by itself.
