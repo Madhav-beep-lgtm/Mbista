@@ -2482,6 +2482,11 @@ function accounting_module_repair_database(): array
             ['inventory_opening_imports', 'inventory_opening_import_rows']);
     });
 
+    $run('Chart of accounts import staging (migration 104)', static function (): void {
+        accounting_repair_run_migration_file('104_coa_import.sql',
+            ['coa_imports', 'coa_import_rows']);
+    });
+
     $run('Invoice fields and tax bases (migration 083)', static function (): void {
         // Column-only migration, so it cannot go through
         // accounting_repair_run_migration_file() — that runner deliberately

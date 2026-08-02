@@ -60,15 +60,22 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </table></div>
 </section>
 
+<?php // The importer lives on the Chart of Accounts page, beside the tree it
+      // writes into. Uploading is now a two-step review rather than a one-line
+      // form, and the preview has to be shown somewhere — next to the chart it
+      // is about to change is where it belongs. ?>
 <section class="mbw-card" aria-label="Bulk import">
-    <div class="mbw-card-head"><h2>Bulk Import Ledgers</h2><span class="frm-optional">CSV columns: group_code, ledger_code, ledger_name, type (asset/liability/equity/revenue/expense)</span></div>
-    <form method="post" action="<?= e(url('admin/chart-of-accounts.php')) ?>" enctype="multipart/form-data" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-        <input type="hidden" name="action" value="bulk_import">
-        <input type="file" name="import_file" accept=".csv" required style="min-height:38px">
-        <button type="submit" class="button"><?= icon('layers') ?>Import CSV</button>
-        <a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>">Download current COA as a template</a>
-    </form>
+    <div class="mbw-card-head"><h2>Import a Chart of Accounts</h2><span class="frm-optional">Excel or CSV — groups, ledgers and opening balances in one sheet</span></div>
+    <p class="frm-optional" style="margin:0 0 12px">
+        Upload a spreadsheet to create groups and ledgers together. Every row is checked and shown back to you
+        before anything is written, so you can see what will be created, what already exists, and what was
+        rejected and why.
+    </p>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <a class="button" href="<?= e(url('admin/chart-of-accounts.php#coa-import')) ?>"><?= icon('layers') ?>Open the importer</a>
+        <a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php?import_template=xlsx')) ?>">Download the template</a>
+        <a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>">Export the current chart</a>
+    </div>
 </section>
 
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

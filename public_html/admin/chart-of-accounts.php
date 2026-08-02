@@ -2,6 +2,8 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/export_engine.php';
+require_once __DIR__ . '/../../app/coa_import.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -35,71 +37,101 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="chart-of-accounts-' . preg_replace('/[^A-Za-z0-9]+/', '-', (string) ($company['name'] ?? 'company')) . '.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Level', 'Code', 'Name', 'Master', 'Nature', 'Group Code', 'Status']);
+    // Deliberately the SAME columns the importer reads, so an exported chart can
+    // be edited and uploaded straight back. The two used to disagree — seven
+    // columns out, four different ones in — which made "download the current COA
+    // as a template" advice that could not work.
+    //
+    // The opening columns go out empty. This file describes the SHAPE of the
+    // chart; balances are derived from the perpetual ledger, and re-importing
+    // them would either double-post or be skipped, so writing numbers here
+    // would only imply a round-trip that does not exist.
+    fputcsv($out, COA_IMPORT_COLUMNS);
     foreach ($masters as $masterKey => $master) {
-        fputcsv($out, ['Master', $masterKey, $master['label'], $masterKey, $master['nature'], '', 'Active']);
+        fputcsv($out, ['Master', $masterKey, $master['label'], $masterKey, $master['nature'], '', '', '', 'Active']);
     }
     foreach ($groups as $g) {
-        fputcsv($out, ['Group', $g['code'], $g['name'], $g['master_key'], ledger_master_nature((string) $g['master_key']) ?? '', '', ((int) $g['is_active'] === 1 ? 'Active' : 'Inactive')]);
+        fputcsv($out, ['Group', $g['code'], $g['name'], $g['master_key'], ledger_master_nature((string) $g['master_key']) ?? '', '', '', '', ((int) $g['is_active'] === 1 ? 'Active' : 'Inactive')]);
     }
     foreach ($ledgers as $l) {
         $g = $groupsById[(int) ($l['group_id'] ?? 0)] ?? null;
-        fputcsv($out, ['Ledger', $l['code'], $l['name'], $g['master_key'] ?? '', $l['type'], $g['code'] ?? '', ucfirst((string) $l['status'])]);
+        fputcsv($out, ['Ledger', $l['code'], $l['name'], $g['master_key'] ?? '', $l['type'], $g['code'] ?? '', '', '', ucfirst((string) $l['status'])]);
     }
     fclose($out);
     exit;
 }
 
 // ---------------------------------------------------------------------------
-// Bulk import ledgers (CSV: group_code, ledger_code, ledger_name, type).
+// The blank template, in either format.
 // ---------------------------------------------------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'bulk_import') {
+if (($_GET['import_template'] ?? '') !== '') {
+    $tplRows = coa_import_template_rows();
+    if ((string) $_GET['import_template'] === 'csv') {
+        export_csv('chart-of-accounts-template.csv', $tplRows);
+    }
+    export_xlsx('chart-of-accounts-template.xlsx', $tplRows, 'Chart of Accounts');
+}
+
+// ---------------------------------------------------------------------------
+// Chart of accounts from a spreadsheet: upload → preview → commit.
+//
+// The old importer applied the file the moment it was uploaded and reported
+// "n rows skipped" without saying which or why. A chart is what every voucher,
+// mapping and report in the system points at, so it is worth reading before it
+// is created — the upload now stages, and only Commit writes anything.
+// ---------------------------------------------------------------------------
+$coaImportActions = ['coa_upload', 'coa_commit', 'coa_discard'];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string) ($_POST['action'] ?? ''), $coaImportActions, true)) {
     verify_csrf();
+    $importAction = (string) $_POST['action'];
     if (!user_can('create')) {
-        flash('error', 'You do not have permission to import ledgers.');
+        flash('error', 'You do not have permission to import a chart of accounts.');
         redirect('admin/chart-of-accounts.php');
     }
     require_permission('accounting', 'create');
-    $tmp = (string) ($_FILES['import_file']['tmp_name'] ?? '');
-    if ($tmp === '' || !is_uploaded_file($tmp)) {
-        flash('error', 'Choose a CSV file to import.');
-        redirect('admin/chart-of-accounts.php');
-    }
-    $groupsByCode = [];
-    foreach ($groups as $g) {
-        $groupsByCode[strtoupper((string) $g['code'])] = $g;
-    }
-    $created = 0;
-    $skipped = 0;
-    $handle = fopen($tmp, 'r');
-    $insert = db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:cid, :gid, :code, :name, :type, 0, 'active')");
-    $exists = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE company_id = :cid AND code = :code');
-    while (($row = fgetcsv($handle)) !== false) {
-        $groupCode = strtoupper(trim((string) ($row[0] ?? '')));
-        $code = strtoupper(trim((string) ($row[1] ?? '')));
-        $name = trim((string) ($row[2] ?? ''));
-        $type = strtolower(trim((string) ($row[3] ?? '')));
-        if ($groupCode === 'GROUP_CODE' || $name === '' || !isset($groupsByCode[$groupCode]) || !in_array($type, ['asset', 'liability', 'equity', 'revenue', 'expense'], true)) {
-            $skipped++;
-            continue;
+
+    try {
+        if ($importAction === 'coa_upload') {
+            $file = $_FILES['import_file'] ?? null;
+            if (!$file || (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK
+                || !is_uploaded_file((string) $file['tmp_name'])) {
+                throw new RuntimeException('Choose a .xlsx or .csv file to upload.');
+            }
+            // A batch nobody decided on would otherwise sit behind this one and
+            // the preview would be showing a different file than the one just
+            // uploaded. The newest upload is the one the user means.
+            $pending = coa_import_latest_staged($companyId);
+            if ($pending !== null) {
+                coa_import_discard($companyId, (int) $pending['id']);
+            }
+            $importId = coa_import_stage($companyId, (int) (current_fiscal_year()['id'] ?? 0) ?: null,
+                $userId, (string) $file['tmp_name'], (string) ($file['name'] ?? 'chart.xlsx'));
+            $staged = coa_import_batch($companyId, $importId);
+            flash('success', 'Read ' . (int) $staged['row_count'] . ' rows — nothing has been created yet. '
+                . (int) $staged['ready_count'] . ' will be created. Check the preview, then Commit.');
+        } elseif ($importAction === 'coa_commit') {
+            $result = coa_import_commit($companyId, (int) ($_POST['import_id'] ?? 0), $userId);
+            if (!$result['ok']) {
+                throw new RuntimeException((string) $result['error']);
+            }
+            $summary = $result['groups'] . ' group(s), ' . $result['ledgers'] . ' ledger(s) and '
+                . $result['openings'] . ' opening balance(s) created.';
+            security_event('coa_bulk_import', 'success', $summary, $companyId, $userId ?: null);
+            log_activity('company', $companyId, 'coa_bulk_import', $summary, $userId ?: null);
+            flash('success', $summary);
+        } else {
+            coa_import_discard($companyId, (int) ($_POST['import_id'] ?? 0));
+            flash('success', 'The upload was discarded. Nothing was created.');
         }
-        if ($code === '') {
-            $code = coa_next_ledger_code($companyId, (int) $groupsByCode[$groupCode]['id']);
-        }
-        $exists->execute(['cid' => $companyId, 'code' => $code]);
-        if ((int) $exists->fetchColumn() > 0) {
-            $skipped++;
-            continue;
-        }
-        $insert->execute(['cid' => $companyId, 'gid' => (int) $groupsByCode[$groupCode]['id'], 'code' => $code, 'name' => $name, 'type' => $type]);
-        $created++;
+    } catch (Throwable $importException) {
+        flash('error', $importException->getMessage());
     }
-    fclose($handle);
-    security_event('coa_bulk_import', 'success', $created . ' account(s) imported.', $companyId, $userId ?: null);
-    log_activity('company', $companyId, 'coa_bulk_import', $created . ' ledgers imported, ' . $skipped . ' rows skipped.', $userId ?: null);
-    flash($created > 0 ? 'success' : 'error', $created . ' ledgers imported' . ($skipped > 0 ? ', ' . $skipped . ' rows skipped (bad group/type, duplicate, or header)' : '') . '.');
-    redirect('admin/chart-masters.php');
+    redirect('admin/chart-of-accounts.php#coa-import');
 }
+
+$coaStaged = coa_import_latest_staged($companyId);
+$coaStagedRows = $coaStaged !== null ? coa_import_rows($companyId, (int) $coaStaged['id']) : [];
+$coaBalanceError = $coaStaged !== null ? coa_import_balance_error($coaStaged) : null;
 
 // ---------------------------------------------------------------------------
 // Hierarchy: nature (1-5) -> groups -> ledgers. Real validation checks.
@@ -146,6 +178,116 @@ $statusPill = static fn (string $status): string => $status === 'active'
     <a class="button" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('layers') ?>＋ Create Group</a>
     <a class="button" href="<?= e(url('admin/chart-ledgers.php')) ?>" id="create-ledger"><?= icon('journal') ?>＋ Create Ledger</a>
 </div>
+
+<?php
+// The verdict on each row, said in the words the preview uses. "Create" rather
+// than "ready" because the question the reader is actually asking is what this
+// button is about to do to their books.
+$coaRowPill = static function (string $status): string {
+    if ($status === 'ready') { return '<span class="mbw-pill tone-green">Create</span>'; }
+    if ($status === 'skipped') { return '<span class="mbw-pill tone-amber">Skip</span>'; }
+    if ($status === 'committed') { return '<span class="mbw-pill tone-blue">Created</span>'; }
+
+    return '<span class="mbw-pill tone-red">Reject</span>';
+};
+?>
+<details class="feature-disclosure" id="coa-import"<?= $coaStaged !== null ? ' open' : '' ?>>
+    <summary><span><strong><?= icon('documents') ?>Chart of accounts from a spreadsheet</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+
+    <p class="frm-optional" style="margin:0 0 12px">
+        <strong>Uploading creates nothing.</strong> Every row is checked and shown back to you first; only
+        Commit writes to the chart. Groups and ledgers can travel in one sheet — a ledger may name a group
+        written further down. Leave <em>Code</em> blank to have codes generated.
+        <a href="<?= e(url('admin/chart-of-accounts.php?import_template=xlsx')) ?>">Download template (.xlsx)</a>
+        &middot; <a href="<?= e(url('admin/chart-of-accounts.php?import_template=csv')) ?>">.csv</a>
+        &middot; <a href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>">Export the current chart to edit</a>
+    </p>
+
+    <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="coa_upload">
+        <label>Spreadsheet<input type="file" name="import_file" accept=".xlsx,.csv" required></label>
+        <div style="align-self:end">
+            <button type="submit" class="button"><?= icon('layers') ?>Upload &amp; Preview</button>
+            <span class="frm-optional">.xlsx or .csv, up to <?= number_format(COA_IMPORT_MAX_ROWS) ?> rows</span>
+        </div>
+    </form>
+
+    <?php if ($coaStaged !== null): ?>
+        <?php
+        $readyCount = (int) $coaStaged['ready_count'];
+        $drTotal = (float) $coaStaged['opening_dr_total'];
+        $crTotal = (float) $coaStaged['opening_cr_total'];
+        ?>
+        <div class="mbw-card-head" style="margin-top:18px">
+            <h2>Preview — <?= e((string) $coaStaged['original_name']) ?></h2>
+            <span class="frm-optional">
+                <?= (int) $coaStaged['row_count'] ?> rows read &middot;
+                <strong><?= $readyCount ?></strong> to create &middot;
+                <?= (int) $coaStaged['skipped_count'] ?> skipped &middot;
+                <?= (int) $coaStaged['error_count'] ?> rejected
+            </span>
+        </div>
+
+        <?php if ($drTotal > 0 || $crTotal > 0): ?>
+            <div class="notice <?= $coaBalanceError !== null ? 'error' : 'success' ?>" style="margin:0 0 12px">
+                Opening balances: debits <?= e(number_format($drTotal, 2)) ?>,
+                credits <?= e(number_format($crTotal, 2)) ?>.
+                <?= $coaBalanceError !== null ? e($coaBalanceError) : 'These balance, so they can be posted.' ?>
+            </div>
+        <?php endif; ?>
+
+        <div style="overflow-x:auto">
+            <table class="mbw-table">
+                <thead><tr>
+                    <th>Row</th><th>Level</th><th>Code</th><th>Name</th><th>Master / Type</th>
+                    <th>Group</th><th class="num">Opening Dr</th><th class="num">Opening Cr</th><th>Verdict</th>
+                </tr></thead>
+                <tbody>
+                <?php foreach ($coaStagedRows as $row): ?>
+                    <tr>
+                        <td><?= (int) $row['source_row_no'] ?></td>
+                        <td><?= e(ucfirst((string) $row['raw_level'])) ?></td>
+                        <td><?= e((string) $row['raw_code']) ?: '<span class="frm-optional">auto</span>' ?></td>
+                        <td><?= e((string) $row['raw_name']) ?></td>
+                        <td><?= e((string) $row['raw_master'] !== '' ? (string) $row['raw_master'] : (string) $row['raw_type']) ?></td>
+                        <td><?= e((string) $row['raw_group_code']) ?: '—' ?></td>
+                        <td class="num"><?= (float) $row['opening_dr'] > 0 ? e(number_format((float) $row['opening_dr'], 2)) : '' ?></td>
+                        <td class="num"><?= (float) $row['opening_cr'] > 0 ? e(number_format((float) $row['opening_cr'], 2)) : '' ?></td>
+                        <td>
+                            <?= $coaRowPill((string) $row['status']) ?>
+                            <?php if ((string) ($row['error_text'] ?? '') !== ''): ?>
+                                <br><small class="frm-optional"><?= e((string) $row['error_text']) ?></small>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+            <form method="post" onsubmit="return confirm('Create <?= $readyCount ?> account(s) in the chart?')">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="coa_commit">
+                <input type="hidden" name="import_id" value="<?= (int) $coaStaged['id'] ?>">
+                <button type="submit" class="button" <?= ($readyCount === 0 || $coaBalanceError !== null) ? 'disabled' : '' ?>>
+                    <?= icon('journal') ?>Commit <?= $readyCount ?> account(s)
+                </button>
+            </form>
+            <form method="post">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="coa_discard">
+                <input type="hidden" name="import_id" value="<?= (int) $coaStaged['id'] ?>">
+                <button type="submit" class="button secondary">Discard</button>
+            </form>
+        </div>
+        <?php if ($readyCount === 0): ?>
+            <p class="frm-optional" style="margin-top:8px">There is nothing to create from this file — every row
+                either already exists or was rejected.</p>
+        <?php endif; ?>
+    <?php endif; ?>
+</details>
 
 <section class="mbw-kpi-grid" aria-label="Chart of accounts overview">
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Masters</span><div class="mbw-kpi-value"><?= count($natureOrder) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">System-defined</span></span></div><span class="mbw-chip tone-blue"><?= icon('layers') ?></span></article>

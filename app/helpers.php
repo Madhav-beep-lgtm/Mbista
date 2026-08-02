@@ -3080,7 +3080,19 @@ function post_ledger_opening_balance(int $companyId, int $ledgerId, float $amoun
         }
     }
 
+    // The fiscal year has to be the one belonging to $companyId. The ambient
+    // year usually is — a screen calling this is already inside a company — but
+    // it comes from session context rather than from the argument, so a caller
+    // working on some OTHER company (a bulk import, a CLI run) would hang the
+    // voucher off a year that is not theirs, which the posting engine rightly
+    // refuses. Fall back to the company's own default whenever they disagree.
     $defaultFy = current_fiscal_year() ?: (resolve_default_company_and_fiscal_year()['fiscal_year'] ?? null);
+    if (!$defaultFy || (int) ($defaultFy['company_id'] ?? 0) !== $companyId) {
+        $fyStmt = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = :cid
+            ORDER BY is_default DESC, start_date DESC LIMIT 1');
+        $fyStmt->execute(['cid' => $companyId]);
+        $defaultFy = $fyStmt->fetch() ?: null;
+    }
     $openingDate = (string) ($defaultFy['start_date'] ?? date('Y-m-d'));
 
     $ownsTransaction = !db()->inTransaction();

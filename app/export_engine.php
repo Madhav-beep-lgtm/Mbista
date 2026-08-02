@@ -240,6 +240,196 @@ function export_print(string $title, array $rows, array $meta = [], array $optio
 }
 
 /**
+ * ---------------------------------------------------------------------------
+ * Reading spreadsheets back IN.
+ * ---------------------------------------------------------------------------
+ * The same argument that put the .xlsx writer here applies to the reader: an
+ * importer that parses .xlsx its own way will drift from the one next to it,
+ * and the bugs that drift produces are the quiet kind — a date column read as
+ * a serial number on one screen and as text on another. One parser, one set of
+ * behaviours, one place to fix.
+ *
+ * Every reader returns the same shape:
+ *   [ ['n' => <row number in the FILE>, 'cells' => [<string>, ...]], ... ]
+ * The file's own row number travels with the row because every error message
+ * an importer shows is only useful if it points at the row the user can see.
+ */
+
+/** Rows from a .csv, cells trimmed, BOM stripped from the first cell. */
+function spreadsheet_read_csv(string $path, int $maxRows = 5000): array
+{
+    $handle = fopen($path, 'r');
+    if ($handle === false) {
+        throw new RuntimeException('The uploaded file could not be opened.');
+    }
+    $rows = [];
+    $rowNo = 0;
+    while (($cells = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
+        $rowNo++;
+        if ($rowNo > $maxRows) {
+            break;
+        }
+        if ($rowNo === 1 && isset($cells[0])) {
+            $cells[0] = (string) preg_replace('/^\xEF\xBB\xBF/', '', (string) $cells[0]);
+        }
+        $rows[] = ['n' => $rowNo, 'cells' => array_map(static fn ($c): string => trim((string) $c), $cells)];
+    }
+    fclose($handle);
+
+    return $rows;
+}
+
+/**
+ * Rows from the FIRST worksheet of a .xlsx, without any external library.
+ *
+ * A .xlsx is a zip of XML: the workbook names its sheets, a relationship file
+ * says which part each one lives in, and most text sits in a shared-strings
+ * table rather than in the cells themselves — a cell of type "s" holds an index
+ * into it, not a word. Blank cells are simply absent from the XML, so the row
+ * is padded back out to keep column positions meaningful.
+ */
+function spreadsheet_read_xlsx(string $path, int $maxRows = 5000): array
+{
+    if (!class_exists('ZipArchive')) {
+        throw new RuntimeException('The server is missing the PHP zip extension needed to read .xlsx files. Upload a .csv instead.');
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($path) !== true) {
+        throw new RuntimeException('The file is not a valid Excel (.xlsx) workbook.');
+    }
+
+    $relNs = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+
+    $workbookXml = $zip->getFromName('xl/workbook.xml');
+    $relsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
+    if ($workbookXml === false || $relsXml === false) {
+        $zip->close();
+        throw new RuntimeException('The workbook structure could not be read. Save the file as .xlsx (not .xls) and retry.');
+    }
+
+    $workbook = simplexml_load_string($workbookXml);
+    $rels = simplexml_load_string($relsXml);
+    if ($workbook === false || $rels === false) {
+        $zip->close();
+        throw new RuntimeException('The workbook XML could not be parsed.');
+    }
+
+    $relTargets = [];
+    foreach ($rels->Relationship as $relationship) {
+        $relTargets[(string) $relationship['Id']] = (string) $relationship['Target'];
+    }
+    $sheetPath = null;
+    foreach ($workbook->sheets->sheet as $sheet) {
+        $rid = (string) ($sheet->attributes($relNs)['id'] ?? '');
+        $target = $relTargets[$rid] ?? '';
+        if ($target !== '') {
+            $sheetPath = str_starts_with($target, '/') ? ltrim($target, '/') : 'xl/' . $target;
+            break;
+        }
+    }
+    if ($sheetPath === null) {
+        $zip->close();
+        throw new RuntimeException('No worksheet found in the workbook.');
+    }
+
+    $sharedStrings = [];
+    $sharedXml = $zip->getFromName('xl/sharedStrings.xml');
+    if ($sharedXml !== false) {
+        $sst = simplexml_load_string($sharedXml);
+        if ($sst !== false) {
+            foreach ($sst->si as $si) {
+                $text = '';
+                if (isset($si->t)) {
+                    $text = (string) $si->t;
+                }
+                foreach ($si->r as $run) {
+                    $text .= (string) $run->t;
+                }
+                $sharedStrings[] = $text;
+            }
+        }
+    }
+
+    $sheetXml = $zip->getFromName($sheetPath);
+    $zip->close();
+    if ($sheetXml === false) {
+        throw new RuntimeException('The worksheet could not be read from the workbook.');
+    }
+    $worksheet = simplexml_load_string($sheetXml);
+    if ($worksheet === false) {
+        throw new RuntimeException('The worksheet XML could not be parsed.');
+    }
+
+    $rows = [];
+    foreach ($worksheet->sheetData->row as $row) {
+        if (count($rows) >= $maxRows) {
+            break;
+        }
+        $rowNo = (int) $row['r'];
+        $cells = [];
+        foreach ($row->c as $cell) {
+            $ref = (string) $cell['r'];
+            if (!preg_match('/^([A-Z]+)\d+$/', $ref, $m)) {
+                continue;
+            }
+            $columnIndex = 0;
+            foreach (str_split($m[1]) as $letter) {
+                $columnIndex = $columnIndex * 26 + (ord($letter) - 64);
+            }
+            $columnIndex--;
+            if ($columnIndex > 63) {
+                continue;
+            }
+            $type = (string) $cell['t'];
+            $value = '';
+            if ($type === 's') {
+                $value = $sharedStrings[(int) $cell->v] ?? '';
+            } elseif ($type === 'inlineStr') {
+                $value = (string) ($cell->is->t ?? '');
+                foreach ($cell->is->r ?? [] as $run) {
+                    $value .= (string) $run->t;
+                }
+            } else {
+                $value = (string) $cell->v;
+            }
+            $cells[$columnIndex] = trim($value);
+        }
+        if ($cells === []) {
+            continue;
+        }
+        $padded = array_fill(0, max(array_keys($cells)) + 1, '');
+        foreach ($cells as $index => $value) {
+            $padded[$index] = $value;
+        }
+        $rows[] = ['n' => $rowNo > 0 ? $rowNo : count($rows) + 1, 'cells' => $padded];
+    }
+
+    return $rows;
+}
+
+/**
+ * Rows from whichever of the two formats the user uploaded, chosen by
+ * extension. .xls is named explicitly because Excel will happily offer it and
+ * the resulting error is otherwise baffling — it is a different, binary format
+ * that nothing here can read.
+ */
+function spreadsheet_read_rows(string $path, string $originalName, int $maxRows = 5000): array
+{
+    $extension = strtolower((string) pathinfo($originalName, PATHINFO_EXTENSION));
+    if ($extension === 'xls') {
+        throw new RuntimeException('Legacy .xls files cannot be read — open the file in Excel and save it as .xlsx or .csv.');
+    }
+    if ($extension === 'xlsx') {
+        return spreadsheet_read_xlsx($path, $maxRows);
+    }
+    if ($extension === 'csv' || $extension === 'txt') {
+        return spreadsheet_read_csv($path, $maxRows);
+    }
+
+    throw new RuntimeException('Upload a .xlsx or .csv file.');
+}
+
+/**
  * One entry point for every export format, so a screen wires up all three at
  * once and they can never drift apart.
  *

@@ -166,123 +166,16 @@ function voucher_import_read_csv(string $path): array
     return $rows;
 }
 
+/**
+ * The .xlsx parser this importer used to carry now lives in export_engine.php,
+ * beside the writer, so the chart-of-accounts importer reads a workbook exactly
+ * the way this one does. Behaviour and return shape are unchanged.
+ */
 function voucher_import_read_xlsx(string $path): array
 {
-    if (!class_exists('ZipArchive')) {
-        throw new RuntimeException('The server is missing the PHP zip extension needed to read .xlsx files. Upload a .csv instead.');
-    }
-    $zip = new ZipArchive();
-    if ($zip->open($path) !== true) {
-        throw new RuntimeException('The file is not a valid Excel (.xlsx) workbook.');
-    }
+    require_once __DIR__ . '/export_engine.php';
 
-    $mainNs = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-    $relNs = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-
-    $workbookXml = $zip->getFromName('xl/workbook.xml');
-    $relsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
-    if ($workbookXml === false || $relsXml === false) {
-        $zip->close();
-        throw new RuntimeException('The workbook structure could not be read. Save the file as .xlsx (not .xls) and retry.');
-    }
-
-    $workbook = simplexml_load_string($workbookXml);
-    $rels = simplexml_load_string($relsXml);
-    if ($workbook === false || $rels === false) {
-        $zip->close();
-        throw new RuntimeException('The workbook XML could not be parsed.');
-    }
-
-    $relTargets = [];
-    foreach ($rels->Relationship as $relationship) {
-        $relTargets[(string) $relationship['Id']] = (string) $relationship['Target'];
-    }
-    $sheetPath = null;
-    foreach ($workbook->sheets->sheet as $sheet) {
-        $rid = (string) ($sheet->attributes($relNs)['id'] ?? '');
-        $target = $relTargets[$rid] ?? '';
-        if ($target !== '') {
-            $sheetPath = str_starts_with($target, '/') ? ltrim($target, '/') : 'xl/' . $target;
-            break;
-        }
-    }
-    if ($sheetPath === null) {
-        $zip->close();
-        throw new RuntimeException('No worksheet found in the workbook.');
-    }
-
-    $sharedStrings = [];
-    $sharedXml = $zip->getFromName('xl/sharedStrings.xml');
-    if ($sharedXml !== false) {
-        $sst = simplexml_load_string($sharedXml);
-        if ($sst !== false) {
-            foreach ($sst->si as $si) {
-                $text = '';
-                if (isset($si->t)) {
-                    $text = (string) $si->t;
-                }
-                foreach ($si->r as $run) {
-                    $text .= (string) $run->t;
-                }
-                $sharedStrings[] = $text;
-            }
-        }
-    }
-
-    $sheetXml = $zip->getFromName($sheetPath);
-    $zip->close();
-    if ($sheetXml === false) {
-        throw new RuntimeException('The worksheet could not be read from the workbook.');
-    }
-    $worksheet = simplexml_load_string($sheetXml);
-    if ($worksheet === false) {
-        throw new RuntimeException('The worksheet XML could not be parsed.');
-    }
-
-    $rows = [];
-    foreach ($worksheet->sheetData->row as $row) {
-        if (count($rows) >= VOUCHER_IMPORT_MAX_ROWS) {
-            break;
-        }
-        $rowNo = (int) $row['r'];
-        $cells = [];
-        foreach ($row->c as $cell) {
-            $ref = (string) $cell['r'];
-            if (!preg_match('/^([A-Z]+)\d+$/', $ref, $m)) {
-                continue;
-            }
-            $columnIndex = 0;
-            foreach (str_split($m[1]) as $letter) {
-                $columnIndex = $columnIndex * 26 + (ord($letter) - 64);
-            }
-            $columnIndex--;
-            if ($columnIndex > 63) {
-                continue;
-            }
-            $type = (string) $cell['t'];
-            $value = '';
-            if ($type === 's') {
-                $value = $sharedStrings[(int) $cell->v] ?? '';
-            } elseif ($type === 'inlineStr') {
-                $value = (string) ($cell->is->t ?? '');
-                foreach ($cell->is->r ?? [] as $run) {
-                    $value .= (string) $run->t;
-                }
-            } else {
-                $value = (string) $cell->v;
-            }
-            $cells[$columnIndex] = trim($value);
-        }
-        if ($cells === []) {
-            continue;
-        }
-        $padded = array_fill(0, max(array_keys($cells)) + 1, '');
-        foreach ($cells as $index => $value) {
-            $padded[$index] = $value;
-        }
-        $rows[] = ['n' => $rowNo > 0 ? $rowNo : count($rows) + 1, 'cells' => $padded];
-    }
-    return $rows;
+    return spreadsheet_read_xlsx($path, VOUCHER_IMPORT_MAX_ROWS);
 }
 
 /** Active company ledgers keyed for lookup by code, name, and "name (code)". */
