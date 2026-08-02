@@ -11,8 +11,20 @@
 ?>
 <script>
 (function () {
+    // ON A PHONE THE SIDEBAR STARTS SHUT, whatever the desktop remembers.
+    //
+    // Below 900px the shell is one column, so an open sidebar is not a column
+    // beside the page — it IS the page, and every visit began with a full
+    // screen of navigation that had to be scrolled past before a single figure
+    // appeared. The stored preference is a decision somebody made about a rail
+    // on a wide monitor; it has no bearing on a 390px screen, and applying it
+    // there was the whole problem.
+    //
+    // matchMedia, not an innerWidth read, because this runs before first paint
+    // and matchMedia is the thing the CSS below agrees with.
     try {
-        if (localStorage.getItem('mbwSidebarCollapsed') === '1') {
+        var narrow = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
+        if (narrow || localStorage.getItem('mbwSidebarCollapsed') === '1') {
             document.body.classList.add('sidebar-collapsed');
         }
     } catch (error) {

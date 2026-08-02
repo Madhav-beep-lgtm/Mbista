@@ -519,6 +519,44 @@ ok(preg_match('~@media \(max-width: 1100px\) \{\s*\R\s*body\.admin-layout\.sideb
     'On a narrow screen, where the sidebar stacks above the content, collapsed means gone');
 
 // ---------------------------------------------------------------------------
+// The admin shell on a phone
+// ---------------------------------------------------------------------------
+/*
+ * Below 1100px the shell was one column with the sidebar static above the
+ * content — right on a narrow laptop window, wrong on a 390px screen, where it
+ * meant every visit opened on a full page of navigation and the figures started
+ * somewhere below all of it. Nobody scrolls past their own menu to read a
+ * balance. Under 900px it is a drawer instead, shut until asked for.
+ */
+$boot = (string) @file_get_contents($root . '/app/views/partials/sidebar_boot.php');
+ok(str_contains($boot, 'max-width: 900px') && str_contains($boot, 'sidebar-collapsed'),
+    'The sidebar starts SHUT on a phone, before first paint, whatever a desktop session remembered');
+
+ok(preg_match('~@media \(max-width: 900px\)[^@]*?\.admin-sidebar\s*\{[^}]*position:\s*fixed~s', $portalCss) === 1,
+    'Under 900px the sidebar is fixed over the page, not a block that pushes it down');
+ok(preg_match('~@media \(max-width: 900px\)[^@]*?sidebar-collapsed\s+\.admin-sidebar\s*\{[^}]*transform:\s*translateX\(-100%\)~s', $portalCss) === 1,
+    'Shut means off the left edge — not display:none, which cannot animate');
+ok(preg_match('~@media \(max-width: 900px\)[^@]*?\.admin-shell::before~s', $portalCss) === 1,
+    'There is a scrim, so the way out of the drawer is not the button underneath it');
+ok(preg_match('~@media \(min-width: 901px\)[^}]*\.admin-shell::before\s*\{\s*content:\s*none~s', $portalCss) === 1,
+    'And the scrim stops existing above the breakpoint — a fixed overlay on a desktop would cover the page');
+
+$mainJs2 = (string) @file_get_contents($root . '/public_html/assets/js/main.js');
+ok(str_contains($mainJs2, "matchMedia('(max-width: 900px)')") && str_contains($mainJs2, 'isDrawer'),
+    'main.js knows when the sidebar is a drawer');
+ok(preg_match('~closest\(\'\.admin-sidebar\'\)[^;]*closest\(\'\[data-sidebar-toggle\]\'\)~', $mainJs2) === 1,
+    'A press outside the drawer shuts it, and a press on the toggle is not counted as outside');
+ok(str_contains($mainJs2, "event.key !== 'Escape'"), 'Escape shuts it too');
+/*
+ * The one that would have leaked. setSidebarCollapsed persists to the same key
+ * the desktop rail restores from, so every tap of the phone drawer was writing
+ * the monitor's preference — an evening on the phone came back as a collapsed
+ * rail next morning with nothing to explain it.
+ */
+ok(preg_match('~if \(!\(window\.matchMedia && window\.matchMedia\(\'\(max-width: 900px\)\'\)\.matches\)\) \{\s*\R\s*localStorage\.setItem\(sidebarStorageKey~', $mainJs2) === 1,
+    'Opening the drawer on a phone is NOT remembered — it must not rewrite the desktop rail preference');
+
+// ---------------------------------------------------------------------------
 // Installable on a phone, and safe to be
 // ---------------------------------------------------------------------------
 $manifest = json_decode((string) @file_get_contents($root . '/public_html/manifest.webmanifest'), true);

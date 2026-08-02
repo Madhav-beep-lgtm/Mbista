@@ -413,7 +413,14 @@ document.addEventListener('DOMContentLoaded', () => {
       button.setAttribute('title', action + ' (Ctrl + B)');
     });
     try {
-      localStorage.setItem(sidebarStorageKey, collapsed ? '1' : '0');
+      // NOT REMEMBERED ON A PHONE. Under 900px this class drives a drawer, and
+      // opening or shutting a drawer is a thing you do once, not a preference.
+      // Persisting it wrote the phone's last tap into the same key the desktop
+      // rail restores from — so a night spent on the phone came back as a
+      // collapsed rail on the monitor next morning, with nothing to explain it.
+      if (!(window.matchMedia && window.matchMedia('(max-width: 900px)').matches)) {
+        localStorage.setItem(sidebarStorageKey, collapsed ? '1' : '0');
+      }
     } catch (error) {
       // Private browsing denies storage; the rail still works this session.
     }
@@ -446,6 +453,51 @@ document.addEventListener('DOMContentLoaded', () => {
       if (event.target.closest('input, textarea, select, [contenteditable="true"]')) { return; }
       event.preventDefault();
       setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+    });
+
+    // ---- the phone drawer -------------------------------------------------
+    // Under 900px the sidebar is a drawer OVER the page, not a column beside
+    // it. Everything below is about getting out of it again: on a desktop the
+    // sidebar has nothing on top of it, so none of this was ever needed.
+    const isDrawer = () => window.matchMedia('(max-width: 900px)').matches;
+
+    // Tapping the page behind it. The scrim is .admin-shell::before, a
+    // pseudo-element, so it cannot carry a listener of its own — but it covers
+    // everything except the drawer, so a press that lands outside the sidebar
+    // while the drawer is open WAS a press on the scrim.
+    document.addEventListener('click', (event) => {
+      if (!isDrawer() || document.body.classList.contains('sidebar-collapsed')) { return; }
+      if (event.target.closest('.admin-sidebar') || event.target.closest('[data-sidebar-toggle]')) { return; }
+      setSidebarCollapsed(true);
+    });
+
+    // Escape, for a keyboard on a narrow window.
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !isDrawer()) { return; }
+      if (!document.body.classList.contains('sidebar-collapsed')) {
+        setSidebarCollapsed(true);
+      }
+    });
+
+    // Following a link. The next page starts shut anyway — sidebar_boot.php
+    // sees to that — but leaving it open until then means the drawer sits over
+    // the page for the whole load, which reads as the tap not having worked.
+    document.querySelectorAll('.admin-nav a[href]').forEach((link) => {
+      link.addEventListener('click', () => {
+        if (isDrawer()) { setSidebarCollapsed(true); }
+      });
+    });
+
+    // Rotating a phone, or dragging a desktop window narrow, must not carry an
+    // open drawer across the boundary: above 900px that same state is an
+    // ordinary sidebar, below it a panel covering the screen.
+    let wasDrawer = isDrawer();
+    window.addEventListener('resize', () => {
+      const nowDrawer = isDrawer();
+      if (nowDrawer !== wasDrawer) {
+        wasDrawer = nowDrawer;
+        if (nowDrawer) { setSidebarCollapsed(true); }
+      }
     });
   }
 

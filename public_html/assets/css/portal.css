@@ -7206,3 +7206,123 @@ body.admin-layout.sidebar-collapsed .admin-sidebar-toggle .ui-icon {
 @media print {
   body.admin-layout .admin-sidebar-toggle { display: none !important; }
 }
+
+/* ===========================================================================
+   PHONES — the admin shell
+   ===========================================================================
+   Below 1100px the shell already became one column and the sidebar went
+   static, which on a laptop with a narrow window is right. On a phone it meant
+   the sidebar WAS the first screen: every visit opened on a full page of
+   navigation — Consolidated Report, Admin Overview, Accounting, Client
+   Directory, Reports, Documents, Compliance — and the figures started somewhere
+   below all of it. Nobody scrolls past their own menu to read a balance.
+
+   So under 900px the sidebar stops being a block in the flow and becomes a
+   drawer over the page, shut unless asked for. sidebar_boot.php starts it shut
+   there regardless of what a desktop session remembered, and the existing
+   topbar button — which already means "hide/show this" and already has its
+   aria wiring — opens it.
+
+   The class is the SAME one the desktop rail uses. .sidebar-collapsed has
+   always meant "the sidebar is not showing", and that is exactly what it means
+   here; nothing in main.js had to learn a second state. */
+@media (max-width: 900px) {
+  body.admin-layout .admin-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(86vw, 320px);
+    height: 100%;
+    z-index: 1200;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    transform: translateX(0);
+    transition: transform .22s ease;
+    box-shadow: 0 0 40px rgba(0, 0, 0, .35);
+  }
+  /* Shut: off the left edge, not display:none — a drawer that is merely gone
+     cannot animate, and a nav that snaps in and out reads as a glitch. */
+  body.admin-layout.sidebar-collapsed .admin-sidebar {
+    transform: translateX(-100%);
+    box-shadow: none;
+  }
+  /* The 1100px block above hides it outright once collapsed, which would beat
+     the transform and take the animation with it. */
+  body.admin-layout.sidebar-collapsed .admin-sidebar {
+    display: block;
+  }
+
+  /* The scrim. Without something to tap, the only way out of the drawer is the
+     button it came from — which is now underneath it. */
+  body.admin-layout .admin-shell::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 20, 14, .55);
+    opacity: 1;
+    z-index: 1100;
+    transition: opacity .22s ease;
+  }
+  body.admin-layout.sidebar-collapsed .admin-shell::before {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* The page no longer gives the drawer a column of its own. */
+  body.admin-layout .admin-shell { grid-template-columns: minmax(0, 1fr); }
+  body.admin-layout .admin-main { width: 100%; min-width: 0; }
+
+  /* THE TOPBAR. It is a flex row built for a monitor, and on a phone it wrapped
+     into a staircase — a lone moon icon on its own line, two buttons centred in
+     the middle of nothing, and a tall empty band above the first card. Tighter
+     spacing, everything left-aligned, and the controls in one wrapping band
+     instead of one row per orphan. */
+  /* The pair below has to stay a PAIR. The topbar's negative side margin
+     cancels the column's side padding, so the bar reaches both edges while its
+     contents still line up with the cards beneath it. Retuning one and not the
+     other is what once put a horizontal scrollbar on every admin page — and the
+     hygiene suite, which subtracts the two, caught this very block setting the
+     column padding on its own. */
+  body.admin-layout .admin-topbar {
+    min-height: 0;
+    margin: -12px -12px 10px;
+    padding: 8px 12px;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  body.admin-layout .admin-topbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 6px;
+    width: 100%;
+  }
+  body.admin-layout .admin-topbar-search {
+    order: 5;
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+  body.admin-layout .admin-topbar-title { font-size: 1rem; line-height: 1.25; }
+
+  /* 16px or Safari zooms the page on focus and does not zoom back — the same
+     rule the jewellery grid needed, and for the same reason. 44px is the tap
+     target Apple asks for. */
+  body.admin-layout .admin-topbar input,
+  body.admin-layout .admin-topbar select,
+  body.admin-layout .admin-main input:not([type="checkbox"]):not([type="radio"]),
+  body.admin-layout .admin-main select,
+  body.admin-layout .admin-main textarea { font-size: 16px; min-height: 44px; }
+  body.admin-layout .admin-icon-button { min-width: 44px; min-height: 44px; }
+
+  /* Three values, matching the desktop shorthand, so the side padding the
+     topbar has to cancel is stated where anyone comparing them can see it. */
+  body.admin-layout .admin-main { padding: 12px 12px 16px; }
+  body.admin-layout .mbw-card { padding: 12px; border-radius: 12px; }
+}
+
+/* The drawer is only a drawer while the screen is small. Above it, every rule
+   in this block must stop applying — a fixed-position sidebar on a desktop
+   would sit on top of the page with the content behind it. */
+@media (min-width: 901px) {
+  body.admin-layout .admin-shell::before { content: none; }
+}
