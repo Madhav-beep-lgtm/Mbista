@@ -1580,6 +1580,86 @@ ok((int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns WHERE company_id
 $workVoucher = voucher_shape((int) $workRec['voucher_id']);
 ok(near($workVoucher['dr'], $workVoucher['cr']), 'And its voucher balances');
 
+// THE PIECE IS WORTH SOMETHING AND HE IS OWED FOR IT.
+//
+// The checks above only ever asked whether the movement and the voucher
+// EXISTED. Both did, and both were empty: with no issue to divide, the fine
+// rate came out zero, so the piece went into stock at nothing, the kaligad was
+// owed nothing for the gold he had put in, and the voucher balanced by having
+// nothing on either side to balance. A shop making work orders had its whole
+// output invisible in the books.
+$workRate = (float) $workRec['avg_fine_rate'];
+$workMetal = (float) $workRec['surplus_amount'];
+ok($workRate > 0, 'The metal he supplied is priced — a work order finds a rate, it does not settle at zero');
+ok(near($workMetal, jw_round_money((float) $workRec['received_fine'] * $workRate)),
+    'And his gold is valued at that rate over every fine unit of it');
+ok(near((float) $workRec['net_payable'], jw_round_money($workMetal + (float) $workRec['making_amount'])),
+    'He is owed the metal AND the making — the shop bought the gold as well as the work');
+$workStock = db()->query("SELECT amount, fine_weight FROM jewellery_stock_txns WHERE company_id=$cidA
+    AND source_type='jewellery_order_receipt' AND source_id=$workReceiptId AND direction='in'")->fetch(PDO::FETCH_ASSOC);
+// The > 0 halves are not padding. near($x, 0) is true when $x is zero, so every
+// one of these checks passed against the broken code by comparing nothing to
+// nothing — which is how the original section came to assert that a piece
+// "arrives in stock" without ever noticing it arrived worth nothing.
+ok($workStock && (float) $workStock['amount'] > 0 && near((float) $workStock['amount'], $workMetal),
+    'The piece enters stock at what it cost — not at zero');
+ok($workVoucher['dr'] > 0 && near($workVoucher['dr'], jw_round_money($workMetal + (float) $workRec['making_amount'])),
+    'The voucher carries real value now, not an empty balance');
+$workStockLedger = jw_item_stock_ledger_id($cidA, jewellery_item($cidA, $chain));
+ok(($workVoucher['ledgers'][$workStockLedger] ?? 0.0) > 0
+    && near($workVoucher['ledgers'][$workStockLedger] ?? 0.0, $workMetal),
+    'Stock is debited with his metal');
+ok(near($workVoucher['ledgers'][$L['making_expense']] ?? 0.0, (float) $workRec['making_amount']),
+    'Making charge hits the expense');
+$workPayable = jw_party_ledger($cidA, $ramParty, 'payable');
+$workOwed = jw_round_money($workMetal + (float) $workRec['making_amount']);
+ok(($workVoucher['ledgers'][$workPayable] ?? 0.0) < 0 && near($workVoucher['ledgers'][$workPayable] ?? 0.0, -$workOwed),
+    'And the whole of it stays payable to the kaligad');
+ok((int) db()->query("SELECT COUNT(*) FROM jewellery_bills WHERE company_id=$cidA
+    AND source_type='jewellery_order_receipt' AND source_id=$workReceiptId")->fetchColumn() === 1,
+    'A bill is opened for it, so it can be paid off like any other');
+
+// The day's board beats the item's average, and a rate agreed at the counter
+// beats both — because somebody was there.
+jewellery_save_rate($cidA, ['metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'rate_date' => '2026-10-05', 'rate_type' => 'purchase', 'rate' => 146560], $userA);
+$boardOrder = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 0, 'issue_date' => '2026-10-01', 'making_basis' => 'flat', 'making_rate' => 400,
+], $userA);
+$boardPreview = jewellery_preview_receipt($cidA, (int) $boardOrder['assignment_id'], 2, $p22, null, 0.0, '2026-10-05');
+ok($boardPreview['ok'] && (string) $boardPreview['rate_source'] === 'board',
+    'With a rate on the board, that is the one used');
+ok(near((float) $boardPreview['avg_fine_rate'], 160000.0),
+    'A 22K purchase quote of 146,560 per tola is 160,000 per FINE tola'
+    . ' (got ' . number_format((float) $boardPreview['avg_fine_rate'], 2) . ')');
+$typedPreview = jewellery_preview_receipt($cidA, (int) $boardOrder['assignment_id'], 2, $p22, null, 0.0, '2026-10-05', 155000);
+ok($typedPreview['ok'] && (string) $typedPreview['rate_source'] === 'typed'
+    && near((float) $typedPreview['avg_fine_rate'], 155000.0),
+    'A rate typed on the receipt overrides the board');
+
+// No issue, no board, no cost basis anywhere: refuse. Booking it at zero is
+// what this whole section is about.
+$bareItem = jewellery_save_item($cidA, ['code' => 'BARE22', 'name' => 'Unstocked 22K', 'item_type' => 'ornament',
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'gross_weight' => 0], $userA);
+$bareOrder = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $bareItem, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 0, 'issue_date' => '2026-10-01', 'making_basis' => 'flat', 'making_rate' => 400,
+], $userA);
+$barePreview = jewellery_preview_receipt($cidA, (int) $bareOrder['assignment_id'], 2, $p22, null, 0.0, '2026-08-02');
+ok(!$barePreview['ok'] && stripos((string) $barePreview['error'], 'rate') !== false,
+    'With nothing to price it by, the receipt is REFUSED and says why — it is never booked at zero');
+ok(jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => (int) $bareOrder['assignment_id'], 'received_gross_weight' => 2,
+    'receive_date' => '2026-08-02'], $userA)['ok'] === false,
+    'And posting it is refused for the same reason, not just the preview');
+$saved = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => (int) $bareOrder['assignment_id'], 'received_gross_weight' => 2,
+    'receive_date' => '2026-08-02', 'own_metal_rate' => '150000'], $userA);
+ok($saved['ok'] && near((float) $saved['net_payable'], jw_round_money(1.832 * 150000 + 400)),
+    'Told the rate, it posts — 1.832 fine at 150,000 plus the 400 making'
+    . ($saved['ok'] ? '' : ' — ' . $saved['error']));
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

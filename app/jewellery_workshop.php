@@ -1998,6 +1998,76 @@ function jewellery_receipt(int $companyId, int $receiptId): ?array
 }
 
 /**
+ * What to pay the kaligad, per unit of fine, for metal HE PUT IN HIMSELF.
+ *
+ * Every other valuation in this module reads the rate off the issue: the metal
+ * was the shop's, it left own stock at a cost, and that cost is what comes
+ * back. A WORK ORDER has no issue. "Make me five chains from your own gold" is
+ * a job and a purchase at once, and there is no issued_amount to divide by
+ * anything — which is exactly why the rate came out zero and the whole receipt
+ * with it: a piece into stock worth nothing, a kaligad owed nothing for his
+ * gold, and a voucher with no legs left to post.
+ *
+ * So the rate is looked for, in the order a shop would look for it:
+ *
+ *   typed    what the counter agreed with him for this piece. Nothing beats
+ *            somebody who was there.
+ *   board    the day's PURCHASE quote — the shop is buying metal, so the buying
+ *            line applies; jewellery_metal_value falls back to market on its
+ *            own. Taken on the receive date, because that is the day the deal
+ *            was struck.
+ *   average  the item's own moving-average cost, the same basis every issue and
+ *            every COGS charge in the module uses. Not a market price, but the
+ *            only figure the books already hold, and better than inventing one.
+ *
+ * A rate of zero means all three came up empty, and the caller REFUSES rather
+ * than booking a piece into stock at nothing — which is how this was going
+ * wrong in the first place.
+ *
+ * @return array{rate: float, source: string, note: string}
+ */
+function jw_own_metal_fine_rate(int $companyId, array $item, array $purity, int $unitId, float $netGold, string $date, ?float $typedRate = null): array
+{
+    if ($typedRate !== null && $typedRate > 0) {
+        return ['rate' => jw_round_rate($typedRate), 'source' => 'typed', 'note' => 'the rate entered on this receipt'];
+    }
+
+    $fine = jw_fine_weight($netGold, (float) $purity['fineness']);
+    if ($netGold > 0 && $fine > 0.00005) {
+        $valued = jewellery_metal_value($companyId, (int) $purity['metal_id'], (int) $purity['id'],
+            $netGold, $unitId, $date, 'purchase');
+        if (($valued['ok'] ?? false) && (float) $valued['amount'] > 0) {
+            $row = $valued['rate_row'] ?? [];
+
+            return [
+                // Total money over the LOCAL fine weight, not the quote divided
+                // by anything: jewellery_metal_value has already crossed the
+                // rate's unit and the piece's, and re-deriving that here is how
+                // a tola gets paid at a gram's rate.
+                'rate' => jw_round_rate((float) $valued['amount'] / $fine),
+                'source' => 'board',
+                'note' => 'the ' . (string) ($row['rate_type'] ?? 'market') . ' rate of '
+                    . (string) ($row['rate_date'] ?? $date),
+            ];
+        }
+    }
+
+    // Holder '' — every holding, not just what is on the shelf. A narrower pool
+    // would give one item two different costs at once, which is the same choice
+    // jewellery_issue_to_karigar makes when it values an issue.
+    $balance = jw_item_balance($companyId, (int) ($item['id'] ?? 0), $date, '');
+    if ((float) $balance['avg_fine_rate'] > 0) {
+        return [
+            'rate' => jw_round_rate((float) $balance['avg_fine_rate']),
+            'source' => 'average',
+            'note' => 'this item\'s own average cost — no rate is on the board for ' . $date,
+        ];
+    }
+
+    return ['rate' => 0.0, 'source' => 'none', 'note' => ''];
+}
+
+/**
  * Preview the settlement of a return WITHOUT writing anything — the numbers
  * the receive screen shows before the user commits.
  *
@@ -2006,8 +2076,12 @@ function jewellery_receipt(int $companyId, int $receiptId): ?array
  * stock — is computed over gross − stone, the metal actually returned.
  * Counting the stones credited the kaligad with pure metal he never handed
  * back, by exactly their weight at the piece's fineness.
+ *
+ * $receiveDate and $ownMetalRate matter only when NOTHING WAS ISSUED — see
+ * jw_own_metal_fine_rate(). On an ordinary receipt the issue supplies the rate
+ * and both are ignored.
  */
-function jewellery_preview_receipt(int $companyId, int $assignmentId, float $receivedGross, ?int $receivedPurityId = null, ?float $grantedFine = null, float $stoneWeight = 0.0): array
+function jewellery_preview_receipt(int $companyId, int $assignmentId, float $receivedGross, ?int $receivedPurityId = null, ?float $grantedFine = null, float $stoneWeight = 0.0, string $receiveDate = '', ?float $ownMetalRate = null, ?int $receivedItemId = null): array
 {
     $assignment = jewellery_assignment($companyId, $assignmentId);
     if (!$assignment) {
@@ -2040,6 +2114,33 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
     // Value the metal at what it was issued at, so the wastage charge does not
     // silently move with the day's rate.
     $avgRate = $issuedFine > 0 ? jw_round_rate((float) $assignment['issued_amount'] / $issuedFine) : 0.0;
+    $rateSource = 'issue';
+    $rateNote = '';
+    if ($issuedFine <= 0) {
+        // A WORK ORDER: no metal went out, so the gold in the piece is his and
+        // the shop is buying it. Nothing to divide, so a rate is found instead.
+        $ownItem = jewellery_item($companyId, $receivedItemId ?: (int) $assignment['item_id']);
+        $resolved = jw_own_metal_fine_rate(
+            $companyId,
+            $ownItem ?: ['id' => (int) $assignment['item_id']],
+            $purity,
+            (int) $assignment['unit_id'],
+            $netGold,
+            $receiveDate !== '' && strtotime($receiveDate) !== false ? $receiveDate : date('Y-m-d'),
+            $ownMetalRate
+        );
+        $avgRate = $resolved['rate'];
+        $rateSource = $resolved['source'];
+        $rateNote = $resolved['note'];
+        if ($avgRate <= 0) {
+            // Booking it anyway is what put pieces into stock worth nothing and
+            // left the kaligad owed nothing for his gold. There is no safe
+            // default here — only somebody who knows what was agreed.
+            return ['ok' => false, 'error' => 'Nothing was issued against this assignment, so there is no cost to '
+                . 'value the piece at. Enter the rate for the kaligad\'s own metal, or put the day\'s rate on the '
+                . 'board under Jewellery → Rates, and receive it again.'];
+        }
+    }
     $metalValue = jw_round_money($receivedFine * $avgRate);
     // The making charge stays on the GROSS — deliberately, and unlike the
     // fine/wastage arithmetic above. A piece-rate (per_unit_weight) pays for
@@ -2069,6 +2170,11 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
         'excess_fine' => $split['excess_fine'],
         'surplus_fine' => $split['surplus_fine'],
         'avg_fine_rate' => $avgRate,
+        // Where that rate came from, so the receive screen can say so. A number
+        // the shop cannot account for is a number it cannot argue with the
+        // kaligad about.
+        'rate_source' => $rateSource,
+        'rate_note' => $rateNote,
         'received_value' => $metalValue,
         'making_amount' => $making,
         'wastage_amount' => $wastageAmount,
@@ -2088,6 +2194,16 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
  *               Cr karigar payable       wages less recovery  (flips to a
  *                                        DEBIT when recovery exceeds wages)
  *               Cr stock                 wastage value
+ *
+ * A WORK ORDER — no metal ever issued, the kaligad worked from his own — is
+ * the same three legs with the issue side empty, and settles as the purchase
+ * it is:
+ *
+ *           Dr stock                     the metal he put in, at the receive
+ *                                        date's rate
+ *           Dr making expense            wages
+ *               Cr karigar payable       both, because the shop owes him for
+ *                                        the gold as well as the work
  */
 function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array $input, int $userId = 0): array
 {
@@ -2134,7 +2250,24 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
         }
     }
 
-    $preview = jewellery_preview_receipt($companyId, $assignmentId, $receivedGross, $receivedPurityId, $grantedFine, $stoneWeight);
+    // The rate for metal the kaligad supplied out of his own, when there was no
+    // issue to take one from. Blank leaves it to the ladder in
+    // jw_own_metal_fine_rate(); it is read here rather than defaulted so an
+    // agreed rate always beats a looked-up one.
+    $ownMetalRate = null;
+    if (array_key_exists('own_metal_rate', $input) && trim((string) $input['own_metal_rate']) !== '') {
+        $ownMetalRate = (float) $input['own_metal_rate'];
+        if ($ownMetalRate < 0) {
+            return ['ok' => false, 'error' => 'A rate cannot be negative.'];
+        }
+    }
+    // Resolved BEFORE the preview: the rate is looked up on the day the piece
+    // was received, and defaulting the date afterwards would price a receipt
+    // backdated into last month at today's board.
+    $receiveDate = (string) ($input['receive_date'] ?? date('Y-m-d'));
+
+    $preview = jewellery_preview_receipt($companyId, $assignmentId, $receivedGross, $receivedPurityId,
+        $grantedFine, $stoneWeight, $receiveDate, $ownMetalRate, $receivedItemId);
     if (!$preview['ok']) {
         return $preview;
     }
@@ -2146,7 +2279,6 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
     // wages; see the money legs below.
 
     $settings = jewellery_settings($companyId);
-    $receiveDate = (string) ($input['receive_date'] ?? date('Y-m-d'));
     $karigar = jewellery_karigar($companyId, (int) $assignment['karigar_id']);
 
     $ownsTransaction = !db()->inTransaction();

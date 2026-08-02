@@ -56,6 +56,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // "0.0000 granted" — the same answer, but the engine could no longer
         // tell the two apart.
         'allow_wastage_fine' => (string) ($_POST['allow_wastage_fine'] ?? ''),
+        // Same reasoning: blank means "find the rate", not "the rate is zero".
+        'own_metal_rate' => (string) ($_POST['own_metal_rate'] ?? ''),
         'notes' => (string) ($_POST['notes'] ?? ''),
     ], $userId);
 
@@ -83,6 +85,12 @@ foreach ($openAssignments as $row) {
 $typedGross = (float) ($_GET['wt'] ?? 0);
 $typedCarat = (float) ($_GET['ct'] ?? 0);
 $typedAllow = (string) ($_GET['allow'] ?? '');
+// The rate for metal the kaligad supplied himself, and the day it is settled
+// on. BOTH are typed at the "work it out" step, not at the posting step: they
+// move the figures on the table below, and a date changed afterwards would post
+// a receipt priced on a day the person never saw.
+$typedRate = (string) ($_GET['rate'] ?? '');
+$typedDate = $clampDate((string) ($_GET['on'] ?? ''));
 $unitGrams = (float) ($target['unit_grams'] ?? 0);
 // The trade quotes stones in carats; the receipt records them in the same unit
 // as the metal they were set into. Both are shown, one is typed.
@@ -96,9 +104,16 @@ if ($target !== null && $typedGross > 0) {
         $typedGross,
         (int) $target['purity_id'],
         $typedAllow !== '' ? (float) $typedAllow : null,
-        $stoneInUnit
+        $stoneInUnit,
+        $typedDate,
+        $typedRate !== '' ? (float) $typedRate : null,
+        (int) $target['item_id']
     );
 }
+// Nothing was issued, so the gold in the piece is the kaligad's and the shop is
+// buying it. Shown as its own line because it is the largest number on the
+// receipt and the one he will ask about.
+$isWorkOrder = $target !== null && (float) ($target['issued_fine_weight'] ?? 0) <= 0.00005;
 $wageStatement = $preview && $preview['ok'] ? jewellery_wage_statement([
     'making_amount' => $preview['making_amount'],
     'recovery_amount' => $preview['recovery_amount'],
@@ -252,9 +267,24 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 ? '= ' . $fmt($stoneInUnit, 4) . ' ' . e((string) $target['unit_code']) . ' on the scale'
                 : '1 ct = 0.2 g' ?></small>
         </label>
-        <label>Wastage to allow (fine)
-            <input type="number" name="allow" step="0.0001" min="0" value="<?= e($typedAllow) ?>" placeholder="0.0000">
-            <small class="frm-optional">Blank means none is forgiven</small>
+        <?php // Wastage is a comparison against what went out. On a work order
+              // nothing went out, so there is nothing to compare and nothing to
+              // forgive — the rate his own gold is bought at takes its place. ?>
+        <?php if ($isWorkOrder): ?>
+            <label>Rate for his own metal
+                <input type="number" name="rate" step="0.01" min="0" value="<?= e($typedRate) ?>"
+                       placeholder="per fine <?= e((string) $target['unit_code']) ?>">
+                <small class="frm-optional">Blank uses the day's rate, or this item's average cost</small>
+            </label>
+        <?php else: ?>
+            <label>Wastage to allow (fine)
+                <input type="number" name="allow" step="0.0001" min="0" value="<?= e($typedAllow) ?>" placeholder="0.0000">
+                <small class="frm-optional">Blank means none is forgiven</small>
+            </label>
+        <?php endif; ?>
+        <label>Receive date <em>*</em>
+            <input type="date" name="on" value="<?= e($typedDate) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required>
+            <?php if ($isWorkOrder): ?><small class="frm-optional">The day his metal is priced at</small><?php endif; ?>
         </label>
         <label style="align-self:end"><button type="submit" class="button secondary"><?= icon('scale') ?>Work it out</button></label>
     </form>
@@ -282,6 +312,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td class="is-numeric"><strong><?= $fmt((float) $preview['excess_fine'], 4) ?></strong></td></tr>
                 <?php if ((float) ($preview['surplus_fine'] ?? 0) > 0.00005): ?>
                     <tr><td>Metal the kaligad added (fine)</td><td class="is-numeric"><?= $fmt((float) $preview['surplus_fine'], 4) ?></td></tr>
+                    <?php // What the shop is paying him for that gold, and where
+                          // the rate came from. He will ask; so will the auditor. ?>
+                    <tr><td>Bought from him at<br><small><?= e((string) ($preview['rate_note'] ?? '')) ?></small></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) $preview['avg_fine_rate']) ?>
+                            <small>per fine <?= e((string) $target['unit_code']) ?></small></td></tr>
+                    <tr><td><strong>Value of his metal</strong></td>
+                        <td class="is-numeric"><strong><?= e($sym) ?><?= $fmt((float) ($preview['surplus_amount'] ?? 0)) ?></strong></td></tr>
                 <?php endif; ?>
                 <tr><td>Making charge</td><td class="is-numeric"><?= e($sym) ?><?= $fmt((float) $preview['making_amount']) ?></td></tr>
                 <tr><td>Recovered from wages</td><td class="is-numeric">− <?= e($sym) ?><?= $fmt((float) $preview['recovery_amount']) ?></td></tr>
@@ -304,9 +341,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <input type="hidden" name="received_gross_weight" value="<?= e((string) $typedGross) ?>">
             <input type="hidden" name="stone_weight" value="<?= e((string) $stoneInUnit) ?>">
             <input type="hidden" name="allow_wastage_fine" value="<?= e($typedAllow) ?>">
+            <?php // Carried from the step above rather than asked again. The two
+                  // price the receipt, and a date or rate changed after the
+                  // table was worked out would post figures nobody looked at. ?>
+            <input type="hidden" name="own_metal_rate" value="<?= e($typedRate) ?>">
+            <input type="hidden" name="receive_date" value="<?= e($typedDate) ?>">
             <div class="frm-grid frm-grid-4">
-                <label>Receive date <em>*</em>
-                    <input type="date" name="receive_date" value="<?= e($todayInFy) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required>
+                <label>Receive date
+                    <input type="date" value="<?= e($typedDate) ?>" disabled>
                 </label>
                 <label class="frm-span-3">Description
                     <input type="text" name="notes" maxlength="255" placeholder="Anything about this piece worth recording"
