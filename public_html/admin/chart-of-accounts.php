@@ -198,18 +198,26 @@ $coaRowPill = static function (string $status): string {
         <strong>Uploading creates nothing.</strong> Every row is checked and shown back to you first; only
         Commit writes to the chart. Groups and ledgers can travel in one sheet — a ledger may name a group
         written further down. Leave <em>Code</em> blank to have codes generated.
-        <a href="<?= e(url('admin/chart-of-accounts.php?import_template=xlsx')) ?>">Download template (.xlsx)</a>
-        &middot; <a href="<?= e(url('admin/chart-of-accounts.php?import_template=csv')) ?>">.csv</a>
-        &middot; <a href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>">Export the current chart to edit</a>
     </p>
 
     <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="coa_upload">
         <label>Spreadsheet<input type="file" name="import_file" accept=".xlsx,.csv" required></label>
-        <div style="align-self:end">
+        <?php // The template sits beside the upload button rather than in the
+              // paragraph above: someone who has not got a file yet needs it
+              // before they can use this form, and that is the moment they are
+              // looking here. ?>
+        <div style="align-self:end;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
             <button type="submit" class="button"><?= icon('layers') ?>Upload &amp; Preview</button>
-            <span class="frm-optional">.xlsx or .csv, up to <?= number_format(COA_IMPORT_MAX_ROWS) ?> rows</span>
+            <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?import_template=xlsx')) ?>"><?= icon('documents') ?>Download template</a>
+        </div>
+        <div style="grid-column:1/-1">
+            <span class="frm-optional">
+                .xlsx or .csv, up to <?= number_format(COA_IMPORT_MAX_ROWS) ?> rows &middot;
+                <a href="<?= e(url('admin/chart-of-accounts.php?import_template=csv')) ?>">template as .csv</a> &middot;
+                <a href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>">export the current chart to edit</a>
+            </span>
         </div>
     </form>
 

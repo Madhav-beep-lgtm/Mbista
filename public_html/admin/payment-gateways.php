@@ -50,13 +50,16 @@ $pageHero = ['icon' => 'card'];
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<section class="mbw-card">
-    <div class="mbw-card-head"><h2>How online collection works</h2></div>
-    <p style="margin:0 0 8px">A client opens an unpaid invoice in their portal, taps <strong>Pay online</strong>, and completes payment on the provider. When the provider confirms, the app posts a <strong>Dr Bank / Cr Receivable</strong> receipt against that invoice — the same entry as a manually recorded payment — and marks the invoice paid.</p>
-    <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">
-        Settlement debits the <strong><?= e($cashLedger['name'] ?? 'default cash/bank') ?></strong> ledger (your <code>default_cash_bank</code> mapping<?= $cashLedger ? '' : ' — not set yet; map it in Settings or receipts cannot post' ?>). Credentials below are visible only to admins; keep them secret. Start in <strong>Test</strong> mode, verify a sandbox payment, then switch to Live.
-    </p>
-</section>
+<?php // The standing explainer that used to sit here is gone. What remains is the
+      // one part of it that was not description: with no default_cash_bank
+      // mapping a confirmed payment has nowhere to post, so this is a warning
+      // about a setup that will fail, not a note about how the feature works. ?>
+<?php if (!$cashLedger): ?>
+    <div class="notice error">
+        No <code>default_cash_bank</code> ledger is mapped, so a confirmed payment cannot post its receipt.
+        Map it in Settings before taking payments online.
+    </div>
+<?php endif; ?>
 
 <?php foreach (pg_providers() as $provider => $meta): ?>
     <?php
