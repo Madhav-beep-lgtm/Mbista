@@ -2487,6 +2487,33 @@ function accounting_module_repair_database(): array
             ['coa_imports', 'coa_import_rows']);
     });
 
+    $run('Jewellery tag printing settings (migration 105)', static function (): void {
+        // Column-only migration, so it cannot go through
+        // accounting_repair_run_migration_file() — that runner fires only when a
+        // whole TABLE is missing.
+        if (!accounting_repair_table_exists('jewellery_settings')) {
+            return;
+        }
+        $tagColumns = [
+            'tag_shop_name' => '`tag_shop_name` VARCHAR(60) DEFAULT NULL',
+            'tag_width_mm' => '`tag_width_mm` DECIMAL(6,1) NOT NULL DEFAULT 12.0',
+            'tag_height_mm' => '`tag_height_mm` DECIMAL(6,1) NOT NULL DEFAULT 75.0',
+            'tag_gap_mm' => '`tag_gap_mm` DECIMAL(6,1) NOT NULL DEFAULT 3.0',
+            'tag_wing_mm' => '`tag_wing_mm` DECIMAL(6,1) NOT NULL DEFAULT 22.0',
+            'tag_dpi' => '`tag_dpi` SMALLINT UNSIGNED NOT NULL DEFAULT 203',
+            'tag_darkness' => '`tag_darkness` TINYINT UNSIGNED NOT NULL DEFAULT 15',
+            'tag_speed' => '`tag_speed` TINYINT UNSIGNED NOT NULL DEFAULT 3',
+            'tag_rotation' => "`tag_rotation` ENUM('0','90','180','270') NOT NULL DEFAULT '0'",
+            'tag_offset_x_mm' => '`tag_offset_x_mm` DECIMAL(5,1) NOT NULL DEFAULT 0.0',
+            'tag_offset_y_mm' => '`tag_offset_y_mm` DECIMAL(5,1) NOT NULL DEFAULT 0.0',
+            'tag_media' => "`tag_media` ENUM('gap','continuous','mark') NOT NULL DEFAULT 'gap'",
+            'tag_hide_empty_stone' => '`tag_hide_empty_stone` TINYINT(1) NOT NULL DEFAULT 1',
+        ];
+        foreach ($tagColumns as $column => $ddl) {
+            accounting_repair_add_column('jewellery_settings', $column, $ddl);
+        }
+    });
+
     $run('Invoice fields and tax bases (migration 083)', static function (): void {
         // Column-only migration, so it cannot go through
         // accounting_repair_run_migration_file() — that runner deliberately

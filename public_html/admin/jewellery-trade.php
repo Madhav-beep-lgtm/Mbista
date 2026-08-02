@@ -617,7 +617,24 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
             <section class="jw-card">
             <div class="jw-card-head">
                 <h2><?= icon('box') ?><?= $editDoc ? 'Edit Draft Purchase — ' . e((string) $editDoc['purchase_no']) : 'New Purchase' ?></h2>
-                <?php if ($editDoc): ?><span class="jw-card-head-actions"><a class="button soft" href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">New purchase</a></span><?php endif; ?>
+                <?php if ($editDoc): ?><span class="jw-card-head-actions">
+                    <?php // Tagging belongs where stock arrives: the pieces on this
+                          // purchase are exactly the ones that need a tag before they
+                          // reach the showcase, so the ids go straight to the tag
+                          // screen already ticked.
+                          $tagIds = [];
+                          foreach ($editLines as $tagLine) {
+                              $tagItemId = (int) ($tagLine['item_id'] ?? 0);
+                              if ($tagItemId > 0) { $tagIds[$tagItemId] = $tagItemId; }
+                          }
+                    ?>
+                    <?php if ($tagIds !== []): ?>
+                        <a class="button soft" href="<?= e(url('admin/jewellery-tags.php?items=' . implode(',', $tagIds))) ?>">
+                            <?= icon('documents') ?>Print tags (<?= count($tagIds) ?>)
+                        </a>
+                    <?php endif; ?>
+                    <a class="button soft" href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">New purchase</a>
+                </span><?php endif; ?>
             </div>
             <div class="workspace-form-grid">
                 <label>Date<input type="date" name="purchase_date" value="<?= e((string) ($editDoc['purchase_date'] ?? $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required></label>

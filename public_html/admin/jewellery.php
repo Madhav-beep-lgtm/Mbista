@@ -1052,6 +1052,11 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         <td><span class="mbw-pill <?= (string) $row['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= (string) $row['status'] === 'active' ? 'Active' : 'Off' ?></span></td>
                         <?php if ($canEdit): ?><td style="white-space:nowrap">
                             <a class="mbw-view-all" href="<?= e(url('admin/jewellery.php?view=items&edit=' . (int) $row['id'])) ?>">Edit</a>
+                            <?php // Straight to the tag screen with this piece already
+                                  // ticked, so re-tagging one item is one click and still
+                                  // goes through the same renderer as a batch. ?>
+                            <a class="mbw-view-all" style="margin-left:8px"
+                               href="<?= e(url('admin/jewellery-tags.php?items=' . (int) $row['id'])) ?>">Tag</a>
                             <?php // Deletable only while untouched: one stock movement or
                                   // document line makes the item part of the record, and
                                   // the engine answers with "mark it inactive instead". ?>
