@@ -60,10 +60,19 @@ write_status() {
     # the two would never have met, and the health check would have reported "no
     # backup has ever run" on a server backing up perfectly well every night.
     status_path="${BACKUP_DIR:-$HOME}/backup-status.json"
-    # Quotes and backslashes would break the JSON this is read back as.
-    detail="$(printf '%s' "$2" | tr -d '\\"')"
-    printf '{"state":"%s","at":"%s","detail":"%s","tables":%s,"artifact":"%s"}\n' \
-        "$1" "$(date '+%Y-%m-%d %H:%M:%S')" "$detail" \
+    # Quotes and backslashes would break the JSON this is read back as — and so
+    # would a newline, which is how mysqldump's own words arrive now that the
+    # detail quotes them. A raw newline inside a JSON string is invalid, the app
+    # would decode nothing at all, and "nothing decoded" reads to the health
+    # check as "no backup has ever run": a broken message about a failure would
+    # have been reported as a missing cron.
+    clean_json_text() {
+        printf '%s' "$1" | tr -d '\\"' | tr '\n\r\t' '   ' | tr -s ' ' | cut -c1-400
+    }
+    detail="$(clean_json_text "$2")"
+    warning="$(clean_json_text "${WARNING_NOTE:-}")"
+    printf '{"state":"%s","at":"%s","detail":"%s","warning":"%s","tables":%s,"artifact":"%s"}\n' \
+        "$1" "$(date '+%Y-%m-%d %H:%M:%S')" "$detail" "$warning" \
         "${TABLES:-0}" "$(basename "${ARTIFACT:-none}")" > "$status_path" 2>/dev/null || true
     chmod 600 "$status_path" 2>/dev/null || true
 }
@@ -133,28 +142,128 @@ BASE="$BACKUP_DIR/${DB_NAME}_${STAMP}.sql"
 # command line, where every other user on the box can read it in `ps`.
 export MYSQL_PWD="$DB_PASS"
 
-log "starting dump of $DB_NAME"
-mysqldump \
-    --host="$DB_HOST" \
-    --user="$DB_USER" \
-    --single-transaction \
-    --quick \
-    --routines \
-    --triggers \
-    --events \
-    --default-character-set=utf8mb4 \
-    --no-tablespaces \
-    "$DB_NAME" > "$BASE" 2>>"$LOG"
-DUMP_STATUS=$?
+# mysqldump's stderr goes to a file of its own rather than straight into the
+# log. It still reaches the log, but it can also be READ: an exit status on its
+# own ("mysqldump exited 3") names no cause, and the banner that reported it
+# sent whoever read it looking for a log file on a server they may not have a
+# shell on. The sentence mysqldump actually wrote is the whole diagnosis, so it
+# is carried through to the status file and shown with the failure.
+DUMP_ERR="$BACKUP_DIR/.mysqldump-stderr.$$"
+trap 'rm -f "$DUMP_ERR"' EXIT
+
+# The last thing mysqldump said that was not boilerplate. The useful line is at
+# the end, and the noise at the front is the password-on-the-command-line
+# warning every client prints whether or not anything is wrong.
+dump_error() {
+    grep -v -e '[Ww]arning: Using a password' -e '^[[:space:]]*$' "$DUMP_ERR" 2>/dev/null | tail -n 1
+}
+
+# Two flags a mysqldump NEWER than its server needs, and that an older
+# mysqldump rejects as unknown options — so they are asked for by name instead
+# of assumed, because guessing wrong kills the run at argument parsing:
+#   --column-statistics=0  an 8.0 client asks a 5.7 or MariaDB server for
+#                          histogram data it has never heard of, and the dump
+#                          dies on information_schema.COLUMN_STATISTICS.
+#   --set-gtid-purged=OFF  on a GTID server the client emits SET GTID_PURGED,
+#                          which needs privileges shared hosting does not hand
+#                          out — and which a single-database restore must not
+#                          be carrying in the first place.
+COMPAT_FLAGS=()
+MYSQLDUMP_HELP="$(mysqldump --help 2>/dev/null || true)"
+case "$MYSQLDUMP_HELP" in *column-statistics*) COMPAT_FLAGS+=(--column-statistics=0) ;; esac
+case "$MYSQLDUMP_HELP" in *set-gtid-purged*) COMPAT_FLAGS+=(--set-gtid-purged=OFF) ;; esac
+
+run_mysqldump() {
+    mysqldump \
+        --host="$DB_HOST" \
+        --user="$DB_USER" \
+        --single-transaction \
+        --quick \
+        --default-character-set=utf8mb4 \
+        --no-tablespaces \
+        ${COMPAT_FLAGS+"${COMPAT_FLAGS[@]}"} \
+        "$@" \
+        "$DB_NAME" > "$BASE" 2>"$DUMP_ERR"
+}
+
+# A dump gets three goes before the night is written off, because the two ways
+# it usually dies are both survivable:
+#
+#   TRANSIENT. A dropped connection, max_user_connections reached because
+#   somebody else on the shared box is busy, or a migration running ALTER while
+#   --single-transaction holds its snapshot — that last one aborts the dump with
+#   "table definition has changed" and is entirely a matter of WHEN the cron
+#   fired. Thirty seconds later it works. One attempt turned an hour's bad
+#   timing into a night with no backup.
+#
+#   THE EXTRAS. Routines, triggers and events are read through SHOW statements a
+#   cPanel database user is not always granted, and a view whose DEFINER no
+#   longer exists — which is what an import restored under a different user
+#   leaves behind — fails the same way. Any of them aborts the dump and takes
+#   THE DATA down with it, which is the wrong trade: the rows are the thing
+#   being protected. So the last attempt drops the extras and keeps the rows.
+#   That is a degraded backup and it says so, loudly, in the status the admin
+#   header reads — but it is a backup, and it is taken tonight rather than
+#   after somebody has worked out a privilege.
+EXTRAS=(--routines --triggers --events)
+DUMP_STATUS=1
+ATTEMPT=0
+# Held from the attempt that FAILED, because each attempt overwrites the stderr
+# file and the attempt that succeeds leaves it empty. Read afterwards, it
+# reported the reason for the fallback as "()" — a warning that says something
+# was skipped without saying why is a warning nobody can act on.
+LAST_ERROR=""
+while [ "$ATTEMPT" -lt 3 ]; do
+    ATTEMPT=$((ATTEMPT + 1))
+    case "$ATTEMPT" in
+        1) log "starting dump of $DB_NAME"
+           run_mysqldump "${EXTRAS[@]}" ;;
+        2) log "attempt 1 exited $DUMP_STATUS — retrying in 30s in case it was transient"
+           sleep 30
+           run_mysqldump "${EXTRAS[@]}" ;;
+        3) log "attempt 2 exited $DUMP_STATUS — retrying without --routines/--triggers/--events"
+           run_mysqldump ;;
+    esac
+    DUMP_STATUS=$?
+
+    [ "$DUMP_STATUS" -eq 0 ] && break
+
+    LAST_ERROR="$(dump_error)"
+    log "attempt $ATTEMPT failed (exit $DUMP_STATUS): $LAST_ERROR"
+    # The whole of stderr as well as the one line lifted out of it: the summary
+    # is what gets reported, the full text is what gets diagnosed.
+    cat "$DUMP_ERR" >> "$LOG" 2>/dev/null
+done
 unset MYSQL_PWD
 
-if [ $DUMP_STATUS -ne 0 ]; then
+# A FAILED dump is evidence and is never rotated away with the good ones. But
+# an hourly job that has been failing for a week leaves a week of partial
+# dumps, uncompressed, on a shared disk with a quota — and a full disk stops
+# the INSERTs, which is a larger outage than the one being investigated. The
+# newest few say everything the whole pile would.
+prune_failed_artifacts() {
+    ls -1t "$BACKUP_DIR"/*.FAILED 2>/dev/null | tail -n +6 | while IFS= read -r stale; do
+        rm -f -- "$stale" && log "removed superseded evidence file $(basename "$stale")"
+    done
+}
+
+if [ "$DUMP_STATUS" -ne 0 ]; then
     # Keep whatever was written. mysqldump stops at the first table it cannot
     # read, so the partial file names the point of failure — and leaving it
     # under its ordinary name would let the next run rotate it away as though
     # it were a good backup.
     [ -f "$BASE" ] && mv "$BASE" "$BASE.FAILED"
-    fail "mysqldump exited $DUMP_STATUS (partial output kept as $BASE.FAILED)"
+    prune_failed_artifacts
+    log "all $ATTEMPT attempts failed; partial output kept as $BASE.FAILED"
+    # The basename, not the path: this sentence is shown in the admin header,
+    # and a full server path there pushes the part that matters — what
+    # mysqldump said — off the end of the line.
+    fail "mysqldump exited $DUMP_STATUS after $ATTEMPT attempts${LAST_ERROR:+ — $LAST_ERROR} (partial output kept as $(basename "$BASE").FAILED)"
+fi
+
+if [ "$ATTEMPT" -ge 3 ]; then
+    WARNING_NOTE="stored routines, triggers and events were SKIPPED${LAST_ERROR:+ — mysqldump said: $LAST_ERROR}. The rows are safe; the schema is not complete."
+    log "WARNING: $WARNING_NOTE"
 fi
 
 # ---------------------------------------------------------------------------
@@ -322,6 +431,10 @@ find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_*.sql.gz*" -mtime "+$BA
 # The file archives age out on the same schedule, so a dump and its files are
 # never kept apart — half a backup restores to a shop with broken documents.
 find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_files_*.tar.gz*" -mtime "+$BACKUP_KEEP_DAYS" -print -delete >>"$LOG" 2>&1
+# Evidence from earlier failures is bounded here too, not only when a run
+# fails: the pile that fills the disk is the one left behind by a run that has
+# since started working again, and nobody comes back to sweep it up.
+prune_failed_artifacts
 
 if [ "$BACKUP_KEEP_EVERY" -gt 1 ] 2>/dev/null; then
     # The cutoff in seconds since the epoch. Everything newer is untouchable.

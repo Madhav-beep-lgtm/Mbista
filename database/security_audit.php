@@ -217,9 +217,19 @@ if (!is_array($status)) {
     printf("  %-20s %s (%s)\n", 'last run', $ranAt !== '' ? $ranAt : 'unknown', $state);
     printf("  %-20s %s\n", 'detail', (string) ($status['detail'] ?? ''));
 
+    $warning = trim((string) ($status['warning'] ?? ''));
+    if ($warning !== '') {
+        printf("  %-20s %s\n", 'warning', $warning);
+    }
+
     if ($state !== 'ok') {
         $note('CRITICAL', 'The last backup FAILED (' . $ranAt . ')',
             (string) ($status['detail'] ?? '') . ' — see backup-database.log on the server.');
+    } elseif ($warning !== '') {
+        // Succeeded, but on the fallback path — the rows are dumped and the
+        // rest of the schema is not. It is a backup, so it is not CRITICAL;
+        // it is incomplete, so it does not get to pass silently either.
+        $note('HIGH', 'The last backup succeeded only partly', $warning);
     } elseif ($ageHours > 48) {
         $note('CRITICAL', 'The last good backup is ' . (int) round($ageHours / 24) . ' days old',
             'A nightly job that has not run for days has stopped. Check the cron entry.');

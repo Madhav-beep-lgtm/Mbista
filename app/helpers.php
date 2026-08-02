@@ -2487,6 +2487,16 @@ function backup_health_warning(): ?string
             . ' days old — the nightly job has stopped. Check the cron entry.';
     }
 
+    // A backup the script had to degrade to get. It falls back to dumping the
+    // rows without the routines, triggers and events when those cannot be read,
+    // because rows without a trigger beat no backup at all — but the fallback
+    // succeeding must not read as a clean night. Restore day is far too late to
+    // discover the schema came back incomplete.
+    $warning = trim((string) ($status['warning'] ?? ''));
+    if ($warning !== '') {
+        return 'The last database backup succeeded, but only partly: ' . $warning;
+    }
+
     return null;
 }
 
