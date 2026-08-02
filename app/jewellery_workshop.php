@@ -808,7 +808,24 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                 && ((int) $existing['purity_id'] !== $purityId || (int) $existing['unit_id'] !== $unitId)) {
                 throw new RuntimeException('This order already has metal issued against it — its purity and unit can no longer be changed.');
             }
-            db()->prepare('UPDATE jewellery_orders SET order_date = :date, delivery_date = :delivery, party_id = :party,
+            // The number is the order's public identity, but it is still typed by
+            // a person, so a correction has to stay possible. What is not allowed
+            // is losing it: an empty field means "leave it as it was" rather than
+            // "clear it", because the issue, the receipt and the bill are all read
+            // back through this number.
+            $no = trim((string) ($input['order_no'] ?? '')) ?: (string) $existing['order_no'];
+            // Same courtesy as on create — a clash is answered with a sentence
+            // instead of a duplicate-key stack trace. The order excludes itself,
+            // so re-saving a form without touching the number never collides.
+            if ($no !== (string) $existing['order_no']) {
+                $dupCheck = db()->prepare('SELECT COUNT(*) FROM jewellery_orders
+                    WHERE company_id = :cid AND order_no = :no AND id <> :id');
+                $dupCheck->execute(['cid' => $companyId, 'no' => $no, 'id' => $orderId]);
+                if ((int) $dupCheck->fetchColumn() > 0) {
+                    throw new RuntimeException('Order number ' . $no . ' is already taken by another order.');
+                }
+            }
+            db()->prepare('UPDATE jewellery_orders SET order_no = :no, order_date = :date, delivery_date = :delivery, party_id = :party,
                     customer_name = :cname, customer_phone = :cphone, item_id = :item, metal_id = :metal, purity_id = :purity,
                     unit_id = :unit, expected_gross_weight = :gross, expected_fine_weight = :fine, design_no = :design,
                     expected_item = :expected,
@@ -820,7 +837,7 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                     vatable_amount = :vatable, vat_amount = :vat, tax_amount = :tax, manual_tax_amount = :mtax,
                     total_amount = :total
                 WHERE id = :id AND company_id = :cid')
-                ->execute($params + ['id' => $orderId]);
+                ->execute($params + ['id' => $orderId, 'no' => $no]);
 
             // Revising an order replaces its lines. Any line that already has
             // metal out with a kaligad must survive that intact: its issue

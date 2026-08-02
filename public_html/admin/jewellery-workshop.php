@@ -729,11 +729,13 @@ jw_filter_bar_styles();
                 <label>Address<input type="text" name="customer_address" maxlength="255"></label>
                 <?php // The reference is usually minted by the engine (JO-2083-000001);
                       // typing one keeps a shop's own numbering. Uniqueness is enforced
-                      // on save with a sentence, not a stack trace. On edit the number
-                      // is identity and stays read-only. ?>
+                      // on save with a sentence, not a stack trace. It stays editable on
+                      // edit too, so a number typed wrong — or one the shop numbered by
+                      // hand before the sequence was set — can still be corrected.
+                      // Clearing the box keeps the number it already has. ?>
                 <label>Order no.<input type="text" name="order_no" maxlength="60"
                         value="<?= e((string) $orderField('order_no')) ?>"
-                        <?= $editOrder ? 'readonly' : 'placeholder="auto — e.g. JO-2083-000001"' ?>></label>
+                        <?= $editOrder ? 'placeholder="blank keeps the current number"' : 'placeholder="auto — e.g. JO-2083-000001"' ?>></label>
                 <?php // What the customer actually said — "bridal set", "ring like my
                       // mother's" — searchable and printed on the slip. ?>
                 <label>Expected item<input type="text" name="expected_item" maxlength="190"
