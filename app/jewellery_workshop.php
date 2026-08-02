@@ -1115,7 +1115,7 @@ function jewellery_delete_order(int $companyId, int $orderId): bool
 function jewellery_assignment(int $companyId, int $assignmentId): ?array
 {
     $stmt = db()->prepare('SELECT a.*, k.name AS karigar_name, k.code AS karigar_code, k.engagement_type, k.party_id,
-            o.order_no, i.sku AS item_code, i.name AS item_name, p.code AS purity_code, p.fineness, u.code AS unit_code
+            o.order_no, o.order_date, i.sku AS item_code, i.name AS item_name, p.code AS purity_code, p.fineness, u.code AS unit_code
         FROM jewellery_order_assignments a
         INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
         LEFT JOIN jewellery_orders o ON o.id = a.order_id
@@ -2181,6 +2181,21 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
     if ($issuedFine <= 0) {
         // A WORK ORDER: no metal went out, so the gold in the piece is his and
         // the shop is buying it. Nothing to divide, so a rate is found instead.
+        //
+        // PRICED ON THE ORDER DATE, not the day it came back. The bill prices
+        // the same piece off the board as it stood the day the customer agreed
+        // it — jewellery_order_sale_prefill has always done that, because gold
+        // moves and a deal already struck is not repriced. Buying the kaligad's
+        // metal at a LATER day's rate makes the two halves of one job disagree:
+        // the shop books a gain or a loss on gold it never held for a day and
+        // never speculated on, and the margin on the job stops being the making
+        // charge it actually agreed. One job, one day's rate, both ways.
+        //
+        // A showroom piece has no order and no such date, so it falls back to
+        // the day it was received, which is the day the shop acquired it.
+        $orderDate = trim((string) ($assignment['order_date'] ?? ''));
+        $fallbackDate = $receiveDate !== '' && strtotime($receiveDate) !== false ? $receiveDate : date('Y-m-d');
+        $pricingDate = $orderDate !== '' && strtotime($orderDate) !== false ? $orderDate : $fallbackDate;
         $ownItem = jewellery_item($companyId, $receivedItemId ?: (int) $assignment['item_id']);
         $resolved = jw_own_metal_fine_rate(
             $companyId,
@@ -2188,9 +2203,12 @@ function jewellery_preview_receipt(int $companyId, int $assignmentId, float $rec
             $purity,
             (int) $assignment['unit_id'],
             $netGold,
-            $receiveDate !== '' && strtotime($receiveDate) !== false ? $receiveDate : date('Y-m-d'),
+            $pricingDate,
             $ownMetalRate
         );
+        if ($resolved['source'] === 'board' && $pricingDate === $orderDate) {
+            $resolved['note'] .= ' — the day the order was taken';
+        }
         $avgRate = $resolved['rate'];
         $rateSource = $resolved['source'];
         $rateNote = $resolved['note'];

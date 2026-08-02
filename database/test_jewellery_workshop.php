@@ -1640,6 +1640,34 @@ ok($typedPreview['ok'] && (string) $typedPreview['rate_source'] === 'typed'
     && near((float) $typedPreview['avg_fine_rate'], 155000.0),
     'A rate typed on the receipt overrides the board');
 
+// ONE JOB, ONE DAY'S RATE. The bill prices off the board as it stood the day
+// the customer agreed the order; buying the kaligad's gold at the day it came
+// back instead books a gain or a loss on metal the shop never held, and the
+// margin stops being the making charge it agreed.
+jewellery_save_rate($cidA, ['metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'rate_date' => '2026-10-20', 'rate_type' => 'purchase', 'rate' => 128240], $userA);   // 140,000 per fine
+jewellery_save_rate($cidA, ['metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'rate_date' => '2026-10-28', 'rate_type' => 'purchase', 'rate' => 164880], $userA);   // 180,000 per fine
+$datedOrder = jewellery_save_order($cidA, $fyA, ['party_id' => $customer, 'order_date' => '2026-10-20',
+    'delivery_date' => '2026-10-30', 'item_id' => $chain, 'metal_id' => $gold, 'purity_id' => $p22,
+    'unit_id' => $tola, 'expected_gross_weight' => 2, 'making_basis' => 'flat', 'making_rate' => 700],
+    [], $userA);
+$datedAssign = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'order_id' => $datedOrder, 'issued_gross_weight' => 0, 'issue_date' => '2026-10-21',
+    'making_basis' => 'flat', 'making_rate' => 700,
+], $userA);
+ok($datedAssign['ok'], 'A customer order goes out as a work order' . ($datedAssign['ok'] ? '' : ' — ' . $datedAssign['error']));
+$datedPreview = jewellery_preview_receipt($cidA, (int) $datedAssign['assignment_id'], 2, $p22, null, 0.0, '2026-10-28');
+ok($datedPreview['ok'] && near((float) $datedPreview['avg_fine_rate'], 140000.0),
+    'His gold is bought at the ORDER date rate of 140,000, not the 180,000 of the day it came back'
+    . ' (got ' . number_format((float) ($datedPreview['avg_fine_rate'] ?? 0), 2) . ')');
+ok(strpos((string) $datedPreview['rate_note'], 'order was taken') !== false,
+    'And the receipt says so, so nobody has to work out which day it used');
+$datedTyped = jewellery_preview_receipt($cidA, (int) $datedAssign['assignment_id'], 2, $p22, null, 0.0, '2026-10-28', 175000);
+ok(near((float) $datedTyped['avg_fine_rate'], 175000.0),
+    'A rate agreed at the counter still beats the order date — somebody was there');
+
 // No issue, no board, no cost basis anywhere: refuse. Booking it at zero is
 // what this whole section is about.
 $bareItem = jewellery_save_item($cidA, ['code' => 'BARE22', 'name' => 'Unstocked 22K', 'item_type' => 'ornament',
