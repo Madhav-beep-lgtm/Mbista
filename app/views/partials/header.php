@@ -37,6 +37,7 @@ if ($navSection === '') {
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
     <meta name="description" content="<?= e(setting('site_meta_description', 'M.Bista & Associates, Chartered Accountants — audit, taxation, accounting, and advisory services in Nepal with a secure client portal.')) ?>">
     <meta name="theme-color" content="#064e3b">
+    <?php require __DIR__ . '/pwa_head.php'; ?>
     <meta property="og:site_name" content="<?= e(app_name()) ?>">
     <meta property="og:title" content="<?= e($pageTitle) ?> | <?= e(app_name()) ?>">
     <meta property="og:description" content="<?= e(setting('site_meta_description', 'Audit, taxation, accounting, and advisory services with a secure client portal.')) ?>">

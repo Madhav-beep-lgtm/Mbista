@@ -367,3 +367,67 @@ table.jw-lines .jw-derived {
     color: inherit !important;
     -webkit-text-fill-color: inherit !important;
 }
+
+/* ---------------------------------------------------------------------------
+   Phones
+   ---------------------------------------------------------------------------
+   This module had exactly one media query — it collapsed the rail below 1100px
+   and stopped there — while the rest of the app carries a hundred. It is also
+   the newest and busiest part of the shop, so the screens a counter uses all
+   day were the ones that had never been laid out for the phone in their hand.
+
+   The line grid deals with itself, in jewellery_line_grid.php, where its
+   twenty-one columns become cards. What is left is this module's own furniture
+   and one bug that belongs to the whole app but bites hardest here. */
+
+/* THE ZOOM. Safari on iOS zooms the entire page when a focused input's text is
+   smaller than 16px, and does not zoom back out. Every compact control in this
+   module — the filter bars, the rail, the toolbars — sat at .8–.9rem, so
+   tapping any of them threw the layout sideways and left the next field off the
+   edge of the screen. It reads as "the app jumps about on my phone" and it is
+   one number. 44px is the tap target Apple asks for. */
+@media (max-width: 720px) {
+    .jw-card input:not([type="checkbox"]):not([type="radio"]),
+    .jw-card select,
+    .jw-card textarea,
+    .jw-report-filter input,
+    .jw-report-filter select,
+    .jw-grid-toolbar input,
+    .jw-grid-toolbar select {
+        font-size: 16px;
+        min-height: 44px;
+    }
+
+    /* A page head that stacks instead of squeezing its title to two letters a
+       line beside an action button. */
+    .jw-page-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .jw-page-head-aside { width: 100%; }
+    .jw-card { padding: 12px; border-radius: 12px; }
+    .jw-card-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .jw-card-head-actions { width: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
+
+    /* Toolbars and filter rows wrap rather than scroll: a control the thumb
+       cannot reach without dragging the row sideways may as well not be there. */
+    .jw-grid-toolbar,
+    .jw-report-filter,
+    .jw-report-exports,
+    .jw-rail-actions { flex-wrap: wrap; gap: 8px; }
+    .jw-grid-toolbar > *,
+    .jw-report-filter > * { flex: 1 1 140px; min-width: 0; }
+    .jw-report-exports .jw-export { flex: 1 1 auto; min-height: 44px; }
+
+    /* The rail carries the running totals. On a phone it belongs under the
+       grid, where it is read after the figures are typed rather than competing
+       with them for the width. */
+    .jw-rail { position: static; margin-top: 14px; }
+    .jw-summary-row { font-size: .95rem; }
+    .jw-summary-total { font-size: 1.05rem; }
+
+    /* Read-only tables keep their sideways scroll — a ledger is a grid and
+       stacking it into cards makes it unreadable — but the drag gets momentum,
+       and a table that CAN scroll says so instead of looking cut off. */
+    .mbw-tablewrap { -webkit-overflow-scrolling: touch; }
+    .jw-shortcuts { grid-template-columns: minmax(0, 1fr); }
+    .jw-page-foot { flex-direction: column; align-items: stretch; gap: 8px; }
+    .jw-add-row, .jw-lines-actions button { min-height: 44px; }
+}

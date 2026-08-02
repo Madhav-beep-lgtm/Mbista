@@ -15,6 +15,7 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
     <meta name="theme-color" content="#064e3b">
+    <?php require __DIR__ . '/pwa_head.php'; ?>
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#064e3b">

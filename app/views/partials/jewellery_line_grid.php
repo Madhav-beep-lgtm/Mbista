@@ -127,6 +127,85 @@ table.jw-lines td.c-del button:hover { background: var(--mbw-red-soft, #fdeaea);
 .workspace-form-grid > label > textarea { margin-top: 0; }
 .workspace-form-grid > label > .bs-date-hint { margin-top: 2px; }
 .workspace-form-grid > label > .frm-optional { margin-top: 2px; }
+
+/* ---------------------------------------------------------------------------
+   ON A PHONE THE TABLE STOPS BEING A TABLE.
+   ---------------------------------------------------------------------------
+   Twenty-one columns come to about 1,740px. The scroller above keeps that off
+   the page, which is the right answer on a laptop with a narrow window — but on
+   a 390px phone it means four and a half screens of sideways dragging PER ROW,
+   with the header scrolled out of sight so nothing tells you which box you are
+   in. That is not a layout that gets better with smaller type; it is the wrong
+   shape.
+
+   So each row becomes a card and every cell carries its own caption, read off
+   the data-label the markup sets. Two fields to a line, because a weight box
+   does not need the width of a phone, and the genuinely wide things — the item,
+   the note, the delete — take the full width.
+
+   The captions come from data-label rather than a second set of <span>s because
+   the header already says these words once. Saying them twice in the markup is
+   two places to change a column name and one of them to forget. */
+@media (max-width: 720px) {
+    .jw-lines-scroll { overflow-x: visible; scrollbar-gutter: auto; }
+    table.jw-lines,
+    table.jw-lines tbody,
+    table.jw-lines tr,
+    table.jw-lines td { display: block; width: auto; min-width: 0; }
+    /* thead and colgroup carry the whole fixed-width layout between them. Both
+       have to go, or those widths go on being applied to blocks that no longer
+       want them. */
+    table.jw-lines thead,
+    table.jw-lines colgroup { display: none; }
+    table.jw-lines { table-layout: auto; font-size: 1rem; }
+
+    table.jw-lines tr {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px 12px;
+        border: 1px solid var(--mbw-border, #d9e2ec);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 12px;
+        background: var(--mbw-card, #fff);
+    }
+    table.jw-lines td { padding: 0; border: 0; }
+    table.jw-lines td::before {
+        content: attr(data-label);
+        display: block;
+        font-size: .7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--mbw-muted, #64748b);
+        margin-bottom: 3px;
+    }
+    /* An empty caption must not leave a gap the height of a line of text. */
+    table.jw-lines td[data-label=""]::before { display: none; }
+
+    table.jw-lines td[data-label="Item"],
+    table.jw-lines td[data-label="Item note"] { grid-column: 1 / -1; }
+    table.jw-lines td.c-del {
+        grid-column: 1 / -1;
+        display: flex;
+        justify-content: flex-end;
+        border-top: 1px dashed var(--mbw-border, #d9e2ec);
+        padding-top: 8px;
+    }
+    table.jw-lines td.c-del button { width: auto; padding: 0 12px; min-height: 36px; }
+    table.jw-lines td.c-del button::after { content: " Remove"; font-size: .8rem; }
+
+    /* 16px is not a matter of taste. Safari on iOS ZOOMS THE WHOLE PAGE when a
+       focused input's text is smaller than 16px, and leaves it zoomed — so
+       tapping a weight box threw the layout sideways and put the next box
+       off-screen. 44px is the tap target Apple asks for; at .85rem and 32px
+       these were neither readable nor reliably hittable with a thumb. */
+    table.jw-lines input,
+    table.jw-lines select { font-size: 16px; min-height: 44px; padding: 6px 10px; }
+    table.jw-lines input[type="number"] { text-align: left; }
+    .jw-lines-actions { flex-wrap: wrap; }
+    .jw-lines-actions button { min-height: 44px; }
+}
 </style>
     <?php
 }
@@ -227,7 +306,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
             <tbody>
             <?php for ($i = 0; $i < $slots; $i++): $row = $existing[$i] ?? null; ?>
                 <tr>
-                    <td>
+                    <td data-label="Item">
                         <?php
                             // Which stored line this row IS. Position is not
                             // identity — two rows can hold the same item, and
@@ -257,7 +336,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                             <?php endforeach; ?>
                         </select>
                     </td>
-                    <td>
+                    <td data-label="Purity">
                         <?php // data-fineness lets the summary rail turn net weight into the
                               // FINE equivalent live — actual weight and pure-metal content
                               // shown together, which is how a jewellery figure is read. ?>
@@ -267,7 +346,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                             <?php endforeach; ?>
                         </select>
                     </td>
-                    <td>
+                    <td data-label="Unit">
                         <?php // data-grams: the unit's gram factor, so the rail can reduce
                               // every row to grams before summing — lines in different
                               // units cannot be added in their own units. ?>
@@ -277,22 +356,22 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                             <?php endforeach; ?>
                         </select>
                     </td>
-                    <td><input type="number" name="<?= $prefix ?>_qty_pieces[]" step="0.001" min="0" value="<?= e((string) ($row['qty_pieces'] ?? '0')) ?>"></td>
-                    <td><input type="number" name="<?= $prefix ?>_gross_weight[]" step="0.0001" min="0" value="<?= e((string) ($row['gross_weight'] ?? '0')) ?>"></td>
-                    <td><input type="number" name="<?= $prefix ?>_stone_weight[]" class="jw-stone-wt" step="0.0001" min="0" value="<?= e((string) ($row['stone_weight'] ?? '0')) ?>"></td>
+                    <td data-label="Pcs"><input type="number" name="<?= $prefix ?>_qty_pieces[]" step="0.001" min="0" value="<?= e((string) ($row['qty_pieces'] ?? '0')) ?>"></td>
+                    <td data-label="Gross"><input type="number" name="<?= $prefix ?>_gross_weight[]" step="0.0001" min="0" value="<?= e((string) ($row['gross_weight'] ?? '0')) ?>"></td>
+                    <td data-label="Less"><input type="number" name="<?= $prefix ?>_stone_weight[]" class="jw-stone-wt" step="0.0001" min="0" value="<?= e((string) ($row['stone_weight'] ?? '0')) ?>"></td>
                     <?php if ($prefix !== 'x'): ?>
-                        <td><input type="number" name="<?= $prefix ?>_wastage_pct[]" class="jw-wastage-pct" step="0.001" min="0" value="<?= e((string) ($row['wastage_pct'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_wastage_weight[]" class="jw-wastage-wt" step="0.0001" min="0" value="<?= e((string) ($row['wastage_weight'] ?? '0')) ?>"></td>
+                        <td data-label="Wast %"><input type="number" name="<?= $prefix ?>_wastage_pct[]" class="jw-wastage-pct" step="0.001" min="0" value="<?= e((string) ($row['wastage_pct'] ?? '0')) ?>"></td>
+                        <td data-label="Wast wt"><input type="number" name="<?= $prefix ?>_wastage_weight[]" class="jw-wastage-wt" step="0.0001" min="0" value="<?= e((string) ($row['wastage_weight'] ?? '0')) ?>"></td>
                     <?php endif; ?>
-                    <td><input type="number" name="<?= $prefix ?>_rate[]" step="0.0001" min="0" value="<?= e((string) ($row['rate'] ?? '0')) ?>"></td>
+                    <td data-label="Rate"><input type="number" name="<?= $prefix ?>_rate[]" step="0.0001" min="0" value="<?= e((string) ($row['rate'] ?? '0')) ?>"></td>
                     <?php if ($full): ?>
-                        <td><input type="number" name="<?= $prefix ?>_making_amount[]" step="0.01" min="0" value="<?= e((string) ($row['making_amount'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_diamond_carat[]" step="0.001" min="0" value="<?= e((string) ($row['diamond_carat'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_diamond_amount[]" step="0.01" min="0" value="<?= e((string) ($row['diamond_amount'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_other_diamond_carat[]" step="0.001" min="0" value="<?= e((string) ($row['other_diamond_carat'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_other_diamond_amount[]" step="0.01" min="0" value="<?= e((string) ($row['other_diamond_amount'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_stone_carat[]" step="0.0001" min="0" value="<?= e((string) ($row['stone_carat'] ?? '0')) ?>"></td>
-                        <td><input type="number" name="<?= $prefix ?>_stone_amount[]" step="0.01" min="0" value="<?= e((string) ($row['stone_amount'] ?? '0')) ?>"></td>
+                        <td data-label="Making"><input type="number" name="<?= $prefix ?>_making_amount[]" step="0.01" min="0" value="<?= e((string) ($row['making_amount'] ?? '0')) ?>"></td>
+                        <td data-label="Diamond crt"><input type="number" name="<?= $prefix ?>_diamond_carat[]" step="0.001" min="0" value="<?= e((string) ($row['diamond_carat'] ?? '0')) ?>"></td>
+                        <td data-label="Diamond amt"><input type="number" name="<?= $prefix ?>_diamond_amount[]" step="0.01" min="0" value="<?= e((string) ($row['diamond_amount'] ?? '0')) ?>"></td>
+                        <td data-label="Other dia crt"><input type="number" name="<?= $prefix ?>_other_diamond_carat[]" step="0.001" min="0" value="<?= e((string) ($row['other_diamond_carat'] ?? '0')) ?>"></td>
+                        <td data-label="Other dia amt"><input type="number" name="<?= $prefix ?>_other_diamond_amount[]" step="0.01" min="0" value="<?= e((string) ($row['other_diamond_amount'] ?? '0')) ?>"></td>
+                        <td data-label="Stone crt"><input type="number" name="<?= $prefix ?>_stone_carat[]" step="0.0001" min="0" value="<?= e((string) ($row['stone_carat'] ?? '0')) ?>"></td>
+                        <td data-label="Stone amt"><input type="number" name="<?= $prefix ?>_stone_amount[]" step="0.01" min="0" value="<?= e((string) ($row['stone_amount'] ?? '0')) ?>"></td>
                     <?php endif; ?>
                     <?php if ($withWorkshop): ?>
                         <?php
@@ -302,7 +381,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                             // wastage against it.
                             $issued = (int) ($row['assignment_id'] ?? 0) > 0;
                         ?>
-                        <td>
+                        <td data-label="Kaligad">
                             <select name="<?= $prefix ?>_karigar_id[]"<?= $issued ? ' disabled' : '' ?>
                                 title="<?= $issued ? e('Metal is already out on issue ' . (string) ($row['issue_no'] ?? '')) : 'Who is to make this piece' ?>">
                                 <option value="0">—</option>
@@ -314,16 +393,16 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                 <input type="hidden" name="<?= $prefix ?>_karigar_id[]" value="<?= (int) ($row['karigar_id'] ?? 0) ?>">
                             <?php endif; ?>
                         </td>
-                        <td><input type="date" name="<?= $prefix ?>_delivery_date[]" value="<?= e((string) ($row['delivery_date'] ?? '')) ?>"></td>
+                        <td data-label="Promised"><input type="date" name="<?= $prefix ?>_delivery_date[]" value="<?= e((string) ($row['delivery_date'] ?? '')) ?>"></td>
                         <?php // Free text both: sizes are written a dozen ways (US 7,
                               // 17 mm, 22"), and the note is the customer's wish for
                               // THIS piece — engraving, finish, stone preference. ?>
-                        <td><input type="text" name="<?= $prefix ?>_size[]" maxlength="60" placeholder="ring 7 / 22&quot;"
+                        <td data-label="Size"><input type="text" name="<?= $prefix ?>_size[]" maxlength="60" placeholder="ring 7 / 22&quot;"
                                    value="<?= e((string) ($row['size'] ?? '')) ?>"></td>
-                        <td><input type="text" name="<?= $prefix ?>_notes[]" maxlength="255" placeholder="engraving, finish…"
+                        <td data-label="Item note"><input type="text" name="<?= $prefix ?>_notes[]" maxlength="255" placeholder="engraving, finish…"
                                    value="<?= e((string) ($row['notes'] ?? '')) ?>"></td>
                     <?php endif; ?>
-                    <td class="c-del">
+                    <td class="c-del" data-label="">
                         <?php // Clearing the item empties the row, and an empty row is ignored on save. ?>
                         <button type="button" class="jw-line-remove" aria-label="Remove this row">&times;</button>
                     </td>

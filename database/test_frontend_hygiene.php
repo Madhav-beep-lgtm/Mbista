@@ -518,5 +518,62 @@ ok(str_contains($mainJs, "event.target.closest('input, textarea, select, [conten
 ok(preg_match('~@media \(max-width: 1100px\) \{\s*\R\s*body\.admin-layout\.sidebar-collapsed[^@]*\.admin-sidebar \{\s*\R\s*display: none~', $portalCss) === 1,
     'On a narrow screen, where the sidebar stacks above the content, collapsed means gone');
 
+// ---------------------------------------------------------------------------
+// Installable on a phone, and safe to be
+// ---------------------------------------------------------------------------
+$manifest = json_decode((string) @file_get_contents($root . '/public_html/manifest.webmanifest'), true);
+ok(is_array($manifest), 'The web app manifest is valid JSON — a broken one is ignored silently by every browser');
+ok(($manifest['display'] ?? '') === 'standalone',
+    'It opens standalone, which is what makes it look like an app and not a browser tab');
+$iconSizes = array_map(static fn (array $i): string => (string) ($i['sizes'] ?? ''), (array) ($manifest['icons'] ?? []));
+ok(in_array('192x192', $iconSizes, true) && in_array('512x512', $iconSizes, true),
+    'With the 192 and 512 icons a manifest is required to carry');
+$purposes = array_map(static fn (array $i): string => (string) ($i['purpose'] ?? ''), (array) ($manifest['icons'] ?? []));
+ok(in_array('maskable', $purposes, true),
+    'And a MASKABLE one — Android crops every icon to its launcher shape, and a normal icon loses its border to that crop');
+foreach (['icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'apple-touch-icon.png'] as $iconFile) {
+    ok(is_file($root . '/public_html/assets/img/' . $iconFile),
+        "$iconFile is committed as a file — a phone asks for it before PHP runs");
+}
+
+$pwaHead = (string) @file_get_contents($root . '/app/views/partials/pwa_head.php');
+ok(str_contains($pwaHead, 'rel="apple-touch-icon"'),
+    'apple-touch-icon is declared — iOS reads NONE of the manifest icons for the home screen, and falls back to a screenshot of the page');
+foreach (['admin_header', 'client_header', 'header', 'staff_header'] as $layout) {
+    ok(str_contains((string) @file_get_contents($root . "/app/views/partials/$layout.php"), 'pwa_head.php'),
+        "$layout pulls the PWA head in — one layout missing it is one way into the app that cannot be installed");
+}
+
+/*
+ * THE ONE THAT MATTERS. A service worker that caches pages hands the shop a
+ * balance, a stock figure or an outstanding amount from an earlier visit with
+ * nothing on screen to say it is old, and somebody takes payment against it. A
+ * stale number is worse than an error, because an error is obvious and a wrong
+ * number gets acted on.
+ */
+$sw = (string) @file_get_contents($root . '/public_html/sw.js');
+ok($sw !== '', 'There is a service worker');
+ok(str_contains($sw, "request.method !== 'GET'"),
+    'It never touches anything but GET — a queued sale replayed later against a moved rate board is its own disaster');
+ok(str_contains($sw, 'function isStaticAsset'),
+    'Caching is limited to a named list of static file types');
+ok(str_contains($sw, "if (request.mode === 'navigate')") && str_contains($sw, 'fetch(request).catch'),
+    'Pages go to the NETWORK every time, and the offline page appears only when that fetch fails');
+ok(!preg_match('~caches\.match\(request\)[^;]*navigate~s', $sw),
+    'No path serves a cached PAGE back — the whole point of the design');
+$offline = (string) @file_get_contents($root . '/public_html/offline.html');
+ok($offline !== '' && stripos($offline, 'nothing at all') !== false,
+    'And the offline page shows no figures at all, on purpose, and says why');
+
+// The line grid: 21 columns on a 390px phone is four and a half screens of
+// sideways dragging per row, with the header scrolled out of sight.
+$grid = (string) @file_get_contents($root . '/app/views/partials/jewellery_line_grid.php');
+ok(substr_count($grid, 'data-label="') >= 20,
+    'Every grid cell carries its own caption, so a row can be read as a card when the header is gone');
+ok(str_contains($grid, '@media (max-width: 720px)') && str_contains($grid, 'content: attr(data-label)'),
+    'And below 720px the rows ARE cards, captions and all');
+ok(preg_match('~@media \(max-width: 720px\).*?font-size: 16px~s', $grid) === 1,
+    'Inputs hit 16px on a phone — Safari zooms the whole page for anything smaller and does not zoom back');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
