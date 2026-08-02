@@ -1129,6 +1129,68 @@ function jewellery_assignment(int $companyId, int $assignmentId): ?array
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
+/**
+ * Everything handed over on one issue, in the order it went.
+ *
+ * Beside jewellery_assignment() rather than beside the function that writes a
+ * component, because the RECEIPT is what has to read this: the kaligad's
+ * holding is cleared component by component, each back to the item it came out
+ * of. jewellery_assign.php requires this file, so nothing there can be called
+ * from here — which is exactly why the stones went out and never came back.
+ */
+function jewellery_assignment_components(int $companyId, int $assignmentId): array
+{
+    if (!table_exists('jewellery_assignment_components')) {
+        return [];
+    }
+    $stmt = db()->prepare('SELECT c.*, i.sku AS item_code, i.name AS item_name,
+            m.code AS metal_code, m.name AS metal_name,
+            p.code AS purity_code, p.fineness, u.code AS unit_code, u.grams AS unit_grams
+        FROM jewellery_assignment_components c
+        INNER JOIN inventory_items i ON i.id = c.item_id
+        LEFT JOIN jewellery_item_profiles ip ON ip.inventory_item_id = i.id
+        LEFT JOIN jewellery_metals m ON m.id = ip.metal_id
+        LEFT JOIN jewellery_purities p ON p.id = c.purity_id
+        LEFT JOIN jewellery_units u ON u.id = c.unit_id
+        WHERE c.company_id = :cid AND c.assignment_id = :aid
+        ORDER BY c.id ASC');
+    $stmt->execute(['cid' => $companyId, 'aid' => $assignmentId]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * What one issue is holding, metal and stones apart.
+ *
+ * Pure: it is handed the components, so the arithmetic that must never mix the
+ * two can be read and tested in one place.
+ */
+function jewellery_component_totals(array $components): array
+{
+    $totals = ['metal_gross' => 0.0, 'metal_fine' => 0.0, 'metal_amount' => 0.0,
+        'stone_carat' => 0.0, 'stone_amount' => 0.0, 'metal_lines' => 0, 'stone_lines' => 0];
+    foreach ($components as $component) {
+        if ((string) ($component['component_kind'] ?? 'metal') === 'stone') {
+            $totals['stone_lines']++;
+            $totals['stone_carat'] += (float) ($component['qty_carat'] ?? 0);
+            $totals['stone_amount'] += (float) ($component['amount'] ?? 0);
+            continue;
+        }
+        $totals['metal_lines']++;
+        $totals['metal_gross'] += (float) ($component['gross_weight'] ?? 0);
+        $totals['metal_fine'] += (float) ($component['fine_weight'] ?? 0);
+        $totals['metal_amount'] += (float) ($component['amount'] ?? 0);
+    }
+    foreach (['metal_gross', 'metal_fine', 'stone_carat'] as $key) {
+        $totals[$key] = round($totals[$key], 4);
+    }
+    foreach (['metal_amount', 'stone_amount'] as $key) {
+        $totals[$key] = round($totals[$key], 2);
+    }
+
+    return $totals;
+}
+
 function jewellery_assignments_list(int $companyId, array $filters = []): array
 {
     $sql = 'SELECT a.*, k.name AS karigar_name, k.code AS karigar_code, o.order_no,
@@ -2340,8 +2402,24 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
         // That surplus is credited to him below as part of his wages, so the
         // two sides move together and the voucher balances either way round.
         $issuedAmount = jw_round_money((float) $assignment['issued_amount']);
+        // THE STONES WENT OUT ON THIS LEDGER TOO.
+        //
+        // A packet of diamonds is issued through the same posting as a bar of
+        // gold — Dr metal with kaligad, Cr own stock — but it totals into
+        // issued_stone_amount, deliberately kept apart from issued_amount so
+        // that carats can never leak into a wastage calculation over fine gold.
+        // The receipt then credited back issued_amount alone, so the diamonds'
+        // value STAYED on the kaligad's ledger after the ring was back in the
+        // safe, and stayed there for good: nothing else ever looks at that
+        // assignment again. Every stone-set job left a permanent debit behind.
+        //
+        // They come back with the metal, because they came back INSIDE it: the
+        // stones are set in the piece, so their value lands in the finished
+        // ornament's stock and the kaligad is holding neither any more.
+        $stoneAmount = jw_round_money((float) ($assignment['issued_stone_amount'] ?? 0));
+        $heldAmount = jw_round_money($issuedAmount + $stoneAmount);
         $surplusAmount = (float) ($preview['surplus_amount'] ?? 0);
-        $returnedValue = jw_round_money($issuedAmount - $wastageAmount + $surplusAmount);
+        $returnedValue = jw_round_money($heldAmount - $wastageAmount + $surplusAmount);
         // Credit the LEDGER THE ISSUE ACTUALLY DEBITED, recorded on the
         // assignment at issue time. Re-deriving it here from the kaligad's
         // current name and current mappings is what created stranded debits
@@ -2362,8 +2440,9 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
         if ($returnedValue > 0) {
             $legs[] = ['ledger_id' => $destLedgerId, 'amount' => $returnedValue, 'memo' => 'Finished piece back in stock ' . $no];
         }
-        if ($issuedAmount > 0) {
-            $legs[] = ['ledger_id' => $sourceLedgerId, 'amount' => -$issuedAmount, 'memo' => 'Metal returned from karigar ' . $no];
+        if ($heldAmount > 0) {
+            $legs[] = ['ledger_id' => $sourceLedgerId, 'amount' => -$heldAmount,
+                'memo' => ($stoneAmount > 0 ? 'Metal and stones' : 'Metal') . ' returned from karigar ' . $no];
         }
         if ($wastageAmount > 0) {
             // The wastage is a real loss, less whatever is recovered from wages.
@@ -2396,18 +2475,63 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
         // --- metal leg -----------------------------------------------------
         // Everything issued leaves the karigar: what came back plus what was lost.
         //
+        // COMPONENT BY COMPONENT, each back to the item it came out of. One
+        // lump against the assignment's own item was right only while an issue
+        // could hold one thing. It cannot any more (migration 103): a diamond
+        // ring goes out as gold AND diamonds, and the diamonds are a different
+        // item, in a different unit, at a different purity. Clearing them as
+        // though they were the header's gold left the diamond item showing a
+        // packet still with the kaligad — for ever, since nothing revisits a
+        // received assignment — while the gold's holding went negative by the
+        // same weight. Stones never reached the clearing at all: they are kept
+        // out of issued_gross_weight on purpose, and that is the figure the old
+        // clearing was built on.
+        $components = jewellery_assignment_components($companyId, $assignmentId);
+        foreach ($components as $component) {
+            $componentGross = (float) ($component['gross_weight'] ?? 0);
+            if ($componentGross <= 0) {
+                continue;
+            }
+            $isStone = (string) ($component['component_kind'] ?? 'metal') === 'stone';
+            // RECOMPUTED, not read back. The component's own fine_weight is the
+            // HEADER's basis and is zero for a stone, because stones must never
+            // enter a wastage sum. The stock register wants the natural one —
+            // what the issue actually wrote — which for a stone at the masters'
+            // standard 1000 is simply its weight.
+            jw_record_stock_txn($companyId, [
+                'item_id' => (int) $component['item_id'], 'txn_type' => 'receive_karigar', 'direction' => 'out',
+                'txn_date' => $receiveDate, 'ref_no' => $no,
+                'holder_type' => 'karigar', 'holder_id' => (int) $assignment['karigar_id'],
+                'purity_id' => (int) $component['purity_id'], 'unit_id' => (int) $component['unit_id'],
+                'gross_weight' => $componentGross,
+                'fine_weight' => jw_fine_weight($componentGross, (float) ($component['fineness'] ?? 0)),
+                'amount' => (float) ($component['amount'] ?? 0),
+                'source_type' => 'jewellery_order_receipt', 'source_id' => $receiptId, 'voucher_id' => $voucherId,
+                'notes' => ($isStone ? 'Stone' : 'Metal') . ' holding cleared — ' . (string) ($component['item_code'] ?? ''),
+                'created_by' => $userId,
+            ]);
+        }
+
+        // Whatever was issued OUTSIDE the component table — the first hand-over
+        // and every later instalment, both of which are always the assignment's
+        // own item — is the header total less what the components account for.
+        // Subtracted rather than assumed, so an issue that mixed the two paths
+        // clears exactly once either way.
+        $componentTotals = jewellery_component_totals($components);
+        $headerGross = jw_round_weight((float) $assignment['issued_gross_weight'] - $componentTotals['metal_gross']);
         // Unless nothing was issued. A work order gives the kaligad the JOB and
         // no metal — he works from his own and sells the finished piece back —
         // and there is then no holding to clear. Writing the clearing movement
         // anyway meant a zero-weight stock row, which the ledger rightly
         // refuses, so a work order could be assigned and never received.
-        if ((float) $assignment['issued_gross_weight'] > 0) {
+        if ($headerGross > 0.00005) {
             jw_record_stock_txn($companyId, [
                 'item_id' => (int) $assignment['item_id'], 'txn_type' => 'receive_karigar', 'direction' => 'out',
                 'txn_date' => $receiveDate, 'ref_no' => $no, 'holder_type' => 'karigar', 'holder_id' => (int) $assignment['karigar_id'],
                 'purity_id' => (int) $assignment['purity_id'], 'unit_id' => (int) $assignment['unit_id'],
-                'gross_weight' => (float) $assignment['issued_gross_weight'], 'fine_weight' => $preview['issued_fine'],
-                'amount' => (float) $assignment['issued_amount'],
+                'gross_weight' => $headerGross,
+                'fine_weight' => jw_round_weight($preview['issued_fine'] - $componentTotals['metal_fine']),
+                'amount' => jw_round_money($issuedAmount - $componentTotals['metal_amount']),
                 'source_type' => 'jewellery_order_receipt', 'source_id' => $receiptId, 'voucher_id' => $voucherId,
                 'notes' => 'Karigar holding cleared', 'created_by' => $userId,
             ]);

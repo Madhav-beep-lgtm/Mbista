@@ -17,6 +17,8 @@ if (PHP_SAPI !== 'cli') { exit('CLI only.'); }
 require __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/accounting_module_repair.php';
 require_once __DIR__ . '/../app/jewellery_reports.php';
+// Issuing a packet of diamonds alongside the gold lives here.
+require_once __DIR__ . '/../app/jewellery_assign.php';
 accounting_module_repair_database();
 
 $pass = 0; $fail = 0;
@@ -1659,6 +1661,131 @@ $saved = jewellery_receive_from_karigar($cidA, $fyA, [
 ok($saved['ok'] && near((float) $saved['net_payable'], jw_round_money(1.832 * 150000 + 400)),
     'Told the rate, it posts — 1.832 fine at 150,000 plus the 400 making'
     . ($saved['ok'] ? '' : ' — ' . $saved['error']));
+
+echo "\n18. Diamonds issued with the gold come back with it\n";
+// A stone-set job hands over gold AND a packet of stones on one issue. Both are
+// debited to the same "metal with kaligad" ledger and both go onto his holding
+// in the stock register — but the receipt credited back issued_amount alone,
+// which is METAL only by design, and cleared the holding as one lump against
+// the assignment's own item. So the diamonds' value sat on his ledger after the
+// ring was back in the safe, and the diamond item showed a packet still out
+// with him. Neither was ever revisited: a received assignment is finished with.
+$diamondMetal = $q("SELECT id FROM jewellery_metals WHERE company_id=$cidA AND code='DIAMOND'");
+$diamondPurity = $q("SELECT id FROM jewellery_purities WHERE company_id=$cidA AND metal_id=$diamondMetal AND code='STD'");
+$carat = $q("SELECT id FROM jewellery_units WHERE company_id=$cidA AND code='CT'");
+$diamond = jewellery_save_item($cidA, ['code' => 'DIA1', 'name' => 'Loose Diamond', 'item_type' => 'stone',
+    'metal_id' => $diamondMetal, 'purity_id' => $diamondPurity, 'unit_id' => $carat, 'gross_weight' => 0], $userA);
+$pDia = jewellery_save_purchase($cidA, $fyA, ['purchase_date' => '2026-08-01', 'settle_mode' => 'cash',
+    'settle_ledger_id' => $cash, 'party_id' => $refiner],
+    [['item_id' => $diamond, 'gross_weight' => 10, 'rate' => 10000]], $userA);
+jewellery_post_purchase($cidA, $pDia, $userA);
+ok(near(jw_item_balance($cidA, $diamond)['fine_weight'], 10.0), 'Ten carats of diamond are on the shelf');
+
+// Each kaligad holds metal on his OWN sub-ledger (MTL-KAR-n), not on the shared
+// stock_karigar mapping — that one is only the group they hang under. And other
+// jobs in this suite have left him holding chain metal, so what this section
+// proves is the DELTA around this ring, not an absolute zero.
+$ramMetalLedger = jw_karigar_metal_ledger_id($cidA, jewellery_karigar($cidA, $kContractor));
+$chainHeldBefore = jw_item_balance($cidA, $chain, null, 'karigar', $kContractor)['fine_weight'];
+
+$ringIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 2, 'issue_date' => '2026-10-10', 'making_basis' => 'flat', 'making_rate' => 8000,
+], $userA);
+$ringAid = (int) $ringIssue['assignment_id'];
+$stoneOut = jewellery_issue_component($cidA, $fyA, $ringAid, [
+    'item_id' => $diamond, 'purity_id' => $diamondPurity, 'unit_id' => $carat,
+    'gross_weight' => 3, 'issue_date' => '2026-10-10',
+], $userA);
+ok($stoneOut['ok'], 'Three carats go out with the gold, on the same issue'
+    . ($stoneOut['ok'] ? '' : ' — ' . $stoneOut['error']));
+$ringRow = jewellery_assignment($cidA, $ringAid);
+ok(near((float) $ringRow['issued_fine_weight'], 1.832),
+    'The stones add NO fine gold — he is answerable for the metal only');
+ok(near((float) $ringRow['issued_stone_amount'], 30000.0),
+    'Their value totals on its own: 3 ct at 10,000');
+ok((int) ($ringRow['metal_ledger_id'] ?? 0) === $ramMetalLedger && $ramMetalLedger > 0,
+    'And the issue records which ledger it debited, so the receipt credits that one');
+ok(near(jw_item_balance($cidA, $diamond, null, 'karigar', $kContractor)['fine_weight'], 3.0),
+    'The kaligad is holding the diamonds');
+
+$ringBack = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => $ringAid, 'received_item_id' => $chain, 'received_purity_id' => $p22,
+    'received_gross_weight' => 2.6, 'stone_weight' => 0.6, 'qty_pieces' => 1, 'receive_date' => '2026-10-12',
+], $userA);
+ok($ringBack['ok'], 'The finished ring comes back' . ($ringBack['ok'] ? '' : ' — ' . $ringBack['error']));
+
+// THE TWO THINGS THAT WERE STRANDED.
+ok(near(jw_item_balance($cidA, $diamond, null, 'karigar', $kContractor)['fine_weight'], 0.0),
+    'The diamonds leave his holding — the stock register no longer says he has them');
+ok(near(jw_item_balance($cidA, $chain, null, 'karigar', $kContractor)['fine_weight'], $chainHeldBefore),
+    'And the gold clears back to exactly where it was, not to minus the stones');
+$ringVoucher = voucher_shape((int) $ringBack['voucher_id']);
+ok(near($ringVoucher['dr'], $ringVoucher['cr']), 'The receipt voucher balances');
+ok(near($ringVoucher['ledgers'][$ramMetalLedger] ?? 0.0,
+        -jw_round_money((float) $ringRow['issued_amount'] + 30000.0)),
+    'The kaligad ledger is credited with the gold AND the stones — the whole of what he held');
+// The whole point, stated as a balance: his metal ledger must end this job
+// exactly where it started it. It was 30,000 short before, for ever.
+$ringHolding = (float) db()->query("SELECT COALESCE(SUM(CASE WHEN e.entry_type='debit' THEN e.amount ELSE -e.amount END),0)
+    FROM voucher_entries e INNER JOIN vouchers v ON v.id = e.voucher_id
+    WHERE v.company_id=$cidA AND e.ledger_id=$ramMetalLedger
+      AND ((v.source_type='jewellery_order_receipt' AND v.source_id=" . (int) $ringBack['receipt_id'] . ")
+        OR (v.source_type='jewellery_karigar_issue' AND v.source_id=$ringAid)
+        OR (v.source_type='jewellery_karigar_issue_add' AND v.source_id IN (
+              SELECT stock_txn_out FROM jewellery_assignment_components WHERE assignment_id=$ringAid)))")->fetchColumn();
+ok(near($ringHolding, 0.0),
+    'So issue and receipt cancel: nothing of this job is left sitting on his ledger'
+    . ' (left ' . number_format($ringHolding, 2) . ')');
+$ringStock = db()->query("SELECT amount FROM jewellery_stock_txns WHERE company_id=$cidA
+    AND source_type='jewellery_order_receipt' AND source_id=" . (int) $ringBack['receipt_id'] . "
+    AND direction='in' AND holder_type='stock'")->fetch(PDO::FETCH_ASSOC);
+ok($ringStock && near((float) $ringStock['amount'],
+        jw_round_money((float) $ringRow['issued_amount'] + 30000.0 - (float) $ringBack['wastage_amount'])),
+    'And the finished ring carries the stones\' value — they are set in it now');
+ok(near(jw_item_balance($cidA, $diamond, null, 'stock')['fine_weight'], 7.0),
+    'Seven carats are left loose on the shelf; the other three are in the ring');
+
+// Reversing puts both back with him, because the movements are keyed to the
+// receipt and there is nothing special about a stone.
+ok(jewellery_unpost_receipt($cidA, (int) $ringBack['receipt_id'], $userA)['ok'], 'The receipt reverses');
+ok(near(jw_item_balance($cidA, $diamond, null, 'karigar', $kContractor)['fine_weight'], 3.0),
+    'And the diamonds are with the kaligad again');
+
+// "Make me a ring, here are the stones, use your own gold." Both halves of this
+// at once: nothing on the metal side to take a rate from, and stones on the
+// ledger that have to come back off it.
+$mixIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 0, 'issue_date' => '2026-10-14', 'making_basis' => 'flat', 'making_rate' => 5000,
+], $userA);
+$mixAid = (int) $mixIssue['assignment_id'];
+ok(jewellery_issue_component($cidA, $fyA, $mixAid, ['item_id' => $diamond,
+    'purity_id' => $diamondPurity, 'unit_id' => $carat, 'gross_weight' => 2, 'issue_date' => '2026-10-14'],
+    $userA)['ok'], 'Two carats go out on a job with no gold on it');
+$mixRow = jewellery_assignment($cidA, $mixAid);
+ok((int) ($mixRow['metal_ledger_id'] ?? 0) === $ramMetalLedger,
+    'An issue of stones ALONE still records the ledger it debited — nothing else was there to set it');
+ok(near((float) $mixRow['issued_fine_weight'], 0.0) && near((float) $mixRow['issued_stone_amount'], 20000.0),
+    'He holds 20,000 of stones and not a grain of gold');
+
+$mixBack = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => $mixAid, 'received_item_id' => $chain, 'received_purity_id' => $p22,
+    'received_gross_weight' => 1.5, 'stone_weight' => 0.4, 'qty_pieces' => 1,
+    'receive_date' => '2026-10-16', 'own_metal_rate' => '150000',
+], $userA);
+ok($mixBack['ok'], 'It comes back' . ($mixBack['ok'] ? '' : ' — ' . $mixBack['error']));
+// 1.5 on the scale less 0.4 of stone = 1.1 tola of 22K = 1.0076 fine, his.
+ok(near((float) $mixBack['surplus_amount'], 151140.0),
+    'His gold is bought at the rate given: 1.0076 fine at 150,000');
+ok(near((float) $mixBack['net_payable'], 156140.0),
+    'He is owed his gold plus the 5,000 making — and nothing for the shop\'s stones');
+$mixVoucher = voucher_shape((int) $mixBack['voucher_id']);
+ok(near($mixVoucher['dr'], $mixVoucher['cr']) && $mixVoucher['dr'] > 0, 'The voucher balances');
+ok(near($mixVoucher['ledgers'][$ramMetalLedger] ?? 0.0, -20000.0),
+    'The stones come off his ledger in full');
+ok(near($mixVoucher['ledgers'][jw_item_stock_ledger_id($cidA, jewellery_item($cidA, $chain))] ?? 0.0, 171140.0),
+    'And the ring lands in stock worth his gold AND the shop\'s stones: 151,140 + 20,000');
 
 jww_cleanup();
 echo "\n==================================================\n";

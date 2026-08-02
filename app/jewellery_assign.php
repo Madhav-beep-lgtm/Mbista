@@ -661,27 +661,11 @@ function jewellery_assign_export_rows(array $rows, string $kind, string $currenc
 // Issue components — one issue, several things in the kaligad's hand
 // ---------------------------------------------------------------------------
 
-/** Everything handed over on one issue, in the order it went. */
-function jewellery_assignment_components(int $companyId, int $assignmentId): array
-{
-    if (!table_exists('jewellery_assignment_components')) {
-        return [];
-    }
-    $stmt = db()->prepare('SELECT c.*, i.sku AS item_code, i.name AS item_name,
-            m.code AS metal_code, m.name AS metal_name,
-            p.code AS purity_code, p.fineness, u.code AS unit_code, u.grams AS unit_grams
-        FROM jewellery_assignment_components c
-        INNER JOIN inventory_items i ON i.id = c.item_id
-        LEFT JOIN jewellery_item_profiles ip ON ip.inventory_item_id = i.id
-        LEFT JOIN jewellery_metals m ON m.id = ip.metal_id
-        LEFT JOIN jewellery_purities p ON p.id = c.purity_id
-        LEFT JOIN jewellery_units u ON u.id = c.unit_id
-        WHERE c.company_id = :cid AND c.assignment_id = :aid
-        ORDER BY c.id ASC');
-    $stmt->execute(['cid' => $companyId, 'aid' => $assignmentId]);
-
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
+// jewellery_assignment_components() and jewellery_component_totals() used to
+// live here, beside the function that WRITES a component. They now sit in
+// jewellery_workshop.php beside jewellery_assignment(), because the receipt has
+// to read them to hand the kaligad's holding back — and this file requires
+// that one, so nothing there can call anything here.
 
 /**
  * Hand one thing over on an issue — a bar of gold, or a packet of diamonds.
@@ -822,6 +806,12 @@ function jewellery_issue_component(int $companyId, int $fiscalYearId, int $assig
 
         // Metal grows the fine the kaligad is answerable for; stones grow their
         // own total and touch no fine weight at all.
+        //
+        // metal_ledger_id records the ledger this issue ACTUALLY debited, so
+        // the receipt credits that one rather than re-deriving it from the
+        // kaligad's mappings as they stand months later — migration 078, which
+        // every other issue path obeys and this one did not. An issue of stones
+        // alone had nothing else on the assignment to set it.
         db()->prepare('UPDATE jewellery_order_assignments
                 SET issued_gross_weight = issued_gross_weight + :gross,
                     issued_fine_weight = issued_fine_weight + :fine,
@@ -830,7 +820,8 @@ function jewellery_issue_component(int $companyId, int $fiscalYearId, int $assig
                     issued_amount = issued_amount + :metal_amount,
                     issue_stock_txn_out = COALESCE(issue_stock_txn_out, :o),
                     issue_stock_txn_in = COALESCE(issue_stock_txn_in, :i),
-                    issue_voucher_id = COALESCE(issue_voucher_id, :v)
+                    issue_voucher_id = COALESCE(issue_voucher_id, :v),
+                    metal_ledger_id = COALESCE(metal_ledger_id, :ml)
                 WHERE id = :id AND company_id = :cid')
             ->execute([
                 'gross' => $isStone ? 0 : $gross,
@@ -839,6 +830,7 @@ function jewellery_issue_component(int $companyId, int $fiscalYearId, int $assig
                 'stone_amount' => $isStone ? $amount : 0,
                 'metal_amount' => $isStone ? 0 : $amount,
                 'o' => $outId, 'i' => $inId, 'v' => $voucherId,
+                'ml' => $voucherId ? $karigarLedgerId : null,
                 'id' => $assignmentId, 'cid' => $companyId,
             ]);
 
@@ -859,38 +851,6 @@ function jewellery_issue_component(int $companyId, int $fiscalYearId, int $assig
     return ['ok' => true, 'error' => '', 'assignment_id' => $assignmentId,
         'kind' => $isStone ? 'stone' : 'metal', 'fine_weight' => $fine,
         'qty_carat' => $carat, 'amount' => $amount];
-}
-
-/**
- * What one issue is holding, metal and stones apart.
- *
- * Pure: it is handed the components, so the arithmetic that must never mix the
- * two can be read and tested in one place.
- */
-function jewellery_component_totals(array $components): array
-{
-    $totals = ['metal_gross' => 0.0, 'metal_fine' => 0.0, 'metal_amount' => 0.0,
-        'stone_carat' => 0.0, 'stone_amount' => 0.0, 'metal_lines' => 0, 'stone_lines' => 0];
-    foreach ($components as $component) {
-        if ((string) ($component['component_kind'] ?? 'metal') === 'stone') {
-            $totals['stone_lines']++;
-            $totals['stone_carat'] += (float) ($component['qty_carat'] ?? 0);
-            $totals['stone_amount'] += (float) ($component['amount'] ?? 0);
-            continue;
-        }
-        $totals['metal_lines']++;
-        $totals['metal_gross'] += (float) ($component['gross_weight'] ?? 0);
-        $totals['metal_fine'] += (float) ($component['fine_weight'] ?? 0);
-        $totals['metal_amount'] += (float) ($component['amount'] ?? 0);
-    }
-    foreach (['metal_gross', 'metal_fine', 'stone_carat'] as $key) {
-        $totals[$key] = round($totals[$key], 4);
-    }
-    foreach (['metal_amount', 'stone_amount'] as $key) {
-        $totals[$key] = round($totals[$key], 2);
-    }
-
-    return $totals;
 }
 
 /**
