@@ -157,9 +157,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $savedOrderId = jewellery_save_order($companyId, $fiscalYearId, [
                 'id' => (int) ($_POST['order_id'] ?? 0),
-                // Blank means "number it for me"; typed means the shop's own
-                // reference, refused with a sentence if it is already taken.
-                'order_no' => $isCreate ? (string) ($_POST['order_no'] ?? '') : '',
+                // Blank means "number it for me" on a new order and "keep the
+                // number it already has" on an existing one; typed means the
+                // shop's own reference, on a correction just as much as on a
+                // new order, refused with a sentence if it is already taken.
+                'order_no' => (string) ($_POST['order_no'] ?? ''),
                 'order_date' => $clampDate((string) ($_POST['order_date'] ?? '')),
                 'delivery_date' => (string) ($_POST['delivery_date'] ?? ''),
                 'party_id' => (int) ($_POST['party_id'] ?? 0),
