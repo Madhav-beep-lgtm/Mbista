@@ -240,7 +240,63 @@ ok(!$secondCommit['ok'] && str_contains((string) $secondCommit['error'], 'nothin
     'And committing it is refused rather than silently doing nothing');
 coa_import_discard($cid, $secondId);
 
-echo "\n7. One spreadsheet reader, shared by both importers\n";
+echo "\n7. A wrong row is fixed in the preview, not in Excel\n";
+$editSheet = [$header,
+    ['Group', '', 'Fixtures', 'non_current_asset', '', '', '', '', ''],
+    ['Ledger', '', 'Display Case', '', 'asset', 'Fixtures', '20000', '', ''],
+    ['Ledger', '', 'Showroom Lamp', '', 'asset', 'Lighting', '', '', ''],
+    ['Ledger', '', 'Capital Top-up', '', 'equity', 'Capital Account', '', '20000', ''],
+];
+$editId = coa_import_stage($cid, $fyId, 0, coaimp_xlsx($editSheet), 'edit.xlsx');
+$editRowsById = [];
+foreach (coa_import_rows($cid, $editId) as $r) { $editRowsById[(string) $r['raw_name']] = (int) $r['id']; }
+$statusOf = static function (int $cid, int $importId, string $name): string {
+    foreach (coa_import_rows($cid, $importId) as $r) {
+        if ((string) $r['raw_name'] === $name) { return (string) $r['status']; }
+    }
+    return 'gone';
+};
+
+ok($statusOf($cid, $editId, 'Showroom Lamp') === 'error', 'The row naming a group that does not exist starts rejected');
+ok((int) coa_import_batch($cid, $editId)['ready_count'] === 3, 'Three of the four rows are ready');
+
+$fix = coa_import_update_row($cid, $editRowsById['Showroom Lamp'], ['group_code' => 'Fixtures']);
+ok($fix['ok'] && $fix['status'] === 'ready', 'Correcting the group in the preview turns that row green');
+ok((int) coa_import_batch($cid, $editId)['ready_count'] === 4, 'And the batch count follows the correction');
+
+// The reason an edit re-judges the whole batch rather than the row alone.
+coa_import_update_row($cid, $editRowsById['Fixtures'], ['master' => 'not_a_master']);
+ok($statusOf($cid, $editId, 'Fixtures') === 'error', 'Breaking the group row rejects it');
+ok($statusOf($cid, $editId, 'Display Case') === 'error',
+    'And the ledgers that named it are re-judged too — a row\'s verdict is not its own business');
+coa_import_update_row($cid, $editRowsById['Fixtures'], ['master' => 'non_current_asset']);
+ok((int) coa_import_batch($cid, $editId)['ready_count'] === 4, 'Putting the group back makes them all valid again');
+
+ok(coa_import_balance_error(coa_import_batch($cid, $editId)) === null, 'The batch balances, 20,000 against 20,000');
+coa_import_update_row($cid, $editRowsById['Display Case'], ['opening_dr' => '25000']);
+ok(coa_import_balance_error(coa_import_batch($cid, $editId)) !== null,
+    'Editing an amount re-tests the balance, which now fails');
+coa_import_update_row($cid, $editRowsById['Display Case'], ['opening_dr' => '20,000.00']);
+ok(coa_import_balance_error(coa_import_batch($cid, $editId)) === null, 'And correcting it clears the failure');
+
+coa_import_update_row($cid, $editRowsById['Capital Top-up'], ['level' => '', 'name' => '', 'code' => '']);
+ok($statusOf($cid, $editId, '') === 'error',
+    'A row edited down to nothing says so rather than vanishing from the preview');
+
+$removed = coa_import_delete_row($cid, $editRowsById['Showroom Lamp']);
+$afterDelete = coa_import_batch($cid, $editId);
+ok($removed['ok'] && (int) $afterDelete['row_count'] === 3, 'Removing a row drops it from the counts');
+ok(count(coa_import_rows($cid, $editId)) === 3 && $statusOf($cid, $editId, 'Showroom Lamp') === 'gone',
+    'And from the preview');
+
+$committedRows = coa_import_rows($cid, $importId);
+$lockedEdit = coa_import_update_row($cid, (int) $committedRows[0]['id'], ['name' => 'Nope']);
+ok(!$lockedEdit['ok'] && str_contains((string) $lockedEdit['error'], 'already been committed'),
+    'Rows of an upload that has been committed can no longer be edited');
+ok(!coa_import_delete_row($cid, (int) $committedRows[0]['id'])['ok'], 'Nor removed');
+coa_import_discard($cid, $editId);
+
+echo "\n8. One spreadsheet reader, shared by both importers\n";
 // The .xlsx parser was lifted out of voucher_import.php so this importer and the
 // voucher one read a workbook the same way. Nothing else covers that move, and a
 // drift between the two would surface as a parsing bug on one screen only —

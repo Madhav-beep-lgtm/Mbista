@@ -80,7 +80,7 @@ if (($_GET['import_template'] ?? '') !== '') {
 // mapping and report in the system points at, so it is worth reading before it
 // is created — the upload now stages, and only Commit writes anything.
 // ---------------------------------------------------------------------------
-$coaImportActions = ['coa_upload', 'coa_commit', 'coa_discard'];
+$coaImportActions = ['coa_upload', 'coa_commit', 'coa_discard', 'coa_row_save', 'coa_row_delete'];
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string) ($_POST['action'] ?? ''), $coaImportActions, true)) {
     verify_csrf();
     $importAction = (string) $_POST['action'];
@@ -119,6 +119,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string) ($_POST['action']
             security_event('coa_bulk_import', 'success', $summary, $companyId, $userId ?: null);
             log_activity('company', $companyId, 'coa_bulk_import', $summary, $userId ?: null);
             flash('success', $summary);
+        } elseif ($importAction === 'coa_row_save') {
+            // Correcting one cell can change the verdict on a different row —
+            // the group being fixed here may be the one another row names — so
+            // the engine re-judges the batch and the whole preview is redrawn.
+            $rowResult = coa_import_update_row($companyId, (int) ($_POST['row_id'] ?? 0), [
+                'level' => (string) ($_POST['level'] ?? ''),
+                'code' => (string) ($_POST['code'] ?? ''),
+                'name' => (string) ($_POST['name'] ?? ''),
+                'master' => (string) ($_POST['master'] ?? ''),
+                'type' => (string) ($_POST['type'] ?? ''),
+                'group_code' => (string) ($_POST['group_code'] ?? ''),
+                'opening_dr' => (string) ($_POST['opening_dr'] ?? ''),
+                'opening_cr' => (string) ($_POST['opening_cr'] ?? ''),
+            ]);
+            if (!$rowResult['ok']) {
+                throw new RuntimeException((string) $rowResult['error']);
+            }
+            if ((string) $rowResult['status'] === 'ready') {
+                flash('success', 'Row updated — it will be created on commit.');
+            } else {
+                flash('error', 'Row updated, but it still will not be created: ' . $rowResult['row_error']);
+            }
+        } elseif ($importAction === 'coa_row_delete') {
+            $rowResult = coa_import_delete_row($companyId, (int) ($_POST['row_id'] ?? 0));
+            if (!$rowResult['ok']) {
+                throw new RuntimeException((string) $rowResult['error']);
+            }
+            flash('success', 'Row removed from the upload.');
         } else {
             coa_import_discard($companyId, (int) ($_POST['import_id'] ?? 0));
             flash('success', 'The upload was discarded. Nothing was created.');
@@ -197,7 +225,8 @@ $coaRowPill = static function (string $status): string {
     <p class="frm-optional" style="margin:0 0 12px">
         <strong>Uploading creates nothing.</strong> Every row is checked and shown back to you first; only
         Commit writes to the chart. Groups and ledgers can travel in one sheet — a ledger may name a group
-        written further down. Leave <em>Code</em> blank to have codes generated.
+        written further down. Leave <em>Code</em> blank to have codes generated. Rows that cannot be created
+        can be corrected or removed in the preview — no need to fix the sheet and upload it again.
     </p>
 
     <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
@@ -249,24 +278,71 @@ $coaRowPill = static function (string $status): string {
             <table class="mbw-table">
                 <thead><tr>
                     <th>Row</th><th>Level</th><th>Code</th><th>Name</th><th>Master / Type</th>
-                    <th>Group</th><th class="num">Opening Dr</th><th class="num">Opening Cr</th><th>Verdict</th>
+                    <th>Group</th><th class="num">Opening Dr</th><th class="num">Opening Cr</th>
+                    <th>Verdict</th><th></th>
                 </tr></thead>
                 <tbody>
                 <?php foreach ($coaStagedRows as $row): ?>
+                    <?php
+                    // Rows that will import read as plain text — the preview's main
+                    // job is to be READ, and 200 accounts' worth of input boxes is
+                    // not readable. A row that needs attention becomes editable in
+                    // place, which is the only place editing actually earns its
+                    // keep: fixing one cell here beats correcting the sheet in
+                    // Excel and uploading the whole thing again.
+                    $rowId = (int) $row['id'];
+                    $formId = 'coa-row-' . $rowId;
+                    $editable = in_array((string) $row['status'], ['error', 'skipped'], true);
+                    $cell = static fn (string $field, string $value, string $placeholder = ''): string
+                        => '<input form="' . $formId . '" name="' . $field . '" value="' . e($value)
+                            . '" placeholder="' . e($placeholder) . '" style="width:100%;min-width:78px">';
+                    ?>
                     <tr>
                         <td><?= (int) $row['source_row_no'] ?></td>
-                        <td><?= e(ucfirst((string) $row['raw_level'])) ?></td>
-                        <td><?= e((string) $row['raw_code']) ?: '<span class="frm-optional">auto</span>' ?></td>
-                        <td><?= e((string) $row['raw_name']) ?></td>
-                        <td><?= e((string) $row['raw_master'] !== '' ? (string) $row['raw_master'] : (string) $row['raw_type']) ?></td>
-                        <td><?= e((string) $row['raw_group_code']) ?: '—' ?></td>
-                        <td class="num"><?= (float) $row['opening_dr'] > 0 ? e(number_format((float) $row['opening_dr'], 2)) : '' ?></td>
-                        <td class="num"><?= (float) $row['opening_cr'] > 0 ? e(number_format((float) $row['opening_cr'], 2)) : '' ?></td>
+                        <?php if ($editable): ?>
+                            <td><?= $cell('level', (string) $row['raw_level'], 'Group/Ledger') ?></td>
+                            <td><?= $cell('code', (string) $row['raw_code'], 'auto') ?></td>
+                            <td><?= $cell('name', (string) $row['raw_name']) ?></td>
+                            <td>
+                                <?= $cell('master', (string) $row['raw_master'], 'master') ?>
+                                <?= $cell('type', (string) $row['raw_type'], 'type') ?>
+                            </td>
+                            <td><?= $cell('group_code', (string) $row['raw_group_code'], 'group') ?></td>
+                            <td class="num"><?= $cell('opening_dr', (string) $row['raw_opening_dr']) ?></td>
+                            <td class="num"><?= $cell('opening_cr', (string) $row['raw_opening_cr']) ?></td>
+                        <?php else: ?>
+                            <td><?= e(ucfirst((string) $row['raw_level'])) ?></td>
+                            <td><?= e((string) $row['raw_code']) ?: '<span class="frm-optional">auto</span>' ?></td>
+                            <td><?= e((string) $row['raw_name']) ?></td>
+                            <td><?= e((string) $row['raw_master'] !== '' ? (string) $row['raw_master'] : (string) $row['raw_type']) ?></td>
+                            <td><?= e((string) $row['raw_group_code']) ?: '—' ?></td>
+                            <td class="num"><?= (float) $row['opening_dr'] > 0 ? e(number_format((float) $row['opening_dr'], 2)) : '' ?></td>
+                            <td class="num"><?= (float) $row['opening_cr'] > 0 ? e(number_format((float) $row['opening_cr'], 2)) : '' ?></td>
+                        <?php endif; ?>
                         <td>
                             <?= $coaRowPill((string) $row['status']) ?>
                             <?php if ((string) ($row['error_text'] ?? '') !== ''): ?>
                                 <br><small class="frm-optional"><?= e((string) $row['error_text']) ?></small>
                             <?php endif; ?>
+                        </td>
+                        <td style="white-space:nowrap">
+                            <?php if ($editable): ?>
+                                <?php // The inputs above live in other cells and join this
+                                      // form by id — a form cannot wrap table cells. ?>
+                                <form method="post" id="<?= e($formId) ?>" style="display:inline">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="coa_row_save">
+                                    <input type="hidden" name="row_id" value="<?= $rowId ?>">
+                                    <button type="submit" class="button secondary">Save</button>
+                                </form>
+                            <?php endif; ?>
+                            <form method="post" style="display:inline"
+                                  onsubmit="return confirm('Remove row <?= (int) $row['source_row_no'] ?> from this upload?')">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="coa_row_delete">
+                                <input type="hidden" name="row_id" value="<?= $rowId ?>">
+                                <button type="submit" class="button secondary">Remove</button>
+                            </form>
                         </td>
                     </tr>
                 <?php endforeach; ?>

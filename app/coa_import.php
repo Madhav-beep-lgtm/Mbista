@@ -131,16 +131,23 @@ function coa_import_ledger_index(int $companyId): array
 }
 
 /**
- * Read the uploaded file, judge every row, and write the whole lot to staging.
- * Nothing in the chart is touched. Returns the new import's id.
+ * Judge a whole sheet — the deciding half of the importer, with no file reading
+ * and no writing in it.
+ *
+ * It takes the sheet ENTIRE rather than a row at a time because the verdict on
+ * one row depends on the others: a ledger may name a group written further down,
+ * and a code is only a duplicate relative to what the rest of the file claims.
+ * That is also why editing a staged row re-judges the whole batch instead of
+ * re-checking that row alone — a correction on line 12 is often exactly what
+ * makes line 40 valid.
+ *
+ * @param array $rows each ['n' => row number in the file, 'id' => staged row id
+ *                    or null, 'cells' => [level, code, name, master, type,
+ *                    group code, opening dr, opening cr]]
+ * @return array judged entries, one per row that is not padding
  */
-function coa_import_stage(int $companyId, ?int $fiscalYearId, int $userId, string $path, string $originalName): int
+function coa_import_judge(int $companyId, array $rows): array
 {
-    $rows = spreadsheet_read_rows($path, $originalName, COA_IMPORT_MAX_ROWS);
-    if ($rows === []) {
-        throw new RuntimeException('The file has no rows in it.');
-    }
-
     $masters = ledger_masters();
     $groupLookup = coa_import_group_lookup($companyId);
     $ledgerIndex = coa_import_ledger_index($companyId);
@@ -199,20 +206,40 @@ function coa_import_stage(int $companyId, ?int $fiscalYearId, int $userId, strin
         $rawDr = $get(6);
         $rawCr = $get(7);
 
-        // A wholly blank line in the middle of a sheet is padding, not an error.
+        $rowId = isset($row['id']) ? (int) $row['id'] : null;
+
+        // A blank line in the middle of a FILE is padding and is dropped. A
+        // staged row someone has edited down to nothing is not padding — it is
+        // still on their screen, so it has to answer for itself rather than
+        // silently disappear from the preview.
         if ($rawLevel === '' && $rawCode === '' && $rawName === '') {
+            if ($rowId === null) {
+                continue;
+            }
+            $staged[] = [
+                'n' => (int) $row['n'], 'id' => $rowId, 'level' => 'unknown',
+                'raw_level' => '', 'raw_code' => '', 'raw_name' => '', 'raw_master' => '',
+                'raw_type' => '', 'raw_group_code' => '', 'raw_opening_dr' => '', 'raw_opening_cr' => '',
+                'group_id' => null, 'code' => '', 'name' => '', 'master_key' => '',
+                'ledger_type' => '', 'parent_code' => '', 'opening_dr' => 0.0, 'opening_cr' => 0.0,
+                'status' => 'error',
+                'error' => 'This row is empty — give it a Level and a Name, or remove it.',
+            ];
             continue;
         }
 
         $level = mb_strtolower($rawLevel);
         // The header, however it was capitalised, and whether the file came from
-        // the export button or was typed from the template.
-        if ($level === 'level' || ($rawName !== '' && mb_strtolower($rawName) === 'name' && $level === '')) {
+        // the export button or was typed from the template. Only a row read from
+        // a file can be one; a stored row never is.
+        if ($rowId === null
+            && ($level === 'level' || ($rawName !== '' && mb_strtolower($rawName) === 'name' && $level === ''))) {
             continue;
         }
 
         $entry = [
             'n' => (int) $row['n'],
+            'id' => $rowId,
             'level' => 'unknown',
             'raw_level' => $rawLevel, 'raw_code' => $rawCode, 'raw_name' => $rawName,
             'raw_master' => $rawMaster, 'raw_type' => $rawType, 'raw_group_code' => $rawGroupCode,
@@ -401,28 +428,57 @@ function coa_import_stage(int $companyId, ?int $fiscalYearId, int $userId, strin
         $staged[] = $entry;
     }
 
+    return $staged;
+}
+
+/**
+ * The batch-level tallies derived from a set of judged entries. Only rows that
+ * will actually be created count toward the opening totals, so the balance test
+ * measures what will post rather than what was typed.
+ */
+function coa_import_totals(array $staged): array
+{
+    $totals = ['rows' => count($staged), 'ready' => 0, 'skipped' => 0, 'errors' => 0, 'dr' => 0.0, 'cr' => 0.0];
+    foreach ($staged as $entry) {
+        $status = is_array($entry) ? (string) $entry['status'] : '';
+        if ($status === 'ready') {
+            $totals['ready']++;
+            $totals['dr'] += (float) $entry['opening_dr'];
+            $totals['cr'] += (float) $entry['opening_cr'];
+        } elseif ($status === 'skipped') {
+            $totals['skipped']++;
+        } else {
+            $totals['errors']++;
+        }
+    }
+    $totals['dr'] = round($totals['dr'], 2);
+    $totals['cr'] = round($totals['cr'], 2);
+
+    return $totals;
+}
+
+/**
+ * Read the uploaded file, judge it, and write the whole lot to staging.
+ * Nothing in the chart is touched. Returns the new import's id.
+ */
+function coa_import_stage(int $companyId, ?int $fiscalYearId, int $userId, string $path, string $originalName): int
+{
+    $rows = spreadsheet_read_rows($path, $originalName, COA_IMPORT_MAX_ROWS);
+    if ($rows === []) {
+        throw new RuntimeException('The file has no rows in it.');
+    }
+    $staged = coa_import_judge($companyId, $rows);
     if ($staged === []) {
         throw new RuntimeException('The file had no account rows in it — only a header, or only blank lines.');
     }
 
     // ---- Write the batch ---------------------------------------------------
-    $readyCount = 0;
-    $skippedCount = 0;
-    $errorCount = 0;
-    $drTotal = 0.0;
-    $crTotal = 0.0;
-    foreach ($staged as $entry) {
-        if ($entry['status'] === 'ready') {
-            $readyCount++;
-            // Only what will actually post counts toward the balance test.
-            $drTotal += $entry['opening_dr'];
-            $crTotal += $entry['opening_cr'];
-        } elseif ($entry['status'] === 'skipped') {
-            $skippedCount++;
-        } else {
-            $errorCount++;
-        }
-    }
+    $counts = coa_import_totals($staged);
+    $readyCount = $counts['ready'];
+    $skippedCount = $counts['skipped'];
+    $errorCount = $counts['errors'];
+    $drTotal = $counts['dr'];
+    $crTotal = $counts['cr'];
 
     db()->prepare('INSERT INTO coa_imports (company_id, fiscal_year_id, original_name, row_count, ready_count,
             skipped_count, error_count, opening_dr_total, opening_cr_total, status, created_by)
@@ -477,6 +533,135 @@ function coa_import_rows(int $companyId, int $importId): array
     $stmt->execute(['id' => $importId, 'cid' => $companyId]);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Re-judge a staged batch from the raw values it is holding and write the fresh
+ * verdicts and tallies back.
+ *
+ * Run after every edit, because a row's verdict is not its own business. The
+ * group a ledger names may have just been corrected two lines above it, a code
+ * stops being a duplicate the moment the other one is changed, and the totals
+ * the balance test reads move with every amount touched. Re-judging the sheet
+ * is the only way the preview can stay true after a single cell changes.
+ */
+function coa_import_revalidate(int $companyId, int $importId): void
+{
+    $rows = coa_import_rows($companyId, $importId);
+    $input = [];
+    foreach ($rows as $row) {
+        if ((string) $row['status'] === 'committed') {
+            continue;
+        }
+        $input[] = ['n' => (int) $row['source_row_no'], 'id' => (int) $row['id'], 'cells' => [
+            (string) $row['raw_level'], (string) $row['raw_code'], (string) $row['raw_name'],
+            (string) $row['raw_master'], (string) $row['raw_type'], (string) $row['raw_group_code'],
+            (string) $row['raw_opening_dr'], (string) $row['raw_opening_cr'],
+        ]];
+    }
+
+    $judged = $input === [] ? [] : coa_import_judge($companyId, $input);
+    $update = db()->prepare('UPDATE coa_import_rows SET level = :level, group_id = :gid, code = :code,
+            name = :name, master_key = :mk, ledger_type = :ltype, parent_code = :parent,
+            opening_dr = :dr, opening_cr = :cr, status = :status, error_text = :err
+        WHERE id = :id AND company_id = :cid');
+    foreach ($judged as $entry) {
+        if ($entry['id'] === null) {
+            continue;
+        }
+        $update->execute([
+            'level' => $entry['level'], 'gid' => $entry['group_id'],
+            'code' => mb_substr($entry['code'], 0, 40), 'name' => mb_substr($entry['name'], 0, 150),
+            'mk' => $entry['master_key'], 'ltype' => $entry['ledger_type'],
+            'parent' => mb_substr($entry['parent_code'], 0, 150),
+            'dr' => $entry['opening_dr'], 'cr' => $entry['opening_cr'],
+            'status' => $entry['status'],
+            'err' => $entry['error'] !== null ? mb_substr($entry['error'], 0, 500) : null,
+            'id' => $entry['id'], 'cid' => $companyId,
+        ]);
+    }
+
+    $totals = coa_import_totals($judged);
+    db()->prepare('UPDATE coa_imports SET row_count = :n, ready_count = :ready, skipped_count = :skipped,
+            error_count = :errors, opening_dr_total = :dr, opening_cr_total = :cr
+        WHERE id = :id AND company_id = :cid')
+        ->execute(['n' => $totals['rows'], 'ready' => $totals['ready'], 'skipped' => $totals['skipped'],
+            'errors' => $totals['errors'], 'dr' => $totals['dr'], 'cr' => $totals['cr'],
+            'id' => $importId, 'cid' => $companyId]);
+}
+
+/**
+ * Correct a staged row in place, so a single wrong cell is fixed here rather
+ * than in Excel followed by uploading the whole file again.
+ *
+ * Only the raw columns are writable. Everything else on the row — the resolved
+ * group, the generated code, the verdict — is a conclusion, and conclusions are
+ * re-derived, never typed.
+ */
+function coa_import_update_row(int $companyId, int $rowId, array $input): array
+{
+    $stmt = db()->prepare('SELECT r.*, b.status AS batch_status FROM coa_import_rows r
+        INNER JOIN coa_imports b ON b.id = r.import_id
+        WHERE r.id = :id AND r.company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $rowId, 'cid' => $companyId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return ['ok' => false, 'error' => 'That row is not part of an import in this company.'];
+    }
+    if ((string) $row['status'] === 'committed' || (string) $row['batch_status'] !== 'staged') {
+        return ['ok' => false, 'error' => 'That upload has already been committed — its rows can no longer be changed.'];
+    }
+
+    // A field the caller does not mention keeps what it had, so a form that
+    // sends one cell cannot blank the other seven.
+    $keep = static fn (string $field, string $column): string
+        => array_key_exists($field, $input) ? trim((string) $input[$field]) : (string) $row[$column];
+
+    db()->prepare('UPDATE coa_import_rows SET raw_level = :level, raw_code = :code, raw_name = :name,
+            raw_master = :master, raw_type = :type, raw_group_code = :grp,
+            raw_opening_dr = :dr, raw_opening_cr = :cr
+        WHERE id = :id AND company_id = :cid')
+        ->execute([
+            'level' => mb_substr($keep('level', 'raw_level'), 0, 60),
+            'code' => mb_substr($keep('code', 'raw_code'), 0, 120),
+            'name' => mb_substr($keep('name', 'raw_name'), 0, 255),
+            'master' => mb_substr($keep('master', 'raw_master'), 0, 120),
+            'type' => mb_substr($keep('type', 'raw_type'), 0, 60),
+            'grp' => mb_substr($keep('group_code', 'raw_group_code'), 0, 120),
+            'dr' => mb_substr($keep('opening_dr', 'raw_opening_dr'), 0, 60),
+            'cr' => mb_substr($keep('opening_cr', 'raw_opening_cr'), 0, 60),
+            'id' => $rowId, 'cid' => $companyId,
+        ]);
+
+    coa_import_revalidate($companyId, (int) $row['import_id']);
+
+    $after = db()->prepare('SELECT status, error_text FROM coa_import_rows WHERE id = :id AND company_id = :cid');
+    $after->execute(['id' => $rowId, 'cid' => $companyId]);
+    $fresh = $after->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    return ['ok' => true, 'error' => null, 'status' => (string) ($fresh['status'] ?? ''),
+        'row_error' => (string) ($fresh['error_text'] ?? '')];
+}
+
+/** Drop a staged row. Nothing was created from it, so nothing is reversed. */
+function coa_import_delete_row(int $companyId, int $rowId): array
+{
+    $stmt = db()->prepare('SELECT r.import_id, r.status, b.status AS batch_status FROM coa_import_rows r
+        INNER JOIN coa_imports b ON b.id = r.import_id
+        WHERE r.id = :id AND r.company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $rowId, 'cid' => $companyId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return ['ok' => false, 'error' => 'That row is not part of an import in this company.'];
+    }
+    if ((string) $row['status'] === 'committed' || (string) $row['batch_status'] !== 'staged') {
+        return ['ok' => false, 'error' => 'That upload has already been committed — its rows can no longer be removed.'];
+    }
+    db()->prepare('DELETE FROM coa_import_rows WHERE id = :id AND company_id = :cid')
+        ->execute(['id' => $rowId, 'cid' => $companyId]);
+    coa_import_revalidate($companyId, (int) $row['import_id']);
+
+    return ['ok' => true, 'error' => null];
 }
 
 /** The most recent batch still waiting for a decision, if there is one. */
