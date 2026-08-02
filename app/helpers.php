@@ -2497,6 +2497,26 @@ function backup_health_warning(): ?string
         return 'The last database backup succeeded, but only partly: ' . $warning;
     }
 
+    // A BACKUP ON THE SAME DISK AS THE DATABASE IS NOT A BACKUP.
+    //
+    // It dies with the disk and ransomware encrypts it alongside everything
+    // else, so a shop with fifty perfect nightly dumps and no off-site copy is
+    // one hardware failure from having none. security_audit.php has called this
+    // HIGH all along — in a CLI report nobody runs, which is the same reason a
+    // failed backup used to surface only in a log file. This is the one backup
+    // problem that never announces itself: every run succeeds, every figure
+    // looks right, and the gap shows up on the single day it cannot be fixed.
+    //
+    // Last, and only when everything else is clean: a real failure is more
+    // urgent than a missing second copy, and two banners at once teaches the
+    // eye to skip both.
+    if ((string) (function_exists('env') ? env('APP_ENV', 'production') : 'production') === 'production'
+        && trim((string) (function_exists('env') ? env('BACKUP_REMOTE', '') : '')) === '') {
+        return 'Backups are working, but every copy is on this server — BACKUP_REMOTE is not set, '
+            . 'so a disk failure or ransomware takes the books and the backups together. '
+            . 'Set it in .env (rclone:... or scp:...) and the nightly job ships them off by itself.';
+    }
+
     return null;
 }
 

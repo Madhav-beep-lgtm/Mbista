@@ -192,6 +192,7 @@ function Run-PermanentTests {
         "database\test_jewellery_workshop.php",
         "database\test_kaligadh_receipt_repair.php",
         "database\test_jewellery_order_to_cash.php",
+        "database\test_backup_banner.php",
         "database\test_frontend_hygiene.php",
         "database\test_acceptance_suite.php"
     )
