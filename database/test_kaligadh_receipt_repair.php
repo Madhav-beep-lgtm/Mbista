@@ -223,8 +223,45 @@ $run = static function (string $flags = ''): string {
 };
 
 echo "\n3. Preview reports it and changes nothing\n";
+// "Nothing" means NOTHING, not "no balances moved". The first version of this
+// resolved the kaligad's ledger with jw_karigar_metal_ledger_id(), which opens
+// the ledger when it is missing, renames a drifted one and stamps the id onto
+// his row — three writes, in the one mode whose whole job is to be trusted on
+// a production database before anybody has agreed to a change. Counted, not
+// eyeballed: the row counts of everything this script can reach.
+// An assignment from before migration 078, which is what most of the damage
+// will be: no ledger id recorded on the assignment OR on the kaligad, though
+// the ledger itself exists because the issue posted against it. Without this
+// the resolver short-circuits on the recorded id and the risk is never reached
+// — the census would pass while proving nothing.
+db()->prepare('UPDATE jewellery_order_assignments SET metal_ledger_id = NULL WHERE id = :id')->execute(['id' => $aid]);
+db()->prepare('UPDATE jewellery_karigars SET metal_ledger_id = NULL WHERE id = :id')->execute(['id' => $karigarId]);
+
+$censusSql = [
+    'ledgers' => "SELECT COUNT(*) FROM ledgers WHERE company_id=$cid",
+    'vouchers' => "SELECT COUNT(*) FROM vouchers WHERE company_id=$cid",
+    'entries' => "SELECT COUNT(*) FROM voucher_entries e INNER JOIN vouchers v ON v.id=e.voucher_id WHERE v.company_id=$cid",
+    'stock movements' => "SELECT COUNT(*) FROM jewellery_stock_txns WHERE company_id=$cid",
+    'stamped kaligads' => "SELECT COUNT(*) FROM jewellery_karigars WHERE company_id=$cid AND metal_ledger_id IS NOT NULL",
+    'stock value' => "SELECT ROUND(COALESCE(SUM(amount),0),2) FROM jewellery_stock_txns WHERE company_id=$cid",
+];
+$census = static function () use ($censusSql): array {
+    $out = [];
+    foreach ($censusSql as $label => $sql) {
+        $out[$label] = (string) db()->query($sql)->fetchColumn();
+    }
+
+    return $out;
+};
+$before = $census();
+
 $preview = $run();
 ok(strpos($preview, 'PREVIEW MODE') !== false, 'It says it is only previewing');
+$after = $census();
+foreach ($before as $label => $value) {
+    ok($after[$label] === $value, "Preview left the $label alone ($value)"
+        . ($after[$label] === $value ? '' : ' — now ' . $after[$label]));
+}
 ok(strpos($preview, 'POST  receipt ' . $receiptNo) !== false,
     'The stone-set receipt is listed for repair');
 ok(near(led_balance($cid, $ramLedger), $goodRam + $stoneAmount),

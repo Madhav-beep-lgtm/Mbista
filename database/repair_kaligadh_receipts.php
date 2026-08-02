@@ -71,6 +71,35 @@ function kal_repair_fiscal_year(int $companyId, string $date): int
     return (int) ($stmt->fetchColumn() ?: 0);
 }
 
+/**
+ * The kaligad's metal ledger AS IT ALREADY STANDS — never opening one.
+ *
+ * jw_karigar_metal_ledger_id() is the right resolver everywhere else and the
+ * wrong one here: it CREATES the ledger when it is missing, renames one whose
+ * name has drifted, and stamps the id onto the kaligad's row. All three are
+ * writes, and this script prints "nothing will change" before it has been told
+ * to change anything. A preview that quietly opened ledgers on a production
+ * database would be a liar in the one mode whose whole job is to be trusted.
+ *
+ * Finding nothing is an answer, not a gap: with no ledger there was no issue
+ * posting either, so there is nothing on it to bring back.
+ */
+function kal_repair_karigar_ledger(int $companyId, array $karigar, int $storedOnAssignment): int
+{
+    if ($storedOnAssignment > 0) {
+        return $storedOnAssignment;
+    }
+    $stored = (int) ($karigar['metal_ledger_id'] ?? 0);
+    if ($stored > 0) {
+        return $stored;
+    }
+    $stmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND code = :code
+        AND status = 'active' AND type = 'asset' LIMIT 1");
+    $stmt->execute(['cid' => $companyId, 'code' => 'MTL-KAR-' . (int) ($karigar['id'] ?? 0)]);
+
+    return (int) ($stmt->fetchColumn() ?: 0);
+}
+
 /** What one ledger ended up with on one voucher: + debit, − credit. */
 function kal_repair_ledger_net(int $voucherId, int $ledgerId): float
 {
@@ -128,8 +157,9 @@ foreach ($companies as $company) {
         }
 
         $karigar = jewellery_karigar($cid, (int) $row['karigar_id']);
-        $sourceLedgerId = (int) ($row['metal_ledger_id'] ?? 0)
-            ?: ($karigar ? jw_karigar_metal_ledger_id($cid, $karigar) : 0);
+        $sourceLedgerId = $karigar
+            ? kal_repair_karigar_ledger($cid, $karigar, (int) ($row['metal_ledger_id'] ?? 0))
+            : 0;
         $receivedItem = jewellery_item($cid, (int) $row['received_item_id']);
         $destLedgerId = $receivedItem ? jw_item_stock_ledger_id($cid, $receivedItem) : 0;
         if ($sourceLedgerId <= 0 || $destLedgerId <= 0) {
