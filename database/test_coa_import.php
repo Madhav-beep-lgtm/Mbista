@@ -240,6 +240,43 @@ ok(!$secondCommit['ok'] && str_contains((string) $secondCommit['error'], 'nothin
     'And committing it is refused rather than silently doing nothing');
 coa_import_discard($cid, $secondId);
 
+echo "\n7. One spreadsheet reader, shared by both importers\n";
+// The .xlsx parser was lifted out of voucher_import.php so this importer and the
+// voucher one read a workbook the same way. Nothing else covers that move, and a
+// drift between the two would surface as a parsing bug on one screen only —
+// the kind that gets blamed on the file rather than the code.
+require_once __DIR__ . '/../app/voucher_import.php';
+$readerRows = [
+    ['Date', 'Voucher No', 'Ledger', 'Debit', 'Credit', 'Narration'],
+    ['2026-08-01', 'JV-001', 'Cash', '1500.50', '', 'Opening float for the counter'],
+    ['2026-08-02', 'JV-002', 'Bank', '', '1500.50', ''],
+    ['2026-08-03', 'JV-003'],
+];
+$readerPath = coaimp_xlsx($readerRows);
+$viaShared = spreadsheet_read_xlsx($readerPath, 5000);
+ok(voucher_import_read_xlsx($readerPath) === $viaShared,
+    'The voucher importer reads a workbook through the same parser, cell for cell');
+ok(count($viaShared) === 4 && $viaShared[0]['cells'][0] === 'Date'
+    && $viaShared[1]['cells'][3] === '1500.50',
+    'Text and numbers come back as the sheet wrote them');
+ok(($viaShared[1]['cells'][5] ?? '') === 'Opening float for the counter'
+    && ($viaShared[2]['cells'][4] ?? '') === '1500.50',
+    'A blank cell mid-row does not shift the columns after it');
+ok(array_column($viaShared, 'n') === [1, 2, 3, 4], 'Each row carries its own row number from the file');
+
+$readerCsv = coaimp_csv($readerRows);
+ok(spreadsheet_read_rows($readerCsv, 'x.csv', 5000)[0]['cells'][0] === 'Date',
+    'The csv path returns the same shape as the xlsx path');
+$xlsGuard = false;
+try {
+    spreadsheet_read_rows($readerCsv, 'legacy.xls', 5000);
+} catch (Throwable $e) {
+    $xlsGuard = str_contains($e->getMessage(), '.xls');
+}
+ok($xlsGuard, 'A legacy .xls is refused with an explanation, not a parse error');
+@unlink($readerPath);
+@unlink($readerCsv);
+
 @unlink($xlsxPath);
 coaimp_cleanup();
 
