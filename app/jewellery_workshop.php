@@ -814,10 +814,19 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
             // "clear it", because the issue, the receipt and the bill are all read
             // back through this number.
             $no = trim((string) ($input['order_no'] ?? '')) ?: (string) $existing['order_no'];
-            // Same courtesy as on create — a clash is answered with a sentence
-            // instead of a duplicate-key stack trace. The order excludes itself,
-            // so re-saving a form without touching the number never collides.
             if ($no !== (string) $existing['order_no']) {
+                // A correction is only a correction while the number is still the
+                // shop's own business. Once the order has been billed the customer
+                // is holding paper with it printed on it, and the sale it was
+                // billed to quotes the same one — renaming it then would leave the
+                // two copies disagreeing about which order is which.
+                if (in_array((string) $existing['status'], ['invoiced', 'delivered', 'closed'], true)) {
+                    throw new RuntimeException('Order ' . $existing['order_no'] . ' has already been billed, so its '
+                        . 'number can no longer be changed — the customer is holding a copy that carries it.');
+                }
+                // Same courtesy as on create — a clash is answered with a sentence
+                // instead of a duplicate-key stack trace. The order excludes itself,
+                // so re-saving a form without touching the number never collides.
                 $dupCheck = db()->prepare('SELECT COUNT(*) FROM jewellery_orders
                     WHERE company_id = :cid AND order_no = :no AND id <> :id');
                 $dupCheck->execute(['cid' => $companyId, 'no' => $no, 'id' => $orderId]);

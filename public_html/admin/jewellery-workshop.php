@@ -734,10 +734,20 @@ jw_filter_bar_styles();
                       // on save with a sentence, not a stack trace. It stays editable on
                       // edit too, so a number typed wrong — or one the shop numbered by
                       // hand before the sequence was set — can still be corrected.
-                      // Clearing the box keeps the number it already has. ?>
+                      // Clearing the box keeps the number it already has.
+                      //
+                      // Once the order has been billed the number is settled — the
+                      // customer is holding a copy with it printed on it. The engine
+                      // refuses that change anyway; showing the box locked saves them
+                      // typing a correction that was never going to be accepted.
+                      $numberSettled = $editOrder
+                          && in_array((string) ($editOrder['status'] ?? ''), ['invoiced', 'delivered', 'closed'], true);
+                      $orderNoAttrs = $numberSettled
+                          ? 'readonly title="Already billed — the customer\'s copy carries this number"'
+                          : ($editOrder ? 'placeholder="blank keeps the current number"'
+                                        : 'placeholder="auto — e.g. JO-2083-000001"'); ?>
                 <label>Order no.<input type="text" name="order_no" maxlength="60"
-                        value="<?= e((string) $orderField('order_no')) ?>"
-                        <?= $editOrder ? 'placeholder="blank keeps the current number"' : 'placeholder="auto — e.g. JO-2083-000001"' ?>></label>
+                        value="<?= e((string) $orderField('order_no')) ?>" <?= $orderNoAttrs ?>></label>
                 <?php // What the customer actually said — "bridal set", "ring like my
                       // mother's" — searchable and printed on the slip. ?>
                 <label>Expected item<input type="text" name="expected_item" maxlength="190"

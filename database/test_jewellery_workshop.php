@@ -213,6 +213,47 @@ ok(jw_next_no($cidA, 'jewellery_orders', 'order_no', 'JO') === 'JO-00008',
 db()->prepare('DELETE FROM jewellery_orders WHERE company_id = :cid AND order_no = :no')
     ->execute(['cid' => $cidA, 'no' => 'JO-00007']);
 
+// A number is typed by a person, so it can be typed wrong. Correcting it has to
+// reach the database — the field being editable on screen means nothing if the
+// save quietly drops it — but it must not be possible to LOSE a number, and a
+// correction stops being one once the customer is holding a bill that quotes it.
+// A throwaway order carries these so the lifecycle order below is left alone.
+$renameBase = [
+    'order_date' => '2026-08-05', 'delivery_date' => '2026-08-25', 'party_id' => $customer,
+    'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'expected_gross_weight' => 5,
+    'status' => 'confirmed',
+];
+$renameOrder = jewellery_save_order($cidA, $fyA, $renameBase + ['order_no' => 'JO-TYPO-1'], [], $userA);
+$renameEdit = $renameBase + ['id' => $renameOrder];
+$renameNow = static fn (): string => (string) jewellery_order($cidA, $renameOrder)['order_no'];
+
+jewellery_save_order($cidA, $fyA, $renameEdit + ['order_no' => 'JO-FIXED-1'], [], $userA);
+ok($renameNow() === 'JO-FIXED-1', 'A number typed wrong can be corrected on update');
+
+jewellery_save_order($cidA, $fyA, $renameEdit + ['order_no' => ''], [], $userA);
+ok($renameNow() === 'JO-FIXED-1', 'Clearing the box keeps the number rather than wiping it');
+
+jewellery_save_order($cidA, $fyA, $renameEdit + ['order_no' => 'JO-FIXED-1'], [], $userA);
+ok($renameNow() === 'JO-FIXED-1', 'Re-saving an untouched number does not collide with itself');
+
+$takenOrder = jewellery_save_order($cidA, $fyA, $renameBase + ['order_no' => 'JO-TAKEN-9'], [], $userA);
+ok(threw(static fn () => jewellery_save_order($cidA, $fyA,
+    $renameEdit + ['order_no' => 'JO-TAKEN-9'], [], $userA)),
+    'A number another order already holds is refused');
+ok($renameNow() === 'JO-FIXED-1', 'And the refusal leaves the number it had alone');
+
+// Billed is the line. Up to there the number is the shop's own business; past it
+// the customer has paper quoting it and the two copies have to agree.
+db()->prepare("UPDATE jewellery_orders SET status = 'invoiced' WHERE id = :id")
+    ->execute(['id' => $renameOrder]);
+ok(threw(static fn () => jewellery_save_order($cidA, $fyA,
+    $renameEdit + ['order_no' => 'JO-TOO-LATE'], [], $userA)),
+    'Once the order is billed its number can no longer be changed');
+ok($renameNow() === 'JO-FIXED-1', 'It keeps the number the customer was given');
+
+db()->prepare('DELETE FROM jewellery_orders WHERE company_id = :cid AND id IN (:a, :b)')
+    ->execute(['cid' => $cidA, 'a' => $renameOrder, 'b' => $takenOrder]);
+
 echo "\n3. Issue metal to a karigar\n";
 $ownBefore = jw_item_balance($cidA, $chain, null, 'stock')['fine_weight'];
 $r = jewellery_issue_to_karigar($cidA, $fyA, [
