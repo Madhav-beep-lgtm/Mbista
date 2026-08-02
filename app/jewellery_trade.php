@@ -1595,7 +1595,24 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
     // entries and types amounts, which arrive here as advance_allocations.
     // Each entry is capped at what it still holds, so the same rupee can
     // never fund two bills.
-    $deliverOrderId = (int) ($header['deliver_order_id'] ?? 0);
+    // ONE BILL CAN SETTLE SEVERAL ORDERS. A customer collecting a locket and a
+    // ring on the same visit expects one bill, and jewellery_orders.
+    // delivered_sale_id has always been many-to-one — it was only the caller
+    // that could name a single order. deliver_order_id stays understood so
+    // every existing caller keeps working.
+    $deliverOrderIds = [];
+    foreach ((array) ($header['deliver_order_ids'] ?? []) as $rawOrderId) {
+        $rawOrderId = (int) $rawOrderId;
+        if ($rawOrderId > 0 && !in_array($rawOrderId, $deliverOrderIds, true)) {
+            $deliverOrderIds[] = $rawOrderId;
+        }
+    }
+    if ($deliverOrderIds === [] && (int) ($header['deliver_order_id'] ?? 0) > 0) {
+        $deliverOrderIds[] = (int) $header['deliver_order_id'];
+    }
+    // The first is what the single-order paths below still reason about: the
+    // legacy advance fallback, and the sale's own convenience order_id column.
+    $deliverOrderId = $deliverOrderIds[0] ?? 0;
     $advanceApplied = jw_round_money((float) ($header['advance_amount'] ?? 0));
     if ($advanceApplied < 0) {
         throw new RuntimeException('An advance applied cannot be negative.');
@@ -1902,13 +1919,24 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
         // second time — whenever a sale was saved by any other route.
         // This is the LINK only; marking the order delivered stays a separate,
         // deliberate act.
-        if ($deliverOrderId > 0) {
-            db()->prepare("UPDATE jewellery_orders SET delivered_sale_id = :sale
-                WHERE id = :id AND company_id = :cid AND status <> 'cancelled'")
-                ->execute(['sale' => $saleId, 'id' => $deliverOrderId, 'cid' => $companyId]);
+        if ($deliverOrderIds !== []) {
+            // Cleared first, so an order dropped from the tick list on a re-save
+            // stops claiming this bill. Without it, un-ticking an order left it
+            // pointing at a sale that no longer carries its goods, and posting
+            // would have delivered something nobody billed.
+            db()->prepare("UPDATE jewellery_orders SET delivered_sale_id = NULL
+                WHERE company_id = :cid AND delivered_sale_id = :sale AND status <> 'delivered' AND status <> 'closed'")
+                ->execute(['cid' => $companyId, 'sale' => $saleId]);
+            $linkStmt = db()->prepare("UPDATE jewellery_orders SET delivered_sale_id = :sale
+                WHERE id = :id AND company_id = :cid AND status <> 'cancelled'");
+            foreach ($deliverOrderIds as $linkOrderId) {
+                $linkStmt->execute(['sale' => $saleId, 'id' => $linkOrderId, 'cid' => $companyId]);
+            }
             // And on the sale's own side, so posting — a different request,
             // long after the POST field that carried the order id has died —
-            // can still finish what the save started.
+            // can still finish what the save started. One column, so it holds
+            // the first; the authoritative link is delivered_sale_id, which
+            // every order on this bill carries.
             if (column_exists('jewellery_sales', 'order_id')) {
                 db()->prepare('UPDATE jewellery_sales SET order_id = :oid WHERE id = :id AND company_id = :cid')
                     ->execute(['oid' => $deliverOrderId, 'id' => $saleId, 'cid' => $companyId]);
@@ -2208,12 +2236,15 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
         // machinery, and jewellery_sync_order_status() will not touch it.
         // Delivery — the goods actually changing hands — remains its own act,
         // jewellery_deliver_order(), which the sale screen performs on posting.
-        $orderId = (int) ($sale['order_id'] ?? 0);
-        if ($orderId > 0 && jw_order_status_storable('invoiced')) {
+        // EVERY order on this bill, not just the one in the sale's convenience
+        // column. A bill that settled three orders and invoiced one left the
+        // other two looking unbilled, so the counter would have raised a second
+        // bill for goods already sold and paid for.
+        if (jw_order_status_storable('invoiced')) {
             db()->prepare("UPDATE jewellery_orders SET status = 'invoiced'
-                    WHERE id = :oid AND company_id = :cid
+                    WHERE company_id = :cid AND delivered_sale_id = :sid
                       AND status IN ('draft', 'confirmed', 'assigned', 'partially_received', 'received')")
-                ->execute(['oid' => $orderId, 'cid' => $companyId]);
+                ->execute(['sid' => $saleId, 'cid' => $companyId]);
         }
 
         if ($ownsTransaction) {
@@ -2240,13 +2271,17 @@ function jewellery_unpost_sale(int $companyId, int $saleId, int $userId = 0): ar
         // this sale's doing, and a draft is evidence of nothing — but the
         // LINK (order_id, delivered_sale_id) survives, so posting again picks
         // the same order back up.
-        $orderId = (int) ($sale['order_id'] ?? 0);
-        if ($orderId <= 0) {
-            $linked = db()->prepare('SELECT id FROM jewellery_orders WHERE delivered_sale_id = :sid AND company_id = :cid LIMIT 1');
-            $linked->execute(['sid' => $saleId, 'cid' => $companyId]);
-            $orderId = (int) ($linked->fetchColumn() ?: 0);
+        // Every order the bill carried, so reversing a bill for three orders
+        // does not leave two of them delivered against a document that is no
+        // longer in the books.
+        $linked = db()->prepare('SELECT id FROM jewellery_orders WHERE delivered_sale_id = :sid AND company_id = :cid');
+        $linked->execute(['sid' => $saleId, 'cid' => $companyId]);
+        $orderIds = array_map('intval', $linked->fetchAll(PDO::FETCH_COLUMN));
+        $saleOrderId = (int) ($sale['order_id'] ?? 0);
+        if ($saleOrderId > 0 && !in_array($saleOrderId, $orderIds, true)) {
+            $orderIds[] = $saleOrderId;
         }
-        if ($orderId > 0) {
+        foreach ($orderIds as $orderId) {
             db()->prepare("UPDATE jewellery_orders SET status = 'received', delivered_at = NULL
                     WHERE id = :oid AND company_id = :cid AND status IN ('invoiced', 'delivered', 'closed')")
                 ->execute(['oid' => $orderId, 'cid' => $companyId]);

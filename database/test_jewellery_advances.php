@@ -646,6 +646,68 @@ $open5After = null;
 foreach (jewellery_open_advances($cid, $customer) as $o) { if ((int) $o['id'] === $adv5) { $open5After = $o; } }
 ok($open5After === null, 'Funded by the bill and refunded in cash, order 5\'s entry now offers nothing');
 
+echo "\n13. One customer, several orders, ONE bill\n";
+// A customer who ordered a locket in Shrawan and a ring in Bhadra collects both
+// on one visit and expects one bill. jewellery_orders.delivered_sale_id has
+// always been many-to-one; it was only the caller that could name a single
+// order, so the counter had to raise two bills for one hand-over.
+$multiA = jewellery_save_order($cid, $fy, ['party_id' => $customer, 'order_date' => '2026-08-01',
+    'item_id' => $chain, 'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'expected_gross_weight' => 2,
+    'making_basis' => 'flat', 'making_rate' => 1000, 'status' => 'confirmed'], [], $uid);
+$multiB = jewellery_save_order($cid, $fy, ['party_id' => $customer, 'order_date' => '2026-08-01',
+    'item_id' => $chain, 'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'expected_gross_weight' => 3,
+    'making_basis' => 'flat', 'making_rate' => 1500, 'status' => 'confirmed'], [], $uid);
+
+$merged = jewellery_orders_sale_prefill($cid, [$multiA, $multiB]);
+ok($merged['ok'], 'Two orders prefill onto one bill' . ($merged['ok'] ? '' : ' — ' . $merged['error']));
+ok(count($merged['lines']) === 2, 'Both orders put a line on it — neither is quietly dropped');
+ok(count($merged['orders']) === 2 && $merged['order_ids'] === [$multiA, $multiB],
+    'And it remembers which orders it carries');
+ok(near((float) $merged['lines'][0]['making_amount'], 1000.0)
+    && near((float) $merged['lines'][1]['making_amount'], 1500.0),
+    'Each keeps the making charge ITS order was agreed at — merging is paperwork, not repricing');
+ok(jewellery_orders_sale_prefill($cid, [])['ok'] === false,
+    'Ticking nothing is refused, not billed as an empty sale');
+
+// ONE BILL, ONE NAME.
+db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type, status)
+    VALUES (:c,'OTHR','Other Customer','customer','active')")->execute(['c' => $cid]);
+$otherParty = (int) db()->lastInsertId();
+$foreignOrder = jewellery_save_order($cid, $fy, ['party_id' => $otherParty, 'order_date' => '2026-08-01',
+    'item_id' => $chain, 'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'expected_gross_weight' => 1,
+    'making_basis' => 'flat', 'making_rate' => 500, 'status' => 'confirmed'], [], $uid);
+$mixed = jewellery_orders_sale_prefill($cid, [$multiA, $foreignOrder]);
+ok($mixed['ok'] === false && stripos((string) $mixed['error'], 'two names') !== false,
+    'Two customers on one bill is refused — nobody is charged for another person\'s gold');
+
+$multiSale = jewellery_save_sale($cid, $fy, [
+    'sale_date' => '2026-10-06', 'party_id' => $customer, 'settle_mode' => 'credit',
+    'deliver_order_ids' => [$multiA, $multiB],
+], $merged['lines'], [], $uid);
+$linkedTo = static fn (int $saleId): array => array_map('intval', db()->query(
+    "SELECT id FROM jewellery_orders WHERE company_id=$cid AND delivered_sale_id=$saleId ORDER BY id")->fetchAll(PDO::FETCH_COLUMN));
+ok($linkedTo($multiSale) === [$multiA, $multiB], 'BOTH orders are linked to the bill, not just the first');
+
+$rsMulti = jewellery_post_sale($cid, $multiSale, $uid);
+ok($rsMulti['ok'], 'It posts' . ($rsMulti['ok'] ? '' : ' — ' . $rsMulti['error']));
+$statusOf = static fn (int $orderId): string => (string) db()->query(
+    "SELECT status FROM jewellery_orders WHERE id=$orderId")->fetchColumn();
+ok($statusOf($multiA) === 'invoiced' && $statusOf($multiB) === 'invoiced',
+    'And BOTH read invoiced — one left unbilled would be billed a second time'
+    . ' (got ' . $statusOf($multiA) . '/' . $statusOf($multiB) . ')');
+ok($statusOf($foreignOrder) !== 'invoiced', 'The other customer\'s order is untouched');
+
+// Un-ticking on a re-save must RELEASE the order, or it goes on claiming a bill
+// that no longer carries its goods — and posting would deliver something
+// nobody billed.
+jewellery_unpost_sale($cid, $multiSale, $uid);
+jewellery_save_sale($cid, $fy, [
+    'id' => $multiSale, 'sale_date' => '2026-10-06', 'party_id' => $customer, 'settle_mode' => 'credit',
+    'deliver_order_ids' => [$multiA],
+], [$merged['lines'][0]], [], $uid);
+ok($linkedTo($multiSale) === [$multiA],
+    'Dropping one from the tick list releases it — it goes back to waiting for its own bill');
+
 jwadv_cleanup();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

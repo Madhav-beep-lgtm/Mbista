@@ -102,6 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'paid_cheque' => (float) ($_POST['paid_cheque'] ?? 0),
                 'paid_qr' => (float) ($_POST['paid_qr'] ?? 0),
                 'deliver_order_id' => (int) ($_POST['deliver_order_id'] ?? 0),
+                'deliver_order_ids' => array_map('intval', (array) ($_POST['deliver_order_ids'] ?? [])),
                 'advance_amount' => (float) ($_POST['advance_amount'] ?? 0),
                 // WHICH advance entries pay this bill — the rows the user put
                 // an amount against on the picker. The engine validates each
@@ -144,8 +145,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // sold through the normal save-then-post flow sat on the
             // ready-to-deliver board forever. The save stores the link on the
             // sale; the post_sale handler below finishes the job.
-            $deliverNote = (int) ($_POST['deliver_order_id'] ?? 0) > 0
-                ? ' Posting the bill will mark the order delivered.' : '';
+            $deliverCount = count(array_filter(array_map('intval', (array) ($_POST['deliver_order_ids'] ?? []))))
+                ?: ((int) ($_POST['deliver_order_id'] ?? 0) > 0 ? 1 : 0);
+            $deliverNote = $deliverCount > 0
+                ? ' Posting the bill will mark ' . ($deliverCount === 1 ? 'the order' : $deliverCount . ' orders') . ' delivered.'
+                : '';
             flash('success', 'Sale saved as a draft.' . $deliverNote);
             redirect($back . '&edit=' . $id);
         } catch (Throwable $e) {
@@ -168,15 +172,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // remembered on the sale itself since the save — is delivered
             // now, and closed in the same stroke when nothing is left to
             // collect.
+            // EVERY order this bill carried. delivered_sale_id is the
+            // authoritative link and holds them all; the sale's own order_id
+            // column has room for one, so handing over on that alone left the
+            // rest of a multi-order bill sitting on the delivery board with
+            // their goods already in the customer's hand.
+            $linkedStmt = db()->prepare('SELECT id FROM jewellery_orders
+                WHERE company_id = :cid AND delivered_sale_id = :sid ORDER BY id ASC');
+            $linkedStmt->execute(['cid' => $companyId, 'sid' => $id]);
+            $deliverOrderIds = array_map('intval', $linkedStmt->fetchAll(PDO::FETCH_COLUMN));
             $postedSale = jewellery_sale($companyId, $id);
-            $deliverOrderId = (int) ($postedSale['order_id'] ?? 0);
-            if ($deliverOrderId > 0) {
+            $fallbackOrderId = (int) ($postedSale['order_id'] ?? 0);
+            if ($fallbackOrderId > 0 && !in_array($fallbackOrderId, $deliverOrderIds, true)) {
+                $deliverOrderIds[] = $fallbackOrderId;
+            }
+            $deliveredCount = 0;
+            $deliverProblems = [];
+            foreach ($deliverOrderIds as $deliverOrderId) {
                 $delivered = jewellery_deliver_order($companyId, $deliverOrderId, $id, $userId);
-                $deliverNote = $delivered['ok']
-                    ? (($delivered['status'] ?? '') === 'closed'
-                        ? ' Order delivered and closed — nothing left to collect.'
-                        : ' Order marked delivered.')
-                    : ' The order could not be marked delivered: ' . $delivered['error'];
+                if ($delivered['ok']) {
+                    $deliveredCount++;
+                } else {
+                    $deliverProblems[] = $delivered['error'];
+                }
+            }
+            if ($deliveredCount > 0) {
+                $deliverNote = ' ' . ($deliveredCount === 1 ? 'Order' : $deliveredCount . ' orders')
+                    . ' marked delivered.';
+            }
+            if ($deliverProblems !== []) {
+                $deliverNote .= ' Not every order could be marked delivered: ' . implode(' ', array_unique($deliverProblems));
             }
         }
         flash($result['ok'] ? 'success' : 'error', $result['ok']
@@ -395,20 +420,31 @@ if ($view === 'sales') {
     }
     // Selling an order: the line is filled in from the order, priced at the
     // rate that stood ON THE ORDER DATE, not today's.
-    $sellOrderId = (int) ($_GET['sell_order'] ?? 0);
-    if ($sellOrderId > 0) {
-        $prefill = jewellery_order_sale_prefill($companyId, $sellOrderId);
+    // One order (the old "Sell this" link) or several ticked together — a
+    // customer collecting a locket and a ring on one visit gets one bill.
+    $sellOrderIds = array_map('intval', (array) ($_GET['sell_orders'] ?? []));
+    if ((int) ($_GET['sell_order'] ?? 0) > 0) {
+        $sellOrderIds[] = (int) $_GET['sell_order'];
+    }
+    $sellOrderIds = array_values(array_unique(array_filter($sellOrderIds, static fn (int $id): bool => $id > 0)));
+    if ($sellOrderIds !== []) {
+        $prefill = jewellery_orders_sale_prefill($companyId, $sellOrderIds);
         if ($prefill['ok']) {
             $orderPrefill = $prefill;
-            $saleParty = (int) ($prefill['order']['party_id'] ?? $saleParty);
+            $saleParty = (int) ($prefill['party_id'] ?? $saleParty);
             $openOrders = jewellery_open_orders_for_party($companyId, $saleParty);
             if ($editLines === []) {
-                $editLines = [$prefill['line']];
+                // EVERY line, not just the first. An order for a ring AND a
+                // chain was filled in as the ring alone — quietly dropping half
+                // of what the shop agreed to sell, which is the exact thing
+                // jewellery_order_sale_prefill() builds the full list to avoid.
+                $editLines = $prefill['lines'];
             }
         } else {
             flash('error', $prefill['error']);
         }
     }
+    $sellingOrderIds = $orderPrefill ? array_map('intval', (array) $orderPrefill['order_ids']) : [];
     // Every advance this customer still holds, entry by entry — this order's,
     // a previous order's, all of it. The user ticks WHICH entries pay this
     // bill; nothing is applied on their behalf.
@@ -835,11 +871,24 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
             <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px;margin:12px 0">
                 <legend style="padding:0 6px;font-weight:600">Orders this customer is here to collect</legend>
                 <div style="overflow-x:auto"><table>
-                    <thead><tr><th>Order</th><th>Ordered</th><th>Item</th><th class="is-numeric">Weight</th><th class="is-numeric">Advance</th><th>Status</th><th></th></tr></thead>
+                    <thead><tr><th style="width:34px"></th><th>Order</th><th>Ordered</th><th>Item</th><th class="is-numeric">Weight</th><th class="is-numeric">Advance</th><th>Status</th></tr></thead>
                     <tbody>
-                        <?php foreach ($openOrders as $ord): ?>
-                            <?php $isSelling = $orderPrefill && (int) $orderPrefill['order']['id'] === (int) $ord['id']; ?>
+                        <?php
+                        // Only a piece that is actually BACK can be handed over.
+                        // Ticking one still out with the kaligad would bill a
+                        // customer for gold nobody has yet.
+                        $collectTotalAdvance = 0.0;
+                        foreach ($openOrders as $ord):
+                            $isSelling = in_array((int) $ord['id'], $sellingOrderIds, true);
+                            $isReady = (string) $ord['status'] === 'received';
+                            if ($isSelling) { $collectTotalAdvance += (float) $ord['advance_amount']; }
+                        ?>
                             <tr<?= $isSelling ? ' style="background:var(--mbw-accent-soft,#eef7f1)"' : '' ?>>
+                                <td><input type="checkbox" class="jw-collect-tick" form="jw-collect-form"
+                                           name="sell_orders[]" value="<?= (int) $ord['id'] ?>"
+                                           data-advance="<?= e((string) (float) $ord['advance_amount']) ?>"
+                                           <?= $isSelling ? 'checked' : '' ?>
+                                           <?= $isReady ? '' : 'disabled title="Still out with the kaligad"' ?>></td>
                                 <td><strong><?= e((string) $ord['order_no']) ?></strong>
                                     <?= $isSelling ? '<span class="mbw-pill tone-green">Being sold</span>' : '' ?>
                                 </td>
@@ -848,20 +897,35 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                     <small><?= e((string) $ord['purity_code']) ?></small></td>
                                 <td class="is-numeric"><?= $fmt((float) $ord['expected_gross_weight'], 4) ?> <?= e((string) $ord['unit_code']) ?></td>
                                 <td class="is-numeric"><?= $fmt((float) $ord['advance_amount']) ?></td>
-                                <td><span class="mbw-pill <?= (string) $ord['status'] === 'received' ? 'tone-green' : 'tone-gray' ?>"><?= e(ucfirst((string) $ord['status'])) ?></span></td>
-                                <td><?php if (!$isSelling): ?>
-                                    <a class="button secondary" style="min-height:30px;padding:3px 10px"
-                                       href="<?= e(url('admin/jewellery-trade.php?view=sales&sell_order=' . (int) $ord['id'])) ?>">Sell this</a>
-                                <?php endif; ?></td>
+                                <td><span class="mbw-pill <?= $isReady ? 'tone-green' : 'tone-gray' ?>"><?= e(ucfirst((string) $ord['status'])) ?></span></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
+                    <tfoot><tr>
+                        <th colspan="5" style="text-align:right">Ticked</th>
+                        <th class="is-numeric"><span id="jw-collect-count"><?= count($sellingOrderIds) ?></span> order(s),
+                            advance <?= e($sym) ?><span id="jw-collect-advance"><?= $fmt($collectTotalAdvance) ?></span></th>
+                        <th></th>
+                    </tr></tfoot>
                 </table></div>
+                <?php // Its own GET form: ticking re-fills the grid below from the
+                      // orders chosen, which is a fresh page, not a sale being saved. ?>
+                <form method="get" id="jw-collect-form" style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <input type="hidden" name="view" value="sales">
+                    <input type="hidden" name="for_party" value="<?= (int) $saleParty ?>">
+                    <button type="submit" class="button secondary"><?= icon('journal') ?>Bill the ticked orders</button>
+                    <small style="color:var(--mbw-muted,#64748b)">Anything left unticked stays waiting for its own bill.</small>
+                </form>
                 <?php if ($orderPrefill): ?>
-                    <input type="hidden" name="deliver_order_id" value="<?= (int) $orderPrefill['order']['id'] ?>">
+                    <?php foreach ($sellingOrderIds as $sellingId): ?>
+                        <input type="hidden" name="deliver_order_ids[]" value="<?= (int) $sellingId ?>">
+                    <?php endforeach; ?>
                     <div class="mbw-note tone-green" style="margin-top:10px">
                         <p style="margin:0">
-                            <strong><?= e((string) $orderPrefill['order']['order_no']) ?> is filled in below.</strong>
+                            <strong><?= e(implode(', ', array_map(
+                                static fn (array $o): string => (string) $o['order_no'],
+                                (array) $orderPrefill['orders']
+                            ))) ?> <?= count($sellingOrderIds) === 1 ? 'is' : 'are' ?> filled in below.</strong>
                             <?= e((string) $orderPrefill['rate_note']) ?>
                             <?php if ($orderPrefill['received']): ?>
                                 The weight billed is what actually came back from the kaligad, not the estimate.
@@ -1226,6 +1290,31 @@ document.addEventListener("change", function (event) {
         if (amount) { amount.value = fill.getAttribute("data-remaining") || "0"; total(); }
     });
     total();
+})();
+
+// The collect panel: how many orders are ticked and what advance they carry,
+// counted as the ticks change rather than only after the page comes back. The
+// figures are read off the checkboxes themselves, so nothing here can disagree
+// with what will actually be submitted.
+(function () {
+    function collected() {
+        var count = document.getElementById("jw-collect-count");
+        var advance = document.getElementById("jw-collect-advance");
+        if (!count || !advance) { return; }
+        var n = 0;
+        var sum = 0;
+        Array.prototype.forEach.call(document.querySelectorAll(".jw-collect-tick"), function (tick) {
+            if (!tick.checked) { return; }
+            n += 1;
+            sum += parseFloat(tick.getAttribute("data-advance")) || 0;
+        });
+        count.textContent = String(n);
+        advance.textContent = sum.toFixed(2);
+    }
+    document.addEventListener("change", function (event) {
+        if (event.target.classList && event.target.classList.contains("jw-collect-tick")) { collected(); }
+    });
+    collected();
 })();
 </script>
 

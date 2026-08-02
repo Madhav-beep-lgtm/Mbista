@@ -2773,6 +2773,84 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
     ];
 }
 
+/**
+ * Several ready orders, billed onto ONE invoice.
+ *
+ * A customer who ordered a locket in Shrawan and a ring in Bhadra collects both
+ * on one visit and expects one bill, not two. Each order is still priced by its
+ * OWN rules — its own order-date rate, its own agreed making charge, its own
+ * received weight — because they were agreed on different days, and merging
+ * them is a matter of paperwork, not a reason to reprice either. Only the lines
+ * are pooled.
+ *
+ * ONE BILL, ONE CUSTOMER. Orders belonging to different parties are refused
+ * rather than merged: a bill carries one name, and the alternative is charging
+ * somebody for another person's gold.
+ *
+ * The shape matches jewellery_order_sale_prefill() so one screen can take
+ * either. 'orders' carries every order merged; 'order' the first, for callers
+ * written when a bill could only settle one.
+ */
+function jewellery_orders_sale_prefill(int $companyId, array $orderIds): array
+{
+    $ids = [];
+    foreach ($orderIds as $raw) {
+        $id = (int) $raw;
+        if ($id > 0 && !in_array($id, $ids, true)) {
+            $ids[] = $id;
+        }
+    }
+    if ($ids === []) {
+        return ['ok' => false, 'error' => 'Tick at least one order to bill.'];
+    }
+
+    $orders = [];
+    $lines = [];
+    $notes = [];
+    $advance = 0.0;
+    $received = null;
+    $partyId = null;
+    foreach ($ids as $id) {
+        $one = jewellery_order_sale_prefill($companyId, $id);
+        if (!($one['ok'] ?? false)) {
+            return $one;
+        }
+        $order = $one['order'];
+        $thisParty = (int) ($order['party_id'] ?? 0);
+        if ($partyId === null) {
+            $partyId = $thisParty;
+        } elseif ($thisParty !== $partyId) {
+            return ['ok' => false, 'error' => 'Those orders are not all the same customer\'s — one bill cannot carry two names.'];
+        }
+        $orders[] = $order;
+        foreach ($one['lines'] as $line) {
+            $lines[] = $line;
+        }
+        $advance = jw_round_money($advance + (float) ($one['advance_amount'] ?? 0));
+        $received = $received ?? $one['received'];
+        // Keyed by the text, so two orders with the same complaint — "no rate
+        // was quoted" — say it once between them instead of once each.
+        $note = trim((string) ($one['rate_note'] ?? ''));
+        if ($note !== '') {
+            $notes[$note] = true;
+        }
+    }
+
+    return [
+        'ok' => true,
+        'error' => '',
+        'orders' => $orders,
+        'order' => $orders[0],
+        'order_ids' => $ids,
+        'party_id' => $partyId,
+        'received' => $received,
+        'rate_note' => implode(' ', array_keys($notes)),
+        'advance_amount' => $advance,
+        'lines' => $lines,
+        'line' => $lines[0],
+    ];
+}
+
 /** Mark a received order delivered, optionally tying it to the sale raised. */
 function jewellery_deliver_order(int $companyId, int $orderId, int $saleId, int $userId = 0): array
 {
