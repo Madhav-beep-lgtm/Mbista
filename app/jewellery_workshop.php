@@ -3371,6 +3371,19 @@ function jewellery_unpost_receipt(int $companyId, int $receiptId, int $userId = 
             db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
                 ->execute(['id' => $voucherId, 'cid' => $companyId]);
         }
+        // The correcting voucher that database/repair_kaligadh_receipts.php
+        // posts against this receipt, if it ever needed one. It is sourced on
+        // the receipt but is NOT the receipt's own voucher_id, so unposting
+        // would have left it standing — the stones taken off the kaligad's
+        // ledger by the repair, and put back on it by the reversal, then taken
+        // off a second time by nothing at all.
+        $repairStmt = db()->prepare("SELECT id FROM vouchers
+            WHERE company_id = :cid AND source_type = 'jewellery_stone_return_repair' AND source_id = :sid");
+        $repairStmt->execute(['cid' => $companyId, 'sid' => $receiptId]);
+        foreach ($repairStmt->fetchAll(PDO::FETCH_COLUMN) as $repairVoucherId) {
+            db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
+                ->execute(['id' => (int) $repairVoucherId, 'cid' => $companyId]);
+        }
         if ($bill) {
             db()->prepare('DELETE FROM jewellery_bills WHERE id = :id AND company_id = :cid')
                 ->execute(['id' => (int) $bill['id'], 'cid' => $companyId]);
