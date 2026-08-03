@@ -91,11 +91,46 @@ echo "\n4. The real function, on this machine\n";
 $live = backup_health_warning();
 $appEnv = (string) env('APP_ENV', 'production');
 if ($appEnv !== 'production') {
-    ok($live === null || stripos($live, 'BACKUP_REMOTE') === false,
-        'On this development machine the live function does not raise the off-site banner');
+    // SILENT, not merely quieter.
+    //
+    // The production guard used to sit inside the "never reported in" branch
+    // alone, so a dev machine said nothing about a missing backup and shouted
+    // about an old one. A stale ~/db-backups status file left by a one-off
+    // dump of an unrelated database put "the last good database backup is 6
+    // days old — the nightly job has stopped" on a laptop, and the production
+    // server it was blamed on had been dumping cleanly every hour. An hour
+    // went into the wrong machine. The earlier assertion here passed
+    // throughout, because it only ever checked for the off-site banner.
+    ok($live === null,
+        'A development machine raises NO backup banner at all, whatever its status file says'
+        . ($live === null ? '' : ' — got: ' . $live));
 } else {
     ok(true, 'Skipped — this machine reports APP_ENV=production');
 }
+
+// The message must not name a schedule it cannot know. This account dumps
+// hourly, and a banner saying the NIGHTLY job had stopped sent somebody
+// looking for a nightly cron that was never what was running.
+//
+// Comments are stripped before looking, via the tokeniser rather than a
+// regex. The first version of this check failed against its own fix: the
+// comment above quotes the very phrase it is asserting is gone, and a plain
+// str_contains cannot tell an explanation from the code it explains.
+$helperCode = '';
+foreach (token_get_all((string) file_get_contents(__DIR__ . '/../app/helpers.php')) as $token) {
+    if (is_array($token)) {
+        if ($token[0] === T_COMMENT || $token[0] === T_DOC_COMMENT) {
+            continue;
+        }
+        $helperCode .= $token[1];
+    } else {
+        $helperCode .= $token;
+    }
+}
+ok(!str_contains($helperCode, 'nightly job has stopped'),
+    'The stale-backup banner does not claim a schedule it cannot know');
+ok(str_contains($helperCode, 'days old (')  && str_contains($helperCode, '$ranAt'),
+    'And it quotes WHEN the last good backup ran, which is what gets compared against the log');
 ok(function_exists('backup_health_warning') && function_exists('backup_status_read'),
     'Both halves the admin header depends on are defined');
 

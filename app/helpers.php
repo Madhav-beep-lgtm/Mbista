@@ -2455,14 +2455,28 @@ function backup_status_read(): array
  */
 function backup_health_warning(): ?string
 {
+    // NOT A PRODUCTION SERVER, NOT A PRODUCTION PROBLEM.
+    //
+    // This guard used to sit inside the "never reported in" branch only, so a
+    // development machine was quiet about a MISSING backup and loud about an
+    // old one. That is backwards, and it produced a genuinely misleading
+    // afternoon: a laptop showed "the last good database backup is 6 days old
+    // — the nightly job has stopped" from a stale ~/db-backups/status file
+    // left by a one-off dump of an unrelated database, while the production
+    // server it was blamed on had been backing up cleanly every hour.
+    //
+    // A dev machine has no cron, no schedule and nothing to lose, and every
+    // banner it shows that does not matter is practice at ignoring the one
+    // that does. The three states below — failed, stale, degraded — are about
+    // a server that is supposed to be backing something up.
+    if ((string) (function_exists('env') ? env('APP_ENV', 'production') : 'production') !== 'production') {
+        return null;
+    }
+
     $read = backup_status_read();
     $status = $read['status'];
 
     if ($status === null) {
-        if ((string) (function_exists('env') ? env('APP_ENV', 'production') : 'production') !== 'production') {
-            return null;
-        }
-
         // Name the file that was LOOKED FOR. "Set up the cron" is advice for
         // somebody who has not; somebody who just did needs to know where the
         // app expected the answer, because that is the only thing that tells
@@ -2483,8 +2497,13 @@ function backup_health_warning(): ?string
             . ': ' . (string) ($status['detail'] ?? 'see backup-database.log') . '.';
     }
     if ($ageHours > 48) {
+        // Say WHEN, not just how long ago, and do not name a schedule.
+        // This account dumps hourly; "the nightly job has stopped" sent
+        // somebody to look for a nightly cron that was never the thing
+        // running. The timestamp is the useful half anyway — it is what gets
+        // compared against the backup log.
         return 'The last good database backup is ' . (int) round($ageHours / 24)
-            . ' days old — the nightly job has stopped. Check the cron entry.';
+            . ' days old (' . $ranAt . ') — the backup job has stopped. Check the cron entry.';
     }
 
     // A backup the script had to degrade to get. It falls back to dumping the
@@ -2510,11 +2529,12 @@ function backup_health_warning(): ?string
     // Last, and only when everything else is clean: a real failure is more
     // urgent than a missing second copy, and two banners at once teaches the
     // eye to skip both.
-    if ((string) (function_exists('env') ? env('APP_ENV', 'production') : 'production') === 'production'
-        && trim((string) (function_exists('env') ? env('BACKUP_REMOTE', '') : '')) === '') {
+    // The production check that used to be here is now the first thing the
+    // function does, for every state rather than two of them.
+    if (trim((string) (function_exists('env') ? env('BACKUP_REMOTE', '') : '')) === '') {
         return 'Backups are working, but every copy is on this server — BACKUP_REMOTE is not set, '
             . 'so a disk failure or ransomware takes the books and the backups together. '
-            . 'Set it in .env (rclone:... or scp:...) and the nightly job ships them off by itself.';
+            . 'Set it in .env (rclone:... or scp:...) and the backup job ships them off by itself.';
     }
 
     return null;
