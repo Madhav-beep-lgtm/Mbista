@@ -660,5 +660,79 @@ $layerRules = (string) preg_replace('~/\*[\s\S]*?\*/~', '', $layerCss);
 ok(!preg_match('~(?:url\(|@import)[^;]*fonts\.(?:googleapis|gstatic)\.com~', $layerRules),
     'Nothing is fetched from a third-party font host at page load');
 
+echo "\n16. Every class in the markup has something behind it\n";
+// An audit found 834 distinct classes and 26 with no rule in any stylesheet,
+// no inline style, and no styled sibling class on the same element — a name
+// somebody wrote and never gave meaning to. They are invisible to review,
+// because a page that renders with browser defaults looks deliberate until
+// you compare it with the one beside it.
+//
+// Three things are NOT failures here and are excluded on purpose:
+//   - JS hooks. A name a querySelector looks for exists to find an element,
+//     not to paint it, so styling it would be inventing a requirement.
+//   - Elements carrying a styled sibling class: <article class="card foo">
+//     is painted by .card.
+//   - Elements with an inline style attribute. Untidy, but not unstyled.
+$markup = array_merge(hygiene_php_files($root . '/app'), hygiene_php_files($root . '/public_html'));
+
+$styleSrc = '';
+foreach (glob($root . '/public_html/assets/css/*.css') as $f) {
+    $styleSrc .= (string) file_get_contents($f);
+}
+$scriptSrc = '';
+foreach (glob($root . '/public_html/assets/js/*.js') as $f) {
+    $scriptSrc .= (string) file_get_contents($f);
+}
+$tags = [];
+foreach ($markup as $path) {
+    $src = (string) file_get_contents($path);
+    if (preg_match_all('~<style[^>]*>([\s\S]*?)</style>~i', $src, $m)) {
+        $styleSrc .= "\n" . implode("\n", $m[1]);
+    }
+    if (preg_match_all('~<script[^>]*>([\s\S]*?)</script>~i', $src, $m)) {
+        $scriptSrc .= "\n" . implode("\n", $m[1]);
+    }
+    if (preg_match_all('~<[a-zA-Z][^>]*class=(["\'])([^"\']*)\1[^>]*>~', $src, $m)) {
+        foreach ($m[0] as $i => $tag) {
+            $tags[] = [$tag, (string) $m[2][$i], basename($path)];
+        }
+    }
+}
+$styleSrc = (string) preg_replace('~/\*[\s\S]*?\*/~', '', $styleSrc);
+preg_match_all('~\.([a-zA-Z][a-zA-Z0-9_-]+)~', $styleSrc, $m);
+$hasRule = array_flip(array_unique($m[1]));
+
+$seen = $bare = [];
+foreach ($tags as [$tag, $attr, $file]) {
+    $classes = array_values(array_filter(preg_split('~\s+~', $attr), static function ($c) {
+        return $c !== '' && preg_match('~^[a-zA-Z][a-zA-Z0-9_-]*$~', $c) === 1;
+    }));
+    $hasInline = strpos($tag, 'style=') !== false;
+    foreach ($classes as $c) {
+        if (isset($hasRule[$c])) { continue; }
+        if (strpos($c, 'js-') === 0
+            || strpos($scriptSrc, "'" . $c . "'") !== false
+            || strpos($scriptSrc, '"' . $c . '"') !== false
+            || strpos($scriptSrc, '.' . $c) !== false) {
+            continue;
+        }
+        $covered = $hasInline;
+        if (!$covered) {
+            foreach ($classes as $other) {
+                if ($other !== $c && isset($hasRule[$other])) { $covered = true; break; }
+            }
+        }
+        $seen[$c] = true;
+        if (!$covered) { $bare[$c] = $file; }
+    }
+}
+ok($tags !== [], 'The markup was scanned for classes (' . count($tags) . ' tagged elements)');
+ok($bare === [], 'No class renders with nothing behind it'
+    . ($bare === [] ? '' : ' — ' . implode(', ', array_map(
+        static fn($c, $f) => $c . ' (' . $f . ')',
+        array_keys(array_slice($bare, 0, 6, true)),
+        array_values(array_slice($bare, 0, 6, true))
+    ))));
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

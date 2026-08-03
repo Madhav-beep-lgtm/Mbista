@@ -822,6 +822,226 @@ input::placeholder, textarea::placeholder { color: var(--c-faint); }
   color: var(--c-gold-ink);
 }
 
+/* --------------------------------------------------------------------------
+   5. Classes the markup uses that no stylesheet had a rule for
+   --------------------------------------------------------------------------
+   An audit of every class in app/ and public_html/ against every stylesheet
+   and inline <style> block found 834 distinct classes, of which 26 had no
+   rule anywhere, no inline style, and no styled sibling class on the same
+   element. Some sit on elements the portal already paints (a <td>, an
+   <input>), so they were not invisible — but a name in the markup with
+   nothing behind it is a decision someone made and never finished, and the
+   next person cannot tell the difference between "deliberately plain" and
+   "forgotten". They are given the behaviour their names promise.
+
+   JS hooks (56 of them, .js-* and anything a querySelector looks for) are
+   deliberately NOT styled: those names exist to find an element, not to
+   paint it.
+   -------------------------------------------------------------------------- */
+
+/* .mbw-stat — a label above a figure, seventeen of them across inventory,
+   reports and the workshop, all rendering as bare divs. .mbw-stat-row is the
+   flex container they sit in and is already handled inline. */
+body.admin-layout .mbw-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 10px 12px;
+  border: 1px solid var(--mbw-border);
+  border-radius: var(--mbw-radius-sm);
+  background: var(--mbw-card-soft);
+}
+body.admin-layout .mbw-stat > span {
+  color: var(--mbw-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+body.admin-layout .mbw-stat > strong {
+  color: var(--mbw-heading);
+  font-family: var(--f-num);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+body.admin-layout .mbw-stat.tone-amber {
+  border-color: var(--mbw-amber);
+  background: var(--mbw-amber-soft);
+}
+
+/* .mbw-inline-form — a filter bar above a table. One of the two carried the
+   layout inline and the other carried nothing, so the same control looked
+   different on two pages. */
+body.admin-layout .mbw-inline-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* .mbw-table — the portal's table look, asked for by name. */
+body.admin-layout .mbw-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+body.admin-layout .mbw-table th,
+body.admin-layout .mbw-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--mbw-border-soft);
+  text-align: left;
+}
+
+/* A checkbox and its wording, which without this sit on separate baselines
+   and give the label no clickable relationship to the box. */
+body.admin-layout .frm-check,
+body.admin-layout .frm-toggle-wrap,
+.auth2-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  min-height: 34px;
+}
+body.admin-layout .frm-check input[type="checkbox"],
+body.admin-layout .frm-toggle-wrap input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--mbw-primary);
+  cursor: pointer;
+}
+.auth2-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Stock summary: six column groups — opening, in, out, damage, closing and
+   the rest — each three columns wide across an eighteen-column sheet. The
+   classes existed to tell them apart and painted nothing, so the report was
+   a wall of numbers with no seam. Tints are faint on purpose: they have to
+   survive being printed, which is what this page is for. */
+.grp-open  { background: color-mix(in srgb, var(--c-blue-tint) 60%, transparent); }
+.grp-in    { background: color-mix(in srgb, var(--c-green-tint) 60%, transparent); }
+.grp-out   { background: color-mix(in srgb, var(--c-amber-tint) 60%, transparent); }
+.grp-dmg   { background: color-mix(in srgb, var(--c-red-tint) 60%, transparent); }
+.grp-close { background: color-mix(in srgb, var(--c-primary-tint) 70%, transparent); }
+.grp-other { background: var(--c-surface-2); }
+.grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-other {
+  border-left: 1px solid var(--c-line);
+}
+@media print {
+  /* Backgrounds are dropped by default when printing, which would undo the
+     grouping on the one medium this sheet exists for. */
+  .grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-other {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+/* Numeric entry cells in the jewellery line grid. Right-aligned figures in a
+   mono face, because these are weights read down a column. */
+body.admin-layout .jw-stone-wt,
+body.admin-layout .jw-wastage-pct,
+body.admin-layout .jw-wastage-wt {
+  font-family: var(--f-num);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Two-factor page. The card, form and button were styled; the wrapper that
+   centres them on the page, the heading block and the footer links were not
+   — so the one screen standing between a stolen password and the books was
+   also the least finished. */
+.auth2-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--c-canvas);
+}
+.auth2-head {
+  margin-bottom: 18px;
+  text-align: center;
+}
+.auth2-head h1 {
+  font-family: var(--f-display);
+  font-size: 22px;
+  font-weight: 500;
+}
+.auth2-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 16px;
+  font-size: 12.5px;
+}
+
+/* Public site: the insights list. .insight-post itself is an .card and was
+   already painted; its list container and inner text blocks were not. */
+.insight-post-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+.insight-post-meta {
+  color: var(--c-gold-ink);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.insight-post-summary {
+  margin-top: 8px;
+  color: var(--c-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.insight-post-body {
+  margin-top: 10px;
+  color: var(--c-body);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.insight-post-body > * + * { margin-top: 10px; }
+
+/* Remaining single-use containers, each a bare div/nav/aside. */
+body.admin-layout .inventory-action-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--mbw-border);
+}
+body.admin-layout .rc2-filters-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+body.admin-layout .rpt-note-body {
+  color: var(--mbw-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* The schema-repair page is the only page in the app with this wrapper, and
+   the .table-card inside it already carries the surface — so all it was ever
+   missing is the width and breathing room every other admin page gets from
+   .admin-content. Kept narrow: it is a page of one-line outcomes, and full
+   width would leave each "Done" stranded a screen away from its label. */
+body.admin-layout .admin-page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4px 0 24px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   body.admin-layout .admin-sidebar a,
   body.admin-layout .admin-sidebar button,
