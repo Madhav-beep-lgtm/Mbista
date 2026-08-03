@@ -1,0 +1,831 @@
+/* ==========================================================================
+   M.B World 2026 — appearance layer
+   ==========================================================================
+   Imported from the "MB World Redesign" design project. APPEARANCE ONLY:
+   this file changes how the product looks and nothing about what it does.
+   No layout is restructured, no markup is required, no behaviour is bound.
+
+   WHY A NEW FILE RATHER THAN EDITS TO THE FOUR EXISTING ONES
+
+   The portal already carries four stylesheets that each redefine the same
+   tokens, and the cascade between them is not the order they are listed in:
+
+     style.css                 :root                    (0,1,0)
+     portal.css                body.admin-layout        (0,1,1)  <- wins on portal
+     theme-brown.css           :root, html, body
+     theme-sahakari-green.css  :root, html, body        (0,1,0)  <- wins on public
+
+   So the public site is coloured by the LAST :root (sahakari-green) while the
+   portal is coloured by portal.css, whose body.admin-layout outranks every
+   :root regardless of load order. Retuning "the palette" by editing one of
+   them would have changed half the product and left the other half alone.
+
+   This file is loaded last and restates both layers together, so the two
+   halves cannot drift apart again. Every existing file is left exactly as it
+   was — removing the one <link> restores the previous appearance completely.
+
+   The design's own token names (--c-*, --f-*, --sh-*) are kept verbatim, so a
+   future revision of the design maps onto this file one line at a time. The
+   app's established token names are then pointed AT those, which is what
+   actually retints the 800-odd var() references already in the other sheets.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Typefaces — self-hosted
+   --------------------------------------------------------------------------
+   The design calls for Newsreader, Instrument Sans and IBM Plex Mono, and
+   loads them from fonts.googleapis.com. This app cannot: its CSP is
+   `style-src 'self'` and `font-src 'self' data:`, so a Google Fonts <link>
+   is refused by the browser and the page silently falls back — the typography
+   would look "not applied" with nothing in the logs to say why.
+
+   Widening the CSP for a third-party host is a real change to the app's
+   security posture and has no place in a restyle, so the faces are served
+   from this account instead. Only the latin and latin-ext subsets are
+   shipped; the design uses no other script, and the omitted subsets were 60%
+   of the download. Sans and serif are variable fonts, one file per subset
+   covering every weight the design asks for.
+   -------------------------------------------------------------------------- */
+
+/* IBM Plex Mono latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/ibm-plex-mono-400-latin-ext.woff2") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* IBM Plex Mono latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/ibm-plex-mono-400-latin.woff2") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* IBM Plex Mono latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/ibm-plex-mono-500-latin-ext.woff2") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* IBM Plex Mono latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/ibm-plex-mono-500-latin.woff2") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* IBM Plex Mono latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/ibm-plex-mono-600-latin-ext.woff2") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* IBM Plex Mono latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/ibm-plex-mono-600-latin.woff2") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* Instrument Sans latin-ext */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("../fonts/instrument-sans-400-700-latin-ext.woff2") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* Instrument Sans latin */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("../fonts/instrument-sans-400-700-latin.woff2") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* Newsreader latin-ext */
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("../fonts/newsreader-300-700-latin-ext.woff2") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* Newsreader latin */
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("../fonts/newsreader-300-700-latin.woff2") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* --------------------------------------------------------------------------
+   2. The design's tokens, verbatim
+   -------------------------------------------------------------------------- */
+:root {
+  --f-ui: "Instrument Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-display: "Newsreader", Georgia, "Times New Roman", serif;
+  --f-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+  --c-canvas: #F1F4F1;
+  --c-surface: #FFFFFF;
+  --c-surface-2: #F8FAF7;
+  --c-surface-3: #EFF3EE;
+
+  --c-ink: #0E1F19;
+  --c-body: #42524B;
+  --c-muted: #71827A;
+  --c-faint: #93A29B;
+
+  --c-line: #E1E7E1;
+  --c-line-soft: #EDF1EB;
+  --c-line-strong: #CFD9D1;
+
+  --c-primary: #0B4A38;
+  --c-primary-2: #0E5F47;
+  --c-primary-deep: #06342A;
+  --c-on-primary: #FFFFFF;
+  --c-primary-tint: #E7F0EC;
+  --c-primary-line: #C6DACF;
+
+  --c-gold: #C3922E;
+  --c-gold-2: #E0B65A;
+  --c-gold-tint: #FBF3E2;
+  --c-gold-line: #EBD9AC;
+  --c-gold-ink: #7A5A12;
+
+  --c-green: #12764A;  --c-green-tint: #E4F3EA;
+  --c-amber: #A6690F;  --c-amber-tint: #FBF0DC;
+  --c-red: #AB2A22;    --c-red-tint: #FBEAE8;
+  --c-blue: #12657D;   --c-blue-tint: #E4F1F5;
+  --c-purple: #5D4A93; --c-purple-tint: #EEEBF8;
+  --c-teal: #0F6E6A;   --c-teal-tint: #E2F1F0;
+
+  --sh-1: 0 1px 2px rgba(14,31,25,.05), 0 1px 3px rgba(14,31,25,.04);
+  --sh-2: 0 1px 2px rgba(14,31,25,.04), 0 10px 26px -10px rgba(11,74,56,.18);
+  --sh-3: 0 24px 60px -22px rgba(6,52,42,.32), 0 2px 6px rgba(14,31,25,.06);
+  --sh-gold: 0 10px 26px -12px rgba(195,146,46,.45);
+
+  --ink-deep: #06342A;
+  --ink-mid: #0B4A38;
+  --ink-far: #0A5741;
+}
+
+/* Dark. The design ships this under :root[data-theme="dark"]; this app marks
+   dark with body.theme-dark (and body.admin-dark on the portal), set by the
+   toggle in main.js. Same values, the selectors this product actually uses. */
+body.theme-dark,
+body.admin-dark {
+  --c-canvas: #070F0C;
+  --c-surface: #0D1815;
+  --c-surface-2: #12211C;
+  --c-surface-3: #16271F;
+
+  --c-ink: #EAF2ED;
+  --c-body: #B0C2BA;
+  --c-muted: #87998F;
+  --c-faint: #6C7E75;
+
+  --c-line: #1D2E28;
+  --c-line-soft: #16241F;
+  --c-line-strong: #2A3F37;
+
+  --c-primary: #2FA97C;
+  --c-primary-2: #3CBB8B;
+  --c-primary-deep: #0B221B;
+  --c-on-primary: #04241B;
+  --c-primary-tint: rgba(47,169,124,.13);
+  --c-primary-line: rgba(47,169,124,.32);
+
+  --c-gold: #DCB765;
+  --c-gold-2: #EBCE8B;
+  --c-gold-tint: rgba(220,183,101,.12);
+  --c-gold-line: rgba(220,183,101,.3);
+  --c-gold-ink: #E5C784;
+
+  --c-green: #39B478;  --c-green-tint: rgba(57,180,120,.13);
+  --c-amber: #D99B3C;  --c-amber-tint: rgba(217,155,60,.13);
+  --c-red: #E0736A;    --c-red-tint: rgba(224,115,106,.13);
+  --c-blue: #57B4CC;   --c-blue-tint: rgba(87,180,204,.13);
+  --c-purple: #9E8CD8; --c-purple-tint: rgba(158,140,216,.13);
+  --c-teal: #43ADA6;   --c-teal-tint: rgba(67,173,166,.13);
+
+  --sh-1: 0 1px 2px rgba(0,0,0,.4);
+  --sh-2: 0 2px 4px rgba(0,0,0,.3), 0 12px 28px -12px rgba(0,0,0,.6);
+  --sh-3: 0 28px 64px -20px rgba(0,0,0,.7);
+  --sh-gold: 0 10px 26px -12px rgba(220,183,101,.3);
+
+  --ink-deep: #04241C;
+  --ink-mid: #07382B;
+  --ink-far: #0A4735;
+
+  color-scheme: dark;
+
+  /* The public site's app-level tokens, dark. style.css declares these at
+     body.theme-dark (0,1,1), which outranks the :root remap in section 3 —
+     so without repeating them here the public site's dark mode would have
+     stayed on the old palette exactly as the portal's did. */
+  --primary: var(--c-primary);
+  --primary-hover: var(--c-primary-2);
+  --secondary: var(--c-primary-2);
+  --secondary-hover: var(--c-primary);
+  --accent: var(--c-gold);
+  --gold: var(--c-gold);
+  --gold-strong: var(--c-gold-2);
+  --gold-soft: var(--c-gold-tint);
+  --gold-bright: var(--c-gold-2);
+  --background: var(--c-canvas);
+  --surface: var(--c-surface);
+  --surface-soft: var(--c-surface-2);
+  --text-primary: var(--c-ink);
+  --text-secondary: var(--c-body);
+  --text-muted: var(--c-muted);
+  --border-color: var(--c-line);
+  --border-dark: var(--c-line-strong);
+  --success: var(--c-green);
+  --warning: var(--c-amber);
+  --danger: var(--c-red);
+  --info: var(--c-blue);
+  --bg: var(--c-canvas);
+  --heading: var(--c-ink);
+  --bg-alt: var(--c-primary-tint);
+  --surface-strong: var(--c-surface-2);
+  --header-surface: var(--c-primary-tint);
+  --header-surface-strong: var(--c-primary-line);
+  --text: var(--c-ink);
+  --muted: var(--c-body);
+  --brand: var(--c-primary);
+  --brand-2: var(--c-gold);
+  --brand-3: var(--c-gold-2);
+  --border: var(--c-line);
+}
+
+/* --------------------------------------------------------------------------
+   3. The app's own tokens, pointed at the design's
+   --------------------------------------------------------------------------
+   This is the part that actually recolours the product: style.css and
+   portal.css between them hold ~1,600 var() references, and every one of them
+   resolves through the names below. Nothing here invents a colour — each line
+   is a translation between two vocabularies for the same thing.
+   -------------------------------------------------------------------------- */
+
+/* -- public site (style.css vocabulary) ---------------------------------- */
+:root {
+  --primary: var(--c-primary);
+  --primary-hover: var(--c-primary-2);
+  --secondary: var(--c-primary-2);
+  --secondary-hover: var(--c-primary);
+  --accent: var(--c-gold);
+
+  --gold: var(--c-gold);
+  --gold-strong: var(--c-gold-ink);
+  --gold-soft: var(--c-gold-tint);
+  --gold-bright: var(--c-gold-2);
+
+  --background: var(--c-canvas);
+  --surface: var(--c-surface);
+  --surface-soft: var(--c-surface-2);
+
+  --text-primary: var(--c-ink);
+  --text-secondary: var(--c-body);
+  --text-muted: var(--c-muted);
+
+  --border-color: var(--c-line);
+  --border-dark: var(--c-line-strong);
+
+  --success: var(--c-green);
+  --warning: var(--c-amber);
+  --danger: var(--c-red);
+  --info: var(--c-blue);
+
+  --shadow-sm: var(--sh-1);
+  --shadow-md: var(--sh-2);
+  --shadow-lg: var(--sh-3);
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 18px;
+
+  --font-display: var(--f-display);
+
+  /* Chained aliases style.css declares off the above. They are re-stated
+     because a var() chain resolves against the value in force where the
+     ALIAS was declared, not where it is used — leaving them out would have
+     left half the public site on the old palette. */
+  --bg: var(--c-canvas);
+  --heading: var(--c-ink);
+  --bg-alt: var(--c-primary-tint);
+  --surface-strong: var(--c-surface-2);
+  --header-surface: var(--c-primary-tint);
+  --header-surface-strong: var(--c-primary-line);
+  --text: var(--c-ink);
+  --muted: var(--c-body);
+  --brand: var(--c-primary);
+  --brand-2: var(--c-gold);
+  --brand-3: var(--c-gold-2);
+  --accent-blue: var(--c-blue);
+  --accent-green: var(--c-green);
+  --border: var(--c-line);
+  --shadow: var(--sh-1);
+  --shadow-strong: var(--sh-2);
+  --radius: 16px;
+}
+
+/* -- portal (portal.css vocabulary) --------------------------------------
+   Matches portal.css's own selector exactly. Same specificity, later in the
+   cascade, so these win — and only these, which is why the four sheets below
+   keep working unmodified. */
+body.admin-layout {
+  --mbw-canvas: var(--c-canvas);
+  --mbw-card: var(--c-surface);
+  --mbw-card-soft: var(--c-surface-2);
+  --mbw-border: var(--c-line);
+  --mbw-border-soft: var(--c-line-soft);
+  --mbw-heading: var(--c-ink);
+  --mbw-text: var(--c-body);
+  --mbw-muted: var(--c-muted);
+  --mbw-primary: var(--c-primary);
+  --mbw-primary-soft: var(--c-primary-tint);
+  --mbw-green: var(--c-green);       --mbw-green-soft: var(--c-green-tint);
+  --mbw-red: var(--c-red);           --mbw-red-soft: var(--c-red-tint);
+  --mbw-amber: var(--c-amber);       --mbw-amber-soft: var(--c-amber-tint);
+  --mbw-purple: var(--c-purple);     --mbw-purple-soft: var(--c-purple-tint);
+  --mbw-teal: var(--c-teal);         --mbw-teal-soft: var(--c-teal-tint);
+  --mbw-gray-soft: var(--c-surface-3);
+
+  --mbw-sidebar: var(--ink-deep);
+  --mbw-sidebar-deep: var(--ink-deep);
+  --mbw-sidebar-line: rgba(255,255,255,.08);
+  --mbw-sidebar-text: rgba(255,255,255,.82);
+  --mbw-sidebar-active: var(--ink-mid);
+
+  --mbw-gold: var(--c-gold);
+  --mbw-shadow: var(--sh-1);
+
+  /* --mbw-surface, --mbw-surface-soft and --mbw-accent are read by the
+     fixed-asset cards in portal.css (.fa-model-card, .fa-policy-status and
+     the panels around them) and are declared in no stylesheet in the project.
+     An undefined custom property makes the whole declaration invalid at
+     computed-value time, so those cards have been rendering with no
+     background and no border colour rather than a wrong one — which reads as
+     "unfinished page" instead of "broken CSS", which is why it has lasted.
+     Given names here because the alternative is the new palette inheriting a
+     patch of blank cards. */
+  --mbw-surface: var(--c-surface);
+  --mbw-surface-soft: var(--c-surface-2);
+  --mbw-accent: var(--c-gold);
+  --mbw-radius: 16px;
+  --mbw-radius-sm: 10px;
+  --mbw-font: var(--f-ui);
+
+  --background: var(--c-canvas);
+  --surface: var(--c-surface);
+  --surface-soft: var(--c-surface-2);
+  --border: var(--c-line);
+  --border-color: var(--c-line);
+  --heading: var(--c-ink);
+  --text-primary: var(--c-ink);
+  --text-secondary: var(--c-muted);
+  --secondary: var(--c-primary);
+  --success: var(--c-green);
+  --danger: var(--c-red);
+  --warning: var(--c-amber);
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --shadow-sm: var(--sh-1);
+}
+
+/* Portal, dark — and this block has to repeat the whole set, not just the
+   handful that differ.
+
+   Dark is declared at body.admin-layout.admin-dark (0,2,1) in portal.css,
+   theme-brown.css AND theme-sahakari-green.css. That outranks the
+   body.admin-layout (0,1,1) block above, so with only the sidebar restated
+   here every other token — canvas, card, border, every status colour — kept
+   its old dark value and the portal's dark mode stayed on the previous
+   palette while light mode moved to the new one. Same specificity, later in
+   the cascade, is what makes these win. The values are the same var(--c-*)
+   names as the light block: those already hold dark values here, because
+   body.admin-dark redefines them in section 2. */
+body.admin-layout.theme-dark,
+body.admin-layout.admin-dark {
+  --mbw-canvas: var(--c-canvas);
+  --mbw-card: var(--c-surface);
+  --mbw-card-soft: var(--c-surface-2);
+  --mbw-border: var(--c-line);
+  --mbw-border-soft: var(--c-line-soft);
+  --mbw-heading: var(--c-ink);
+  --mbw-text: var(--c-body);
+  --mbw-muted: var(--c-muted);
+  --mbw-primary: var(--c-primary);
+  --mbw-primary-soft: var(--c-primary-tint);
+  --mbw-green: var(--c-green);       --mbw-green-soft: var(--c-green-tint);
+  --mbw-red: var(--c-red);           --mbw-red-soft: var(--c-red-tint);
+  --mbw-amber: var(--c-amber);       --mbw-amber-soft: var(--c-amber-tint);
+  --mbw-purple: var(--c-purple);     --mbw-purple-soft: var(--c-purple-tint);
+  --mbw-teal: var(--c-teal);         --mbw-teal-soft: var(--c-teal-tint);
+  --mbw-gray-soft: var(--c-surface-3);
+  --mbw-gold: var(--c-gold);
+  --mbw-surface: var(--c-surface);
+  --mbw-surface-soft: var(--c-surface-2);
+  --mbw-accent: var(--c-gold);
+
+  --mbw-sidebar: var(--ink-deep);
+  --mbw-sidebar-deep: var(--ink-deep);
+  --mbw-sidebar-line: rgba(255,255,255,.08);
+  --mbw-sidebar-text: rgba(255,255,255,.82);
+  --mbw-sidebar-active: var(--ink-far);
+  --mbw-shadow: var(--sh-2);
+
+  /* Re-pointed at this specificity too: theme-sahakari-green declares these
+     at body.admin-layout.admin-dark, which outranks the :root above. */
+  --background: var(--c-canvas);
+  --surface: var(--c-surface);
+  --surface-soft: var(--c-surface-2);
+  --border: var(--c-line);
+  --border-color: var(--c-line);
+  --heading: var(--c-ink);
+  --text-primary: var(--c-ink);
+  --text-secondary: var(--c-muted);
+  --primary: var(--c-primary);
+  --secondary: var(--c-primary-2);
+
+  /* Legacy reference-layout tokens, restated for the var()-chain reason. */
+  --ref-text: var(--c-ink);
+  --ref-muted: var(--c-muted);
+  --ref-line: var(--c-line);
+  --ref-soft: var(--c-surface-2);
+  --ref-navy: var(--c-primary);
+  --ref-navy-2: var(--c-primary-2);
+  --ref-gold: var(--c-gold);
+}
+
+/* Dark chrome, when the rest of the portal is not dark.
+   --------------------------------------------------------------------------
+   theme-brown.css:300 pins body.admin-layout.theme-dark / .admin-dark back to
+   the LIGHT values with !important on every token and color-scheme:light, so
+   the portal's "dark mode" is in practice a light page wearing dark chrome.
+   That is a deliberate decision in this product and it is not this file's
+   place to reverse it — !important wins over any specificity, and the way to
+   beat it would be a second !important, which is how a stylesheet becomes
+   unmaintainable.
+
+   What IS in scope: the two rules that survive it hard-code the OLD greens
+   (--mbw-card:#064e3b, --mbw-border:#08634a on the topbar), which would leave
+   the previous palette's chrome framing the new one. Matched at the same
+   specificity and repointed. Undoing theme-brown's pin, if that is ever
+   wanted, is a separate decision and the dark tokens above are already
+   correct for it. */
+body.admin-layout.theme-dark .admin-sidebar,
+body.admin-layout.admin-dark .admin-sidebar {
+  --mbw-card: var(--ink-deep);
+  --mbw-border: rgba(255,255,255,.16);
+  --mbw-heading: #fff;
+  --mbw-text: rgba(255,255,255,.86);
+  --mbw-muted: rgba(255,255,255,.60);
+}
+body.admin-layout.theme-dark .admin-topbar,
+body.admin-layout.admin-dark .admin-topbar {
+  --mbw-card: var(--ink-mid);
+  --mbw-border: var(--ink-far);
+  --mbw-heading: #fff;
+  --mbw-text: rgba(255,255,255,.92);
+  --mbw-muted: rgba(255,255,255,.68);
+}
+
+/* --------------------------------------------------------------------------
+   3b. The sub-palettes, which is where a retheme normally comes apart
+   --------------------------------------------------------------------------
+   Restating the app-level tokens above is not enough. Four separate palettes
+   are painted from DIRECTLY, never through --primary or --mbw-*:
+
+     --sg-*     theme-sahakari-green.css   58 direct paints (public chrome)
+     --brown-*  } theme-brown.css, 116 direct paints, resolved through
+     --app-*    } sahakari's re-declarations of the same names
+     --uw-*     portal.css, the users workflow page
+     --gd-*     portal.css, the group dashboard
+
+   Leave them and you get the failure that makes a retheme look broken rather
+   than unfinished: a new canvas with the old site header, the old dashboard
+   cards and the old chart colours still sitting on it. They are repointed
+   here, each at its own selector, so every one of those direct paints follows
+   the new design without either file being edited.
+   -------------------------------------------------------------------------- */
+
+/* Sahakari's palette — the public site's header, footer, hero and buttons. */
+:root {
+  --sg-950: var(--c-primary-deep);
+  --sg-900: var(--ink-mid);
+  --sg-850: var(--c-primary);
+  --sg-800: var(--c-primary);
+  --sg-700: var(--c-primary-2);
+  --sg-600: var(--c-primary-2);
+  --sg-500: var(--c-green);
+  --sg-400: var(--c-gold-2);
+  --sg-100: var(--c-primary-tint);
+  --sg-50: var(--c-canvas);
+  --sg-ink: var(--c-ink);
+  --sg-muted: var(--c-muted);
+  --sg-line: var(--c-line);
+  --sg-gold: var(--c-gold);
+  --sg-red: var(--c-red);
+  --sg-amber: var(--c-amber);
+
+  /* Brown-era names, still live because theme-brown paints 116 rules from
+     them (many !important). Sahakari re-points four; all of them are
+     re-pointed here so none can fall back to the brown original. */
+  --brown-50: var(--c-canvas);
+  --brown-100: var(--c-surface-3);
+  --brown-700: var(--c-primary-2);
+  --brown-800: var(--c-primary);
+  --brown-900: var(--ink-mid);
+  --brown-950: var(--c-primary-deep);
+  --app-white: var(--c-surface);
+  --app-text: var(--c-ink);
+  --app-muted: var(--c-muted);
+  --app-border: var(--c-line);
+  --app-border-strong: var(--c-line-strong);
+  --app-success: var(--c-green);
+  --app-success-bg: var(--c-green-tint);
+  --app-danger: var(--c-red);
+  --app-danger-bg: var(--c-red-tint);
+  --app-warning: var(--c-amber);
+  --app-warning-bg: var(--c-amber-tint);
+}
+
+/* Users workflow page (portal.css). Same selector, later cascade. */
+body.admin-layout .users-workflow-page {
+  --uw-blue: var(--c-blue);        --uw-blue-soft: var(--c-blue-tint);
+  --uw-blue-dark: var(--c-primary);
+  --uw-green: var(--c-green);      --uw-green-soft: var(--c-green-tint);
+  --uw-amber: var(--c-amber);      --uw-amber-soft: var(--c-amber-tint);
+  --uw-red: var(--c-red);          --uw-red-soft: var(--c-red-tint);
+}
+
+/* Group dashboard (portal.css), light and dark. */
+body.accounting-dashboard-page {
+  --gd-page: var(--c-canvas);
+  --gd-card: var(--c-surface);
+  --gd-soft: var(--c-surface-2);
+  --gd-border: var(--c-line);
+  --gd-border-soft: var(--c-line-soft);
+  --gd-heading: var(--c-ink);
+  --gd-text: var(--c-body);
+  --gd-muted: var(--c-muted);
+  --gd-blue: var(--c-blue);
+  --gd-blue-dark: var(--c-primary);
+  --gd-green: var(--c-green);
+  --gd-red: var(--c-red);
+}
+body.accounting-dashboard-page.theme-dark {
+  --gd-page: var(--c-canvas);
+  --gd-card: var(--c-surface);
+  --gd-soft: var(--c-surface-2);
+  --gd-border: var(--c-line);
+  --gd-border-soft: var(--c-line-soft);
+  --gd-heading: var(--c-ink);
+  --gd-text: var(--c-body);
+  --gd-muted: var(--c-muted);
+}
+
+/* --------------------------------------------------------------------------
+   4. Appearance
+   --------------------------------------------------------------------------
+   Everything below restyles components the app already renders. No selector
+   here invents structure, sets display/position, or changes a dimension that
+   another rule depends on — in particular the phone drawer geometry in
+   portal.css (sidebar transform, .admin-main padding, topbar margins) is left
+   entirely alone, because that is layout and this is paint.
+   -------------------------------------------------------------------------- */
+
+body {
+  background: var(--c-canvas);
+  color: var(--c-body);
+  font-family: var(--f-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* theme-sahakari-green paints body with a fixed dark-green gradient and
+   theme-brown paints <main> flat white. Between them the public site has no
+   canvas left to show, and the design's cards need one to sit on. Matching
+   their specificity to hand it back. */
+body:not(.theme-dark) main,
+body.home-page main {
+  background-color: transparent;
+}
+
+h1, h2, h3, h4, h5 {
+  font-family: var(--f-display);
+  color: var(--c-ink);
+  font-weight: 500;
+  letter-spacing: -.02em;
+  line-height: 1.15;
+}
+
+/* Numbers line up under each other and read as figures rather than prose —
+   the design sets a mono face for exactly this. Tabular figures matter more
+   than the face does: a column of money that shifts by a pixel per digit is
+   the thing an accountant notices first. */
+.amount-cell, .amount-positive, .amount-negative,
+td.text-right, th.text-right,
+.mbw-stat-value, .stat-value, .kpi-value {
+  font-family: var(--f-num);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+}
+table { font-variant-numeric: tabular-nums; }
+
+/* IMPORTANT — why everything scoped to body.admin-layout below paints from
+   --mbw-* and not from the --c-* tokens it was translated from.
+   Both resolve to the same colour in light mode, but they come apart in dark:
+   theme-brown pins --mbw-* to LIGHT values with !important (see section 3b)
+   while --c-* still holds the design's dark values. Paint from --c-* and the
+   portal's dark mode gets dark table headers inside white cards. Painting
+   from the app's own tokens means these rules follow whatever the product
+   decides a surface is, which is the only way a restyle stays correct through
+   a decision it does not control. */
+
+/* Column headings: small, tracked, upper — the design's table voice. */
+body.admin-layout thead th {
+  background: var(--mbw-card-soft);
+  color: var(--mbw-muted);
+  font-family: var(--f-ui);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--mbw-border);
+}
+
+body.admin-layout tbody tr { transition: background .14s ease; }
+body.admin-layout tbody tr:hover { background: var(--mbw-card-soft); }
+
+/* Cards */
+body.admin-layout .mbw-card,
+body.admin-layout .card {
+  background: var(--mbw-card);
+  border: 1px solid var(--mbw-border);
+  border-radius: 16px;
+  box-shadow: var(--mbw-shadow);
+}
+body.admin-layout .mbw-card-head {
+  border-bottom: 1px solid var(--mbw-border-soft);
+  color: var(--mbw-heading);
+}
+body.admin-layout .mbw-card-head h2,
+body.admin-layout .mbw-card-head h3 {
+  font-family: var(--f-display);
+  font-weight: 500;
+}
+
+/* Sidebar: deep green, gold for the active row. The design marks the current
+   page with a gold bar down the left edge rather than a filled block, so the
+   label stays legible and the rail reads as one surface. */
+body.admin-layout .admin-sidebar {
+  background: var(--ink-deep);
+  border-right: 1px solid rgba(255,255,255,.07);
+}
+body.admin-layout .admin-sidebar a,
+body.admin-layout .admin-sidebar button {
+  border-radius: 10px;
+  color: rgba(255,255,255,.78);
+  transition: background .16s ease, color .16s ease;
+}
+body.admin-layout .admin-sidebar a:hover,
+body.admin-layout .admin-sidebar button:hover {
+  background: rgba(255,255,255,.08);
+  color: #fff;
+}
+body.admin-layout .admin-sidebar a.active,
+body.admin-layout .admin-sidebar a[aria-current="page"] {
+  position: relative;
+  background: rgba(255,255,255,.10);
+  color: #fff;
+  font-weight: 600;
+}
+body.admin-layout .admin-sidebar a.active::before,
+body.admin-layout .admin-sidebar a[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 0 3px 3px 0;
+  background: var(--c-gold-2);
+}
+
+/* Topbar: translucent over the canvas, hairline under it. */
+body.admin-layout .admin-topbar {
+  background: color-mix(in srgb, var(--mbw-card) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--mbw-border);
+}
+body.admin-layout .admin-topbar-title {
+  font-family: var(--f-display);
+  font-weight: 500;
+  color: var(--mbw-heading);
+}
+body.admin-layout .admin-topbar-crumbs {
+  font-size: 12px;
+  color: var(--mbw-muted);
+}
+
+/* Pills and chips */
+body.admin-layout .mbw-pill,
+body.admin-layout .mbw-chip,
+body.admin-layout .badge {
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+
+/* Buttons */
+body.admin-layout .btn {
+  border-radius: 10px;
+  font-weight: 600;
+  transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, color .18s ease;
+}
+body.admin-layout .btn-primary,
+body.admin-layout .btn.btn-primary {
+  background: var(--mbw-primary);
+  border-color: var(--mbw-primary);
+  color: #fff;
+}
+body.admin-layout .btn-primary:hover,
+body.admin-layout .btn.btn-primary:hover {
+  background: color-mix(in srgb, var(--mbw-primary) 88%, #fff);
+  border-color: color-mix(in srgb, var(--mbw-primary) 88%, #fff);
+  box-shadow: var(--mbw-shadow);
+}
+
+/* Inputs */
+body.admin-layout input:not([type="checkbox"]):not([type="radio"]),
+body.admin-layout select,
+body.admin-layout textarea {
+  border-radius: 10px;
+  border: 1px solid var(--mbw-border);
+  background: var(--mbw-card);
+  color: var(--mbw-heading);
+}
+body.admin-layout input:focus,
+body.admin-layout select:focus,
+body.admin-layout textarea:focus {
+  border-color: var(--mbw-primary);
+}
+
+/* Links and focus. The gold focus ring is the design's, and it is the one
+   piece of this file that is not purely cosmetic: it has to stay visible
+   against both the light canvas and the dark sidebar. */
+a { color: var(--c-primary); transition: color .16s ease; }
+a:hover { color: var(--c-gold-ink); }
+:focus-visible {
+  outline: 2px solid var(--c-gold);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+::selection { background: var(--c-gold-tint); color: var(--c-ink); }
+input::placeholder, textarea::placeholder { color: var(--c-faint); }
+
+/* Eyebrow labels — the small tracked caps above a heading. Applied only where
+   the app already emits one of these classes. */
+.eyebrow, .section-eyebrow, .mbw-eyebrow {
+  font-family: var(--f-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--c-gold-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.admin-layout .admin-sidebar a,
+  body.admin-layout .admin-sidebar button,
+  body.admin-layout tbody tr,
+  body.admin-layout .btn,
+  a { transition: none; }
+}

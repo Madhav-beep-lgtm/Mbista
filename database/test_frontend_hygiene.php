@@ -613,5 +613,52 @@ ok(str_contains($grid, '@media (max-width: 720px)') && str_contains($grid, 'cont
 ok(preg_match('~@media \(max-width: 720px\).*?font-size: 16px~s', $grid) === 1,
     'Inputs hit 16px on a phone — Safari zooms the whole page for anything smaller and does not zoom back');
 
+echo "\n15. The 2026 appearance layer has the last word\n";
+// mbworld-2026.css restates tokens that style.css, portal.css, theme-brown
+// and theme-sahakari-green each also declare. Equal specificity is settled by
+// load order, so the ENTIRE retheme rests on this file being linked last. Add
+// a stylesheet after it and half the palette silently reverts — the portal
+// keeps the new canvas and goes back to the old cards, which reads as a
+// half-finished design rather than as a mistake in a <link> order.
+$layer = 'assets/css/mbworld-2026.css';
+$shells = ['admin_header.php', 'client_header.php', 'staff_header.php', 'header.php'];
+$missing = $notLast = [];
+foreach ($shells as $shell) {
+    $src = (string) @file_get_contents($root . '/app/views/partials/' . $shell);
+    if (!preg_match_all("~asset_url\('(assets/css/[^']+)'\)~", $src, $m)) {
+        $missing[] = $shell;
+        continue;
+    }
+    if (!in_array($layer, $m[1], true)) {
+        $missing[] = $shell;
+    } elseif (end($m[1]) !== $layer) {
+        $notLast[] = $shell . ' (last is ' . end($m[1]) . ')';
+    }
+}
+ok($missing === [], 'Every shell loads the appearance layer'
+    . ($missing === [] ? '' : ' — missing from ' . implode(', ', $missing)));
+ok($notLast === [], 'And loads it LAST, or its tokens lose to the sheet that follows'
+    . ($notLast === [] ? '' : ' — ' . implode(', ', $notLast)));
+
+$layerCss = (string) @file_get_contents($root . '/public_html/' . $layer);
+ok($layerCss !== '' && substr_count($layerCss, '@font-face') >= 6,
+    'The typefaces are self-hosted, because the CSP refuses fonts.googleapis.com');
+$fontMisses = [];
+if (preg_match_all('~url\("\.\./fonts/([^"]+)"\)~', $layerCss, $m)) {
+    foreach (array_unique($m[1]) as $file) {
+        if (!is_file($root . '/public_html/assets/fonts/' . $file)) {
+            $fontMisses[] = $file;
+        }
+    }
+}
+ok($m[1] !== [] && $fontMisses === [], 'And every face it names is committed as a file'
+    . ($fontMisses === [] ? '' : ' — missing ' . implode(', ', $fontMisses)));
+// Comments stripped first: the file explains at length WHY it does not use
+// fonts.googleapis.com, and a check that cannot tell an explanation from a
+// request would fail on the sentence describing the thing it wants.
+$layerRules = (string) preg_replace('~/\*[\s\S]*?\*/~', '', $layerCss);
+ok(!preg_match('~(?:url\(|@import)[^;]*fonts\.(?:googleapis|gstatic)\.com~', $layerRules),
+    'Nothing is fetched from a third-party font host at page load');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
