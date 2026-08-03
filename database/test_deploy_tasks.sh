@@ -122,12 +122,42 @@ check "$(printf '%s' "$out" | grep -q 'ERROR' && echo 1 || echo 0)" "and says ER
 check "$(printf '%s' "$out" | grep -q 'deploy: done' && echo 0 || echo 1)" "and does NOT go on to report 'done'"
 
 # ------------------------------------------------ two candidate docroots
+#
+# THE ONE THAT BROKE THE SITE. An empty ~/mbca.com.np used to beat the
+# ~/public_html that was actually being served, purely by existing, so every
+# stylesheet went to a directory no request ever reached while app/ kept
+# landing correctly — PHP live, assets frozen, rsync reporting success.
 H="$ROOT/h3"; mkdir -p "$H/public_html" "$H/mbca.com.np"
 echo '<?php // the site Apache actually serves' > "$H/public_html/index.php"
 R="$ROOT/r3"; make_repo "$R"
 out="$(HOME="$H" bash "$R/deploy/tasks.sh" 2>&1)"
-check "$(printf '%s' "$out" | grep -q "WARNING $H/public_html also looks like a deployed site" && echo 1 || echo 0)" "A second candidate document root is reported, not passed over"
-check "$([ -f "$H/mbca.com.np/assets/css/portal.css" ] && echo 1 || echo 0)" "The addon-domain root still wins the detection"
+check "$([ -f "$H/public_html/assets/css/portal.css" ] && echo 1 || echo 0)" "The directory that already HOLDS the site wins over one that merely exists"
+check "$([ ! -f "$H/mbca.com.np/assets/css/portal.css" ] && echo 1 || echo 0)" "and the empty candidate is left alone"
+check "$(printf '%s' "$out" | grep -q "already holds the site" && echo 1 || echo 0)" "The deploy says which root it chose and why"
+
+# An addon domain that really is the site still wins — the fix must not
+# hard-code ~/public_html.
+H="$ROOT/h3b"; mkdir -p "$H/public_html" "$H/mbca.com.np"
+echo '<?php // addon domain is the real site here' > "$H/mbca.com.np/index.php"
+R="$ROOT/r3b"; make_repo "$R"
+out="$(HOME="$H" bash "$R/deploy/tasks.sh" 2>&1)"
+check "$([ -f "$H/mbca.com.np/assets/css/portal.css" ] && echo 1 || echo 0)" "An addon-domain root that holds the site is still chosen"
+
+# Both hold a site: one is picked, the other is REPORTED rather than ignored.
+H="$ROOT/h3c"; mkdir -p "$H/public_html" "$H/mbca.com.np"
+echo '<?php' > "$H/public_html/index.php"; echo '<?php' > "$H/mbca.com.np/index.php"
+R="$ROOT/r3c"; make_repo "$R"
+out="$(HOME="$H" bash "$R/deploy/tasks.sh" 2>&1)"
+check "$(printf '%s' "$out" | grep -q "WARNING $H/mbca.com.np also holds a site" && echo 1 || echo 0)" "A second live candidate is reported, with the command to switch to it"
+
+# ~/.deploy-docroot overrides the guessing entirely.
+H="$ROOT/h3d"; mkdir -p "$H/public_html" "$H/webroot"
+echo '<?php' > "$H/public_html/index.php"
+echo "$H/webroot" > "$H/.deploy-docroot"
+R="$ROOT/r3d"; make_repo "$R"
+out="$(HOME="$H" bash "$R/deploy/tasks.sh" 2>&1)"
+check "$([ -f "$H/webroot/assets/css/portal.css" ] && echo 1 || echo 0)" "~/.deploy-docroot is obeyed over anything the detection would pick"
+check "$([ ! -f "$H/public_html/assets/css/portal.css" ] && echo 1 || echo 0)" "and the guessed root is then left untouched"
 
 echo
 echo "== auto-deploy.sh =="

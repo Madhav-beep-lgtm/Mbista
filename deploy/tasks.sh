@@ -24,26 +24,76 @@ die() {
     exit 1
 }
 
-DOCROOT="$HOME/public_html"
-if [ -d "$HOME/mbca.com.np" ]; then
-    DOCROOT="$HOME/mbca.com.np"
-elif [ -d "$HOME/public_html/mbca.com.np" ]; then
-    DOCROOT="$HOME/public_html/mbca.com.np"
-fi
-APP_BASE="$(dirname "$DOCROOT")"
-echo "deploy: web files -> $DOCROOT ; app/database -> $APP_BASE"
+# ---------------------------------------------------------------------------
+# Which directory is the document root
+# ---------------------------------------------------------------------------
+# This used to take the FIRST candidate that existed, preferring the addon
+# domain directories over ~/public_html. An empty ~/mbca.com.np — which cPanel
+# will create just for adding a domain — was therefore enough to redirect
+# every web file away from the site that was actually being served, while
+# app/ and database/ carried on landing correctly one level above. The result
+# is the most confusing shape a broken deploy can take: PHP changes go live,
+# stylesheets and images do not, rsync reports success, and the site sits on
+# whatever assets it had the last time the guess happened to be right.
+#
+# So existence is no longer the test. A directory that ALREADY holds the site
+# wins over one that merely exists, ~/public_html is preferred when more than
+# one qualifies, and the choice is printed with its reason. An account whose
+# real root is somewhere else can say so outright and skip the guessing.
+CANDIDATES="$HOME/public_html
+$HOME/mbca.com.np
+$HOME/public_html/mbca.com.np"
 
-# Writing to the wrong one of several candidate document roots looks exactly
-# like a successful deploy: rsync reports every file copied, and the browser
-# goes on serving the directory nobody wrote to. The detection above picks
-# one; if another also holds a site, which one it picked is the first thing to
-# check when a deploy "works" but nothing changes.
-for CANDIDATE in "$HOME/public_html" "$HOME/mbca.com.np" "$HOME/public_html/mbca.com.np"; do
-    if [ "$CANDIDATE" != "$DOCROOT" ] && [ -f "$CANDIDATE/index.php" ]; then
-        echo "deploy: WARNING $CANDIDATE also looks like a deployed site, and is NOT being written to."
-        echo "deploy:   If the browser still shows old files, that is probably the real document root."
+looks_deployed() { [ -f "$1/assets/css/style.css" ] || [ -f "$1/index.php" ]; }
+
+DOCROOT=""
+DOCROOT_WHY=""
+if [ -n "${DEPLOY_DOCROOT:-}" ]; then
+    DOCROOT="$DEPLOY_DOCROOT"
+    DOCROOT_WHY="DEPLOY_DOCROOT is set"
+elif [ -f "$HOME/.deploy-docroot" ]; then
+    DOCROOT="$(head -1 "$HOME/.deploy-docroot" | tr -d '\r')"
+    DOCROOT_WHY="named in ~/.deploy-docroot"
+else
+    while IFS= read -r CANDIDATE; do
+        [ -n "$CANDIDATE" ] && [ -d "$CANDIDATE" ] || continue
+        if looks_deployed "$CANDIDATE"; then
+            DOCROOT="$CANDIDATE"
+            DOCROOT_WHY="it already holds the site"
+            break
+        fi
+    done <<CANDIDATE_LIST
+$CANDIDATES
+CANDIDATE_LIST
+fi
+if [ -z "$DOCROOT" ]; then
+    while IFS= read -r CANDIDATE; do
+        [ -n "$CANDIDATE" ] && [ -d "$CANDIDATE" ] || continue
+        DOCROOT="$CANDIDATE"
+        DOCROOT_WHY="first existing candidate; no directory holds a site yet"
+        break
+    done <<CANDIDATE_LIST
+$CANDIDATES
+CANDIDATE_LIST
+fi
+[ -n "$DOCROOT" ] || { DOCROOT="$HOME/public_html"; DOCROOT_WHY="default"; }
+
+APP_BASE="$(dirname "$DOCROOT")"
+echo "deploy: web files -> $DOCROOT ($DOCROOT_WHY)"
+echo "deploy: app/database -> $APP_BASE"
+
+# Any OTHER directory that also holds a site is reported. If the browser still
+# shows old files after this deploy, one of these is the real document root
+# and belongs in ~/.deploy-docroot.
+while IFS= read -r CANDIDATE; do
+    [ -n "$CANDIDATE" ] && [ "$CANDIDATE" != "$DOCROOT" ] || continue
+    if looks_deployed "$CANDIDATE"; then
+        echo "deploy: WARNING $CANDIDATE also holds a site and is NOT being written to."
+        echo "deploy:   If the browser still shows old files: echo '$CANDIDATE' > ~/.deploy-docroot"
     fi
-done
+done <<CANDIDATE_LIST
+$CANDIDATES
+CANDIDATE_LIST
 
 mkdir -p "$DOCROOT" "$APP_BASE/app" "$APP_BASE/database" "$APP_BASE/secure_uploads/kyc"
 
