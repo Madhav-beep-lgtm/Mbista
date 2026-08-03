@@ -322,27 +322,67 @@ log "wrote $ARTIFACT ($SIZE)"
 # anything rclone or scp understands, e.g.
 #     BACKUP_REMOTE="rclone:gdrive:mbista-backups"
 #     BACKUP_REMOTE="scp:backupuser@203.0.113.9:/srv/mbista"
+# WHICH rclone. $HOME/bin first, and not as a matter of taste.
+#
+# Distributions ship old rclone — this account's /bin/rclone is v1.57 from
+# 2021 — and Google retired the out-of-band login flow that version uses, so a
+# remote can only be AUTHORISED with a current build. The refresh token that
+# authorisation returns is tied to the client_id that issued it, so handing it
+# back to a different rclone can fail to refresh once the first hour is up:
+# the initial upload succeeds, every one after it does not, and the log fills
+# with a failure nobody is reading. Same binary that got the token, always.
+rclone_bin() {
+    if [ -x "$HOME/bin/rclone" ]; then
+        printf '%s' "$HOME/bin/rclone"
+    elif command -v rclone >/dev/null 2>&1; then
+        command -v rclone
+    fi
+}
+
+# AN UPLOAD THAT FAILS HAS TO REACH THE BANNER.
+#
+# This used to log a WARNING and return, leaving the run to finish and report
+# "ok". Every symptom of a backup that had silently stopped leaving the server
+# was therefore a line in a file nobody opens — which is the exact failure this
+# script's own status file was written to end, reintroduced one level down.
+# WARNING_NOTE is what write_status puts in the "warning" field, and the app
+# turns that into "the last database backup succeeded, but only partly".
+offsite_failed() {
+    log "WARNING: $1"
+    WARNING_NOTE="${WARNING_NOTE:+$WARNING_NOTE; }$1"
+}
+
 ship_offsite() {
     ARTEFACT="$1"
     if [ -z "$BACKUP_REMOTE" ]; then
         log "NOTE: BACKUP_REMOTE is not set — $(basename "$ARTEFACT") exists only on this server"
         return 0
     fi
+    NAME="$(basename "$ARTEFACT")"
     case "$BACKUP_REMOTE" in
         rclone:*)
             TARGET="${BACKUP_REMOTE#rclone:}"
-            if command -v rclone >/dev/null 2>&1; then
-                rclone copy "$ARTEFACT" "$TARGET" >>"$LOG" 2>&1                     && log "copied $(basename "$ARTEFACT") off-server to $TARGET"                     || log "WARNING: rclone copy to $TARGET failed — $(basename "$ARTEFACT") is only on this server"
+            RCLONE="$(rclone_bin)"
+            if [ -n "$RCLONE" ]; then
+                if "$RCLONE" copy "$ARTEFACT" "$TARGET" >>"$LOG" 2>&1; then
+                    log "copied $NAME off-server to $TARGET"
+                else
+                    offsite_failed "rclone copy to $TARGET failed — $NAME is only on this server"
+                fi
             else
-                log "WARNING: BACKUP_REMOTE uses rclone but rclone is not installed"
+                offsite_failed "BACKUP_REMOTE uses rclone but rclone is not installed"
             fi
             ;;
         scp:*)
             TARGET="${BACKUP_REMOTE#scp:}"
-            scp -q -o BatchMode=yes "$ARTEFACT" "$TARGET" >>"$LOG" 2>&1                 && log "copied $(basename "$ARTEFACT") off-server to $TARGET"                 || log "WARNING: scp to $TARGET failed — $(basename "$ARTEFACT") is only on this server"
+            if scp -q -o BatchMode=yes "$ARTEFACT" "$TARGET" >>"$LOG" 2>&1; then
+                log "copied $NAME off-server to $TARGET"
+            else
+                offsite_failed "scp to $TARGET failed — $NAME is only on this server"
+            fi
             ;;
         *)
-            log "WARNING: BACKUP_REMOTE must start with rclone: or scp: — got '$BACKUP_REMOTE'"
+            offsite_failed "BACKUP_REMOTE must start with rclone: or scp: — got '$BACKUP_REMOTE'"
             ;;
     esac
 }

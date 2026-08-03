@@ -134,5 +134,22 @@ ok(str_contains($helperCode, 'days old (')  && str_contains($helperCode, '$ranAt
 ok(function_exists('backup_health_warning') && function_exists('backup_status_read'),
     'Both halves the admin header depends on are defined');
 
+echo "\n5. A backup that cannot leave the server says so\n";
+// An off-site copy that fails used to log a WARNING and let the run finish
+// reporting "ok" — so "the backups stopped reaching Google Drive" lived only
+// in a file nobody opens. That is the same silence the status file was written
+// to end. The failure now goes into WARNING_NOTE, which write_status puts in
+// the warning field, which the banner reads.
+$sh = (string) @file_get_contents(__DIR__ . '/../deploy/backup-database.sh');
+ok(preg_match('~offsite_failed\(\)\s*\{[^}]*WARNING_NOTE=~s', $sh) === 1,
+    'A failed off-site copy is recorded in WARNING_NOTE, not just logged');
+ok(substr_count($sh, 'offsite_failed "') >= 3,
+    'Every way the copy can fail goes through it — missing tool, bad target, failed transfer');
+ok(preg_match('~warning="\$\(clean_json_text "\$\{WARNING_NOTE:-\}"\)"~', $sh) === 1,
+    'And write_status puts that note where the app reads it');
+// The binary matters: only the rclone that obtained the token can refresh it.
+ok(str_contains($sh, '$HOME/bin/rclone'),
+    'rclone is taken from $HOME/bin first, so the version that got the token is the one that uses it');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
