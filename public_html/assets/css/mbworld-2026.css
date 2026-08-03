@@ -919,28 +919,21 @@ body.admin-layout .frm-toggle-wrap input[type="checkbox"] {
   font-weight: 600;
 }
 
-/* Stock summary: six column groups — opening, in, out, damage, closing and
-   the rest — each three columns wide across an eighteen-column sheet. The
-   classes existed to tell them apart and painted nothing, so the report was
-   a wall of numbers with no seam. Tints are faint on purpose: they have to
-   survive being printed, which is what this page is for. */
-.grp-open  { background: color-mix(in srgb, var(--c-blue-tint) 60%, transparent); }
-.grp-in    { background: color-mix(in srgb, var(--c-green-tint) 60%, transparent); }
-.grp-out   { background: color-mix(in srgb, var(--c-amber-tint) 60%, transparent); }
-.grp-dmg   { background: color-mix(in srgb, var(--c-red-tint) 60%, transparent); }
-.grp-close { background: color-mix(in srgb, var(--c-primary-tint) 70%, transparent); }
-.grp-other { background: var(--c-surface-2); }
-.grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-other {
-  border-left: 1px solid var(--c-line);
-}
-@media print {
-  /* Backgrounds are dropped by default when printing, which would undo the
-     grouping on the one medium this sheet exists for. */
-  .grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-other {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-}
+/* The six .grp-* column groups on the stock summary live in that page's own
+   <style>, not here.
+
+   stock-summary-report.php renders two different documents. Asked for a PDF
+   it echoes its own <!doctype>, with its own <style> and no portal stylesheet
+   at all, and exits. Asked for the screen it falls through to the admin
+   header, which loads everything. The grouped cells are only ever emitted by
+   the screen branch, so rules here would in fact have worked — but they would
+   have worked by luck, a hundred lines below an exit() that decides whether
+   any of this file is loaded. Kept beside the markup instead, where the next
+   person can see which of the two documents they apply to.
+
+   The PDF branch builds its own table and does not carry these classes, so
+   the printed sheet has no column grouping. That is how it has always been
+   and is a separate question from this one. */
 
 /* Numeric entry cells in the jewellery line grid. Right-aligned figures in a
    mono face, because these are weights read down a column. */
@@ -956,13 +949,15 @@ body.admin-layout .jw-wastage-wt {
    centres them on the page, the heading block and the footer links were not
    — so the one screen standing between a stolen password and the books was
    also the least finished. */
+/* Centred horizontally, NOT stretched to the viewport. two-factor.php
+   includes the public header and footer, so a min-height:100vh here would
+   have pushed the footer a full screen below the card and given a short form
+   a scrollbar. The page is a header, one small card, and a footer; it should
+   end where the card ends. */
 .auth2-wrap {
-  min-height: 100vh;
   display: flex;
-  align-items: center;
   justify-content: center;
-  padding: 24px 16px;
-  background: var(--c-canvas);
+  padding: 48px 16px 64px;
 }
 .auth2-head {
   margin-bottom: 18px;

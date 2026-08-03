@@ -521,6 +521,35 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <style>
+/* The six column groups.
+   Opening, In, Out, Damage, Closing and the rest, three columns each across
+   an eighteen-column sheet. The classes have been in the markup all along
+   with nothing behind them, so the report read as one undifferentiated wall
+   of figures and the eye had to count headers to find which block a number
+   belonged to.
+
+   Literal colours, not tokens: this page emits its own document and loads no
+   portal stylesheet, so var(--c-*) would resolve to nothing here. Faint on
+   purpose — this is a sheet that gets printed, and print-color-adjust keeps
+   the grouping when it is, because browsers drop backgrounds by default and
+   would otherwise throw away the whole point of it on the one medium that
+   matters most. */
+.grp-open  { background: #eef4f8; }
+.grp-in    { background: #edf5ef; }
+.grp-out   { background: #fbf3e6; }
+.grp-dmg   { background: #fbeeed; }
+.grp-close { background: #e9f0ec; }
+.grp-other { background: #f5f7f5; }
+.grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-other {
+    border-left: 1px solid #d9e0da;
+}
+@media print {
+    .grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-other {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+
 /* Compact multi-select popovers: uniform 38px fields like every other input,
    options in an anchored checklist instead of a tall scrolling list box. */
 .ssr-msel { position: relative; }

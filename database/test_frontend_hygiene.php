@@ -739,5 +739,59 @@ ok($bare === [], 'No class renders with nothing behind it'
         array_values(array_slice($bare, 0, 6, true))
     ))));
 
+echo "\n17. A page that builds its own document is styled inside it\n";
+// Section 16 asks whether a rule exists ANYWHERE. For a page that emits its
+// own <!doctype and links no stylesheet, that is the wrong question: a rule
+// written for it in assets/css reaches nothing while reading as correct in
+// review. Here the question is whether the rule is in the document itself.
+// Its own <style> blocks and inline style attributes count; the shared
+// stylesheets deliberately do not.
+//
+// SCOPE, honestly. This covers pages that are standalone documents and
+// nothing else. It does NOT cover the hybrid ones — stock-summary-report.php
+// echoes a complete PDF document and exits, or falls through to the admin
+// header and loads everything, depending on a query parameter. Deciding
+// which half of such a file a given class belongs to needs the branch it
+// sits in, which is beyond a regex over the source. Those pages are excluded
+// rather than guessed at, and the exclusion is the reason this check cannot
+// be relied on alone.
+$standalone = [];
+foreach (hygiene_php_files($root . '/public_html') as $path) {
+    $src = (string) file_get_contents($path);
+    if (stripos($src, '<!doctype html') === false) { continue; }
+    if (preg_match('~rel=["\']stylesheet~i', $src) === 1) { continue; }
+    if (preg_match('~partials/(admin_|staff_|client_)?header\.php~', $src) === 1) { continue; }
+    $standalone[$path] = $src;
+}
+$orphans = [];
+foreach ($standalone as $path => $src) {
+    $own = '';
+    if (preg_match_all('~<style[^>]*>([\s\S]*?)</style>~i', $src, $m)) {
+        $own = implode("\n", $m[1]);
+    }
+    $own = (string) preg_replace('~/\*[\s\S]*?\*/~', '', $own);
+    preg_match_all('~\.([a-zA-Z][a-zA-Z0-9_-]*)~', $own, $m);
+    $ownRules = array_flip(array_unique($m[1]));
+
+    if (!preg_match_all('~<[a-zA-Z][^>]*class=(["\'])([^"\']*)\1[^>]*>~', $src, $tm)) { continue; }
+    foreach ($tm[0] as $i => $tag) {
+        if (strpos($tag, 'style=') !== false) { continue; }
+        foreach (preg_split('~\s+~', (string) $tm[2][$i]) as $c) {
+            $c = trim((string) $c);
+            if ($c === '' || preg_match('~^[a-zA-Z][a-zA-Z0-9_-]*$~', $c) !== 1) { continue; }
+            if (isset($ownRules[$c])) { continue; }
+            if (strpos($c, 'js-') === 0 || strpos($scriptSrc, '.' . $c) !== false) { continue; }
+            $orphans[$c] = basename($path);
+        }
+    }
+}
+ok($standalone !== [], 'Standalone documents were found and checked (' . count($standalone) . ')');
+ok($orphans === [], 'None of them uses a class styled only in a stylesheet it never loads'
+    . ($orphans === [] ? '' : ' — ' . implode(', ', array_map(
+        static fn($c, $f) => $c . ' (' . $f . ')',
+        array_keys(array_slice($orphans, 0, 8, true)),
+        array_values(array_slice($orphans, 0, 8, true))
+    ))));
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
