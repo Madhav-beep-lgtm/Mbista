@@ -793,5 +793,44 @@ ok($orphans === [], 'None of them uses a class styled only in a stylesheet it ne
         array_values(array_slice($orphans, 0, 8, true))
     ))));
 
+echo "\n18. Action buttons can be hit, and can be named\n";
+// 74 of the app's 500 buttons carry an inline height under 44px — 24px on the
+// agreement builder, 30px on several delete controls. 44px is the size a
+// fingertip actually hits and the figure enforced everywhere else here; the
+// suite already checks it for inputs and simply never covered buttons.
+//
+// The floor is stated once in CSS rather than by editing 74 attributes,
+// because an inline style beats a stylesheet and the seventy-fifth button
+// would arrive unprotected. What is asserted is that the floor exists.
+$layerCss = (string) @file_get_contents($root . '/public_html/assets/css/mbworld-2026.css');
+ok(preg_match('~@media[^{]*pointer:\s*coarse[^{]*\{~', $layerCss) === 1,
+    'There is a touch-only rule, so nothing about the desktop layout is changed by it');
+ok(preg_match('~pointer:\s*coarse[\s\S]{0,600}?min-height:\s*44px\s*!important~', $layerCss) === 1,
+    'And it holds every button to a 44px minimum on a finger, over any inline height');
+
+// A button whose only content is an icon or a glyph needs a name, or a screen
+// reader announces "button" and nothing else. Two delete controls in payroll
+// were reading exactly that way.
+$unnamed = [];
+foreach ($markup as $path) {
+    $src = (string) file_get_contents($path);
+    if (!preg_match_all('~<button\b([^>]*)>([\s\S]*?)</button>~i', $src, $bm, PREG_SET_ORDER)) { continue; }
+    foreach ($bm as $b) {
+        [$whole, $attrs, $inner] = [$b[0], (string) $b[1], (string) $b[2]];
+        if (preg_match('~\baria-label\s*=|\btitle\s*=~i', $attrs) === 1) { continue; }
+        // A PHP block usually IS the label; only a button with no words at
+        // all, in markup or in PHP, is nameless.
+        $php = '';
+        if (preg_match_all('~<\?(?:php|=)([\s\S]*?)\?' . '>~', $inner, $pm)) { $php = implode(' ', $pm[1]); }
+        if (preg_match('~[\'"][^\'"]*[A-Za-z]{2}~', $php) === 1
+            || preg_match('~\b(?:e|esc|htmlspecialchars)\s*\(~', $php) === 1) { continue; }
+        $text = trim((string) preg_replace('~<\?php[\s\S]*?\?' . '>|<\?=[\s\S]*?\?' . '>|<[^>]*>|&[a-z]+;|\s~i', '', $inner));
+        if ($text !== '') { continue; }
+        $unnamed[] = basename($path);
+    }
+}
+ok($unnamed === [], 'No button is left without a name a screen reader can read'
+    . ($unnamed === [] ? '' : ' — ' . implode(', ', array_unique(array_slice($unnamed, 0, 6)))));
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

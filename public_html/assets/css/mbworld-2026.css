@@ -1112,6 +1112,58 @@ body.admin-layout .admin-page {
   padding: 4px 0 24px;
 }
 
+/* --------------------------------------------------------------------------
+   7. Action buttons
+   --------------------------------------------------------------------------
+   An audit of all 500 <button> elements in the app found 74 carrying an
+   inline height under 44px — as low as 24px on the agreement builder, and
+   30px on several delete controls. 44px is the size a fingertip actually
+   hits, it is the figure the rest of this codebase enforces, and the hygiene
+   suite already checks it for form inputs. Buttons were simply never
+   included.
+
+   WHY !important, WHICH IS NORMALLY AN ADMISSION OF DEFEAT
+
+   All 74 are set inline, and an inline style beats any stylesheet. The
+   alternatives were to edit seventy-four attributes across twenty-two files —
+   every one a chance to break a layout, and no protection at all against the
+   seventy-fifth being added next week — or to state the floor once, in the
+   one place it can be read, and have it hold. A minimum tap target is a
+   genuine exception to the usual rule: it is not a preference competing with
+   the page's intent, it is a floor beneath it.
+
+   Bounded deliberately. Only on a coarse pointer (a finger, not a mouse) and
+   only below 900px, so nothing about the desktop layout changes — a dense
+   toolbar of 28px buttons is perfectly reasonable under a cursor. */
+@media (max-width: 900px) and (pointer: coarse) {
+  body.admin-layout .button,
+  body.admin-layout button.button,
+  body.admin-layout .btn,
+  body.admin-layout button[type="submit"],
+  body.admin-layout button[type="button"] {
+    min-height: 44px !important;
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+  }
+  /* Icon-only buttons need the width too, or they stay a 44px-tall sliver. */
+  body.admin-layout .jw-line-remove,
+  body.admin-layout .jw-line-add {
+    min-width: 44px !important;
+  }
+}
+
+/* Destructive controls that were colouring themselves inline. The colour is
+   the only thing distinguishing a delete from a save in these rows, so it
+   belongs in one place rather than in each row's style attribute. */
+body.admin-layout .danger-text {
+  color: var(--mbw-red);
+}
+body.admin-layout .danger-text:hover {
+  color: var(--mbw-red);
+  border-color: var(--mbw-red);
+  background: var(--mbw-red-soft);
+}
+
 @media (prefers-reduced-motion: reduce) {
   body.admin-layout .admin-sidebar a,
   body.admin-layout .admin-sidebar button,
