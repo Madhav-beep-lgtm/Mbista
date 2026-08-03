@@ -699,7 +699,12 @@ foreach ($markup as $path) {
     }
 }
 $styleSrc = (string) preg_replace('~/\*[\s\S]*?\*/~', '', $styleSrc);
-preg_match_all('~\.([a-zA-Z][a-zA-Z0-9_-]+)~', $styleSrc, $m);
+// `*` and not `+`: the first version of this required two characters, so the
+// single-letter classes in the printed invoice — `table.items .c { text-align:
+// center }` and its `.r` — were invisible to it. They matched in the markup
+// and never in the stylesheet, and only escaped being reported as unstyled
+// because some of them happened to carry an inline width as well.
+preg_match_all('~\.([a-zA-Z][a-zA-Z0-9_-]*)~', $styleSrc, $m);
 $hasRule = array_flip(array_unique($m[1]));
 
 $seen = $bare = [];

@@ -1031,6 +1031,81 @@ body.admin-layout .rpt-note-body {
   line-height: 1.6;
 }
 
+/* --------------------------------------------------------------------------
+   Classes that were painted inline, and painted DIFFERENTLY in each place
+   --------------------------------------------------------------------------
+   Eighty classes with no rule carry an inline style instead. Untidy but
+   harmless — except for eight that carry a DIFFERENT inline style in each
+   place they appear, which is the one thing a class name exists to prevent.
+   Given a base rule here so the class decides the look; the inline margins
+   left in the markup still win where a page wants a different gap, which is
+   a reasonable thing for a page to want.
+
+   One of the eight was not cosmetic. See .jw-line-remove below.
+   -------------------------------------------------------------------------- */
+
+/* Removing a row is a destructive action on a touch screen, and the workshop
+   set this button to min-height:30px inline while the shared line grid set
+   nothing at all — against the 44px minimum this codebase enforces on every
+   other control and that the hygiene suite checks for. 30px is under the
+   pad of a thumb, directly beside the fields it deletes. The inline
+   override was removed from jewellery-workshop.php so this can apply. */
+body.admin-layout .jw-line-remove {
+  min-height: 34px;
+  padding: 4px 10px;
+  border-radius: var(--mbw-radius-sm);
+  line-height: 1.1;
+}
+@media (max-width: 720px) {
+  body.admin-layout .jw-line-remove {
+    min-height: 44px;
+    padding: 8px 14px;
+  }
+}
+
+/* The remaining seven differed only in margin. A base look here; the pages
+   keep their own spacing. */
+body.admin-layout .mbw-note {
+  padding: 9px 12px;
+  border: 1px solid var(--mbw-border);
+  border-left: 3px solid var(--mbw-muted);
+  border-radius: var(--mbw-radius-sm);
+  background: var(--mbw-card-soft);
+  color: var(--mbw-text);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+body.admin-layout .mbw-note.tone-amber {
+  border-color: var(--mbw-amber);
+  border-left-color: var(--mbw-amber);
+  background: var(--mbw-amber-soft);
+}
+body.admin-layout .mbw-note.tone-grey {
+  border-left-color: var(--mbw-muted);
+  background: var(--mbw-gray-soft);
+}
+body.admin-layout .mbw-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+body.admin-layout .jw-lines-box {
+  min-width: 0;
+  border: 1px solid var(--mbw-border);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+/* .frm-span-2 meant two different things: `grid-column: span 2` on one field
+   and `grid-column: 1 / -1` — the full width of the grid — on another. One
+   name, two behaviours, and whichever a reader saw first was the wrong guess
+   about the other. The name says two, so two is what it does; the field that
+   wants the full row keeps its inline rule, which now reads as the deliberate
+   exception it is. */
+body.admin-layout .frm-span-2 {
+  grid-column: span 2;
+}
+
 /* The schema-repair page is the only page in the app with this wrapper, and
    the .table-card inside it already carries the surface — so all it was ever
    missing is the width and breathing room every other admin page gets from
