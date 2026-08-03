@@ -4413,7 +4413,18 @@ body.admin-layout .admin-content table:not(.reference-table):not(.party-ledger-t
   color: var(--mbw-muted);
 }
 
-body.admin-layout .admin-content .button:not(.secondary):not(.outline) {
+/* The exclusion list has to name EVERY variant that brings its own colours,
+   because this rule outranks them (0-5-1 against the 0-3-1 of
+   `body.admin-layout .button.soft`) and it sets only the background. A variant
+   left off the list keeps its own TEXT colour and loses its background to
+   --mbw-primary — and .soft's text colour IS --mbw-primary, so `＋ Add row`
+   rendered as a green block with a green label inside it. Same shape as the
+   export buttons documented in jewellery.css: the words were in the HTML the
+   whole time, painted the colour of what was behind them.
+
+   .danger and .success were losing their red and green backgrounds the same
+   way. Five variants style themselves; five are named here. */
+body.admin-layout .admin-content .button:not(.secondary):not(.outline):not(.soft):not(.danger):not(.success) {
   background: var(--mbw-primary);
   border-color: var(--mbw-primary);
 }

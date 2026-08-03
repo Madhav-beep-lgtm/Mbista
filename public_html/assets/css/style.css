@@ -7173,7 +7173,10 @@ body.accounting-reference-layout .admin-content table:not(.reference-table):not(
   border-bottom: 1px solid var(--ref-line);
 }
 
-body.accounting-reference-layout .admin-content .button:not(.secondary):not(.outline) {
+/* The same exclusion list as the token mirror of this rule in portal.css: a
+   variant that brings its own background must be named here too, or it keeps
+   its own text colour on top of this one's background. */
+body.accounting-reference-layout .admin-content .button:not(.secondary):not(.outline):not(.soft):not(.danger):not(.success) {
   background: var(--ref-navy);
   border-color: var(--ref-navy);
   border-radius: 6px;
