@@ -12,6 +12,18 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
+# A step that fails must stop the deploy and say so.
+#
+# This script had `set -u` but no `set -e`, and it ends on an echo — so its
+# exit status was "success" no matter what happened in between. A failed rsync
+# printed its complaint into the log and the deploy still reported "done".
+# Copy steps are checked explicitly rather than with `set -e`, because what
+# follows them (the crontab install) is deliberately allowed to fail.
+die() {
+    echo "deploy: ERROR $*" >&2
+    exit 1
+}
+
 DOCROOT="$HOME/public_html"
 if [ -d "$HOME/mbca.com.np" ]; then
     DOCROOT="$HOME/mbca.com.np"
@@ -20,6 +32,18 @@ elif [ -d "$HOME/public_html/mbca.com.np" ]; then
 fi
 APP_BASE="$(dirname "$DOCROOT")"
 echo "deploy: web files -> $DOCROOT ; app/database -> $APP_BASE"
+
+# Writing to the wrong one of several candidate document roots looks exactly
+# like a successful deploy: rsync reports every file copied, and the browser
+# goes on serving the directory nobody wrote to. The detection above picks
+# one; if another also holds a site, which one it picked is the first thing to
+# check when a deploy "works" but nothing changes.
+for CANDIDATE in "$HOME/public_html" "$HOME/mbca.com.np" "$HOME/public_html/mbca.com.np"; do
+    if [ "$CANDIDATE" != "$DOCROOT" ] && [ -f "$CANDIDATE/index.php" ]; then
+        echo "deploy: WARNING $CANDIDATE also looks like a deployed site, and is NOT being written to."
+        echo "deploy:   If the browser still shows old files, that is probably the real document root."
+    fi
+done
 
 mkdir -p "$DOCROOT" "$APP_BASE/app" "$APP_BASE/database" "$APP_BASE/secure_uploads/kyc"
 
@@ -36,13 +60,33 @@ NEVER_PUBLISH=(
 )
 
 # Never overwrite server-side user uploads; never ship local dev uploads.
-rsync -a --exclude=uploads/ --exclude=assets/uploads/ "${NEVER_PUBLISH[@]}" public_html/ "$DOCROOT/"
+rsync -a --exclude=uploads/ --exclude=assets/uploads/ "${NEVER_PUBLISH[@]}" public_html/ "$DOCROOT/" \
+    || die "could not copy the web files into $DOCROOT (see the rsync message above)"
 mkdir -p "$DOCROOT/uploads" "$DOCROOT/assets/uploads"
-cp -f public_html/uploads/.htaccess "$DOCROOT/uploads/.htaccess"
-cp -f public_html/uploads/.htaccess "$DOCROOT/assets/uploads/.htaccess"
+cp -f public_html/uploads/.htaccess "$DOCROOT/uploads/.htaccess" \
+    || die "could not install $DOCROOT/uploads/.htaccess — uploads would be served unprotected"
+cp -f public_html/uploads/.htaccess "$DOCROOT/assets/uploads/.htaccess" \
+    || die "could not install $DOCROOT/assets/uploads/.htaccess — uploads would be served unprotected"
 
-rsync -a "${NEVER_PUBLISH[@]}" app/ "$APP_BASE/app/"
-rsync -a "${NEVER_PUBLISH[@]}" database/ "$APP_BASE/database/"
+rsync -a "${NEVER_PUBLISH[@]}" app/ "$APP_BASE/app/" \
+    || die "could not copy app/ into $APP_BASE/app/"
+rsync -a "${NEVER_PUBLISH[@]}" database/ "$APP_BASE/database/" \
+    || die "could not copy database/ into $APP_BASE/database/"
+
+# Prove the copy actually landed, rather than trusting that it did.
+#
+# Everything above can report success and still leave the served files
+# untouched — a read-only target, a docroot that is not the one Apache uses, a
+# stale NFS handle. Comparing one real file end to end is cheap and catches
+# all three, and it is the check that would have caught a fortnight of deploys
+# that changed nothing.
+SENTINEL="assets/css/portal.css"
+if [ -f "public_html/$SENTINEL" ]; then
+    if ! cmp -s "public_html/$SENTINEL" "$DOCROOT/$SENTINEL"; then
+        die "$DOCROOT/$SENTINEL does not match the repository copy after rsync — the deploy did not take effect"
+    fi
+    echo "deploy: verified $SENTINEL matches the repository ($(wc -c < "$DOCROOT/$SENTINEL") bytes)"
+fi
 cp -f secure_uploads/kyc/.htaccess "$APP_BASE/secure_uploads/kyc/.htaccess"
 
 # Provide the .env template; the real .env is created once by hand and never touched.
