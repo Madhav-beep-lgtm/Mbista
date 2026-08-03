@@ -201,6 +201,39 @@ app.get("/", (req, res) => {
     );
 });
 
+/*
+ * Health check — the one route that answers without a token.
+ *
+ * It exists to tell a blank page apart from a broken one. Hitting the API and
+ * getting an empty 200 back says nothing: Passenger not started, the subdomain
+ * pointed at an empty directory, and a crashed worker all look identical from
+ * a browser. Any JSON at all from here proves Node is running and reached; the
+ * db field then separates "the app is up" from "the app is up and can read".
+ *
+ * Deliberately unauthenticated, because a health check that needs a login
+ * cannot tell you the login is broken. Equally deliberately it says nothing
+ * else: no version, no hostname, no database name, no error text. Those are
+ * free reconnaissance on a public endpoint, and the reason a query failed
+ * belongs in the log where it already goes.
+ *
+ * 503 rather than 200 when the database is unreachable, so an uptime monitor
+ * treats it as down without having to parse the body.
+ */
+app.get("/api/health", async (req, res) => {
+    let database = "up";
+    try {
+        await db.query("SELECT 1");
+    } catch (err) {
+        console.error("[GET /api/health]", err.message);
+        database = "down";
+    }
+    res.status(database === "up" ? 200 : 503).json({
+        status: database === "up" ? "ok" : "degraded",
+        database: database,
+        time: new Date().toISOString()
+    });
+});
+
 // ---------------------------------------------------------------------------
 // Login
 // ---------------------------------------------------------------------------

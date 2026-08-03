@@ -94,6 +94,25 @@ a plain `npm install` may use a different Node than the one Passenger runs.
 Press **Restart**, then from your laptop:
 
 ```bash
+curl -i https://api.mbca.com.np/api/health
+# expect: 200 {"status":"ok","database":"up","time":"…"}
+```
+
+**Start with that one.** It needs no token, and it is the only check that
+distinguishes the three ways this fails, which look identical in a browser —
+all of them a blank page:
+
+| what you get | what it means |
+|---|---|
+| `200` and JSON | Node is running and can read the database |
+| `503 {"database":"down"}` | Node is running; `DB_*` is wrong. The reason is in the stderr log, never in the reply |
+| `200` with an **empty body**, `Content-Type: text/html` | Node is NOT running. Apache is serving the subdomain's empty directory — Passenger was never started, or `npm install` was never run |
+| `502` | the startup file threw; see the log |
+
+That third row is the one that wastes an afternoon, because a zero-byte `200`
+looks like a working server returning nothing.
+
+```bash
 curl -i https://api.mbca.com.np/api/users
 # expect: 401, "Log in at /api/auth/login…"
 
