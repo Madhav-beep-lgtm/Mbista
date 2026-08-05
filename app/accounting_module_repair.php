@@ -50,7 +50,11 @@ function accounting_repair_add_index(string $tableName, string $indexName, strin
 function accounting_repair_add_constraint(string $tableName, string $constraintName, string $definition): void
 {
     if (accounting_repair_table_exists($tableName) && !accounting_repair_constraint_exists($tableName, $constraintName)) {
-        db()->exec('ALTER TABLE `' . $tableName . '` ADD CONSTRAINT ' . $definition);
+        if (preg_match('/^\s*CONSTRAINT\b/i', $definition)) {
+            db()->exec('ALTER TABLE `' . $tableName . '` ADD ' . $definition);
+        } else {
+            db()->exec('ALTER TABLE `' . $tableName . '` ADD CONSTRAINT ' . $definition);
+        }
     }
 }
 
@@ -2741,12 +2745,20 @@ function accounting_module_repair_database(): array
         $status = db()->query("SHOW COLUMNS FROM `jewellery_orders` LIKE 'status'")->fetch(PDO::FETCH_ASSOC);
         $partial = stripos((string) ($status['Type'] ?? ''), "'partially_received'") !== false
             ? 'partially_received' : 'assigned';
+        // An item taken off the Ready to Sale shelf (migration 106) counts as
+        // already back, exactly as jewellery_sync_order_status() counts it.
+        // This step runs on every page load, so a rule it does not know is a
+        // rule it silently undoes: without the clause below it knocked every
+        // shelf order back to 'confirmed' seconds after it was written, and the
+        // customer's ring dropped off the ready-to-deliver board.
+        $shelf = accounting_repair_column_exists('jewellery_order_lines', 'source')
+            ? "WHEN l.`source` = 'stock' THEN 1 " : '';
         db()->exec("UPDATE `jewellery_orders` o
             INNER JOIN (
                 SELECT l.`order_id`,
                        COUNT(*) AS total_items,
-                       SUM(CASE WHEN a.`id` IS NOT NULL AND a.`status` <> 'cancelled' THEN 1 ELSE 0 END) AS out_now,
-                       SUM(CASE WHEN a.`status` = 'received' THEN 1 ELSE 0 END) AS came_back
+                       SUM(CASE $shelf WHEN a.`id` IS NOT NULL AND a.`status` <> 'cancelled' THEN 1 ELSE 0 END) AS out_now,
+                       SUM(CASE $shelf WHEN a.`status` = 'received' THEN 1 ELSE 0 END) AS came_back
                   FROM `jewellery_order_lines` l
                   LEFT JOIN `jewellery_order_assignments` a
                          ON a.`id` = l.`assignment_id` AND a.`company_id` = l.`company_id`
@@ -3289,6 +3301,33 @@ function accounting_module_repair_database(): array
             '`issued_stone_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `issued_fine_weight`');
         accounting_repair_add_column('jewellery_order_assignments', 'issued_stone_amount',
             '`issued_stone_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `issued_stone_carat`');
+    });
+
+    $run('An ordered item can be a piece already on the shelf (migration 106)', static function (): void {
+        // A customer who points at a ring in the case is placing an order, not
+        // commissioning one: there is a customer, an advance, a promised day
+        // and a bill, but nothing for a kaligad to make. The line now says so,
+        // and names WHICH piece off the Ready to Sale tray it is holding.
+        //
+        // Every line already written defaults to 'workshop', which is what it
+        // has always meant.
+        if (!accounting_repair_table_exists('jewellery_order_lines')
+            || !accounting_repair_table_exists('jewellery_order_receipts')) {
+            return;
+        }
+        accounting_repair_add_column('jewellery_order_lines', 'source',
+            "`source` ENUM('workshop','stock') NOT NULL DEFAULT 'workshop' AFTER `item_id`");
+        accounting_repair_add_column('jewellery_order_lines', 'stock_receipt_id',
+            '`stock_receipt_id` INT UNSIGNED DEFAULT NULL AFTER `source`');
+        accounting_repair_add_index('jewellery_order_lines', 'idx_jw_oline_stock',
+            'KEY `idx_jw_oline_stock` (`company_id`, `stock_receipt_id`)');
+        db()->exec('UPDATE `jewellery_order_lines` l'
+            . ' LEFT JOIN `jewellery_order_receipts` r ON l.`stock_receipt_id` = r.`id`'
+            . ' SET l.`stock_receipt_id` = NULL'
+            . ' WHERE l.`stock_receipt_id` IS NOT NULL AND r.`id` IS NULL');
+        accounting_repair_add_constraint('jewellery_order_lines', 'fk_jw_oline_stock_receipt',
+            'CONSTRAINT `fk_jw_oline_stock_receipt` FOREIGN KEY (`stock_receipt_id`) '
+            . 'REFERENCES `jewellery_order_receipts` (`id`) ON DELETE SET NULL');
     });
 
     return $errors;
