@@ -276,21 +276,75 @@ $exportUrl = static fn (string $v, string $format = 'csv'): string => url('admin
     . '&from=' . $from . '&to=' . $to . '&karigar=' . $karigarId . '&fine_rate=' . $statementRate
     . '&status=' . urlencode($orderStatusFilter) . '&pending=' . ($pendingOnly ? '1' : '')
     . '&wgroup=' . $workshopGroup . '&export=' . $format);
+$reportUrl = static fn (string $v): string => url('admin/jewellery-reports.php?view=' . $v
+    . '&from=' . $from . '&to=' . $to . '&karigar=' . $karigarId . '&fine_rate=' . $statementRate
+    . '&status=' . urlencode($orderStatusFilter) . '&pending=' . ($pendingOnly ? '1' : '')
+    . '&wgroup=' . $workshopGroup);
 ?>
 
-<nav class="mbw-tabbar" aria-label="Jewellery report sections" style="flex-wrap:wrap">
-    <a class="mbw-tab" href="<?= e(url('admin/jewellery.php')) ?>"><?= icon('dashboard') ?> Jewellery Home</a>
-    <?php foreach ([
-        'summary' => 'Summary', 'orders' => 'Order Status', 'workshop' => 'Gold Out / Workshop',
-        'advreg' => 'Advance Register', 'profit' => 'Order Profitability',
-        'sales' => 'Sales Detailed', 'purchases' => 'Purchase Detailed',
-        'inventory' => 'Inventory Detailed', 'vat' => 'VAT Register', 'karigar' => 'Kaligad Ledger',
-        'statement' => 'Kaligad Statement',
-        'bills' => 'Bill-wise', 'uncollected' => 'Uncollected Orders',
-    ] as $tabView => $tabLabel): ?>
-        <a class="mbw-tab <?= $view === $tabView ? 'is-active' : '' ?>" href="<?= e(url('admin/jewellery-reports.php?view=' . $tabView . '&from=' . $from . '&to=' . $to)) ?>"><?= e($tabLabel) ?></a>
-    <?php endforeach; ?>
-</nav>
+<style>
+.jw-report-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 14px;
+}
+.jw-report-selector label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+}
+.jw-report-selector select {
+    min-height: 34px;
+    padding: 6px 10px;
+    min-width: 260px;
+    max-width: 100%;
+}
+</style>
+
+<section class="mbw-card" style="margin-bottom:14px">
+    <form method="get" class="jw-report-selector">
+        <label for="jw-report-view">Report</label>
+        <select id="jw-report-view" name="view" aria-label="Choose report">
+            <?php foreach ([
+                'summary' => 'Summary', 'orders' => 'Order Status', 'workshop' => 'Gold Out / Workshop',
+                'advreg' => 'Advance Register', 'profit' => 'Order Profitability',
+                'sales' => 'Sales Detailed', 'purchases' => 'Purchase Detailed',
+                'inventory' => 'Inventory Detailed', 'vat' => 'VAT Register', 'karigar' => 'Kaligad Ledger',
+                'statement' => 'Kaligad Statement',
+                'bills' => 'Bill-wise', 'uncollected' => 'Uncollected Orders',
+            ] as $tabView => $tabLabel): ?>
+                <option value="<?= e($tabView) ?>" data-url="<?= e($reportUrl($tabView)) ?>" <?= $view === $tabView ? 'selected' : '' ?>><?= e($tabLabel) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <input type="hidden" name="from" value="<?= e($from) ?>">
+        <input type="hidden" name="to" value="<?= e($to) ?>">
+        <input type="hidden" name="karigar" value="<?= e((string) $karigarId) ?>">
+        <input type="hidden" name="fine_rate" value="<?= e((string) $statementRate) ?>">
+        <input type="hidden" name="status" value="<?= e($orderStatusFilter) ?>">
+        <input type="hidden" name="pending" value="<?= e($pendingOnly ? '1' : '') ?>">
+        <input type="hidden" name="wgroup" value="<?= e($workshopGroup) ?>">
+        <noscript>
+            <button type="submit" class="button">Go</button>
+        </noscript>
+    </form>
+    <script>
+    (function() {
+        var viewSelect = document.getElementById('jw-report-view');
+        if (!viewSelect) { return; }
+        viewSelect.addEventListener('change', function () {
+            var selected = viewSelect.options[viewSelect.selectedIndex];
+            var url = selected && selected.dataset ? selected.dataset.url : null;
+            if (url) {
+                window.location = url;
+            }
+        });
+    })();
+    </script>
+</section>
 
 <section class="mbw-card">
     <form method="get" class="jw-report-filter">
