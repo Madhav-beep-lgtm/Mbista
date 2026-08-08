@@ -153,7 +153,7 @@ if ($headerIsClientBooks) {
 }
 // The module spans four pages, so "is this section open?" keys off the script
 // rather than a single filename.
-$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php', 'jewellery-tags.php'];
+$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php', 'jewellery-tags.php', 'accounting-parties.php'];
 $headerJewelleryActive = in_array($headerScript, $headerJewelleryScripts, true);
 $headerJewelleryView = (string) ($_GET['view'] ?? '');
 $headerJewelleryMenu = '';
@@ -167,6 +167,7 @@ if ($headerJewellery) {
         ['jewellery.php', 'stock', 'Stock &amp; Metal Position', 'layers'],
         ['jewellery-trade.php', 'purchases', 'Purchases', 'box'],
         ['jewellery-trade.php', 'sales', 'Sales', 'receipt-voucher'],
+        ['accounting-parties.php', 'customers', 'Party Master', 'users'],
         ['jewellery-trade.php', 'bills', 'Bills &amp; Settlement', 'wallet'],
         ['jewellery-workshop.php', 'orders', 'Orders', 'journal'],
         // Assigning the work comes before issuing the metal, and reads that way
@@ -186,16 +187,32 @@ if ($headerJewellery) {
     ];
     // Each page's first tab is its default, so a bare URL still highlights.
     $jewDefaults = ['jewellery.php' => 'dashboard', 'jewellery-trade.php' => 'purchases',
-        'jewellery-workshop.php' => 'orders', 'jewellery-reports.php' => 'summary'];
+        'jewellery-workshop.php' => 'orders', 'jewellery-reports.php' => 'summary',
+        'accounting-parties.php' => 'customers'];
     $headerJewelleryMenu = '<div class="mbw-nav-parent' . ($headerJewelleryActive ? ' is-open' : '') . '" data-nav-parent="jewellery">'
         . '<a href="#" data-nav-toggle aria-expanded="' . ($headerJewelleryActive ? 'true' : 'false') . '" class="' . ($headerJewelleryActive ? 'is-active' : '') . '">'
         . icon('coins') . 'Jewellery Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
     foreach ($jewLinks as [$jewScript, $jewView, $jewLabel, $jewIcon]) {
-        $isActive = $headerScript === $jewScript
-            && ($headerJewelleryView === $jewView
-                || ($headerJewelleryView === '' && ($jewDefaults[$jewScript] ?? '') === $jewView));
-        $headerJewelleryMenu .= '<a class="' . ($isActive ? 'is-active' : '') . '" href="' . e(url('admin/' . $jewScript . '?view=' . $jewView)) . '">'
-            . icon($jewIcon) . $jewLabel . '</a>';
+        $jewQueryKey = $jewScript === 'accounting-parties.php' ? 'tab' : 'view';
+        $jewCurrentValue = $jewQueryKey === 'tab'
+            ? (string) ($_GET['tab'] ?? '')
+            : $headerJewelleryView;
+
+        $isPartyMaster = $jewScript === 'accounting-parties.php'
+            && $headerScript === $jewScript
+            && in_array($jewCurrentValue, ['', 'customers', 'suppliers'], true);
+
+        $isActive = $isPartyMaster || (
+            $headerScript === $jewScript
+            && ($jewCurrentValue === $jewView
+                || ($jewCurrentValue === ''
+                    && ($jewDefaults[$jewScript] ?? '') === $jewView))
+        );
+
+        $headerJewelleryMenu .= '<a class="' . ($isActive ? 'is-active' : '')
+            . '" href="' . e(url(
+                'admin/' . $jewScript . '?' . $jewQueryKey . '=' . rawurlencode($jewView)
+            )) . '">' . icon($jewIcon) . $jewLabel . '</a>';
     }
     $headerJewelleryMenu .= '</div></div>';
 }
