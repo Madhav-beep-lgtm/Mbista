@@ -109,6 +109,42 @@ function accounting_repair_run_migration_file(string $migrationFile, array $sent
     }
 }
 
+/**
+ * Replay a migration until a named index proves that it completed.
+ *
+ * This is used for data-link migrations where all tables already exist, so a
+ * missing-table sentinel cannot tell whether the migration ran.
+ */
+function accounting_repair_run_migration_file_if_index_missing(
+    string $migrationFile,
+    string $tableName,
+    string $indexName
+): void {
+    if (accounting_repair_index_exists($tableName, $indexName)) {
+        return;
+    }
+
+    $path = dirname(__DIR__) . '/database/migrations/' . $migrationFile;
+    if (!is_file($path)) {
+        return;
+    }
+
+    $lines = [];
+    foreach (preg_split('/\R/', (string) file_get_contents($path)) ?: [] as $line) {
+        if (preg_match('/^\s*--/', $line)) {
+            continue;
+        }
+        $lines[] = $line;
+    }
+
+    foreach (explode(';', implode("\n", $lines)) as $statement) {
+        $statement = trim($statement);
+        if ($statement !== '') {
+            db()->exec($statement);
+        }
+    }
+}
+
 function accounting_module_required_tables(): array
 {
     return [
@@ -242,6 +278,19 @@ function accounting_module_repair_database(): array
         // client's My Invoices.
         accounting_repair_add_column('accounting_parties', 'client_profile_id', '`client_profile_id` INT UNSIGNED DEFAULT NULL AFTER `payable_ledger_id`');
         accounting_repair_add_index('accounting_parties', 'idx_accounting_parties_client_profile', 'KEY `idx_accounting_parties_client_profile` (`client_profile_id`)');
+    });
+
+    $run('Unify client, sales party and ledger identity (migration 107)', static function (): void {
+        foreach (['accounting_parties', 'client_profiles', 'client_tasks', 'task_invoices'] as $requiredTable) {
+            if (!accounting_repair_table_exists($requiredTable)) {
+                return;
+            }
+        }
+        accounting_repair_run_migration_file_if_index_missing(
+            '107_unified_party_identity.sql',
+            'accounting_parties',
+            'uniq_accounting_parties_company_client'
+        );
     });
 
     $run('Create budgets and report notes', static function (): void {
