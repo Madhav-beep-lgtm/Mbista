@@ -167,7 +167,7 @@ if ($headerJewellery) {
         ['jewellery.php', 'stock', 'Stock &amp; Metal Position', 'layers'],
         ['jewellery-trade.php', 'purchases', 'Purchases', 'box'],
         ['jewellery-trade.php', 'sales', 'Sales', 'receipt-voucher'],
-        ['accounting-parties.php', 'customers', 'Party Master', 'users'],
+        ['accounting-parties.php', 'directory', 'Party Master', 'users'],
         ['jewellery-trade.php', 'bills', 'Bills &amp; Settlement', 'wallet'],
         ['jewellery-workshop.php', 'orders', 'Orders', 'journal'],
         // Assigning the work comes before issuing the metal, and reads that way
@@ -188,7 +188,7 @@ if ($headerJewellery) {
     // Each page's first tab is its default, so a bare URL still highlights.
     $jewDefaults = ['jewellery.php' => 'dashboard', 'jewellery-trade.php' => 'purchases',
         'jewellery-workshop.php' => 'orders', 'jewellery-reports.php' => 'summary',
-        'accounting-parties.php' => 'customers'];
+        'accounting-parties.php' => 'directory'];
     $headerJewelleryMenu = '<div class="mbw-nav-parent' . ($headerJewelleryActive ? ' is-open' : '') . '" data-nav-parent="jewellery">'
         . '<a href="#" data-nav-toggle aria-expanded="' . ($headerJewelleryActive ? 'true' : 'false') . '" class="' . ($headerJewelleryActive ? 'is-active' : '') . '">'
         . icon('coins') . 'Jewellery Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
@@ -200,7 +200,7 @@ if ($headerJewellery) {
 
         $isPartyMaster = $jewScript === 'accounting-parties.php'
             && $headerScript === $jewScript
-            && in_array($jewCurrentValue, ['', 'customers', 'suppliers'], true);
+            && in_array($jewCurrentValue, ['', 'directory', 'customers', 'suppliers', 'unlinked'], true);
 
         $isActive = $isPartyMaster || (
             $headerScript === $jewScript
