@@ -29,14 +29,20 @@ const OPENING_IMPORT_MAX_ROWS = 5000;
 function opening_import_columns(): array
 {
     return [
-        'code' => ['Item code', ['item code', 'code', 'sku', 'item', 'item_code']],
-        'name' => ['Item name', ['item name', 'name', 'description', 'particulars']],
-        'purity' => ['Purity', ['purity', 'karat', 'carat', 'fineness']],
-        'unit' => ['Unit', ['unit', 'uom', 'weight unit']],
-        'qty_pieces' => ['Pieces', ['pieces', 'qty', 'quantity', 'pcs', 'nos']],
-        'gross_weight' => ['Gross weight', ['gross weight', 'weight', 'gross', 'gross wt']],
+        'stock_kind' => ['Stock Type *', ['stock type', 'stock kind', 'stock classification']],
+        'group' => ['Stock Group *', ['stock group', 'group', 'category', 'item group']],
+        'code' => ['Item Code *', ['item code', 'code', 'sku', 'item', 'item_code']],
+        'name' => ['Item Name *', ['item name', 'name', 'description', 'particulars']],
+        'metal' => ['Metal *', ['metal', 'metal type']],
+        'purity_percent' => ['Purity % *', ['purity %', 'purity percentage', 'purity percent']],
+        'purity' => ['Purity Code', ['purity', 'purity code', 'karat', 'carat', 'fineness']],
+        'unit' => ['Unit *', ['unit', 'uom', 'weight unit']],
+        'qty_pieces' => ['Pieces *', ['pieces', 'qty', 'quantity', 'pcs', 'nos']],
+        'gross_weight' => ['Gross Weight (GM) *', ['gross weight', 'weight', 'gross', 'gross wt']],
         'rate' => ['Rate', ['rate', 'unit cost', 'cost', 'price']],
-        'amount' => ['Amount', ['amount', 'value', 'total', 'opening value']],
+        'amount' => ['Opening Amount *', ['amount', 'opening amount', 'value', 'total', 'opening value']],
+        'customer_name' => ['Customer Name', ['customer name', 'customer']],
+        'order_number' => ['Order Number', ['order number', 'order no', 'order no.', 'order']],
     ];
 }
 
@@ -47,6 +53,8 @@ function opening_import_map_headers(array $headerCells): array
     foreach (opening_import_columns() as $key => [, $aliases]) {
         foreach ($headerCells as $index => $cell) {
             $needle = strtolower(trim(preg_replace('/\s+/', ' ', (string) $cell) ?? ''));
+            $needle = trim((string) preg_replace('/\s*\*+\s*$/', '', $needle));
+            $needle = trim((string) preg_replace('/\s*\((?:gm|g|npr|rs\.?|pcs)\)\s*$/', '', $needle));
             if ($needle !== '' && in_array($needle, $aliases, true)) {
                 $map[$key] = (int) $index;
                 break;
@@ -62,16 +70,16 @@ function opening_import_template_rows(bool $jewellery): array
 {
     $header = [];
     foreach (opening_import_columns() as $key => [$label]) {
-        if (!$jewellery && in_array($key, ['purity', 'gross_weight'], true)) {
+        if (!$jewellery && in_array($key, ['stock_kind', 'group', 'metal', 'purity_percent', 'purity', 'gross_weight', 'customer_name', 'order_number'], true)) {
             continue;
         }
         $header[] = $label;
     }
 
     $sample = $jewellery
-        ? [['G-01', 'Gold Chain 22K', '22K', 'TOLA', 2, 10.5, 139000, ''],
-           ['G-02', 'Gold Ring 22K', '22K', 'GM', 5, 40.0, 11900, ''],
-           ['', 'Leave Amount blank to let Rate x Weight price it, or fill Amount and leave Rate blank.', '', '', '', '', '', '']]
+        ? [['Showroom Stock', 'Chains', 'G-01', 'Gold Chain 1', 'Gold', 92, '22K', 'GM', 2, 10.5, '', 139000, '', ''],
+           ['Customer Ordered Stock', 'Rings', 'G-02', 'Gold Ring 1', 'Gold', 92, '22K', 'GM', 1, 8.0, '', 95000, 'Customer name', 'JO-000001'],
+           ['', '', '', 'Unknown codes can create new items after you review and save the staged row.', '', '', '', '', '', '', '', '', '', '']]
         : [['ITEM-01', 'Sample Item', 'PCS', 10, 250, ''],
            ['', 'Fill either Rate or Amount. Rows with neither are flagged, not dropped.', '', '', '', '']];
 
@@ -134,6 +142,7 @@ function opening_import_stage(int $companyId, int $fiscalYearId, string $path, s
 
     $unitsByCode = [];
     $puritiesByCode = [];
+    $metalsByCode = [];
     if ($jewellery) {
         foreach (jewellery_units_list($companyId, false) as $unit) {
             $unitsByCode[strtolower(trim((string) $unit['code']))] = (int) $unit['id'];
@@ -141,6 +150,14 @@ function opening_import_stage(int $companyId, int $fiscalYearId, string $path, s
         }
         foreach (jewellery_purities_list($companyId, 0, false) as $purity) {
             $puritiesByCode[strtolower(trim((string) $purity['code']))] = (int) $purity['id'];
+            $puritiesByCode[strtolower(trim((string) $purity['name']))] = (int) $purity['id'];
+            $percent = (string) (int) round((float) $purity['fineness'] / 10);
+            $puritiesByCode[$percent] = (int) $purity['id'];
+            $puritiesByCode['gold-' . $percent] = (int) $purity['id'];
+        }
+        foreach (jewellery_metals_list($companyId, false) as $metal) {
+            $metalsByCode[strtolower(trim((string) $metal['code']))] = (int) $metal['id'];
+            $metalsByCode[strtolower(trim((string) $metal['name']))] = (int) $metal['id'];
         }
     }
 
@@ -151,9 +168,11 @@ function opening_import_stage(int $companyId, int $fiscalYearId, string $path, s
     $importId = (int) db()->lastInsertId();
 
     $insert = db()->prepare('INSERT INTO inventory_opening_import_rows (import_id, company_id, source_row_no,
-            raw_code, raw_name, raw_unit, raw_purity, item_id, purity_id, unit_id,
+            raw_code, raw_name, raw_unit, raw_purity, stock_kind, raw_group, proposed_code, proposed_name,
+            metal_id, create_item, customer_name, order_number, item_id, purity_id, unit_id,
             qty_pieces, gross_weight, rate, amount, status, error_text)
-        VALUES (:imp, :cid, :rowno, :rcode, :rname, :runit, :rpurity, :item, :purity, :unit,
+        VALUES (:imp, :cid, :rowno, :rcode, :rname, :runit, :rpurity, :kind, :grp, :pcode, :pname,
+            :metal, :create_item, :customer, :order_no, :item, :purity, :unit,
             :pieces, :gross, :rate, :amount, :status, :err)');
 
     $total = 0;
@@ -175,21 +194,63 @@ function opening_import_stage(int $companyId, int $fiscalYearId, string $path, s
         $total++;
         $errors = [];
         $itemId = $itemsByCode[strtolower($code)] ?? ($itemsByName[strtolower($name)] ?? 0);
-        if ($itemId <= 0) {
-            $errors[] = $code !== ''
-                ? 'No item with code "' . $code . '".'
-                : 'No item named "' . $name . '".';
+        $matchedJewelleryItem = $jewellery && $itemId > 0 ? jewellery_item($companyId, $itemId) : null;
+        $createItem = $jewellery && $itemId <= 0;
+        if ($itemId <= 0 && !$createItem) {
+            $errors[] = $code !== '' ? 'No item with code "' . $code . '".' : 'No item named "' . $name . '".';
+        }
+        if ($createItem && ($code === '' || $name === '')) {
+            $errors[] = 'A new item needs both an item code and item name.';
+        }
+
+        $stockRaw = strtolower(str_replace(['-', '_'], ' ', $cell('stock_kind')));
+        $stockKind = match (trim(preg_replace('/\s+/', ' ', $stockRaw) ?? '')) {
+            'showroom', 'showroom stock', 'self', 'self ordered', 'self ordered stock' => 'showroom',
+            'customer', 'customer ordered', 'customer ordered stock', 'ordered stock' => 'customer_ordered',
+            default => '',
+        };
+        if ($stockKind === '' && $matchedJewelleryItem) {
+            $stockKind = (string) ($matchedJewelleryItem['stock_kind'] ?? 'showroom');
+        }
+        $group = trim($cell('group'));
+        if ($group === '' && $matchedJewelleryItem) {
+            $group = trim((string) ($matchedJewelleryItem['category'] ?? '')) ?: 'Uncategorised';
+        }
+        $customerName = trim($cell('customer_name'));
+        $orderNumber = trim($cell('order_number'));
+        if ($jewellery && $stockKind === '') {
+            $errors[] = 'Choose Showroom Stock or Customer Ordered Stock.';
+        }
+        if ($jewellery && $group === '') {
+            $errors[] = $createItem
+                ? 'New item "' . ($code !== '' ? $code : $name) . '" needs a stock group.'
+                : 'Choose or enter a stock group.';
+        }
+        if ($stockKind === 'customer_ordered' && ($customerName === '' || $orderNumber === '')) {
+            $errors[] = 'Customer Ordered Stock needs both customer name and order number.';
         }
 
         $unitRaw = $cell('unit');
         $purityRaw = $cell('purity');
+        $purityPercentRaw = $cell('purity_percent');
+        if ($purityRaw === '' && $purityPercentRaw !== '') {
+            $purityRaw = rtrim(rtrim(number_format(opening_import_number($purityPercentRaw), 4, '.', ''), '0'), '.');
+        }
+        $metalRaw = $cell('metal');
         $unitId = $unitRaw !== '' ? ($unitsByCode[strtolower($unitRaw)] ?? 0) : 0;
         $purityId = $purityRaw !== '' ? ($puritiesByCode[strtolower($purityRaw)] ?? 0) : 0;
+        $metalId = $metalRaw !== '' ? ($metalsByCode[strtolower($metalRaw)] ?? 0) : 0;
+        if ($metalId <= 0 && $matchedJewelleryItem) {
+            $metalId = (int) $matchedJewelleryItem['metal_id'];
+        }
         if ($jewellery && $unitRaw !== '' && $unitId <= 0) {
             $errors[] = 'Unknown weight unit "' . $unitRaw . '".';
         }
         if ($jewellery && $purityRaw !== '' && $purityId <= 0) {
             $errors[] = 'Unknown purity "' . $purityRaw . '".';
+        }
+        if ($jewellery && $metalId <= 0) {
+            $errors[] = 'Choose a metal that belongs to this company.';
         }
 
         $pieces = opening_import_number($cell('qty_pieces'));
@@ -223,6 +284,11 @@ function opening_import_stage(int $companyId, int $fiscalYearId, string $path, s
             'imp' => $importId, 'cid' => $companyId, 'rowno' => $sheetRowNo,
             'rcode' => mb_substr($code, 0, 120), 'rname' => mb_substr($name, 0, 255),
             'runit' => mb_substr($unitRaw, 0, 60), 'rpurity' => mb_substr($purityRaw, 0, 60),
+            'kind' => $stockKind !== '' ? $stockKind : null,
+            'grp' => mb_substr($group, 0, 190), 'pcode' => mb_substr($code, 0, 120),
+            'pname' => mb_substr($name, 0, 255), 'metal' => $metalId ?: null,
+            'create_item' => $createItem ? 1 : 0,
+            'customer' => mb_substr($customerName, 0, 190), 'order_no' => mb_substr($orderNumber, 0, 120),
             'item' => $itemId ?: null, 'purity' => $purityId ?: null, 'unit' => $unitId ?: null,
             'pieces' => $pieces, 'gross' => $gross, 'rate' => $rate, 'amount' => $amount,
             'status' => $status, 'err' => $errors === [] ? null : mb_substr(implode(' ', $errors), 0, 500),
@@ -272,11 +338,12 @@ function opening_import_rows(int $companyId, int $importId): array
         return [];
     }
     $stmt = db()->prepare('SELECT r.*, i.sku AS item_code, i.name AS item_name,
-            p.code AS purity_code, u.code AS unit_code
+            p.code AS purity_code, u.code AS unit_code, m.code AS metal_code, m.name AS metal_name
         FROM inventory_opening_import_rows r
         LEFT JOIN inventory_items i ON i.id = r.item_id
         LEFT JOIN jewellery_purities p ON p.id = r.purity_id
         LEFT JOIN jewellery_units u ON u.id = r.unit_id
+        LEFT JOIN jewellery_metals m ON m.id = r.metal_id
         WHERE r.import_id = :imp AND r.company_id = :cid
         ORDER BY r.source_row_no ASC, r.id ASC');
     $stmt->execute(['imp' => $importId, 'cid' => $companyId]);
@@ -299,6 +366,10 @@ function opening_import_update_row(int $companyId, int $rowId, array $input): ar
         return ['ok' => false, 'error' => 'That row has already been committed.'];
     }
 
+    $jewellery = (string) $row['module'] === 'jewellery';
+    if ($jewellery) {
+        require_once __DIR__ . '/jewellery_stock.php';
+    }
     $itemId = (int) ($input['item_id'] ?? $row['item_id']);
     if ($itemId > 0) {
         $check = db()->prepare('SELECT COUNT(*) FROM inventory_items WHERE id = :id AND company_id = :cid');
@@ -308,11 +379,32 @@ function opening_import_update_row(int $companyId, int $rowId, array $input): ar
         }
     }
 
+    $code = strtoupper(trim((string) ($input['proposed_code'] ?? $row['proposed_code'] ?? $row['raw_code'])));
+    $name = trim((string) ($input['proposed_name'] ?? $row['proposed_name'] ?? $row['raw_name']));
+    $group = trim((string) ($input['raw_group'] ?? $row['raw_group'] ?? ''));
+    $stockKind = (string) ($input['stock_kind'] ?? $row['stock_kind'] ?? '');
+    if (!in_array($stockKind, ['showroom', 'customer_ordered'], true)) {
+        $stockKind = '';
+    }
+    $customerName = trim((string) ($input['customer_name'] ?? $row['customer_name'] ?? ''));
+    $orderNumber = trim((string) ($input['order_number'] ?? $row['order_number'] ?? ''));
+    $metalId = (int) ($input['metal_id'] ?? $row['metal_id'] ?? 0);
+    $purityId = (int) ($input['purity_id'] ?? $row['purity_id'] ?? 0);
+    $unitId = (int) ($input['unit_id'] ?? $row['unit_id'] ?? 0);
+    $createItem = $jewellery && $itemId <= 0;
+    $selectedItem = $jewellery && $itemId > 0 ? jewellery_item($companyId, $itemId) : null;
+    if ($selectedItem) {
+        $group = $group !== '' ? $group : (trim((string) ($selectedItem['category'] ?? '')) ?: 'Uncategorised');
+        $stockKind = $stockKind !== '' ? $stockKind : (string) ($selectedItem['stock_kind'] ?? 'showroom');
+        $metalId = $metalId > 0 ? $metalId : (int) ($selectedItem['metal_id'] ?? 0);
+        $purityId = $purityId > 0 ? $purityId : (int) ($selectedItem['purity_id'] ?? 0);
+        $unitId = $unitId > 0 ? $unitId : (int) ($selectedItem['unit_id'] ?? 0);
+    }
+
     $pieces = round((float) ($input['qty_pieces'] ?? $row['qty_pieces']), 3);
     $gross = round((float) ($input['gross_weight'] ?? $row['gross_weight']), 4);
     $rate = round((float) ($input['rate'] ?? $row['rate']), 4);
     $amount = round((float) ($input['amount'] ?? $row['amount']), 2);
-    $jewellery = (string) $row['module'] === 'jewellery';
     $basis = $jewellery ? ($gross > 0 ? $gross : $pieces) : ($pieces > 0 ? $pieces : $gross);
     if ($amount <= 0 && $rate > 0 && $basis > 0) {
         $amount = round($rate * $basis, 2);
@@ -321,8 +413,43 @@ function opening_import_update_row(int $companyId, int $rowId, array $input): ar
     }
 
     $errors = [];
-    if ($itemId <= 0) {
+    if ($itemId <= 0 && !$createItem) {
         $errors[] = 'Choose the item this row is for.';
+    }
+    if ($createItem && ($code === '' || $name === '')) {
+        $errors[] = 'A new item needs both an item code and item name.';
+    }
+    if ($jewellery && $group === '') {
+        $errors[] = $createItem
+            ? 'New item "' . ($code !== '' ? $code : $name) . '" needs a stock group.'
+            : 'Choose or enter a stock group.';
+    }
+    if ($jewellery && $stockKind === '') {
+        $errors[] = 'Choose Showroom Stock or Customer Ordered Stock.';
+    }
+    if ($stockKind === 'customer_ordered' && ($customerName === '' || $orderNumber === '')) {
+        $errors[] = 'Customer Ordered Stock needs both customer name and order number.';
+    }
+    if ($jewellery) {
+        if (!jewellery_metal($companyId, $metalId)) {
+            $errors[] = 'Choose a metal that belongs to this company.';
+        }
+        $purity = jewellery_purity($companyId, $purityId);
+        if (!$purity || (int) $purity['metal_id'] !== $metalId) {
+            $errors[] = 'Choose a purity that belongs to the selected metal.';
+        }
+        if (!jewellery_unit($companyId, $unitId)) {
+            $errors[] = 'Choose a unit that belongs to this company.';
+        }
+        if ($createItem && $code !== '') {
+            $clash = db()->prepare('SELECT id FROM inventory_items WHERE company_id = :cid AND sku = :sku LIMIT 1');
+            $clash->execute(['cid' => $companyId, 'sku' => $code]);
+            $matched = (int) ($clash->fetchColumn() ?: 0);
+            if ($matched > 0) {
+                $itemId = $matched;
+                $createItem = false;
+            }
+        }
     }
     if ($pieces < 0 || $gross < 0 || $rate < 0 || $amount < 0) {
         $errors[] = 'Negative figures are not an opening balance.';
@@ -335,13 +462,18 @@ function opening_import_update_row(int $companyId, int $rowId, array $input): ar
     }
 
     db()->prepare('UPDATE inventory_opening_import_rows SET item_id = :item, purity_id = :purity, unit_id = :unit,
+            stock_kind = :kind, raw_group = :grp, proposed_code = :code, proposed_name = :name,
+            metal_id = :metal, create_item = :create_item, customer_name = :customer, order_number = :order_no,
             qty_pieces = :pieces, gross_weight = :gross, rate = :rate, amount = :amount,
             status = :status, error_text = :err
         WHERE id = :id AND company_id = :cid')
         ->execute([
             'item' => $itemId ?: null,
-            'purity' => (int) ($input['purity_id'] ?? $row['purity_id']) ?: null,
-            'unit' => (int) ($input['unit_id'] ?? $row['unit_id']) ?: null,
+            'purity' => $purityId ?: null, 'unit' => $unitId ?: null,
+            'kind' => $stockKind !== '' ? $stockKind : null, 'grp' => mb_substr($group, 0, 190),
+            'code' => mb_substr($code, 0, 120), 'name' => mb_substr($name, 0, 255),
+            'metal' => $metalId ?: null, 'create_item' => $createItem ? 1 : 0,
+            'customer' => mb_substr($customerName, 0, 190), 'order_no' => mb_substr($orderNumber, 0, 120),
             'pieces' => $pieces, 'gross' => $gross, 'rate' => $rate, 'amount' => $amount,
             'status' => $errors === [] ? 'ready' : 'error',
             'err' => $errors === [] ? null : implode(' ', $errors),
@@ -435,17 +567,56 @@ function opening_import_commit(int $companyId, int $importId, int $fiscalYearId,
             if ((string) $row['status'] !== 'ready') {
                 continue;
             }
+            $rowSavepoint = 'opening_import_row';
+            db()->exec('SAVEPOINT ' . $rowSavepoint);
             try {
                 if ($jewellery) {
-                    jewellery_save_opening($companyId, $fiscalYearId, [
-                        'item_id' => (int) $row['item_id'],
+                    $itemId = (int) $row['item_id'];
+                    if ($itemId <= 0 && (int) ($row['create_item'] ?? 0) === 1) {
+                        $group = trim((string) ($row['raw_group'] ?? ''));
+                        $categoryExists = false;
+                        foreach (jewellery_categories_list($companyId, false) as $category) {
+                            if (strcasecmp(trim((string) $category['name']), $group) === 0) {
+                                $group = (string) $category['name'];
+                                $categoryExists = true;
+                                break;
+                            }
+                        }
+                        if (!$categoryExists) {
+                            jewellery_save_category($companyId, ['name' => $group, 'sort_order' => 100, 'active' => 1]);
+                        }
+                        $itemId = jewellery_save_item($companyId, [
+                            'code' => (string) $row['proposed_code'],
+                            'name' => (string) $row['proposed_name'],
+                            'category' => $group,
+                            'item_type' => 'ornament',
+                            'metal_id' => (int) $row['metal_id'],
+                            'purity_id' => (int) $row['purity_id'],
+                            'unit_id' => (int) $row['unit_id'],
+                            'stock_kind' => (string) $row['stock_kind'],
+                            'track_mode' => (float) $row['qty_pieces'] > 0 ? 'piece' : 'weight',
+                            'gross_weight' => (float) $row['gross_weight'],
+                            'notes' => trim('Created from opening stock import ' . (string) $batch['original_name']
+                                . ((string) ($row['customer_name'] ?? '') !== ''
+                                    ? '; customer ' . (string) $row['customer_name'] . '; order ' . (string) $row['order_number'] : '')),
+                        ], $userId);
+                        db()->prepare('UPDATE inventory_opening_import_rows SET item_id = :item, create_item = 0
+                            WHERE id = :id AND company_id = :cid')
+                            ->execute(['item' => $itemId, 'id' => (int) $row['id'], 'cid' => $companyId]);
+                    }
+                    $saved = jewellery_save_opening($companyId, $fiscalYearId, [
+                        'item_id' => $itemId,
                         'purity_id' => (int) ($row['purity_id'] ?? 0),
                         'unit_id' => (int) ($row['unit_id'] ?? 0),
+                        'stock_kind' => (string) ($row['stock_kind'] ?? 'showroom'),
                         'qty_pieces' => (float) $row['qty_pieces'],
                         'gross_weight' => (float) $row['gross_weight'],
                         'amount' => (float) $row['amount'],
                         'notes' => 'Imported from ' . (string) $batch['original_name'],
                     ], $userId);
+                    if (!($saved['ok'] ?? false)) {
+                        throw new RuntimeException((string) ($saved['error'] ?? 'Opening stock could not be saved.'));
+                    }
                 } else {
                     $qty = (float) $row['qty_pieces'] > 0 ? (float) $row['qty_pieces'] : (float) $row['gross_weight'];
                     db()->prepare('UPDATE inventory_items SET opening_qty = :q, opening_amount = :a
@@ -462,10 +633,15 @@ function opening_import_commit(int $companyId, int $importId, int $fiscalYearId,
                 db()->prepare("UPDATE inventory_opening_import_rows SET status = 'committed', error_text = NULL
                     WHERE id = :id AND company_id = :cid")
                     ->execute(['id' => (int) $row['id'], 'cid' => $companyId]);
+                db()->exec('RELEASE SAVEPOINT ' . $rowSavepoint);
                 $committed++;
             } catch (Throwable $rowException) {
                 // One bad row must not lose the other forty-six. It is marked
                 // and left staged so it can be fixed and committed after.
+                // Roll the row back first so a newly-created item/category can
+                // never survive without its matching opening-stock record.
+                db()->exec('ROLLBACK TO SAVEPOINT ' . $rowSavepoint);
+                db()->exec('RELEASE SAVEPOINT ' . $rowSavepoint);
                 db()->prepare("UPDATE inventory_opening_import_rows SET status = 'error', error_text = :err
                     WHERE id = :id AND company_id = :cid")
                     ->execute(['err' => mb_substr($rowException->getMessage(), 0, 500),

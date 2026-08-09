@@ -2552,6 +2552,15 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
                 'notes' => 'Karigar holding cleared', 'created_by' => $userId,
             ]);
         }
+        // The finished piece keeps its business purpose. Customer assignments
+        // are reported separately from pieces made for the showroom, without
+        // asking the receiver to classify the same job again.
+        $receivedStockKind = (string) ($assignment['assign_kind'] ?? 'customer') === 'self'
+            ? 'showroom' : 'customer_ordered';
+        db()->prepare('UPDATE jewellery_item_profiles SET stock_kind = :kind
+            WHERE inventory_item_id = :iid AND company_id = :cid')
+            ->execute(['kind' => $receivedStockKind, 'iid' => $receivedItemId, 'cid' => $companyId]);
+
         // The finished piece arrives in own stock at issued cost less wastage.
         jw_record_stock_txn($companyId, [
             'item_id' => $receivedItemId, 'txn_type' => 'receive_karigar', 'direction' => 'in',

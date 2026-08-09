@@ -106,9 +106,11 @@ $filters = [
     'valuation' => in_array((string) ($_GET['valuation'] ?? ''), ['fifo', 'weighted_average', 'specific'], true) ? (string) $_GET['valuation'] : '',
     'search' => trim((string) ($_GET['q'] ?? '')),
     'stock_status' => in_array((string) ($_GET['status'] ?? ''), ['positive', 'zero', 'negative'], true) ? (string) $_GET['status'] : '',
+    'jewellery_stock_kind' => in_array((string) ($_GET['jewellery_stock_kind'] ?? ''), ['showroom', 'customer_ordered'], true)
+        ? (string) $_GET['jewellery_stock_kind'] : '',
     'zero_movement' => !isset($_GET['applied']) || isset($_GET['zero_movement']),
     'zero_closing' => !isset($_GET['applied']) || isset($_GET['zero_closing']),
-    'group_by' => in_array((string) ($_GET['group_by'] ?? ''), ['type', 'valuation', 'ledger'], true) ? (string) $_GET['group_by'] : '',
+    'group_by' => in_array((string) ($_GET['group_by'] ?? ''), ['type', 'valuation', 'ledger', 'stock_kind'], true) ? (string) $_GET['group_by'] : '',
     'ledger_id' => (int) ($_GET['ledger'] ?? 0),
 ];
 // Arriving from a GL ledger ("items behind this balance") groups by ledger so
@@ -137,6 +139,7 @@ $qs = http_build_query(array_filter([
     'valuation' => $filters['valuation'] ?: null,
     'q' => $filters['search'] ?: null,
     'status' => $filters['stock_status'] ?: null,
+    'jewellery_stock_kind' => $filters['jewellery_stock_kind'] ?: null,
     'zero_movement' => $filters['zero_movement'] ? 1 : null,
     'zero_closing' => $filters['zero_closing'] ? 1 : null,
     'group_by' => $filters['group_by'] ?: null,
@@ -150,7 +153,7 @@ $qs = http_build_query(array_filter([
 $export = (string) ($_GET['export'] ?? '');
 if ($export !== '') {
     require_permission('reports', 'export');
-    $header = ['S.N.', 'Item Code', 'Item Name', 'Item Type', 'Department / Location', 'UOM',
+    $header = ['S.N.', 'Item Code', 'Item Name', 'Stock Group', 'Jewellery Stock Type', 'Item Type', 'Department / Location', 'UOM',
         'Opening Qty', 'Opening Rate', 'Opening Amount',
         'Inward Qty', 'Inward Rate', 'Inward Amount',
         'Outward Qty', 'Outward Rate', 'Outward Amount',
@@ -168,7 +171,7 @@ if ($export !== '') {
         $header,
     ];
     foreach ($rows as $i => $r) {
-        $data[] = [$i + 1, $r['sku'], $r['name'], $r['item_type_label'], $r['location'], $r['unit'],
+        $data[] = [$i + 1, $r['sku'], $r['name'], $r['stock_group'], $r['jewellery_stock_kind_label'], $r['item_type_label'], $r['location'], $r['unit'],
             $r['opening_qty'], $r['opening_rate'], $r['opening_amount'],
             $r['in_qty'], $r['in_rate'], $r['in_amount'],
             $r['out_qty'], $r['out_rate'], $r['out_amount'],
@@ -178,7 +181,7 @@ if ($export !== '') {
             strtoupper(str_replace('_', ' ', $r['valuation_method']))];
     }
     $data[] = [];
-    $data[] = ['TOTALS', '', '', '', '', '', '', '', $totals['opening_amount'], '', '', $totals['in_amount'],
+    $data[] = ['TOTALS', '', '', '', '', '', '', '', '', '', $totals['opening_amount'], '', '', $totals['in_amount'],
         '', '', $totals['out_amount'], '', '', $totals['damage_amount'], '', '', $totals['closing_amount'], '', ''];
     security_event('report_exported', 'success', 'Stock summary export (' . $export . ').', $companyId, $userId);
     if ($export === 'csv' || $export === 'excel') {
@@ -205,19 +208,19 @@ if ($export !== '') {
         . ' · Locations: ' . e($filters['warehouse_ids'] === [] ? 'All' : implode(', ', $filters['warehouse_ids']))
         . ' · Valuation filter: ' . e($filters['valuation'] ?: 'All')
         . ' · Generated ' . e(date('Y-m-d H:i')) . '</div>';
-    echo '<table><thead><tr><th colspan="6">Basic Item Information</th><th colspan="3" class="n">Opening</th><th colspan="3" class="n">Purchase / Inward</th><th colspan="3" class="n">Sold / Consumed / Outward</th><th colspan="3" class="n">Damage / Write-off</th><th colspan="3" class="n">Closing</th><th>Val.</th></tr><tr>';
-    foreach (['S.N.', 'Code', 'Item', 'Type', 'Location', 'UOM'] as $h) { echo '<th>' . $h . '</th>'; }
+    echo '<table><thead><tr><th colspan="8">Basic Item Information</th><th colspan="3" class="n">Opening</th><th colspan="3" class="n">Purchase / Inward</th><th colspan="3" class="n">Sold / Consumed / Outward</th><th colspan="3" class="n">Damage / Write-off</th><th colspan="3" class="n">Closing</th><th>Val.</th></tr><tr>';
+    foreach (['S.N.', 'Code', 'Item', 'Stock Group', 'Jewellery Stock Type', 'Type', 'Location', 'UOM'] as $h) { echo '<th>' . $h . '</th>'; }
     for ($i = 0; $i < 5; $i++) { echo '<th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th>'; }
     echo '<th>Method</th></tr></thead><tbody>';
     foreach ($rows as $i => $r) {
-        echo '<tr><td>' . ($i + 1) . '</td><td>' . e($r['sku']) . '</td><td>' . e($r['name']) . '</td><td>' . e($r['item_type_label']) . '</td><td>' . e($r['location']) . '</td><td>' . e($r['unit']) . '</td>';
+        echo '<tr><td>' . ($i + 1) . '</td><td>' . e($r['sku']) . '</td><td>' . e($r['name']) . '</td><td>' . e($r['stock_group']) . '</td><td>' . e($r['jewellery_stock_kind_label']) . '</td><td>' . e($r['item_type_label']) . '</td><td>' . e($r['location']) . '</td><td>' . e($r['unit']) . '</td>';
         foreach ([['opening_qty', 'opening_rate', 'opening_amount'], ['in_qty', 'in_rate', 'in_amount'], ['out_qty', 'out_rate', 'out_amount'], ['damage_qty', 'damage_rate', 'damage_amount'], ['closing_qty', 'closing_rate', 'closing_amount']] as [$q, $ra, $am]) {
             $neg = $r[$q] < 0 ? ' neg' : '';
             echo '<td class="n' . $neg . '">' . number_format($r[$q], 3) . '</td><td class="n">' . $fmt($r[$ra]) . '</td><td class="n' . $neg . '">' . $fmt($r[$am]) . '</td>';
         }
         echo '<td>' . e(strtoupper(str_replace('_', ' ', $r['valuation_method']))) . '</td></tr>';
     }
-    echo '<tr class="tot"><td colspan="6">Totals (amounts)</td>'
+    echo '<tr class="tot"><td colspan="8">Totals (amounts)</td>'
         . '<td colspan="2"></td><td class="n">' . $fmt($totals['opening_amount']) . '</td>'
         . '<td colspan="2"></td><td class="n">' . $fmt($totals['in_amount']) . '</td>'
         . '<td colspan="2"></td><td class="n">' . $fmt($totals['out_amount']) . '</td>'
@@ -296,12 +299,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <option value="negative" <?= $filters['stock_status'] === 'negative' ? 'selected' : '' ?>>Negative stock</option>
             </select>
         </label>
+        <label>Jewellery stock type
+            <select name="jewellery_stock_kind">
+                <option value="">All stock types</option>
+                <option value="showroom" <?= $filters['jewellery_stock_kind'] === 'showroom' ? 'selected' : '' ?>>Showroom Stock</option>
+                <option value="customer_ordered" <?= $filters['jewellery_stock_kind'] === 'customer_ordered' ? 'selected' : '' ?>>Customer Ordered Stock</option>
+            </select>
+        </label>
         <label>Group by
             <select name="group_by">
                 <option value="">Item (code order)</option>
                 <option value="type" <?= $filters['group_by'] === 'type' ? 'selected' : '' ?>>Item type</option>
                 <option value="valuation" <?= $filters['group_by'] === 'valuation' ? 'selected' : '' ?>>Valuation method</option>
                 <option value="ledger" <?= $filters['group_by'] === 'ledger' ? 'selected' : '' ?>>GL ledger (ties to trial balance)</option>
+                <option value="stock_kind" <?= $filters['group_by'] === 'stock_kind' ? 'selected' : '' ?>>Jewellery stock type</option>
             </select>
         </label>
         <?php if ($filters['ledger_id'] > 0): ?>
@@ -386,9 +397,30 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     $ledgerSubtotals[$key]['count'] = ($ledgerSubtotals[$key]['count'] ?? 0) + 1;
                 }
             }
+            $stockKindSubtotals = [];
+            if ($filters['group_by'] === 'stock_kind') {
+                foreach ($rows as $sr) {
+                    $key = (string) ($sr['jewellery_stock_kind'] ?: 'other');
+                    $stockKindSubtotals[$key]['label'] = $key === 'showroom' ? 'Showroom Stock'
+                        : ($key === 'customer_ordered' ? 'Customer Ordered Stock' : 'Other Inventory');
+                    $stockKindSubtotals[$key]['closing'] = ($stockKindSubtotals[$key]['closing'] ?? 0.0) + $sr['closing_amount'];
+                    $stockKindSubtotals[$key]['count'] = ($stockKindSubtotals[$key]['count'] ?? 0) + 1;
+                }
+            }
             $prevLedgerKey = null;
+            $prevStockKind = null;
             $sn = ($page - 1) * $perPage; foreach ($pageRows as $r): $sn++;
                 $ledgerUrl = url('admin/stock-ledger.php?item=' . $r['item_id'] . '&return=' . urlencode($qs . '&page=' . $page . '&per_page=' . $perPage) . '&' . $qs);
+                if ($filters['group_by'] === 'stock_kind' && $prevStockKind !== (string) ($r['jewellery_stock_kind'] ?: 'other')):
+                    $prevStockKind = (string) ($r['jewellery_stock_kind'] ?: 'other');
+                    $stockSub = $stockKindSubtotals[$prevStockKind];
+            ?>
+                <tr style="background:var(--mbw-soft,#eef5f0);font-weight:700">
+                    <td colspan="21"><?= icon('inventory') ?> <?= e($stockSub['label']) ?> — <?= (int) $stockSub['count'] ?> item(s)</td>
+                    <td class="is-numeric grp-close"><?= e($sym . number_format($stockSub['closing'], 2)) ?></td>
+                    <td colspan="2" class="grp-other" style="font-weight:500;color:var(--mbw-muted)">closing stock value</td>
+                </tr>
+            <?php endif;
                 if ($filters['group_by'] === 'ledger' && $prevLedgerKey !== (int) $r['ledger_id']):
                     $prevLedgerKey = (int) $r['ledger_id'];
                     $sub = $ledgerSubtotals[$prevLedgerKey];
@@ -403,7 +435,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <tr>
                     <td><?= $sn ?></td>
                     <td class="ssr-sticky-1"><a href="<?= e($ledgerUrl) ?>"><strong><?= e($r['sku']) ?></strong></a></td>
-                    <td class="ssr-sticky-2"><a href="<?= e($ledgerUrl) ?>"><?= e($r['name']) ?></a></td>
+                    <td class="ssr-sticky-2"><a href="<?= e($ledgerUrl) ?>"><?= e($r['name']) ?></a>
+                        <?php if ((string) $r['jewellery_stock_kind'] !== ''): ?><br><small><?= e(trim((string) $r['stock_group'] . ' · ' . (string) $r['jewellery_stock_kind_label'], ' ·')) ?></small><?php endif; ?>
+                    </td>
                     <td><span class="mbw-pill tone-blue"><?= e($r['item_type_label']) ?></span></td>
                     <td><?= e($r['location']) ?></td>
                     <td><?= e($r['unit']) ?></td>

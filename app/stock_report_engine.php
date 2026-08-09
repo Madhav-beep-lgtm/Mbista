@@ -151,7 +151,7 @@ function sr_replay_balance(array $state): array
  * (string[] master/location types), valuation (''|fifo|weighted_average|
  * specific), search (code/name), stock_status (''|positive|zero|negative),
  * zero_movement (bool include), zero_closing (bool include),
- * group_by (''|type|location|valuation).
+ * group_by (''|type|location|valuation|ledger|stock_kind).
  *
  * Returns ['rows' => [...], 'totals' => [...], 'generated' => meta].
  * One query for items + one for transactions — no per-item queries.
@@ -168,19 +168,28 @@ function sr_stock_summary(int $companyId, array $f): array
     $includeZeroMovement = (bool) ($f['zero_movement'] ?? true);
     $includeZeroClosing = (bool) ($f['zero_closing'] ?? true);
 
-    $itemSql = "SELECT id, sku, name, item_type, valuation_method, unit, purchase_rate, opening_qty, opening_amount, default_warehouse_id
-        FROM inventory_items WHERE company_id = :cid AND item_type <> 'service'";
+    $itemSql = "SELECT i.id, i.sku, i.name, i.item_type, i.valuation_method, i.unit, i.purchase_rate,
+            i.opening_qty, i.opening_amount, i.default_warehouse_id, i.category,
+            jp.stock_kind AS jewellery_stock_kind
+        FROM inventory_items i
+        LEFT JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id AND jp.company_id = i.company_id
+        WHERE i.company_id = :cid AND i.item_type <> 'service'";
     $params = ['cid' => $companyId];
     if ($search !== '') {
-        $itemSql .= ' AND (sku LIKE :q OR name LIKE :q2)';
+        $itemSql .= ' AND (i.sku LIKE :q OR i.name LIKE :q2)';
         $params['q'] = '%' . $search . '%';
         $params['q2'] = '%' . $search . '%';
     }
     if ($valuation !== '') {
-        $itemSql .= ' AND valuation_method = :vm';
+        $itemSql .= ' AND i.valuation_method = :vm';
         $params['vm'] = $valuation;
     }
-    $itemSql .= ' ORDER BY sku ASC';
+    $stockKind = (string) ($f['jewellery_stock_kind'] ?? '');
+    if (in_array($stockKind, ['showroom', 'customer_ordered'], true)) {
+        $itemSql .= ' AND jp.stock_kind = :stock_kind';
+        $params['stock_kind'] = $stockKind;
+    }
+    $itemSql .= ' ORDER BY i.sku ASC';
     $stmt = db()->prepare($itemSql);
     $stmt->execute($params);
     $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -356,6 +365,13 @@ function sr_stock_summary(int $companyId, array $f): array
             'name' => (string) $item['name'],
             'item_type' => $displayType,
             'item_type_label' => sr_item_type_labels()[$displayType] ?? ucfirst($displayType),
+            'stock_group' => (string) ($item['category'] ?? ''),
+            'jewellery_stock_kind' => (string) ($item['jewellery_stock_kind'] ?? ''),
+            'jewellery_stock_kind_label' => match ((string) ($item['jewellery_stock_kind'] ?? '')) {
+                'customer_ordered' => 'Customer Ordered',
+                'showroom' => 'Showroom',
+                default => '—',
+            },
             'location' => $warehouseLabel,
             'unit' => (string) $item['unit'],
             'valuation_method' => $method,
@@ -396,6 +412,9 @@ function sr_stock_summary(int $companyId, array $f): array
         usort($rows, static fn (array $a, array $b): int => [$a['valuation_method'], $a['sku']] <=> [$b['valuation_method'], $b['sku']]);
     } elseif ($groupBy === 'ledger') {
         usort($rows, static fn (array $a, array $b): int => [$a['ledger_code'], $a['sku']] <=> [$b['ledger_code'], $b['sku']]);
+    } elseif ($groupBy === 'stock_kind') {
+        usort($rows, static fn (array $a, array $b): int => [$a['jewellery_stock_kind'], $a['stock_group'], $a['sku']]
+            <=> [$b['jewellery_stock_kind'], $b['stock_group'], $b['sku']]);
     }
 
     return ['rows' => $rows, 'totals' => $totals, 'item_count' => count($rows)];

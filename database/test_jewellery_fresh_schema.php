@@ -108,6 +108,12 @@ ok($missing === [], 'All ' . count($expected) . ' jewellery tables exist'
     . ($missing === [] ? '' : ' — missing: ' . implode(', ', $missing)));
 ok(accounting_repair_column_exists('client_profiles', 'jewellery_accounting_enabled'),
     'The client activation flag was added to client_profiles');
+ok(accounting_repair_column_exists('jewellery_item_profiles', 'stock_kind'),
+    'Jewellery item profiles classify showroom and customer-ordered stock');
+ok(accounting_repair_column_exists('inventory_opening_import_rows', 'raw_group')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'proposed_code')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'stock_kind'),
+    'Opening import staging carries editable group, code, name and stock type fields');
 
 echo "\n4. Foreign keys actually resolved\n";
 // The repair steps must run in an order where every referenced table already

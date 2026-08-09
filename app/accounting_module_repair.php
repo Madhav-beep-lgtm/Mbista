@@ -3433,5 +3433,17 @@ function accounting_module_repair_database(): array
             . 'REFERENCES `jewellery_order_receipts` (`id`) ON DELETE SET NULL');
     });
 
+    $run('Jewellery opening stock can be segregated and create item masters (migration 110)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_item_profiles')
+            || !accounting_repair_table_exists('inventory_opening_import_rows')) {
+            return;
+        }
+        accounting_repair_run_migration_file_if_index_missing(
+            '110_jewellery_opening_stock_classification.sql',
+            'inventory_opening_import_rows',
+            'idx_inv_opimprow_stock_kind'
+        );
+    });
+
     return $errors;
 }

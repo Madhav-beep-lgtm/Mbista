@@ -40,7 +40,7 @@ require_once __DIR__ . '/jewellery_engine.php';
 // screen that was supposed to show it back had nothing to read.
 const JW_ITEM_SELECT = 'i.id, i.company_id, i.sku AS code, i.name, i.category, i.status, i.notes,
         i.hs_code, i.unit AS unit_label, i.ledger_id, i.opening_qty, i.opening_amount,
-        j.jewellery_type AS item_type, j.metal_id, j.purity_id, j.unit_id, j.track_mode,
+        j.jewellery_type AS item_type, j.metal_id, j.purity_id, j.unit_id, j.track_mode, j.stock_kind,
         j.gross_weight, j.stone_weight, j.net_weight, j.wastage_pct,
         j.making_charge_basis, j.making_charge_rate, j.stone_value,
         j.vat_applicable, j.vat_base, j.hallmark, j.design_no, j.reorder_weight';
@@ -313,6 +313,8 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
         'unit_id' => $unitId,
         'jewellery_type' => $jewelleryType,
         'track_mode' => (string) ($input['track_mode'] ?? '') === 'piece' ? 'piece' : 'weight',
+        'stock_kind' => (string) ($input['stock_kind'] ?? ($existingItem['stock_kind'] ?? 'showroom')) === 'customer_ordered'
+            ? 'customer_ordered' : 'showroom',
         'gross_weight' => $gross,
         'stone_weight' => $stone,
         'net_weight' => $net,
@@ -354,7 +356,7 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
                 WHERE id = :id AND company_id = :cid')
                 ->execute($shared + ['id' => $itemId]);
             db()->prepare('UPDATE jewellery_item_profiles SET metal_id = :metal_id, purity_id = :purity_id,
-                    unit_id = :unit_id, jewellery_type = :jewellery_type, track_mode = :track_mode,
+                    unit_id = :unit_id, jewellery_type = :jewellery_type, track_mode = :track_mode, stock_kind = :stock_kind,
                     gross_weight = :gross_weight, stone_weight = :stone_weight, net_weight = :net_weight,
                     wastage_pct = :wastage_pct, making_charge_basis = :making_charge_basis,
                     making_charge_rate = :making_charge_rate, stone_value = :stone_value,
@@ -368,10 +370,10 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
                 ->execute($shared);
             $itemId = (int) db()->lastInsertId();
             db()->prepare('INSERT INTO jewellery_item_profiles (inventory_item_id, company_id, metal_id, purity_id, unit_id,
-                    jewellery_type, track_mode, gross_weight, stone_weight, net_weight, wastage_pct,
+                    jewellery_type, track_mode, stock_kind, gross_weight, stone_weight, net_weight, wastage_pct,
                     making_charge_basis, making_charge_rate, stone_value, vat_applicable, vat_base,
                     hallmark, design_no, reorder_weight)
-                VALUES (:id, :cid, :metal_id, :purity_id, :unit_id, :jewellery_type, :track_mode, :gross_weight,
+                VALUES (:id, :cid, :metal_id, :purity_id, :unit_id, :jewellery_type, :track_mode, :stock_kind, :gross_weight,
                     :stone_weight, :net_weight, :wastage_pct, :making_charge_basis, :making_charge_rate,
                     :stone_value, :vat_applicable, :vat_base, :hallmark, :design_no, :reorder_weight)')
                 ->execute($profile + ['id' => $itemId, 'cid' => $companyId]);
@@ -1405,6 +1407,12 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
         db()->beginTransaction();
     }
     try {
+        $stockKind = (string) ($input['stock_kind'] ?? ($item['stock_kind'] ?? 'showroom')) === 'customer_ordered'
+            ? 'customer_ordered' : 'showroom';
+        db()->prepare('UPDATE jewellery_item_profiles SET stock_kind = :kind
+            WHERE inventory_item_id = :id AND company_id = :cid')
+            ->execute(['kind' => $stockKind, 'id' => $itemId, 'cid' => $companyId]);
+
         // 1. The shared master carries the numbers, so the core Inventory page
         //    and the Opening Balances reconciliation see the same opening.
         db()->prepare('UPDATE inventory_items SET opening_qty = :qty, opening_amount = :amount
