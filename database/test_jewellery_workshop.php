@@ -1815,6 +1815,108 @@ ok(near($mixVoucher['ledgers'][$ramMetalLedger] ?? 0.0, -20000.0),
 ok(near($mixVoucher['ledgers'][jw_item_stock_ledger_id($cidA, jewellery_item($cidA, $chain))] ?? 0.0, 171140.0),
     'And the ring lands in stock worth his gold AND the shop\'s stones: 151,140 + 20,000');
 
+echo "\n27. Assignment edits preserve every linked record\n";
+$editOrder = jewellery_save_order($cidA, $fyA, [
+    'order_date' => '2026-11-01', 'delivery_date' => '2026-11-20', 'party_id' => $customer, 'status' => 'confirmed',
+], [
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1, 'gross_weight' => 2, 'stone_weight' => 0, 'rate' => 150000],
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1, 'gross_weight' => 3, 'stone_weight' => 0, 'rate' => 150000],
+    ['item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1, 'gross_weight' => 4, 'stone_weight' => 0, 'rate' => 150000],
+], $userA);
+$editLines = jewellery_order_line_rows($cidA, $editOrder);
+$assignInput = ['assign_kind' => 'customer', 'karigar_id' => $kContractor, 'order_id' => $editOrder,
+    'order_line_id' => (int) $editLines[0]['id'], 'category' => 'gold', 'making_basis' => 'flat',
+    'making_rate' => 1200, 'assigned_date' => '2026-11-02', 'expected_delivery' => '2026-11-18',
+    'description' => 'Original assignment'];
+$editSaved = jewellery_save_assignment($cidA, $fyA, $assignInput, $userA);
+$editAid = (int) $editSaved['id'];
+ok($editSaved['ok'] && jewellery_assignment_edit_state($cidA, $editAid)['level'] === 'full',
+    'An unissued assignment opens at full-edit level');
+
+$changeKarigar = jewellery_update_assignment($cidA, $editAid,
+    array_replace($assignInput, ['karigar_id' => $kEmployee, 'description' => 'New kaligad']), $userA);
+$editedAssignment = jewellery_assignment($cidA, $editAid);
+$editedLine = jewellery_order_line_rows($cidA, $editOrder)[0];
+ok($changeKarigar['ok'], 'An unissued assignment can change kaligad');
+ok((int) $editedAssignment['karigar_id'] === $kEmployee && (int) $editedLine['karigar_id'] === $kEmployee,
+    'Assignment and order line both receive the new kaligad ID');
+
+$changeItem = jewellery_update_assignment($cidA, $editAid,
+    array_replace($assignInput, ['karigar_id' => $kEmployee, 'order_line_id' => (int) $editLines[1]['id']]), $userA);
+$linesAfterMove = jewellery_order_line_rows($cidA, $editOrder);
+ok($changeItem['ok'] && (int) jewellery_assignment($cidA, $editAid)['order_line_id'] === (int) $editLines[1]['id'],
+    'A customer assignment can move to another unassigned item of the same order');
+ok((int) ($linesAfterMove[0]['assignment_id'] ?? 0) === 0 && (int) ($linesAfterMove[0]['karigar_id'] ?? 0) === 0,
+    'The old order line is released completely');
+ok((int) $linesAfterMove[1]['assignment_id'] === $editAid && (int) $linesAfterMove[1]['karigar_id'] === $kEmployee,
+    'The new order line links to the existing assignment and kaligad');
+
+$otherOrder = jewellery_save_order($cidA, $fyA, ['order_date' => '2026-11-01', 'delivery_date' => '2026-11-20',
+    'party_id' => $customer, 'status' => 'confirmed'], [[
+        'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1,
+        'gross_weight' => 1, 'rate' => 150000,
+    ]], $userA);
+$otherLine = jewellery_order_line_rows($cidA, $otherOrder)[0];
+$beforeFailedEdit = jewellery_assignment($cidA, $editAid);
+$foreignItem = jewellery_update_assignment($cidA, $editAid,
+    array_replace($assignInput, ['karigar_id' => $kEmployee, 'order_line_id' => (int) $otherLine['id']]), $userA);
+ok(!$foreignItem['ok'], 'An item from another order is rejected');
+ok((int) jewellery_assignment($cidA, $editAid)['order_line_id'] === (int) $beforeFailedEdit['order_line_id'],
+    'A failed update leaves the original assignment unchanged');
+
+$secondSaved = jewellery_save_assignment($cidA, $fyA,
+    array_replace($assignInput, ['order_line_id' => (int) $editLines[2]['id'], 'karigar_id' => $kContractor]), $userA);
+$claimedItem = jewellery_update_assignment($cidA, $editAid,
+    array_replace($assignInput, ['karigar_id' => $kEmployee, 'order_line_id' => (int) $editLines[2]['id']]), $userA);
+ok($secondSaved['ok'] && !$claimedItem['ok'], 'An item already assigned elsewhere is rejected');
+
+$remove = jewellery_unassign_assignment($cidA, (int) $secondSaved['id'], 'Customer changed the design', $userA);
+$releasedThird = jewellery_order_line_rows($cidA, $editOrder)[2];
+ok($remove['ok'] && (string) jewellery_assignment($cidA, (int) $secondSaved['id'])['status'] === 'cancelled',
+    'An untouched assignment is cancelled rather than deleted');
+ok((int) ($releasedThird['assignment_id'] ?? 0) === 0 && (int) ($releasedThird['karigar_id'] ?? 0) === 0,
+    'Removing an assignment releases both links on its order line');
+
+db()->prepare('UPDATE jewellery_order_assignments SET issued_gross_weight = 1 WHERE id = :id AND company_id = :cid')
+    ->execute(['id' => $editAid, 'cid' => $cidA]);
+$lockedAttempt = jewellery_update_assignment($cidA, $editAid,
+    array_replace($assignInput, ['karigar_id' => $kContractor, 'order_line_id' => (int) $editLines[0]['id'],
+        'expected_delivery' => '2026-11-19', 'description' => 'Date only after issue']), $userA);
+ok(jewellery_assignment_edit_state($cidA, $editAid)['level'] === 'limited'
+    && $lockedAttempt['ok'] && (int) jewellery_assignment($cidA, $editAid)['karigar_id'] === $kEmployee,
+    'After metal is issued, only delivery date and description change; kaligad and item stay locked');
+ok(!jewellery_unassign_assignment($cidA, $editAid, 'Too late', $userA)['ok'],
+    'An assignment cannot be removed after metal has moved');
+
+ok(jewellery_assignment_edit_state($cidA, $mixAid)['level'] === 'readonly'
+    && !jewellery_update_assignment($cidA, $mixAid, ['expected_delivery' => '2026-12-01'], $userA)['ok'],
+    'A received assignment cannot be reassigned');
+ok(!jewellery_update_assignment($cidB, $editAid, $assignInput, $userB)['ok'],
+    'A cross-company assignment ID is rejected');
+$foreignKarigarSaved = jewellery_save_assignment($cidA, $fyA,
+    array_replace($assignInput, ['order_line_id' => (int) $editLines[2]['id']]), $userA);
+$karigarB = jewellery_save_karigar($cidB, ['code' => 'FOREIGN', 'name' => 'Foreign Kaligad',
+    'engagement_type' => 'contractor', 'default_making_basis' => 'flat', 'default_making_rate' => 1], $userB);
+ok($foreignKarigarSaved['ok'] && !jewellery_update_assignment($cidA, (int) $foreignKarigarSaved['id'],
+    array_replace($assignInput, ['order_line_id' => (int) $editLines[2]['id'], 'karigar_id' => $karigarB]), $userA)['ok'],
+    'A kaligad outside the company is rejected');
+$goldB = $q("SELECT id FROM jewellery_metals WHERE company_id=$cidB AND code='GOLD'");
+$p22B = $q("SELECT id FROM jewellery_purities WHERE company_id=$cidB AND metal_id=$goldB AND code='22K'");
+$tolaB = $q("SELECT id FROM jewellery_units WHERE company_id=$cidB AND code='TOLA'");
+$itemB = jewellery_save_item($cidB, ['code' => 'FOREIGN22', 'name' => 'Foreign 22K Item', 'item_type' => 'ornament',
+    'metal_id' => $goldB, 'purity_id' => $p22B, 'unit_id' => $tolaB, 'gross_weight' => 1], $userB);
+$orderB = jewellery_save_order($cidB, $fyB, ['order_date' => '2026-11-01', 'customer_name' => 'Foreign customer',
+    'status' => 'confirmed'], [[
+        'item_id' => $itemB, 'purity_id' => $p22B, 'unit_id' => $tolaB, 'qty_pieces' => 1,
+        'gross_weight' => 1, 'rate' => 100,
+    ]], $userB);
+$lineB = jewellery_order_line_rows($cidB, $orderB)[0];
+ok(!jewellery_update_assignment($cidA, (int) $foreignKarigarSaved['id'],
+    array_replace($assignInput, ['order_line_id' => (int) $lineB['id']]), $userA)['ok'],
+    'An order-line ID from another company is rejected');
+ok($q("SELECT COUNT(*) FROM activity_logs WHERE entity_type='jewellery_assignment' AND entity_id=$editAid AND action='updated'") > 0,
+    'Successful assignment changes create audit activity');
+
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

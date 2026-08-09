@@ -49,7 +49,7 @@ declare(strict_types=1);
         </table>
     </div>
     <div class="frm-entries-foot">
-        <button type="button" class="button soft" data-add-row>＋ Add row</button>
+        <button type="button" class="button soft" data-add-row><?= icon('plus') ?>Add row</button>
         <div class="frm-entry-totals">
             <span class="mbw-pill tone-gray" id="jw-assign-count">No rows filled</span>
         </div>
@@ -135,7 +135,7 @@ declare(strict_types=1);
             <td><input type="date" name="assigned_date[]" data-field="assigned_date" class="jw-assigned" value="<?= e($todayInFy) ?>"></td>
             <td><input type="date" name="expected_delivery[]" data-field="expected_delivery" class="jw-delivery"></td>
             <td><input type="text" name="description[]" data-field="description" maxlength="255" placeholder="Anything the kaligad should know"></td>
-            <td><button type="button" class="frm-del" data-remove-row aria-label="Remove this row">&#128465;</button></td>
+            <td><button type="button" class="frm-del" data-remove-row aria-label="Remove this row"><?= icon('trash') ?></button></td>
         </tr>
     </template>
 </div>

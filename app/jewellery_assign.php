@@ -625,6 +625,247 @@ function jewellery_assign_rows(int $companyId, string $kind, array $filters = []
 }
 
 /**
+ * Server-authoritative edit level for one assignment.
+ *
+ * The counts deliberately cover both the header links and their underlying
+ * records. A stale zero on the header must never unlock an assignment whose
+ * stock movement, component, voucher or receipt still exists.
+ */
+function jewellery_assignment_edit_state(int $companyId, int $assignmentId, bool $lock = false): array
+{
+    $sql = 'SELECT a.*, k.code AS karigar_code, k.name AS karigar_name,
+            o.order_no, o.delivery_date AS order_delivery_date,
+            COALESCE(ap.name, o.customer_name, \'Walk-in customer\') AS customer_name,
+            i.sku AS item_code, i.name AS item_name, p.code AS purity_code, u.code AS unit_code
+        FROM jewellery_order_assignments a
+        INNER JOIN jewellery_karigars k ON k.id = a.karigar_id AND k.company_id = a.company_id
+        LEFT JOIN jewellery_orders o ON o.id = a.order_id AND o.company_id = a.company_id
+        LEFT JOIN accounting_parties ap ON ap.id = o.party_id
+        INNER JOIN inventory_items i ON i.id = a.item_id AND i.company_id = a.company_id
+        INNER JOIN jewellery_purities p ON p.id = a.purity_id AND p.company_id = a.company_id
+        INNER JOIN jewellery_units u ON u.id = a.unit_id AND u.company_id = a.company_id
+        WHERE a.id = :id AND a.company_id = :cid LIMIT 1' . ($lock ? ' FOR UPDATE' : '');
+    $stmt = db()->prepare($sql);
+    $stmt->execute(['id' => $assignmentId, 'cid' => $companyId]);
+    $assignment = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    if (!$assignment) {
+        return ['found' => false, 'level' => 'none', 'assignment' => null, 'has_movement' => false];
+    }
+
+    $count = static function (string $sql, array $params): int {
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
+        return (int) $stmt->fetchColumn();
+    };
+    $params = ['id' => $assignmentId, 'cid' => $companyId];
+    $componentCount = table_exists('jewellery_assignment_components')
+        ? $count('SELECT COUNT(*) FROM jewellery_assignment_components WHERE assignment_id = :id AND company_id = :cid', $params)
+        : 0;
+    $stockCount = table_exists('jewellery_stock_txns')
+        ? $count("SELECT COUNT(*) FROM jewellery_stock_txns WHERE company_id = :cid AND source_id = :id AND source_type = 'jewellery_karigar_issue'", $params)
+        : 0;
+    $receiptCount = table_exists('jewellery_order_receipts')
+        ? $count('SELECT COUNT(*) FROM jewellery_order_receipts WHERE assignment_id = :id AND company_id = :cid', $params)
+        : 0;
+    $voucherCount = (int) ($assignment['issue_voucher_id'] ?? 0) > 0 ? 1 : 0;
+    if ($voucherCount === 0 && table_exists('vouchers')) {
+        $voucherCount = $count("SELECT COUNT(*) FROM vouchers WHERE company_id = :cid AND source_id = :id AND source_type = 'jewellery_karigar_issue'", $params);
+    }
+    $weightsMoved = abs((float) ($assignment['issued_gross_weight'] ?? 0)) > 0.00005
+        || abs((float) ($assignment['issued_fine_weight'] ?? 0)) > 0.00005
+        || abs((float) ($assignment['issued_amount'] ?? 0)) > 0.005
+        || abs((float) ($assignment['issued_stone_carat'] ?? 0)) > 0.00005
+        || abs((float) ($assignment['issued_stone_amount'] ?? 0)) > 0.005
+        || (int) ($assignment['issue_stock_txn_out'] ?? 0) > 0
+        || (int) ($assignment['issue_stock_txn_in'] ?? 0) > 0;
+    $hasMovement = $weightsMoved || $componentCount > 0 || $stockCount > 0 || $voucherCount > 0;
+    $status = (string) $assignment['status'];
+    $level = $status === 'issued' && $receiptCount === 0
+        ? ($hasMovement ? 'limited' : 'full')
+        : 'readonly';
+
+    return ['found' => true, 'level' => $level, 'assignment' => $assignment,
+        'has_movement' => $hasMovement, 'component_count' => $componentCount,
+        'stock_count' => $stockCount, 'voucher_count' => $voucherCount,
+        'receipt_count' => $receiptCount];
+}
+
+/** Update an assignment without touching any stock, voucher or receipt. */
+function jewellery_update_assignment(int $companyId, int $assignmentId, array $input, int $userId = 0): array
+{
+    $orderIdsToSync = [];
+    try {
+        db()->beginTransaction();
+        $state = jewellery_assignment_edit_state($companyId, $assignmentId, true);
+        if (!$state['found']) {
+            throw new RuntimeException('Assignment not found for this company.');
+        }
+        if ($state['level'] === 'readonly') {
+            throw new RuntimeException('A received or cancelled assignment is read-only.');
+        }
+        $old = $state['assignment'];
+        $updates = [
+            'expected_return_date' => trim((string) ($input['expected_delivery'] ?? '')) ?: null,
+            'notes' => substr(trim((string) ($input['description'] ?? '')), 0, 255) ?: null,
+        ];
+        if ($updates['expected_return_date'] !== null
+            && preg_match('/^\d{4}-\d{2}-\d{2}$/', $updates['expected_return_date']) !== 1) {
+            throw new RuntimeException('Expected delivery must be a valid date.');
+        }
+        if ($updates['expected_return_date'] !== null
+            && $updates['expected_return_date'] < (string) $old['issue_date']) {
+            throw new RuntimeException('Expected delivery cannot be before the assigned date.');
+        }
+        if ((string) $old['assign_kind'] === 'customer' && $updates['expected_return_date'] !== null
+            && (string) ($old['order_delivery_date'] ?? '') !== ''
+            && $updates['expected_return_date'] > (string) $old['order_delivery_date']) {
+            throw new RuntimeException('Expected delivery cannot be after the date promised to the customer.');
+        }
+
+        if ($state['level'] === 'full') {
+            $kind = (string) $old['assign_kind'];
+            $karigar = jewellery_karigar($companyId, (int) ($input['karigar_id'] ?? 0));
+            if (!$karigar || (string) ($karigar['status'] ?? '') !== 'active') {
+                throw new RuntimeException('Select an active kaligad from this company.');
+            }
+            $order = null;
+            $line = null;
+            if ($kind === 'customer') {
+                $orderId = (int) $old['order_id'];
+                $orderStmt = db()->prepare('SELECT * FROM jewellery_orders WHERE id = :id AND company_id = :cid LIMIT 1');
+                $orderStmt->execute(['id' => $orderId, 'cid' => $companyId]);
+                $order = $orderStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                $lineStmt = db()->prepare('SELECT l.*, i.name AS item_name, p.fineness
+                    FROM jewellery_order_lines l
+                    INNER JOIN inventory_items i ON i.id = l.item_id AND i.company_id = l.company_id
+                    INNER JOIN jewellery_purities p ON p.id = l.purity_id AND p.company_id = l.company_id
+                    WHERE l.id = :id AND l.order_id = :oid AND l.company_id = :cid LIMIT 1 FOR UPDATE');
+                $lineStmt->execute(['id' => (int) ($input['order_line_id'] ?? 0), 'oid' => $orderId, 'cid' => $companyId]);
+                $line = $lineStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                if (!$line) {
+                    throw new RuntimeException('The selected item does not belong to this order.');
+                }
+                if ((int) ($line['assignment_id'] ?? 0) > 0 && (int) $line['assignment_id'] !== $assignmentId) {
+                    throw new RuntimeException('That order item is already linked to another assignment.');
+                }
+            } else {
+                $itemStmt = db()->prepare("SELECT i.id FROM inventory_items i
+                    INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
+                    WHERE i.id = :id AND i.company_id = :cid AND i.status = 'active' LIMIT 1");
+                $itemStmt->execute(['id' => (int) ($input['item_id'] ?? 0), 'cid' => $companyId]);
+                if (!$itemStmt->fetchColumn()) {
+                    throw new RuntimeException('Select an active finished-stock item from this company.');
+                }
+            }
+            $checked = jewellery_assign_validate($kind, ['assign_kind' => $kind] + $input, $order, $line);
+            if (!$checked['ok']) {
+                throw new RuntimeException(implode(' ', $checked['errors']));
+            }
+            $row = $checked['row'];
+            $updates += [
+                'karigar_id' => (int) $row['karigar_id'], 'order_line_id' => $row['order_line_id'] ?: null,
+                'item_id' => (int) $row['item_id'], 'purity_id' => (int) $row['purity_id'],
+                'unit_id' => (int) $row['unit_id'], 'category' => $row['category'],
+                'size_design' => $row['size_design'] ?: null,
+                'expected_ornament' => $row['expected_ornament'] ?: null,
+                'expected_gross_weight' => $row['expected_gross_weight'],
+                'expected_stone_weight' => $row['expected_stone_weight'],
+                'expected_net_weight' => $row['expected_net_weight'],
+                'making_basis' => $row['making_basis'], 'making_rate' => $row['making_rate'],
+                'issue_date' => $row['assigned_date'],
+            ];
+            if ($kind === 'customer') {
+                $oldLineId = (int) ($old['order_line_id'] ?? 0);
+                $newLineId = (int) $row['order_line_id'];
+                if ($oldLineId > 0 && $oldLineId !== $newLineId) {
+                    db()->prepare('UPDATE jewellery_order_lines SET assignment_id = NULL, karigar_id = NULL
+                        WHERE id = :id AND company_id = :cid AND assignment_id = :aid')
+                        ->execute(['id' => $oldLineId, 'cid' => $companyId, 'aid' => $assignmentId]);
+                }
+                db()->prepare('UPDATE jewellery_order_lines SET assignment_id = :aid, karigar_id = :kid
+                    WHERE id = :id AND order_id = :oid AND company_id = :cid')
+                    ->execute(['aid' => $assignmentId, 'kid' => $row['karigar_id'], 'id' => $newLineId,
+                        'oid' => (int) $old['order_id'], 'cid' => $companyId]);
+                $orderIdsToSync[] = (int) $old['order_id'];
+            }
+        }
+
+        $changed = [];
+        foreach ($updates as $field => $value) {
+            if ((string) ($old[$field] ?? '') !== (string) ($value ?? '')) {
+                $changed[$field] = $value;
+            }
+        }
+        if ($changed !== []) {
+            $sets = [];
+            $params = ['id' => $assignmentId, 'cid' => $companyId];
+            foreach ($changed as $field => $value) {
+                $sets[] = "`$field` = :$field";
+                $params[$field] = $value;
+            }
+            db()->prepare('UPDATE jewellery_order_assignments SET ' . implode(', ', $sets)
+                . ' WHERE id = :id AND company_id = :cid')->execute($params);
+            log_field_changes('jewellery_assignment', $assignmentId, $old, $changed + $old, $companyId, $userId ?: null);
+            $auditPairs = [];
+            foreach ($changed as $field => $newValue) {
+                $auditPairs[] = $field . ': ' . (string) ($old[$field] ?? '') . ' -> ' . (string) ($newValue ?? '');
+            }
+            log_activity('jewellery_assignment', $assignmentId, 'updated',
+                'Assignment ' . $old['assignment_no'] . ' updated. ' . implode('; ', $auditPairs) . '.', $userId ?: null);
+        }
+        db()->commit();
+        foreach (array_unique($orderIdsToSync) as $orderId) {
+            jewellery_sync_order_status($companyId, $orderId);
+        }
+        return ['ok' => true, 'error' => '', 'changed' => array_keys($changed)];
+    } catch (Throwable $exception) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+        return ['ok' => false, 'error' => $exception->getMessage(), 'changed' => []];
+    }
+}
+
+/** Cancel an untouched assignment and release its order line. */
+function jewellery_unassign_assignment(int $companyId, int $assignmentId, string $reason, int $userId = 0): array
+{
+    $reason = trim($reason);
+    if ($reason === '') {
+        return ['ok' => false, 'error' => 'Enter a reason for removing the assignment.'];
+    }
+    $orderId = 0;
+    try {
+        db()->beginTransaction();
+        $state = jewellery_assignment_edit_state($companyId, $assignmentId, true);
+        if (!$state['found'] || $state['level'] !== 'full') {
+            throw new RuntimeException('This assignment can no longer be removed because metal, accounting, or receipt history is linked to it.');
+        }
+        $assignment = $state['assignment'];
+        $orderId = (int) ($assignment['order_id'] ?? 0);
+        db()->prepare('UPDATE jewellery_order_lines SET assignment_id = NULL, karigar_id = NULL
+            WHERE assignment_id = :aid AND company_id = :cid')
+            ->execute(['aid' => $assignmentId, 'cid' => $companyId]);
+        db()->prepare("UPDATE jewellery_order_assignments SET status = 'cancelled', notes = :notes
+            WHERE id = :id AND company_id = :cid")
+            ->execute(['notes' => trim((string) ($assignment['notes'] ?? '') . "\nRemoval reason: " . substr($reason, 0, 180)),
+                'id' => $assignmentId, 'cid' => $companyId]);
+        log_activity('jewellery_assignment', $assignmentId, 'unassigned',
+            'Assignment ' . $assignment['assignment_no'] . ' removed. Reason: ' . substr($reason, 0, 180), $userId ?: null);
+        log_field_changes('jewellery_assignment', $assignmentId, ['status' => $assignment['status']], ['status' => 'cancelled'], $companyId, $userId ?: null);
+        db()->commit();
+        if ($orderId > 0) {
+            jewellery_sync_order_status($companyId, $orderId);
+        }
+        return ['ok' => true, 'error' => ''];
+    } catch (Throwable $exception) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+        return ['ok' => false, 'error' => $exception->getMessage()];
+    }
+}
+
+/**
  * One assignment row flattened into the columns of the sheet, for CSV, Excel
  * and PDF. The screen and the file carry the same columns in the same order,
  * so a printed sheet is the page.
