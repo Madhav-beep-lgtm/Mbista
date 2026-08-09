@@ -30,7 +30,7 @@ function osi_cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
-        foreach (['inventory_opening_import_rows', 'inventory_opening_imports',
+        foreach (['jewellery_stock_unit_events', 'jewellery_stock_units', 'inventory_opening_import_rows', 'inventory_opening_imports',
                   'jewellery_line_taxes', 'jewellery_item_taxes', 'jewellery_taxes',
                   'jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items',
                   'jewellery_item_categories',
@@ -278,10 +278,10 @@ ok($created[0]['stock_kind'] === 'showroom' && $created[1]['stock_kind'] === 'cu
 ok($q("SELECT COUNT(*) FROM jewellery_item_categories WHERE company_id=$cid AND name IN ('Bangles','Rings')") === 2,
     'Missing stock groups are created once in the Jewellery category master');
 $templateHeader = opening_import_template_rows(true)[0];
-ok(array_slice($templateHeader, 0, 10) === [
-    'Stock Type *', 'Stock Group *', 'Item Code *', 'Item Name *', 'Metal *',
-    'Purity % *', 'Purity Code', 'Unit *', 'Pieces *', 'Gross Weight (GM) *',
-], 'The downloadable template uses the same first ten columns as the segregation workbook');
+ok($templateHeader === [
+    'SN', 'Stock type', 'Stock group', 'Item code', 'Item name', 'Metal', 'Purity',
+    'Unit', 'Pieces', 'Gross weight', 'Rate', 'Amount', 'Customer name', 'Order number',
+], 'The downloadable template exactly matches the supplied stock workbook columns');
 $openingScreen = (string) file_get_contents(__DIR__ . '/../public_html/admin/jewellery.php');
 ok(str_contains($openingScreen, 'Source Excel Row')
     && str_contains($openingScreen, 'Existing Item / Create')

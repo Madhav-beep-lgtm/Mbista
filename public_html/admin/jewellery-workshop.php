@@ -475,6 +475,19 @@ if ($view === 'orders' && $editOrder === null && is_array($orderStash)) {
 } else {
     $orderFormPrefill = null;
 }
+if ($view === 'orders' && $editOrder === null && !is_array($orderFormPrefill)
+    && (int) ($_GET['stock_unit'] ?? 0) > 0) {
+    $directUnit = jewellery_trace_unit($companyId, (int) $_GET['stock_unit']);
+    if ($directUnit && (string) $directUnit['stock_kind'] === 'showroom'
+        && (string) $directUnit['status'] === 'in_stock') {
+        $orderLines = [[
+            'stock_unit_id' => (int) $directUnit['id'], 'source' => 'stock',
+            'item_id' => (int) $directUnit['item_id'], 'purity_id' => (int) $directUnit['purity_id'],
+            'unit_id' => (int) $directUnit['unit_id'], 'qty_pieces' => (float) $directUnit['qty_pieces'],
+            'gross_weight' => (float) $directUnit['gross_weight'], 'stone_weight' => (float) $directUnit['stone_weight'],
+        ]];
+    }
+}
 // The form reads header values through this: the stashed value when a refused
 // save is being corrected, else the stored order being edited, else blank.
 $orderField = static function (string $key, $fallback = '') use (&$editOrder, &$orderFormPrefill) {
@@ -550,14 +563,15 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
         export_dispatch($exportFormat, 'jewellery-issues-' . $stamp, $data, 'Kaligad Issues', $exportMeta);
     }
     if ($view === 'ready-to-sale') {
-        $data = [['Assignment', 'Kaligad', 'Ornament', 'Size/Design', 'Received on', 'Gross', 'Stone',
-            'Net', 'Fine', 'Purity', 'Making charge']];
+        $data = [['Trace', 'Origin', 'Stock order', 'Assignment', 'Kaligad', 'Ornament', 'Size/Design',
+            'Received on', 'Gross', 'Stone', 'Net', 'Fine', 'Purity', 'Reservation']];
         foreach ($readyToSale as $r) {
-            $data[] = [$r['assignment_no'], (string) ($r['karigar_name'] ?? ''),
+            $data[] = [$r['trace_code'], $r['origin_type'], (string) ($r['stock_order_no'] ?? ''),
+                (string) ($r['assignment_no'] ?? ''), (string) ($r['karigar_name'] ?? ''),
                 (string) ($r['expected_ornament'] ?: $r['item_name'] ?? ''), (string) ($r['size_design'] ?? ''),
                 (string) $r['receive_date'], $r['received_gross_weight'], $r['stone_weight'],
                 $r['net_gold_weight'], $r['received_fine_weight'], (string) ($r['purity_code'] ?? ''),
-                $r['making_amount'] ?? 0];
+                (string) ($r['reserved_order_no'] ?? '')];
         }
         export_dispatch($exportFormat, 'jewellery-ready-to-sale-' . $stamp, $data, 'Ready to Sale', $exportMeta);
     }
@@ -776,6 +790,7 @@ jw_filter_bar_styles();
                 jw_render_line_grid('l', $orderLines, max(3, count($orderLines) + 2), 'Items ordered', [
                     'items' => $items, 'purities' => $purities, 'units' => $units,
                     'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $orderOnHand,
+                    'stock_units' => jewellery_ready_to_sale_options($companyId, (int) ($editOrder['id'] ?? 0)),
                     // Handing over a kaligad list is what turns on the two
                     // workshop columns: who makes each piece, and when it is due.
                     'karigars' => $karigars,
@@ -1378,20 +1393,21 @@ jw_filter_bar_styles();
             <div class="mbw-card-tools"><?= $canExport && $readyToSale !== [] ? 'Export' . $exportLinks() : '' ?></div>
         </div>
         <div class="mbw-tablewrap"><table>
-            <thead><tr><th>Assignment</th><th>Ornament</th><th>Size / design</th><th>Kaligad</th>
+            <thead><tr><th>Trace</th><th>Origin</th><th>Ornament</th><th>Size / design</th><th>Kaligad</th>
                 <th>Received on</th><th class="is-numeric">Gross</th><th class="is-numeric">Stone</th>
                 <th class="is-numeric">Net</th><th class="is-numeric">Fine</th><th>Purity</th>
-                <th class="is-numeric">Making charge</th><th class="is-numeric">Days on shelf</th></tr></thead>
+                <th>Reservation</th><th class="is-numeric">Days on shelf</th><th></th></tr></thead>
             <tbody>
                 <?php if ($readyToSale === []): ?>
-                    <tr><td colspan="12" style="text-align:center;color:var(--mbw-muted);padding:18px">
+                    <tr><td colspan="14" style="text-align:center;color:var(--mbw-muted);padding:18px">
                         Nothing has come back for the showroom yet. Assign showroom work under
                         <a href="<?= e(url('admin/jewellery-assign.php?kind=self')) ?>">Kaligad Assign</a>.
                     </td></tr>
                 <?php endif; ?>
                 <?php foreach ($readyToSale as $row): ?>
                     <tr>
-                        <td><strong><?= e((string) $row['assignment_no']) ?></strong><br><small><?= e((string) $row['receipt_no']) ?></small></td>
+                        <td><a class="reference-link" href="<?= e(url('admin/jewellery-trace.php?id=' . (int) $row['stock_unit_id'])) ?>"><strong><?= e((string) $row['trace_code']) ?></strong></a></td>
+                        <td><?= e((string) ($row['stock_order_no'] ?: $row['receipt_no'] ?: ucfirst(str_replace('_', ' ', (string) $row['origin_type'])))) ?></td>
                         <td><?= e((string) ($row['expected_ornament'] ?: $row['item_name'] ?? '')) ?></td>
                         <td><?= e((string) ($row['size_design'] ?? '')) ?: '—' ?></td>
                         <td><?= e((string) ($row['karigar_name'] ?? '')) ?></td>
@@ -1401,8 +1417,18 @@ jw_filter_bar_styles();
                         <td class="is-numeric"><?= $fmt((float) ($row['net_gold_weight'] ?? 0), 4) ?></td>
                         <td class="is-numeric"><strong><?= $fmt((float) $row['received_fine_weight'], 4) ?></strong></td>
                         <td><?= e((string) ($row['purity_code'] ?? '')) ?></td>
-                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['making_amount'] ?? 0)) ?></td>
+                        <td><?= (int) ($row['reserved_order_id'] ?? 0) > 0
+                            ? '<span class="mbw-pill tone-amber">Held for ' . e((string) ($row['reserved_for'] ?: $row['reserved_order_no'])) . '</span>'
+                            : '<span class="mbw-pill tone-green">Available</span>' ?></td>
                         <td class="is-numeric"><?= (int) ($row['days_on_shelf'] ?? 0) ?></td>
+                        <td style="white-space:nowrap">
+                            <?php if ((int) ($row['reserved_order_id'] ?? 0) === 0): ?>
+                                <a class="button secondary" style="min-height:30px;padding:3px 9px" href="<?= e(url('admin/jewellery-workshop.php?view=orders&stock_unit=' . (int) $row['stock_unit_id'])) ?>">Reserve</a>
+                                <a class="button" style="min-height:30px;padding:3px 9px" href="<?= e(url('admin/jewellery-trade.php?view=sales&stock_unit=' . (int) $row['stock_unit_id'])) ?>">Sell now</a>
+                            <?php else: ?>
+                                <a class="button" style="min-height:30px;padding:3px 9px" href="<?= e(url('admin/jewellery-trade.php?view=sales&sell_order=' . (int) $row['reserved_order_id'])) ?>">Bill order</a>
+                            <?php endif; ?>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

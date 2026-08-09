@@ -412,6 +412,7 @@ $lineTemplates = in_array($view, ['purchases', 'sales'], true)
 $saleParty = (int) ($_GET['for_party'] ?? ($editDoc['party_id'] ?? 0));
 $openOrders = [];
 $orderPrefill = null;
+$sellingOrderIds = [];
 $openAdvances = [];
 $editAdvanceAllocs = [];
 if ($view === 'sales') {
@@ -456,6 +457,41 @@ if ($view === 'sales') {
             }
         }
     }
+    if ($editDoc === null && $editLines === [] && (int) ($_GET['stock_unit'] ?? 0) > 0) {
+        $directUnit = jewellery_trace_unit($companyId, (int) $_GET['stock_unit']);
+        if ($directUnit && (string) $directUnit['stock_kind'] === 'showroom'
+            && (string) $directUnit['status'] === 'in_stock') {
+            $editLines = [[
+                'stock_unit_id' => (int) $directUnit['id'], 'item_id' => (int) $directUnit['item_id'],
+                'purity_id' => (int) $directUnit['purity_id'], 'unit_id' => (int) $directUnit['unit_id'],
+                'qty_pieces' => (float) $directUnit['qty_pieces'], 'gross_weight' => (float) $directUnit['gross_weight'],
+                'stone_weight' => (float) $directUnit['stone_weight'],
+            ]];
+        }
+    }
+}
+
+$saleStockUnits = [];
+if ($view === 'sales') {
+    $byTrace = [];
+    foreach (jewellery_ready_to_sale_options($companyId) as $unit) {
+        $byTrace[(int) $unit['id']] = $unit;
+    }
+    foreach ($sellingOrderIds as $sellingOrderId) {
+        foreach (jewellery_ready_to_sale_options($companyId, $sellingOrderId) as $unit) {
+            $byTrace[(int) $unit['id']] = $unit;
+        }
+    }
+    foreach ($editLines as $editLine) {
+        $traceId = (int) ($editLine['stock_unit_id'] ?? 0);
+        if ($traceId > 0 && !isset($byTrace[$traceId])) {
+            $traceUnit = jewellery_trace_unit($companyId, $traceId);
+            if ($traceUnit) {
+                $byTrace[$traceId] = $traceUnit;
+            }
+        }
+    }
+    $saleStockUnits = array_values($byTrace);
 }
 
 // Posting is confirmed with the mapping ON THE SCREEN. The Post button leads
@@ -623,11 +659,12 @@ $renderGridToolbar = static function (string $docType) use ($lineTemplates): str
     return (string) ob_get_clean();
 };
 
-$renderLineRows = static function (string $prefix, array $existing, int $slots, string $legend, string $headActions = '') use ($items, $purities, $units, $baseUnit, $fmt, $onHand): void {
+$renderLineRows = static function (string $prefix, array $existing, int $slots, string $legend, string $headActions = '') use ($items, $purities, $units, $baseUnit, $fmt, $onHand, $saleStockUnits, $view): void {
     jw_render_line_grid($prefix, $existing, $slots, $legend, [
         'items' => $items, 'purities' => $purities, 'units' => $units,
         'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $onHand,
         'head_actions' => $headActions,
+        'stock_units' => $view === 'sales' && $prefix === 'l' ? $saleStockUnits : [],
     ]);
 };
 ?>

@@ -45,7 +45,7 @@ function jww_cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
-        foreach (['jewellery_refinery_jobs', 'jewellery_order_receipts', 'jewellery_order_assignments',
+        foreach (['jewellery_stock_unit_events', 'jewellery_stock_units', 'jewellery_refinery_jobs', 'jewellery_order_receipts', 'jewellery_order_assignments',
                   'jewellery_order_lines', 'jewellery_orders', 'jewellery_karigars', 'jewellery_settlement_allocations',
                   'jewellery_settlements', 'jewellery_bills', 'jewellery_sale_exchanges', 'jewellery_sale_lines',
                   'jewellery_sales', 'jewellery_purchase_lines', 'jewellery_purchases',                   'jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items', 'jewellery_daily_rates', 'inventory_ledger_mappings',

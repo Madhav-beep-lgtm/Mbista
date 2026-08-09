@@ -34,8 +34,15 @@ function jewellery_assign_kinds(): array
 {
     return [
         'customer' => 'Customer ordered item',
-        'self' => 'Self ordered item for showroom',
+        'self' => 'Stock order for showroom',
     ];
+}
+
+/** One public stock-order number may group several workshop assignment rows. */
+function jewellery_stock_order_next_no(int $companyId, ?int $fiscalYearId, string $orderDate): string
+{
+    return jw_next_no($companyId, 'jewellery_order_assignments', 'stock_order_no', 'SO',
+        jewellery_order_series($companyId, $fiscalYearId, $orderDate));
 }
 
 /** Gold, diamond, or something else. */
@@ -109,7 +116,7 @@ function jewellery_assign_order_payload(int $companyId): array
         INNER JOIN inventory_items i ON i.id = l.item_id
         INNER JOIN jewellery_purities p ON p.id = l.purity_id
         INNER JOIN jewellery_units u ON u.id = l.unit_id
-        WHERE l.company_id = :cid AND l.assignment_id IS NULL
+        WHERE l.company_id = :cid AND l.assignment_id IS NULL AND l.source = 'workshop'
         ORDER BY l.id ASC");
     $lineStmt->execute(['cid' => $companyId]);
     foreach ($lineStmt->fetchAll(PDO::FETCH_ASSOC) as $line) {
@@ -190,6 +197,9 @@ function jewellery_assign_validate(string $kind, array $input, ?array $order, ?a
         }
         if ($order && $orderLine && (int) $orderLine['order_id'] !== (int) $order['id']) {
             $errors[] = 'That item does not belong to the order chosen.';
+        }
+        if ($orderLine && (string) ($orderLine['source'] ?? 'workshop') === 'stock') {
+            $errors[] = 'That item came from Ready to Sale and is already made; it must not be sent to a kaligad.';
         }
         if ($order && $orderLine && $errors === []) {
             $orderId = (int) $order['id'];
@@ -335,6 +345,10 @@ function jewellery_save_assignment(int $companyId, int $fiscalYearId, array $inp
         // voucher_no-style retry: assignment_no is UNIQUE per company, so two
         // counters saving in the same second means one loses and takes the next.
         $assignmentId = 0;
+        $stockOrderNo = $row['assign_kind'] === 'self'
+            ? (trim((string) ($input['stock_order_no'] ?? '')) ?: jewellery_stock_order_next_no(
+                $companyId, $fiscalYearId, (string) $row['assigned_date']))
+            : '';
         for ($attempt = 0; $attempt < 5; $attempt++) {
             $assignmentNo = jewellery_assign_next_no($companyId, $fiscalYearId, (string) $row['assigned_date']);
             // The issue number is claimed at the same time so the metal, when
@@ -344,14 +358,14 @@ function jewellery_save_assignment(int $companyId, int $fiscalYearId, array $inp
                 (string) ($settings['issue_no_prefix'] ?? 'JI'));
             try {
                 $stmt = db()->prepare('INSERT INTO jewellery_order_assignments
-                    (company_id, fiscal_year_id, order_id, order_line_id, karigar_id, issue_no, assignment_no,
+                    (company_id, fiscal_year_id, order_id, order_line_id, karigar_id, issue_no, assignment_no, stock_order_no,
                      assign_kind, category, size_design, expected_ornament,
                      expected_gross_weight, expected_stone_weight, expected_net_weight,
                      issue_date, expected_return_date, item_id, purity_id, unit_id,
                      issued_gross_weight, issued_fine_weight, issued_amount,
                      wastage_allowed_pct, making_basis, making_rate, status, notes, created_by)
                     VALUES
-                    (:cid, :fy, :order_id, :order_line_id, :karigar_id, :issue_no, :assignment_no,
+                    (:cid, :fy, :order_id, :order_line_id, :karigar_id, :issue_no, :assignment_no, :stock_order_no,
                      :assign_kind, :category, :size_design, :ornament,
                      :gross, :stone, :net,
                      :issue_date, :expected_return, :item_id, :purity_id, :unit_id,
@@ -365,6 +379,7 @@ function jewellery_save_assignment(int $companyId, int $fiscalYearId, array $inp
                     'karigar_id' => $row['karigar_id'],
                     'issue_no' => $issueNo,
                     'assignment_no' => $assignmentNo,
+                    'stock_order_no' => $stockOrderNo !== '' ? $stockOrderNo : null,
                     'assign_kind' => $row['assign_kind'],
                     'category' => $row['category'],
                     'size_design' => $row['size_design'] !== '' ? $row['size_design'] : null,
@@ -385,6 +400,13 @@ function jewellery_save_assignment(int $companyId, int $fiscalYearId, array $inp
                     'uid' => $userId ?: null,
                 ]);
                 $assignmentId = (int) db()->lastInsertId();
+                $stockUnitId = jewellery_trace_plan_assignment($companyId, $fiscalYearId, $assignmentId,
+                    $row, $assignmentNo, $stockOrderNo, $userId);
+                if ($stockUnitId > 0 && $row['order_line_id'] > 0) {
+                    db()->prepare('UPDATE jewellery_order_lines SET stock_unit_id = :uid
+                        WHERE id = :id AND company_id = :cid')
+                        ->execute(['uid' => $stockUnitId, 'id' => $row['order_line_id'], 'cid' => $companyId]);
+                }
                 break;
             } catch (PDOException $duplicate) {
                 if ((string) $duplicate->getCode() !== '23000' || $attempt === 4) {
@@ -424,7 +446,9 @@ function jewellery_save_assignment(int $companyId, int $fiscalYearId, array $inp
     log_activity('jewellery_assignment', $assignmentId, 'assigned',
         'Work assigned to kaligad (' . $row['assign_kind'] . ').', $userId ?: null);
 
-    return ['ok' => true, 'errors' => [], 'id' => $assignmentId, 'order_id' => (int) $row['order_id']];
+    $savedAssignment = jewellery_assignment($companyId, $assignmentId);
+    return ['ok' => true, 'errors' => [], 'id' => $assignmentId, 'order_id' => (int) $row['order_id'],
+        'stock_order_no' => (string) ($savedAssignment['stock_order_no'] ?? '')];
 }
 
 /**
@@ -443,6 +467,12 @@ function jewellery_save_assignment(int $companyId, int $fiscalYearId, array $inp
 function jewellery_save_assignments(int $companyId, int $fiscalYearId, string $kind, array $input, int $userId = 0): array
 {
     $kind = $kind === 'self' ? 'self' : 'customer';
+    $stockOrderNo = '';
+    if ($kind === 'self') {
+        $batchDate = (string) (voucher_input_row($input, 'assigned_date', 0) ?: date('Y-m-d'));
+        $stockOrderNo = trim((string) ($input['stock_order_no'] ?? ''))
+            ?: jewellery_stock_order_next_no($companyId, $fiscalYearId, $batchDate);
+    }
     $rowCount = voucher_input_rows($input, 'karigar_id');
     $rows = [];
     $errors = [];
@@ -467,6 +497,7 @@ function jewellery_save_assignments(int $companyId, int $fiscalYearId, string $k
             'assigned_date' => voucher_input_row($input, 'assigned_date', $index),
             'expected_delivery' => voucher_input_row($input, 'expected_delivery', $index),
             'description' => voucher_input_row($input, 'description', $index),
+            'stock_order_no' => $stockOrderNo,
         ];
         // An untouched row is not an error. Only a row somebody started is.
         $started = $row['karigar_id'] > 0 || $row['order_line_id'] > 0 || $row['item_id'] > 0
@@ -532,7 +563,7 @@ function jewellery_save_assignments(int $companyId, int $fiscalYearId, string $k
         jewellery_sync_order_status($companyId, $orderId);
     }
 
-    return ['ok' => true, 'saved' => $saved, 'errors' => []];
+    return ['ok' => true, 'saved' => $saved, 'errors' => [], 'stock_order_no' => $stockOrderNo];
 }
 
 /**
@@ -563,6 +594,9 @@ function jewellery_assign_dry_run(int $companyId, string $kind, array $row): arr
             $orderLine = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
             if ($orderLine && (int) ($orderLine['assignment_id'] ?? 0) > 0) {
                 return ['that item is already out with a kaligad.'];
+            }
+            if ($orderLine && (string) ($orderLine['source'] ?? 'workshop') === 'stock') {
+                return ['that item came from Ready to Sale and must not be sent to a kaligad.'];
             }
         }
     }
@@ -603,7 +637,7 @@ function jewellery_assign_rows(int $companyId, string $kind, array $filters = []
 
     $search = trim((string) ($filters['q'] ?? ''));
     if ($search !== '') {
-        $sql .= ' AND (a.assignment_no LIKE :q OR a.issue_no LIKE :q OR k.name LIKE :q
+        $sql .= ' AND (a.assignment_no LIKE :q OR a.stock_order_no LIKE :q OR a.issue_no LIKE :q OR k.name LIKE :q
                        OR o.order_no LIKE :q OR a.expected_ornament LIKE :q
                        OR ap.name LIKE :q OR o.customer_name LIKE :q)';
         $params['q'] = '%' . $search . '%';
@@ -812,6 +846,30 @@ function jewellery_update_assignment(int $companyId, int $assignmentId, array $i
             }
             log_activity('jewellery_assignment', $assignmentId, 'updated',
                 'Assignment ' . $old['assignment_no'] . ' updated. ' . implode('; ', $auditPairs) . '.', $userId ?: null);
+            if ((int) ($old['stock_unit_id'] ?? 0) > 0) {
+                $tracePurity = jewellery_purity($companyId, (int) ($updates['purity_id'] ?? $old['purity_id']));
+                $traceNet = (float) ($updates['expected_net_weight'] ?? $old['expected_net_weight']);
+                jewellery_trace_transition($companyId, (int) $old['stock_unit_id'], 'assignment_updated', [
+                    'item_id' => (int) ($updates['item_id'] ?? $old['item_id']),
+                    'purity_id' => (int) ($updates['purity_id'] ?? $old['purity_id']),
+                    'unit_id' => (int) ($updates['unit_id'] ?? $old['unit_id']),
+                    'gross_weight' => (float) ($updates['expected_gross_weight'] ?? $old['expected_gross_weight']),
+                    'stone_weight' => (float) ($updates['expected_stone_weight'] ?? $old['expected_stone_weight']),
+                    'net_weight' => $traceNet,
+                    'fine_weight' => $tracePurity ? jw_fine_weight($traceNet, (float) $tracePurity['fineness']) : 0,
+                    'current_holder_id' => (int) ($updates['karigar_id'] ?? $old['karigar_id']),
+                    'reserved_order_line_id' => (int) ($updates['order_line_id'] ?? $old['order_line_id']) ?: null,
+                ], ['event_date' => (string) ($updates['issue_date'] ?? $old['issue_date']),
+                    'source_type' => 'jewellery_assignment', 'source_id' => $assignmentId,
+                    'reference_no' => (string) $old['assignment_no'],
+                    'notes' => implode('; ', $auditPairs)], $userId);
+                if ((int) ($updates['order_line_id'] ?? $old['order_line_id'] ?? 0) > 0) {
+                    db()->prepare('UPDATE jewellery_order_lines SET stock_unit_id = :uid
+                        WHERE id = :lid AND company_id = :cid')
+                        ->execute(['uid' => (int) $old['stock_unit_id'],
+                            'lid' => (int) ($updates['order_line_id'] ?? $old['order_line_id']), 'cid' => $companyId]);
+                }
+            }
         }
         db()->commit();
         foreach (array_unique($orderIdsToSync) as $orderId) {
@@ -849,6 +907,7 @@ function jewellery_unassign_assignment(int $companyId, int $assignmentId, string
             WHERE id = :id AND company_id = :cid")
             ->execute(['notes' => trim((string) ($assignment['notes'] ?? '') . "\nRemoval reason: " . substr($reason, 0, 180)),
                 'id' => $assignmentId, 'cid' => $companyId]);
+        jewellery_trace_cancel_assignment($companyId, $assignmentId, $reason, $userId);
         log_activity('jewellery_assignment', $assignmentId, 'unassigned',
             'Assignment ' . $assignment['assignment_no'] . ' removed. Reason: ' . substr($reason, 0, 180), $userId ?: null);
         log_field_changes('jewellery_assignment', $assignmentId, ['status' => $assignment['status']], ['status' => 'cancelled'], $companyId, $userId ?: null);
@@ -876,7 +935,12 @@ function jewellery_assign_export_rows(array $rows, string $kind, string $currenc
     $serial = 0;
     foreach ($rows as $row) {
         $serial++;
-        $line = ['SN' => $serial, 'Assignment Number' => (string) $row['assignment_no'], 'Kaligadh Name' => trim((string) $row['karigar_code'] . ' — ' . (string) $row['karigar_name'])];
+        $line = ['SN' => $serial];
+        if ($kind === 'self') {
+            $line['Stock Order Number'] = (string) ($row['stock_order_no'] ?? '');
+        }
+        $line += ['Assignment Number' => (string) $row['assignment_no'],
+            'Kaligadh Name' => trim((string) $row['karigar_code'] . ' — ' . (string) $row['karigar_name'])];
         if ($kind === 'customer') {
             $line['Order Number'] = (string) ($row['order_no'] ?? '');
             $line['Customer Name'] = (string) ($row['customer_name'] ?? '');
@@ -1108,34 +1172,47 @@ function jewellery_issue_component(int $companyId, int $fiscalYearId, int $assig
  */
 function jewellery_ready_to_sale(int $companyId, array $filters = []): array
 {
-    $sql = "SELECT a.id, a.assignment_no, a.issue_no, a.category, a.size_design, a.expected_ornament,
+    if (!jewellery_trace_ready()) {
+        return [];
+    }
+    jewellery_trace_backfill_legacy_balance($companyId);
+    $sql = "SELECT su.id AS stock_unit_id, su.trace_code, su.status AS trace_status, su.origin_type,
+            su.assignment_id AS id, su.assignment_id, su.receipt_id, su.stock_order_no,
+            su.qty_pieces, su.gross_weight AS received_gross_weight, su.stone_weight,
+            su.net_weight AS net_gold_weight, su.fine_weight AS received_fine_weight, su.cost_amount,
+            su.reserved_order_id, su.reserved_order_line_id,
+            a.assignment_no, a.issue_no, a.category, a.size_design, a.expected_ornament,
             a.expected_gross_weight, a.expected_net_weight,
             k.code AS karigar_code, k.name AS karigar_name,
-            r.id AS receipt_id, r.receipt_no, r.receive_date, r.received_gross_weight,
-            r.stone_weight, r.net_gold_weight, r.received_fine_weight, r.making_amount,
-            r.net_payable, r.status AS receipt_status,
+            r.receipt_no, r.receive_date, r.making_amount, r.net_payable, r.status AS receipt_status,
             i.sku AS item_code, i.name AS item_name,
             p.code AS purity_code, u.code AS unit_code,
-            DATEDIFF(CURDATE(), r.receive_date) AS days_on_shelf
-        FROM jewellery_order_assignments a
-        INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
-        INNER JOIN jewellery_order_receipts r ON r.assignment_id = a.id
-        LEFT JOIN inventory_items i ON i.id = r.received_item_id
-        LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
-        LEFT JOIN jewellery_units u ON u.id = r.unit_id
-        WHERE a.company_id = :cid AND a.assign_kind = 'self'
-          AND a.status = 'received' AND r.status <> 'cancelled'";
+            o.order_no AS reserved_order_no,
+            COALESCE(ap.name, o.customer_name, su.customer_name) AS reserved_for,
+            DATEDIFF(CURDATE(), COALESCE(r.receive_date, DATE(su.created_at))) AS days_on_shelf
+        FROM jewellery_stock_units su
+        INNER JOIN inventory_items i ON i.id = su.item_id AND i.company_id = su.company_id
+        INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = su.item_id AND jp.company_id = su.company_id
+        INNER JOIN jewellery_purities p ON p.id = su.purity_id AND p.company_id = su.company_id
+        INNER JOIN jewellery_units u ON u.id = su.unit_id AND u.company_id = su.company_id
+        LEFT JOIN jewellery_order_assignments a ON a.id = su.assignment_id AND a.company_id = su.company_id
+        LEFT JOIN jewellery_karigars k ON k.id = a.karigar_id AND k.company_id = su.company_id
+        LEFT JOIN jewellery_order_receipts r ON r.id = su.receipt_id AND r.company_id = su.company_id
+        LEFT JOIN jewellery_orders o ON o.id = su.reserved_order_id AND o.company_id = su.company_id
+        LEFT JOIN accounting_parties ap ON ap.id = o.party_id
+        WHERE su.company_id = :cid AND su.stock_kind = 'showroom' AND jp.jewellery_type NOT IN ('bullion','stone')
+          AND su.status IN ('in_stock','reserved')";
     $params = ['cid' => $companyId];
 
     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($filters['from'] ?? '')) === 1) {
-        $sql .= ' AND r.receive_date >= :from';
+        $sql .= ' AND COALESCE(r.receive_date, DATE(su.created_at)) >= :from';
         $params['from'] = $filters['from'];
     }
     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($filters['to'] ?? '')) === 1) {
-        $sql .= ' AND r.receive_date <= :to';
+        $sql .= ' AND COALESCE(r.receive_date, DATE(su.created_at)) <= :to';
         $params['to'] = $filters['to'];
     }
-    $sql .= ' ORDER BY r.receive_date DESC, r.id DESC';
+    $sql .= ' ORDER BY COALESCE(r.receive_date, DATE(su.created_at)) DESC, su.id DESC';
 
     $stmt = db()->prepare($sql);
     $stmt->execute($params);

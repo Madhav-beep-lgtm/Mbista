@@ -83,6 +83,7 @@ table.jw-lines input[type="number"]::-webkit-inner-spin-button { -webkit-appeara
    table-layout:fixed reads them from when the header has colspans in its first
    row — as this one does. */
 table.jw-lines .c-item { width: 230px; }
+.jw-trace-select { margin-top:4px; font-size:.76rem!important; color:var(--mbw-primary,#0f766e); }
 table.jw-lines .c-sel  { width: 110px; }
 table.jw-lines .c-unit { width: 88px; }
 table.jw-lines .c-pcs  { width: 68px; }
@@ -224,6 +225,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
     // columns appear only when the page hands over a kaligad list.
     $karigars = $ctx['karigars'] ?? null;
     $withWorkshop = is_array($karigars);
+    $stockUnits = is_array($ctx['stock_units'] ?? null) ? $ctx['stock_units'] : [];
     ?>
     <?php $full = $prefix === 'l'; ?>
     <fieldset class="jw-lines-box" style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:12px 0;min-width:0">
@@ -335,6 +337,26 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                 <option value="<?= (int) $it['id'] ?>" data-type="<?= e((string) ($it['item_type'] ?? '')) ?>" title="<?= e($it['code'] . ' — ' . $it['name'] . $left) ?>" <?= (int) ($row['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name'] . $left) ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <?php if ($full && $stockUnits !== []): ?>
+                            <select name="<?= $prefix ?>_stock_unit_id[]" class="jw-trace-select" title="Use an exact physical item already in the showroom">
+                                <option value="0">— make / sell by item —</option>
+                                <?php foreach ($stockUnits as $stockUnit): ?>
+                                    <option value="<?= (int) $stockUnit['id'] ?>"
+                                        data-item="<?= (int) $stockUnit['item_id'] ?>"
+                                        data-purity="<?= (int) $stockUnit['purity_id'] ?>"
+                                        data-unit="<?= (int) $stockUnit['unit_id'] ?>"
+                                        data-pieces="<?= e((string) $stockUnit['qty_pieces']) ?>"
+                                        data-gross="<?= e((string) $stockUnit['gross_weight']) ?>"
+                                        data-stone="<?= e((string) $stockUnit['stone_weight']) ?>"
+                                        data-receipt="<?= (int) ($stockUnit['receipt_id'] ?? 0) ?>"
+                                        <?= (int) ($row['stock_unit_id'] ?? 0) === (int) $stockUnit['id'] ? 'selected' : '' ?>>
+                                        <?= e($stockUnit['trace_code'] . ' · ' . $stockUnit['item_code'] . ' · '
+                                            . number_format((float) $stockUnit['gross_weight'], 4) . ' ' . $stockUnit['unit_code']
+                                            . ((string) ($stockUnit['reserved_order_no'] ?? '') !== '' ? ' · held ' . $stockUnit['reserved_order_no'] : '')) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        <?php endif; ?>
                     </td>
                     <td data-label="Purity">
                         <?php // data-fineness lets the summary rail turn net weight into the
@@ -475,6 +497,40 @@ function jw_line_grid_scripts(): void
             body.removeChild(target);
         } else {
             resetRow(target);
+        }
+    });
+
+    // Picking a trace fills physical facts from the object itself. The server
+    // repeats this authoritatively; this is the immediate, visible preview.
+    document.addEventListener("change", function (event) {
+        var trace = event.target.closest(".jw-trace-select");
+        if (trace) {
+            var row = trace.closest("tr");
+            var option = trace.options[trace.selectedIndex];
+            if (!row || !option || !trace.value || trace.value === "0") { return; }
+            function setSelect(suffix, value) {
+                var field = row.querySelector('select[name$="' + suffix + '[]"]');
+                if (field) { field.value = value || "0"; }
+            }
+            function setInput(suffix, value) {
+                var field = row.querySelector('input[name$="' + suffix + '[]"]');
+                if (field) { field.value = value === undefined || value === null ? "0" : value; }
+            }
+            setSelect("_item_id", option.dataset.item);
+            setSelect("_purity_id", option.dataset.purity);
+            setSelect("_unit_id", option.dataset.unit);
+            setInput("_qty_pieces", option.dataset.pieces);
+            setInput("_gross_weight", option.dataset.gross);
+            setInput("_stone_weight", option.dataset.stone);
+            setSelect("_karigar_id", "0");
+            setInput("_delivery_date", "");
+            return;
+        }
+        var item = event.target.closest('select[name$="_item_id[]"]');
+        if (item) {
+            var itemRow = item.closest("tr");
+            var traceSelect = itemRow && itemRow.querySelector(".jw-trace-select");
+            if (traceSelect) { traceSelect.value = "0"; }
         }
     });
 

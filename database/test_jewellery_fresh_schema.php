@@ -93,6 +93,7 @@ echo "\n3. Every jewellery table was created\n";
 $expected = [
     'jewellery_units', 'jewellery_metals', 'jewellery_purities', 'jewellery_settings',
     'jewellery_daily_rates', 'inventory_ledger_mappings', 'jewellery_item_profiles', 'jewellery_stock_txns',
+    'jewellery_stock_units', 'jewellery_stock_unit_events',
     'jewellery_purchases', 'jewellery_purchase_lines', 'jewellery_sales',
     'jewellery_sale_lines', 'jewellery_sale_exchanges', 'jewellery_bills', 'jewellery_settlements',
     'jewellery_settlement_allocations', 'jewellery_karigars', 'jewellery_orders',
@@ -114,6 +115,11 @@ ok(accounting_repair_column_exists('inventory_opening_import_rows', 'raw_group')
     && accounting_repair_column_exists('inventory_opening_import_rows', 'proposed_code')
     && accounting_repair_column_exists('inventory_opening_import_rows', 'stock_kind'),
     'Opening import staging carries editable group, code, name and stock type fields');
+ok(accounting_repair_column_exists('jewellery_order_assignments', 'stock_order_no')
+    && accounting_repair_column_exists('jewellery_order_lines', 'stock_unit_id')
+    && accounting_repair_column_exists('jewellery_sale_lines', 'stock_unit_id')
+    && accounting_repair_column_exists('jewellery_sale_exchanges', 'stock_unit_id'),
+    'Stock orders, customer orders and sales all retain the exact physical trace id');
 
 echo "\n4. Foreign keys actually resolved\n";
 // The repair steps must run in an order where every referenced table already

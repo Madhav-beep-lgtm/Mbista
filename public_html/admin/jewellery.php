@@ -298,11 +298,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'unit_id' => (int) ($_POST['unit_id'] ?? 0),
                 'track_mode' => (string) ($_POST['track_mode'] ?? 'weight'),
                 'stock_kind' => (string) ($_POST['stock_kind'] ?? 'showroom'),
-                // The per-piece figures — weight, wastage, making charge, stone
-                // value — are deliberately NOT sent from here. They are punched
-                // on the sale or purchase line, where each piece has its own,
-                // and jewellery_save_item() leaves anything it is not told about
-                // exactly as it found it.
+                'design_no' => (string) ($_POST['design_no'] ?? ''),
+                'hallmark' => (string) ($_POST['hallmark'] ?? ''),
+                'gross_weight' => (float) ($_POST['gross_weight'] ?? 0),
+                'stone_weight' => (float) ($_POST['stone_weight'] ?? 0),
+                'wastage_pct' => (float) ($_POST['wastage_pct'] ?? 0),
+                'making_charge_basis' => (string) ($_POST['making_charge_basis'] ?? 'default'),
+                'making_charge_rate' => (float) ($_POST['making_charge_rate'] ?? 0),
+                'stone_value' => (float) ($_POST['stone_value'] ?? 0),
+                'reorder_weight' => (float) ($_POST['reorder_weight'] ?? 0),
                 'vat_applicable' => isset($_POST['vat_applicable']) ? 1 : 0,
                 'vat_base' => (string) ($_POST['vat_base'] ?? 'default'),
                 'hs_code' => (string) ($_POST['hs_code'] ?? ''),
@@ -517,7 +521,10 @@ if (($_GET['template'] ?? '') !== '' && $view === 'opening') {
     if ((string) $_GET['template'] === 'csv') {
         export_csv('opening-stock-template.csv', $templateRows);
     }
-    export_xlsx('opening-stock-template.xlsx', $templateRows, 'Opening Stock');
+    export_xlsx('opening-stock-template.xlsx', $templateRows, 'Opening Stock',
+        [0 => 7, 1 => 20, 2 => 18, 3 => 15, 4 => 22, 5 => 12, 6 => 10, 7 => 9,
+            8 => 10, 9 => 15, 10 => 14, 11 => 16, 12 => 22, 13 => 18],
+        ['styled_table' => true, 'freeze_header' => true, 'auto_filter' => true]);
 }
 
 // ---------------------------------------------------------------------------
@@ -947,7 +954,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <?php endforeach; ?>
                 </select>
             </label>
-            <label>Stock type
+            <label>Default stock type
                 <select name="stock_kind" required>
                     <option value="showroom" <?= (string) ($editItem['stock_kind'] ?? 'showroom') === 'showroom' ? 'selected' : '' ?>>Showroom Stock</option>
                     <option value="customer_ordered" <?= (string) ($editItem['stock_kind'] ?? '') === 'customer_ordered' ? 'selected' : '' ?>>Customer Ordered Stock</option>
@@ -983,6 +990,21 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <option value="piece" <?= (string) ($editItem['track_mode'] ?? '') === 'piece' ? 'selected' : '' ?>>Piece</option>
                 </select>
             </label>
+            <label>Design / reference no.<input type="text" name="design_no" maxlength="100" value="<?= e((string) ($editItem['design_no'] ?? '')) ?>"></label>
+            <label>Hallmark<input type="text" name="hallmark" maxlength="100" value="<?= e((string) ($editItem['hallmark'] ?? '')) ?>"></label>
+            <label>Reference gross weight<input type="number" name="gross_weight" min="0" step="0.0001" value="<?= e((string) ($editItem['gross_weight'] ?? '0')) ?>"></label>
+            <label>Reference stone weight<input type="number" name="stone_weight" min="0" step="0.0001" value="<?= e((string) ($editItem['stone_weight'] ?? '0')) ?>"></label>
+            <label>Default wastage %<input type="number" name="wastage_pct" min="0" max="99.999" step="0.001" value="<?= e((string) ($editItem['wastage_pct'] ?? '0')) ?>"></label>
+            <label>Making basis
+                <select name="making_charge_basis">
+                    <?php foreach (['default' => 'Company default', 'per_unit_weight' => 'Per unit weight', 'percent_of_metal' => 'Percent of metal', 'flat' => 'Flat'] as $mkKey => $mkLabel): ?>
+                        <option value="<?= e($mkKey) ?>" <?= (string) ($editItem['making_charge_basis'] ?? 'default') === $mkKey ? 'selected' : '' ?>><?= e($mkLabel) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label>Default making rate<input type="number" name="making_charge_rate" min="0" step="0.0001" value="<?= e((string) ($editItem['making_charge_rate'] ?? '0')) ?>"></label>
+            <label>Default stone value<input type="number" name="stone_value" min="0" step="0.01" value="<?= e((string) ($editItem['stone_value'] ?? '0')) ?>"></label>
+            <label>Reorder weight<input type="number" name="reorder_weight" min="0" step="0.0001" value="<?= e((string) ($editItem['reorder_weight'] ?? '0')) ?>"></label>
             <label>VAT base
                 <select name="vat_base">
                     <?php foreach (['default' => 'Use company default', 'full_value' => 'Full line value', 'making_only' => 'Making charge only', 'stone_only' => 'Stone value only'] as $vbKey => $vbLabel): ?>
@@ -994,7 +1016,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label class="frm-check"><input type="checkbox" name="vat_applicable" <?= (int) ($editItem['vat_applicable'] ?? 0) === 1 ? 'checked' : '' ?>> VAT applicable</label>
             <label class="frm-check"><input type="checkbox" name="active" <?= $editItem === null || (string) $editItem['status'] === 'active' ? 'checked' : '' ?>> Active</label>
             <label style="grid-column:1/-1">Notes<input type="text" name="notes" maxlength="255" value="<?= e((string) ($editItem['notes'] ?? '')) ?>"></label>
-            <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editItem ? 'Update Item' : 'Add Item' ?></button></div>
+            <p class="frm-optional" style="grid-column:1/-1;margin:0">This creates the item/style master. Physical trace IDs are created when opening stock is imported, a purchase is posted, or a stock/customer order is assigned.</p>
+            <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editItem ? 'Update Item' : 'Create New Item' ?></button></div>
         </form>
     </section>
     <?php endif; ?>

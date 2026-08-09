@@ -600,6 +600,11 @@ function jw_posted_lines(array $post, string $prefix): array
             // an order line that already has metal out with a kaligad has to be
             // recognised however the rows are reordered.
             'line_id' => (int) ($post[$prefix . '_line_id'][$index] ?? 0),
+            // Exact physical piece. Orders and sales may select a showroom
+            // trace; purchases leave this empty and create traces on posting.
+            'stock_unit_id' => (int) ($post[$prefix . '_stock_unit_id'][$index] ?? 0),
+            'stock_receipt_id' => (int) ($post[$prefix . '_stock_receipt_id'][$index] ?? 0),
+            'source' => (string) ($post[$prefix . '_source'][$index] ?? ''),
         ];
     }
 
@@ -636,7 +641,7 @@ function jw_next_no(int $companyId, string $table, string $column, string $prefi
     // one. The list stays a whitelist — the column is interpolated below.
     $allowed = ['jewellery_purchases' => ['purchase_no'], 'jewellery_sales' => ['sale_no'],
         'jewellery_settlements' => ['settlement_no'], 'jewellery_orders' => ['order_no'],
-        'jewellery_order_assignments' => ['issue_no', 'assignment_no'],
+        'jewellery_order_assignments' => ['issue_no', 'assignment_no', 'stock_order_no'],
         'jewellery_order_receipts' => ['receipt_no'], 'jewellery_refinery_jobs' => ['job_no']];
     if (!in_array($column, $allowed[$table] ?? [], true)) {
         throw new RuntimeException('Refusing to number an unknown document table.');
@@ -705,28 +710,36 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
     $sumSdTaxable = 0.0; $sumVatable = 0.0;
 
     foreach ($lines as $index => $line) {
-        $itemId = (int) ($line['item_id'] ?? 0);
+        $stockUnitId = $docType === 'sale' ? (int) ($line['stock_unit_id'] ?? 0) : 0;
+        $traceUnit = $stockUnitId > 0 ? jewellery_trace_unit($companyId, $stockUnitId) : null;
+        if ($stockUnitId > 0 && !$traceUnit) {
+            $errors[] = 'Line ' . ($index + 1) . ': the selected trace item does not belong to this company.';
+            continue;
+        }
+        // A trace identifies the object. Its item, purity and physical weight
+        // therefore win over anything stale or retyped in the browser.
+        $itemId = $traceUnit ? (int) $traceUnit['item_id'] : (int) ($line['item_id'] ?? 0);
         $item = jewellery_item($companyId, $itemId);
         if (!$item) {
             $errors[] = 'Line ' . ($index + 1) . ': unknown item.';
             continue;
         }
 
-        $purityId = (int) ($line['purity_id'] ?? $item['purity_id']);
+        $purityId = $traceUnit ? (int) $traceUnit['purity_id'] : (int) ($line['purity_id'] ?? $item['purity_id']);
         $purity = jewellery_purity($companyId, $purityId);
         if (!$purity || (int) $purity['metal_id'] !== (int) $item['metal_id']) {
             $errors[] = 'Line ' . ($index + 1) . ': the purity must belong to the item\'s metal.';
             continue;
         }
-        $unitId = (int) ($line['unit_id'] ?? $item['unit_id']);
+        $unitId = $traceUnit ? (int) $traceUnit['unit_id'] : (int) ($line['unit_id'] ?? $item['unit_id']);
         $unit = jewellery_unit($companyId, $unitId);
         if (!$unit) {
             $errors[] = 'Line ' . ($index + 1) . ': unknown weight unit.';
             continue;
         }
 
-        $gross = jw_round_weight((float) ($line['gross_weight'] ?? 0));
-        $pieces = round((float) ($line['qty_pieces'] ?? 0), 3);
+        $gross = jw_round_weight((float) ($traceUnit['gross_weight'] ?? $line['gross_weight'] ?? 0));
+        $pieces = round((float) ($traceUnit['qty_pieces'] ?? $line['qty_pieces'] ?? 0), 3);
         if ($gross < 0 || $pieces < 0) {
             $errors[] = 'Line ' . ($index + 1) . ': weight and pieces cannot be negative.';
             continue;
@@ -742,7 +755,7 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
         // anything that is not gold or silver, so the distinction has to be
         // carried, not assumed away. Leave stone weight at zero and net is
         // gross, which is exactly how every document written so far behaves.
-        $stoneWeight = jw_round_weight((float) ($line['stone_weight'] ?? 0));
+        $stoneWeight = jw_round_weight((float) ($traceUnit['stone_weight'] ?? $line['stone_weight'] ?? 0));
         // Stones are weighed in CARATS at the counter, but the bill weighs the
         // piece in grams or tola. A carat is 0.2 g everywhere on earth, so the
         // typed carat figures — stones, diamonds and other diamonds alike, all
@@ -919,6 +932,9 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
             'delivery_date' => (string) ($line['delivery_date'] ?? ''),
             'size' => trim((string) ($line['size'] ?? '')),
             'line_id' => (int) ($line['line_id'] ?? 0),
+            'stock_unit_id' => $stockUnitId,
+            'stock_receipt_id' => (int) ($line['stock_receipt_id'] ?? 0),
+            'source' => $stockUnitId > 0 || (string) ($line['source'] ?? '') === 'stock' ? 'stock' : 'workshop',
         ];
 
         $sumMetal += $metalAmount;
@@ -1339,8 +1355,10 @@ function jewellery_post_purchase(int $companyId, int $purchaseId, int $userId = 
         ], jw_build_entries($legs));
 
         foreach ($lines as $line) {
+            $traceIds = jewellery_trace_create_purchase_line($companyId, $purchase, $line, $userId);
             $txnId = jw_record_stock_txn($companyId, [
                 'item_id' => (int) $line['item_id'],
+                'stock_unit_id' => (int) ($traceIds[0] ?? 0) ?: null,
                 'txn_type' => 'purchase',
                 'direction' => 'in',
                 'txn_date' => (string) $purchase['purchase_date'],
@@ -1399,7 +1417,45 @@ function jewellery_post_purchase(int $companyId, int $purchaseId, int $userId = 
 /** Reverse a posted purchase back to draft. */
 function jewellery_unpost_purchase(int $companyId, int $purchaseId, int $userId = 0): array
 {
-    return jw_unpost_document($companyId, 'jewellery_purchases', 'jewellery_purchase', $purchaseId, $userId);
+    if (jewellery_trace_ready()) {
+        $blocked = db()->prepare("SELECT trace_code, status FROM jewellery_stock_units
+            WHERE company_id = :cid AND origin_type = 'purchase' AND origin_id = :pid
+              AND status NOT IN ('in_stock','cancelled') LIMIT 1");
+        $blocked->execute(['cid' => $companyId, 'pid' => $purchaseId]);
+        if ($row = $blocked->fetch(PDO::FETCH_ASSOC)) {
+            return ['ok' => false, 'error' => 'Purchase cannot be unposted because trace ' . $row['trace_code']
+                . ' is already ' . str_replace('_', ' ', (string) $row['status']) . '.'];
+        }
+    }
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        $result = jw_unpost_document($companyId, 'jewellery_purchases', 'jewellery_purchase', $purchaseId, $userId);
+        if (!$result['ok']) {
+            throw new RuntimeException((string) $result['error']);
+        }
+        if (jewellery_trace_ready()) {
+            $stmt = db()->prepare("SELECT id FROM jewellery_stock_units
+                WHERE company_id = :cid AND origin_type = 'purchase' AND origin_id = :pid AND status = 'in_stock'");
+            $stmt->execute(['cid' => $companyId, 'pid' => $purchaseId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $stockUnitId) {
+                jewellery_trace_transition($companyId, (int) $stockUnitId, 'purchase_unposted', ['status' => 'cancelled'], [
+                    'source_type' => 'jewellery_purchase', 'source_id' => $purchaseId,
+                ], $userId);
+            }
+        }
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+        return $result;
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        return ['ok' => false, 'error' => $exception->getMessage()];
+    }
 }
 
 function jewellery_delete_purchase(int $companyId, int $purchaseId): bool
@@ -1511,6 +1567,22 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
         if ((string) $existing['status'] !== 'draft') {
             throw new RuntimeException('This sale is already posted. Unpost it before revising.');
         }
+    }
+
+    $claimedStockUnits = [];
+    foreach ($lines as $index => $line) {
+        $stockUnitId = (int) ($line['stock_unit_id'] ?? 0);
+        if ($stockUnitId <= 0) {
+            continue;
+        }
+        $unit = jewellery_trace_unit($companyId, $stockUnitId);
+        if (!$unit) {
+            throw new RuntimeException('Sale line ' . ($index + 1) . ': the selected trace item was not found for this company.');
+        }
+        if (isset($claimedStockUnits[$stockUnitId])) {
+            throw new RuntimeException('Trace ' . $unit['trace_code'] . ' cannot be sold twice on one bill.');
+        }
+        $claimedStockUnits[$stockUnitId] = true;
     }
 
     $settings = jewellery_settings($companyId);
@@ -1807,17 +1879,18 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
             $saleId = (int) db()->lastInsertId();
         }
 
-        $lineStmt = db()->prepare('INSERT INTO jewellery_sale_lines (sale_id, company_id, item_id, purity_id, unit_id,
+        $lineStmt = db()->prepare('INSERT INTO jewellery_sale_lines (sale_id, company_id, item_id, stock_unit_id, purity_id, unit_id,
                 qty_pieces, gross_weight, stone_weight, net_weight, fine_weight, rate, metal_amount,
                 wastage_pct, wastage_amount, wastage_weight, total_weight, making_amount, stone_amount,
                 stone_carat, diamond_amount, diamond_carat, other_diamond_amount, other_diamond_carat,
                 vat_base, vat_rate, vat_amount, tax_amount, allocated_adjust, line_total, notes)
-            VALUES (:sid, :cid, :item, :purity, :unit, :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
+            VALUES (:sid, :cid, :item, :stock_unit, :purity, :unit, :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
                 :wpct, :wamount, :wweight, :tweight, :making, :stone,
                 :scarat, :diamond, :dcarat, :odiamond, :odcarat, :vbase, :vrate, :vamount, :tamount, :adjust, :ltotal, :notes)');
         foreach ($computed['lines'] as $row) {
             $lineStmt->execute([
-                'sid' => $saleId, 'cid' => $companyId, 'item' => $row['item_id'], 'purity' => $row['purity_id'],
+                'sid' => $saleId, 'cid' => $companyId, 'item' => $row['item_id'],
+                'stock_unit' => (int) ($row['stock_unit_id'] ?? 0) ?: null, 'purity' => $row['purity_id'],
                 'unit' => $row['unit_id'], 'pieces' => $row['qty_pieces'], 'gross' => $row['gross_weight'],
                 'sweight' => $row['stone_weight'], 'net' => $row['net_weight'],
                 'fine' => $row['fine_weight'], 'rate' => $row['rate'], 'metal' => $row['metal_amount'],
@@ -1831,8 +1904,17 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
                 'adjust' => $row['allocated_adjust'],
                 'ltotal' => $row['line_total'], 'notes' => $row['notes'] !== '' ? $row['notes'] : null,
             ]);
-            jw_save_line_taxes($companyId, 'sale', $saleId, (int) db()->lastInsertId(), $row);
+            $saleLineId = (int) db()->lastInsertId();
+            jw_save_line_taxes($companyId, 'sale', $saleId, $saleLineId, $row);
+            if ((int) ($row['stock_unit_id'] ?? 0) > 0) {
+                $reserved = jewellery_trace_reserve_for_sale($companyId, (int) $row['stock_unit_id'],
+                    $saleId, $saleLineId, $deliverOrderIds, $userId);
+                if (!$reserved['ok']) {
+                    throw new RuntimeException((string) $reserved['error']);
+                }
+            }
         }
+        jewellery_trace_release_sale_reservations($companyId, $saleId, array_keys($claimedStockUnits), $userId);
 
         $exStmt = db()->prepare('INSERT INTO jewellery_sale_exchanges (sale_id, company_id, item_id, purity_id, unit_id,
                 qty_pieces, gross_weight, fine_weight, rate, amount, notes)
@@ -2125,8 +2207,16 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
             $item = jewellery_item($companyId, (int) $line['item_id']);
             // Cost pool = every holder, as at the sale date. Same pool the
             // karigar and refinery issues use, so one item has one cost.
+            $traceUnit = (int) ($line['stock_unit_id'] ?? 0) > 0
+                ? jewellery_trace_unit($companyId, (int) $line['stock_unit_id'], true) : null;
+            if ((int) ($line['stock_unit_id'] ?? 0) > 0 && (!$traceUnit
+                || !in_array((string) $traceUnit['status'], ['in_stock', 'reserved'], true))) {
+                throw new RuntimeException('The exact trace item on sale line ' . (int) $line['id'] . ' is no longer available.');
+            }
             $balance = jw_item_balance($companyId, (int) $line['item_id'], $saleDate, '');
-            $cost = jw_round_money((float) $line['fine_weight'] * $balance['avg_fine_rate']);
+            $cost = $traceUnit && (float) $traceUnit['cost_amount'] > 0
+                ? jw_round_money((float) $traceUnit['cost_amount'])
+                : jw_round_money((float) $line['fine_weight'] * $balance['avg_fine_rate']);
             $lineCogs[(int) $line['id']] = $cost;
             $cogsTotal += $cost;
             if ($cost > 0) {
@@ -2163,6 +2253,7 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
             $cost = $lineCogs[(int) $line['id']] ?? 0.0;
             $txnId = jw_record_stock_txn($companyId, [
                 'item_id' => (int) $line['item_id'],
+                'stock_unit_id' => (int) ($line['stock_unit_id'] ?? 0) ?: null,
                 'txn_type' => 'sale',
                 'direction' => 'out',
                 'txn_date' => $saleDate,
@@ -2183,12 +2274,21 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
             ]);
             db()->prepare('UPDATE jewellery_sale_lines SET cogs_amount = :c, stock_txn_id = :t WHERE id = :id')
                 ->execute(['c' => $cost, 't' => $txnId, 'id' => (int) $line['id']]);
+            if ((int) ($line['stock_unit_id'] ?? 0) > 0) {
+                $sold = jewellery_trace_mark_sold($companyId, (int) $line['stock_unit_id'], $saleId,
+                    (int) $line['id'], (int) ($sale['party_id'] ?? 0), (string) $sale['sale_no'], $saleDate, $userId);
+                if (!$sold['ok']) {
+                    throw new RuntimeException((string) $sold['error']);
+                }
+            }
         }
 
         // Old gold in, at the value it was allowed against the sale.
         foreach ($exchanges as $exchange) {
+            $exchangeTraceIds = jewellery_trace_create_sale_exchange($companyId, $sale, $exchange, $userId);
             $txnId = jw_record_stock_txn($companyId, [
                 'item_id' => (int) $exchange['item_id'],
+                'stock_unit_id' => (int) ($exchangeTraceIds[0] ?? 0) ?: null,
                 'txn_type' => 'purchase',
                 'direction' => 'in',
                 'txn_date' => $saleDate,
@@ -2264,8 +2364,40 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
 function jewellery_unpost_sale(int $companyId, int $saleId, int $userId = 0): array
 {
     $sale = jewellery_sale($companyId, $saleId);
-    $result = jw_unpost_document($companyId, 'jewellery_sales', 'jewellery_sale', $saleId, $userId);
-    if ($result['ok'] && $sale !== null) {
+    if ($sale === null) {
+        return ['ok' => false, 'error' => 'Sale not found for this company.'];
+    }
+    if (jewellery_trace_ready()) {
+        $blocked = db()->prepare("SELECT trace_code, status FROM jewellery_stock_units
+            WHERE company_id = :cid AND origin_type = 'sale_exchange' AND origin_id = :sid
+              AND status NOT IN ('in_stock','cancelled') LIMIT 1");
+        $blocked->execute(['cid' => $companyId, 'sid' => $saleId]);
+        if ($row = $blocked->fetch(PDO::FETCH_ASSOC)) {
+            return ['ok' => false, 'error' => 'Sale cannot be unposted because received-old-jewellery trace '
+                . $row['trace_code'] . ' is already ' . str_replace('_', ' ', (string) $row['status']) . '.'];
+        }
+    }
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        $result = jw_unpost_document($companyId, 'jewellery_sales', 'jewellery_sale', $saleId, $userId);
+        if (!$result['ok']) {
+            throw new RuntimeException((string) $result['error']);
+        }
+        jewellery_trace_release_sale($companyId, $saleId, $userId);
+        if (jewellery_trace_ready()) {
+            $exchangeUnits = db()->prepare("SELECT id FROM jewellery_stock_units
+                WHERE company_id = :cid AND origin_type = 'sale_exchange' AND origin_id = :sid AND status = 'in_stock'");
+            $exchangeUnits->execute(['cid' => $companyId, 'sid' => $saleId]);
+            foreach ($exchangeUnits->fetchAll(PDO::FETCH_COLUMN) as $stockUnitId) {
+                jewellery_trace_transition($companyId, (int) $stockUnitId, 'sale_exchange_unposted', [
+                    'status' => 'cancelled',
+                ], ['source_type' => 'jewellery_sale_exchange', 'source_id' => $saleId], $userId);
+            }
+        }
         // The bill is out of the books, so the order it stood on goes back to
         // the workshop's answer. Delivery is undone with it: 'delivered' was
         // this sale's doing, and a draft is evidence of nothing — but the
@@ -2289,17 +2421,46 @@ function jewellery_unpost_sale(int $companyId, int $saleId, int $userId = 0): ar
             // the sync derives the true one from the items themselves.
             jewellery_sync_order_status($companyId, $orderId);
         }
-    }
+        if ($ownsTransaction) {
+            db()->commit();
+        }
 
-    return $result;
+        return $result;
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        if (!$ownsTransaction) {
+            throw $exception;
+        }
+
+        return ['ok' => false, 'error' => $exception->getMessage()];
+    }
 }
 
 function jewellery_delete_sale(int $companyId, int $saleId): bool
 {
-    $stmt = db()->prepare("DELETE FROM jewellery_sales WHERE id = :id AND company_id = :cid AND status = 'draft'");
-    $stmt->execute(['id' => $saleId, 'cid' => $companyId]);
-
-    return $stmt->rowCount() > 0;
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        $stmt = db()->prepare("DELETE FROM jewellery_sales WHERE id = :id AND company_id = :cid AND status = 'draft'");
+        $stmt->execute(['id' => $saleId, 'cid' => $companyId]);
+        $deleted = $stmt->rowCount() > 0;
+        if ($deleted) {
+            jewellery_trace_release_sale_reservations($companyId, $saleId);
+        }
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+        return $deleted;
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        return false;
+    }
 }
 
 /**

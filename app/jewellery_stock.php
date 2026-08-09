@@ -1009,16 +1009,17 @@ function jw_record_stock_txn(int $companyId, array $txn): int
     }
     try {
         db()->prepare('INSERT INTO jewellery_stock_txns
-            (company_id, fiscal_year_id, item_id, txn_type, direction, txn_date, ref_no, holder_type, holder_id,
+            (company_id, fiscal_year_id, item_id, stock_unit_id, txn_type, direction, txn_date, ref_no, holder_type, holder_id,
              metal_id, purity_id, unit_id, qty_pieces, gross_weight, gross_grams, fine_weight, fine_grams, rate, amount,
              source_type, source_id, voucher_id, party_id, notes, created_by)
-        VALUES (:cid, :fy, :iid, :type, :dir, :d, :ref, :ht, :hid,
+        VALUES (:cid, :fy, :iid, :trace, :type, :dir, :d, :ref, :ht, :hid,
              :mid, :pid, :uid, :pieces, :gross, :ggrams, :fine, :fgrams, :rate, :amount,
              :stype, :sid, :vid, :party, :notes, :by)')
         ->execute([
             'cid' => $companyId,
             'fy' => $fiscalYearId,
             'iid' => $itemId,
+            'trace' => (int) ($txn['stock_unit_id'] ?? 0) ?: null,
             'type' => $type,
             'dir' => $direction,
             'd' => $txnDate,
@@ -1378,7 +1379,7 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
  * movement rather than stacking a second one, so correcting an opening is
  * simply saving it again.
  *
- * @return array{ok: bool, error: string, note: string, voucher_id: int, item_id: int}
+ * @return array{ok: bool, error: string, note: string, voucher_id: int, item_id: int, stock_unit_ids?: array}
  */
 function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input, int $userId = 0): array
 {
@@ -1435,9 +1436,26 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
         db()->prepare("DELETE FROM jewellery_stock_txns
             WHERE company_id = :cid AND item_id = :iid AND txn_type = 'opening'")
             ->execute(['cid' => $companyId, 'iid' => $itemId]);
+        $traceIds = jewellery_trace_replace_opening($companyId, $fiscalYearId, [
+            'item_id' => $itemId,
+            'purity_id' => (int) $item['purity_id'],
+            'unit_id' => (int) $item['unit_id'],
+            'stock_kind' => $stockKind,
+            'qty_pieces' => $pieces,
+            'gross_weight' => $gross,
+            'cost_amount' => $amount,
+            'origin_type' => (string) ($input['origin_type'] ?? 'manual_opening'),
+            'origin_id' => (int) ($input['origin_id'] ?? $itemId),
+            'origin_line_id' => (int) ($input['origin_line_id'] ?? 0),
+            'customer_name' => (string) ($input['customer_name'] ?? ''),
+            'customer_order_no' => (string) ($input['customer_order_no'] ?? ''),
+            'event_date' => $asOn,
+            'reference_no' => (string) ($input['reference_no'] ?? 'OPENING'),
+        ], $userId);
         if ($gross > 0 || $pieces > 0) {
             jw_record_stock_txn($companyId, [
                 'item_id' => $itemId,
+                'stock_unit_id' => (int) ($traceIds[0] ?? 0),
                 'txn_type' => 'opening',
                 'direction' => 'in',
                 'txn_date' => $asOn,
@@ -1465,6 +1483,7 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
             'note' => (string) ($posted['note'] ?? ''),
             'voucher_id' => (int) ($posted['voucher_id'] ?? 0),
             'item_id' => $itemId,
+            'stock_unit_ids' => $traceIds,
         ];
     } catch (Throwable $openingException) {
         if ($ownsTransaction && db()->inTransaction()) {
@@ -1519,3 +1538,9 @@ function jewellery_next_document_no(int $companyId, string $prefix): string
 
     return $prefix . '-' . str_pad((string) $next, 5, '0', STR_PAD_LEFT);
 }
+
+// Physical-piece identity sits above the aggregate metal ledger in this file.
+// Requiring it here makes the same trace engine available to opening stock,
+// purchases, workshop receipts, orders and sales without another copy of the
+// rules in each module.
+require_once __DIR__ . '/jewellery_trace.php';

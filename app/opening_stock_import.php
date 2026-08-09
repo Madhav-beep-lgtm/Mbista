@@ -29,20 +29,21 @@ const OPENING_IMPORT_MAX_ROWS = 5000;
 function opening_import_columns(): array
 {
     return [
-        'stock_kind' => ['Stock Type *', ['stock type', 'stock kind', 'stock classification']],
-        'group' => ['Stock Group *', ['stock group', 'group', 'category', 'item group']],
-        'code' => ['Item Code *', ['item code', 'code', 'sku', 'item', 'item_code']],
-        'name' => ['Item Name *', ['item name', 'name', 'description', 'particulars']],
-        'metal' => ['Metal *', ['metal', 'metal type']],
+        'sn' => ['SN', ['sn', 's.n.', 'serial', 'serial no', 'serial number']],
+        'stock_kind' => ['Stock type', ['stock type', 'stock kind', 'stock classification']],
+        'group' => ['Stock group', ['stock group', 'group', 'category', 'item group']],
+        'code' => ['Item code', ['item code', 'code', 'sku', 'item', 'item_code']],
+        'name' => ['Item name', ['item name', 'name', 'description', 'particulars']],
+        'metal' => ['Metal', ['metal', 'metal type']],
         'purity_percent' => ['Purity % *', ['purity %', 'purity percentage', 'purity percent']],
-        'purity' => ['Purity Code', ['purity', 'purity code', 'karat', 'carat', 'fineness']],
-        'unit' => ['Unit *', ['unit', 'uom', 'weight unit']],
-        'qty_pieces' => ['Pieces *', ['pieces', 'qty', 'quantity', 'pcs', 'nos']],
-        'gross_weight' => ['Gross Weight (GM) *', ['gross weight', 'weight', 'gross', 'gross wt']],
+        'purity' => ['Purity', ['purity', 'purity code', 'karat', 'carat', 'fineness']],
+        'unit' => ['Unit', ['unit', 'uom', 'weight unit']],
+        'qty_pieces' => ['Pieces', ['pieces', 'qty', 'quantity', 'pcs', 'nos']],
+        'gross_weight' => ['Gross weight', ['gross weight', 'weight', 'gross', 'gross wt']],
         'rate' => ['Rate', ['rate', 'unit cost', 'cost', 'price']],
-        'amount' => ['Opening Amount *', ['amount', 'opening amount', 'value', 'total', 'opening value']],
-        'customer_name' => ['Customer Name', ['customer name', 'customer']],
-        'order_number' => ['Order Number', ['order number', 'order no', 'order no.', 'order']],
+        'amount' => ['Amount', ['amount', 'opening amount', 'value', 'total', 'opening value']],
+        'customer_name' => ['Customer name', ['customer name', 'customer']],
+        'order_number' => ['Order number', ['order number', 'order no', 'order no.', 'order']],
     ];
 }
 
@@ -68,19 +69,16 @@ function opening_import_map_headers(array $headerCells): array
 /** A downloadable template, so nobody has to guess the column names. */
 function opening_import_template_rows(bool $jewellery): array
 {
-    $header = [];
-    foreach (opening_import_columns() as $key => [$label]) {
-        if (!$jewellery && in_array($key, ['stock_kind', 'group', 'metal', 'purity_percent', 'purity', 'gross_weight', 'customer_name', 'order_number'], true)) {
-            continue;
-        }
-        $header[] = $label;
-    }
+    $header = $jewellery
+        ? ['SN', 'Stock type', 'Stock group', 'Item code', 'Item name', 'Metal', 'Purity', 'Unit',
+            'Pieces', 'Gross weight', 'Rate', 'Amount', 'Customer name', 'Order number']
+        : ['Item code', 'Item name', 'Unit', 'Pieces', 'Rate', 'Amount'];
 
     $sample = $jewellery
-        ? [['Showroom Stock', 'Chains', 'G-01', 'Gold Chain 1', 'Gold', 92, '22K', 'GM', 2, 10.5, '', 139000, '', ''],
-           ['Customer Ordered Stock', 'Rings', 'G-02', 'Gold Ring 1', 'Gold', 92, '22K', 'GM', 1, 8.0, '', 95000, 'Customer name', 'JO-000001'],
-           ['', '', '', 'Unknown codes can create new items after you review and save the staged row.', '', '', '', '', '', '', '', '', '', '']]
-        : [['ITEM-01', 'Sample Item', 'PCS', 10, 250, ''],
+        ? [[1, 'Showroom Stock', 'Bangles', 'BG-1', 'Bangle 1', 'Gold', '22K', 'GM', 1, 13.77, 22250.69, 306392, '', ''],
+           [2, 'Showroom Stock', 'Bangles', 'BG-2', 'Bangle 2', 'Gold', '22K', 'GM', 1, 13.77, 22250.69, 306392, '', ''],
+           [3, 'Customer Ordered Stock', 'Rings', 'RG-1', 'Ring 1', 'Gold', '22K', 'GM', 1, 8.50, 22250.69, 189130.87, 'Customer name', 'JO-000001']]
+        : [['ITEM-01', 'Sample Item', 'PCS', 10, 250, 2500],
            ['', 'Fill either Rate or Amount. Rows with neither are flagged, not dropped.', '', '', '', '']];
 
     return array_merge([$header], $sample);
@@ -177,6 +175,7 @@ function opening_import_stage(int $companyId, int $fiscalYearId, string $path, s
 
     $total = 0;
     $valid = 0;
+    $seenOpeningKeys = [];
     foreach ($rows as $offset => $row) {
         $cells = (array) ($row['cells'] ?? $row);
         $sheetRowNo = (int) ($row['n'] ?? ((int) $offset + 2));
@@ -196,6 +195,14 @@ function opening_import_stage(int $companyId, int $fiscalYearId, string $path, s
         $itemId = $itemsByCode[strtolower($code)] ?? ($itemsByName[strtolower($name)] ?? 0);
         $matchedJewelleryItem = $jewellery && $itemId > 0 ? jewellery_item($companyId, $itemId) : null;
         $createItem = $jewellery && $itemId <= 0;
+        $openingKey = $itemId > 0 ? 'item:' . $itemId
+            : 'new:' . strtolower($code !== '' ? $code : $name);
+        if ($jewellery && isset($seenOpeningKeys[$openingKey])) {
+            $errors[] = 'This item is already on sheet row ' . $seenOpeningKeys[$openingKey]
+                . '. Put one physical item code on one row so its trace is not overwritten.';
+        } elseif ($jewellery && $openingKey !== 'new:') {
+            $seenOpeningKeys[$openingKey] = $sheetRowNo;
+        }
         if ($itemId <= 0 && !$createItem) {
             $errors[] = $code !== '' ? 'No item with code "' . $code . '".' : 'No item named "' . $name . '".';
         }
@@ -413,6 +420,25 @@ function opening_import_update_row(int $companyId, int $rowId, array $input): ar
     }
 
     $errors = [];
+    if ($jewellery) {
+        if ($itemId > 0) {
+            $duplicate = db()->prepare('SELECT source_row_no FROM inventory_opening_import_rows
+                WHERE import_id = :imp AND company_id = :cid AND id <> :id AND item_id = :item LIMIT 1');
+            $duplicate->execute(['imp' => (int) $row['import_id'], 'cid' => $companyId,
+                'id' => $rowId, 'item' => $itemId]);
+        } else {
+            $duplicate = db()->prepare('SELECT source_row_no FROM inventory_opening_import_rows
+                WHERE import_id = :imp AND company_id = :cid AND id <> :id AND item_id IS NULL
+                  AND proposed_code = :code LIMIT 1');
+            $duplicate->execute(['imp' => (int) $row['import_id'], 'cid' => $companyId,
+                'id' => $rowId, 'code' => $code]);
+        }
+        $duplicateRow = (int) ($duplicate->fetchColumn() ?: 0);
+        if ($duplicateRow > 0) {
+            $errors[] = 'This item is already on sheet row ' . $duplicateRow
+                . '. Put one physical item code on one row so its trace is not overwritten.';
+        }
+    }
     if ($itemId <= 0 && !$createItem) {
         $errors[] = 'Choose the item this row is for.';
     }
@@ -613,9 +639,21 @@ function opening_import_commit(int $companyId, int $importId, int $fiscalYearId,
                         'gross_weight' => (float) $row['gross_weight'],
                         'amount' => (float) $row['amount'],
                         'notes' => 'Imported from ' . (string) $batch['original_name'],
+                        'origin_type' => 'opening_import',
+                        'origin_id' => $importId,
+                        'origin_line_id' => (int) $row['id'],
+                        'customer_name' => (string) ($row['customer_name'] ?? ''),
+                        'customer_order_no' => (string) ($row['order_number'] ?? ''),
+                        'reference_no' => (string) $batch['original_name'] . ' row ' . (int) $row['source_row_no'],
                     ], $userId);
                     if (!($saved['ok'] ?? false)) {
                         throw new RuntimeException((string) ($saved['error'] ?? 'Opening stock could not be saved.'));
+                    }
+                    if (!empty($saved['stock_unit_ids'])) {
+                        db()->prepare('UPDATE inventory_opening_import_rows SET stock_unit_id = :uid
+                            WHERE id = :id AND company_id = :cid')
+                            ->execute(['uid' => (int) $saved['stock_unit_ids'][0],
+                                'id' => (int) $row['id'], 'cid' => $companyId]);
                     }
                 } else {
                     $qty = (float) $row['qty_pieces'] > 0 ? (float) $row['qty_pieces'] : (float) $row['gross_weight'];

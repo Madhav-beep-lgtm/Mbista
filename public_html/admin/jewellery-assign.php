@@ -70,9 +70,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $result = jewellery_save_assignments($companyId, $fiscalYearId, $postKind, $_POST, $userId);
     if ($result['ok']) {
-        flash('success', $result['saved'] === 1
+        $stockOrder = $postKind === 'self' ? ' Stock order ' . (string) ($result['stock_order_no'] ?? '') . ' was created.' : '';
+        flash('success', ($result['saved'] === 1
             ? 'Work assigned. The kaligad has the job; hand the metal over from Metal Issued when it goes.'
-            : $result['saved'] . ' assignments saved. Hand the metal over from Metal Issued as each one goes.');
+            : $result['saved'] . ' assignments saved. Hand the metal over from Metal Issued as each one goes.') . $stockOrder);
     } else {
         // Typed rows come back typed, not blank — a grid of fifteen columns is
         // not something anybody should have to enter twice.
@@ -95,7 +96,7 @@ $exportFormat = jw_enum($_GET['export'] ?? null, ['csv', 'xlsx', 'print'], '');
 if ($exportFormat !== '' && ($_GET['export'] ?? '') !== '') {
     require_permission('jewellery', 'export');
     require_once __DIR__ . '/../../app/export_engine.php';
-    $title = $isCustomer ? 'Kaligad assignments — customer ordered' : 'Kaligad assignments — self ordered';
+    $title = $isCustomer ? 'Kaligad assignments — customer ordered' : 'Showroom stock orders';
     export_dispatch(
         $exportFormat,
         'kaligad-assignments-' . $kind . '-' . date('Ymd-His'),
@@ -204,6 +205,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <form method="post" id="jw-assign-form">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="assign_kind" value="<?= e($kind) ?>">
+        <?php if (!$isCustomer): ?>
+            <div class="workspace-form-grid" style="margin:0 0 14px;max-width:520px">
+                <label>Stock order number <span class="frm-optional">(blank = automatic)</span>
+                    <input type="text" name="stock_order_no" maxlength="60" value="<?= e((string) ($retry['stock_order_no'] ?? '')) ?>" placeholder="SO-2083-000001">
+                </label>
+            </div>
+        <?php endif; ?>
         <?php include __DIR__ . '/../../app/views/jewellery/assign_grid.php'; ?>
         <div style="margin-top:12px">
             <button type="submit" class="button" <?= $karigars === [] || ($isCustomer && $orderPayload === []) ? 'disabled' : '' ?>><?= icon('plus') ?>Save all rows</button>
@@ -216,7 +224,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <section class="mbw-card">
     <div class="mbw-card-head">
-        <h2><?= $isCustomer ? 'For customer ordered item' : 'For self ordered item for showroom' ?></h2>
+        <h2><?= $isCustomer ? 'For customer ordered item' : 'Showroom stock orders' ?></h2>
         <div class="mbw-card-tools"><span class="mbw-pill tone-gray"><?= count($rows) ?> assignments</span></div>
     </div>
 
@@ -236,6 +244,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <thead>
                 <tr>
                     <th style="width:44px">SN</th>
+                    <?php if (!$isCustomer): ?><th>Stock order</th><?php endif; ?>
                     <th>Assignment number</th>
                     <th>Kaligadh name</th>
                     <?php if ($isCustomer): ?>
@@ -259,13 +268,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </thead>
             <tbody>
                 <?php if ($rows === []): ?>
-                    <tr><td colspan="<?= $isCustomer ? 18 : 16 ?>" style="text-align:center;color:var(--mbw-muted);padding:18px">
+                    <tr><td colspan="<?= $isCustomer ? 18 : 17 ?>" style="text-align:center;color:var(--mbw-muted);padding:18px">
                         Nothing assigned yet<?= $filters['q'] !== '' || $filters['from'] !== '' || $filters['to'] !== '' ? ' for this search' : '' ?>.
                     </td></tr>
                 <?php endif; ?>
                 <?php foreach ($rows as $index => $row): ?>
                     <tr>
                         <td><?= $index + 1 ?></td>
+                        <?php if (!$isCustomer): ?><td><strong><?= e((string) ($row['stock_order_no'] ?? '')) ?></strong></td><?php endif; ?>
                         <td><strong><?= e((string) $row['assignment_no']) ?></strong></td>
                         <td><?= e(trim((string) $row['karigar_code'] . ' — ' . (string) $row['karigar_name'])) ?></td>
                         <?php if ($isCustomer): ?>
