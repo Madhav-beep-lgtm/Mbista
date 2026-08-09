@@ -493,6 +493,22 @@ function accounting_module_repair_database(): array
         ");
     });
 
+    $run('Unify Party Master ledger roles (migration 108)', static function (): void {
+        if (!accounting_repair_table_exists('ledger_groups') || !accounting_repair_table_exists('accounting_parties')) {
+            return;
+        }
+        accounting_repair_run_migration_file_if_index_missing(
+            '108_party_ledger_roles.sql',
+            'ledger_groups',
+            'uniq_ledger_groups_company_party_role'
+        );
+        // Complete a partially-applied deployment as well as a clean one.
+        accounting_repair_add_column('accounting_parties', 'advance_ledger_id', '`advance_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `payable_ledger_id`');
+        accounting_repair_add_column('accounting_parties', 'supplier_advance_ledger_id', '`supplier_advance_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `advance_ledger_id`');
+        accounting_repair_add_index('accounting_parties', 'idx_parties_advance_ledger', 'KEY `idx_parties_advance_ledger` (`advance_ledger_id`)');
+        accounting_repair_add_index('accounting_parties', 'idx_parties_supplier_advance_ledger', 'KEY `idx_parties_supplier_advance_ledger` (`supplier_advance_ledger_id`)');
+    });
+
     $run('Create inventory items', static function (): void {
         db()->exec("
             CREATE TABLE IF NOT EXISTS `inventory_items` (

@@ -14,6 +14,7 @@ $fiscalYear = current_fiscal_year();
 $companyId = (int) ($company['id'] ?? 0);
 $currentUser = current_user();
 $userId = (int) ($currentUser['id'] ?? 0);
+$partyLedgerSync = sync_company_party_ledgers_from_chart($companyId, $userId ?: null);
 
 $partyTypes = ['customer', 'supplier', 'both', 'other'];
 $statuses = ['active', 'inactive'];
@@ -46,6 +47,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $partyType = (string) ($_POST['party_type'] ?? 'both');
         $status = (string) ($_POST['status'] ?? 'active');
         $ledgerId = (int) ($_POST['ledger_id'] ?? 0);
+        $hasPayableLedgerLink = column_exists('accounting_parties', 'payable_ledger_id');
+        $hasAdvanceLedgerLink = column_exists('accounting_parties', 'advance_ledger_id');
+        $hasSupplierAdvanceLedgerLink = column_exists('accounting_parties', 'supplier_advance_ledger_id');
+        $payableLedgerId = $hasPayableLedgerLink ? (int) ($_POST['payable_ledger_id'] ?? 0) : 0;
+        $advanceLedgerId = $hasAdvanceLedgerLink ? (int) ($_POST['advance_ledger_id'] ?? 0) : 0;
+        $supplierAdvanceLedgerId = $hasSupplierAdvanceLedgerLink ? (int) ($_POST['supplier_advance_ledger_id'] ?? 0) : 0;
         $openingBalance = round((float) ($_POST['opening_balance'] ?? 0), 2);
         $openingBalanceType = (string) ($_POST['opening_balance_type'] ?? 'debit');
         $clientProfileId = (int) ($_POST['client_profile_id'] ?? 0);
@@ -57,6 +64,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (!in_array($openingBalanceType, ['debit', 'credit'], true)) {
             $openingBalanceType = 'debit';
+        }
+
+        // These are three different accounting relationships. A receivable is
+        // an asset; trade payable and customer advance are liabilities. The old
+        // single dropdown offered every ledger and then ensure_party_ledger()
+        // silently replaced an invalid liability selection with a new asset
+        // ledger, even though the screen had already said "Party updated".
+        if ($partyId > 0) {
+            if (in_array($partyType, ['customer', 'both'], true)) {
+                ensure_party_role_ledger($companyId, $partyId, 'customer_receivable');
+            }
+            if (in_array($partyType, ['supplier', 'both'], true)) {
+                ensure_party_role_ledger($companyId, $partyId, 'supplier_payable');
+            }
+            $currentLinksStmt = db()->prepare('SELECT advance_ledger_id, supplier_advance_ledger_id FROM accounting_parties WHERE id = :id AND company_id = :cid LIMIT 1');
+            $currentLinksStmt->execute(['id' => $partyId, 'cid' => $companyId]);
+            $currentLinks = $currentLinksStmt->fetch() ?: [];
+            if ((int) ($currentLinks['advance_ledger_id'] ?? 0) > 0) {
+                ensure_party_role_ledger($companyId, $partyId, 'customer_advance');
+            }
+            if ((int) ($currentLinks['supplier_advance_ledger_id'] ?? 0) > 0) {
+                ensure_party_role_ledger($companyId, $partyId, 'supplier_advance');
+            }
+        }
+        foreach ([
+            ['id' => $ledgerId, 'type' => 'asset', 'role' => 'customer_receivable', 'label' => 'Receivable ledger'],
+            ['id' => $payableLedgerId, 'type' => 'liability', 'role' => 'supplier_payable', 'label' => 'Payable ledger'],
+            ['id' => $advanceLedgerId, 'type' => 'liability', 'role' => 'customer_advance', 'label' => 'Customer advance ledger'],
+            ['id' => $supplierAdvanceLedgerId, 'type' => 'asset', 'role' => 'supplier_advance', 'label' => 'Supplier advance ledger'],
+        ] as $ledgerLink) {
+            if ((int) $ledgerLink['id'] <= 0) {
+                continue;
+            }
+            $expectedGroupId = party_ledger_group_id($companyId, (string) $ledgerLink['role']);
+            $ledgerLinkCheck = db()->prepare("SELECT id FROM ledgers WHERE id = :id AND company_id = :company_id AND status = 'active' AND type = :type AND group_id = :group_id LIMIT 1");
+            $ledgerLinkCheck->execute([
+                'id' => (int) $ledgerLink['id'],
+                'company_id' => $companyId,
+                'type' => (string) $ledgerLink['type'],
+                'group_id' => $expectedGroupId,
+            ]);
+            if (!$ledgerLinkCheck->fetchColumn()) {
+                flash('error', (string) $ledgerLink['label'] . ' must be an active ledger in its canonical Party Master group. No link was changed.');
+                redirect($partiesReturn('admin/accounting-parties.php'));
+            }
+
+            $ledgerColumn = (string) (party_ledger_role_definitions()[(string) $ledgerLink['role']]['column'] ?? '');
+            if ($ledgerColumn !== '') {
+                $ownerCheck = db()->prepare("SELECT id FROM accounting_parties
+                    WHERE company_id = :company_id AND {$ledgerColumn} = :ledger_id AND id <> :party_id
+                    LIMIT 1");
+                $ownerCheck->execute([
+                    'company_id' => $companyId,
+                    'ledger_id' => (int) $ledgerLink['id'],
+                    'party_id' => $partyId,
+                ]);
+                if ($ownerCheck->fetchColumn()) {
+                    flash('error', (string) $ledgerLink['label'] . ' is already linked to another Party Master record. No link was changed.');
+                    redirect($partiesReturn('admin/accounting-parties.php'));
+                }
+            }
         }
         if ($hasPartyClientLink && $clientProfileId > 0) {
             // The linked client must be one this company serves — the link puts
@@ -89,9 +157,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($hasPartyClientLink) {
             $params['client_profile_id'] = $clientProfileId > 0 ? $clientProfileId : null;
         }
+        if ($hasPayableLedgerLink) {
+            $params['payable_ledger_id'] = $payableLedgerId > 0 ? $payableLedgerId : null;
+        }
+        if ($hasAdvanceLedgerLink) {
+            $params['advance_ledger_id'] = $advanceLedgerId > 0 ? $advanceLedgerId : null;
+        }
+        if ($hasSupplierAdvanceLedgerLink) {
+            $params['supplier_advance_ledger_id'] = $supplierAdvanceLedgerId > 0 ? $supplierAdvanceLedgerId : null;
+        }
         $clientLinkSet = $hasPartyClientLink ? ', client_profile_id = :client_profile_id' : '';
         $clientLinkCol = $hasPartyClientLink ? ', client_profile_id' : '';
         $clientLinkVal = $hasPartyClientLink ? ', :client_profile_id' : '';
+        $ledgerLinkSet = ($hasPayableLedgerLink ? ', payable_ledger_id = :payable_ledger_id' : '')
+            . ($hasAdvanceLedgerLink ? ', advance_ledger_id = :advance_ledger_id' : '')
+            . ($hasSupplierAdvanceLedgerLink ? ', supplier_advance_ledger_id = :supplier_advance_ledger_id' : '');
+        $ledgerLinkCol = ($hasPayableLedgerLink ? ', payable_ledger_id' : '')
+            . ($hasAdvanceLedgerLink ? ', advance_ledger_id' : '')
+            . ($hasSupplierAdvanceLedgerLink ? ', supplier_advance_ledger_id' : '');
+        $ledgerLinkVal = ($hasPayableLedgerLink ? ', :payable_ledger_id' : '')
+            . ($hasAdvanceLedgerLink ? ', :advance_ledger_id' : '')
+            . ($hasSupplierAdvanceLedgerLink ? ', :supplier_advance_ledger_id' : '');
 
         try {
             if ($partyId > 0) {
@@ -101,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     SET ledger_id = :ledger_id, code = :code, name = :name, party_type = :party_type,
                         pan_no = :pan_no, email = :email, phone = :phone, billing_address = :billing_address,
                         opening_balance = :opening_balance, opening_balance_type = :opening_balance_type,
-                        credit_limit = :credit_limit, status = :status, notes = :notes' . $clientLinkSet . '
+                        credit_limit = :credit_limit, status = :status, notes = :notes' . $ledgerLinkSet . $clientLinkSet . '
                     WHERE id = :id AND company_id = :company_id
                 ');
                 $stmt->execute($params);
@@ -112,10 +198,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = db()->prepare('
                     INSERT INTO accounting_parties (
                         company_id, ledger_id, code, name, party_type, pan_no, email, phone, billing_address,
-                        opening_balance, opening_balance_type, credit_limit, status, notes' . $clientLinkCol . '
+                        opening_balance, opening_balance_type, credit_limit, status, notes' . $ledgerLinkCol . $clientLinkCol . '
                     ) VALUES (
                         :company_id, :ledger_id, :code, :name, :party_type, :pan_no, :email, :phone, :billing_address,
-                        :opening_balance, :opening_balance_type, :credit_limit, :status, :notes' . $clientLinkVal . '
+                        :opening_balance, :opening_balance_type, :credit_limit, :status, :notes' . $ledgerLinkVal . $clientLinkVal . '
                     )
                 ');
                 $stmt->execute($params);
@@ -133,6 +219,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 if (in_array($partyType, ['supplier', 'both'], true)) {
                     ensure_party_ledger($companyId, $savedPartyId, 'payable');
+                }
+                if ($advanceLedgerId > 0) {
+                    ensure_party_role_ledger($companyId, $savedPartyId, 'customer_advance');
+                }
+                if ($supplierAdvanceLedgerId > 0) {
+                    ensure_party_role_ledger($companyId, $savedPartyId, 'supplier_advance');
                 }
                 post_party_opening_balance($companyId, $savedPartyId, $userId);
                 // The opening post is one-time and swallows failures internally;
@@ -385,6 +477,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $paidOn = trim((string) ($_POST['paid_on'] ?? date('Y-m-d')));
         $reference = trim((string) ($_POST['reference_no'] ?? ''));
         $note = trim((string) ($_POST['notes'] ?? ''));
+        $paymentKind = (string) ($_POST['payment_kind'] ?? 'settlement') === 'advance' ? 'advance' : 'settlement';
 
         $party = null;
         if ($partyId > 0) {
@@ -394,13 +487,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $cashLedger = ledger_by_code($companyId, 'CASH');
-        // Settle against the supplier's own ledger under Trade Payables.
-        $payableLedgerId = $party ? ensure_party_ledger($companyId, (int) $party['id'], 'payable') : 0;
-        if ($payableLedgerId <= 0) {
-            $payableLedgerId = (int) (ledger_by_code($companyId, 'AP')['id'] ?? 0);
+        $supplierDebitLedgerId = 0;
+        if ($party) {
+            $supplierDebitLedgerId = $paymentKind === 'advance'
+                ? ensure_party_role_ledger($companyId, (int) $party['id'], 'supplier_advance')
+                : ensure_party_ledger($companyId, (int) $party['id'], 'payable');
+        }
+        if ($supplierDebitLedgerId <= 0 && $paymentKind === 'settlement') {
+            $supplierDebitLedgerId = (int) (ledger_by_code($companyId, 'AP')['id'] ?? 0);
         }
 
-        if (!$party || !$cashLedger || $payableLedgerId <= 0 || $amount <= 0 || current_fiscal_year_id() <= 0) {
+        if (!$party || !$cashLedger || $supplierDebitLedgerId <= 0 || $amount <= 0 || current_fiscal_year_id() <= 0) {
             flash('error', 'Supplier and a positive amount are required to record a payment.');
             redirect($partiesReturn('admin/accounting-parties.php?panel=supplier-payment'));
         }
@@ -412,23 +509,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'fiscal_year_id' => current_fiscal_year_id(),
                 'voucher_no' => $voucherNo,
                 'voucher_type' => 'payment',
-                'source_type' => 'supplier_payment',
+                'source_type' => $paymentKind === 'advance' ? 'supplier_advance' : 'supplier_payment',
                 'source_id' => null,
                 'party_id' => $partyId,
                 'reference_no' => $reference !== '' ? $reference : null,
                 'voucher_date' => $paidOn !== '' ? $paidOn : date('Y-m-d'),
-                'narration' => $note !== '' ? $note : ('Payment to ' . $party['name']),
+                'narration' => $note !== '' ? $note : (($paymentKind === 'advance' ? 'Advance to ' : 'Payment to ') . $party['name']),
                 'total_amount' => $amount,
                 'status' => 'posted',
                 'posted_by' => $userId,
                 'posted_at' => date('Y-m-d H:i:s'),
             ], [
-                ['ledger_id' => $payableLedgerId, 'entry_type' => 'debit', 'amount' => $amount, 'memo' => 'Supplier balance settled'],
+                ['ledger_id' => $supplierDebitLedgerId, 'entry_type' => 'debit', 'amount' => $amount, 'memo' => $paymentKind === 'advance' ? 'Advance paid to supplier' : 'Supplier balance settled'],
                 ['ledger_id' => (int) $cashLedger['id'], 'entry_type' => 'credit', 'amount' => $amount, 'memo' => 'Paid to ' . $party['name']],
             ]);
-            security_event('voucher_posted', 'success', 'Supplier payment recorded for party #' . $partyId . '.', $companyId, $userId);
-            log_activity('supplier_payment', $voucherId, 'recorded', 'Payment ' . $voucherNo . ' made to ' . $party['name'] . '.', $userId);
-            flash('success', 'Payment ' . $voucherNo . ' of ' . site_currency_symbol() . number_format($amount, 2) . ' recorded for ' . $party['name'] . '.');
+            $paymentLabel = $paymentKind === 'advance' ? 'Supplier advance' : 'Supplier payment';
+            security_event('voucher_posted', 'success', $paymentLabel . ' recorded for party #' . $partyId . '.', $companyId, $userId);
+            log_activity('supplier_payment', $voucherId, 'recorded', $paymentLabel . ' ' . $voucherNo . ' made to ' . $party['name'] . '.', $userId);
+            flash('success', $paymentLabel . ' ' . $voucherNo . ' of ' . site_currency_symbol() . number_format($amount, 2) . ' recorded for ' . $party['name'] . '.');
         } catch (Throwable $exception) {
             flash('error', 'Could not record the supplier payment.');
         }
@@ -510,27 +608,51 @@ if ($editId > 0) {
     $editParty = $stmt->fetch() ?: null;
 }
 
-$ledgerStmt = db()->prepare("SELECT id, code, name, type FROM ledgers WHERE company_id = :company_id AND status = 'active' ORDER BY code ASC");
+$ledgerStmt = db()->prepare("SELECT l.id, l.code, l.name, l.type, g.party_role
+    FROM ledgers l
+    LEFT JOIN ledger_groups g ON g.id = l.group_id AND g.company_id = l.company_id
+    WHERE l.company_id = :company_id AND l.status = 'active'
+    ORDER BY l.code ASC");
 $ledgerStmt->execute(['company_id' => $companyId]);
 $ledgers = $ledgerStmt->fetchAll();
+$assetLedgers = array_values(array_filter($ledgers, static fn (array $ledger): bool => (string) ($ledger['type'] ?? '') === 'asset'));
+$liabilityLedgers = array_values(array_filter($ledgers, static fn (array $ledger): bool => (string) ($ledger['type'] ?? '') === 'liability'));
+$receivableLedgers = array_values(array_filter($ledgers, static fn (array $ledger): bool => (string) ($ledger['party_role'] ?? '') === 'customer_receivable'));
+$payableLedgers = array_values(array_filter($ledgers, static fn (array $ledger): bool => (string) ($ledger['party_role'] ?? '') === 'supplier_payable'));
+$customerAdvanceLedgers = array_values(array_filter($ledgers, static fn (array $ledger): bool => (string) ($ledger['party_role'] ?? '') === 'customer_advance'));
+$supplierAdvanceLedgers = array_values(array_filter($ledgers, static fn (array $ledger): bool => (string) ($ledger['party_role'] ?? '') === 'supplier_advance'));
 $expenseLedgers = array_values(array_filter($ledgers, static fn (array $ledger): bool => in_array((string) ($ledger['type'] ?? ''), ['expense', 'asset'], true)));
 
 $hasPartyClientLink = column_exists('accounting_parties', 'client_profile_id');
 $hasPayableLedgerLink = column_exists('accounting_parties', 'payable_ledger_id');
+$hasAdvanceLedgerLink = column_exists('accounting_parties', 'advance_ledger_id');
+$hasSupplierAdvanceLedgerLink = column_exists('accounting_parties', 'supplier_advance_ledger_id');
 
 $payableLedgerSelect = $hasPayableLedgerLink
     ? ', pl.code AS payable_ledger_code, pl.name AS payable_ledger_name'
     : ', NULL AS payable_ledger_code, NULL AS payable_ledger_name';
 $payableLedgerJoin = $hasPayableLedgerLink
-    ? ' LEFT JOIN ledgers pl ON pl.id = p.payable_ledger_id'
+    ? ' LEFT JOIN ledgers pl ON pl.id = p.payable_ledger_id AND pl.company_id = p.company_id'
+    : '';
+$advanceLedgerSelect = $hasAdvanceLedgerLink
+    ? ', al.code AS advance_ledger_code, al.name AS advance_ledger_name'
+    : ', NULL AS advance_ledger_code, NULL AS advance_ledger_name';
+$advanceLedgerJoin = $hasAdvanceLedgerLink
+    ? ' LEFT JOIN ledgers al ON al.id = p.advance_ledger_id AND al.company_id = p.company_id'
+    : '';
+$supplierAdvanceLedgerSelect = $hasSupplierAdvanceLedgerLink
+    ? ', sal.code AS supplier_advance_ledger_code, sal.name AS supplier_advance_ledger_name'
+    : ', NULL AS supplier_advance_ledger_code, NULL AS supplier_advance_ledger_name';
+$supplierAdvanceLedgerJoin = $hasSupplierAdvanceLedgerLink
+    ? ' LEFT JOIN ledgers sal ON sal.id = p.supplier_advance_ledger_id AND sal.company_id = p.company_id'
     : '';
 
 $partySql = '
     SELECT p.*, rl.code AS ledger_code, rl.name AS ledger_name
-           ' . $payableLedgerSelect . '
+           ' . $payableLedgerSelect . $advanceLedgerSelect . $supplierAdvanceLedgerSelect . '
     FROM accounting_parties p
-    LEFT JOIN ledgers rl ON rl.id = p.ledger_id
-    ' . $payableLedgerJoin . '
+    LEFT JOIN ledgers rl ON rl.id = p.ledger_id AND rl.company_id = p.company_id
+    ' . $payableLedgerJoin . $advanceLedgerJoin . $supplierAdvanceLedgerJoin . '
     WHERE p.company_id = :company_id
     ORDER BY p.status ASC, p.name ASC
 ';
@@ -539,9 +661,47 @@ $partyStmt = db()->prepare($partySql);
 $partyStmt->execute(['company_id' => $companyId]);
 $parties = $partyStmt->fetchAll();
 
+// Repair each active Party Master once from its classification. This adopts
+// existing ledgers into the canonical groups and creates only a missing primary
+// receivable/payable ledger; advance ledgers remain demand-driven.
+$partyLinksRepaired = false;
+foreach ($parties as $partyForLedgerRepair) {
+    if ((string) ($partyForLedgerRepair['status'] ?? '') !== 'active') {
+        continue;
+    }
+    $repairPartyId = (int) $partyForLedgerRepair['id'];
+    $repairPartyType = (string) ($partyForLedgerRepair['party_type'] ?? 'other');
+    if (in_array($repairPartyType, ['customer', 'both'], true)) {
+        $partyLinksRepaired = ensure_party_role_ledger($companyId, $repairPartyId, 'customer_receivable') > 0 || $partyLinksRepaired;
+    }
+    if (in_array($repairPartyType, ['supplier', 'both'], true)) {
+        $partyLinksRepaired = ensure_party_role_ledger($companyId, $repairPartyId, 'supplier_payable') > 0 || $partyLinksRepaired;
+    }
+    if ((int) ($partyForLedgerRepair['advance_ledger_id'] ?? 0) > 0) {
+        $partyLinksRepaired = ensure_party_role_ledger($companyId, $repairPartyId, 'customer_advance') > 0 || $partyLinksRepaired;
+    }
+    if ((int) ($partyForLedgerRepair['supplier_advance_ledger_id'] ?? 0) > 0) {
+        $partyLinksRepaired = ensure_party_role_ledger($companyId, $repairPartyId, 'supplier_advance') > 0 || $partyLinksRepaired;
+    }
+}
+if ($partyLinksRepaired) {
+    $partyStmt->execute(['company_id' => $companyId]);
+    $parties = $partyStmt->fetchAll();
+}
+
 $directoryLedgerIds = [];
+$directoryLedgerColumns = ['ledger_id'];
+if ($hasPayableLedgerLink) {
+    $directoryLedgerColumns[] = 'payable_ledger_id';
+}
+if ($hasAdvanceLedgerLink) {
+    $directoryLedgerColumns[] = 'advance_ledger_id';
+}
+if ($hasSupplierAdvanceLedgerLink) {
+    $directoryLedgerColumns[] = 'supplier_advance_ledger_id';
+}
 foreach ($parties as $party) {
-    foreach (['ledger_id', 'payable_ledger_id'] as $ledgerColumn) {
+    foreach ($directoryLedgerColumns as $ledgerColumn) {
         $ledgerId = (int) ($party[$ledgerColumn] ?? 0);
         if ($ledgerId > 0) {
             $directoryLedgerIds[$ledgerId] = $ledgerId;
@@ -569,6 +729,48 @@ if ($directoryLedgerIds !== [] && table_exists('vouchers') && table_exists('vouc
     $balanceStmt->execute(array_merge([$companyId], $directoryLedgerIds));
     foreach ($balanceStmt->fetchAll(PDO::FETCH_ASSOC) as $balanceRow) {
         $partyLedgerBalances[(int) $balanceRow['ledger_id']] = round((float) $balanceRow['balance'], 2);
+    }
+}
+
+// Older modules posted identifiable parties to shared AR/AP/CUST-ADV ledgers,
+// and an administrator may later correct a Party Master's primary link from
+// one party-role ledger to another. Keep both kinds of historical posting
+// visible by voucher.party_id. Current primary ledgers are excluded here
+// because they were already totalled above; no voucher is rewritten.
+$legacyRoleBalancesByParty = [];
+if (table_exists('vouchers') && table_exists('voucher_entries')) {
+    $legacyLinkedExclusion = '';
+    $legacyRoleParams = ['company_id' => $companyId];
+    if ($directoryLedgerIds !== []) {
+        $legacyLinkedNames = [];
+        foreach ($directoryLedgerIds as $legacyLinkedIndex => $legacyLinkedId) {
+            $legacyLinkedName = 'linked_ledger_' . $legacyLinkedIndex;
+            $legacyLinkedNames[] = ':' . $legacyLinkedName;
+            $legacyRoleParams[$legacyLinkedName] = $legacyLinkedId;
+        }
+        $legacyLinkedExclusion = ' AND ve.ledger_id NOT IN (' . implode(',', $legacyLinkedNames) . ')';
+    }
+    $legacyRoleStmt = db()->prepare("SELECT v.party_id,
+               CASE
+                   WHEN l.is_system = 1 AND l.code IN ('AR', 'AP', 'CUST-ADV') THEN l.code
+                   WHEN g.party_role = 'customer_receivable' THEN 'AR'
+                   WHEN g.party_role = 'supplier_payable' THEN 'AP'
+                   WHEN g.party_role = 'customer_advance' THEN 'CUST-ADV'
+                   WHEN g.party_role = 'supplier_advance' THEN 'SUP-ADV'
+               END AS balance_role,
+               COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0) AS balance
+        FROM voucher_entries ve
+        INNER JOIN vouchers v ON v.id = ve.voucher_id
+        INNER JOIN ledgers l ON l.id = ve.ledger_id AND l.company_id = v.company_id
+        LEFT JOIN ledger_groups g ON g.id = l.group_id AND g.company_id = l.company_id
+        WHERE v.company_id = :company_id AND v.status = 'posted' AND v.party_id IS NOT NULL
+          AND ((l.is_system = 1 AND l.code IN ('AR', 'AP', 'CUST-ADV'))
+               OR g.party_role IN ('customer_receivable', 'supplier_payable', 'customer_advance', 'supplier_advance'))
+          {$legacyLinkedExclusion}
+        GROUP BY v.party_id, balance_role");
+    $legacyRoleStmt->execute($legacyRoleParams);
+    foreach ($legacyRoleStmt->fetchAll(PDO::FETCH_ASSOC) as $legacyRoleRow) {
+        $legacyRoleBalancesByParty[(int) $legacyRoleRow['party_id']][(string) $legacyRoleRow['balance_role']] = round((float) $legacyRoleRow['balance'], 2);
     }
 }
 
@@ -641,6 +843,8 @@ foreach ($parties as &$party) {
     $partyType = (string) ($party['party_type'] ?? 'customer');
     $receivableLedgerId = (int) ($party['ledger_id'] ?? 0);
     $payableLedgerId = (int) ($party['payable_ledger_id'] ?? 0);
+    $advanceLedgerId = (int) ($party['advance_ledger_id'] ?? 0);
+    $supplierAdvanceLedgerId = (int) ($party['supplier_advance_ledger_id'] ?? 0);
 
     $expectsReceivable = in_array($partyType, ['customer', 'both'], true);
     $expectsPayable = in_array($partyType, ['supplier', 'both'], true);
@@ -648,13 +852,18 @@ foreach ($parties as &$party) {
     $receivableLinked = !$expectsReceivable || $receivableLedgerId > 0;
     $payableLinked = !$expectsPayable || $payableLedgerId > 0;
 
-    $receivableBalance = (float) ($partyLedgerBalances[$receivableLedgerId] ?? 0);
-    $payableBalance = (float) ($partyLedgerBalances[$payableLedgerId] ?? 0);
+    $legacyRoleBalances = $legacyRoleBalancesByParty[$partyId] ?? [];
+    $receivableBalance = (float) ($partyLedgerBalances[$receivableLedgerId] ?? 0) + (float) ($legacyRoleBalances['AR'] ?? 0);
+    $payableBalance = (float) ($partyLedgerBalances[$payableLedgerId] ?? 0) + (float) ($legacyRoleBalances['AP'] ?? 0);
+    $advanceBalance = (float) ($partyLedgerBalances[$advanceLedgerId] ?? 0) + (float) ($legacyRoleBalances['CUST-ADV'] ?? 0);
+    $supplierAdvanceBalance = (float) ($partyLedgerBalances[$supplierAdvanceLedgerId] ?? 0) + (float) ($legacyRoleBalances['SUP-ADV'] ?? 0);
 
     $party['row_kind'] = 'party';
     $party['_receivable_balance'] = $receivableBalance;
     $party['_payable_balance'] = $payableBalance;
-    $party['_net_balance'] = round($receivableBalance + $payableBalance, 2);
+    $party['_advance_balance'] = $advanceBalance;
+    $party['_supplier_advance_balance'] = $supplierAdvanceBalance;
+    $party['_net_balance'] = round($receivableBalance + $payableBalance + $advanceBalance + $supplierAdvanceBalance, 2);
     $party['_jewellery_items'] = (int) ($jewelleryActivityByParty[$partyId] ?? 0);
     $party['_duplicate'] = isset($duplicatePartyIds[$partyId]);
     $party['_link_status'] = $receivableLinked && $payableLinked ? 'linked' : 'unlinked';
@@ -705,12 +914,20 @@ if (
             'credit_limit' => 0.0,
             'ledger_id' => 0,
             'payable_ledger_id' => 0,
+            'advance_ledger_id' => 0,
+            'supplier_advance_ledger_id' => 0,
             'ledger_code' => null,
             'ledger_name' => null,
             'payable_ledger_code' => null,
             'payable_ledger_name' => null,
+            'advance_ledger_code' => null,
+            'advance_ledger_name' => null,
+            'supplier_advance_ledger_code' => null,
+            'supplier_advance_ledger_name' => null,
             '_receivable_balance' => 0.0,
             '_payable_balance' => 0.0,
+            '_advance_balance' => 0.0,
+            '_supplier_advance_balance' => 0.0,
             '_net_balance' => 0.0,
             '_jewellery_items' => 0,
             '_duplicate' => false,
@@ -857,6 +1074,83 @@ $document['party_link_status'] = $document['party_id'] > 0 ? 'linked' : 'unlinke
 }
 unset($document);
 
+// Sales posted by jewellery, hospitality, or the manual voucher desk belong in
+// the same register. Task-invoice vouchers are excluded because their richer
+// invoice rows are already present above. Direct hospitality day sheets remain
+// visible as company sales even when they correctly have no customer party.
+if (table_exists('vouchers')) {
+    $jewellerySaleJoin = table_exists('jewellery_sales')
+        ? " LEFT JOIN jewellery_sales js ON v.source_type = 'jewellery_sale' AND js.id = v.source_id AND js.company_id = v.company_id "
+        : '';
+    $jewelleryAdvanceAmount = table_exists('jewellery_sales') && column_exists('jewellery_sales', 'advance_amount')
+        ? 'COALESCE(js.advance_amount, 0)'
+        : '0';
+    $jewelleryPaidSelect = table_exists('jewellery_sales')
+        ? ', (COALESCE(js.received_amount, 0) + COALESCE(js.exchange_amount, 0) + ' . $jewelleryAdvanceAmount . ') AS module_paid_amount, js.balance_amount AS module_outstanding_amount'
+        : ', NULL AS module_paid_amount, NULL AS module_outstanding_amount';
+    $moduleSalesSql = "SELECT v.*, ap.name AS party_name, ap.code AS party_code
+            {$jewelleryPaidSelect}
+        FROM vouchers v
+        LEFT JOIN accounting_parties ap ON ap.id = v.party_id AND ap.company_id = v.company_id
+        {$jewellerySaleJoin}
+        WHERE v.company_id = :company_id AND v.status = 'posted' AND v.voucher_type = 'sales'
+          AND COALESCE(v.source_type, '') <> 'task_invoice'
+          AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :from_date AND :to_date";
+    $moduleSalesParams = ['company_id' => $companyId, 'from_date' => $fromDate, 'to_date' => $toDate];
+    if ($searchQuery !== '') {
+        $moduleSalesSql .= ' AND (v.voucher_no LIKE :search OR ap.name LIKE :search2 OR v.reference_no LIKE :search3 OR v.narration LIKE :search4)';
+        $moduleLike = '%' . $searchQuery . '%';
+        $moduleSalesParams += ['search' => $moduleLike, 'search2' => $moduleLike, 'search3' => $moduleLike, 'search4' => $moduleLike];
+    }
+    $moduleSalesSql .= ' ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) DESC, v.id DESC LIMIT 500';
+    $moduleSalesStmt = db()->prepare($moduleSalesSql);
+    $moduleSalesStmt->execute($moduleSalesParams);
+    foreach ($moduleSalesStmt->fetchAll(PDO::FETCH_ASSOC) as $moduleSale) {
+        $saleDate = (string) (($moduleSale['voucher_date'] ?? '') ?: date('Y-m-d', strtotime((string) $moduleSale['created_at'])));
+        $modulePaid = $moduleSale['module_paid_amount'] !== null ? (float) $moduleSale['module_paid_amount'] : null;
+        $moduleOutstanding = $moduleSale['module_outstanding_amount'] !== null ? (float) $moduleSale['module_outstanding_amount'] : null;
+        $sourceType = (string) ($moduleSale['source_type'] ?? '');
+        $displayType = match ($sourceType) {
+            'jewellery_sale' => 'Jewellery Sale',
+            'hospitality_sales_upload' => 'Hospitality Sales',
+            default => 'Accounting Sale',
+        };
+        $documents[] = [
+            'id' => (int) $moduleSale['id'],
+            'voucher_id' => (int) $moduleSale['id'],
+            'record_kind' => 'voucher',
+            'voucher_no' => (string) $moduleSale['voucher_no'],
+            'party_id' => (int) ($moduleSale['party_id'] ?? 0),
+            'party_name' => (string) (($moduleSale['party_name'] ?? '') ?: 'Direct entry'),
+            'party_code' => (string) ($moduleSale['party_code'] ?? ''),
+            'display_type' => $displayType,
+            'invoice_date' => date('d M Y', strtotime($saleDate)),
+            'issued_raw' => $saleDate,
+            'due_date' => '—',
+            'total_amount' => (float) $moduleSale['total_amount'],
+            'paid_amount' => $modulePaid,
+            'outstanding_amount' => $moduleOutstanding,
+            'display_status' => $moduleOutstanding !== null
+                ? ($moduleOutstanding <= 0.004 ? 'Paid' : 'Open')
+                : 'Posted',
+            'document_url' => url('admin/voucher-form.php?edit=' . (int) $moduleSale['id']),
+            'party_link_status' => (int) ($moduleSale['party_id'] ?? 0) > 0 ? 'linked' : 'direct',
+            'opening_balance' => $moduleOutstanding ?? 0.0,
+        ];
+        $summary['sales'] += (float) $moduleSale['total_amount'];
+        if (new DateTimeImmutable($saleDate) >= $monthStart) {
+            $summary['month_sales'] += (float) $moduleSale['total_amount'];
+        }
+        if ($modulePaid !== null) {
+            $summary['paid'] += $modulePaid;
+        }
+        if ($moduleOutstanding !== null) {
+            $summary['receivables'] += max(0.0, $moduleOutstanding);
+        }
+    }
+    usort($documents, static fn (array $left, array $right): int => strcmp((string) ($right['issued_raw'] ?? ''), (string) ($left['issued_raw'] ?? '')));
+}
+
 // ---------------------------------------------------------------------------
 // Data: purchase bills and supplier payments (vouchers), collections.
 // ---------------------------------------------------------------------------
@@ -867,13 +1161,25 @@ if (table_exists('vouchers')) {
         SELECT v.*, ap.name AS party_name, ap.code AS party_code
         FROM vouchers v
         LEFT JOIN accounting_parties ap ON ap.id = v.party_id
-        WHERE v.company_id = :company_id AND v.status = "posted" AND v.voucher_type = :voucher_type
+        WHERE v.company_id = :company_id AND v.status = "posted"
           AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :from_date AND :to_date
     ';
     $voucherParamsBase = ['company_id' => $companyId, 'from_date' => $fromDate, 'to_date' => $toDate];
     foreach (['purchase' => 'purchaseBills', 'payment' => 'supplierPayments'] as $voucherType => $target) {
         $sql = $voucherSql;
         $voucherParams = $voucherParamsBase + ['voucher_type' => $voucherType];
+        if ($voucherType === 'purchase') {
+            // Fixed-asset purchases are correctly posted as journals, but a
+            // credit acquisition still belongs in this supplier register.
+            $sql .= " AND (v.voucher_type = :voucher_type OR v.source_type = 'fixed_asset_acquisition')";
+        } else {
+            $sql .= ' AND v.voucher_type = :voucher_type';
+        }
+        if ($voucherType === 'payment') {
+            // An advance remains an asset until it is deliberately applied to
+            // a purchase. It must not silently settle old purchase bills.
+            $sql .= " AND COALESCE(v.source_type, '') <> 'supplier_advance'";
+        }
         if ($searchQuery !== '') {
             $sql .= ' AND (v.voucher_no LIKE :search OR ap.name LIKE :search2 OR v.reference_no LIKE :search3)';
             $like = '%' . $searchQuery . '%';
@@ -962,49 +1268,106 @@ if (!$selectedParty && $documents !== []) {
 
 $partyTransactions = array_values(array_filter($documents, static fn (array $document): bool => (int) ($document['party_id'] ?? 0) === (int) ($selectedParty['id'] ?? 0)));
 
-// Running-balance ledger for the selected party: invoices debit, collections credit,
-// purchase bills credit, supplier payments debit.
+// The Party Ledger must be the books, not a reconstruction from invoice totals.
+// Read the posted entries on all four ledgers linked to this party so advances,
+// journals and settlements appear exactly as they were posted.
 $partyLedgerRows = [];
-if ($selectedParty) {
-    // The ledger/statement opens with the party's master opening balance —
-    // previously the closing figure ignored it entirely.
-    $partyOpening = round((float) ($selectedParty['opening_balance'] ?? 0), 2);
-    if (abs($partyOpening) > 0.004) {
+if ($selectedParty && table_exists('vouchers') && table_exists('voucher_entries')) {
+    $selectedLedgerIds = [];
+    foreach ($directoryLedgerColumns as $ledgerColumn) {
+        $selectedLedgerId = (int) ($selectedParty[$ledgerColumn] ?? 0);
+        if ($selectedLedgerId > 0) {
+            $selectedLedgerIds[$selectedLedgerId] = $selectedLedgerId;
+        }
+    }
+    $selectedLedgerIds = array_values($selectedLedgerIds);
+
+    if ($selectedLedgerIds !== []) {
+        $partyLedgerPlaceholders = implode(',', array_fill(0, count($selectedLedgerIds), '?'));
+        $openingStmt = db()->prepare("
+            SELECT COALESCE(SUM(CASE
+                       WHEN ve.entry_type = 'debit' THEN ve.amount
+                       ELSE -ve.amount
+                   END), 0)
+            FROM voucher_entries ve
+            INNER JOIN vouchers v ON v.id = ve.voucher_id
+            INNER JOIN ledgers l ON l.id = ve.ledger_id AND l.company_id = v.company_id
+            LEFT JOIN ledger_groups g ON g.id = l.group_id AND g.company_id = l.company_id
+            WHERE v.company_id = ?
+              AND v.status = 'posted'
+              AND v.voucher_date < ?
+              AND (ve.ledger_id IN ($partyLedgerPlaceholders)
+                   OR (v.party_id = ? AND ((l.is_system = 1 AND l.code IN ('AR', 'AP', 'CUST-ADV'))
+                       OR g.party_role IN ('customer_receivable', 'supplier_payable', 'customer_advance', 'supplier_advance'))))
+        ");
+        $openingStmt->execute(array_merge([$companyId, $fromDate], $selectedLedgerIds, [(int) $selectedParty['id']]));
+        $broughtForward = round((float) $openingStmt->fetchColumn(), 2);
+
+        if (abs($broughtForward) > 0.004) {
+            $partyLedgerRows[] = [
+                'date' => $fromDate,
+                'ref' => 'B/F',
+                'label' => 'Balance brought forward',
+                'debit' => $broughtForward > 0 ? $broughtForward : 0.0,
+                'credit' => $broughtForward < 0 ? abs($broughtForward) : 0.0,
+            ];
+        }
+
+        $partyEntryStmt = db()->prepare("
+            SELECT v.voucher_date AS entry_date,
+                   v.voucher_no,
+                   l.code AS ledger_code,
+                   l.name AS ledger_name,
+                   COALESCE(NULLIF(ve.memo, ''), NULLIF(v.narration, ''), l.name) AS particulars,
+                   CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE 0 END AS debit,
+                   CASE WHEN ve.entry_type = 'credit' THEN ve.amount ELSE 0 END AS credit
+            FROM voucher_entries ve
+            INNER JOIN vouchers v ON v.id = ve.voucher_id
+            INNER JOIN ledgers l ON l.id = ve.ledger_id AND l.company_id = v.company_id
+            LEFT JOIN ledger_groups g ON g.id = l.group_id AND g.company_id = l.company_id
+            WHERE v.company_id = ?
+              AND v.status = 'posted'
+              AND v.voucher_date BETWEEN ? AND ?
+              AND (ve.ledger_id IN ($partyLedgerPlaceholders)
+                   OR (v.party_id = ? AND ((l.is_system = 1 AND l.code IN ('AR', 'AP', 'CUST-ADV'))
+                       OR g.party_role IN ('customer_receivable', 'supplier_payable', 'customer_advance', 'supplier_advance'))))
+            ORDER BY v.voucher_date ASC, v.id ASC, ve.id ASC
+        ");
+        $partyEntryStmt->execute(array_merge([$companyId, $fromDate, $toDate], $selectedLedgerIds, [(int) $selectedParty['id']]));
+        foreach ($partyEntryStmt->fetchAll(PDO::FETCH_ASSOC) as $entryRow) {
+            $partyLedgerRows[] = [
+                'date' => (string) $entryRow['entry_date'],
+                'ref' => (string) $entryRow['voucher_no'],
+                'label' => (string) $entryRow['ledger_code'] . ' · ' . (string) $entryRow['particulars'],
+                'debit' => (float) $entryRow['debit'],
+                'credit' => (float) $entryRow['credit'],
+            ];
+        }
+    }
+
+    $running = 0.0;
+    foreach ($partyLedgerRows as &$ledgerRow) {
+        $running = round($running + (float) $ledgerRow['debit'] - (float) $ledgerRow['credit'], 2);
+        $ledgerRow['balance'] = $running;
+    }
+    unset($ledgerRow);
+}
+
+// A legacy master balance may pre-date voucher posting. Keep it visible only
+// when there are no posted rows at all, avoiding a duplicate opening balance.
+if ($selectedParty && $partyLedgerRows === []) {
+    $legacyOpening = round((float) ($selectedParty['opening_balance'] ?? 0), 2);
+    if (abs($legacyOpening) > 0.004) {
         $openingSide = (string) ($selectedParty['opening_balance_type'] ?? 'debit');
         $partyLedgerRows[] = [
             'date' => $fromDate,
             'ref' => 'OPENING',
-            'label' => 'Opening balance',
-            'debit' => $openingSide === 'debit' ? $partyOpening : 0.0,
-            'credit' => $openingSide === 'credit' ? $partyOpening : 0.0,
+            'label' => 'Legacy opening balance',
+            'debit' => $openingSide === 'debit' ? $legacyOpening : 0.0,
+            'credit' => $openingSide === 'credit' ? $legacyOpening : 0.0,
+            'balance' => $openingSide === 'debit' ? $legacyOpening : -$legacyOpening,
         ];
     }
-    foreach ($partyTransactions as $row) {
-        if ((string) ($row['status'] ?? '') === 'draft') {
-            continue; // Drafts are not receivables — keep them off the statement.
-        }
-        $partyLedgerRows[] = ['date' => $row['issued_raw'], 'ref' => $row['voucher_no'], 'label' => $row['display_type'], 'debit' => (float) $row['total_amount'], 'credit' => 0.0];
-        if ((float) $row['paid_amount'] > 0) {
-            $partyLedgerRows[] = ['date' => $row['issued_raw'], 'ref' => $row['voucher_no'], 'label' => 'Payment received', 'debit' => 0.0, 'credit' => (float) $row['paid_amount']];
-        }
-    }
-    foreach ($purchaseBills as $bill) {
-        if ((int) ($bill['party_id'] ?? 0) === (int) $selectedParty['id']) {
-            $partyLedgerRows[] = ['date' => (string) ($bill['voucher_date'] ?: date('Y-m-d')), 'ref' => $bill['voucher_no'], 'label' => 'Purchase bill', 'debit' => 0.0, 'credit' => (float) $bill['total_amount']];
-        }
-    }
-    foreach ($supplierPayments as $payment) {
-        if ((int) ($payment['party_id'] ?? 0) === (int) $selectedParty['id']) {
-            $partyLedgerRows[] = ['date' => (string) ($payment['voucher_date'] ?: date('Y-m-d')), 'ref' => $payment['voucher_no'], 'label' => 'Payment made', 'debit' => (float) $payment['total_amount'], 'credit' => 0.0];
-        }
-    }
-    usort($partyLedgerRows, static fn (array $a, array $b): int => strcmp($a['date'], $b['date']));
-    $running = 0.0;
-    foreach ($partyLedgerRows as &$ledgerRow) {
-        $running += $ledgerRow['debit'] - $ledgerRow['credit'];
-        $ledgerRow['balance'] = $running;
-    }
-    unset($ledgerRow);
 }
 
 $collectionEfficiency = ($summary['paid'] + $summary['receivables']) > 0 ? round(($summary['paid'] / ($summary['paid'] + $summary['receivables'])) * 100, 1) : 0.0;
@@ -1082,6 +1445,8 @@ $tabLinks = [
     'directory' => ['All Parties', parties_page_url(['tab' => 'directory', 'type' => null, 'page' => null])],
     'customers' => ['Customers', parties_page_url(['tab' => 'customers', 'type' => null, 'page' => null])],
     'suppliers' => ['Suppliers', parties_page_url(['tab' => 'suppliers', 'type' => null, 'page' => null])],
+    'sales' => ['Sales & Invoices', parties_page_url(['tab' => 'sales', 'type' => null, 'page' => null])],
+    'purchases' => ['Purchases & Payments', parties_page_url(['tab' => 'purchases', 'type' => null, 'page' => null])],
     'unlinked' => ['Unlinked Review', parties_page_url(['tab' => 'unlinked', 'type' => null, 'page' => null])],
 ];
 
@@ -1383,7 +1748,16 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
             <label>Name<input type="text" name="name" maxlength="190" value="<?= e($editParty['name'] ?? '') ?>" required></label>
             <label>Type<select name="party_type"><?php foreach ($partyTypes as $type): ?><option value="<?= e($type) ?>" <?= $partyFormType === $type ? 'selected' : '' ?>><?= e(ucfirst($type)) ?></option><?php endforeach; ?></select></label>
             <label>Status<select name="status"><?php foreach ($statuses as $statusOption): ?><option value="<?= e($statusOption) ?>" <?= ($editParty['status'] ?? 'active') === $statusOption ? 'selected' : '' ?>><?= e(ucfirst($statusOption)) ?></option><?php endforeach; ?></select></label>
-            <label>Linked ledger<select name="ledger_id"><option value="0">No linked ledger</option><?php foreach ($ledgers as $ledger): ?><option value="<?= e((int) $ledger['id']) ?>" <?= (int) ($editParty['ledger_id'] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Receivable ledger<select name="ledger_id"><option value="0">Create or use the party receivable</option><?php foreach ($receivableLedgers as $ledger): ?><option value="<?= e((int) $ledger['id']) ?>" <?= (int) ($editParty['ledger_id'] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option><?php endforeach; ?></select></label>
+            <?php if ($hasPayableLedgerLink): ?>
+                <label>Payable ledger<select name="payable_ledger_id"><option value="0">Create or use the party payable</option><?php foreach ($payableLedgers as $ledger): ?><option value="<?= e((int) $ledger['id']) ?>" <?= (int) ($editParty['payable_ledger_id'] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option><?php endforeach; ?></select></label>
+            <?php endif; ?>
+            <?php if ($hasAdvanceLedgerLink): ?>
+                <label>Customer advance ledger<select name="advance_ledger_id"><option value="0">Create when an advance is received</option><?php foreach ($customerAdvanceLedgers as $ledger): ?><option value="<?= e((int) $ledger['id']) ?>" <?= (int) ($editParty['advance_ledger_id'] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option><?php endforeach; ?></select></label>
+            <?php endif; ?>
+            <?php if ($hasSupplierAdvanceLedgerLink): ?>
+                <label>Supplier advance ledger<select name="supplier_advance_ledger_id"><option value="0">Create when an advance is paid</option><?php foreach ($supplierAdvanceLedgers as $ledger): ?><option value="<?= e((int) $ledger['id']) ?>" <?= (int) ($editParty['supplier_advance_ledger_id'] ?? 0) === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option><?php endforeach; ?></select></label>
+            <?php endif; ?>
             <?php if ($partyClientOptions !== []): ?>
                 <label>Client portal link<select name="client_profile_id"><option value="0">Not a portal client</option><?php foreach ($partyClientOptions as $partyClientOption): ?><option value="<?= e((int) $partyClientOption['id']) ?>" <?= (int) ($editParty['client_profile_id'] ?? $partyPrefillClientId) === (int) $partyClientOption['id'] ? 'selected' : '' ?>><?= e($partyClientOption['organization_name'] . (!empty($partyClientOption['client_code']) ? ' (' . $partyClientOption['client_code'] . ')' : '')) ?></option><?php endforeach; ?></select></label>
             <?php endif; ?>
@@ -1480,6 +1854,7 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
                     </select>
                 </label>
                 <label>Amount paid<input type="number" step="0.01" min="0.01" name="amount" required></label>
+                <label>Purpose<select name="payment_kind"><option value="settlement">Settle purchase payable</option><option value="advance">Advance to supplier / fixed-asset supplier</option></select></label>
                 <label>Paid on<input type="date" name="paid_on" value="<?= e(date('Y-m-d')) ?>"></label>
                 <label>Reference<input type="text" name="reference_no" maxlength="120" placeholder="Cheque / transfer reference"></label>
                 <label class="span-2">Notes<textarea name="notes"></textarea></label>
@@ -1516,8 +1891,8 @@ $tabHeadings = [
     'customers' => 'Customers',
     'suppliers' => 'Suppliers',
     'unlinked' => 'Unlinked Review',
-    'sales' => 'Sales Invoices',
-    'purchases' => 'Purchase Bills',
+    'sales' => 'Sales & Invoices',
+    'purchases' => 'Purchases & Payments',
 ];
 ?>
 <?php if ($tab !== 'aging'): ?>
@@ -1545,17 +1920,17 @@ $tabHeadings = [
                     <?php if ($pagedRows === []): ?><tr><td colspan="11">No invoices match the current filters.</td></tr><?php endif; ?>
                     <?php foreach ($pagedRows as $document): ?>
                         <tr>
-                            <td><input type="checkbox" class="invoice-check" value="<?= e((int) $document['id']) ?>" aria-label="Select <?= e($document['voucher_no']) ?>"></td>
-                            <td><a class="reference-link" href="<?= e(parties_page_url(['party_id' => (int) ($document['party_id'] ?? 0)])) ?>"><?= e($document['voucher_no']) ?></a></td>
+                            <td><?php if (($document['record_kind'] ?? 'invoice') === 'invoice'): ?><input type="checkbox" class="invoice-check" value="<?= e((int) $document['id']) ?>" aria-label="Select <?= e($document['voucher_no']) ?>"><?php else: ?>—<?php endif; ?></td>
+                            <td><a class="reference-link" href="<?= e(($document['record_kind'] ?? 'invoice') === 'voucher' ? (string) $document['document_url'] : parties_page_url(['party_id' => (int) ($document['party_id'] ?? 0)])) ?>"><?= e($document['voucher_no']) ?></a></td>
                             <td><?= e($document['party_name'] ?: 'Direct entry') ?></td>
                             <td><span class="mbw-pill tone-blue"><?= e($document['display_type']) ?></span></td>
                             <td><?= e($document['invoice_date']) ?></td>
                             <td class="<?= $document['display_status'] === 'Overdue' ? 'text-danger' : '' ?>"><?= e($document['due_date']) ?></td>
                             <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['total_amount'], 2)) ?></td>
-                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['paid_amount'], 2)) ?></td>
-                            <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $document['outstanding_amount'], 2)) ?></td>
+                            <td class="is-numeric"><?= $document['paid_amount'] !== null ? e(site_currency_symbol()) . e(number_format((float) $document['paid_amount'], 2)) : '—' ?></td>
+                            <td class="is-numeric"><?= $document['outstanding_amount'] !== null ? e(site_currency_symbol()) . e(number_format((float) $document['outstanding_amount'], 2)) : 'See ledger' ?></td>
                             <td><span class="mbw-pill tone-<?= e($statusPillTone((string) $document['display_status'])) ?>"><?= e($document['display_status']) ?></span></td>
-                            <td><div class="reference-row-actions"><a href="<?= e(parties_page_url(['party_id' => (int) ($document['party_id'] ?? 0), 'ptab' => 'ledger'])) ?>" title="View ledger"><?= icon('portal') ?></a><a href="<?= e(url('admin/export-invoice.php?id=' . (int) $document['id'])) ?>" title="Export invoice"><?= icon('documents') ?></a></div></td>
+                            <td><div class="reference-row-actions"><?php if ((int) ($document['party_id'] ?? 0) > 0): ?><a href="<?= e(parties_page_url(['party_id' => (int) $document['party_id'], 'ptab' => 'ledger'])) ?>" title="View party ledger"><?= icon('portal') ?></a><?php endif; ?><?php if (($document['record_kind'] ?? 'invoice') === 'voucher'): ?><a href="<?= e((string) $document['document_url']) ?>" title="Open voucher"><?= icon('journal') ?></a><?php else: ?><a href="<?= e(url('admin/export-invoice.php?id=' . (int) $document['id'])) ?>" title="Export invoice"><?= icon('documents') ?></a><?php endif; ?></div></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -1565,14 +1940,15 @@ $tabHeadings = [
             <div style="overflow-x:auto">
             <table class="reference-table">
                 <thead>
-                    <tr><th>Bill No.</th><th>Supplier</th><th>Bill Date</th><th>Reference</th><th class="is-numeric">Amount</th><th class="is-numeric">Outstanding</th><th>Narration</th><th>Actions</th></tr>
+                    <tr><th>Bill No.</th><th>Supplier</th><th>Source</th><th>Bill Date</th><th>Reference</th><th class="is-numeric">Amount</th><th class="is-numeric">Outstanding</th><th>Narration</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
-                    <?php if ($pagedRows === []): ?><tr><td colspan="8">No purchase bills recorded yet. Use Record Purchase to add one.</td></tr><?php endif; ?>
+                    <?php if ($pagedRows === []): ?><tr><td colspan="9">No purchase bills recorded yet. Use Record Purchase to add one.</td></tr><?php endif; ?>
                     <?php foreach ($pagedRows as $bill): ?>
                         <tr>
                             <td><a class="reference-link" href="<?= e(url('admin/voucher-form.php?edit=' . (int) $bill['id'])) ?>"><?= e($bill['voucher_no']) ?></a></td>
                             <td><?= e($bill['party_name'] ?: 'Direct entry') ?></td>
+                            <td><span class="mbw-pill tone-blue"><?= e(match ((string) ($bill['source_type'] ?? '')) { 'jewellery_purchase' => 'Jewellery', 'fixed_asset_acquisition', 'fixed_asset_cost' => 'Fixed Assets', default => 'Accounting' }) ?></span></td>
                             <td><?= e(date('d M Y', strtotime((string) ($bill['voucher_date'] ?: $bill['created_at'])))) ?></td>
                             <td><?= e($bill['reference_no'] ?? '-') ?></td>
                             <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $bill['total_amount'], 2)) ?></td>
@@ -1594,6 +1970,7 @@ $tabHeadings = [
                             <th>Contact / PAN</th>
                             <th>Receivable Ledger</th>
                             <th>Payable Ledger</th>
+                            <th>Advance Ledgers</th>
                             <th>Jewellery Activity</th>
                             <th class="is-numeric">Outstanding</th>
                             <th>Link Status</th>
@@ -1603,7 +1980,7 @@ $tabHeadings = [
                     <tbody>
                         <?php if ($pagedRows === []): ?>
                             <tr>
-                                <td colspan="9">No party records match the current filters.</td>
+                                <td colspan="10">No party records match the current filters.</td>
                             </tr>
                         <?php endif; ?>
 
@@ -1687,6 +2064,28 @@ $tabHeadings = [
                                             <?= (float) ($party['_payable_balance'] ?? 0) > 0 ? 'Dr' : ((float) ($party['_payable_balance'] ?? 0) < 0 ? 'Cr' : '') ?>
                                         </small>
                                     <?php else: ?>
+                                        <span class="party-directory-empty">—</span>
+                                    <?php endif; ?>
+                                </td>
+
+                                <td>
+                                    <?php if (!empty($party['advance_ledger_code'])): ?>
+                                        <strong>From customer · <?= e($party['advance_ledger_code']) ?></strong>
+                                        <small class="party-directory-subtext">
+                                            Balance:
+                                            <?= e(site_currency_symbol()) ?><?= e(number_format(abs((float) ($party['_advance_balance'] ?? 0)), 2)) ?>
+                                            <?= (float) ($party['_advance_balance'] ?? 0) > 0 ? 'Dr' : ((float) ($party['_advance_balance'] ?? 0) < 0 ? 'Cr' : '') ?>
+                                        </small>
+                                    <?php endif; ?>
+                                    <?php if (!empty($party['supplier_advance_ledger_code'])): ?>
+                                        <strong>To supplier · <?= e($party['supplier_advance_ledger_code']) ?></strong>
+                                        <small class="party-directory-subtext">
+                                            Balance:
+                                            <?= e(site_currency_symbol()) ?><?= e(number_format(abs((float) ($party['_supplier_advance_balance'] ?? 0)), 2)) ?>
+                                            <?= (float) ($party['_supplier_advance_balance'] ?? 0) > 0 ? 'Dr' : ((float) ($party['_supplier_advance_balance'] ?? 0) < 0 ? 'Cr' : '') ?>
+                                        </small>
+                                    <?php endif; ?>
+                                    <?php if (empty($party['advance_ledger_code']) && empty($party['supplier_advance_ledger_code'])): ?>
                                         <span class="party-directory-empty">—</span>
                                     <?php endif; ?>
                                 </td>
@@ -1817,7 +2216,9 @@ $tabHeadings = [
                     static fn (array $payment): float => (int) ($payment['party_id'] ?? 0) === (int) $selectedParty['id'] ? (float) $payment['total_amount'] : 0.0,
                     $supplierPayments
                 ));
-                $partyBalance = (float) (end($partyLedgerRows)['balance'] ?? $selectedParty['opening_balance']);
+                $partyBalance = (float) ($selectedParty['_net_balance'] ?? (end($partyLedgerRows)['balance'] ?? $selectedParty['opening_balance']));
+                $partyAdvanceBalance = (float) ($selectedParty['_advance_balance'] ?? 0);
+                $supplierAdvanceBalance = (float) ($selectedParty['_supplier_advance_balance'] ?? 0);
                 ?>
                 <section>
                     <h4>Financial Details</h4>
@@ -1826,9 +2227,9 @@ $tabHeadings = [
                 <section>
                     <h4 id="party-ledger">Account Summary <a href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) $selectedParty['id']])) ?>">View Ledger</a></h4>
                     <?php if ($isSupplierParty): ?>
-                        <dl><dt>Total Purchases</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format($partyBillTotal, 2)) ?></dd><dt>Payments Made</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format($partyPaymentsMade, 2)) ?></dd><dt>Payable Outstanding</dt><dd class="<?= $partyBillOutstanding > 0 ? 'text-danger' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format($partyBillOutstanding, 2)) ?></dd><dt>Last Bill</dt><dd><?= e($partyBills !== [] ? date('d M Y', strtotime((string) ($partyBills[0]['voucher_date'] ?: $partyBills[0]['created_at']))) : '-') ?></dd></dl>
+                        <dl><dt>Total Purchases</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format($partyBillTotal, 2)) ?></dd><dt>Payments Made</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format($partyPaymentsMade, 2)) ?></dd><dt>Payable Outstanding</dt><dd class="<?= $partyBillOutstanding > 0 ? 'text-danger' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format($partyBillOutstanding, 2)) ?></dd><dt>Advance Paid</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(abs($supplierAdvanceBalance), 2)) ?><?= $supplierAdvanceBalance > 0 ? ' Dr' : ($supplierAdvanceBalance < 0 ? ' Cr' : '') ?></dd><dt>Last Bill</dt><dd><?= e($partyBills !== [] ? date('d M Y', strtotime((string) ($partyBills[0]['voucher_date'] ?: $partyBills[0]['created_at']))) : '-') ?></dd></dl>
                     <?php else: ?>
-                        <dl><dt>Total Sales</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['total_amount'], $partyTransactions)), 2)) ?></dd><dt>Payments Received</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['paid_amount'], $partyTransactions)), 2)) ?></dd><dt>Outstanding</dt><dd class="text-danger"><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['outstanding_amount'], $partyTransactions)), 2)) ?></dd><dt>Last Invoice</dt><dd><?= e($partyTransactions[0]['invoice_date'] ?? '-') ?></dd></dl>
+                        <dl><dt>Total Sales</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['total_amount'], $partyTransactions)), 2)) ?></dd><dt>Payments Received</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['paid_amount'], $partyTransactions)), 2)) ?></dd><dt>Invoice Outstanding</dt><dd class="text-danger"><?= e(site_currency_symbol()) ?><?= e(number_format(array_sum(array_map(static fn (array $row): float => (float) $row['outstanding_amount'], $partyTransactions)), 2)) ?></dd><dt>Advance Held</dt><dd><?= e(site_currency_symbol()) ?><?= e(number_format(abs($partyAdvanceBalance), 2)) ?><?= $partyAdvanceBalance < 0 ? ' Cr' : ($partyAdvanceBalance > 0 ? ' Dr' : '') ?></dd><dt>Last Invoice</dt><dd><?= e($partyTransactions[0]['invoice_date'] ?? '-') ?></dd></dl>
                     <?php endif; ?>
                 </section>
             <?php elseif ($ptab === 'ledger'): ?>
@@ -1838,12 +2239,13 @@ $tabHeadings = [
                         <p class="muted">No transactions for this party in the selected period.</p>
                     <?php else: ?>
                         <table class="party-ledger-table">
-                            <thead><tr><th>Date</th><th>Ref</th><th>Dr</th><th>Cr</th><th>Balance</th></tr></thead>
+                            <thead><tr><th>Date</th><th>Ref</th><th>Particulars</th><th>Dr</th><th>Cr</th><th>Balance</th></tr></thead>
                             <tbody>
                                 <?php foreach ($partyLedgerRows as $ledgerRow): ?>
                                     <tr>
                                         <td><?= e(date('d M', strtotime($ledgerRow['date']))) ?></td>
-                                        <td title="<?= e($ledgerRow['label']) ?>"><?= e($ledgerRow['ref']) ?></td>
+                                        <td><?= e($ledgerRow['ref']) ?></td>
+                                        <td><?= e($ledgerRow['label']) ?></td>
                                         <td><?= $ledgerRow['debit'] > 0 ? e(number_format($ledgerRow['debit'], 0)) : '-' ?></td>
                                         <td><?= $ledgerRow['credit'] > 0 ? e(number_format($ledgerRow['credit'], 0)) : '-' ?></td>
                                         <td><?= e(number_format($ledgerRow['balance'], 0)) ?></td>
@@ -1862,7 +2264,7 @@ $tabHeadings = [
                         <ul class="party-document-list">
                             <?php foreach (array_slice($partyTransactions, 0, 12) as $row): ?>
                                 <li>
-                                    <a class="reference-link" href="<?= e(url('admin/export-invoice.php?id=' . (int) $row['id'])) ?>"><?= e($row['voucher_no']) ?></a>
+                                    <a class="reference-link" href="<?= e(($row['record_kind'] ?? 'invoice') === 'voucher' ? (string) $row['document_url'] : url('admin/export-invoice.php?id=' . (int) $row['id'])) ?>"><?= e($row['voucher_no']) ?></a>
                                     <span><?= e($row['invoice_date']) ?> · <?= e(site_currency_symbol()) ?><?= e(number_format((float) $row['total_amount'], 2)) ?></span>
                                     <span class="mbw-pill tone-<?= e($statusPillTone((string) $row['display_status'])) ?>"><?= e($row['display_status']) ?></span>
                                 </li>

@@ -1,9 +1,12 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
+require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
+
+$repairErrors = accounting_module_repair_database();
 
 $pageTitle = 'Chart Ledgers';
 $pageSubtitle = 'Manage ledger accounts, edit rows, and remove unused ledgers.';
@@ -11,6 +14,7 @@ $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
 $masters = ledger_masters();
+$partyLedgerSync = sync_company_party_ledgers_from_chart($companyId, (int) (current_user()['id'] ?? 0) ?: null);
 $groupsStmt = db()->prepare('SELECT * FROM ledger_groups WHERE company_id = :company_id AND is_active = 1 ORDER BY master_key ASC, name ASC');
 $groupsStmt->execute(['company_id' => $companyId]);
 $groups = $groupsStmt->fetchAll();
@@ -23,13 +27,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ledgerId = (int) ($_POST['ledger_id'] ?? 0);
         $name = trim((string) ($_POST['name'] ?? ''));
         $groupId = (int) ($_POST['group_id'] ?? 0);
-        $groupStmt = db()->prepare('SELECT id, master_key FROM ledger_groups WHERE id = :id AND company_id = :company_id AND is_active = 1 LIMIT 1');
+        $groupStmt = db()->prepare('SELECT id, master_key, party_role FROM ledger_groups WHERE id = :id AND company_id = :company_id AND is_active = 1 LIMIT 1');
         $groupStmt->execute(['id' => $groupId, 'company_id' => $companyId]);
         $group = $groupStmt->fetch();
         $ledgerType = $group ? ledger_master_nature((string) $group['master_key']) : null;
         if ($name === '' || !$group || $ledgerType === null) {
             flash('error', 'Name and group are required.');
             redirect('admin/chart-ledgers.php');
+        }
+        if ($ledgerId > 0) {
+            $partyLinkStmt = db()->prepare("SELECT
+                    CASE
+                        WHEN ledger_id = :id1 THEN 'customer_receivable'
+                        WHEN payable_ledger_id = :id2 THEN 'supplier_payable'
+                        WHEN advance_ledger_id = :id3 THEN 'customer_advance'
+                        WHEN supplier_advance_ledger_id = :id4 THEN 'supplier_advance'
+                    END AS linked_role
+                FROM accounting_parties
+                WHERE company_id = :cid
+                  AND (ledger_id = :id5 OR payable_ledger_id = :id6 OR advance_ledger_id = :id7 OR supplier_advance_ledger_id = :id8)
+                LIMIT 1");
+            $partyLinkStmt->execute([
+                'id1' => $ledgerId, 'id2' => $ledgerId, 'id3' => $ledgerId, 'id4' => $ledgerId,
+                'id5' => $ledgerId, 'id6' => $ledgerId, 'id7' => $ledgerId, 'id8' => $ledgerId,
+                'cid' => $companyId,
+            ]);
+            $linkedRole = $partyLinkStmt->fetchColumn() ?: null;
+            if ($linkedRole !== null && (string) ($group['party_role'] ?? '') !== (string) $linkedRole) {
+                flash('error', 'A Party Master ledger cannot be moved outside its canonical group. Change the party relationship instead.');
+                redirect('admin/chart-ledgers.php?edit_id=' . $ledgerId);
+            }
         }
         // Codes follow the structure rules and are never entered manually.
         if ($ledgerId > 0) {
@@ -42,13 +69,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($ledgerId > 0) {
             db()->prepare("UPDATE ledgers SET code = :code, name = :name, group_id = :group_id, type = :type WHERE id = :id AND company_id = :company_id")
                 ->execute(['id' => $ledgerId, 'company_id' => $companyId, 'code' => $code, 'name' => $name, 'group_id' => $groupId, 'type' => $ledgerType]);
-            flash('success', 'Ledger updated.');
         } else {
             db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:company_id, :group_id, :code, :name, :type, 0, 'active')")
                 ->execute(['company_id' => $companyId, 'group_id' => $groupId, 'code' => $code, 'name' => $name, 'type' => $ledgerType]);
             $ledgerId = (int) db()->lastInsertId();
-            flash('success', 'Ledger created.');
         }
+
+        $syncedPartyId = $ledgerId > 0
+            ? sync_party_from_chart_ledger($companyId, $ledgerId, (int) (current_user()['id'] ?? 0) ?: null)
+            : 0;
+        flash('success', $syncedPartyId > 0
+            ? 'Ledger saved and synchronized with Party Master.'
+            : 'Ledger saved.');
 
         // Balance-sheet ledgers (asset/liability/equity) can carry an opening
         // balance, journalled once against Opening Balance Adjustments and
@@ -75,6 +107,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('accounting', 'edit');
         $ledgerId = (int) ($_POST['ledger_id'] ?? 0);
         if ($ledgerId > 0) {
+            $linkedCheck = db()->prepare('SELECT COUNT(*) FROM accounting_parties
+                WHERE company_id = :company_id
+                  AND (ledger_id = :id1 OR payable_ledger_id = :id2 OR advance_ledger_id = :id3 OR supplier_advance_ledger_id = :id4)');
+            $linkedCheck->execute([
+                'company_id' => $companyId,
+                'id1' => $ledgerId,
+                'id2' => $ledgerId,
+                'id3' => $ledgerId,
+                'id4' => $ledgerId,
+            ]);
+            if ((int) $linkedCheck->fetchColumn() > 0) {
+                flash('error', 'This ledger is linked to Party Master and cannot be deleted. Change the party link first so transaction history stays intact.');
+                redirect('admin/chart-ledgers.php');
+            }
             // Never delete a ledger that carries accounting entries — the
             // entries (and the vouchers' balance) must survive. Offer suspend.
             $entryCount = db()->prepare('SELECT COUNT(*) FROM voucher_entries ve JOIN ledgers l ON l.id = ve.ledger_id WHERE ve.ledger_id = :id AND l.company_id = :company_id');
@@ -95,7 +141,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$ledgerStmt = db()->prepare('SELECT l.*, g.name AS group_name, g.master_key FROM ledgers l LEFT JOIN ledger_groups g ON g.id = l.group_id WHERE l.company_id = :company_id ORDER BY l.code ASC');
+$ledgerStmt = db()->prepare('SELECT l.*, g.name AS group_name, g.master_key, g.party_role,
+        ap.id AS party_id, ap.name AS party_name
+    FROM ledgers l
+    LEFT JOIN ledger_groups g ON g.id = l.group_id AND g.company_id = l.company_id
+    LEFT JOIN accounting_parties ap ON ap.company_id = l.company_id
+       AND (ap.ledger_id = l.id OR ap.payable_ledger_id = l.id
+            OR ap.advance_ledger_id = l.id OR ap.supplier_advance_ledger_id = l.id)
+    WHERE l.company_id = :company_id
+    ORDER BY l.code ASC');
 $ledgerStmt->execute(['company_id' => $companyId]);
 $ledgers = $ledgerStmt->fetchAll();
 $editId = (int) ($_GET['edit_id'] ?? 0);
@@ -108,6 +162,9 @@ if ($editId > 0) {
 
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
+<?php if ($repairErrors !== []): ?>
+    <div class="notice error">Accounting repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div>
+<?php endif; ?>
 <section class="mbw-card">
     <div class="mbw-card-head">
         <h2><?= $editLedger ? 'Edit Ledger' : 'Create Ledger' ?></h2>
@@ -127,7 +184,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <select name="group_id" required>
                     <option value="">Select group</option>
                     <?php foreach ($groups as $group): ?>
-                        <option value="<?= e((int) $group['id']) ?>" <?= (int) ($editLedger['group_id'] ?? 0) === (int) $group['id'] ? 'selected' : '' ?>><?= e($masters[$group['master_key']]['label'] ?? $group['master_key']) ?> / <?= e($group['name']) ?></option>
+                        <option value="<?= e((int) $group['id']) ?>" <?= (int) ($editLedger['group_id'] ?? 0) === (int) $group['id'] ? 'selected' : '' ?>><?= e($masters[$group['master_key']]['label'] ?? $group['master_key']) ?> / <?= e($group['name']) ?><?= !empty($group['party_role']) ? ' · Party Master' : '' ?></option>
                     <?php endforeach; ?>
                 </select>
             </label>
@@ -170,14 +227,21 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
     <div style="overflow-x:auto">
     <table>
-        <thead><tr><th>Code</th><th>Name</th><th>Group</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Code</th><th>Name</th><th>Group</th><th>Party Master</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
-            <?php if ($ledgers === []): ?><tr><td colspan="6">No ledgers yet.</td></tr><?php endif; ?>
+            <?php if ($ledgers === []): ?><tr><td colspan="7">No ledgers yet.</td></tr><?php endif; ?>
             <?php foreach ($ledgers as $ledger): ?>
                 <tr>
                     <td><?= e($ledger['code']) ?></td>
                     <td><?= e($ledger['name']) ?></td>
                     <td><?= e($ledger['group_name'] ?? '-') ?></td>
+                    <td>
+                        <?php if ((int) ($ledger['party_id'] ?? 0) > 0): ?>
+                            <a class="reference-link" href="<?= e(url('admin/accounting-parties.php?party_id=' . (int) $ledger['party_id'] . '&ptab=ledger')) ?>"><?= e($ledger['party_name']) ?></a>
+                        <?php elseif (!empty($ledger['party_role']) && (int) ($ledger['is_system'] ?? 0) === 0): ?>
+                            <span class="mbw-pill tone-amber">Review link</span>
+                        <?php else: ?>—<?php endif; ?>
+                    </td>
                     <td><?= e($ledger['type']) ?></td>
                     <td><span class="mbw-pill <?= ($ledger['status'] ?? '') === 'active' ? 'tone-green' : 'tone-red' ?>"><?= e($ledger['status']) ?></span></td>
                     <td>

@@ -2641,55 +2641,174 @@ function get_mapped_ledger(int $companyId, string $mapKey): ?array
 }
 
 /**
- * The Trade Receivables / Trade Payables ledger GROUPS. Receivable and
- * payable balances live in per-party ledgers under these groups; the old
- * generic AR/AP ledgers remain only as a fallback for postings that have
- * no party attached.
+ * The four balance-sheet relationships that can belong to one Party Master.
+ *
+ * They deliberately remain separate ledgers: a receivable is an asset, a
+ * payable is a liability, money received in advance is a liability, and money
+ * paid to a supplier in advance is an asset. `party_role` joins those correct
+ * accounting presentations back to one operational party identity.
  */
-function receivable_payable_group_id(int $companyId, string $side): int
+function party_ledger_role_definitions(): array
 {
-    if ($companyId <= 0 || !table_exists('ledger_groups')) {
+    return [
+        'customer_receivable' => [
+            'column' => 'ledger_id',
+            'group_code' => 'RECEIVABLE',
+            'group_name' => 'Trade Receivables',
+            'master_key' => 'current_asset',
+            'ledger_type' => 'asset',
+            'party_type' => 'customer',
+            'name_prefix' => '',
+            'label' => 'Customer receivable',
+        ],
+        'supplier_payable' => [
+            'column' => 'payable_ledger_id',
+            'group_code' => 'PAYABLE',
+            'group_name' => 'Trade Payables',
+            'master_key' => 'current_liability',
+            'ledger_type' => 'liability',
+            'party_type' => 'supplier',
+            'name_prefix' => '',
+            'label' => 'Supplier payable',
+        ],
+        'customer_advance' => [
+            'column' => 'advance_ledger_id',
+            'group_code' => 'CUSTOMER_ADVANCES',
+            'group_name' => 'Advances from Customers',
+            'master_key' => 'current_liability',
+            'ledger_type' => 'liability',
+            'party_type' => 'customer',
+            'name_prefix' => 'Advance from ',
+            'label' => 'Customer advance',
+        ],
+        'supplier_advance' => [
+            'column' => 'supplier_advance_ledger_id',
+            'group_code' => 'SUPPLIER_ADVANCES',
+            'group_name' => 'Advances to Suppliers',
+            'master_key' => 'current_asset',
+            'ledger_type' => 'asset',
+            'party_type' => 'supplier',
+            'name_prefix' => 'Advance to ',
+            'label' => 'Supplier advance',
+        ],
+    ];
+}
+
+function party_ledger_group_id(int $companyId, string $role): int
+{
+    $definitions = party_ledger_role_definitions();
+    $definition = $definitions[$role] ?? null;
+    if ($companyId <= 0 || !$definition || !table_exists('ledger_groups')) {
         return 0;
     }
-    $code = $side === 'payable' ? 'PAYABLE' : 'RECEIVABLE';
-    $name = $side === 'payable' ? 'Trade Payables' : 'Trade Receivables';
-    $masterKey = $side === 'payable' ? 'current_liability' : 'current_asset';
 
-    // Match by seed code first, then by name + nature: client-books
-    // companies (and structured-code companies) carry the same groups
-    // under generated numeric codes.
-    $stmt = db()->prepare('SELECT id FROM ledger_groups
-        WHERE company_id = :cid AND (code = :code OR (name = :name AND master_key = :master_key))
+    $hasRoleColumn = column_exists('ledger_groups', 'party_role');
+    if ($hasRoleColumn) {
+        $roleStmt = db()->prepare("SELECT id FROM ledger_groups WHERE company_id = :cid AND party_role = :role AND is_active = 1 LIMIT 1");
+        $roleStmt->execute(['cid' => $companyId, 'role' => $role]);
+        $roleId = (int) ($roleStmt->fetchColumn() ?: 0);
+        if ($roleId > 0) {
+            return $roleId;
+        }
+    }
+
+    // Adopt one legacy canonical group rather than creating a duplicate.
+    $legacy = db()->prepare('SELECT id FROM ledger_groups
+        WHERE company_id = :cid
+          AND is_active = 1
+          AND master_key = :master_key
+          AND (code = :code OR LOWER(TRIM(name)) = LOWER(TRIM(:name)))
         ORDER BY (code = :code2) DESC, id ASC
         LIMIT 1');
-    $stmt->execute(['cid' => $companyId, 'code' => $code, 'name' => $name, 'master_key' => $masterKey, 'code2' => $code]);
-    $groupId = (int) ($stmt->fetchColumn() ?: 0);
+    $legacy->execute([
+        'cid' => $companyId,
+        'master_key' => $definition['master_key'],
+        'code' => $definition['group_code'],
+        'name' => $definition['group_name'],
+        'code2' => $definition['group_code'],
+    ]);
+    $groupId = (int) ($legacy->fetchColumn() ?: 0);
     if ($groupId > 0) {
+        if ($hasRoleColumn) {
+            db()->prepare('UPDATE ledger_groups SET party_role = :role WHERE id = :id AND company_id = :cid AND party_role IS NULL')
+                ->execute(['role' => $role, 'id' => $groupId, 'cid' => $companyId]);
+        }
         return $groupId;
     }
-    // Older companies may predate the seeded group structure.
-    db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, :name, :master_key, 0, 1)')
-        ->execute([
-            'cid' => $companyId,
-            'code' => $code,
-            'name' => $name,
-            'master_key' => $masterKey,
-        ]);
+
+    $code = (string) $definition['group_code'];
+    $codeCheck = db()->prepare('SELECT COUNT(*) FROM ledger_groups WHERE company_id = :cid AND code = :code');
+    $codeCheck->execute(['cid' => $companyId, 'code' => $code]);
+    if ((int) $codeCheck->fetchColumn() > 0) {
+        $code = coa_next_group_code($companyId, (string) $definition['master_key']);
+    }
+
+    $roleColumn = $hasRoleColumn ? ', party_role' : '';
+    $roleValue = $hasRoleColumn ? ', :role' : '';
+    $params = [
+        'cid' => $companyId,
+        'code' => $code,
+        'name' => $definition['group_name'],
+        'master_key' => $definition['master_key'],
+    ];
+    if ($hasRoleColumn) {
+        $params['role'] = $role;
+    }
+    db()->prepare('INSERT INTO ledger_groups
+            (company_id, code, name, master_key' . $roleColumn . ', is_cash_or_bank, is_system, is_active)
+        VALUES (:cid, :code, :name, :master_key' . $roleValue . ', 0, 1, 1)')
+        ->execute($params);
+
     return (int) db()->lastInsertId();
 }
 
-/**
- * Finds or creates the party's own ledger under Trade Receivables /
- * Trade Payables, so invoices, receipts, purchase bills, and supplier
- * payments post against the client or supplier by name instead of the
- * generic AR/AP ledger. Returns 0 when it cannot resolve one (callers
- * fall back to the mapped default ledger).
- */
-function ensure_party_ledger(int $companyId, int $partyId, string $side = 'receivable'): int
+function party_ledger_role_for_group(int $companyId, int $groupId): ?string
 {
-    if ($companyId <= 0 || $partyId <= 0 || !table_exists('accounting_parties') || !table_exists('ledgers')) {
+    if ($companyId <= 0 || $groupId <= 0 || !table_exists('ledger_groups')) {
+        return null;
+    }
+
+    $select = column_exists('ledger_groups', 'party_role') ? ', party_role' : '';
+    $stmt = db()->prepare('SELECT code, name, master_key' . $select . ' FROM ledger_groups WHERE id = :id AND company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $groupId, 'cid' => $companyId]);
+    $group = $stmt->fetch();
+    if (!$group) {
+        return null;
+    }
+    if (!empty($group['party_role']) && isset(party_ledger_role_definitions()[(string) $group['party_role']])) {
+        return (string) $group['party_role'];
+    }
+
+    foreach (party_ledger_role_definitions() as $role => $definition) {
+        if ((string) $group['master_key'] === (string) $definition['master_key']
+            && ((string) $group['code'] === (string) $definition['group_code']
+                || strcasecmp(trim((string) $group['name']), (string) $definition['group_name']) === 0)) {
+            return $role;
+        }
+    }
+    return null;
+}
+
+/** Backwards-compatible group resolver used throughout existing postings. */
+function receivable_payable_group_id(int $companyId, string $side): int
+{
+    return party_ledger_group_id($companyId, $side === 'payable' ? 'supplier_payable' : 'customer_receivable');
+}
+
+/**
+ * Resolve one role ledger for one party. Existing posted entries are never
+ * changed. If an explicitly linked ledger has the right accounting nature but
+ * sits in a legacy group, only its group classification is repaired.
+ */
+function ensure_party_role_ledger(int $companyId, int $partyId, string $role): int
+{
+    $definition = party_ledger_role_definitions()[$role] ?? null;
+    if ($companyId <= 0 || $partyId <= 0 || !$definition
+        || !table_exists('accounting_parties') || !table_exists('ledgers')
+        || !column_exists('accounting_parties', (string) $definition['column'])) {
         return 0;
     }
+
     try {
         $partyStmt = db()->prepare('SELECT * FROM accounting_parties WHERE id = :id AND company_id = :cid LIMIT 1');
         $partyStmt->execute(['id' => $partyId, 'cid' => $companyId]);
@@ -2698,30 +2817,48 @@ function ensure_party_ledger(int $companyId, int $partyId, string $side = 'recei
             return 0;
         }
 
-        $hasPayableColumn = column_exists('accounting_parties', 'payable_ledger_id');
-        $column = $side === 'payable' ? ($hasPayableColumn ? 'payable_ledger_id' : null) : 'ledger_id';
-
-        $storedId = $column !== null ? (int) ($party[$column] ?? 0) : 0;
-        if ($storedId > 0) {
-            // Honour a stored/admin-linked ledger only when its nature fits
-            // the side, so a mis-linked cash or revenue ledger can never
-            // receive the receivable/payable leg.
-            $expectedType = $side === 'payable' ? 'liability' : 'asset';
-            $check = db()->prepare("SELECT id FROM ledgers WHERE id = :id AND company_id = :cid AND status = 'active' AND type = :type LIMIT 1");
-            $check->execute(['id' => $storedId, 'cid' => $companyId, 'type' => $expectedType]);
-            if ($check->fetchColumn()) {
-                return $storedId;
-            }
-        }
-
-        $groupId = receivable_payable_group_id($companyId, $side);
+        $groupId = party_ledger_group_id($companyId, $role);
         if ($groupId <= 0) {
             return 0;
         }
 
-        // Reuse a ledger already named after this party under the group.
-        $existing = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND group_id = :gid AND name = :name AND status = 'active' LIMIT 1");
-        $existing->execute(['cid' => $companyId, 'gid' => $groupId, 'name' => (string) $party['name']]);
+        $column = (string) $definition['column'];
+        $storedId = (int) ($party[$column] ?? 0);
+        if ($storedId > 0) {
+            $check = db()->prepare("SELECT id, group_id, code, is_system FROM ledgers WHERE id = :id AND company_id = :cid AND status = 'active' AND type = :type LIMIT 1");
+            $check->execute(['id' => $storedId, 'cid' => $companyId, 'type' => $definition['ledger_type']]);
+            $storedLedger = $check->fetch();
+            $isSharedFallback = $storedLedger
+                && (int) ($storedLedger['is_system'] ?? 0) === 1
+                && in_array((string) ($storedLedger['code'] ?? ''), ['AR', 'AP', 'CUST-ADV'], true);
+            if ($storedLedger && !$isSharedFallback) {
+                if ((int) $storedLedger['group_id'] !== $groupId) {
+                    db()->prepare('UPDATE ledgers SET group_id = :group_id WHERE id = :id AND company_id = :cid')
+                        ->execute(['group_id' => $groupId, 'id' => $storedId, 'cid' => $companyId]);
+                }
+                return $storedId;
+            }
+            if ($isSharedFallback) {
+                db()->prepare("UPDATE accounting_parties SET {$column} = NULL WHERE id = :id AND company_id = :cid")
+                    ->execute(['id' => $partyId, 'cid' => $companyId]);
+            }
+        }
+
+        $ledgerName = (string) $definition['name_prefix'] . (string) $party['name'];
+        $existing = db()->prepare("SELECT l.id
+            FROM ledgers l
+            LEFT JOIN accounting_parties linked
+              ON linked.company_id = l.company_id AND linked.{$column} = l.id AND linked.id <> :party_id
+            WHERE l.company_id = :cid AND l.group_id = :gid AND l.name = :name
+              AND l.status = 'active' AND l.type = :type AND linked.id IS NULL
+            ORDER BY l.id ASC LIMIT 1");
+        $existing->execute([
+            'party_id' => $partyId,
+            'cid' => $companyId,
+            'gid' => $groupId,
+            'name' => $ledgerName,
+            'type' => $definition['ledger_type'],
+        ]);
         $ledgerId = (int) ($existing->fetchColumn() ?: 0);
 
         if ($ledgerId <= 0) {
@@ -2730,21 +2867,175 @@ function ensure_party_ledger(int $companyId, int $partyId, string $side = 'recei
                     'cid' => $companyId,
                     'gid' => $groupId,
                     'code' => coa_next_ledger_code($companyId, $groupId),
-                    'name' => (string) $party['name'],
-                    'type' => $side === 'payable' ? 'liability' : 'asset',
+                    'name' => $ledgerName,
+                    'type' => $definition['ledger_type'],
                 ]);
             $ledgerId = (int) db()->lastInsertId();
         }
 
-        if ($ledgerId > 0 && $column !== null) {
-            db()->prepare("UPDATE accounting_parties SET {$column} = :lid WHERE id = :id")
-                ->execute(['lid' => $ledgerId, 'id' => $partyId]);
+        if ($ledgerId > 0) {
+            db()->prepare("UPDATE accounting_parties SET {$column} = :lid WHERE id = :id AND company_id = :cid")
+                ->execute(['lid' => $ledgerId, 'id' => $partyId, 'cid' => $companyId]);
         }
-
         return $ledgerId;
     } catch (Throwable $exception) {
         return 0;
     }
+}
+
+/** Existing public API retained for every sales and purchase posting path. */
+function ensure_party_ledger(int $companyId, int $partyId, string $side = 'receivable'): int
+{
+    return ensure_party_role_ledger($companyId, $partyId, $side === 'payable' ? 'supplier_payable' : 'customer_receivable');
+}
+
+/**
+ * Link a ledger created in a canonical party group back to Party Master.
+ * Non-party groups are deliberately ignored. A same-name party is reused only
+ * when unique inside the current company; otherwise a new auditable party is
+ * created instead of guessing across tenants or duplicate names.
+ */
+function sync_party_from_chart_ledger(int $companyId, int $ledgerId, ?int $actorId = null): int
+{
+    if ($companyId <= 0 || $ledgerId <= 0 || !table_exists('ledgers') || !table_exists('accounting_parties')) {
+        return 0;
+    }
+
+    $ledgerStmt = db()->prepare('SELECT * FROM ledgers WHERE id = :id AND company_id = :cid LIMIT 1');
+    $ledgerStmt->execute(['id' => $ledgerId, 'cid' => $companyId]);
+    $ledger = $ledgerStmt->fetch();
+    if (!$ledger || (int) ($ledger['is_system'] ?? 0) === 1) {
+        return 0;
+    }
+
+    $role = party_ledger_role_for_group($companyId, (int) ($ledger['group_id'] ?? 0));
+    $definition = $role !== null ? (party_ledger_role_definitions()[$role] ?? null) : null;
+    if (!$definition || !column_exists('accounting_parties', (string) $definition['column'])) {
+        return 0;
+    }
+
+    $column = (string) $definition['column'];
+    $linkedStmt = db()->prepare("SELECT id FROM accounting_parties WHERE company_id = :cid AND {$column} = :lid LIMIT 1");
+    $linkedStmt->execute(['cid' => $companyId, 'lid' => $ledgerId]);
+    $partyId = (int) ($linkedStmt->fetchColumn() ?: 0);
+    if ($partyId > 0) {
+        return $partyId;
+    }
+
+    $partyName = trim((string) $ledger['name']);
+    $prefix = (string) $definition['name_prefix'];
+    if ($prefix !== '' && stripos($partyName, $prefix) === 0) {
+        $partyName = trim(substr($partyName, strlen($prefix)));
+    }
+    if ($partyName === '') {
+        return 0;
+    }
+
+    $pdo = db();
+    $ownsTransaction = !$pdo->inTransaction();
+    if ($ownsTransaction) {
+        $pdo->beginTransaction();
+    }
+    try {
+        $nameStmt = $pdo->prepare("SELECT id, party_type, {$column} AS role_ledger_id FROM accounting_parties
+            WHERE company_id = :cid AND LOWER(TRIM(name)) = LOWER(TRIM(:name))
+            ORDER BY id ASC LIMIT 2 FOR UPDATE");
+        $nameStmt->execute(['cid' => $companyId, 'name' => $partyName]);
+        $matches = $nameStmt->fetchAll(PDO::FETCH_ASSOC);
+        if (count($matches) > 1) {
+            if ($ownsTransaction) {
+                $pdo->rollBack();
+            }
+            return 0;
+        }
+        if (count($matches) === 1) {
+            $partyId = (int) $matches[0]['id'];
+            $authoritativeLedgerId = (int) ($matches[0]['role_ledger_id'] ?? 0);
+            if ($authoritativeLedgerId > 0 && $authoritativeLedgerId !== $ledgerId) {
+                // Party Master already has a deliberate primary ledger for
+                // this role. Never let a legacy same-name ledger silently
+                // reverse an administrator's later link correction.
+                if ($ownsTransaction) {
+                    $pdo->rollBack();
+                }
+                return 0;
+            }
+            $currentType = (string) $matches[0]['party_type'];
+            $wantedType = (string) $definition['party_type'];
+            $nextType = $currentType;
+            if (($currentType === 'customer' && $wantedType === 'supplier')
+                || ($currentType === 'supplier' && $wantedType === 'customer')) {
+                $nextType = 'both';
+            } elseif ($currentType === 'other') {
+                $nextType = $wantedType;
+            }
+            $pdo->prepare("UPDATE accounting_parties SET {$column} = :lid, party_type = :party_type WHERE id = :id AND company_id = :cid")
+                ->execute(['lid' => $ledgerId, 'party_type' => $nextType, 'id' => $partyId, 'cid' => $companyId]);
+        } else {
+            $partyCode = strtoupper(substr((string) $definition['party_type'], 0, 3)) . '-L' . str_pad((string) $ledgerId, 6, '0', STR_PAD_LEFT);
+            $pdo->prepare("INSERT INTO accounting_parties
+                    (company_id, {$column}, code, name, party_type, status)
+                VALUES (:cid, :lid, :code, :name, :party_type, 'active')")
+                ->execute([
+                    'cid' => $companyId,
+                    'lid' => $ledgerId,
+                    'code' => $partyCode,
+                    'name' => $partyName,
+                    'party_type' => $definition['party_type'],
+                ]);
+            $partyId = (int) $pdo->lastInsertId();
+        }
+
+        // A party created from an advance group still needs its primary trade
+        // ledger; an advance must never become a substitute for receivables or
+        // payables.
+        if ($partyId > 0) {
+            ensure_party_role_ledger(
+                $companyId,
+                $partyId,
+                $definition['party_type'] === 'supplier' ? 'supplier_payable' : 'customer_receivable'
+            );
+            log_activity('accounting_party', $partyId, 'ledger_synced', (string) $definition['label'] . ' linked from Chart of Accounts.', $actorId);
+        }
+
+        if ($ownsTransaction) {
+            $pdo->commit();
+        }
+        return $partyId;
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return 0;
+    }
+}
+
+/** Adopt every non-system ledger already filed in a canonical party group. */
+function sync_company_party_ledgers_from_chart(int $companyId, ?int $actorId = null): array
+{
+    $result = ['linked' => 0, 'skipped' => 0];
+    if ($companyId <= 0 || !table_exists('ledgers') || !table_exists('ledger_groups')) {
+        return $result;
+    }
+
+    $roleCondition = column_exists('ledger_groups', 'party_role')
+        ? 'g.party_role IS NOT NULL'
+        : "((g.master_key = 'current_asset' AND LOWER(TRIM(g.name)) IN ('trade receivables','advances to suppliers'))
+            OR (g.master_key = 'current_liability' AND LOWER(TRIM(g.name)) IN ('trade payables','advances from customers')))";
+    $stmt = db()->prepare("SELECT l.id
+        FROM ledgers l
+        INNER JOIN ledger_groups g ON g.id = l.group_id AND g.company_id = l.company_id
+        WHERE l.company_id = :cid AND l.status = 'active' AND l.is_system = 0 AND {$roleCondition}
+        ORDER BY l.id ASC");
+    $stmt->execute(['cid' => $companyId]);
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $ledgerId) {
+        if (sync_party_from_chart_ledger($companyId, (int) $ledgerId, $actorId) > 0) {
+            $result['linked']++;
+        } else {
+            $result['skipped']++;
+        }
+    }
+    return $result;
 }
 
 /**

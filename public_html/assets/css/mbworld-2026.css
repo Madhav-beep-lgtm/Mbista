@@ -1696,7 +1696,7 @@ body.party-master-page .reference-filter-group select {
 }
 
 body.party-master-page .party-directory-table {
-    min-width: 1220px;
+    min-width: 1370px;
 }
 
 body.party-master-page .party-directory-identity {
@@ -1764,7 +1764,8 @@ body.party-master-page .party-directory-table td:nth-child(3) {
 }
 
 body.party-master-page .party-directory-table td:nth-child(4),
-body.party-master-page .party-directory-table td:nth-child(5) {
+body.party-master-page .party-directory-table td:nth-child(5),
+body.party-master-page .party-directory-table td:nth-child(6) {
     min-width: 145px;
 }
 

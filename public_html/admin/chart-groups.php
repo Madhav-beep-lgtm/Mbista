@@ -1,9 +1,12 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
+require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
+
+$repairErrors = accounting_module_repair_database();
 
 $pageTitle = 'Chart Groups';
 $pageSubtitle = 'Manage account groups, hierarchy, and cash/bank flags for the chart of accounts.';
@@ -23,6 +26,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $masterKey = (string) ($_POST['master_key'] ?? '');
         $parentGroupId = $supportsGroupHierarchy ? (int) ($_POST['parent_group_id'] ?? 0) : 0;
         $isCashOrBank = isset($_POST['is_cash_or_bank']) ? 1 : 0;
+        $existingRole = null;
+        if ($groupId > 0 && column_exists('ledger_groups', 'party_role')) {
+            $roleStmt = db()->prepare('SELECT party_role FROM ledger_groups WHERE id = :id AND company_id = :cid LIMIT 1');
+            $roleStmt->execute(['id' => $groupId, 'cid' => $companyId]);
+            $existingRole = $roleStmt->fetchColumn() ?: null;
+        }
+        if ($existingRole !== null) {
+            $roleDefinition = party_ledger_role_definitions()[(string) $existingRole] ?? null;
+            if ($roleDefinition) {
+                // These four groups are accounting controls, not free-form
+                // folders. Their presentation must remain correct across every
+                // posting module and Party Master.
+                $name = (string) $roleDefinition['group_name'];
+                $masterKey = (string) $roleDefinition['master_key'];
+                $parentGroupId = 0;
+                $isCashOrBank = 0;
+            }
+        }
         if ($parentGroupId > 0) {
             $parentStmt = db()->prepare('SELECT id, master_key FROM ledger_groups WHERE id = :id AND company_id = :company_id LIMIT 1');
             $parentStmt->execute(['id' => $parentGroupId, 'company_id' => $companyId]);
@@ -34,6 +55,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($name === '' || !array_key_exists($masterKey, $masters)) {
             flash('error', 'Name and master are required.');
             redirect('admin/chart-groups.php');
+        }
+        if ($groupId <= 0) {
+            foreach (party_ledger_role_definitions() as $roleDefinition) {
+                if ($masterKey === (string) $roleDefinition['master_key']
+                    && strcasecmp($name, (string) $roleDefinition['group_name']) === 0) {
+                    flash('error', 'That canonical party group already exists. Use the system group so Chart of Accounts and Party Master do not split.');
+                    redirect('admin/chart-groups.php');
+                }
+            }
         }
         // Codes follow the structure rules and are never entered manually.
         if ($groupId > 0) {
@@ -66,6 +96,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('accounting', 'edit');
         $groupId = (int) ($_POST['group_id'] ?? 0);
         if ($groupId > 0) {
+            if (column_exists('ledger_groups', 'party_role')) {
+                $roleCheck = db()->prepare('SELECT party_role FROM ledger_groups WHERE id = :id AND company_id = :company_id LIMIT 1');
+                $roleCheck->execute(['id' => $groupId, 'company_id' => $companyId]);
+                if ($roleCheck->fetchColumn()) {
+                    flash('error', 'This system party group cannot be deleted because Party Master and module postings depend on its role.');
+                    redirect('admin/chart-groups.php');
+                }
+            }
             try {
                 db()->prepare('DELETE FROM ledger_groups WHERE id = :id AND company_id = :company_id')->execute(['id' => $groupId, 'company_id' => $companyId]);
                 security_event('group_deleted', 'success', 'Group #' . $groupId . ' deleted.', $companyId, (int) (current_user()['id'] ?? 0) ?: null);
@@ -92,6 +130,9 @@ if ($editId > 0) {
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
+<?php if ($repairErrors !== []): ?>
+    <div class="notice error">Accounting repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div>
+<?php endif; ?>
 <section class="mbw-card">
     <div class="mbw-card-head">
         <h2><?= $editGroup ? 'Edit Group' : 'Create Group' ?></h2>
@@ -105,13 +146,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <input type="hidden" name="action" value="save_group">
             <input type="hidden" name="group_id" value="<?= e((int) ($editGroup['id'] ?? 0)) ?>">
             <label>Code<input type="text" value="<?= e($editGroup['code'] ?? 'Auto — master digit + sequence') ?>" disabled title="System-generated per the code structure rules"></label>
-            <label>Name<input type="text" name="name" value="<?= e($editGroup['name'] ?? '') ?>" required></label>
+            <label>Name<input type="text" name="name" value="<?= e($editGroup['name'] ?? '') ?>" <?= !empty($editGroup['party_role']) ? 'readonly' : '' ?> required></label>
             <label>Master
-                <select name="master_key" required>
+                <select name="master_key" <?= !empty($editGroup['party_role']) ? 'disabled' : '' ?> required>
                     <?php foreach ($masters as $key => $master): ?>
                         <option value="<?= e($key) ?>" <?= ($editGroup['master_key'] ?? '') === $key ? 'selected' : '' ?>><?= e($master['label']) ?></option>
                     <?php endforeach; ?>
                 </select>
+                <?php if (!empty($editGroup['party_role'])): ?><input type="hidden" name="master_key" value="<?= e($editGroup['master_key']) ?>"><?php endif; ?>
             </label>
             <?php if ($supportsGroupHierarchy): ?>
                 <label>Parent Group
@@ -138,24 +180,25 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
     <div style="overflow-x:auto">
     <table>
-        <thead><tr><th>Code</th><th>Name</th><th>Master</th><th>Parent</th><th class="is-numeric">Ledgers</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Code</th><th>Name</th><th>Master</th><th>Party role</th><th>Parent</th><th class="is-numeric">Ledgers</th><th>Actions</th></tr></thead>
         <tbody>
-            <?php if ($groups === []): ?><tr><td colspan="6">No groups yet.</td></tr><?php endif; ?>
+            <?php if ($groups === []): ?><tr><td colspan="7">No groups yet.</td></tr><?php endif; ?>
             <?php foreach ($groups as $group): ?>
                 <tr>
                     <td><?= e($group['code']) ?></td>
                     <td><?= e($group['name']) ?></td>
                     <td><?= e($masters[$group['master_key']]['label'] ?? $group['master_key']) ?></td>
+                    <td><?= !empty($group['party_role']) ? '<span class="mbw-pill tone-green">' . e((string) (party_ledger_role_definitions()[$group['party_role']]['label'] ?? $group['party_role'])) . '</span>' : '—' ?></td>
                     <td><?= e($group['parent_group_id'] ? (string) $group['parent_group_id'] : '-') ?></td>
                     <td class="is-numeric"><?= e((string) $group['ledger_count']) ?></td>
                     <td>
                         <a class="button secondary" href="<?= e(url('admin/chart-groups.php?edit_id=' . (int) $group['id'])) ?>">Edit</a>
-                        <form method="post" style="display:inline">
+                        <?php if (empty($group['party_role'])): ?><form method="post" style="display:inline">
                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                             <input type="hidden" name="action" value="delete_group">
                             <input type="hidden" name="group_id" value="<?= e((int) $group['id']) ?>">
                             <button type="submit" class="button secondary" onclick="return confirm('Delete this group?')">Delete</button>
-                        </form>
+                        </form><?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>

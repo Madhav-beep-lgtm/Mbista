@@ -17,6 +17,7 @@ if (PHP_SAPI !== 'cli') {
 
 require __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/accounting_module_repair.php';
+require_once __DIR__ . '/../app/advance_engine.php';
 
 $pass = 0;
 $fail = 0;
@@ -54,7 +55,7 @@ unified_cleanup();
 try {
     echo "Repair and migration\n";
     $repairErrors = accounting_module_repair_database();
-    unified_ok($repairErrors === [], 'Accounting repair, including migration 107, completes without error');
+    unified_ok($repairErrors === [], 'Accounting repair, including migrations 107 and 108, completes without error');
     if ($repairErrors !== []) {
         foreach ($repairErrors as $repairError) {
             echo "        {$repairError}\n";
@@ -73,6 +74,12 @@ try {
         'index_name' => 'uniq_accounting_parties_company_client',
     ]);
     unified_ok((int) $indexStmt->fetchColumn() > 0, 'One-client-per-company unique index exists');
+    $indexStmt->execute([
+        'database_name' => DB_NAME,
+        'table_name' => 'ledger_groups',
+        'index_name' => 'uniq_ledger_groups_company_party_role',
+    ]);
+    unified_ok((int) $indexStmt->fetchColumn() > 0, 'One canonical group per company and Party Master role is enforced');
 
     echo "\nFixture\n";
     db()->prepare("INSERT INTO companies (name, code, is_active) VALUES ('Unified Party Test Co', 'UPTY107', 1)")->execute();
@@ -141,7 +148,7 @@ try {
 
     $ledgerId = (int) ($party['ledger_id'] ?? 0);
     $ledgerStmt = db()->prepare(
-        'SELECT l.type, l.name, g.name AS group_name
+        'SELECT l.type, l.name, g.name AS group_name, g.party_role
          FROM ledgers l
          INNER JOIN ledger_groups g ON g.id = l.group_id
          WHERE l.id = :id AND l.company_id = :company_id'
@@ -153,6 +160,72 @@ try {
         && (string) ($ledger['type'] ?? '') === 'asset'
         && (string) ($ledger['group_name'] ?? '') === 'Trade Receivables',
         'Canonical party owns one asset ledger under Trade Receivables'
+    );
+    unified_ok((string) ($ledger['party_role'] ?? '') === 'customer_receivable', 'Trade Receivables carries the authoritative customer role');
+
+    $advanceLedgerId = ensure_customer_advance_ledger($companyId, $partyId);
+    $advanceRoleStmt = db()->prepare('SELECT g.party_role, g.master_key, l.type
+        FROM ledgers l INNER JOIN ledger_groups g ON g.id = l.group_id
+        WHERE l.id = :id AND l.company_id = :cid');
+    $advanceRoleStmt->execute(['id' => $advanceLedgerId, 'cid' => $companyId]);
+    $advanceRole = $advanceRoleStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    unified_ok(
+        $advanceLedgerId > 0
+        && (string) ($advanceRole['party_role'] ?? '') === 'customer_advance'
+        && (string) ($advanceRole['master_key'] ?? '') === 'current_liability'
+        && (string) ($advanceRole['type'] ?? '') === 'liability',
+        'Customer advance is a party-specific current liability'
+    );
+
+    echo "\nChart of Accounts synchronization\n";
+    $supplierGroupId = party_ledger_group_id($companyId, 'supplier_payable');
+    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status)
+        VALUES (:cid, :gid, 'UPTY-SUP-1', 'Unified Asset Supplier', 'liability', 'active')")
+        ->execute(['cid' => $companyId, 'gid' => $supplierGroupId]);
+    $chartSupplierLedgerId = (int) db()->lastInsertId();
+    $chartSupplierPartyId = sync_party_from_chart_ledger($companyId, $chartSupplierLedgerId);
+    $chartSupplierStmt = db()->prepare('SELECT party_type, payable_ledger_id FROM accounting_parties WHERE id = :id AND company_id = :cid');
+    $chartSupplierStmt->execute(['id' => $chartSupplierPartyId, 'cid' => $companyId]);
+    $chartSupplier = $chartSupplierStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    unified_ok(
+        $chartSupplierPartyId > 0
+        && (string) ($chartSupplier['party_type'] ?? '') === 'supplier'
+        && (int) ($chartSupplier['payable_ledger_id'] ?? 0) === $chartSupplierLedgerId,
+        'A supplier ledger created in Chart of Accounts appears in Party Master'
+    );
+
+    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status)
+        VALUES (:cid, :gid, 'UPTY-SUP-2', 'Unified Asset Supplier', 'liability', 'active')")
+        ->execute(['cid' => $companyId, 'gid' => $supplierGroupId]);
+    $replacementSupplierLedgerId = (int) db()->lastInsertId();
+    unified_ok(
+        sync_party_from_chart_ledger($companyId, $replacementSupplierLedgerId) === 0,
+        'A second same-name ledger cannot silently replace an established Party Master link'
+    );
+    db()->prepare('UPDATE accounting_parties SET payable_ledger_id = :ledger_id WHERE id = :id AND company_id = :cid')
+        ->execute(['ledger_id' => $replacementSupplierLedgerId, 'id' => $chartSupplierPartyId, 'cid' => $companyId]);
+    unified_ok(
+        sync_party_from_chart_ledger($companyId, $chartSupplierLedgerId) === 0,
+        'Automatic synchronization cannot reverse a controlled ledger-link correction'
+    );
+    $correctedLinkStmt = db()->prepare('SELECT payable_ledger_id FROM accounting_parties WHERE id = :id AND company_id = :cid');
+    $correctedLinkStmt->execute(['id' => $chartSupplierPartyId, 'cid' => $companyId]);
+    unified_ok(
+        (int) $correctedLinkStmt->fetchColumn() === $replacementSupplierLedgerId,
+        'The corrected Party Master link remains authoritative'
+    );
+
+    $supplierAdvanceId = ensure_party_role_ledger($companyId, $chartSupplierPartyId, 'supplier_advance');
+    $supplierAdvanceStmt = db()->prepare('SELECT g.party_role, g.master_key, l.type
+        FROM ledgers l INNER JOIN ledger_groups g ON g.id = l.group_id WHERE l.id = :id');
+    $supplierAdvanceStmt->execute(['id' => $supplierAdvanceId]);
+    $supplierAdvance = $supplierAdvanceStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    unified_ok(
+        $supplierAdvanceId > 0
+        && (string) ($supplierAdvance['party_role'] ?? '') === 'supplier_advance'
+        && (string) ($supplierAdvance['master_key'] ?? '') === 'current_asset'
+        && (string) ($supplierAdvance['type'] ?? '') === 'asset',
+        'Advance to a supplier is a party-specific current asset'
     );
 
     $samePartyId = ensure_party_for_client($companyId, $clientOneId);
@@ -210,6 +283,40 @@ try {
         str_contains($partyPage, "party_link_status")
         && !str_contains($partyPage, "accounting_party_id'] ?: (\$document['client_profile_id"),
         'Party screen never treats client_profiles.id as accounting_parties.id'
+    );
+    unified_ok(
+        str_contains($partyPage, 'name="ledger_id"')
+        && str_contains($partyPage, 'name="payable_ledger_id"')
+        && str_contains($partyPage, 'name="advance_ledger_id"')
+        && str_contains($partyPage, 'name="supplier_advance_ledger_id"'),
+        'Party edit keeps all four balance-sheet relationships separate'
+    );
+    unified_ok(
+        str_contains($partyPage, "['id' => \$ledgerId, 'type' => 'asset'")
+        && str_contains($partyPage, "'role' => 'customer_receivable'")
+        && str_contains($partyPage, "'role' => 'supplier_advance'"),
+        'Party ledger links are checked against accounting nature and canonical role'
+    );
+    unified_ok(
+        str_contains($partyPage, "\$directoryLedgerColumns[] = 'advance_ledger_id'")
+        && str_contains($partyPage, "\$directoryLedgerColumns[] = 'supplier_advance_ledger_id'")
+        && str_contains($partyPage, "\$party['_advance_balance']")
+        && str_contains($partyPage, 'Advance Ledgers'),
+        'Party directory includes customer and supplier advances with their balances'
+    );
+    unified_ok(
+        str_contains($partyPage, 'FROM voucher_entries ve')
+        && str_contains($partyPage, 'Balance brought forward')
+        && str_contains($partyPage, 'v.status = \'posted\''),
+        'Party ledger reads posted voucher entries instead of rebuilding invoice totals'
+    );
+    unified_ok(
+        str_contains($partyPage, "'sales' => ['Sales & Invoices'")
+        && str_contains($partyPage, "'purchases' => ['Purchases & Payments'")
+        && str_contains($partyPage, "'jewellery_sale' => 'Jewellery Sale'")
+        && str_contains($partyPage, "'hospitality_sales_upload' => 'Hospitality Sales'")
+        && str_contains($partyPage, "v.source_type = 'fixed_asset_acquisition'"),
+        'Party Master exposes cross-module sales, invoices, purchases, fixed assets and payments'
     );
 
     $invoicePage = (string) file_get_contents(__DIR__ . '/../public_html/admin/invoice.php');

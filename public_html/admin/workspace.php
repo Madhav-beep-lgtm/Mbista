@@ -2,9 +2,11 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/admin_work_portal_repair.php';
+require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_admin();
 require_company_context();
+accounting_module_repair_database();
 $pageTitle = 'Admin Work Portal';
 $pageSubtitle = 'Operations hub for clients, teams, contracts, tasks, and invoicing';
 $bodyClass = 'admin-layout admin-workspace';
