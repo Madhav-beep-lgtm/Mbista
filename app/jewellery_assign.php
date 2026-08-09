@@ -1025,8 +1025,7 @@ function jewellery_issue_component(int $companyId, int $fiscalYearId, int $assig
                     'narration' => ($isStone ? 'Stones' : 'Metal') . ' issued to kaligad ' . $karigar['name'] . ' (' . $no . ')',
                     'total_amount' => $amount, 'status' => 'posted', 'posted_by' => $userId ?: null,
                 ], $entries);
-                db()->prepare('UPDATE jewellery_stock_txns SET voucher_id = :v WHERE id IN (:o, :i)')
-                    ->execute(['v' => $voucherId, 'o' => $outId, 'i' => $inId]);
+                jw_link_stock_txn_voucher($companyId, [$outId, $inId], $voucherId);
             }
         }
 

@@ -17,6 +17,7 @@ if (PHP_SAPI !== 'cli') { exit('CLI only.'); }
 require __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/accounting_module_repair.php';
 require_once __DIR__ . '/../app/jewellery_reports.php';
+require_once __DIR__ . '/../app/stock_report_engine.php';
 // Issuing a packet of diamonds alongside the gold lives here.
 require_once __DIR__ . '/../app/jewellery_assign.php';
 accounting_module_repair_database();
@@ -355,6 +356,28 @@ $rec = jewellery_receive_from_karigar($cidA, $fyA, [
     'received_gross_weight' => 9.9, 'qty_pieces' => 1, 'receive_date' => '2026-08-20',
 ], $userA);
 ok($rec['ok'], 'The receipt posts' . ($rec['ok'] ? '' : ' — ' . $rec['error']));
+$coreReceipt = db()->query("SELECT it.*, jt.source_type, jt.source_id, jt.holder_type
+    FROM inventory_transactions it
+    INNER JOIN jewellery_stock_txns jt ON jt.id = it.jewellery_stock_txn_id
+    WHERE jt.company_id=$cidA AND jt.source_type='jewellery_order_receipt'
+      AND jt.source_id=" . (int) $rec['receipt_id'] . " AND jt.holder_type='stock'
+    LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+ok($coreReceipt !== false
+    && (int) $coreReceipt['company_id'] === $cidA
+    && (int) $coreReceipt['item_id'] === $chain
+    && (string) $coreReceipt['transaction_type'] === 'produce'
+    && near((float) $coreReceipt['qty_in'], 9.9, 0.0011),
+    'The received ornament is linked into core inventory as 9.9 tola in');
+ok((int) ($coreReceipt['voucher_id'] ?? 0) === (int) $rec['voucher_id'],
+    'The core receipt movement carries the same posted voucher');
+$stockSummary = sr_stock_summary($cidA, [
+    'from' => '2026-07-16', 'to' => '2026-08-20', 'search' => 'CHAIN22',
+]);
+$summaryChain = $stockSummary['rows'][0] ?? null;
+ok($summaryChain !== null
+    && near((float) $summaryChain['closing_qty'],
+        (float) jw_item_balance($cidA, $chain, '2026-08-20', 'stock')['gross_weight'], 0.0011),
+    'Core Stock Summary agrees with Jewellery own-stock after the Kaligad receipt');
 ok(near(jw_item_balance($cidA, $chain, null, 'karigar', $kContractor)['fine_weight'], 0.0),
     "The karigar's holding is cleared to EXACTLY zero");
 ok(near(jw_item_balance($cidA, $chain, null, 'stock')['fine_weight'], $ownBefore - 0.0916),
@@ -1181,12 +1204,20 @@ ok($got2['ok'] && $statusOf() === 'partially_received', 'Two back, one out: stil
 
 $got3 = $receiveOne($issues[2], '2026-08-22');
 ok($got3['ok'], 'The last piece comes back' . ($got3['ok'] ? '' : ' — ' . $got3['error']));
+$got3CoreTxn = (int) db()->query("SELECT it.id FROM inventory_transactions it
+    INNER JOIN jewellery_stock_txns jt ON jt.id = it.jewellery_stock_txn_id
+    WHERE jt.company_id=$cidA AND jt.source_type='jewellery_order_receipt'
+      AND jt.source_id=" . (int) $got3['receipt_id'] . " AND jt.holder_type='stock'
+    LIMIT 1")->fetchColumn();
+ok($got3CoreTxn > 0, 'Its received ornament is present in the core stock movement register');
 ok($statusOf() === 'received', 'NOW the order is received');
 ok(in_array($threeOrder, array_map('intval', array_column(jewellery_pending_delivery($cidA), 'id')), true),
     'And only now does it appear as ready to hand over');
 
 // Undoing a receipt has to walk back the same way.
 ok(jewellery_unpost_receipt($cidA, (int) $got3['receipt_id'], $userA)['ok'], 'The last receipt is unposted');
+ok((int) db()->query("SELECT COUNT(*) FROM inventory_transactions WHERE id=$got3CoreTxn")->fetchColumn() === 0,
+    'Unposting removes the linked core receipt movement instead of leaving phantom stock');
 ok($statusOf() === 'partially_received', 'Which puts the order back to partly-made, not stuck on received');
 
 // And cancelling ONE issue must not pretend the whole order left the workshop.

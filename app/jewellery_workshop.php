@@ -1921,8 +1921,7 @@ function jewellery_issue_metal_to_assignment(int $companyId, int $fiscalYearId, 
                     'narration' => 'Further metal issued to karigar ' . $karigar['name'] . ' (' . $no . ')',
                     'total_amount' => $amount, 'status' => 'posted', 'posted_by' => $userId ?: null,
                 ], $entries);
-                db()->prepare('UPDATE jewellery_stock_txns SET voucher_id = :v WHERE id IN (:o, :i)')
-                    ->execute(['v' => $voucherId, 'o' => $outId, 'i' => $inId]);
+                jw_link_stock_txn_voucher($companyId, [$outId, $inId], $voucherId);
             }
         }
 
@@ -2009,8 +2008,7 @@ function jewellery_cancel_assignment(int $companyId, int $assignmentId, int $use
             }
             db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')->execute(['id' => $voucherId, 'cid' => $companyId]);
         }
-        db()->prepare("DELETE FROM jewellery_stock_txns WHERE company_id = :cid AND source_type = 'jewellery_karigar_issue' AND source_id = :sid")
-            ->execute(['cid' => $companyId, 'sid' => $assignmentId]);
+        jw_delete_stock_txns_by_source($companyId, ['jewellery_karigar_issue'], $assignmentId);
         db()->prepare("UPDATE jewellery_order_assignments SET status = 'cancelled', issue_voucher_id = NULL,
                 issue_stock_txn_out = NULL, issue_stock_txn_in = NULL, metal_ledger_id = NULL
             WHERE id = :id AND company_id = :cid")
@@ -3484,9 +3482,7 @@ function jewellery_unpost_receipt(int $companyId, int $receiptId, int $userId = 
             db()->prepare('DELETE FROM jewellery_bills WHERE id = :id AND company_id = :cid')
                 ->execute(['id' => (int) $bill['id'], 'cid' => $companyId]);
         }
-        db()->prepare("DELETE FROM jewellery_stock_txns
-            WHERE company_id = :cid AND source_type = 'jewellery_order_receipt' AND source_id = :sid")
-            ->execute(['cid' => $companyId, 'sid' => $receiptId]);
+        jw_delete_stock_txns_by_source($companyId, ['jewellery_order_receipt'], $receiptId);
         db()->prepare('DELETE FROM jewellery_order_receipts WHERE id = :id AND company_id = :cid')
             ->execute(['id' => $receiptId, 'cid' => $companyId]);
 
@@ -3550,9 +3546,7 @@ function jewellery_cancel_refinery_job(int $companyId, int $jobId, int $userId =
             db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
                 ->execute(['id' => $voucherId, 'cid' => $companyId]);
         }
-        db()->prepare("DELETE FROM jewellery_stock_txns
-            WHERE company_id = :cid AND source_type = 'jewellery_refinery_issue' AND source_id = :sid")
-            ->execute(['cid' => $companyId, 'sid' => $jobId]);
+        jw_delete_stock_txns_by_source($companyId, ['jewellery_refinery_issue'], $jobId);
         db()->prepare("UPDATE jewellery_refinery_jobs SET status = 'cancelled', issue_voucher_id = NULL,
                 issue_stock_txn_out = NULL, issue_stock_txn_in = NULL, metal_ledger_id = NULL
             WHERE id = :id AND company_id = :cid")

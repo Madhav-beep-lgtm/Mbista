@@ -855,11 +855,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/accounting-inventory.php');
         }
         $movementId = (int) ($_POST['movement_id'] ?? 0);
-        $mvStmt = db()->prepare("SELECT * FROM inventory_transactions WHERE id = :id AND company_id = :cid AND transaction_type NOT IN ('consume', 'produce') LIMIT 1");
+        $linkedGuard = column_exists('inventory_transactions', 'jewellery_stock_txn_id')
+            ? ' AND jewellery_stock_txn_id IS NULL'
+            : '';
+        $mvStmt = db()->prepare("SELECT * FROM inventory_transactions WHERE id = :id AND company_id = :cid AND transaction_type NOT IN ('consume', 'produce')"
+            . $linkedGuard . ' LIMIT 1');
         $mvStmt->execute(['id' => $movementId, 'cid' => $companyId]);
         $movement = $mvStmt->fetch(PDO::FETCH_ASSOC);
         if (!$movement) {
-            flash('error', 'Movement not found, or it belongs to a manufacturing order (cancel the order instead).');
+            flash('error', 'Movement not found, or it is controlled by Manufacturing/Jewellery (reverse it from its source document instead).');
             redirect('admin/accounting-inventory.php');
         }
         // A transfer is a PAIR of rows (out of the source, in to the destination).
@@ -901,11 +905,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/accounting-inventory.php');
         }
         $movementId = (int) ($_POST['movement_id'] ?? 0);
-        $mvStmt = db()->prepare("SELECT * FROM inventory_transactions WHERE id = :id AND company_id = :cid AND transaction_type NOT IN ('consume', 'produce') LIMIT 1");
+        $linkedGuard = column_exists('inventory_transactions', 'jewellery_stock_txn_id')
+            ? ' AND jewellery_stock_txn_id IS NULL'
+            : '';
+        $mvStmt = db()->prepare("SELECT * FROM inventory_transactions WHERE id = :id AND company_id = :cid AND transaction_type NOT IN ('consume', 'produce')"
+            . $linkedGuard . ' LIMIT 1');
         $mvStmt->execute(['id' => $movementId, 'cid' => $companyId]);
         $movement = $mvStmt->fetch(PDO::FETCH_ASSOC);
         if (!$movement) {
-            flash('error', 'Movement not found (production rows are reversed by cancelling the order).');
+            flash('error', 'Movement not found, or it is controlled by Manufacturing/Jewellery (reverse it from its source document instead).');
             redirect('admin/accounting-inventory.php');
         }
         if (inv_movement_is_location_only((string) $movement['transaction_type'])) {
@@ -2613,7 +2621,8 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                     <td class="is-numeric"><?= e(number_format((float) $movement['qty_in'], 3)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['qty_out'], 3)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['rate'], 2)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['amount'], 2)) ?></td><td><?= e($movement['ref_no'] ?? '-') ?></td>
                     <?php if (($currentUser['role'] ?? '') === 'admin'): ?>
                         <td style="white-space:nowrap">
-                            <?php if (!in_array((string) $movement['transaction_type'], ['consume', 'produce'], true)): ?>
+                            <?php if (empty($movement['jewellery_stock_txn_id'])
+                                && !in_array((string) $movement['transaction_type'], ['consume', 'produce'], true)): ?>
                                 <?php if ((int) ($movement['voucher_id'] ?? 0) > 0): ?>
                                     <form method="post" style="display:inline" data-confirm="Reverse this <?= e(str_replace('_', ' ', $movement['transaction_type'])) ?> of <?= e($movement['sku']) ?>? A mirror stock entry and a reversing voucher (Dr/Cr swapped) are posted; the originals are kept for audit.">
                                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

@@ -288,6 +288,7 @@ foreach ($companies as $company) {
             if ($inRow) {
                 db()->prepare('UPDATE jewellery_stock_txns SET amount = amount + :add WHERE id = :id')
                     ->execute(['add' => $stoneAmount, 'id' => (int) $inRow['id']]);
+                jw_sync_core_inventory_txn($cid, (int) $inRow['id']);
             }
 
             db()->commit();

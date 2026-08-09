@@ -2356,9 +2356,7 @@ function jw_unpost_document(int $companyId, string $table, string $sourceType, i
         }
         // A sale also writes exchange movements under their own source type.
         $sourceTypes = $sourceType === 'jewellery_sale' ? [$sourceType, 'jewellery_sale_exchange'] : [$sourceType];
-        $placeholders = implode(',', array_fill(0, count($sourceTypes), '?'));
-        db()->prepare("DELETE FROM jewellery_stock_txns WHERE company_id = ? AND source_id = ? AND source_type IN ($placeholders)")
-            ->execute(array_merge([$companyId, $documentId], $sourceTypes));
+        jw_delete_stock_txns_by_source($companyId, $sourceTypes, $documentId);
         if ($bill) {
             db()->prepare('DELETE FROM jewellery_bills WHERE id = :id AND company_id = :cid')->execute(['id' => (int) $bill['id'], 'cid' => $companyId]);
         }

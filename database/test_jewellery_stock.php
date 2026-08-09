@@ -233,7 +233,7 @@ $oversell = jw_record_stock_txn($cidA, [
     'item_id' => $ringId, 'txn_type' => 'sale', 'direction' => 'out', 'txn_date' => '2026-08-10', 'gross_weight' => 100.0,
 ]);
 ok($oversell > 0, 'With the company opt-in, an over-issue is allowed');
-db()->exec("DELETE FROM jewellery_stock_txns WHERE id=$oversell");
+jw_delete_stock_txns($cidA, [$oversell]);
 jewellery_save_settings($cidA, ['allow_negative_stock' => 0], $userA);
 ok(near(jw_item_balance($cidA, $ringId)['fine_weight'], 18.32), 'Balance restored after removing the test over-issue');
 

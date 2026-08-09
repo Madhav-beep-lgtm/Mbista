@@ -469,8 +469,12 @@ function sr_txn_costs(int $companyId, array $item): array
 function sr_unposted_summary(int $companyId): array
 {
     $result = ['movements' => 0, 'movements_value' => 0.0, 'manufacturing' => 0, 'openings' => 0, 'openings_value' => 0.0];
+    $jewelleryExclusion = column_exists('inventory_transactions', 'jewellery_stock_txn_id')
+        ? ' AND t.jewellery_stock_txn_id IS NULL'
+        : '';
     $stmt = db()->prepare('SELECT t.id, t.item_id, t.transaction_type, t.qty_in, t.qty_out
-        FROM inventory_transactions t WHERE t.company_id = :cid AND t.voucher_id IS NULL');
+        FROM inventory_transactions t WHERE t.company_id = :cid AND t.voucher_id IS NULL'
+        . $jewelleryExclusion);
     $stmt->execute(['cid' => $companyId]);
     $byItem = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
@@ -526,10 +530,14 @@ function sr_unposted_summary(int $companyId): array
 function sr_post_missing_movement_vouchers(int $companyId, int $userId): array
 {
     $result = ['posted' => 0, 'posted_value' => 0.0, 'skipped' => [], 'manufacturing' => 0];
+    $jewelleryExclusion = column_exists('inventory_transactions', 'jewellery_stock_txn_id')
+        ? ' AND t.jewellery_stock_txn_id IS NULL'
+        : '';
     $stmt = db()->prepare('SELECT t.*, i.sku FROM inventory_transactions t
         JOIN inventory_items i ON i.id = t.item_id
-        WHERE t.company_id = :cid AND t.voucher_id IS NULL
-        ORDER BY t.item_id, t.transaction_date ASC, t.id ASC');
+        WHERE t.company_id = :cid AND t.voucher_id IS NULL'
+        . $jewelleryExclusion
+        . ' ORDER BY t.item_id, t.transaction_date ASC, t.id ASC');
     $stmt->execute(['cid' => $companyId]);
     $txns = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $itemCache = [];
@@ -636,10 +644,14 @@ function sr_inventory_gl_total(int $companyId, ?string $asAt = null): float
 function sr_post_missing_production_journals(int $companyId, int $userId): array
 {
     $result = ['posted' => 0, 'posted_value' => 0.0, 'skipped' => []];
+    $jewelleryExclusion = column_exists('inventory_transactions', 'jewellery_stock_txn_id')
+        ? ' AND t.jewellery_stock_txn_id IS NULL'
+        : '';
     $stmt = db()->prepare("SELECT t.*, i.sku FROM inventory_transactions t
         JOIN inventory_items i ON i.id = t.item_id
-        WHERE t.company_id = :cid AND t.voucher_id IS NULL AND t.transaction_type IN ('consume', 'produce')
-        ORDER BY t.transaction_date ASC, t.id ASC");
+        WHERE t.company_id = :cid AND t.voucher_id IS NULL AND t.transaction_type IN ('consume', 'produce')"
+        . $jewelleryExclusion
+        . ' ORDER BY t.transaction_date ASC, t.id ASC');
     $stmt->execute(['cid' => $companyId]);
     $groups = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {

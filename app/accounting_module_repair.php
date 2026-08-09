@@ -3308,6 +3308,44 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Jewellery movements visible in core stock reports (migration 109)', static function (): void {
+        if (!accounting_repair_table_exists('inventory_transactions')
+            || !accounting_repair_table_exists('jewellery_stock_txns')
+            || !accounting_repair_table_exists('jewellery_item_profiles')
+            || !accounting_repair_column_exists('jewellery_stock_txns', 'gross_grams')) {
+            return;
+        }
+
+        $needsBackfill = !accounting_repair_index_exists(
+            'inventory_transactions',
+            'uniq_inventory_jewellery_stock_txn'
+        );
+        accounting_repair_run_migration_file_if_index_missing(
+            '109_jewellery_core_stock_sync.sql',
+            'inventory_transactions',
+            'uniq_inventory_jewellery_stock_txn'
+        );
+        accounting_repair_add_constraint(
+            'inventory_transactions',
+            'fk_inventory_jewellery_stock_txn',
+            '`fk_inventory_jewellery_stock_txn` FOREIGN KEY (`jewellery_stock_txn_id`) '
+                . 'REFERENCES `jewellery_stock_txns` (`id`) ON DELETE CASCADE'
+        );
+
+        // The migration adds historical movements. Cost layers are cached, so
+        // replay every affected item once or the quantity reports would be
+        // correct while the Inventory valuation card still showed the old
+        // value until a later edit happened to rebuild it.
+        if ($needsBackfill && accounting_repair_index_exists('inventory_transactions', 'uniq_inventory_jewellery_stock_txn')) {
+            $affected = db()->query('SELECT DISTINCT company_id, item_id
+                FROM inventory_transactions WHERE jewellery_stock_txn_id IS NOT NULL')
+                ->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($affected as $item) {
+                inv_rebuild_item((int) $item['company_id'], (int) $item['item_id']);
+            }
+        }
+    });
+
     $run('Kaligad assignment carries the piece it asks for (migration 102)', static function (): void {
         // The ornament's specification, kept apart from the metal handed over:
         // a shop assigns work long before any bar leaves the safe, and assigns
