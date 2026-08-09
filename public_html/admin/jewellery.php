@@ -1191,7 +1191,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </div>
 
         <p class="frm-optional" style="margin:0 0 10px">The spreadsheet columns appear first, in the same order as the Opening Stock Import template. Existing item, validation status and actions are review controls — they are not spreadsheet columns. Every uncommitted row remains editable until you deliberately commit it.</p>
-        <div style="overflow-x:auto"><table style="min-width:2250px">
+        <div class="mbw-tablewrap jw-opening-import-wrap"><table class="jw-opening-import-table">
             <thead><tr>
                 <th>Source Excel Row</th><th>Stock Type *</th><th>Stock Group *</th><th>Item Code *</th><th>Item Name *</th>
                 <th>Metal *</th><th>Purity Code</th><th>Unit *</th><th>Pieces *</th><th>Gross Weight (GM) *</th>
@@ -1277,14 +1277,14 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                                 <?php endif; ?>
                             </td>
                             <td style="white-space:nowrap">
-                                <button type="submit" class="button secondary" style="min-height:30px;padding:3px 9px">Save</button>
+                                <button type="submit" class="button secondary jw-import-action"><?= icon('save') ?><span>Save</span></button>
                         </form>
                                 <form method="post" style="display:inline" onsubmit="return confirm('Remove sheet row <?= (int) $ir['source_row_no'] ?> from this import?');">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="delete_import_row">
                                     <input type="hidden" name="import_id" value="<?= (int) $importBatch['id'] ?>">
                                     <input type="hidden" name="row_id" value="<?= (int) $ir['id'] ?>">
-                                    <button type="submit" class="button secondary" style="min-height:30px;padding:3px 9px">Delete</button>
+                                    <button type="submit" class="button secondary jw-import-action jw-import-delete"><?= icon('trash') ?><span>Delete</span></button>
                                 </form>
                             </td>
                         <?php endif; ?>
