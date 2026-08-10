@@ -113,6 +113,7 @@ function accounting_module_required_tables(): array
 {
     return [
         'accounting_parties',
+        'company_ledger_mappings',
         'inventory_items',
         'inventory_transactions',
         'manufacturing_orders',
@@ -138,6 +139,30 @@ function accounting_module_repair_database(): array
             $errors[] = $label . ': ' . $exception->getMessage();
         }
     };
+
+    $run('Restore company ledger mappings', static function (): void {
+        // Migration 022 created this foundational table, but older databases
+        // can have its migration marker without the table itself. Recreate it
+        // idempotently before any accounting screen or test relies on it.
+        if (accounting_repair_table_exists('company_ledger_mappings')) {
+            return;
+        }
+        db()->exec("CREATE TABLE `company_ledger_mappings` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `company_id` INT UNSIGNED NOT NULL,
+            `map_key` VARCHAR(80) NOT NULL,
+            `ledger_id` INT UNSIGNED NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_company_ledger_mapping` (`company_id`, `map_key`),
+            KEY `idx_company_ledger_mappings_ledger` (`ledger_id`),
+            CONSTRAINT `fk_company_ledger_mappings_company`
+                FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_company_ledger_mappings_ledger`
+                FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    });
 
     $run('Upgrade fiscal year lifecycle', static function (): void {
         // Migration 051: status lifecycle + authorship. Cutoff stays in

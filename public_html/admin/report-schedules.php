@@ -188,7 +188,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="delete_schedule">
                                     <input type="hidden" name="schedule_id" value="<?= e((int) $schedule['id']) ?>">
-                                    <button type="submit" title="Remove schedule">&times;</button>
+                                    <button type="submit" title="Remove schedule"><?= icon('trash') ?></button>
                                 </form>
                             </td>
                         </tr>

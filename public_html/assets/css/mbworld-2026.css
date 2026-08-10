@@ -1152,6 +1152,37 @@ body.admin-layout .admin-page {
   }
 }
 
+/* An icon that IS the button, rather than sitting before a word.
+   .ui-icon carries margin-right: 0.45em globally, which is right beside a
+   label and wrong when there is no label — it hangs the glyph off-centre in
+   its own button. :only-child is exactly the condition: the icon is the
+   entire content. Slightly larger too, because a lone 1em mark in a 44px
+   target looks lost. */
+.button .ui-icon:only-child,
+button .ui-icon:only-child,
+.btn .ui-icon:only-child,
+.modal-close .ui-icon:only-child {
+  margin-right: 0;
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: -0.2em;
+}
+
+/* The invoice modals closed on a <span> with an onclick — not focusable, not
+   reachable by keyboard, and invisible to a screen reader. They are real
+   buttons now, so they need styling back down to the bare mark they were. */
+.modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+}
+
 /* Destructive controls that were colouring themselves inline. The colour is
    the only thing distinguishing a delete from a save in these rows, so it
    belongs in one place rather than in each row's style attribute. */

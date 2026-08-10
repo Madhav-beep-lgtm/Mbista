@@ -104,7 +104,7 @@ ok('S10', 'Reversal restores stock + reverses voucher, original preserved', $ori
 // S12: inventory subledger reconciles to GL (report produces a difference row)
 $rec = rc_generate('inventory-gl-reconciliation', $co, '2026-01-01', '2026-12-31', ['currency'=>'Rs.']);
 $hasDiff = false;
-foreach ($rec['rows'] as $r) { if (str_contains(implode(' ', $r), 'DIFFERENCE')) { $hasDiff = true; } }
+foreach ($rec['rows'] as $r) { foreach (rc_row_cells($r) as $cell) { if (is_string($cell) && str_contains($cell, 'DIFFERENCE')) { $hasDiff = true; break 2; } } }
 ok('S12', 'Inventory-to-GL reconciliation report renders with difference row', $hasDiff);
 
 echo "== S13-S17 fixed-asset IFRS ==\n";

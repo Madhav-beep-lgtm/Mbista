@@ -592,6 +592,12 @@ function jw_posted_lines(array $post, string $prefix): array
             // kaligads specialise, so one order routinely goes to several.
             'karigar_id' => (int) ($post[$prefix . '_karigar_id'][$index] ?? 0),
             'delivery_date' => (string) ($post[$prefix . '_delivery_date'][$index] ?? ''),
+            // Order-only: whether this item is to be MADE or is already on the
+            // shelf. A piece taken off the Ready to Sale tray names the receipt
+            // that put it there — the one physical object, not just its item
+            // code — and never goes to a kaligad.
+            'source' => (string) ($post[$prefix . '_source'][$index] ?? 'workshop'),
+            'stock_receipt_id' => (int) ($post[$prefix . '_stock_receipt_id'][$index] ?? 0),
             // The measurement THIS piece is made to — ring size, chain length,
             // bangle diameter. Free text, because sizes are written a dozen ways.
             'size' => (string) ($post[$prefix . '_size'][$index] ?? ''),
@@ -919,6 +925,10 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
             'delivery_date' => (string) ($line['delivery_date'] ?? ''),
             'size' => trim((string) ($line['size'] ?? '')),
             'line_id' => (int) ($line['line_id'] ?? 0),
+            // Order only: 'stock' means the customer picked a finished piece
+            // off the Ready to Sale tray, and stock_receipt_id says which one.
+            'source' => (string) ($line['source'] ?? 'workshop') === 'stock' ? 'stock' : 'workshop',
+            'stock_receipt_id' => (int) ($line['stock_receipt_id'] ?? 0),
         ];
 
         $sumMetal += $metalAmount;

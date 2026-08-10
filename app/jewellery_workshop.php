@@ -559,7 +559,10 @@ function jewellery_order_line_rows(int $companyId, int $orderId): array
             jp.jewellery_type AS item_type, i.category, mt.name AS metal_name, mt.id AS metal_id,
             p.code AS purity_code, p.fineness, u.code AS unit_code,
             k.code AS karigar_code, k.name AS karigar_name,
-            a.issue_no, a.issue_date, a.status AS assignment_status
+            a.issue_no, a.issue_date, a.status AS assignment_status,
+            sr.receipt_no AS stock_receipt_no, sr.receive_date AS stock_receive_date,
+            sa.assignment_no AS stock_assignment_no, sa.expected_ornament AS stock_ornament,
+            sa.size_design AS stock_size_design
         FROM jewellery_order_lines l
         INNER JOIN inventory_items i ON i.id = l.item_id
         INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
@@ -568,10 +571,75 @@ function jewellery_order_line_rows(int $companyId, int $orderId): array
         INNER JOIN jewellery_units u ON u.id = l.unit_id
         LEFT JOIN jewellery_karigars k ON k.id = l.karigar_id
         LEFT JOIN jewellery_order_assignments a ON a.id = l.assignment_id
+        LEFT JOIN jewellery_order_receipts sr ON sr.id = l.stock_receipt_id
+        LEFT JOIN jewellery_order_assignments sa ON sa.id = sr.assignment_id
         WHERE l.company_id = :cid AND l.order_id = :oid ORDER BY l.id ASC');
     $stmt->execute(['cid' => $companyId, 'oid' => $orderId]);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * One piece off the Ready to Sale shelf, by the receipt that put it there.
+ *
+ * Returns null unless it really is a showroom piece of THIS company that came
+ * back and was not cancelled — the same four conditions the board itself
+ * applies, so a piece the counter cannot see is a piece an order cannot claim.
+ * `label` is how it is named back to the person in a refusal.
+ */
+function jewellery_stock_piece(int $companyId, int $receiptId): ?array
+{
+    if ($receiptId <= 0) {
+        return null;
+    }
+    $stmt = db()->prepare("SELECT r.id AS receipt_id, r.receipt_no, r.receive_date, r.qty_pieces,
+            r.received_item_id, r.received_purity_id, r.unit_id,
+            r.received_gross_weight, r.stone_weight, r.net_gold_weight, r.received_fine_weight,
+            r.making_amount,
+            a.assignment_no, a.expected_ornament, a.size_design,
+            i.sku AS item_code, i.name AS item_name, p.code AS purity_code, u.code AS unit_code
+        FROM jewellery_order_receipts r
+        INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id
+        LEFT JOIN inventory_items i ON i.id = r.received_item_id
+        LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
+        LEFT JOIN jewellery_units u ON u.id = r.unit_id
+        WHERE r.id = :id AND r.company_id = :cid AND a.company_id = :acid
+          AND a.assign_kind = 'self' AND a.status = 'received' AND r.status <> 'cancelled'
+        LIMIT 1");
+    $stmt->execute(['id' => $receiptId, 'cid' => $companyId, 'acid' => $companyId]);
+    $piece = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$piece) {
+        return null;
+    }
+    $name = trim((string) ($piece['expected_ornament'] ?? '')) ?: trim((string) ($piece['item_name'] ?? ''));
+    $piece['label'] = trim((string) $piece['assignment_no'] . ($name !== '' ? ' — ' . $name : ''));
+
+    return $piece;
+}
+
+/**
+ * Who is holding this shelf piece, if anybody — the order line that named it.
+ *
+ * A cancelled order holds nothing: its line keeps the id as the record of what
+ * it once reserved, and the piece goes back on offer. $exceptOrderId is the
+ * order being revised, which must not find itself blocking its own re-save.
+ */
+function jewellery_stock_piece_reservation(int $companyId, int $receiptId, int $exceptOrderId = 0): ?array
+{
+    if ($receiptId <= 0) {
+        return null;
+    }
+    $stmt = db()->prepare("SELECT l.id AS line_id, o.id AS order_id, o.order_no, o.status,
+            COALESCE(ap.name, o.customer_name, 'Walk-in') AS customer_name
+        FROM jewellery_order_lines l
+        INNER JOIN jewellery_orders o ON o.id = l.order_id
+        LEFT JOIN accounting_parties ap ON ap.id = o.party_id
+        WHERE l.company_id = :cid AND l.stock_receipt_id = :rid AND l.source = 'stock'
+          AND o.status <> 'cancelled' AND o.id <> :except
+        ORDER BY l.id ASC LIMIT 1");
+    $stmt->execute(['cid' => $companyId, 'rid' => $receiptId, 'except' => $exceptOrderId]);
+
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
 /**
@@ -645,6 +713,61 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         ]];
     }
 
+    // A piece taken off the Ready to Sale shelf STATES ITS OWN FACTS. Which
+    // item it is, its purity, its unit, what it weighs and how much of that
+    // weight is stone were all settled when it came back from the kaligad and
+    // went into stock. So they are read off the piece here, before anything is
+    // priced, rather than trusted from the form: a weight retyped at the
+    // counter would put one ring's figures on another ring's bill and draw the
+    // difference out of stock for ever.
+    //
+    // What the customer is CHARGED — the metal rate, the making, the stone
+    // money, the wastage the shop prices at — is untouched. That is the deal
+    // being struck now, not a fact about the object.
+    $claimedReceipts = [];
+    foreach ($lines as $index => $line) {
+        $receiptId = (int) ($line['stock_receipt_id'] ?? 0);
+        $wantsStock = (string) ($line['source'] ?? 'workshop') === 'stock' || $receiptId > 0;
+        if (!$wantsStock) {
+            continue;
+        }
+        if ($receiptId <= 0) {
+            throw new RuntimeException('Item ' . ($index + 1) . ': choose which piece off the Ready to Sale shelf '
+                . 'is being sold, or leave it as one a kaligad will make.');
+        }
+        $piece = jewellery_stock_piece($companyId, $receiptId);
+        if ($piece === null) {
+            throw new RuntimeException('Item ' . ($index + 1) . ': that piece is not on this company\'s Ready to Sale '
+                . 'shelf — it may have been taken off it since this form was opened.');
+        }
+        // The same ring twice on one order is the same mistake as the same ring
+        // on two orders, and the reservation test cannot see it: neither row
+        // has been stored yet.
+        if (isset($claimedReceipts[$receiptId])) {
+            throw new RuntimeException('Item ' . ($index + 1) . ': ' . $piece['label'] . ' is already item '
+                . $claimedReceipts[$receiptId] . ' of this order. There is only one of it.');
+        }
+        $claimedReceipts[$receiptId] = $index + 1;
+
+        $heldBy = jewellery_stock_piece_reservation($companyId, $receiptId, $orderId);
+        if ($heldBy !== null) {
+            throw new RuntimeException('Item ' . ($index + 1) . ': ' . $piece['label'] . ' is already promised on order '
+                . $heldBy['order_no'] . ' (' . $heldBy['customer_name'] . '). There is only one of it.');
+        }
+
+        $lines[$index]['source'] = 'stock';
+        $lines[$index]['stock_receipt_id'] = $receiptId;
+        $lines[$index]['item_id'] = (int) $piece['received_item_id'];
+        $lines[$index]['purity_id'] = (int) $piece['received_purity_id'];
+        $lines[$index]['unit_id'] = (int) $piece['unit_id'];
+        // The receipt IS the piece, so the whole of it is what the order holds.
+        // Selling part of a batch is an ordinary counter sale out of stock, not
+        // an order against one named object.
+        $lines[$index]['qty_pieces'] = (float) $piece['qty_pieces'] ?: 1.0;
+        $lines[$index]['gross_weight'] = (float) $piece['received_gross_weight'];
+        $lines[$index]['stone_weight'] = (float) $piece['stone_weight'];
+    }
+
     $computed = jw_compute_document($companyId, [
         'document_date' => $orderDate,
         'doc_type' => 'sale',
@@ -709,17 +832,36 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     // Each item goes to its own kaligad, on its own promised date. Kaligads
     // specialise — the one who makes chains does not set stones — so an order
     // for a chain and a diamond ring is routinely two craftsmen and two dates.
+    //
+    // Unless the customer pointed at the case. An item taken off the Ready to
+    // Sale tray is already made: it has no kaligad, no promised date to wait
+    // for and no work to schedule, and the piece it names is held for this
+    // customer from the moment the order is saved.
     $lineKarigars = [];
     $lineDates = [];
     $lineSizes = [];
+    $lineSources = [];
+    $lineStockReceipts = [];
     foreach ($computed['lines'] as $index => $lineRow) {
+        // Settled in the pre-pass above, which read the piece and refused
+        // anything it could not stand behind.
+        $fromStock = (string) ($lineRow['source'] ?? 'workshop') === 'stock';
+        $lineSources[$index] = $fromStock ? 'stock' : 'workshop';
+        $lineStockReceipts[$index] = $fromStock ? (int) $lineRow['stock_receipt_id'] : null;
+
         $lineKarigarId = (int) ($lineRow['karigar_id'] ?? 0);
+        if ($fromStock) {
+            // Not refused, cleared. The form disables the column the moment a
+            // piece is chosen, so a kaligad arriving here is a leftover from
+            // before the switch, not something the person is asking for.
+            $lineKarigarId = 0;
+        }
         if ($lineKarigarId > 0 && !jewellery_karigar($companyId, $lineKarigarId)) {
             throw new RuntimeException('Item ' . ($index + 1) . ': choose a kaligad that belongs to this company.');
         }
         $lineKarigars[$index] = $lineKarigarId ?: null;
 
-        $lineDate = trim((string) ($lineRow['delivery_date'] ?? ''));
+        $lineDate = $fromStock ? '' : trim((string) ($lineRow['delivery_date'] ?? ''));
         if ($lineDate !== '' && strtotime($lineDate) === false) {
             throw new RuntimeException('Item ' . ($index + 1) . ': that promised date is not a date.');
         }
@@ -879,6 +1021,13 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                     throw new RuntimeException('Item ' . ($index + 1) . ' already has metal out with a kaligad, '
                         . 'so it cannot be changed to a different item. Cancel that issue first.');
                 }
+                // Nor can it become a piece off the shelf: the metal for it is
+                // in a kaligad's hands right now, and the order line is what
+                // his issue points back at.
+                if (($lineSources[$index] ?? 'workshop') === 'stock') {
+                    throw new RuntimeException('Item ' . ($index + 1) . ' already has metal out with a kaligad, '
+                        . 'so it cannot be switched to a piece off the Ready to Sale shelf. Cancel that issue first.');
+                }
                 $priorAssignments[$index] = (int) $priorLine['assignment_id'];
             }
 
@@ -923,12 +1072,14 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         }
 
         $lineStmt = db()->prepare('INSERT INTO jewellery_order_lines (order_id, company_id, item_id, karigar_id,
+                source, stock_receipt_id,
                 delivery_date, size, assignment_id, purity_id, unit_id,
                 qty_pieces, gross_weight, stone_weight, net_weight, fine_weight, rate, metal_amount,
                 wastage_pct, wastage_weight, total_weight, wastage_amount, making_amount, stone_amount,
                 stone_carat, diamond_amount, diamond_carat, other_diamond_amount, other_diamond_carat,
                 vat_base, vat_rate, vat_amount, tax_amount, allocated_adjust, line_total, notes)
-            VALUES (:oid, :cid, :item, :karigar, :ldelivery, :lsize, :assignment, :purity, :unit,
+            VALUES (:oid, :cid, :item, :karigar, :source, :stockreceipt,
+                :ldelivery, :lsize, :assignment, :purity, :unit,
                 :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
                 :wpct, :wweight, :tweight, :wamount, :making, :stone,
                 :scarat, :diamond, :dcarat, :odiamond, :odcarat, :vbase, :vrate, :vamount, :tamount, :adjust, :ltotal, :notes)');
@@ -936,6 +1087,8 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         foreach ($computed['lines'] as $lineIndex => $row) {
             $lineStmt->execute([
                 'karigar' => $lineKarigars[$lineIndex] ?? null,
+                'source' => $lineSources[$lineIndex] ?? 'workshop',
+                'stockreceipt' => $lineStockReceipts[$lineIndex] ?? null,
                 'ldelivery' => $lineDates[$lineIndex] ?? null,
                 'lsize' => $lineSizes[$lineIndex] ?? null,
                 'assignment' => $priorAssignments[$lineIndex] ?? null,
@@ -965,6 +1118,18 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                     WHERE id = :aid AND company_id = :cid')
                     ->execute(['lid' => $insertedLineIds[$lineIndex], 'aid' => $assignmentId, 'cid' => $companyId]);
             }
+        }
+
+        // An item taken off the shelf is finished the moment the order is
+        // written, so the order's own status has to be re-read from its lines
+        // here rather than waiting for a workshop event that will never come:
+        // an order for a piece in the case would otherwise sit at 'confirmed'
+        // for ever and never reach the ready-to-deliver board.
+        //
+        // A draft is left alone — it is still being written up, and a draft on
+        // the delivery board is an order nobody has agreed to yet.
+        if ($status !== 'draft') {
+            jewellery_sync_order_status($companyId, $orderId);
         }
 
         if ($ownsTransaction) {
@@ -1100,8 +1265,15 @@ function jewellery_postpone_order(int $companyId, int $orderId, string $newDate,
 function jewellery_delete_order(int $companyId, int $orderId): bool
 {
     // Only an order that never reached a karigar may be removed outright.
+    //
+    // 'received' is on the list for one case only, and the NOT EXISTS below is
+    // what makes it safe: an order made up of Ready to Sale pieces is
+    // 'received' from the minute it is written, because nothing is being
+    // waited for. A workshop order cannot reach that word without an
+    // assignment, so it is still barred. Deleting simply hands the pieces back
+    // to the shelf — the lines go with the order and the reservation with them.
     $stmt = db()->prepare("DELETE FROM jewellery_orders WHERE id = :id AND company_id = :cid
-        AND status IN ('draft', 'confirmed', 'cancelled')
+        AND status IN ('draft', 'confirmed', 'received', 'cancelled')
         AND NOT EXISTS (SELECT 1 FROM jewellery_order_assignments a WHERE a.order_id = jewellery_orders.id)");
     $stmt->execute(['id' => $orderId, 'cid' => $companyId]);
 
@@ -1261,7 +1433,7 @@ function jewellery_pending_order_lines(int $companyId): array
         INNER JOIN jewellery_purities p ON p.id = l.purity_id
         LEFT JOIN jewellery_karigars k ON k.id = l.karigar_id
         LEFT JOIN accounting_parties ap ON ap.id = o.party_id
-        WHERE l.company_id = :cid AND l.assignment_id IS NULL
+        WHERE l.company_id = :cid AND l.assignment_id IS NULL AND l.source <> 'stock'
           AND o.status IN ('draft', 'confirmed', 'assigned', 'partially_received')
         ORDER BY COALESCE(l.delivery_date, '9999-12-31') ASC, o.order_no ASC, l.id ASC");
     $stmt->execute(['cid' => $companyId]);
@@ -1686,9 +1858,17 @@ function jewellery_sync_order_status(int $companyId, int $orderId): string
     // Per item: is it out with somebody, and has it come back? A cancelled
     // issue releases its items (assignment_id is cleared), so they read as
     // not-yet-issued again, which is exactly right.
+    //
+    // An item taken off the Ready to Sale shelf counts as back before anything
+    // happens at all. Nobody is making it — it is in the case with the
+    // customer's name on it — so as far as this order's progress goes it has
+    // already been produced, and an order of nothing but shelf pieces is
+    // 'received' from the minute it is written.
     $count = db()->prepare("SELECT COUNT(*) AS total,
-            SUM(CASE WHEN a.id IS NOT NULL AND a.status <> 'cancelled' THEN 1 ELSE 0 END) AS out_now,
-            SUM(CASE WHEN a.status = 'received' THEN 1 ELSE 0 END) AS back
+            SUM(CASE WHEN l.source = 'stock' THEN 1
+                     WHEN a.id IS NOT NULL AND a.status <> 'cancelled' THEN 1 ELSE 0 END) AS out_now,
+            SUM(CASE WHEN l.source = 'stock' THEN 1
+                     WHEN a.status = 'received' THEN 1 ELSE 0 END) AS back
         FROM jewellery_order_lines l
         LEFT JOIN jewellery_order_assignments a
                ON a.id = l.assignment_id AND a.company_id = l.company_id
@@ -2711,11 +2891,23 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
     // that took an order for a ring AND a chain must get both back on the bill;
     // returning only the first would quietly drop what it agreed to sell.
     $orderLines = jewellery_order_line_rows($companyId, $orderId);
+    // The receipt above belongs to the workshop, so the line it re-measures has
+    // to be a workshop line. An item taken off the Ready to Sale shelf was
+    // weighed when it came back for the SHOWROOM, and those figures are already
+    // on its order line — letting a customer's receipt overwrite them would
+    // bill one physical piece using another one's weight.
+    $firstWorkshopIndex = -1;
+    foreach ($orderLines as $index => $orderLine) {
+        if ((string) ($orderLine['source'] ?? 'workshop') !== 'stock') {
+            $firstWorkshopIndex = $index;
+            break;
+        }
+    }
     $lines = [];
     foreach ($orderLines as $index => $orderLine) {
-        // The first line is the one the karigar worked to, so it takes the
-        // weight and rate actually received. The rest stand as ordered.
-        $isFirst = $index === 0;
+        // That line is the one the karigar worked to, so it takes the weight
+        // and rate actually received. The rest stand as ordered.
+        $isFirst = $index === $firstWorkshopIndex;
         $lineGross = $isFirst && $received !== null ? $gross : jw_round_weight((float) $orderLine['gross_weight']);
         $lineRate = (float) $orderLine['rate'];
         if ($isFirst && $rate > 0) {

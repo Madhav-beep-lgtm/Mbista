@@ -296,6 +296,22 @@ function icon(string $name): string
             'viewBox' => '0 0 24 24',
             'paths' => ['M18 6L6 18', 'M6 6l12 12'],
         ],
+        // An app this full of delete actions had no bin. Twelve controls that
+        // destroy something were drawn with the &times; character instead —
+        // the same mark used to dismiss a dialog, at whatever size the
+        // surrounding font happened to be. 'close' stays for removing a row
+        // from a form you are still filling in; this is for deleting a record
+        // that is already saved, and the two should not look alike.
+        'trash' => [
+            'viewBox' => '0 0 24 24',
+            'paths' => [
+                'M3.5 6h17',
+                'M9.5 6V4.5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1V6',
+                'M5.5 6l.9 13.1a1.5 1.5 0 0 0 1.5 1.4h8.2a1.5 1.5 0 0 0 1.5-1.4L18.5 6',
+                'M10 10.5v6',
+                'M14 10.5v6',
+            ],
+        ],
         'phone' => [
             'viewBox' => '0 0 24 24',
             'paths' => ['M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z'],
@@ -2749,40 +2765,131 @@ function ensure_party_for_client(int $companyId, int $clientId): int
     if ($companyId <= 0 || $clientId <= 0 || !table_exists('accounting_parties') || !table_exists('client_profiles')) {
         return 0;
     }
+
+    $hasClientLink = column_exists('accounting_parties', 'client_profile_id');
+
     try {
-        $clientStmt = db()->prepare('SELECT organization_name, client_code FROM client_profiles WHERE id = :id LIMIT 1');
-        $clientStmt->execute(['id' => $clientId]);
+        $clientStmt = db()->prepare('
+            SELECT cp.organization_name, cp.client_code, cp.pan_no, cp.address,
+                   u.email, u.phone
+            FROM client_profiles cp
+            LEFT JOIN users u ON u.id = cp.user_id
+            WHERE cp.id = :id AND cp.company_id = :company_id
+            LIMIT 1
+        ');
+        $clientStmt->execute(['id' => $clientId, 'company_id' => $companyId]);
         $client = $clientStmt->fetch();
         if (!$client || trim((string) $client['organization_name']) === '') {
             return 0;
         }
+
         $name = trim((string) $client['organization_name']);
 
-        $existing = db()->prepare('SELECT id FROM accounting_parties WHERE company_id = :cid AND name = :name LIMIT 1');
-        $existing->execute(['cid' => $companyId, 'name' => $name]);
-        $partyId = (int) ($existing->fetchColumn() ?: 0);
-        if ($partyId > 0) {
-            return $partyId;
+        // The permanent link is authoritative. Names, phone numbers and PANs
+        // may change, but a client profile must continue to resolve to the same
+        // Party Master record and therefore the same receivable ledger.
+        if ($hasClientLink) {
+            $linkedStmt = db()->prepare('
+                SELECT id
+                FROM accounting_parties
+                WHERE company_id = :company_id AND client_profile_id = :client_id
+                LIMIT 1
+            ');
+            $linkedStmt->execute(['company_id' => $companyId, 'client_id' => $clientId]);
+            $linkedPartyId = (int) ($linkedStmt->fetchColumn() ?: 0);
+            if ($linkedPartyId > 0) {
+                ensure_party_ledger($companyId, $linkedPartyId, 'receivable');
+                return $linkedPartyId;
+            }
+        }
+
+        // A legacy name match is safe only when exactly one party has that
+        // normalized name. Ambiguous matches are left for controlled linking;
+        // silently picking one would move invoices between financial ledgers.
+        $nameStmt = db()->prepare('
+            SELECT id, client_profile_id
+            FROM accounting_parties
+            WHERE company_id = :company_id
+              AND LOWER(TRIM(name)) = LOWER(TRIM(:name))
+            ORDER BY id ASC
+            LIMIT 2
+        ');
+        $nameStmt->execute(['company_id' => $companyId, 'name' => $name]);
+        $nameMatches = $nameStmt->fetchAll(PDO::FETCH_ASSOC);
+        if (count($nameMatches) === 1) {
+            $partyId = (int) $nameMatches[0]['id'];
+            $existingClientId = (int) ($nameMatches[0]['client_profile_id'] ?? 0);
+            if (!$hasClientLink || $existingClientId === 0 || $existingClientId === $clientId) {
+                if ($hasClientLink) {
+                    db()->prepare("\n                        UPDATE accounting_parties\n                        SET client_profile_id = :client_id,\n                            party_type = CASE\n                                WHEN party_type = 'supplier' THEN 'both'\n                                WHEN party_type = 'other' THEN 'customer'\n                                ELSE party_type\n                            END,\n                            pan_no = COALESCE(NULLIF(pan_no, ''), :pan_no),\n                            email = COALESCE(NULLIF(email, ''), :email),\n                            phone = COALESCE(NULLIF(phone, ''), :phone),\n                            billing_address = COALESCE(NULLIF(billing_address, ''), :address)\n                        WHERE id = :id AND company_id = :company_id\n                    ")->execute([
+                        'client_id' => $clientId,
+                        'pan_no' => trim((string) ($client['pan_no'] ?? '')) ?: null,
+                        'email' => trim((string) ($client['email'] ?? '')) ?: null,
+                        'phone' => trim((string) ($client['phone'] ?? '')) ?: null,
+                        'address' => trim((string) ($client['address'] ?? '')) ?: null,
+                        'id' => $partyId,
+                        'company_id' => $companyId,
+                    ]);
+                }
+                ensure_party_ledger($companyId, $partyId, 'receivable');
+                return $partyId;
+            }
+        } elseif (count($nameMatches) > 1) {
+            return 0;
         }
 
         $code = strtoupper(trim((string) ($client['client_code'] ?? '')));
         if ($code === '') {
             $code = 'CL-' . $clientId;
         }
-        $codeTaken = db()->prepare('SELECT id FROM accounting_parties WHERE company_id = :cid AND code = :code LIMIT 1');
-        $codeTaken->execute(['cid' => $companyId, 'code' => $code]);
+        $codeTaken = db()->prepare('SELECT id FROM accounting_parties WHERE company_id = :company_id AND code = :code LIMIT 1');
+        $codeTaken->execute(['company_id' => $companyId, 'code' => $code]);
         if ($codeTaken->fetchColumn()) {
             $code .= '-' . $clientId;
         }
 
-        db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type, status) VALUES (:cid, :code, :name, 'customer', 'active')")
-            ->execute(['cid' => $companyId, 'code' => $code, 'name' => $name]);
-        return (int) db()->lastInsertId();
+        $params = [
+            'company_id' => $companyId,
+            'code' => $code,
+            'name' => $name,
+            'pan_no' => trim((string) ($client['pan_no'] ?? '')) ?: null,
+            'email' => trim((string) ($client['email'] ?? '')) ?: null,
+            'phone' => trim((string) ($client['phone'] ?? '')) ?: null,
+            'address' => trim((string) ($client['address'] ?? '')) ?: null,
+        ];
+        if ($hasClientLink) {
+            $params['client_id'] = $clientId;
+            db()->prepare("\n                INSERT INTO accounting_parties\n                    (company_id, client_profile_id, code, name, party_type, pan_no, email, phone, billing_address, status)\n                VALUES\n                    (:company_id, :client_id, :code, :name, 'customer', :pan_no, :email, :phone, :address, 'active')\n            ")->execute($params);
+        } else {
+            db()->prepare("\n                INSERT INTO accounting_parties\n                    (company_id, code, name, party_type, pan_no, email, phone, billing_address, status)\n                VALUES\n                    (:company_id, :code, :name, 'customer', :pan_no, :email, :phone, :address, 'active')\n            ")->execute($params);
+        }
+
+        $partyId = (int) db()->lastInsertId();
+        ensure_party_ledger($companyId, $partyId, 'receivable');
+        return $partyId;
     } catch (Throwable $exception) {
+        // A concurrent request may have inserted the unique client link first.
+        // Resolve that winner instead of creating or returning another party.
+        if ($hasClientLink) {
+            try {
+                $retry = db()->prepare('
+                    SELECT id FROM accounting_parties
+                    WHERE company_id = :company_id AND client_profile_id = :client_id
+                    LIMIT 1
+                ');
+                $retry->execute(['company_id' => $companyId, 'client_id' => $clientId]);
+                $partyId = (int) ($retry->fetchColumn() ?: 0);
+                if ($partyId > 0) {
+                    ensure_party_ledger($companyId, $partyId, 'receivable');
+                    return $partyId;
+                }
+            } catch (Throwable $ignored) {
+                // Preserve the original safe failure contract below.
+            }
+        }
         return 0;
     }
 }
-
 /**
  * The equity ledger that absorbs opening-balance journals. Found by code,
  * else created under the Reserve & Surplus (or any equity) group.

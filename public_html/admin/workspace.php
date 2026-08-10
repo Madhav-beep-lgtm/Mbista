@@ -1523,6 +1523,9 @@ $editTaskAssigneeIds = [];
 $terminatePrefillTaskId = (int) ($_GET['terminate_task_id'] ?? 0);
 $unlinkedCustomers = [];
 $otherPortalClients = [];
+$industries = [];
+$serviceProviderEntities = [];
+$selectedClientServiceProviderIds = [];
 
 if ($missingTables === []) {
     $staffStmt = db()->prepare("SELECT id, name, email FROM users WHERE role = 'staff' AND status = 'active' AND company_id = :company_id ORDER BY name ASC");

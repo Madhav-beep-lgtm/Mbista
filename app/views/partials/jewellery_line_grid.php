@@ -90,8 +90,10 @@ table.jw-lines .c-wt   { width: 92px; }
 table.jw-lines .c-rate { width: 118px; }
 table.jw-lines .c-crt  { width: 80px; }
 table.jw-lines .c-amt  { width: 108px; }
-/* Order grids only: which kaligad makes this piece, when it is promised, what
-   size it is made to, and the customer's note for THAT piece. */
+/* Order grids only: whether the piece is already on the shelf, which kaligad
+   makes it otherwise, when it is promised, what size it is made to, and the
+   customer's note for THAT piece. */
+table.jw-lines .c-src  { width: 200px; }
 table.jw-lines .c-krg  { width: 104px; }
 table.jw-lines .c-date { width: 152px; }
 table.jw-lines .c-size { width: 96px; }
@@ -224,6 +226,12 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
     // columns appear only when the page hands over a kaligad list.
     $karigars = $ctx['karigars'] ?? null;
     $withWorkshop = is_array($karigars);
+    // Orders only, again. Not everything a customer orders has to be made: the
+    // commonest counter conversation is a customer pointing at a ring in the
+    // case. Handing over the Ready to Sale shelf turns on the column that lets
+    // them order THAT piece — and a row that names one never goes to a kaligad.
+    $stockPieces = $ctx['stock_pieces'] ?? null;
+    $withStock = $withWorkshop && is_array($stockPieces);
     ?>
     <?php $full = $prefix === 'l'; ?>
     <fieldset class="jw-lines-box" style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:12px 0;min-width:0">
@@ -259,6 +267,9 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                     }
                 }
                 if ($withWorkshop) {
+                    if ($withStock) {
+                        $cols[] = 'c-src';
+                    }
                     $cols[] = 'c-krg';
                     $cols[] = 'c-date';
                     $cols[] = 'c-size';
@@ -284,7 +295,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         <th colspan="2">Stone</th>
                     <?php endif; ?>
                     <?php if ($withWorkshop): ?>
-                        <th colspan="4">Workshop</th>
+                        <th colspan="<?= $withStock ? 5 : 4 ?>">Workshop</th>
                     <?php endif; ?>
                     <th rowspan="2" class="c-del"></th>
                 </tr>
@@ -298,6 +309,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         <th class="c-crt">Crt</th><th class="c-amt">Amt</th>
                     <?php endif; ?>
                     <?php if ($withWorkshop): ?>
+                        <?php if ($withStock): ?><th class="c-src">From stock</th><?php endif; ?>
                         <th class="c-krg">Kaligad</th><th class="c-date">Promised</th>
                         <th class="c-size">Size</th><th class="c-note">Item note</th>
                     <?php endif; ?>
@@ -305,6 +317,14 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
             </thead>
             <tbody>
             <?php for ($i = 0; $i < $slots; $i++): $row = $existing[$i] ?? null; ?>
+                <?php
+                    // A stored line whose piece came off the Ready to Sale shelf.
+                    // The measurements below are the object's own, so they are
+                    // shown rather than asked for — the engine reads them off the
+                    // piece again on save either way.
+                    $fromStock = $withStock && (string) ($row['source'] ?? 'workshop') === 'stock';
+                    $pieceLock = $fromStock ? ' readonly title="The piece\'s own weight, measured when it came back"' : '';
+                ?>
                 <tr>
                     <td data-label="Item">
                         <?php
@@ -356,9 +376,9 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                             <?php endforeach; ?>
                         </select>
                     </td>
-                    <td data-label="Pcs"><input type="number" name="<?= $prefix ?>_qty_pieces[]" step="0.001" min="0" value="<?= e((string) ($row['qty_pieces'] ?? '0')) ?>"></td>
-                    <td data-label="Gross"><input type="number" name="<?= $prefix ?>_gross_weight[]" step="0.0001" min="0" value="<?= e((string) ($row['gross_weight'] ?? '0')) ?>"></td>
-                    <td data-label="Less"><input type="number" name="<?= $prefix ?>_stone_weight[]" class="jw-stone-wt" step="0.0001" min="0" value="<?= e((string) ($row['stone_weight'] ?? '0')) ?>"></td>
+                    <td data-label="Pcs"><input type="number" name="<?= $prefix ?>_qty_pieces[]" step="0.001" min="0" value="<?= e((string) ($row['qty_pieces'] ?? '0')) ?>"<?= $pieceLock ?>></td>
+                    <td data-label="Gross"><input type="number" name="<?= $prefix ?>_gross_weight[]" step="0.0001" min="0" value="<?= e((string) ($row['gross_weight'] ?? '0')) ?>"<?= $pieceLock ?>></td>
+                    <td data-label="Less"><input type="number" name="<?= $prefix ?>_stone_weight[]" class="jw-stone-wt" step="0.0001" min="0" value="<?= e((string) ($row['stone_weight'] ?? '0')) ?>"<?= $pieceLock ?>></td>
                     <?php if ($prefix !== 'x'): ?>
                         <td data-label="Wast %"><input type="number" name="<?= $prefix ?>_wastage_pct[]" class="jw-wastage-pct" step="0.001" min="0" value="<?= e((string) ($row['wastage_pct'] ?? '0')) ?>"></td>
                         <td data-label="Wast wt"><input type="number" name="<?= $prefix ?>_wastage_weight[]" class="jw-wastage-wt" step="0.0001" min="0" value="<?= e((string) ($row['wastage_weight'] ?? '0')) ?>"></td>
@@ -380,20 +400,66 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                             // THIS date, and the receipt settles his wage and his
                             // wastage against it.
                             $issued = (int) ($row['assignment_id'] ?? 0) > 0;
+                            // $fromStock was settled at the top of the row: a
+                            // piece off the shelf has no craftsman and no day to
+                            // wait for, because it is finished and in the case.
+                            $lockKarigar = $issued || $fromStock;
                         ?>
+                        <?php if ($withStock): ?>
+                            <td data-label="From stock">
+                                <?php // One control, not two: naming a piece IS saying the
+                                      // line comes off the shelf, so there is no second
+                                      // field that can disagree with it. Every option
+                                      // carries the piece's own measurements, and the
+                                      // script below writes them across the row — the
+                                      // engine reads them off the piece again on save, so
+                                      // what is shown and what is stored cannot drift. ?>
+                                <select name="<?= $prefix ?>_stock_receipt_id[]" class="jw-stock-pick"
+                                        title="Sell a finished piece already on the Ready to Sale shelf">
+                                    <option value="0">— to be made —</option>
+                                    <?php foreach ($stockPieces as $piece): ?>
+                                        <?php
+                                            $pieceName = trim((string) ($piece['expected_ornament'] ?? '')) !== ''
+                                                ? (string) $piece['expected_ornament']
+                                                : (string) ($piece['item_name'] ?? '');
+                                            $pieceLabel = (string) $piece['assignment_no'] . ' · ' . $pieceName
+                                                . ' · ' . $fmt((float) $piece['received_gross_weight'], 4)
+                                                . ' ' . (string) ($piece['unit_code'] ?? '')
+                                                . ' ' . (string) ($piece['purity_code'] ?? '');
+                                        ?>
+                                        <option value="<?= (int) $piece['receipt_id'] ?>"
+                                                data-item="<?= (int) $piece['received_item_id'] ?>"
+                                                data-purity="<?= (int) $piece['received_purity_id'] ?>"
+                                                data-unit="<?= (int) $piece['unit_id'] ?>"
+                                                data-pcs="<?= e((string) ((float) $piece['qty_pieces'] ?: 1)) ?>"
+                                                data-gross="<?= e((string) (float) $piece['received_gross_weight']) ?>"
+                                                data-stone="<?= e((string) (float) ($piece['stone_weight'] ?? 0)) ?>"
+                                                data-making="<?= e((string) (float) ($piece['making_amount'] ?? 0)) ?>"
+                                                data-size="<?= e((string) ($piece['size_design'] ?? '')) ?>"
+                                                title="<?= e($pieceLabel) ?>"
+                                                <?= (int) ($row['stock_receipt_id'] ?? 0) === (int) $piece['receipt_id'] ? 'selected' : '' ?>><?= e($pieceLabel) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                        <?php endif; ?>
                         <td data-label="Kaligad">
-                            <select name="<?= $prefix ?>_karigar_id[]"<?= $issued ? ' disabled' : '' ?>
-                                title="<?= $issued ? e('Metal is already out on issue ' . (string) ($row['issue_no'] ?? '')) : 'Who is to make this piece' ?>">
+                            <select name="<?= $prefix ?>_karigar_id[]"<?= $lockKarigar ? ' disabled' : '' ?>
+                                title="<?= $issued ? e('Metal is already out on issue ' . (string) ($row['issue_no'] ?? ''))
+                                    : ($fromStock ? 'Already made — this piece is coming off the shelf' : 'Who is to make this piece') ?>">
                                 <option value="0">—</option>
                                 <?php foreach ($karigars as $k): ?>
                                     <option value="<?= (int) $k['id'] ?>" <?= (int) ($row['karigar_id'] ?? 0) === (int) $k['id'] ? 'selected' : '' ?>><?= e($k['code']) ?></option>
                                 <?php endforeach; ?>
                             </select>
-                            <?php if ($issued): ?>
-                                <input type="hidden" name="<?= $prefix ?>_karigar_id[]" value="<?= (int) ($row['karigar_id'] ?? 0) ?>">
+                            <?php // A disabled select posts nothing, and every field on this
+                                  // grid is a parallel array — one missing value would slide
+                                  // every later row's kaligad onto the wrong item. The hidden
+                                  // input is what keeps the arrays the same length. ?>
+                            <?php if ($lockKarigar): ?>
+                                <input type="hidden" class="jw-karigar-lock"<?= $issued ? ' data-issued="1"' : '' ?> name="<?= $prefix ?>_karigar_id[]" value="<?= $fromStock ? 0 : (int) ($row['karigar_id'] ?? 0) ?>">
                             <?php endif; ?>
                         </td>
-                        <td data-label="Promised"><input type="date" name="<?= $prefix ?>_delivery_date[]" value="<?= e((string) ($row['delivery_date'] ?? '')) ?>"></td>
+                        <td data-label="Promised"><input type="date" name="<?= $prefix ?>_delivery_date[]" value="<?= $fromStock ? '' : e((string) ($row['delivery_date'] ?? '')) ?>"<?= $fromStock ? ' readonly title="Already made — there is nothing to wait for"' : '' ?>></td>
                         <?php // Free text both: sizes are written a dozen ways (US 7,
                               // 17 mm, 22"), and the note is the customer's wish for
                               // THIS piece — engraving, finish, stone preference. ?>
@@ -404,7 +470,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                     <?php endif; ?>
                     <td class="c-del" data-label="">
                         <?php // Clearing the item empties the row, and an empty row is ignored on save. ?>
-                        <button type="button" class="jw-line-remove" aria-label="Remove this row">&times;</button>
+                        <button type="button" class="jw-line-remove" aria-label="Remove this row"><?= icon('close') ?></button>
                     </td>
                 </tr>
             <?php endfor; ?>
@@ -449,6 +515,79 @@ function jw_line_grid_scripts(): void
             field.value = field.type === "number" ? "0" : "";
         });
     }
+    // A row is off the shelf, or it is work for a kaligad. Never both, and the
+    // two halves below are exact opposites so a row can be switched back.
+    function releaseRow(row) {
+        var karigar = row.querySelector('select[name$="_karigar_id[]"]');
+        if (karigar) {
+            karigar.disabled = false;
+            karigar.title = "Who is to make this piece";
+        }
+        // Only the compensator this script added. One marked data-issued
+        // belongs to metal that is genuinely out with a craftsman.
+        Array.prototype.forEach.call(row.querySelectorAll(".jw-karigar-lock:not([data-issued])"), function (lock) {
+            lock.parentNode.removeChild(lock);
+        });
+        ["_delivery_date[]", "_qty_pieces[]", "_gross_weight[]", "_stone_weight[]"].forEach(function (suffix) {
+            var field = row.querySelector('input[name$="' + suffix + '"]');
+            if (field) { field.readOnly = false; field.removeAttribute("title"); }
+        });
+    }
+
+    function claimRow(row, option) {
+        var read = function (key) { return option.getAttribute("data-" + key) || ""; };
+        var put = function (suffix, value) {
+            var field = row.querySelector('[name$="' + suffix + '"]');
+            if (field && value !== "") { field.value = value; }
+            return field;
+        };
+        put("_item_id[]", read("item"));
+        put("_purity_id[]", read("purity"));
+        put("_unit_id[]", read("unit"));
+        // The piece's own measurements, shown rather than asked for. The engine
+        // reads them off the piece again on save, so a browser that got this
+        // wrong cannot put one ring's weight on another ring's bill.
+        ["_qty_pieces[]:pcs", "_gross_weight[]:gross", "_stone_weight[]:stone"].forEach(function (pair) {
+            var parts = pair.split(":");
+            var field = put(parts[0], read(parts[1]));
+            if (field) { field.readOnly = true; field.title = "The piece's own weight, measured when it came back"; }
+        });
+        var making = row.querySelector('input[name$="_making_amount[]"]');
+        if (making && parseFloat(making.value || "0") === 0) { making.value = read("making"); }
+        var size = row.querySelector('input[name$="_size[]"]');
+        if (size && size.value.trim() === "") { size.value = read("size"); }
+
+        // Nobody is making it, so nobody is waiting for it either.
+        var karigar = row.querySelector('select[name$="_karigar_id[]"]');
+        if (karigar && !karigar.disabled) {
+            karigar.value = "0";
+            karigar.disabled = true;
+            karigar.title = "Already made — this piece is coming off the shelf";
+            var lock = document.createElement("input");
+            lock.type = "hidden";
+            lock.className = "jw-karigar-lock";
+            lock.name = karigar.name;
+            lock.value = "0";
+            karigar.parentNode.appendChild(lock);
+        }
+        var promised = row.querySelector('input[name$="_delivery_date[]"]');
+        if (promised) {
+            promised.value = "";
+            promised.readOnly = true;
+            promised.title = "Already made — there is nothing to wait for";
+        }
+    }
+
+    document.addEventListener("change", function (event) {
+        var picker = event.target.closest(".jw-stock-pick");
+        if (!picker) { return; }
+        var row = picker.closest("tr");
+        if (!row) { return; }
+        var option = picker.options[picker.selectedIndex];
+        if (!option || parseInt(picker.value, 10) <= 0) { releaseRow(row); return; }
+        claimRow(row, option);
+    });
+
     document.addEventListener("click", function (event) {
         var addButton = event.target.closest(".jw-line-add");
         if (addButton) {
@@ -456,8 +595,17 @@ function jw_line_grid_scripts(): void
             var body = box && box.querySelector("table.jw-lines tbody");
             if (!body || !body.lastElementChild) { return; }
             var clone = body.lastElementChild.cloneNode(true);
+            // A cloned lock would post a SECOND kaligad for the new row and
+            // slide every later row's value onto the wrong item.
+            Array.prototype.forEach.call(clone.querySelectorAll(".jw-karigar-lock"), function (lock) {
+                lock.parentNode.removeChild(lock);
+            });
             Array.prototype.forEach.call(clone.querySelectorAll("[disabled]"), function (field) {
                 field.disabled = false;
+            });
+            Array.prototype.forEach.call(clone.querySelectorAll("[readonly]"), function (field) {
+                field.readOnly = false;
+                field.removeAttribute("title");
             });
             resetRow(clone);
             body.appendChild(clone);
@@ -469,11 +617,14 @@ function jw_line_grid_scripts(): void
         if (!removeButton) { return; }
         var target = removeButton.closest("tr");
         if (!target) { return; }
-        if (target.querySelector("select[disabled]")) { return; }
+        // Metal already out with a kaligad pins its row; a piece merely
+        // reserved off the shelf does not — dropping the row hands it back.
+        if (target.querySelector(".jw-karigar-lock[data-issued]")) { return; }
         var body = target.parentNode;
         if (body && body.children.length > 1) {
             body.removeChild(target);
         } else {
+            releaseRow(target);
             resetRow(target);
         }
     });

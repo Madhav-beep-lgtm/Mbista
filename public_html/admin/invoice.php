@@ -207,6 +207,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
+                // Every task invoice must retain the canonical Party Master id at
+                // creation time. This keeps sales, receipts, statements and the
+                // Trade Receivables ledger on one identity from the first save.
+                if (!$error && $invoiceSourceType === 'task' && $taskId > 0 && $partyId <= 0) {
+                    $partyId = invoice_party_id(['task_id' => $taskId], (int) $currentCompany['id']);
+                    if ($partyId <= 0) {
+                        $error = 'The task client could not be linked to one unambiguous Party Master record. Link or merge the client party before issuing this invoice.';
+                    }
+                }
+
                 // A Manufacturing Output invoice must reference a completed order
                 // of this company — previously the id was stored unchecked.
                 if (!$error && $invoiceSourceType === 'manufacturing' && $sourceId > 0 && table_exists('manufacturing_orders')) {
@@ -1504,7 +1514,9 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
     <!-- Payment Request Modal -->
     <div id="paymentModal" class="modal">
         <div class="modal-content">
-            <span class="modal-close" onclick="closePaymentModal()">&times;</span>
+            <button type="button" class="modal-close" onclick="closePaymentModal()" aria-label="Close">
+                <?= icon('close') ?>
+            </button>
             <h3>Request Payment</h3>
             <form method="post" action="">
                 <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
@@ -1536,7 +1548,9 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
     <!-- Convert to Tax Modal -->
     <div id="convertModal" class="modal">
         <div class="modal-content">
-            <span class="modal-close" onclick="closeConvertModal()">&times;</span>
+            <button type="button" class="modal-close" onclick="closeConvertModal()" aria-label="Close">
+                <?= icon('close') ?>
+            </button>
             <h3>Convert to Tax Invoice</h3>
             <p>This action will convert the proforma invoice to a tax invoice. This cannot be undone.</p>
             <form method="post" action="">

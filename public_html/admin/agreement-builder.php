@@ -705,7 +705,7 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
                             <?php if ($link['section_id']): ?><br><small style="color:var(--mbw-muted)">clause: <?= e((string) (($link['section_title_en'] ?? '') ?: ($link['section_title_np'] ?? '#' . $link['section_id']))) ?></small><?php endif; ?>
                         </span>
                         <?php if (!agreement_is_frozen($sa) && $canEdit): ?>
-                            <form method="post"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="unlink_task"><input type="hidden" name="agreement_id" value="<?= $agreementId ?>"><input type="hidden" name="link_id" value="<?= (int) $link['link_id'] ?>"><button type="submit" class="button secondary" style="min-height:26px;padding:2px 8px">✕</button></form>
+                            <form method="post"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="unlink_task"><input type="hidden" name="agreement_id" value="<?= $agreementId ?>"><input type="hidden" name="link_id" value="<?= (int) $link['link_id'] ?>"><button type="submit" class="button secondary" style="padding:2px 8px" title="Unlink this task" aria-label="Unlink this task"><?= icon('close') ?></button></form>
                         <?php endif; ?>
                     </div>
                 <?php endforeach; ?>

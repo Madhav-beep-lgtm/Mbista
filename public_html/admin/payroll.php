@@ -593,7 +593,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                             <input type="text" name="override_reason" maxlength="255" placeholder="Reason if changed" value="<?= e((string) ($componentRow['override_reason'] ?? '')) ?>" style="flex:1">
                                             <?php if (!in_array((string) $componentRow['source'], ['overtime', 'service_charge'], true)): ?>
                                                 <button type="submit" class="button secondary" style="min-height:32px;padding:4px 8px">Save</button>
-                                                <button type="submit" name="remove" value="1" class="button secondary" style="min-height:32px;padding:4px 8px;color:var(--mbw-red, #a33)" title="Remove for this month">&times;</button>
+                                                <button type="submit" name="remove" value="1" class="button secondary" style="min-height:32px;padding:4px 8px;color:var(--mbw-red, #a33)" title="Remove for this month"><?= icon('trash') ?></button>
                                             <?php endif; ?>
                                         </div>
                                     </form>

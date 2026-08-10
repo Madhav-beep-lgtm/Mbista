@@ -101,6 +101,11 @@ function jewellery_assign_order_payload(int $companyId): array
 
     // Only items not already out with somebody: an ornament assigned once must
     // not be quietly assigned again to a second kaligad.
+    //
+    // And only items that have to be MADE. An item the customer picked off the
+    // Ready to Sale tray is finished, in stock and reserved for them; offering
+    // it here would invite a kaligad to be sent to make a piece the shop is
+    // already holding.
     $lineStmt = db()->prepare("SELECT l.id, l.order_id, l.item_id, l.purity_id, l.unit_id, l.size,
             l.gross_weight, l.stone_weight, l.net_weight, l.delivery_date,
             i.sku AS item_code, i.name AS item_name,
@@ -109,7 +114,7 @@ function jewellery_assign_order_payload(int $companyId): array
         INNER JOIN inventory_items i ON i.id = l.item_id
         INNER JOIN jewellery_purities p ON p.id = l.purity_id
         INNER JOIN jewellery_units u ON u.id = l.unit_id
-        WHERE l.company_id = :cid AND l.assignment_id IS NULL
+        WHERE l.company_id = :cid AND l.assignment_id IS NULL AND l.source <> 'stock'
         ORDER BY l.id ASC");
     $lineStmt->execute(['cid' => $companyId]);
     foreach ($lineStmt->fetchAll(PDO::FETCH_ASSOC) as $line) {
@@ -302,6 +307,13 @@ function jewellery_save_assignment(int $companyId, int $fiscalYearId, array $inp
             $orderLine = $lineStmt->fetch(PDO::FETCH_ASSOC) ?: null;
             if ($orderLine && (int) ($orderLine['assignment_id'] ?? 0) > 0) {
                 return ['ok' => false, 'errors' => ['That item is already out with a kaligad.'], 'id' => 0];
+            }
+            // The customer chose a finished piece off the shelf. There is
+            // nothing to make, and sending a kaligad to make it would put a
+            // second ornament into stock against one order line.
+            if ($orderLine && (string) ($orderLine['source'] ?? 'workshop') === 'stock') {
+                return ['ok' => false, 'errors' => ['That item was ordered from Ready to Sale stock — '
+                    . 'the piece is already made and reserved for the customer, so no kaligad is assigned to it.'], 'id' => 0];
             }
         }
     }
@@ -865,6 +877,16 @@ function jewellery_issue_component(int $companyId, int $fiscalYearId, int $assig
  * is in stock it is stock, and which physical chain leaves the case is the
  * stock ledger's business, not this board's. The date filter is what keeps the
  * list to the recent work.
+ *
+ * A piece CAN be spoken for, though, and that is a different thing from sold: a
+ * customer who points at a ring in the case and puts money down has an order
+ * against that exact piece (migration 106). Each row carries who is holding it,
+ * and `available` keeps the list to what is still free to promise. A cancelled
+ * order holds nothing, so its line does not count as a reservation.
+ *
+ * Filters: from, to (receive date), available (bool), keep_order_id (int — the
+ * order being edited, whose own reservations stay on the list so re-saving it
+ * does not lose them).
  */
 function jewellery_ready_to_sale(int $companyId, array $filters = []): array
 {
@@ -873,9 +895,12 @@ function jewellery_ready_to_sale(int $companyId, array $filters = []): array
             k.code AS karigar_code, k.name AS karigar_name,
             r.id AS receipt_id, r.receipt_no, r.receive_date, r.received_gross_weight,
             r.stone_weight, r.net_gold_weight, r.received_fine_weight, r.making_amount,
-            r.net_payable, r.status AS receipt_status,
+            r.net_payable, r.status AS receipt_status, r.qty_pieces,
+            r.received_item_id, r.received_purity_id, r.unit_id,
             i.sku AS item_code, i.name AS item_name,
-            p.code AS purity_code, u.code AS unit_code,
+            p.code AS purity_code, p.fineness, u.code AS unit_code,
+            res.order_id AS reserved_order_id, res.order_no AS reserved_order_no,
+            res.customer_name AS reserved_for, res.order_status AS reserved_order_status,
             DATEDIFF(CURDATE(), r.receive_date) AS days_on_shelf
         FROM jewellery_order_assignments a
         INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
@@ -883,6 +908,14 @@ function jewellery_ready_to_sale(int $companyId, array $filters = []): array
         LEFT JOIN inventory_items i ON i.id = r.received_item_id
         LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
         LEFT JOIN jewellery_units u ON u.id = r.unit_id
+        LEFT JOIN (
+            SELECT ol.stock_receipt_id, ol.order_id, o2.order_no, o2.status AS order_status,
+                   COALESCE(ap2.name, o2.customer_name, 'Walk-in') AS customer_name
+              FROM jewellery_order_lines ol
+              INNER JOIN jewellery_orders o2 ON o2.id = ol.order_id AND o2.status <> 'cancelled'
+              LEFT JOIN accounting_parties ap2 ON ap2.id = o2.party_id
+             WHERE ol.source = 'stock' AND ol.stock_receipt_id IS NOT NULL
+        ) res ON res.stock_receipt_id = r.id
         WHERE a.company_id = :cid AND a.assign_kind = 'self'
           AND a.status = 'received' AND r.status <> 'cancelled'";
     $params = ['cid' => $companyId];
@@ -895,12 +928,35 @@ function jewellery_ready_to_sale(int $companyId, array $filters = []): array
         $sql .= ' AND r.receive_date <= :to';
         $params['to'] = $filters['to'];
     }
+    if (!empty($filters['available'])) {
+        // The order being revised keeps its own pieces on offer, or editing it
+        // would strike out every line it had already reserved.
+        $keepOrderId = (int) ($filters['keep_order_id'] ?? 0);
+        if ($keepOrderId > 0) {
+            $sql .= ' AND (res.stock_receipt_id IS NULL OR res.order_id = :keep)';
+            $params['keep'] = $keepOrderId;
+        } else {
+            $sql .= ' AND res.stock_receipt_id IS NULL';
+        }
+    }
     $sql .= ' ORDER BY r.receive_date DESC, r.id DESC';
 
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * The Ready to Sale pieces an order form may offer — everything still free,
+ * plus whatever this order is already holding.
+ *
+ * Thin on purpose: the board above is the one query, so a piece can never be
+ * on the shelf on one screen and missing from the picker on the other.
+ */
+function jewellery_ready_to_sale_options(int $companyId, int $keepOrderId = 0): array
+{
+    return jewellery_ready_to_sale($companyId, ['available' => true, 'keep_order_id' => $keepOrderId]);
 }
 
 /**

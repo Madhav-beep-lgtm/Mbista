@@ -2464,7 +2464,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                                     <td><select name="input_item_id[]"><option value="">Select input</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name'] . ' (on hand ' . number_format((float) $item['on_hand'], 3) . ')') ?></option><?php endforeach; ?></select></td>
                                     <td class="is-numeric"><input type="number" step="0.001" min="0" name="input_quantity[]"></td>
                                     <td class="is-numeric"><input type="number" step="0.01" min="0" name="input_rate[]" placeholder="Auto: purchase rate"></td>
-                                    <td><button type="button" class="button secondary" style="min-height:32px;padding:3px 10px;color:var(--mbw-red, #a33)" title="Remove this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value='';});this.closest('tr').querySelector('select').selectedIndex=0;}">&times;</button></td>
+                                    <td><button type="button" class="button secondary" style="min-height:32px;padding:3px 10px;color:var(--mbw-red, #a33)" title="Remove this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value='';});this.closest('tr').querySelector('select').selectedIndex=0;}"><?= icon('close') ?></button></td>
                                 </tr>
                             <?php endfor; ?>
                         </tbody>
@@ -2500,7 +2500,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                                     <td class="is-numeric"><input type="number" step="0.0001" min="0" name="bom_qty[]"></td>
                                     <td class="is-numeric"><input type="number" step="0.001" min="0" name="bom_waste[]" value="0"></td>
                                     <td class="is-numeric"><input type="number" step="0.000001" min="0" name="bom_rate[]" placeholder="Auto: purchase rate"></td>
-                                    <td><button type="button" class="button secondary" style="min-height:32px;padding:3px 10px;color:var(--mbw-red, #a33)" title="Remove this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value=i.name==='bom_waste[]'?'0':'';});this.closest('tr').querySelector('select').selectedIndex=0;}">&times;</button></td>
+                                    <td><button type="button" class="button secondary" style="min-height:32px;padding:3px 10px;color:var(--mbw-red, #a33)" title="Remove this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value=i.name==='bom_waste[]'?'0':'';});this.closest('tr').querySelector('select').selectedIndex=0;}"><?= icon('close') ?></button></td>
                                 </tr>
                             <?php endfor; ?>
                         </tbody>
@@ -2626,7 +2626,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                         <input type="hidden" name="action" value="delete_movement">
                                         <input type="hidden" name="movement_id" value="<?= e((int) $movement['id']) ?>">
-                                        <button type="submit" class="button secondary" title="Delete this stock-only movement">&times;</button>
+                                        <button type="submit" class="button secondary" title="Delete this stock-only movement"><?= icon('trash') ?></button>
                                     </form>
                                 <?php endif; ?>
                             <?php endif; ?>

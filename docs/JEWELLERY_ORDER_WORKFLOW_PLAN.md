@@ -198,6 +198,43 @@ it. It promised silent posting and delivered nothing; it has been removed
 rather than implemented, since a setting that silences the confirmation has
 no place in this workflow.
 
+### H. An ordered item can be a piece already on the shelf — **SHIPPED** (migration 106)
+
+Everything above assumes an ordered item is a *job*. The commonest counter
+conversation is not: a customer sees a ring in the case, likes it, and asks the
+shop to hold it. That is an order — customer, advance, promised day, bill — with
+nothing to make.
+
+`jewellery_order_lines.source` (`workshop` | `stock`) says which, and
+`stock_receipt_id` names WHICH physical piece off the Ready to Sale board. The
+receipt is the piece: one per assignment, its own weights, its own purity, its
+own item. Naming only the item would not do — two 22K rings of the same item
+code are two different objects.
+
+What follows from it:
+
+- **The piece states its own facts.** Item, purity, unit, pieces, gross and
+  stone are read off the receipt before pricing, never from the form. The rate,
+  making and stone money stay the shop's to set — that is the deal, not a fact
+  about the object.
+- **One ring, one customer.** A piece a live order names is not offered again;
+  the board says who holds it, and a second order is refused by name. A
+  cancelled or deleted order hands it back and keeps the record of what it held.
+- **No kaligad, ever.** Stock lines are absent from `jewellery_assign_order_payload()`
+  and `jewellery_pending_order_lines()`, and `jewellery_save_assignment()`
+  refuses one in a sentence.
+- **Finished when written.** `jewellery_sync_order_status()` counts a shelf line
+  as already back, so an all-shelf order is `received` immediately and reaches
+  the ready-to-deliver board; a mixed order reads `partially_received` until the
+  made half returns. The 090 recompute in the self-repair had to learn the same
+  rule — it runs on every page load, and a rule it did not know it silently
+  undid. `jewellery_delete_order()` now allows `received` when no assignment
+  exists, or an order taken by mistake could never be taken back off the books.
+- **Billing.** The workshop receipt re-measures the first *workshop* line, not
+  line one — otherwise one physical piece would be billed at another's weight.
+
+Proven end to end in `database/test_jewellery_order_from_stock.php`.
+
 ## Open questions
 
 These change the work materially and are asked before any code is written.
