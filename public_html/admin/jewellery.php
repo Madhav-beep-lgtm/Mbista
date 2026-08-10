@@ -355,6 +355,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    if ($action === 'clear_opening_bulk') {
+        require_permission('jewellery', 'post');
+        $itemIds = array_values(array_filter(array_map('intval', (array) ($_POST['item_ids'] ?? []))));
+        if ($itemIds === []) {
+            flash('error', 'No opening stock item was selected.');
+            redirect($back);
+        }
+
+        $cleared = 0;
+        $errors = [];
+        foreach (array_unique($itemIds) as $itemId) {
+            if ($itemId <= 0) {
+                continue;
+            }
+            $result = jewellery_clear_opening($companyId, $itemId, $userId, $fiscalYearId);
+            if ($result['ok']) {
+                $cleared++;
+            } else {
+                $errors[] = 'Item #' . $itemId . ': ' . $result['error'];
+            }
+        }
+
+        if ($cleared > 0) {
+            flash('success', 'Cleared opening stock for ' . $cleared . ' selected item' . ($cleared === 1 ? '' : 's') . '.');
+        }
+        if ($errors !== []) {
+            flash('error', implode(' ', $errors));
+        }
+        redirect($back);
+    }
+
     if ($action === 'save_mapping') {
         require_permission('jewellery', 'edit');
         try {
@@ -889,9 +920,85 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <script>
+        (function () {
+            var table = document.querySelector('table');
+            if (!table) { return; }
+            function applyFilters() {
+                var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row input[type="search"]'));
+                var rows = Array.from(table.querySelectorAll('tbody tr'));
+                rows.forEach(function (row) {
+                    var cells = Array.from(row.querySelectorAll('td'));
+                    var show = true;
+                    inputs.forEach(function (inp) {
+                        var col = parseInt(inp.dataset.colIndex || inp.getAttribute('data-col') || inp.dataset.col, 10);
+                        if (Number.isNaN(col)) { return; }
+                        var cell = cells[col];
+                        var text = cell ? cell.innerText.toLowerCase() : '';
+                        if (inp.value && text.indexOf(inp.value.toLowerCase()) === -1) {
+                            show = false;
+                        }
+                    });
+                    row.style.display = show ? '' : 'none';
+                });
+            }
+            window.jwApplyFilters = applyFilters;
+            var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row input[type="search"]'));
+            inputs.forEach(function (inp) {
+                if (!inp.dataset.colIndex) {
+                    if (inp.dataset.col) inp.dataset.colIndex = inp.dataset.col;
+                    else if (inp.getAttribute('data-col')) inp.dataset.colIndex = inp.getAttribute('data-col');
+                }
+                inp.addEventListener('input', applyFilters);
+            });
+        })();
+        </script>
     </section>
 
     <script>
+    // Simple client-side filters for the Opening Stock table
+    (function () {
+        function attachFilters() {
+            // Find the Opening Stock section and its table specifically
+            var openingSection = Array.from(document.querySelectorAll('.mbw-card-head h2')).
+                map(function (h) { return {h:h, txt: (h.innerText||'').trim()}; }).
+                find(function (o) { return o.txt && o.txt.indexOf('Opening Stock') === 0; });
+            var table = null;
+            if (openingSection && openingSection.h) {
+                var section = openingSection.h.closest('section');
+                if (section) { table = section.querySelector('table'); }
+            }
+            if (!table) { return; }
+            var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row input[type="search"]'));
+            if (!inputs.length) { return; }
+            function applyFilters() {
+                var rows = Array.from(table.querySelectorAll('tbody tr'));
+                rows.forEach(function (row) {
+                    var cells = Array.from(row.querySelectorAll('td'));
+                    var show = true;
+                    inputs.forEach(function (inp) {
+                        var col = parseInt(inp.dataset.colIndex || inp.getAttribute('data-col') || inp.dataset.col, 10);
+                        if (Number.isNaN(col)) { return; }
+                        var cell = cells[col];
+                        var text = cell ? cell.innerText.toLowerCase() : '';
+                        if (inp.value && text.indexOf(inp.value.toLowerCase()) === -1) { show = false; }
+                    });
+                    row.style.display = show ? '' : 'none';
+                });
+            }
+            inputs.forEach(function (inp) {
+                if (!inp.dataset.colIndex) {
+                    if (inp.dataset.col) inp.dataset.colIndex = inp.dataset.col;
+                    else if (inp.getAttribute('data-col')) inp.dataset.colIndex = inp.getAttribute('data-col');
+                }
+                inp.addEventListener('input', applyFilters);
+            });
+            window.jwApplyFilters = applyFilters;
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachFilters); } else { attachFilters(); }
+    })();
+
+    </script>
     // Keep the purity list to the chosen metal — a purity from another metal
     // is rejected server-side, so filtering here just avoids a pointless trip.
     (function () {
@@ -1113,6 +1220,132 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </tbody>
         </table></div>
     </section>
+    <?php if ($canEdit): ?>
+    <script>
+    (function () {
+        var start = function () {
+        var form = document.getElementById('opening-bulk-clear-form');
+        if (!form) { return; }
+
+        // Find the Opening Stock section and its table specifically so we don't
+        // accidentally bind to an earlier preview table.
+        var openingSection = Array.from(document.querySelectorAll('.mbw-card-head h2')).
+            map(function (h) { return {h:h, txt: (h.innerText||'').trim()}; }).
+            find(function (o) { return o.txt && o.txt.indexOf('Opening Stock') === 0; });
+        var table = null;
+        if (openingSection && openingSection.h) {
+            var section = openingSection.h.closest('section');
+            if (section) { table = section.querySelector('table'); }
+        }
+        if (!table) {
+            // Fallback: first table on the page
+            table = document.querySelector('table');
+        }
+
+        // Attach select-all behavior scoped to this table only.
+        var selectAll = table ? table.querySelector('#opening-select-all') : null;
+        if (selectAll) {
+            selectAll.addEventListener('change', function () {
+                var checkboxes = table.querySelectorAll('.opening-select-checkbox');
+                checkboxes.forEach(function (cb) { cb.checked = selectAll.checked; });
+            });
+        }
+
+        // Submit handler: collect checked rows from this table only.
+        form.addEventListener('submit', function (event) {
+            var checkboxes = (table ? Array.from(table.querySelectorAll('.opening-select-checkbox')) : Array.from(document.querySelectorAll('.opening-select-checkbox')));
+            var selected = checkboxes.filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
+            if (selected.length === 0) {
+                alert('Select at least one opening stock item to clear.');
+                event.preventDefault();
+                return;
+            }
+            form.querySelectorAll('input[name="item_ids[]"]').forEach(function (existing) { existing.remove(); });
+            selected.forEach(function (id) {
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'item_ids[]';
+                input.value = id;
+                form.appendChild(input);
+            });
+            return confirm('Clear opening stock for ' + selected.length + ' selected item(s)? This will remove their voucher and metal movement.');
+        });
+
+        // Add per-column simple client-side filters under the opening stock table
+        if (table) {
+            var thead = table.querySelector('thead');
+            if (thead) {
+                // Reuse an existing server-rendered filter row if present,
+                // otherwise create one. Always attach listeners to the inputs.
+                var filterRow = thead.querySelector('.jw-filter-row');
+                if (!filterRow) {
+                    var headerCells = Array.from(thead.querySelectorAll('th'));
+                    filterRow = document.createElement('tr');
+                    filterRow.className = 'jw-filter-row';
+                    headerCells.forEach(function (th, idx) {
+                        var cell = document.createElement('th');
+                        // Skip filter for checkbox and action columns
+                        if (th.querySelector('#opening-select-all') || idx === headerCells.length - 1) {
+                            cell.innerHTML = '';
+                        } else {
+                            var input = document.createElement('input');
+                            input.type = 'search';
+                            input.placeholder = 'Filter';
+                            input.style.width = '100%';
+                            input.dataset.colIndex = idx;
+                            cell.appendChild(input);
+                        }
+                        filterRow.appendChild(cell);
+                    });
+                    thead.appendChild(filterRow);
+                }
+
+                // Attach listeners to inputs whether server or client rendered.
+                var inputs = Array.from(thead.querySelectorAll('.jw-filter-row input[type="search"]'));
+                inputs.forEach(function (inp) {
+                    // Accept server-provided `data-col` and normalise to `data-colIndex`.
+                    if (!inp.dataset.colIndex) {
+                        if (inp.dataset.col) {
+                            inp.dataset.colIndex = inp.dataset.col;
+                        } else if (inp.getAttribute('data-col')) {
+                            inp.dataset.colIndex = inp.getAttribute('data-col');
+                        }
+                    }
+                    inp.addEventListener('input', function () { applyFilters(); });
+                });
+            }
+
+            function applyFilters() {
+                var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row input[type="search"]'));
+                var rows = Array.from(table.querySelectorAll('tbody tr'));
+                rows.forEach(function (row) {
+                    var cells = Array.from(row.querySelectorAll('td'));
+                    var show = true;
+                    inputs.forEach(function (inp) {
+                        var col = parseInt(inp.dataset.colIndex, 10);
+                        if (Number.isNaN(col)) { return; }
+                        var cell = cells[col];
+                        var text = cell ? cell.innerText.toLowerCase() : '';
+                        if (inp.value && text.indexOf(inp.value.toLowerCase()) === -1) {
+                            show = false;
+                        }
+                    });
+                    row.style.display = show ? '' : 'none';
+                    });
+                }
+                // Expose for debugging and manual invocation
+                window.jwApplyFilters = applyFilters;
+            }
+
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', start);
+        } else {
+            start();
+        }
+    })();
+    </script>
+    <?php endif; ?>
 
     <script>
     (function () {
@@ -1349,14 +1582,65 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
     <?php endif; ?>
 
+    <?php if ($canEdit && $openingRows !== []): ?>
+    <form id="opening-bulk-clear-form" method="post" style="margin-bottom:14px">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="clear_opening_bulk">
+        <input type="hidden" name="back_view" value="opening">
+        <button type="submit" class="button danger" aria-label="Clear selected opening stock" style="display:inline-flex;align-items:center;gap:8px;padding:10px 14px;background:#d9534f !important;border:1px solid #c9302c !important;color:#ffffff !important;font-weight:600;box-shadow:0 1px 0 rgba(0,0,0,0.08) !important;">
+            <?= icon('trash') ?> <span>Clear selected opening stock</span>
+        </button>
+    </form>
+    <?php endif; ?>
+
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Opening Stock — <?= e((string) $fiscalYear['label']) ?> (<?= count($openingRows) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Item</th><th>Stock group</th><th>Stock type</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Value</th><th>Posted</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
+            <thead>
+                <tr>
+                    <?php if ($canEdit): ?><th style="width:34px"><input type="checkbox" id="opening-select-all" aria-label="Select all opening stock rows"></th><?php endif; ?>
+                    <th>Item</th>
+                    <th>Stock group</th>
+                    <th>Stock type</th>
+                    <th>Purity</th>
+                    <th class="is-numeric">Gross</th>
+                    <th class="is-numeric">Fine</th>
+                    <th class="is-numeric">Rate</th>
+                    <th class="is-numeric">Value</th>
+                    <th>Posted</th>
+                    <?php if ($canEdit): ?><th></th><?php endif; ?>
+                </tr>
+                <tr class="jw-filter-row">
+                    <?php
+                    $col = 0;
+                    if ($canEdit) { echo '<th></th>'; $col++; }
+                    // Item
+                    echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
+                    // Stock group
+                    echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
+                    // Stock type
+                    echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
+                    // Purity
+                    echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
+                    // Gross
+                    echo '<th></th>'; $col++;
+                    // Fine
+                    echo '<th></th>'; $col++;
+                    // Rate
+                    echo '<th></th>'; $col++;
+                    // Value
+                    echo '<th></th>'; $col++;
+                    // Posted
+                    echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
+                    if ($canEdit) { echo '<th></th>'; }
+                    ?>
+                </tr>
+            </thead>
             <tbody>
                 <?php if ($openingRows === []): ?><tr><td colspan="<?= $canEdit ? 10 : 9 ?>">No item carries opening stock for this fiscal year.</td></tr><?php endif; ?>
                 <?php foreach ($openingRows as $row): ?>
                     <tr>
+                        <?php if ($canEdit): ?><td><input type="checkbox" class="opening-select-checkbox" value="<?= (int) $row['id'] ?>" aria-label="Select opening stock for <?= e($row['item_code']) ?>"></td><?php endif; ?>
                         <td><?= e($row['item_code']) ?><br><small><?= e($row['item_name']) ?></small></td>
                         <td><?= e((string) ($row['category'] ?? 'Uncategorised')) ?></td>
                         <td><span class="mbw-pill <?= (string) ($row['stock_kind'] ?? 'showroom') === 'customer_ordered' ? 'tone-blue' : 'tone-green' ?>"><?= (string) ($row['stock_kind'] ?? 'showroom') === 'customer_ordered' ? 'Customer Ordered' : 'Showroom' ?></span></td>
@@ -1390,6 +1674,98 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </tbody>
         </table></div>
     </section>
+    
+    <script>
+    // Attach per-column filters specifically for the Opening Stock table
+    (function () {
+        function attachOpeningFilters() {
+            var openingSection = Array.from(document.querySelectorAll('.mbw-card-head h2')).
+                map(function (h) { return {h:h, txt: (h.innerText||'').trim()}; }).
+                find(function (o) { return o.txt && o.txt.indexOf('Opening Stock') === 0; });
+            if (!openingSection || !openingSection.h) { return; }
+            var section = openingSection.h.closest('section'); if (!section) { return; }
+            var table = section.querySelector('table'); if (!table) { return; }
+            var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row input[type="search"]'));
+            if (!inputs.length) { return; }
+            function apply() {
+                var rows = Array.from(table.querySelectorAll('tbody tr'));
+                rows.forEach(function (row) {
+                    var cells = Array.from(row.querySelectorAll('td'));
+                    var show = true;
+                    inputs.forEach(function (inp) {
+                        var col = parseInt(inp.dataset.colIndex || inp.getAttribute('data-col') || inp.dataset.col, 10);
+                        if (Number.isNaN(col)) { return; }
+                        var cell = cells[col];
+                        var text = cell ? cell.innerText.toLowerCase() : '';
+                        if (inp.value && text.indexOf(inp.value.toLowerCase()) === -1) { show = false; }
+                    });
+                    row.style.display = show ? '' : 'none';
+                });
+            }
+            inputs.forEach(function (inp) {
+                if (!inp.dataset.colIndex) {
+                    if (inp.dataset.col) inp.dataset.colIndex = inp.dataset.col;
+                    else if (inp.getAttribute('data-col')) inp.dataset.colIndex = inp.getAttribute('data-col');
+                }
+                inp.addEventListener('input', apply);
+            });
+            window.jwApplyFilters = apply;
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachOpeningFilters); } else { attachOpeningFilters(); }
+    })();
+    </script>
+
+    <script>
+    // Robust fallback: ensure the Opening Stock master checkbox always toggles
+    // visible `.opening-select-checkbox` inputs even if other scripts run.
+    (function () {
+        function attachMaster() {
+            var master = document.getElementById('opening-select-all');
+            if (!master) { return; }
+            // avoid double-binding
+            if (master.__jw_master_attached) { return; }
+            master.__jw_master_attached = true;
+            master.addEventListener('change', function () {
+                var table = (master.closest('table')) || document.querySelector('table');
+                var boxes = Array.from((table || document).querySelectorAll('.opening-select-checkbox'))
+                    .filter(function (cb) { var tr = cb.closest('tr'); return !tr || tr.style.display !== 'none'; });
+                boxes.forEach(function (cb) { cb.checked = master.checked; cb.dispatchEvent(new Event('change', { bubbles: true })); });
+            });
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachMaster); } else { attachMaster(); }
+    })();
+    </script>
+
+    <script>
+    // Ensure the form includes item_ids[] for selected rows before submission
+    (function () {
+        function attachSubmitFix() {
+            var form = document.getElementById('opening-bulk-clear-form');
+            if (!form) return;
+            if (form.__jw_submit_fixed) return; form.__jw_submit_fixed = true;
+            form.addEventListener('submit', function (event) {
+                // If hidden inputs already present, do nothing.
+                if (form.querySelectorAll('input[name="item_ids[]"]').length > 0) { return; }
+                var openingSection = Array.from(document.querySelectorAll('.mbw-card-head h2')).
+                    map(function (h) { return {h:h, txt: (h.innerText||'').trim()}; }).
+                    find(function (o) { return o.txt && o.txt.indexOf('Opening Stock') === 0; });
+                var table = openingSection && openingSection.h ? openingSection.h.closest('section').querySelector('table') : document.querySelector('table');
+                var checkboxes = table ? Array.from(table.querySelectorAll('.opening-select-checkbox')) : Array.from(document.querySelectorAll('.opening-select-checkbox'));
+                var selected = checkboxes.filter(function (cb) { var tr = cb.closest('tr'); if (tr && tr.style.display === 'none') return false; return cb.checked; }).map(function (cb) { return cb.value; });
+                if (selected.length === 0) {
+                    alert('Select at least one opening stock item to clear.');
+                    event.preventDefault();
+                    return;
+                }
+                selected.forEach(function (id) {
+                    var input = document.createElement('input'); input.type = 'hidden'; input.name = 'item_ids[]'; input.value = id; form.appendChild(input);
+                });
+            }, true);
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachSubmitFix); } else { attachSubmitFix(); }
+    })();
+    </script>
+
 <?php elseif ($view === 'stock'): ?>
     <?php
     $holderLabels = ['stock' => 'Own stock', 'karigar' => 'With karigar', 'refinery' => 'With refinery', 'customer' => 'With customer'];
