@@ -1955,3 +1955,16 @@ body.voucher-entry-page.theme-dark #voucher-form :is(label,.vch-table thead th),
 body.voucher-entry-page.theme-dark #voucher-form .vch-table thead th,body.voucher-entry-page.admin-dark #voucher-form .vch-table thead th{background:#16271f!important}
 body.voucher-entry-page.theme-dark #voucher-form .vch-table tbody td,body.voucher-entry-page.admin-dark #voucher-form .vch-table tbody td{background:#0d1815!important;border-color:#1d2e28!important}
 body.voucher-entry-page.theme-dark #voucher-form .frm-entry-totals strong,body.voucher-entry-page.admin-dark #voucher-form .frm-entry-totals strong{background:#12211c!important;color:#eaf2ed!important}
+
+/* Dark-mode contrast guarantee. Older green-theme selectors assign ink
+   colours directly to many descendants (including WebKit text fill), so
+   changing only the card's inherited color is insufficient. */
+body.admin-layout.theme-dark .admin-content :is(.mbw-card,.card,.panel,.frm-section) :is(h1,h2,h3,h4,h5,h6,strong,label,legend,.title,.heading,.card-title,.panel-title),
+body.admin-layout.admin-dark .admin-content :is(.mbw-card,.card,.panel,.frm-section) :is(h1,h2,h3,h4,h5,h6,strong,label,legend,.title,.heading,.card-title,.panel-title){color:#eaf2ed!important;-webkit-text-fill-color:#eaf2ed!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(.mbw-card,.card,.panel,.frm-section) :is(p,span,small,li,dd,dt,.meta,.muted,.help,.hint,.description,.subtitle),
+body.admin-layout.admin-dark .admin-content :is(.mbw-card,.card,.panel,.frm-section) :is(p,span,small,li,dd,dt,.meta,.muted,.help,.hint,.description,.subtitle){color:#b0c2ba!important;-webkit-text-fill-color:#b0c2ba!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(input,select,textarea),body.admin-layout.admin-dark .admin-content :is(input,select,textarea){-webkit-text-fill-color:#eaf2ed!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(input,textarea)::placeholder,body.admin-layout.admin-dark .admin-content :is(input,textarea)::placeholder{color:#87998f!important;-webkit-text-fill-color:#87998f!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(input,select,textarea):disabled,body.admin-layout.admin-dark .admin-content :is(input,select,textarea):disabled{background:#16271f!important;color:#b0c2ba!important;-webkit-text-fill-color:#b0c2ba!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(button,.button,input[type=submit]),body.admin-layout.admin-dark .admin-content :is(button,.button,input[type=submit]){color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(.mbw-pill.tone-amber,.badge.warning,.status-pending),body.admin-layout.admin-dark .admin-content :is(.mbw-pill.tone-amber,.badge.warning,.status-pending){color:#f0bd62!important;-webkit-text-fill-color:#f0bd62!important}
