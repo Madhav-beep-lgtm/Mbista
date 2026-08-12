@@ -248,7 +248,7 @@ html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown
 @media (min-width:1181px) {
   body.admin-layout .admin-topbar {
     display:grid!important;
-    grid-template-columns:40px minmax(260px,1fr) 40px minmax(165px,210px) 116px minmax(320px,auto)!important;
+    grid-template-columns:40px minmax(190px,260px) 40px minmax(165px,210px) 116px minmax(320px,1fr)!important;
     align-items:center!important;
     column-gap:10px!important;
     row-gap:8px!important;
@@ -412,14 +412,15 @@ body.admin-layout .topbar-bs-date .ui-icon {display:block!important;width:15px!i
 body.admin-layout .topbar-bs-date span {color:#5f4900!important;-webkit-text-fill-color:#5f4900!important;opacity:1!important}
 html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .topbar-bs-date,
 html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .topbar-bs-date :is(span,.ui-icon) {color:#5f4900!important;-webkit-text-fill-color:#5f4900!important;opacity:1!important}
-body.admin-layout .topbar-bs-calendar-panel {position:absolute;z-index:180;right:0;top:calc(100% + 8px);width:294px;padding:12px;border:1px solid var(--ui-border);border-radius:13px;background:var(--ui-surface);color:var(--ui-text);box-shadow:0 18px 44px rgba(5,40,29,.22)}
+html body.admin-layout .admin-topbar .topbar-bs-calendar-panel {position:absolute!important;z-index:180!important;right:0!important;top:calc(100% + 8px)!important;width:294px!important;height:auto!important;min-height:0!important;padding:12px!important;border:1px solid #bdd3c8!important;border-radius:13px!important;background:#fff!important;color:#173a2f!important;-webkit-text-fill-color:#173a2f!important;box-shadow:0 18px 44px rgba(5,40,29,.22)!important}
 body.admin-layout .topbar-bs-calendar-panel[hidden] {display:none!important}
-body.admin-layout .bs-calendar-head {display:grid;grid-template-columns:34px 1fr 34px;align-items:center;gap:7px;margin-bottom:10px}
-body.admin-layout .bs-calendar-head strong {text-align:center;color:var(--ui-heading)}
-body.admin-layout .bs-calendar-head button,.bs-calendar-today {min-height:32px;border:1px solid var(--ui-border);border-radius:8px;background:var(--ui-surface-soft);color:var(--ui-text);cursor:pointer}
-body.admin-layout .bs-calendar-week,.bs-calendar-grid {display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}
-body.admin-layout .bs-calendar-week {margin-bottom:5px;color:var(--ui-muted);font-size:9px;font-weight:750;text-transform:uppercase}
-body.admin-layout .bs-calendar-grid span {display:grid;place-items:center;min-height:30px;border-radius:7px;font-size:11px}
+html body.admin-layout .admin-topbar .bs-calendar-head {display:grid!important;grid-template-columns:32px 1fr 32px!important;align-items:center!important;gap:7px!important;margin-bottom:10px!important}
+html body.admin-layout .admin-topbar .bs-calendar-head strong {display:block!important;text-align:center!important;color:#173a2f!important;-webkit-text-fill-color:#173a2f!important;font-size:12px!important;opacity:1!important}
+html body.admin-layout .admin-topbar :is(.bs-calendar-head button,.bs-calendar-today) {display:grid!important;place-items:center!important;width:auto!important;min-width:0!important;height:32px!important;min-height:32px!important;padding:4px 8px!important;border:1px solid #bdd3c8!important;border-radius:8px!important;background:#f1f8f4!important;color:#173a2f!important;-webkit-text-fill-color:#173a2f!important;font-size:11px!important;line-height:1!important;opacity:1!important;cursor:pointer!important;box-shadow:none!important}
+html body.admin-layout .admin-topbar .bs-calendar-week,html body.admin-layout .admin-topbar .bs-calendar-grid {display:grid!important;grid-template-columns:repeat(7,1fr)!important;gap:4px!important;text-align:center!important}
+html body.admin-layout .admin-topbar .bs-calendar-week {margin-bottom:5px!important;color:#60756c!important;font-size:9px!important;font-weight:750!important;text-transform:uppercase!important}
+html body.admin-layout .admin-topbar .bs-calendar-week span {color:#60756c!important;-webkit-text-fill-color:#60756c!important;opacity:1!important}
+html body.admin-layout .admin-topbar .bs-calendar-grid span {display:grid!important;place-items:center!important;min-height:30px!important;border-radius:7px!important;color:#263c34!important;-webkit-text-fill-color:#263c34!important;font-size:11px!important;opacity:1!important}
 body.admin-layout .bs-calendar-grid .is-today {background:var(--ui-green-700);color:#fff!important;font-weight:800}
 body.admin-layout .bs-calendar-grid .is-empty {visibility:hidden}
 body.admin-layout .bs-calendar-today {width:100%;margin-top:10px;font-size:11px;font-weight:700}
@@ -448,6 +449,9 @@ body.admin-layout:is(.theme-dark,.admin-dark) .topbar-bs-date :is(span,.ui-icon)
 body.admin-layout:is(.theme-dark,.admin-dark) .topbar-switch {background:#0d1815!important;border-color:rgba(255,255,255,.36)!important}
 body.admin-layout:is(.theme-dark,.admin-dark) .topbar-switch-value {color:#c9d8d1!important;-webkit-text-fill-color:#c9d8d1!important}
 body.admin-layout:is(.theme-dark,.admin-dark) .topbar-switch-value.is-current {color:#fff!important;-webkit-text-fill-color:#fff!important}
+html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .topbar-bs-calendar-panel {background:#0d1815!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:#668276!important}
+html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .topbar-bs-calendar-panel :is(strong,span,button) {color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important}
+html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar :is(.bs-calendar-head button,.bs-calendar-today) {background:#12211c!important;border-color:#668276!important}
 
 @media (min-width:1181px) and (max-width:1700px) {
   body.admin-layout .admin-profile-identity {display:none!important}

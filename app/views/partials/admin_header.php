@@ -520,7 +520,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <a class="topbar-switch" href="?<?= e(http_build_query($headerLanguageQuery)) ?>"
                    aria-label="Switch language to <?= e(APP_LANGS[$headerNextLanguage]) ?>" title="Language: <?= e(APP_LANGS[app_lang()]) ?> — switch to <?= e(APP_LANGS[$headerNextLanguage]) ?>">
                     <span class="topbar-switch-value is-current"><?= e(strtoupper(app_lang())) ?></span>
-                    <span class="topbar-switch-track"><?= icon('language') ?></span>
+                    <span class="topbar-switch-track"><?= icon('globe-language') ?></span>
                     <span class="topbar-switch-value"><?= e(strtoupper($headerNextLanguage)) ?></span>
                 </a>
                 <form method="post" action="<?= e(url('set-date-mode.php')) ?>" class="topbar-date-control topbar-icon-form">
@@ -529,7 +529,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <input type="hidden" name="date_mode" value="<?= e($headerNextDateMode) ?>">
                     <button type="submit" class="topbar-switch" aria-label="Switch date display to <?= e(strtoupper($headerNextDateMode)) ?>" title="Date display: <?= e(strtoupper(date_mode())) ?> — switch to <?= e(strtoupper($headerNextDateMode)) ?>">
                         <span class="topbar-switch-value is-current"><?= e(strtoupper(date_mode() === 'both' ? 'A+B' : date_mode())) ?></span>
-                        <span class="topbar-switch-track"><?= icon('calendar') ?></span>
+                        <span class="topbar-switch-track"><?= icon('calendar-range') ?></span>
                         <span class="topbar-switch-value"><?= e(strtoupper($headerNextDateMode === 'both' ? 'A+B' : $headerNextDateMode)) ?></span>
                     </button>
                 </form>
