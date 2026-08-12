@@ -19,7 +19,10 @@ $fiscalYear = current_fiscal_year();
 $companyId = (int) ($company['id'] ?? 0);
 $currentUser = current_user();
 $userId = (int) ($currentUser['id'] ?? 0);
-$partyLedgerSync = sync_company_party_ledgers_from_chart($companyId, $userId ?: null);
+// Chart-to-party adoption is a repair/import operation, not page rendering.
+// Running it here scanned every eligible ledger and performed several lookup
+// queries per ledger on every visit, making load time grow with the database.
+$partyLedgerSync = ['linked' => 0, 'skipped' => 0];
 
 $partyTypes = ['customer', 'supplier', 'both', 'other'];
 $statuses = ['active', 'inactive'];
@@ -676,18 +679,16 @@ foreach ($parties as $partyForLedgerRepair) {
     }
     $repairPartyId = (int) $partyForLedgerRepair['id'];
     $repairPartyType = (string) ($partyForLedgerRepair['party_type'] ?? 'other');
-    if (in_array($repairPartyType, ['customer', 'both'], true)) {
+    if (in_array($repairPartyType, ['customer', 'both'], true)
+        && (int) ($partyForLedgerRepair['ledger_id'] ?? 0) <= 0) {
         $partyLinksRepaired = ensure_party_role_ledger($companyId, $repairPartyId, 'customer_receivable') > 0 || $partyLinksRepaired;
     }
-    if (in_array($repairPartyType, ['supplier', 'both'], true)) {
+    if (in_array($repairPartyType, ['supplier', 'both'], true)
+        && (int) ($partyForLedgerRepair['payable_ledger_id'] ?? 0) <= 0) {
         $partyLinksRepaired = ensure_party_role_ledger($companyId, $repairPartyId, 'supplier_payable') > 0 || $partyLinksRepaired;
     }
-    if ((int) ($partyForLedgerRepair['advance_ledger_id'] ?? 0) > 0) {
-        $partyLinksRepaired = ensure_party_role_ledger($companyId, $repairPartyId, 'customer_advance') > 0 || $partyLinksRepaired;
-    }
-    if ((int) ($partyForLedgerRepair['supplier_advance_ledger_id'] ?? 0) > 0) {
-        $partyLinksRepaired = ensure_party_role_ledger($companyId, $repairPartyId, 'supplier_advance') > 0 || $partyLinksRepaired;
-    }
+    // Existing advance links are already canonical; validating them again is
+    // pure read amplification and was especially costly for large directories.
 }
 if ($partyLinksRepaired) {
     $partyStmt->execute(['company_id' => $companyId]);
