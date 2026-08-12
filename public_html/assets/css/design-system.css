@@ -248,7 +248,7 @@ html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown
 @media (min-width:1181px) {
   body.admin-layout .admin-topbar {
     display:grid!important;
-    grid-template-columns:auto minmax(130px,auto) minmax(190px,320px) auto minmax(210px,280px) minmax(180px,230px) auto auto!important;
+    grid-template-columns:42px minmax(110px,170px) minmax(170px,280px) 42px minmax(190px,250px) minmax(165px,210px) auto minmax(270px,auto)!important;
     align-items:center!important;
     column-gap:10px!important;
     row-gap:8px!important;
@@ -267,6 +267,7 @@ html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown
     justify-content:flex-end!important;
     flex-wrap:nowrap!important;
     gap:6px!important;
+    min-width:0!important;
   }
 }
 
@@ -397,11 +398,8 @@ body.admin-layout .admin-context-chip small {font-size:10.5px!important}
 body.admin-layout .admin-topbar select {min-height:42px!important;border-radius:10px!important;padding-inline:11px 34px!important}
 body.admin-layout .admin-profile-menu>summary {min-height:42px!important;border-radius:11px!important;padding:5px 10px 5px 5px!important}
 body.admin-layout .admin-profile-avatar {width:32px!important;height:32px!important;flex-basis:32px!important}
-body.admin-layout .topbar-icon-select {
-  position:relative;display:grid;place-items:center;width:42px;height:42px;border:1px solid var(--ui-border);border-radius:11px;background:var(--ui-surface);color:var(--ui-green-800);cursor:pointer;
-}
-body.admin-layout .topbar-icon-select>.ui-icon {width:18px;height:18px}
-body.admin-layout .topbar-icon-select select {position:absolute!important;inset:0!important;width:100%!important;height:100%!important;min-height:0!important;padding:0!important;opacity:0!important;cursor:pointer!important}
+body.admin-layout .topbar-cycle-button {position:relative!important}
+body.admin-layout .topbar-cycle-button .topbar-control-code {position:absolute;right:2px;bottom:1px;min-width:15px;padding:1px 2px;border-radius:4px;background:var(--ui-green-700);color:#fff!important;-webkit-text-fill-color:#fff!important;font-size:7px!important;font-weight:800!important;line-height:1.2!important;letter-spacing:0!important;text-align:center}
 body.admin-layout .topbar-bs-calendar {position:relative;align-self:center}
 body.admin-layout .topbar-bs-date {display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:7px 10px;border:1px solid #eadcb4;border-radius:999px;background:#fff7df;color:#6e5600;font-size:11px;font-weight:750;white-space:nowrap;cursor:pointer}
 body.admin-layout .topbar-bs-date .ui-icon {width:15px;height:15px}
@@ -434,8 +432,17 @@ body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar :is(.admin-icon-butt
 body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .admin-context-chip :is(strong,small,.ui-icon) {
   color:#fff!important;-webkit-text-fill-color:#fff!important;
 }
-body.admin-layout:is(.theme-dark,.admin-dark) .topbar-icon-select {background:#0d1815;color:#fff;border-color:rgba(255,255,255,.36)}
 body.admin-layout:is(.theme-dark,.admin-dark) .topbar-bs-date {background:#493711;color:#fff;border-color:#8a6b24}
+
+@media (min-width:1181px) and (max-width:1550px) {
+  body.admin-layout .admin-topbar {grid-template-columns:42px minmax(95px,135px) minmax(150px,240px) 42px minmax(170px,220px) minmax(145px,180px) auto minmax(220px,auto)!important;column-gap:7px!important}
+  body.admin-layout .admin-context-chip strong {max-width:135px!important}
+  body.admin-layout .admin-profile-identity {display:none!important}
+  body.admin-layout .admin-profile-menu>summary {width:42px!important;padding:5px!important}
+  body.admin-layout .admin-profile-chevron {display:none!important}
+  body.admin-layout .topbar-bs-date span {display:none!important}
+  body.admin-layout .topbar-bs-date {width:42px!important;min-width:42px!important;height:42px!important;padding:0!important;justify-content:center!important;border-radius:11px!important}
+}
 
 @media (max-width:1180px) {
   body.admin-layout .admin-topbar {display:flex!important;min-height:64px!important}

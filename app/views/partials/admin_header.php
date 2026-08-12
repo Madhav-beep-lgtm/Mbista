@@ -512,24 +512,27 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <div class="topbar-bs-calendar-panel" data-bs-calendar-panel hidden></div>
             </div>
             <div class="admin-topbar-actions">
-                <form method="get" class="no-search topbar-language-control" style="align-self:center;margin:0" title="Language">
-                    <?php foreach ($_GET as $langKeepKey => $langKeepValue): if ($langKeepKey === 'lang' || !is_scalar($langKeepValue)) { continue; } ?>
-                        <input type="hidden" name="<?= e((string) $langKeepKey) ?>" value="<?= e((string) $langKeepValue) ?>">
-                    <?php endforeach; ?>
-                    <label class="topbar-icon-select" aria-label="Language"><?= icon('language') ?><select name="lang" onchange="this.form.submit()" style="cursor:pointer">
-                        <?php foreach (APP_LANGS as $langCode => $langLabel): ?>
-                            <option value="<?= e($langCode) ?>" <?= app_lang() === $langCode ? 'selected' : '' ?>><?= e($langLabel) ?></option>
-                        <?php endforeach; ?>
-                    </select></label>
-                </form>
-                <form method="post" action="<?= e(url('set-date-mode.php')) ?>" class="topbar-date-control" style="align-self:center;margin:0">
+                <?php
+                $headerLanguageCodes = array_keys(APP_LANGS);
+                $headerLanguageIndex = array_search(app_lang(), $headerLanguageCodes, true);
+                $headerNextLanguage = $headerLanguageCodes[((int) $headerLanguageIndex + 1) % count($headerLanguageCodes)];
+                $headerLanguageQuery = $_GET;
+                $headerLanguageQuery['lang'] = $headerNextLanguage;
+                $headerDateModes = ['ad', 'bs', 'both'];
+                $headerDateModeIndex = array_search(date_mode(), $headerDateModes, true);
+                $headerNextDateMode = $headerDateModes[((int) $headerDateModeIndex + 1) % count($headerDateModes)];
+                ?>
+                <a class="admin-icon-button topbar-cycle-button" href="?<?= e(http_build_query($headerLanguageQuery)) ?>"
+                   aria-label="Switch language to <?= e(APP_LANGS[$headerNextLanguage]) ?>" title="Language: <?= e(APP_LANGS[app_lang()]) ?> — switch to <?= e(APP_LANGS[$headerNextLanguage]) ?>">
+                    <?= icon('language') ?><span class="topbar-control-code"><?= e(strtoupper(app_lang())) ?></span>
+                </a>
+                <form method="post" action="<?= e(url('set-date-mode.php')) ?>" class="topbar-date-control topbar-icon-form">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="return" value="<?= e($_SERVER['REQUEST_URI'] ?? '') ?>">
-                    <label class="topbar-icon-select" aria-label="Date display"><?= icon('calendar') ?><select name="date_mode" onchange="this.form.submit()" title="Date display: English / Nepali" style="cursor:pointer">
-                        <option value="ad" <?= date_mode() === 'ad' ? 'selected' : '' ?>>AD</option>
-                        <option value="bs" <?= date_mode() === 'bs' ? 'selected' : '' ?>>BS</option>
-                        <option value="both" <?= date_mode() === 'both' ? 'selected' : '' ?>>AD+BS</option>
-                    </select></label>
+                    <input type="hidden" name="date_mode" value="<?= e($headerNextDateMode) ?>">
+                    <button type="submit" class="admin-icon-button topbar-cycle-button" aria-label="Switch date display to <?= e(strtoupper($headerNextDateMode)) ?>" title="Date display: <?= e(strtoupper(date_mode())) ?> — switch to <?= e(strtoupper($headerNextDateMode)) ?>">
+                        <?= icon('calendar') ?><span class="topbar-control-code"><?= e(strtoupper(date_mode() === 'both' ? 'A+B' : date_mode())) ?></span>
+                    </button>
                 </form>
 
                 <?php if (!$headerIsCustomer): ?>
