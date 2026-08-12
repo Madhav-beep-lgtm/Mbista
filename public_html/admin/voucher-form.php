@@ -657,7 +657,7 @@ $pageTitle = $editVoucher ? 'Edit ' . $spec['label'] . ' ' . (string) $editVouch
 $pageSubtitle = $editVoucher
     ? 'Editing replaces the voucher\'s lines and re-applies the posting and approval rules.'
     : (string) $spec['blurb'];
-$bodyClass = 'admin-layout accounting-module-page';
+$bodyClass = 'admin-layout accounting-module-page voucher-entry-page voucher-type-' . $spec['key'];
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
@@ -679,7 +679,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="notice">These lines do not fit the <?= e(voucher_type_label((string) $editVoucher['voucher_type'])) ?> screen — they were posted by another part of the system. They are shown as a plain debit/credit grid, which can express anything.</div>
 <?php endif; ?>
 
-<form method="post" action="<?= e(url('admin/voucher-form.php' . ($editVoucher ? '?edit=' . (int) $editVoucher['id'] : ''))) ?>" enctype="multipart/form-data" id="voucher-form" data-balanced="0">
+<form method="post" action="<?= e(url('admin/voucher-form.php' . ($editVoucher ? '?edit=' . (int) $editVoucher['id'] : ''))) ?>" enctype="multipart/form-data" id="voucher-form" class="voucher-entry-form" data-balanced="0">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <input type="hidden" name="save_mode" id="frm-save-mode" value="submit">
     <input type="hidden" name="context_fiscal_year_id" value="<?= (int) $fiscalYearId ?>">
@@ -697,10 +697,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <label>Voucher no.
                     <input type="text" value="<?= e($nextNumberPreview) ?>" disabled title="<?= $editVoucher ? 'A voucher keeps its number for life' : 'The next number in this type\'s series — issued when you save' ?>">
                 </label>
-                <label>Voucher date <em>*</em>
+                <label><span>Voucher date <em>*</em></span>
                     <input type="date" name="voucher_date" id="frm-date" value="<?= e((string) ($prefill['voucher_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?> required>
                 </label>
-                <label class="frm-span-3">Title <em>*</em>
+                <label class="frm-span-3"><span>Title <em>*</em></span>
                     <input type="text" name="title" id="frm-title" maxlength="180" placeholder="<?= e((string) $spec['title_hint']) ?>" value="<?= e($editTitle) ?>" required>
                 </label>
             </div>

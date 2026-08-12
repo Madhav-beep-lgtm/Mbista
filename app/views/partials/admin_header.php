@@ -136,7 +136,7 @@ if ($headerHospitality) {
         ['settings', 'Settings', 'sliders'],
     ];
     $headerHospitalityMenu = '<div class="mbw-nav-parent' . ($headerHospitalityActive ? ' is-open' : '') . '" data-nav-parent="hospitality">'
-        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerHospitalityActive ? 'true' : 'false') . '" class="' . ($headerHospitalityActive ? 'is-active' : '') . '">'
+        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerHospitalityActive ? 'true' : 'false') . '">'
         . icon('services') . 'Hospitality Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
     foreach ($hospLinks as [$hospView, $hospLabel, $hospIcon]) {
         $isActive = $headerHospitalityActive && ($headerHospitalityView === $hospView || ($headerHospitalityView === '' && $hospView === 'dashboard'));
@@ -191,7 +191,7 @@ if ($headerJewellery) {
         'jewellery-workshop.php' => 'orders', 'jewellery-reports.php' => 'summary',
         'accounting-parties.php' => 'directory'];
     $headerJewelleryMenu = '<div class="mbw-nav-parent' . ($headerJewelleryActive ? ' is-open' : '') . '" data-nav-parent="jewellery">'
-        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerJewelleryActive ? 'true' : 'false') . '" class="' . ($headerJewelleryActive ? 'is-active' : '') . '">'
+        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerJewelleryActive ? 'true' : 'false') . '">'
         . icon('coins') . 'Jewellery Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
     foreach ($jewLinks as [$jewScript, $jewView, $jewLabel, $jewIcon]) {
         $jewQueryKey = $jewScript === 'accounting-parties.php' ? 'tab' : 'view';
@@ -282,7 +282,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a href="<?= e(url('my-profile.php')) ?>"><?= icon('profile') ?>My Profile &amp; Users</a>
             <span class="admin-nav-group">Accounting Workspace</span>
             <div class="mbw-nav-parent is-open" data-nav-parent="accounting">
-                <a href="#" data-nav-toggle aria-expanded="true" class="is-active">
+                <a href="#" data-nav-toggle aria-expanded="true">
                     <?= icon('accounting') ?>Accounting
                     <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                 </a>
@@ -331,7 +331,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <?php endif; ?>
             <?php else: ?>
             <div class="mbw-nav-parent<?= $headerAccountingActive ? ' is-open' : '' ?>" data-nav-parent="accounting">
-                <a href="#" data-nav-toggle aria-expanded="<?= $headerAccountingActive ? 'true' : 'false' ?>" class="<?= $headerAccountingActive ? 'is-active' : '' ?>">
+                <a href="#" data-nav-toggle aria-expanded="<?= $headerAccountingActive ? 'true' : 'false' ?>">
                     <?= icon('accounting') ?>Accounting
                     <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                 </a>
@@ -359,7 +359,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <?php endif; ?>
             <?php if ($headerIsClientBooks): ?>
                 <div class="mbw-nav-parent is-open" data-nav-parent="client-accounting">
-                    <a href="#" data-nav-toggle aria-expanded="true" class="is-active">
+                    <a href="#" data-nav-toggle aria-expanded="true">
                         <?= icon('accounting') ?>Client Accounting
                         <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                     </a>
@@ -387,7 +387,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
             <a class="<?= $headerScript === 'hr.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>HR &amp; Attendance</a>
             <div class="mbw-nav-parent<?= $headerPayrollActive ? ' is-open' : '' ?>" data-nav-parent="payroll">
-                <a href="#" data-nav-toggle aria-expanded="<?= $headerPayrollActive ? 'true' : 'false' ?>" class="<?= $headerPayrollActive ? 'is-active' : '' ?>">
+                <a href="#" data-nav-toggle aria-expanded="<?= $headerPayrollActive ? 'true' : 'false' ?>">
                     <?= icon('wallet') ?>Payroll
                     <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                 </a>
@@ -402,13 +402,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </div>
             </div>
 
-            <span class="admin-nav-group">Users &amp; System</span>
-            <a class="<?= $headerScript === 'users.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?>Users</a>
             <?php if ($headerCompanyCode === 'MBAACA'): ?>
+                <span class="admin-nav-group">Website</span>
                 <a class="<?= $headerScript === 'insights.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/insights.php')) ?>"><?= icon('insights') ?>Website Insights</a>
             <?php endif; ?>
-            <a class="<?= $headerScript === 'settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
-            <a href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?>Logout</a>
             <?php endif; ?>
         </nav>
     </aside>
@@ -575,6 +572,35 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <?= icon('theme') ?>
                     <span class="sr-only" data-theme-toggle-label>Dark mode</span>
                 </button>
+                <?php if (!$headerIsCustomer): ?>
+                    <?php
+                    $headerUserName = trim((string) ($currentUser['name'] ?? 'Super Admin')) ?: 'Super Admin';
+                    $headerUserInitials = '';
+                    foreach (preg_split('/\s+/', $headerUserName) ?: [] as $headerNamePart) {
+                        $headerUserInitials .= mb_substr($headerNamePart, 0, 1);
+                        if (mb_strlen($headerUserInitials) >= 2) { break; }
+                    }
+                    $headerUserInitials = mb_strtoupper($headerUserInitials ?: 'SA');
+                    $headerUserRole = (string) ($currentUser['role'] ?? '') === 'admin' ? 'Super Admin' : ucfirst((string) ($currentUser['role'] ?? 'User'));
+                    ?>
+                    <details class="admin-profile-menu">
+                        <summary aria-label="Open user menu" title="<?= e($headerUserName) ?>">
+                            <span class="admin-profile-avatar"><?= e($headerUserInitials) ?></span>
+                            <span class="admin-profile-identity"><strong><?= e($headerUserName) ?></strong><small><?= e($headerUserRole) ?></small></span>
+                            <span class="admin-profile-chevron"><?= icon('chevron') ?></span>
+                        </summary>
+                        <div class="admin-profile-dropdown">
+                            <div class="admin-profile-dropdown-head">
+                                <span class="admin-profile-avatar is-large"><?= e($headerUserInitials) ?></span>
+                                <span><strong><?= e($headerUserName) ?></strong><small><?= e((string) ($currentUser['email'] ?? $headerUserRole)) ?></small></span>
+                            </div>
+                            <a href="<?= e(url('admin/users.php?view=' . (int) ($currentUser['id'] ?? 0))) ?>"><?= icon('profile') ?><span><strong>My profile</strong><small>Personal details and security</small></span></a>
+                            <a href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?><span><strong>Users</strong><small>Accounts and permissions</small></span></a>
+                            <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?><span><strong>Settings</strong><small>System preferences</small></span></a>
+                            <a class="is-logout" href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?><span><strong>Logout</strong><small>End this session</small></span></a>
+                        </div>
+                    </details>
+                <?php endif; ?>
             </div>
         </header>
         <div class="admin-content">

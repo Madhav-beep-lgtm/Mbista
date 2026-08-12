@@ -471,29 +471,55 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </table>
     </div>
     <nav class="ssr-pagination" aria-label="Stock summary pages">
-        <div class="ssr-pagination-summary">Showing <strong><?= $showingFrom ?>–<?= $showingTo ?></strong> of <strong><?= $rowCount ?></strong> records</div>
+        <div class="ssr-pagination-summary">
+            Showing <strong><?= $showingFrom ?>â€“<?= $showingTo ?></strong> of <strong><?= $rowCount ?></strong> records
+        </div>
         <?php if ($pageCount > 1): ?>
             <?php
             $pageUrl = static fn (int $target): string => '?' . $qs . '&per_page=' . $perPage . '&page=' . $target;
             $windowStart = max(2, $page - 2);
             $windowEnd = min($pageCount - 1, $page + 2);
-            if ($page <= 4) $windowEnd = min($pageCount - 1, 6);
-            if ($page >= $pageCount - 3) $windowStart = max(2, $pageCount - 5);
+            if ($page <= 4) {
+                $windowEnd = min($pageCount - 1, 6);
+            }
+            if ($page >= $pageCount - 3) {
+                $windowStart = max(2, $pageCount - 5);
+            }
             ?>
             <div class="ssr-pagination-pages">
-                <?php if ($page > 1): ?><a href="<?= e($pageUrl(1)) ?>" aria-label="First page">&laquo;</a><a href="<?= e($pageUrl($page - 1)) ?>" aria-label="Previous page">&lsaquo; Previous</a><?php endif; ?>
+                <?php if ($page > 1): ?>
+                    <a href="<?= e($pageUrl(1)) ?>" aria-label="First page">&laquo;</a>
+                    <a href="<?= e($pageUrl($page - 1)) ?>" aria-label="Previous page">&lsaquo; Previous</a>
+                <?php endif; ?>
                 <a class="<?= $page === 1 ? 'is-active' : '' ?>" href="<?= e($pageUrl(1)) ?>" <?= $page === 1 ? 'aria-current="page"' : '' ?>>1</a>
-                <?php if ($windowStart > 2): ?><span class="ssr-pagination-gap">…</span><?php endif; ?>
-                <?php for ($p = $windowStart; $p <= $windowEnd; $p++): ?><a class="<?= $p === $page ? 'is-active' : '' ?>" href="<?= e($pageUrl($p)) ?>" <?= $p === $page ? 'aria-current="page"' : '' ?>><?= $p ?></a><?php endfor; ?>
-                <?php if ($windowEnd < $pageCount - 1): ?><span class="ssr-pagination-gap">…</span><?php endif; ?>
+                <?php if ($windowStart > 2): ?><span class="ssr-pagination-gap">â€¦</span><?php endif; ?>
+                <?php for ($p = $windowStart; $p <= $windowEnd; $p++): ?>
+                    <a class="<?= $p === $page ? 'is-active' : '' ?>" href="<?= e($pageUrl($p)) ?>" <?= $p === $page ? 'aria-current="page"' : '' ?>><?= $p ?></a>
+                <?php endfor; ?>
+                <?php if ($windowEnd < $pageCount - 1): ?><span class="ssr-pagination-gap">â€¦</span><?php endif; ?>
                 <a class="<?= $page === $pageCount ? 'is-active' : '' ?>" href="<?= e($pageUrl($pageCount)) ?>" <?= $page === $pageCount ? 'aria-current="page"' : '' ?>><?= $pageCount ?></a>
-                <?php if ($page < $pageCount): ?><a href="<?= e($pageUrl($page + 1)) ?>" aria-label="Next page">Next &rsaquo;</a><a href="<?= e($pageUrl($pageCount)) ?>" aria-label="Last page">&raquo;</a><?php endif; ?>
+                <?php if ($page < $pageCount): ?>
+                    <a href="<?= e($pageUrl($page + 1)) ?>" aria-label="Next page">Next &rsaquo;</a>
+                    <a href="<?= e($pageUrl($pageCount)) ?>" aria-label="Last page">&raquo;</a>
+                <?php endif; ?>
             </div>
             <form method="get" class="ssr-pagination-jump">
-                <?php foreach (array_filter(['from'=>$from,'to'=>$to,'q'=>$filters['search'],'valuation'=>$filters['valuation'],'status'=>$filters['stock_status'],'jewellery_stock_kind'=>$filters['jewellery_stock_kind'],'group_by'=>$filters['group_by'],'ledger'=>$filters['ledger_id'] ?: null,'zero_movement'=>$filters['zero_movement'] ? 1 : null,'zero_closing'=>$filters['zero_closing'] ? 1 : null,'applied'=>1], static fn ($value): bool => $value !== null && $value !== '') as $name => $value): ?><input type="hidden" name="<?= e((string) $name) ?>" value="<?= e((string) $value) ?>"><?php endforeach; ?>
+                <?php foreach (array_filter([
+                    'from' => $from, 'to' => $to, 'q' => $filters['search'],
+                    'valuation' => $filters['valuation'], 'status' => $filters['stock_status'],
+                    'jewellery_stock_kind' => $filters['jewellery_stock_kind'],
+                    'group_by' => $filters['group_by'], 'ledger' => $filters['ledger_id'] ?: null,
+                    'zero_movement' => $filters['zero_movement'] ? 1 : null,
+                    'zero_closing' => $filters['zero_closing'] ? 1 : null, 'applied' => 1,
+                ], static fn ($value): bool => $value !== null && $value !== '') as $name => $value): ?>
+                    <input type="hidden" name="<?= e((string) $name) ?>" value="<?= e((string) $value) ?>">
+                <?php endforeach; ?>
                 <?php foreach ($filters['warehouse_ids'] as $value): ?><input type="hidden" name="warehouses[]" value="<?= (int) $value ?>"><?php endforeach; ?>
                 <?php foreach ($filters['types'] as $value): ?><input type="hidden" name="types[]" value="<?= e((string) $value) ?>"><?php endforeach; ?>
-                <input type="hidden" name="per_page" value="<?= $perPage ?>"><label for="ssr-page-jump">Go to page</label><input id="ssr-page-jump" type="number" name="page" min="1" max="<?= $pageCount ?>" value="<?= $page ?>"><button type="submit" class="button secondary">Go</button>
+                <input type="hidden" name="per_page" value="<?= $perPage ?>">
+                <label for="ssr-page-jump">Go to page</label>
+                <input id="ssr-page-jump" type="number" name="page" min="1" max="<?= $pageCount ?>" value="<?= $page ?>">
+                <button type="submit" class="button secondary">Go</button>
             </form>
         <?php endif; ?>
     </nav>

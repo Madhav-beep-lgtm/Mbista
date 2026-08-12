@@ -132,7 +132,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 
             <?php foreach ($mappingRoles as $mapKey => $role): ?>
-                <label><?= e($role['label']) ?>
+                <label id="<?= $mapKey === 'default_cash_bank' ? 'default-cash-bank' : e($mapKey) ?>"><?= e($role['label']) ?>
                     <select name="mapping[<?= e($mapKey) ?>]">
                         <option value="0">Use legacy default</option>
                         <?php foreach ($flatLedgers as $ledger): ?>

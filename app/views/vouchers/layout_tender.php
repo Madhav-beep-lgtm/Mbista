@@ -15,7 +15,7 @@ declare(strict_types=1);
 $bankSide = (string) $spec['bank_side'];
 $isMoneyIn = $bankSide === 'debit';
 ?>
-<section class="mbw-card frm-section vch-focus">
+<section class="mbw-card frm-section vch-focus vch-work-section vch-money-section">
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-<?= e((string) $spec['tone']) ?>"><?= icon($isMoneyIn ? 'trend-up' : 'trend-down') ?></span>
         <h2><?= e((string) $spec['bank_label']) ?></h2>
@@ -68,7 +68,7 @@ $isMoneyIn = $bankSide === 'debit';
     </div>
 </section>
 
-<section class="mbw-card frm-section">
+<section class="mbw-card frm-section vch-work-section vch-party-section">
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-green"><?= icon('clients') ?></span>
         <h2><?= e((string) $spec['party_label']) ?></h2>
@@ -91,7 +91,7 @@ $isMoneyIn = $bankSide === 'debit';
     </div>
 </section>
 
-<section class="mbw-card frm-section">
+<section class="mbw-card frm-section vch-work-section vch-against-section">
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-blue"><?= icon('layers') ?></span>
         <h2><?= e((string) $spec['lines_label']) ?></h2>

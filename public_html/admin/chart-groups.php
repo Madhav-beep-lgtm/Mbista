@@ -56,6 +56,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Name and master are required.');
             redirect('admin/chart-groups.php');
         }
+        // A group name is an identity inside one company's chart, regardless
+        // of case or surrounding spaces. Apply this to both new groups and
+        // renames, excluding only the row currently being edited.
+        $duplicateStmt = db()->prepare('SELECT id, code, name FROM ledger_groups
+            WHERE company_id = :company_id
+              AND LOWER(TRIM(name)) = LOWER(TRIM(:name))
+              AND id <> :group_id
+            LIMIT 1');
+        $duplicateStmt->execute([
+            'company_id' => $companyId,
+            'name' => $name,
+            'group_id' => $groupId,
+        ]);
+        $duplicateGroup = $duplicateStmt->fetch();
+        if ($duplicateGroup) {
+            flash('error', 'A group named "' . (string) $duplicateGroup['name'] . '" already exists ('
+                . (string) $duplicateGroup['code'] . '). Group names must be unique.');
+            redirect('admin/chart-groups.php' . ($groupId > 0 ? '?edit=' . $groupId : ''));
+        }
         if ($groupId <= 0) {
             foreach (party_ledger_role_definitions() as $roleDefinition) {
                 if ($masterKey === (string) $roleDefinition['master_key']
