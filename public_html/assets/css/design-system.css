@@ -292,6 +292,42 @@ html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .admin-profile-
     gap:8px!important;
     min-width:0!important;
   }
+
+  /* Client headers have five children, not the six used by the admin header.
+     Giving them their own grid prevents the organization chip from falling
+     into the admin header's 40px analytics-button column. */
+  body.client-portal .admin-topbar {
+    grid-template-columns:40px minmax(190px,1fr) minmax(270px,340px) 150px auto!important;
+    column-gap:12px!important;
+  }
+  body.client-portal .admin-topbar-title {
+    display:block!important;
+    overflow:hidden!important;
+  }
+  body.client-portal .admin-context-chip {
+    width:100%!important;
+    max-width:340px!important;
+    min-height:48px!important;
+  }
+  body.client-portal .admin-context-chip>span:last-child {min-width:0!important}
+  body.client-portal .admin-context-chip strong,
+  body.client-portal .admin-context-chip small {
+    display:block!important;
+    max-width:260px!important;
+    overflow:hidden!important;
+    text-overflow:ellipsis!important;
+    white-space:nowrap!important;
+  }
+  body.client-portal .admin-topbar>.mbw-pill {
+    width:auto!important;
+    min-width:150px!important;
+    justify-self:center!important;
+    white-space:nowrap!important;
+  }
+  body.client-portal .admin-topbar-actions {
+    grid-column:5!important;
+    justify-self:end!important;
+  }
 }
 
 body.admin-layout .admin-topbar {
@@ -519,6 +555,13 @@ html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .topbar-segment
 @media (max-width:1180px) {
   body.admin-layout .admin-topbar {display:flex!important;min-height:64px!important}
   body.admin-layout .admin-topbar-actions {margin-left:auto!important;justify-content:flex-end!important}
+}
+
+body.client-portal .brand-admin .mbw-logo-sidebar {
+  width:auto!important;
+  max-width:132px!important;
+  height:42px!important;
+  object-fit:contain!important;
 }
 @media (max-width:700px) {
   body.admin-layout .admin-sidebar-toggle {width:42px!important;padding:0!important}
