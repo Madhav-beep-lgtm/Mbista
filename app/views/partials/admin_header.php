@@ -522,16 +522,20 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 $headerDateModeIndex = array_search(date_mode(), $headerDateModes, true);
                 $headerNextDateMode = $headerDateModes[((int) $headerDateModeIndex + 1) % count($headerDateModes)];
                 ?>
-                <a class="admin-icon-button topbar-cycle-button" href="?<?= e(http_build_query($headerLanguageQuery)) ?>"
+                <a class="topbar-switch" href="?<?= e(http_build_query($headerLanguageQuery)) ?>"
                    aria-label="Switch language to <?= e(APP_LANGS[$headerNextLanguage]) ?>" title="Language: <?= e(APP_LANGS[app_lang()]) ?> — switch to <?= e(APP_LANGS[$headerNextLanguage]) ?>">
-                    <?= icon('language') ?><span class="topbar-control-code"><?= e(strtoupper(app_lang())) ?></span>
+                    <span class="topbar-switch-value is-current"><?= e(strtoupper(app_lang())) ?></span>
+                    <span class="topbar-switch-track"><?= icon('language') ?></span>
+                    <span class="topbar-switch-value"><?= e(strtoupper($headerNextLanguage)) ?></span>
                 </a>
                 <form method="post" action="<?= e(url('set-date-mode.php')) ?>" class="topbar-date-control topbar-icon-form">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="return" value="<?= e($_SERVER['REQUEST_URI'] ?? '') ?>">
                     <input type="hidden" name="date_mode" value="<?= e($headerNextDateMode) ?>">
-                    <button type="submit" class="admin-icon-button topbar-cycle-button" aria-label="Switch date display to <?= e(strtoupper($headerNextDateMode)) ?>" title="Date display: <?= e(strtoupper(date_mode())) ?> — switch to <?= e(strtoupper($headerNextDateMode)) ?>">
-                        <?= icon('calendar') ?><span class="topbar-control-code"><?= e(strtoupper(date_mode() === 'both' ? 'A+B' : date_mode())) ?></span>
+                    <button type="submit" class="topbar-switch" aria-label="Switch date display to <?= e(strtoupper($headerNextDateMode)) ?>" title="Date display: <?= e(strtoupper(date_mode())) ?> — switch to <?= e(strtoupper($headerNextDateMode)) ?>">
+                        <span class="topbar-switch-value is-current"><?= e(strtoupper(date_mode() === 'both' ? 'A+B' : date_mode())) ?></span>
+                        <span class="topbar-switch-track"><?= icon('calendar') ?></span>
+                        <span class="topbar-switch-value"><?= e(strtoupper($headerNextDateMode === 'both' ? 'A+B' : $headerNextDateMode)) ?></span>
                     </button>
                 </form>
 

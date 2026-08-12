@@ -398,8 +398,15 @@ body.admin-layout .admin-context-chip small {font-size:10.5px!important}
 body.admin-layout .admin-topbar select {min-height:42px!important;border-radius:10px!important;padding-inline:11px 34px!important}
 body.admin-layout .admin-profile-menu>summary {min-height:42px!important;border-radius:11px!important;padding:5px 10px 5px 5px!important}
 body.admin-layout .admin-profile-avatar {width:32px!important;height:32px!important;flex-basis:32px!important}
-body.admin-layout .topbar-cycle-button {position:relative!important}
-body.admin-layout .topbar-cycle-button .topbar-control-code {position:absolute;right:2px;bottom:1px;min-width:15px;padding:1px 2px;border-radius:4px;background:var(--ui-green-700);color:#fff!important;-webkit-text-fill-color:#fff!important;font-size:7px!important;font-weight:800!important;line-height:1.2!important;letter-spacing:0!important;text-align:center}
+body.admin-layout .topbar-switch {
+  display:inline-grid!important;grid-template-columns:minmax(24px,auto) 38px minmax(24px,auto)!important;align-items:center!important;gap:5px!important;min-height:42px!important;padding:4px 8px!important;border:1px solid var(--ui-border)!important;border-radius:999px!important;background:var(--ui-surface)!important;color:var(--ui-muted)!important;text-decoration:none!important;box-shadow:0 3px 10px rgba(15,61,45,.06)!important;cursor:pointer!important;font:750 10px/1 inherit!important;
+}
+body.admin-layout button.topbar-switch {width:auto!important}
+body.admin-layout .topbar-switch-value {color:var(--ui-muted)!important;-webkit-text-fill-color:var(--ui-muted)!important;text-align:center!important;white-space:nowrap!important}
+body.admin-layout .topbar-switch-value.is-current {color:var(--ui-green-800)!important;-webkit-text-fill-color:var(--ui-green-800)!important}
+body.admin-layout .topbar-switch-track {display:grid!important;place-items:center!important;width:38px!important;height:28px!important;border-radius:999px!important;background:var(--ui-green-700)!important;color:#fff!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)!important}
+body.admin-layout .topbar-switch-track .ui-icon {width:15px!important;height:15px!important;color:#fff!important}
+body.admin-layout .topbar-switch:hover {border-color:var(--ui-green-700)!important;box-shadow:0 0 0 3px var(--ui-focus)!important}
 body.admin-layout .topbar-bs-calendar {position:relative;align-self:center}
 body.admin-layout .topbar-bs-date {display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:7px 10px;border:1px solid #eadcb4;border-radius:999px;background:#fff7df;color:#6e5600;font-size:11px;font-weight:750;white-space:nowrap;cursor:pointer}
 body.admin-layout .topbar-bs-date .ui-icon {width:15px;height:15px}
@@ -433,6 +440,9 @@ body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .admin-context-chip 
   color:#fff!important;-webkit-text-fill-color:#fff!important;
 }
 body.admin-layout:is(.theme-dark,.admin-dark) .topbar-bs-date {background:#493711;color:#fff;border-color:#8a6b24}
+body.admin-layout:is(.theme-dark,.admin-dark) .topbar-switch {background:#0d1815!important;border-color:rgba(255,255,255,.36)!important}
+body.admin-layout:is(.theme-dark,.admin-dark) .topbar-switch-value {color:#c9d8d1!important;-webkit-text-fill-color:#c9d8d1!important}
+body.admin-layout:is(.theme-dark,.admin-dark) .topbar-switch-value.is-current {color:#fff!important;-webkit-text-fill-color:#fff!important}
 
 @media (min-width:1181px) and (max-width:1550px) {
   body.admin-layout .admin-topbar {grid-template-columns:42px minmax(95px,135px) minmax(150px,240px) 42px minmax(170px,220px) minmax(145px,180px) auto minmax(220px,auto)!important;column-gap:7px!important}
