@@ -46,7 +46,7 @@ body.admin-layout.admin-dark {
 }
 
 /* Permanent product navigation. */
-body.admin-layout .admin-sidebar {
+html body.admin-layout .admin-shell > .admin-sidebar {
   background:linear-gradient(180deg,var(--ui-green-900),var(--ui-green-800))!important;
   border-right:1px solid rgba(255,255,255,.16)!important;
   box-shadow:8px 0 24px rgba(3,46,36,.20)!important;
@@ -54,7 +54,7 @@ body.admin-layout .admin-sidebar {
   color-scheme:dark!important;
   scrollbar-color:rgba(255,255,255,.42) transparent!important;
 }
-body.admin-layout .admin-sidebar :is(a,button,span,strong,small,p,.ui-icon) {
+html body.admin-layout .admin-shell > .admin-sidebar :is(a,button,span,strong,small,p,.ui-icon) {
   color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important;
 }
 body.admin-layout .admin-sidebar .brand.brand-admin {
@@ -134,6 +134,14 @@ body.admin-layout .admin-sidebar .mbw-nav-parent>a[data-nav-toggle] {
   box-shadow:none!important;
 }
 body.admin-layout .admin-sidebar .mbw-nav-parent>a[data-nav-toggle]:hover {background:rgba(255,255,255,.1)!important}
+body.admin-layout .admin-sidebar .mbw-nav-parent.is-open>a[data-nav-toggle],
+body.admin-layout .admin-sidebar .mbw-nav-parent>a[data-nav-toggle].is-active {
+  background:var(--ui-green-700)!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border-color:rgba(255,255,255,.3)!important;
+  box-shadow:inset 3px 0 0 var(--ui-gold)!important;
+}
 body.admin-layout .admin-sidebar .mbw-nav-caret {color:#fff!important;opacity:1!important}
 body.admin-layout .admin-sidebar .mbw-subnav {
   margin-left:20px!important;
@@ -211,9 +219,28 @@ body.admin-layout .admin-content table tbody tr:hover{background:color-mix(in sr
 body.admin-layout .admin-content :is(.badge,.pill,.status,.mbw-badge){display:inline-flex;align-items:center;justify-content:center;min-height:24px;padding:4px 9px;border-radius:999px;font-size:11px;font-weight:700;line-height:1.1;white-space:nowrap}
 
 /* Menus, popovers and native details dropdowns. */
-body.admin-layout :is(.dropdown-menu,.menu-popover,.admin-profile-dropdown,details[open]>.dropdown-panel){background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-border)!important;border-radius:12px!important;box-shadow:0 16px 38px rgba(5,40,29,.2)!important}
-body.admin-layout :is(.dropdown-menu,.menu-popover,.admin-profile-dropdown) a{min-height:40px;border-radius:8px;color:var(--ui-text)!important}
-body.admin-layout :is(.dropdown-menu,.menu-popover,.admin-profile-dropdown) a:hover{background:var(--ui-green-100)!important;color:var(--ui-green-800)!important}
+body.admin-layout :is(.dropdown-menu,.menu-popover,details[open]>.dropdown-panel){background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-border)!important;border-radius:12px!important;box-shadow:0 16px 38px rgba(5,40,29,.2)!important}
+body.admin-layout :is(.dropdown-menu,.menu-popover) a{min-height:40px;border-radius:8px;color:var(--ui-text)!important}
+body.admin-layout :is(.dropdown-menu,.menu-popover) a:hover{background:var(--ui-green-100)!important;color:var(--ui-green-800)!important}
+
+/* The account menu is permanent dark chrome in both themes.  Keeping this
+   separate from content popovers prevents light-mode surface rules from
+   producing pale text on a white menu. */
+html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown {
+  background:#071a15!important;
+  color:#fff!important;
+  border-color:rgba(255,255,255,.18)!important;
+  color-scheme:dark!important;
+}
+html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown :is(a,span,strong,small,p,.ui-icon) {
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  opacity:1!important;
+}
+html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown a:hover {
+  background:rgba(60,187,139,.16)!important;
+  color:#fff!important;
+}
 
 /* Notices and validation. */
 body.admin-layout .admin-content :is(.notice,.alert){padding:12px 14px;border:1px solid var(--ui-border);border-radius:11px;font-size:13px;line-height:1.45}
