@@ -363,12 +363,18 @@ body.admin-layout .admin-sidebar-toggle {width:42px!important;padding:0!importan
     min-height:72px!important;
     padding:14px 4px!important;
     margin:0!important;
+    align-items:center!important;
+    justify-content:center!important;
   }
   body.admin-layout.sidebar-collapsed .admin-sidebar .mbw-logo-sidebar {
     display:block!important;
-    width:188px!important;
-    max-width:none!important;
-    height:auto!important;
+    width:38px!important;
+    max-width:38px!important;
+    height:38px!important;
+    max-height:38px!important;
+    margin:0!important;
+    object-fit:contain!important;
+    object-position:center!important;
   }
   body.admin-layout.sidebar-collapsed .admin-sidebar::-webkit-scrollbar {width:7px!important}
   body.admin-layout.sidebar-collapsed .admin-sidebar::-webkit-scrollbar-thumb {

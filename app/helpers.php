@@ -557,6 +557,10 @@ function brand_logo(string $variant = 'dark', string $class = 'mbw-logo', ?strin
         }
     }
 
+    if ($uploaded === '' && function_exists('setting')) {
+        $uploaded = (string) setting('company_logo_path', '');
+    }
+
     if ($uploaded !== '') {
         $file = $uploaded;
     } else {
