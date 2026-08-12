@@ -182,11 +182,17 @@ $businessProfile = accounting_business_profile($businessType);
 $showInventoryFeatures = (bool) ($businessProfile['show_inventory'] ?? false);
 $showManufacturingFeatures = (bool) ($businessProfile['show_manufacturing'] ?? false);
 
+$hasBankMeta = column_exists('ledgers', 'bank_account_no');
+$bankMetaSelect = $hasBankMeta
+    ? ', l.bank_name, l.bank_account_no'
+    : ', NULL AS bank_name, NULL AS bank_account_no';
 $ledgerStmt = db()->prepare('
-    SELECT l.id, l.code, l.name, l.type, g.name AS group_name, g.master_key,
+    SELECT l.id, l.code, l.name, l.type, g.code AS group_code, g.name AS group_name, g.master_key,
            COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank,
            COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) AS debit_total,
-           COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS credit_total
+           COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS credit_total,
+           MAX(CASE WHEN v.id IS NOT NULL THEN COALESCE(v.voucher_date, DATE(v.created_at)) END) AS last_move
+           ' . $bankMetaSelect . '
     FROM ledgers l
     LEFT JOIN ledger_groups g ON g.id = l.group_id
     LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
@@ -195,7 +201,8 @@ $ledgerStmt = db()->prepare('
         AND v.fiscal_year_id = :fiscal_year_id
         AND v.status = \'posted\'
     WHERE l.company_id = :company_id
-    GROUP BY l.id, l.code, l.name, l.type, g.name, g.master_key, g.is_cash_or_bank
+    GROUP BY l.id, l.code, l.name, l.type, g.code, g.name, g.master_key, g.is_cash_or_bank'
+    . ($hasBankMeta ? ', l.bank_name, l.bank_account_no' : '') . '
     ORDER BY l.code ASC
 ');
 $ledgerStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
@@ -209,6 +216,9 @@ $directExpenses = 0.0;
 $totalAssets = 0.0;
 $totalLiabilities = 0.0;
 $totalEquity = 0.0;
+$receivablesTotal = 0.0;
+$payablesTotal = 0.0;
+$tradeGroupLedgerIds = [];
 foreach ($ledgerRows as $ledger) {
     $debit = (float) $ledger['debit_total'];
     $credit = (float) $ledger['credit_total'];
@@ -233,30 +243,21 @@ foreach ($ledgerRows as $ledger) {
     } elseif ($type === 'equity') {
         $totalEquity += $naturalBalance;
     }
+
+    $groupCode = (string) ($ledger['group_code'] ?? '');
+    $groupName = (string) ($ledger['group_name'] ?? '');
+    if ($groupCode === 'RECEIVABLE' || $groupName === 'Trade Receivables') {
+        $tradeGroupLedgerIds[(int) $ledger['id']] = true;
+        $receivablesTotal += $naturalBalance;
+    } elseif ($groupCode === 'PAYABLE' || $groupName === 'Trade Payables') {
+        $tradeGroupLedgerIds[(int) $ledger['id']] = true;
+        $payablesTotal += $naturalBalance;
+    }
 }
 
 // Receivables/payables are the Trade Receivables / Trade Payables groups
 // (all party ledgers inside them); mapped generic ledgers only count when
 // they sit outside those groups (legacy layouts).
-$receivablesTotal = 0.0;
-$payablesTotal = 0.0;
-$tradeGroupLedgerIds = [];
-$tradeStmt = db()->prepare("SELECT l.id, g.code AS group_code, g.name AS group_name
-    FROM ledgers l
-    INNER JOIN ledger_groups g ON g.id = l.group_id
-    WHERE l.company_id = :cid
-      AND (g.code IN ('RECEIVABLE', 'PAYABLE') OR g.name IN ('Trade Receivables', 'Trade Payables'))");
-$tradeStmt->execute(['cid' => $companyId]);
-foreach ($tradeStmt->fetchAll() as $tradeRow) {
-    $tradeLedgerId = (int) $tradeRow['id'];
-    $tradeGroupLedgerIds[$tradeLedgerId] = true;
-    $tradeBalance = (float) ($balancesById[$tradeLedgerId] ?? 0);
-    if ((string) $tradeRow['group_code'] === 'RECEIVABLE' || (string) $tradeRow['group_name'] === 'Trade Receivables') {
-        $receivablesTotal += $tradeBalance;
-    } else {
-        $payablesTotal += $tradeBalance;
-    }
-}
 $receivableLedgerId = (int) (get_mapped_ledger($companyId, 'default_accounts_receivable')['id'] ?? 0);
 $payableLedgerId = (int) (get_mapped_ledger($companyId, 'default_accounts_payable')['id'] ?? 0);
 if ($receivableLedgerId > 0 && !isset($tradeGroupLedgerIds[$receivableLedgerId])) {
@@ -510,28 +511,15 @@ if (table_exists('task_invoices') && column_exists('task_invoices', 'due_on')) {
 // ---------------------------------------------------------------------------
 // Bank accounts: cash/bank ledgers with optional account metadata + last move.
 // ---------------------------------------------------------------------------
-$hasBankMeta = column_exists('ledgers', 'bank_account_no');
 $lastMovementByLedger = [];
-if ($cashLedgers !== []) {
-    $movementStmt = db()->prepare('
-        SELECT ve.ledger_id, MAX(COALESCE(v.voucher_date, DATE(v.created_at))) AS last_move
-        FROM voucher_entries ve
-        INNER JOIN vouchers v ON v.id = ve.voucher_id
-        WHERE v.company_id = :company_id AND v.fiscal_year_id = :fiscal_year_id AND v.status = \'posted\'
-        GROUP BY ve.ledger_id
-    ');
-    $movementStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
-    foreach ($movementStmt->fetchAll() as $row) {
-        $lastMovementByLedger[(int) $row['ledger_id']] = (string) $row['last_move'];
-    }
-}
 $bankMetaById = [];
-if ($hasBankMeta && $cashLedgers !== []) {
-    $bankMetaStmt = db()->prepare('SELECT id, bank_name, bank_account_no FROM ledgers WHERE company_id = :company_id');
-    $bankMetaStmt->execute(['company_id' => $companyId]);
-    foreach ($bankMetaStmt->fetchAll() as $row) {
-        $bankMetaById[(int) $row['id']] = $row;
-    }
+foreach ($cashLedgers as $row) {
+    $ledgerId = (int) $row['id'];
+    $lastMovementByLedger[$ledgerId] = $row['last_move'] !== null ? (string) $row['last_move'] : null;
+    $bankMetaById[$ledgerId] = [
+        'bank_name' => $row['bank_name'] ?? null,
+        'bank_account_no' => $row['bank_account_no'] ?? null,
+    ];
 }
 
 $fmtMoney = static fn (float $amount): string => $currency . number_format($amount, 2);

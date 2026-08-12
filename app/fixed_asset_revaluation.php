@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/fixed_asset_engine.php';
 
 /**
  * Database support for the shared fixed-asset revaluation workflow.

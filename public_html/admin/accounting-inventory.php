@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/manufacturing_engine.php';
 // The item master is shared with the Jewellery module, so this page has to be
 // able to read and complete the jewellery half of an item. Pure function
 // definitions — it does nothing unless the client has the module switched on.

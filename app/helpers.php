@@ -734,6 +734,15 @@ function table_exists(string $tableName): bool
         return $cache[$tableName];
     }
 
+    $persistentKey = 'mbw:schema:table:' . DB_NAME . ':' . $tableName;
+    if (function_exists('apcu_fetch')) {
+        $found = false;
+        $value = apcu_fetch($persistentKey, $found);
+        if ($found) {
+            return $cache[$tableName] = (bool) $value;
+        }
+    }
+
     try {
         $stmt = db()->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = :db_name AND table_name = :table_name');
         $stmt->execute([
@@ -742,6 +751,9 @@ function table_exists(string $tableName): bool
         ]);
 
         $cache[$tableName] = (int) $stmt->fetchColumn() > 0;
+        if (function_exists('apcu_store')) {
+            apcu_store($persistentKey, $cache[$tableName], 300);
+        }
     } catch (Throwable $exception) {
         $cache[$tableName] = false;
     }
@@ -758,6 +770,15 @@ function column_exists(string $tableName, string $columnName): bool
         return $cache[$key];
     }
 
+    $persistentKey = 'mbw:schema:column:' . DB_NAME . ':' . $key;
+    if (function_exists('apcu_fetch')) {
+        $found = false;
+        $value = apcu_fetch($persistentKey, $found);
+        if ($found) {
+            return $cache[$key] = (bool) $value;
+        }
+    }
+
     try {
         $stmt = db()->prepare('SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = :db_name AND table_name = :table_name AND column_name = :column_name');
         $stmt->execute([
@@ -767,6 +788,9 @@ function column_exists(string $tableName, string $columnName): bool
         ]);
 
         $cache[$key] = (int) $stmt->fetchColumn() > 0;
+        if (function_exists('apcu_store')) {
+            apcu_store($persistentKey, $cache[$key], 300);
+        }
     } catch (Throwable $exception) {
         $cache[$key] = false;
     }
@@ -945,6 +969,38 @@ function client_service_provider_names(int $clientId): string
     $stmt->execute(['client_id' => $clientId]);
 
     return implode(', ', array_column($stmt->fetchAll(), 'name'));
+}
+
+/**
+ * Return service-provider names for many clients with one database query.
+ *
+ * @param list<int> $clientIds
+ * @return array<int, string>
+ */
+function client_service_provider_names_by_client(array $clientIds): array
+{
+    $clientIds = array_values(array_unique(array_filter(
+        array_map('intval', $clientIds),
+        static fn (int $clientId): bool => $clientId > 0
+    )));
+    if ($clientIds === [] || !table_exists('client_service_provider_entities')) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($clientIds), '?'));
+    $stmt = db()->prepare("\n        SELECT cspe.client_id, spe.name\n        FROM client_service_provider_entities cspe\n        INNER JOIN service_provider_entities spe ON spe.id = cspe.service_provider_entity_id\n        WHERE cspe.client_id IN ($placeholders)\n        ORDER BY cspe.client_id ASC, spe.name ASC\n    ");
+    $stmt->execute($clientIds);
+
+    $names = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $clientId = (int) $row['client_id'];
+        $names[$clientId][] = (string) $row['name'];
+    }
+
+    return array_map(
+        static fn (array $clientNames): string => implode(', ', $clientNames),
+        $names
+    );
 }
 
 /**
