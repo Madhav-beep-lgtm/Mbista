@@ -155,6 +155,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('jewellery', 'edit');
         $isCreate = (int) ($_POST['order_id'] ?? 0) === 0;
         try {
+            if (!$isCreate) {
+                $orderBeingEdited = jewellery_order($companyId, (int) ($_POST['order_id'] ?? 0));
+                if ($orderBeingEdited && in_array((string) $orderBeingEdited['status'], ['received', 'delivered'], true)) {
+                    throw new RuntimeException('Received and delivered orders cannot be edited.');
+                }
+            }
             $savedOrderId = jewellery_save_order($companyId, $fiscalYearId, [
                 'id' => (int) ($_POST['order_id'] ?? 0),
                 // Blank means "number it for me" on a new order and "keep the
@@ -457,6 +463,10 @@ $advancedInUse = $filterStatus !== '' || $filterParty > 0 || $filterKarigar > 0 
 $orders = $view === 'orders' ? jewellery_orders_list($companyId, $listFilters) : [];
 $editKarigar = $view === 'karigars' ? jewellery_karigar($companyId, (int) ($_GET['edit'] ?? 0)) : null;
 $editOrder = $view === 'orders' ? jewellery_order($companyId, (int) ($_GET['edit'] ?? 0)) : null;
+if ($editOrder && in_array((string) $editOrder['status'], ['received', 'delivered'], true)) {
+    flash('error', 'Received and delivered orders cannot be edited.');
+    redirect(url('admin/jewellery-workshop.php?view=orders'));
+}
 $orderAdvances = $editOrder ? jewellery_order_advances($companyId, (int) $editOrder['id'])
     : ['rows' => [], 'cash_total' => 0.0, 'metal_total' => 0.0, 'total' => 0.0];
 $advanceAvailable = $editOrder ? jewellery_order_advance_available($companyId, (int) $editOrder['id']) : 0.0;
@@ -1083,11 +1093,12 @@ jw_filter_bar_styles();
                         <td><span class="mbw-pill <?= e($statusTone[$row['status']] ?? 'tone-gray') ?>"><?= e($statusLabel((string) $row['status'])) ?></span></td>
                         <td style="white-space:nowrap">
                             <select class="jw-order-action-select" aria-label="Order actions"
-                                    data-edit-url="<?= $canEdit ? e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) : '' ?>"
+                                    data-edit-url="<?= $canEdit && !in_array((string) $row['status'], ['received', 'delivered'], true) ? e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) : '' ?>"
                                     data-preview-url="<?= $canEdit ? e(url('admin/jewellery-print.php?doc=order&id=' . (int) $row['id'])) : '' ?>"
                                     data-assign-url="<?= in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost ? e(url('admin/jewellery-assign.php?kind=customer&order=' . (int) $row['id'])) : '' ?>">
                                 <option value="">Select action</option>
-                                <?php if ($canEdit): ?><option value="edit">Edit</option><option value="preview">Preview</option><?php endif; ?>
+                                <?php if ($canEdit && !in_array((string) $row['status'], ['received', 'delivered'], true)): ?><option value="edit">Edit</option><?php endif; ?>
+                                <?php if ($canEdit): ?><option value="preview">Preview</option><?php endif; ?>
                                 <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?><option value="assign">Assign</option><?php endif; ?>
                                 <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?><option value="postpone">Postpone</option><option value="cancel">Cancel</option><?php endif; ?>
                                 <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?><option value="delete">Delete</option><?php endif; ?>
