@@ -961,6 +961,11 @@ jw_filter_bar_styles();
         </div>
 
         <?php if ($orderAdvances['rows'] !== []): ?>
+        <style>
+        .jw-order-action-select{min-height:32px;min-width:145px;padding:3px 28px 3px 8px}
+        .jw-order-postpone{display:none!important;margin-top:6px}.jw-order-postpone.is-open{display:inline-flex!important}
+.jw-order-legacy-action{display:inline}.jw-order-legacy-action>a,.jw-order-legacy-action>button,.jw-order-legacy-action>form{display:none!important}
+        </style>
         <div class="mbw-tablewrap"><table>
             <thead><tr><th>Date</th><th>Ref</th><th>What</th><th class="is-numeric">Weight</th><th class="is-numeric">Value</th></tr></thead>
             <tbody>
@@ -1056,16 +1061,20 @@ jw_filter_bar_styles();
             ],
         ]); ?>
         <div class="mbw-tablewrap"><table>
-            <thead><tr><th>No.</th><th>Date</th><th>Customer</th><th>Metal</th><th class="is-numeric">Expected wt</th><th>Delivery</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Order no.</th><th>Date / design</th><th>Customer</th><th>Expected item</th><th>Metal / purity</th><th>Unit</th><th class="is-numeric">Gross wt</th><th class="is-numeric">Fine wt</th><th>Delivery</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
-                <?php if ($orders === []): ?><tr><td colspan="8">No orders yet.</td></tr><?php endif; ?>
+                <?php if ($orders === []): ?><tr><td colspan="11">No orders yet.</td></tr><?php endif; ?>
                 <?php foreach ($orders as $row): ?>
                     <tr>
-                        <td><?= e($row['order_no']) ?><?= ($row['design_no'] ?? '') !== '' ? '<br><small>' . e((string) $row['design_no']) . '</small>' : '' ?></td>
-                        <td><?= e(app_date((string) $row['order_date'])) ?></td>
+                        <td><strong><?= e($row['order_no']) ?></strong></td>
+                        <td><?= e(app_date((string) $row['order_date'])) ?><?= ($row['design_no'] ?? '') !== '' ? '<br><small>' . e((string) $row['design_no']) . '</small>' : '' ?></td>
                         <td><?= e((string) ($row['party_name'] ?? $row['customer_name'] ?? 'Walk-in')) ?></td>
+                        <td><?= e((string) (($row['expected_item'] ?? '') ?: ($row['item_code'] ?? '—'))) ?></td>
                         <td><?= e($row['metal_name'] . ' · ' . $row['purity_code']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $row['expected_gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small>
+                        <td><?= e((string) $row['unit_code']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['expected_gross_weight'], 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['expected_fine_weight'], 4) ?></td>
+                        <td style="display:none">
                             <?php // Actual weight and pure-metal content together — the pair a jewellery figure is read as. ?>
                             <?php if ((float) $row['expected_fine_weight'] > 0.00005): ?>
                                 <br><small><?= $fmt((float) $row['expected_fine_weight'], 4) ?> fine</small>
@@ -1074,6 +1083,14 @@ jw_filter_bar_styles();
                         <td><?= ($row['delivery_date'] ?? null) ? e(app_date((string) $row['delivery_date'])) : '—' ?></td>
                         <td><span class="mbw-pill <?= e($statusTone[$row['status']] ?? 'tone-gray') ?>"><?= e($statusLabel((string) $row['status'])) ?></span></td>
                         <td style="white-space:nowrap">
+                            <select class="jw-order-action-select" aria-label="Order actions">
+                                <option value="">Select action</option>
+                                <?php if ($canEdit): ?><option value="edit">Edit</option><option value="preview">Preview</option><?php endif; ?>
+                                <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?><option value="assign">Assign</option><?php endif; ?>
+                                <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?><option value="postpone">Postpone</option><option value="cancel">Cancel</option><?php endif; ?>
+                                <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?><option value="delete">Delete</option><?php endif; ?>
+                            </select>
+                            <div class="jw-order-legacy-action">
                             <?php if ($canEdit): ?>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) ?>">Edit</a>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=order&id=' . (int) $row['id'])) ?>">Preview</a>
@@ -1086,7 +1103,7 @@ jw_filter_bar_styles();
                                    href="<?= e(url('admin/jewellery-assign.php?kind=customer&order=' . (int) $row['id'])) ?>">Assign</a>
                             <?php endif; ?>
                             <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?>
-                                <form method="post" style="display:inline-flex;gap:4px;align-items:center">
+                                <form method="post" class="jw-order-postpone" style="display:inline-flex;gap:4px;align-items:center">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="postpone_order">
                                     <input type="hidden" name="back_view" value="orders">
@@ -1096,7 +1113,7 @@ jw_filter_bar_styles();
                                            style="min-height:30px;padding:2px 6px;max-width:140px">
                                     <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Postpone</button>
                                 </form>
-                                <form method="post" style="display:inline"
+                                <form method="post" class="jw-order-cancel" style="display:inline"
                                       onsubmit="return confirm('Cancel order <?= e((string) $row['order_no']) ?>?')">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="cancel_order">
@@ -1106,7 +1123,7 @@ jw_filter_bar_styles();
                                 </form>
                             <?php endif; ?>
                             <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?>
-                                <form method="post" style="display:inline"
+                                <form method="post" class="jw-order-delete" style="display:inline"
                                       onsubmit="return confirm('Delete order <?= e((string) $row['order_no']) ?> for good?')">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="delete_order">
@@ -1123,11 +1140,29 @@ jw_filter_bar_styles();
                                         style="min-height:30px;padding:3px 8px;opacity:.45;cursor:not-allowed"
                                         title="A <?= e(str_replace('_', ' ', (string) $row['status'])) ?> order is a financial record — metal and money moved against it. Cancel or unpost the documents instead; deletion is not allowed.">&times;</button>
                             <?php endif; ?>
+                            </div>
                         </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <script>
+        (function(){
+            document.querySelectorAll('.jw-order-action-select').forEach(function(select){
+                select.addEventListener('change', function(){
+                    var legacy = select.parentElement.querySelector('.jw-order-legacy-action');
+                    var links = legacy ? Array.from(legacy.querySelectorAll('a')) : [];
+                    var postpone = legacy && legacy.querySelector('.jw-order-postpone');
+                    if (postpone) { postpone.classList.toggle('is-open', select.value === 'postpone'); }
+                    if (select.value === 'edit' && links[0]) window.location.href = links[0].href;
+                    if (select.value === 'preview' && links[1]) { window.open(links[1].href, '_blank', 'noopener'); select.value = ''; }
+                    if (select.value === 'assign') { var a = links.find(function(x){return x.textContent.trim()==='Assign';}); if(a) window.location.href=a.href; }
+                    if (select.value === 'cancel') { var c=legacy.querySelector('.jw-order-cancel'); if(c)c.requestSubmit(); }
+                    if (select.value === 'delete') { var d=legacy.querySelector('.jw-order-delete'); if(d)d.requestSubmit(); }
+                });
+            });
+        })();
+        </script>
     </section>
 
 <?php elseif ($view === 'karigars'): ?>
