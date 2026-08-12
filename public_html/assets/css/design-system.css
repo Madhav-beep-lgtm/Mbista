@@ -312,21 +312,65 @@ body.admin-layout .admin-sidebar-toggle {
 }
 body.admin-layout .admin-sidebar-toggle-label {color:inherit!important;-webkit-text-fill-color:inherit!important}
 
-/* A collapsed desktop sidebar releases all of its width. The control remains
-   in the topbar, so navigation can always be restored without a page reload. */
+/* Collapsed desktop navigation becomes a usable icon rail. Shared typography
+   rules must not restore the bare text nodes that portal.css intentionally
+   hides with font-size:0. */
 @media (min-width:1101px) {
-  body.admin-layout.sidebar-collapsed .admin-shell {grid-template-columns:0 minmax(0,1fr)!important}
+  body.admin-layout.sidebar-collapsed .admin-shell {grid-template-columns:64px minmax(0,1fr)!important}
   body.admin-layout.sidebar-collapsed .admin-sidebar {
     display:block!important;
-    width:0!important;
-    min-width:0!important;
-    padding:0!important;
-    border:0!important;
+    width:64px!important;
+    min-width:64px!important;
+    padding:8px!important;
     overflow:hidden!important;
-    opacity:0!important;
-    pointer-events:none!important;
-    box-shadow:none!important;
+    opacity:1!important;
+    pointer-events:auto!important;
   }
+  body.admin-layout.sidebar-collapsed .admin-sidebar :is(.admin-sidebar-context,.admin-nav-group,.brand-admin-sub,.mbw-nav-caret,.mbw-subnav) {
+    display:none!important;
+  }
+  body.admin-layout.sidebar-collapsed .admin-sidebar .admin-nav a,
+  body.admin-layout.sidebar-collapsed .admin-sidebar .mbw-nav-parent>a[data-nav-toggle] {
+    display:flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+    width:46px!important;
+    min-width:46px!important;
+    min-height:42px!important;
+    padding:0!important;
+    gap:0!important;
+    overflow:hidden!important;
+    white-space:nowrap!important;
+    font-size:0!important;
+    line-height:0!important;
+  }
+  body.admin-layout.sidebar-collapsed .admin-sidebar .admin-nav a>.ui-icon,
+  body.admin-layout.sidebar-collapsed .admin-sidebar .mbw-nav-parent>a[data-nav-toggle]>.ui-icon {
+    display:block!important;
+    width:19px!important;
+    height:19px!important;
+    flex:0 0 19px!important;
+    color:#fff!important;
+    stroke:currentColor!important;
+    opacity:1!important;
+  }
+  body.admin-layout.sidebar-collapsed .admin-sidebar .brand.brand-admin {
+    width:46px!important;
+    min-height:72px!important;
+    padding:14px 4px!important;
+    margin:0!important;
+  }
+  body.admin-layout.sidebar-collapsed .admin-sidebar .mbw-logo-sidebar {
+    display:block!important;
+    width:188px!important;
+    max-width:none!important;
+    height:auto!important;
+  }
+  body.admin-layout.sidebar-collapsed .admin-sidebar-toggle {
+    width:42px!important;
+    padding:0!important;
+  }
+  body.admin-layout.sidebar-collapsed .admin-sidebar-toggle-label {display:none!important}
 }
 body.admin-layout .admin-context-chip {
   min-height:42px!important;
