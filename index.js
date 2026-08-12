@@ -55,8 +55,10 @@ const db = mysql.createPool({
     password: process.env.DB_PASS || process.env.DB_PASSWORD || "",
     database: process.env.DB_NAME || "mbista_altiora_complete_hosting",
     waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
+    connectionLimit: Math.max(1, Number(process.env.DB_CONNECTION_LIMIT || 10)),
+    // A bounded queue prevents an overloaded database from turning into an
+    // ever-growing process-memory backlog. Tune both values with load tests.
+    queueLimit: Math.max(1, Number(process.env.DB_QUEUE_LIMIT || 100)),
     // Several statements in one string is how one injected parameter becomes a
     // second statement. Off, and said out loud.
     multipleStatements: false

@@ -221,7 +221,10 @@ if ($headerJewellery) {
 $headerIsCustomer = (string) ($currentUser['role'] ?? '') === 'customer';
 $headerClientBooksOptions = [];
 if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') && column_exists('client_profiles', 'books_company_id')) {
-    $headerClientsStmt = db()->query('SELECT * FROM client_profiles WHERE is_active = 1 AND books_company_id IS NOT NULL ORDER BY organization_name ASC');
+    $headerClientsStmt = db()->query('SELECT id, organization_name, company_id, assigned_staff_user_id, books_company_id
+        FROM client_profiles
+        WHERE is_active = 1 AND books_company_id IS NOT NULL
+        ORDER BY organization_name ASC');
     foreach ($headerClientsStmt->fetchAll() as $headerClientRow) {
         if (client_books_access_level($headerClientRow) === 'direct') {
             $headerClientBooksOptions[] = $headerClientRow;

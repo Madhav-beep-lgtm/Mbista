@@ -570,12 +570,12 @@ if ($clientProfile) {
             FROM service_agreements
             WHERE client_id = :client_id
               AND workflow_status IN ('issued','accepted','signed','active','expired','terminated','superseded')
-            ORDER BY id DESC");
+            ORDER BY id DESC LIMIT 100");
         $agreementStmt->execute(['client_id' => (int) $clientProfile['id']]);
         $clientAgreements = $agreementStmt->fetchAll();
     }
     if (table_exists('service_contracts')) {
-        $stmt = db()->prepare('SELECT * FROM service_contracts WHERE client_id = :client_id ORDER BY created_at DESC');
+        $stmt = db()->prepare('SELECT * FROM service_contracts WHERE client_id = :client_id ORDER BY created_at DESC LIMIT 100');
         $stmt->execute(['client_id' => $clientId]);
         $contracts = $stmt->fetchAll();
     }
@@ -589,7 +589,7 @@ if ($clientProfile) {
             LEFT JOIN teams tm ON tm.id = t.team_id
             LEFT JOIN service_contracts sc ON sc.id = t.contract_id{$taskAssignedJoin}
             WHERE t.client_id = :client_id
-            ORDER BY t.created_at DESC");
+            ORDER BY t.created_at DESC LIMIT 200");
         $stmt->execute(['client_id' => $clientId]);
         $tasks = $stmt->fetchAll();
 
@@ -626,7 +626,7 @@ if ($clientProfile) {
                 LEFT JOIN client_tasks t ON t.id = ti.task_id
                 LEFT JOIN task_stages ts ON ts.id = ti.stage_id
                 WHERE " . implode(' OR ', $invoiceConditions) . "
-                ORDER BY ti.created_at DESC");
+                ORDER BY ti.created_at DESC LIMIT 200");
             $stmt->execute($invoiceParams);
             $invoices = $stmt->fetchAll();
 
@@ -647,7 +647,7 @@ if ($clientProfile) {
     }
 
     if (table_exists('documents')) {
-        $stmt = db()->prepare("SELECT * FROM documents WHERE client_id = :client_id AND visibility = 'client' AND is_active = 1 ORDER BY created_at DESC");
+        $stmt = db()->prepare("SELECT * FROM documents WHERE client_id = :client_id AND visibility = 'client' AND is_active = 1 ORDER BY created_at DESC LIMIT 500");
         $stmt->execute(['client_id' => $clientId]);
         $allClientDocuments = $stmt->fetchAll();
 
@@ -662,7 +662,7 @@ if ($clientProfile) {
     }
 
     if (table_exists('document_requests')) {
-        $stmt = db()->prepare('SELECT * FROM document_requests WHERE client_id = :client_id ORDER BY created_at DESC');
+        $stmt = db()->prepare('SELECT * FROM document_requests WHERE client_id = :client_id ORDER BY created_at DESC LIMIT 200');
         $stmt->execute(['client_id' => $clientId]);
         $documentRequests = $stmt->fetchAll();
     }
@@ -673,7 +673,7 @@ if ($clientProfile) {
             INNER JOIN compliance_types ct ON ct.id = cd.compliance_type_id
             LEFT JOIN documents d ON d.id = cd.document_id
             WHERE cd.client_id = :client_id
-            ORDER BY cd.statutory_due_date ASC');
+            ORDER BY cd.statutory_due_date ASC LIMIT 200');
         $stmt->execute(['client_id' => $clientId]);
         $rawComplianceDeadlines = $stmt->fetchAll();
 
@@ -774,9 +774,9 @@ if ($clientProfile && $view === 'messages') {
                 db()->prepare('UPDATE message_thread_participants SET last_read_at = NOW() WHERE thread_id = :thread_id AND user_id = :user_id')
                     ->execute(['thread_id' => $requestedThreadId, 'user_id' => $userId]);
 
-                $msgStmt = db()->prepare('SELECT m.*, u.name AS sender_name FROM messages m INNER JOIN users u ON u.id = m.sender_id WHERE m.thread_id = :thread_id ORDER BY m.created_at ASC');
+                $msgStmt = db()->prepare('SELECT m.*, u.name AS sender_name FROM messages m INNER JOIN users u ON u.id = m.sender_id WHERE m.thread_id = :thread_id ORDER BY m.created_at DESC LIMIT 500');
                 $msgStmt->execute(['thread_id' => $requestedThreadId]);
-                $threadMessages = $msgStmt->fetchAll();
+                $threadMessages = array_reverse($msgStmt->fetchAll());
             }
         } else {
             flash('error', 'You do not have access to that thread.');
@@ -791,7 +791,7 @@ if ($clientProfile && $view === 'messages') {
             FROM message_threads mt
             INNER JOIN message_thread_participants mtp ON mtp.thread_id = mt.id AND mtp.user_id = :self2
             WHERE mt.client_id = :client_id
-            ORDER BY mt.updated_at DESC");
+            ORDER BY mt.updated_at DESC LIMIT 100");
         $inboxStmt->execute(['self1' => $userId, 'self2' => $userId, 'client_id' => $clientId]);
         $threads = $inboxStmt->fetchAll();
     }
@@ -816,9 +816,9 @@ if ($clientProfile && $view === 'tickets') {
         $ticket = $ticketStmt->fetch() ?: null;
 
         if ($ticket) {
-            $msgStmt = db()->prepare('SELECT tm.*, u.name AS sender_name FROM support_ticket_messages tm INNER JOIN users u ON u.id = tm.sender_id WHERE tm.ticket_id = :ticket_id ORDER BY tm.created_at ASC');
+            $msgStmt = db()->prepare('SELECT tm.*, u.name AS sender_name FROM support_ticket_messages tm INNER JOIN users u ON u.id = tm.sender_id WHERE tm.ticket_id = :ticket_id ORDER BY tm.created_at DESC LIMIT 500');
             $msgStmt->execute(['ticket_id' => $requestedTicketId]);
-            $ticketMessages = $msgStmt->fetchAll();
+            $ticketMessages = array_reverse($msgStmt->fetchAll());
         } else {
             flash('error', 'That ticket is not available.');
         }
@@ -833,7 +833,7 @@ if ($clientProfile && $view === 'tickets') {
         if ($hasTicketRequests) {
             $listSql .= ' LEFT JOIN support_ticket_requests tr ON tr.ticket_id = st.id';
         }
-        $listSql .= ' WHERE st.client_id = :client_id ORDER BY st.created_at DESC';
+        $listSql .= ' WHERE st.client_id = :client_id ORDER BY st.created_at DESC LIMIT 100';
         $listStmt = db()->prepare($listSql);
         $listStmt->execute(['client_id' => $clientId]);
         $tickets = $listStmt->fetchAll();
