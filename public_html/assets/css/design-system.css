@@ -235,3 +235,4 @@ body.admin-layout:is(.theme-dark,.admin-dark) .admin-content :is(.notice.success
   body.admin-layout .admin-content :is(.filters,.filter-bar,.filter-row,.reference-filter-group,.report-filters,.table-filters)>label{width:100%;min-width:0}
   body.admin-layout .admin-content table :is(th,td){padding:9px 10px}
 }
+.admin-profile-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:16px;align-items:start}.admin-profile-security{display:grid;gap:16px}.admin-profile-grid form{display:grid;gap:14px}.admin-self-photo{width:96px;height:96px;object-fit:cover;border:3px solid var(--ui-surface);border-radius:22px;box-shadow:0 0 0 1px var(--ui-border),var(--ui-shadow)}@media(max-width:900px){.admin-profile-grid{grid-template-columns:1fr}}

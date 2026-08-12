@@ -2046,7 +2046,9 @@ function request_password_reset(string $email, ?string $requestIp = null): ?stri
         require_once __DIR__ . '/mailer.php';
     }
     if (function_exists('send_app_email')) {
-        $resetUrl = url('reset-password.php') . '?token=' . $token;
+        $resetUrl = function_exists('mail_public_url')
+            ? mail_public_url('reset-password.php') . '?token=' . $token
+            : rtrim(APP_URL !== '' ? APP_URL : 'https://www.mbca.com.np', '/') . '/reset-password.php?token=' . $token;
         $safeUrl = htmlspecialchars($resetUrl, ENT_QUOTES, 'UTF-8');
         $name = htmlspecialchars((string) ($user['name'] ?? ''), ENT_QUOTES, 'UTF-8');
         $inner = '<p>Hello ' . ($name !== '' ? $name : 'there') . ',</p>'

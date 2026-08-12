@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
+require_once __DIR__ . '/../../app/mailer.php';
 
 require_admin();
 require_company_context();
@@ -163,7 +164,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
 
                 log_activity('user', $newUserId, 'created', 'User profile created from admin workflow.', (int) ($currentAdmin['id'] ?? 0));
                 log_activity('user', $newUserId, 'status_changed', 'User status set to ' . $status . '.', (int) ($currentAdmin['id'] ?? 0));
-                flash('success', 'User created successfully.');
+                $credentialMail = send_account_credentials_email($email, $name, $password, ucfirst($role) . ' portal account');
+                flash('success', 'User created successfully.' . (!empty($credentialMail['ok']) && ($credentialMail['transport'] ?? '') !== 'log'
+                    ? ' Credentials emailed.'
+                    : (($credentialMail['transport'] ?? '') === 'log' ? ' SMTP is not configured; credential email saved to storage/mail only.' : ' Credential email failed.')));
             } catch (Throwable $exception) {
                 flash('error', 'Could not create user. The email may already exist.');
             }
@@ -230,6 +234,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
             if ($password !== '') {
                 $sql .= ', password_hash = :password_hash';
                 $params['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+                if (column_exists('users', 'must_change_password')) {
+                    $sql .= ', must_change_password = 1';
+                }
             }
             $sql .= ' WHERE id = :id AND company_id = :company_id';
 
@@ -262,7 +269,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
                 security_event('user_permission_change', 'success', 'Status/permission change forced re-login for user #' . $userId . '.', $companyId, (int) ($currentAdmin['id'] ?? 0));
             }
 
-            flash('success', 'User updated successfully.');
+            $passwordMailNote = '';
+            if ($password !== '') {
+                revoke_user_sessions($userId);
+                $credentialMail = send_account_credentials_email($email, $name, $password, ucfirst($role) . ' portal account');
+                $passwordMailNote = !empty($credentialMail['ok']) && ($credentialMail['transport'] ?? '') !== 'log'
+                    ? ' New temporary credentials emailed.'
+                    : (($credentialMail['transport'] ?? '') === 'log' ? ' SMTP is not configured; credential email saved to storage/mail only.' : ' Credential email failed.');
+            }
+            flash('success', 'User updated successfully.' . $passwordMailNote);
         } catch (Throwable $exception) {
             error_log(
                 'User update failed for user #' .

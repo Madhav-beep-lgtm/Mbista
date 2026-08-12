@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/admin_work_portal_repair.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/mailer.php';
 
 require_admin();
 require_company_context();
@@ -329,7 +330,11 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             db()->commit();
             log_activity('client_profile', $clientProfileId, 'created', 'Client created with generated code ' . $clientCode . '.', $adminId);
-            flash('success', 'Client created successfully. Code: ' . $clientCode . ' / Login: ' . $email);
+            $credentialMail = send_account_credentials_email($email, $name, $password, 'client portal account');
+            $mailNote = !empty($credentialMail['ok']) && ($credentialMail['transport'] ?? '') !== 'log'
+                ? ' Credentials emailed.'
+                : (($credentialMail['transport'] ?? '') === 'log' ? ' SMTP is not configured; credential email saved to storage/mail only.' : ' Credential email failed.');
+            flash('success', 'Client created successfully. Code: ' . $clientCode . ' / Login: ' . $email . $mailNote);
         } catch (Throwable $exception) {
             if (db()->inTransaction()) {
                 db()->rollBack();

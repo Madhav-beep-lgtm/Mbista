@@ -596,7 +596,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                                 <span class="admin-profile-avatar is-large"><?= e($headerUserInitials) ?></span>
                                 <span><strong><?= e($headerUserName) ?></strong><small><?= e((string) ($currentUser['email'] ?? $headerUserRole)) ?></small></span>
                             </div>
-                            <a href="<?= e(url('admin/users.php?view=' . (int) ($currentUser['id'] ?? 0))) ?>"><?= icon('profile') ?><span><strong>My profile</strong><small>Personal details and security</small></span></a>
+                            <a href="<?= e(url('admin/profile.php')) ?>"><?= icon('profile') ?><span><strong>My profile</strong><small>Personal details and security</small></span></a>
                             <a href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?><span><strong>Users</strong><small>Accounts and permissions</small></span></a>
                             <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?><span><strong>Settings</strong><small>System preferences</small></span></a>
                             <a class="is-logout" href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?><span><strong>Logout</strong><small>End this session</small></span></a>

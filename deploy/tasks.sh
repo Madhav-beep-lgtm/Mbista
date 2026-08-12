@@ -184,6 +184,22 @@ else
     echo "deploy:   $CRON_LINE"
 fi
 
+# Due report schedules are generated and emailed every morning. The runner is
+# CLI-only and records success/failure on each schedule for administrator review.
+REPORT_RUNNER="$APP_BASE/database/run_report_schedules.php"
+REPORT_CRON="5 7 * * * /usr/local/bin/php $REPORT_RUNNER >>$HOME/report-schedules.log 2>&1"
+if command -v crontab >/dev/null 2>&1; then
+    CURRENT_CRON="$(crontab -l 2>/dev/null || true)"
+    if printf '%s\n' "$CURRENT_CRON" | grep -qF 'database/run_report_schedules.php'; then
+        echo "deploy: scheduled-report email cron already installed"
+    elif printf '%s\n%s\n' "$CURRENT_CRON" "$REPORT_CRON" | grep -v '^[[:space:]]*$' | crontab - 2>/dev/null; then
+        echo "deploy: scheduled-report email cron installed (07:05 daily)"
+    else
+        echo "deploy: WARNING could not install scheduled-report cron; add manually:"
+        echo "deploy:   $REPORT_CRON"
+    fi
+fi
+
 # Where the backup writes, kept out of the web root and readable only by the
 # account: a dump is every row in the business, and a world-readable one in a
 # guessable place is the whole database published.

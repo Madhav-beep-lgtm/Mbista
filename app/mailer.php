@@ -84,6 +84,34 @@ function branded_email_html(string $title, string $innerHtml): string
 HTML;
 }
 
+/** Absolute public URL for links that leave the browser in an email. */
+function mail_public_url(string $path): string
+{
+    $base = rtrim(APP_URL, '/');
+    if ($base === '' && !empty($_SERVER['HTTP_HOST'])) {
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $base = $scheme . '://' . preg_replace('/[^a-z0-9.\-:\[\]]/i', '', (string) $_SERVER['HTTP_HOST']);
+    }
+    // CLI tasks have no request host. The production hostname is the safe
+    // final fallback; deployments should still set APP_URL explicitly.
+    return ($base !== '' ? $base : 'https://www.mbca.com.np') . '/' . ltrim($path, '/');
+}
+
+/** Send first-login credentials without ever storing the plain password. */
+function send_account_credentials_email(string $email, string $name, string $temporaryPassword, string $accountLabel = 'portal account'): array
+{
+    $loginUrl = mail_public_url('login.php');
+    $inner = '<p>Hello <strong>' . e($name) . '</strong>,</p>'
+        . '<p>Your ' . e($accountLabel) . ' has been created or reset.</p>'
+        . '<div style="padding:14px 16px;background:#f3f7f5;border:1px solid #d5e5dc;border-radius:8px;">'
+        . '<p style="margin:0 0 7px"><strong>Login email:</strong> ' . e($email) . '</p>'
+        . '<p style="margin:0"><strong>Temporary password:</strong> ' . e($temporaryPassword) . '</p></div>'
+        . '<p><a href="' . e($loginUrl) . '">Sign in to the portal</a>. You must change this temporary password at first sign-in.</p>'
+        . '<p>If you did not expect this account, contact your administrator immediately.</p>';
+
+    return send_app_email($email, 'Your temporary portal login', branded_email_html('Your portal login', $inner));
+}
+
 /**
  * @param array $attachments Each item: ['name' => string, 'mime' => string, 'content' => string]
  * @return array{ok: bool, error: ?string, transport: string}
