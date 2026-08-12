@@ -1864,6 +1864,43 @@ body.admin-layout .admin-profile-dropdown>a small{color:var(--mbw-muted);font-si
 body.admin-layout .admin-profile-dropdown>a.is-logout{margin-top:5px;border-top:1px solid var(--mbw-border-soft);border-radius:0 0 9px 9px;color:var(--mbw-red)}
 @media(max-width:1280px){body.admin-layout .admin-profile-identity{display:none}body.admin-layout .admin-profile-menu>summary{padding-right:5px}.admin-profile-chevron{display:none!important}}
 
+/* True application theme ---------------------------------------------------
+   The legacy compatibility sheet forced the admin canvas back to white even
+   after the theme class changed. These final rules make the shared tokens and
+   common surfaces follow the selected theme throughout every portal. */
+[data-theme-icon]{display:inline-flex;align-items:center;justify-content:center}
+[data-theme-icon][hidden]{display:none!important}
+body.admin-layout.theme-dark,body.admin-layout.admin-dark{
+  --mbw-canvas:#070f0c!important;--mbw-card:#0d1815!important;--mbw-card-soft:#12211c!important;
+  --mbw-border:#2a3f37!important;--mbw-border-soft:#1d2e28!important;--mbw-heading:#eaf2ed!important;
+  --mbw-text:#b9c9c1!important;--mbw-muted:#8fa198!important;--mbw-primary:#3cbb8b!important;
+  --mbw-primary-soft:rgba(60,187,139,.14)!important;--mbw-gray-soft:#16271f!important;
+  color-scheme:dark!important;background:#070f0c!important;color:#b9c9c1!important
+}
+body.admin-layout.theme-dark :is(.admin-main,.admin-content),body.admin-layout.admin-dark :is(.admin-main,.admin-content){background:#070f0c!important;color:#b9c9c1!important}
+body.admin-layout.theme-dark .admin-content :is(.card,.panel,.form-card,.table-card,.stat-card,.metric-card,.dashboard-card,.report-card,.settings-card,.workspace-card,.admin-card,.admin-panel,.cr-card,.rc-card,.mbw-card,.frm-section,.accounting-page-head),
+body.admin-layout.admin-dark .admin-content :is(.card,.panel,.form-card,.table-card,.stat-card,.metric-card,.dashboard-card,.report-card,.settings-card,.workspace-card,.admin-card,.admin-panel,.cr-card,.rc-card,.mbw-card,.frm-section,.accounting-page-head){background-color:#0d1815!important;color:#b9c9c1!important;border-color:#2a3f37!important}
+body.admin-layout.theme-dark .admin-content :is(h1,h2,h3,h4,h5,h6,strong,label,legend,th,td),body.admin-layout.admin-dark .admin-content :is(h1,h2,h3,h4,h5,h6,strong,label,legend,th,td){color:#eaf2ed!important}
+body.admin-layout.theme-dark .admin-content :is(p,small,.meta,.muted,.help,.hint),body.admin-layout.admin-dark .admin-content :is(p,small,.meta,.muted,.help,.hint){color:#8fa198!important}
+body.admin-layout.theme-dark .admin-content :is(input,select,textarea),body.admin-layout.admin-dark .admin-content :is(input,select,textarea){background:#12211c!important;color:#eaf2ed!important;border-color:#2a3f37!important;color-scheme:dark!important}
+body.admin-layout.theme-dark .admin-content table,body.admin-layout.admin-dark .admin-content table{background:#0d1815!important;color:#b9c9c1!important}
+body.admin-layout.theme-dark .admin-content thead th,body.admin-layout.admin-dark .admin-content thead th{background:#16271f!important;color:#eaf2ed!important}
+body.admin-layout.theme-dark .admin-content tbody tr:nth-child(even),body.admin-layout.admin-dark .admin-content tbody tr:nth-child(even){background:#101d19!important}
+body.admin-layout.theme-dark .admin-content tbody tr:hover,body.admin-layout.admin-dark .admin-content tbody tr:hover{background:#16271f!important}
+
+/* Account popup lives inside the dark topbar, so give the floating surface an
+   explicit palette and intrinsic height instead of inheriting topbar paint. */
+body.admin-layout .admin-topbar .admin-profile-dropdown{height:auto!important;min-height:0!important;background:#fff!important;color:#32443d!important;border-color:#d5e5dc!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown :is(strong){color:#173a2f!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown :is(small){color:#6d857b!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a{display:flex!important;color:#32443d!important;visibility:visible!important;opacity:1!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a:hover{background:#e8f5ef!important;color:#08775b!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a.is-logout{color:#b42318!important}
+body.admin-layout.theme-dark .admin-topbar .admin-profile-dropdown,body.admin-layout.admin-dark .admin-topbar .admin-profile-dropdown{background:#0d1815!important;color:#b9c9c1!important;border-color:#2a3f37!important}
+body.admin-layout.theme-dark .admin-topbar .admin-profile-dropdown :is(strong),body.admin-layout.admin-dark .admin-topbar .admin-profile-dropdown :is(strong){color:#eaf2ed!important}
+body.admin-layout.theme-dark .admin-topbar .admin-profile-dropdown :is(small),body.admin-layout.admin-dark .admin-topbar .admin-profile-dropdown :is(small){color:#8fa198!important}
+body.admin-layout.theme-dark .admin-topbar .admin-profile-dropdown>a,body.admin-layout.admin-dark .admin-topbar .admin-profile-dropdown>a{color:#b9c9c1!important}
+
 /* Professional voucher workspace ------------------------------------------------
    A voucher is one document, so its sections share one calm visual hierarchy
    instead of looking like unrelated full-width panels. */
@@ -1908,3 +1945,13 @@ body.voucher-entry-page #voucher-form .frm-approvers>div{padding:12px;border:1px
 body.voucher-entry-page #voucher-form .frm-footer{position:static;bottom:auto;z-index:20;padding:10px 12px;border:1px solid rgba(8,119,91,.3);background:#fff;box-shadow:0 5px 20px rgba(15,61,45,.1)}
 body.voucher-entry-page #voucher-form .frm-main{padding-bottom:4px}
 @media (max-width:760px){body.voucher-entry-page .vch-typebar{justify-content:flex-start}body.voucher-entry-page #voucher-form .frm-section{padding:15px 13px}body.voucher-entry-page #voucher-form .frm-section-head{align-items:flex-start;flex-wrap:wrap}body.voucher-entry-page #voucher-form .frm-optional{width:100%;margin-left:31px}body.voucher-entry-page #voucher-form .frm-footer{position:static;flex-wrap:wrap}body.voucher-entry-page #voucher-form .frm-footer .frm-submit{width:100%;margin-left:0;order:-1}}
+
+/* Voucher-specific light paints must also yield to the global dark theme. */
+body.voucher-entry-page.theme-dark .admin-content,body.voucher-entry-page.admin-dark .admin-content{background:linear-gradient(180deg,rgba(47,169,124,.06),transparent 360px)!important}
+body.voucher-entry-page.theme-dark .vch-typebar,body.voucher-entry-page.admin-dark .vch-typebar,
+body.voucher-entry-page.theme-dark #voucher-form :is(.vch-head-card,.mbw-tablewrap,.frm-entry-totals,.frm-dropzone,.frm-approvers>div,.frm-footer),
+body.voucher-entry-page.admin-dark #voucher-form :is(.vch-head-card,.mbw-tablewrap,.frm-entry-totals,.frm-dropzone,.frm-approvers>div,.frm-footer){background:#0d1815!important;border-color:#2a3f37!important}
+body.voucher-entry-page.theme-dark #voucher-form :is(label,.vch-table thead th),body.voucher-entry-page.admin-dark #voucher-form :is(label,.vch-table thead th){color:#eaf2ed!important}
+body.voucher-entry-page.theme-dark #voucher-form .vch-table thead th,body.voucher-entry-page.admin-dark #voucher-form .vch-table thead th{background:#16271f!important}
+body.voucher-entry-page.theme-dark #voucher-form .vch-table tbody td,body.voucher-entry-page.admin-dark #voucher-form .vch-table tbody td{background:#0d1815!important;border-color:#1d2e28!important}
+body.voucher-entry-page.theme-dark #voucher-form .frm-entry-totals strong,body.voucher-entry-page.admin-dark #voucher-form .frm-entry-totals strong{background:#12211c!important;color:#eaf2ed!important}

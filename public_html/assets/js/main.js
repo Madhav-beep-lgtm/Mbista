@@ -350,6 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const applyTheme = (theme) => {
       const isDark = theme === 'dark';
       document.body.classList.toggle('theme-dark', isDark);
+      document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
 
       // Keep compatibility with the admin workspace styles that also key off this class.
       if (document.body.classList.contains('admin-workspace') || document.body.classList.contains('admin-layout')) {
@@ -363,6 +364,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const labelText = isDark ? 'Light mode' : 'Dark mode';
         const actionText = isDark ? 'Switch to light mode' : 'Switch to dark mode';
         const label = button.querySelector('[data-theme-toggle-label]');
+        button.querySelectorAll('[data-theme-icon]').forEach((icon) => {
+          icon.hidden = icon.dataset.themeIcon !== (isDark ? 'light' : 'dark');
+        });
 
         if (label) {
           label.textContent = labelText;

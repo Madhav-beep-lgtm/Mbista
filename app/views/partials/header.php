@@ -94,7 +94,8 @@ if ($navSection === '') {
         </form>
         <div class="header-actions">
             <button type="button" class="theme-toggle-link" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
-                <?= icon('theme') ?>
+                <span data-theme-icon="dark"><?= icon('theme') ?></span>
+                <span data-theme-icon="light" hidden><?= icon('sun') ?></span>
                 <span data-theme-toggle-label>Dark mode</span>
             </button>
             <?php if ($currentUser): ?>
