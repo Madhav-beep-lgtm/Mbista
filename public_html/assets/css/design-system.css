@@ -248,7 +248,7 @@ html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown
 @media (min-width:1181px) {
   body.admin-layout .admin-topbar {
     display:grid!important;
-    grid-template-columns:42px minmax(110px,170px) minmax(170px,280px) 42px minmax(190px,250px) minmax(165px,210px) auto minmax(270px,auto)!important;
+    grid-template-columns:42px minmax(90px,140px) minmax(160px,240px) 42px minmax(170px,220px) minmax(145px,180px) 142px minmax(350px,1fr)!important;
     align-items:center!important;
     column-gap:10px!important;
     row-gap:8px!important;
@@ -399,18 +399,20 @@ body.admin-layout .admin-topbar select {min-height:42px!important;border-radius:
 body.admin-layout .admin-profile-menu>summary {min-height:42px!important;border-radius:11px!important;padding:5px 10px 5px 5px!important}
 body.admin-layout .admin-profile-avatar {width:32px!important;height:32px!important;flex-basis:32px!important}
 body.admin-layout .topbar-switch {
-  display:inline-grid!important;grid-template-columns:28px 38px 28px!important;align-items:center!important;gap:5px!important;flex:0 0 auto!important;width:112px!important;min-width:112px!important;max-width:112px!important;min-height:42px!important;padding:4px 6px!important;border:1px solid var(--ui-border)!important;border-radius:999px!important;background:var(--ui-surface)!important;color:var(--ui-muted)!important;text-decoration:none!important;box-shadow:0 3px 10px rgba(15,61,45,.06)!important;cursor:pointer!important;font:750 10px/1 inherit!important;box-sizing:border-box!important;
+  display:inline-grid!important;grid-template-columns:18px 30px 18px!important;align-items:center!important;gap:3px!important;flex:0 0 78px!important;width:78px!important;min-width:78px!important;max-width:78px!important;min-height:42px!important;padding:4px!important;border:1px solid var(--ui-border)!important;border-radius:999px!important;background:var(--ui-surface)!important;color:var(--ui-muted)!important;text-decoration:none!important;box-shadow:0 3px 10px rgba(15,61,45,.06)!important;cursor:pointer!important;font:800 9px/1 inherit!important;box-sizing:border-box!important;overflow:visible!important;
 }
-body.admin-layout button.topbar-switch {width:112px!important}
+body.admin-layout button.topbar-switch {width:78px!important}
 body.admin-layout .topbar-switch-value {color:var(--ui-muted)!important;-webkit-text-fill-color:var(--ui-muted)!important;text-align:center!important;white-space:nowrap!important}
 body.admin-layout .topbar-switch-value.is-current {color:var(--ui-green-800)!important;-webkit-text-fill-color:var(--ui-green-800)!important}
-body.admin-layout .topbar-switch-track {display:grid!important;place-items:center!important;width:38px!important;height:28px!important;border-radius:999px!important;background:var(--ui-green-700)!important;color:#fff!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)!important}
+body.admin-layout .topbar-switch-track {display:grid!important;place-items:center!important;width:30px!important;height:28px!important;border-radius:999px!important;background:var(--ui-green-700)!important;color:#fff!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)!important}
 body.admin-layout .topbar-switch-track .ui-icon {width:15px!important;height:15px!important;color:#fff!important}
 body.admin-layout .topbar-switch:hover {border-color:var(--ui-green-700)!important;box-shadow:0 0 0 3px var(--ui-focus)!important}
 body.admin-layout .topbar-bs-calendar {position:relative;align-self:center}
 body.admin-layout .topbar-bs-date {display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:6px!important;min-width:142px!important;min-height:38px!important;padding:7px 10px!important;border:1px solid #d5b85d!important;border-radius:999px!important;background:#fff4cf!important;color:#5f4900!important;-webkit-text-fill-color:#5f4900!important;font-size:11px!important;font-weight:800!important;white-space:nowrap!important;cursor:pointer!important}
 body.admin-layout .topbar-bs-date .ui-icon {display:block!important;width:15px!important;height:15px!important;color:#5f4900!important;stroke:currentColor!important;opacity:1!important}
 body.admin-layout .topbar-bs-date span {color:#5f4900!important;-webkit-text-fill-color:#5f4900!important;opacity:1!important}
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .topbar-bs-date,
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .topbar-bs-date :is(span,.ui-icon) {color:#5f4900!important;-webkit-text-fill-color:#5f4900!important;opacity:1!important}
 body.admin-layout .topbar-bs-calendar-panel {position:absolute;z-index:180;right:0;top:calc(100% + 8px);width:294px;padding:12px;border:1px solid var(--ui-border);border-radius:13px;background:var(--ui-surface);color:var(--ui-text);box-shadow:0 18px 44px rgba(5,40,29,.22)}
 body.admin-layout .topbar-bs-calendar-panel[hidden] {display:none!important}
 body.admin-layout .bs-calendar-head {display:grid;grid-template-columns:34px 1fr 34px;align-items:center;gap:7px;margin-bottom:10px}
@@ -446,12 +448,14 @@ body.admin-layout:is(.theme-dark,.admin-dark) .topbar-switch {background:#0d1815
 body.admin-layout:is(.theme-dark,.admin-dark) .topbar-switch-value {color:#c9d8d1!important;-webkit-text-fill-color:#c9d8d1!important}
 body.admin-layout:is(.theme-dark,.admin-dark) .topbar-switch-value.is-current {color:#fff!important;-webkit-text-fill-color:#fff!important}
 
-@media (min-width:1181px) and (max-width:1360px) {
-  body.admin-layout .admin-topbar {grid-template-columns:42px minmax(95px,135px) minmax(150px,240px) 42px minmax(170px,220px) minmax(145px,180px) auto minmax(220px,auto)!important;column-gap:7px!important}
-  body.admin-layout .admin-context-chip strong {max-width:135px!important}
+@media (min-width:1181px) and (max-width:1700px) {
   body.admin-layout .admin-profile-identity {display:none!important}
   body.admin-layout .admin-profile-menu>summary {width:42px!important;padding:5px!important}
   body.admin-layout .admin-profile-chevron {display:none!important}
+}
+@media (min-width:1181px) and (max-width:1360px) {
+  body.admin-layout .admin-topbar {grid-template-columns:42px minmax(95px,135px) minmax(150px,240px) 42px minmax(170px,220px) minmax(145px,180px) auto minmax(220px,auto)!important;column-gap:7px!important}
+  body.admin-layout .admin-context-chip strong {max-width:135px!important}
   body.admin-layout .topbar-bs-date span {display:none!important}
   body.admin-layout .topbar-bs-date {width:42px!important;min-width:42px!important;height:42px!important;padding:0!important;justify-content:center!important;border-radius:11px!important}
 }
