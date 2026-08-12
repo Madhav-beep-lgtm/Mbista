@@ -19,5 +19,6 @@ $check(str_contains($engine,'fingerprint') && str_contains($migration,'uniq_jw_a
 $check(str_contains($engine,'jw_aml_create_manual_sar'),'Attempted activity can be entered manually');
 $check(str_contains($page,"require_permission('jewellery','post')"),'Review writes require jewellery posting authority');
 $check(!str_contains($page,'csrf_field()') && str_contains($page,'name="csrf_token"') && str_contains($page,'csrf_token()'),'AML forms use the application CSRF contract');
+$check(str_contains($page,'jw-aml-filters') && str_contains($header,"'jewellery-aml.php' => 'aml'") && str_contains($header,"'AML / goAML Reporting', 'aml'"),'AML filters and dedicated icon are wired');
 $check(str_contains($reports,"'jewellery-aml-register'") && str_contains($header,'jewellery-aml.php'),'Report Centre and Jewellery navigation are wired');
 exit(count(array_filter($checks,static fn($c)=>!$c[0]))>0?1:0);

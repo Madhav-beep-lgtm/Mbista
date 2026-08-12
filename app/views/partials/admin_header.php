@@ -88,7 +88,7 @@ $headerPageIcons = [
     'payment-gateways.php' => 'card',
     'insights.php' => 'insights',
     'jewellery.php' => 'coins', 'jewellery-trade.php' => 'coins',
-    'jewellery-workshop.php' => 'handshake', 'jewellery-assign.php' => 'handshake', 'jewellery-receive.php' => 'box', 'jewellery-reports.php' => 'reports', 'jewellery-aml.php' => 'compliance',
+    'jewellery-workshop.php' => 'handshake', 'jewellery-assign.php' => 'handshake', 'jewellery-receive.php' => 'box', 'jewellery-reports.php' => 'reports', 'jewellery-aml.php' => 'aml',
     'jewellery-trace.php' => 'search',
     'jewellery-tags.php' => 'documents',
 ];
@@ -180,7 +180,7 @@ if ($headerJewellery) {
         ['jewellery-workshop.php', 'karigars', 'Kaligads', 'teams'],
         ['jewellery-workshop.php', 'refinery', 'Refinery', 'layers'],
         ['jewellery-reports.php', 'summary', 'Reports', 'reports'],
-        ['jewellery-aml.php', '', 'AML / goAML Reporting', 'compliance'],
+        ['jewellery-aml.php', '', 'AML / goAML Reporting', 'aml'],
         // Tagging sits next to the stock it labels, after the trade pages that
         // create that stock and before the masters.
         ['jewellery-tags.php', '', 'Print Tags', 'documents'],
