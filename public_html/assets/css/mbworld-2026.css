@@ -2089,3 +2089,22 @@ body.admin-layout.theme-dark .admin-content table :is(th,td),body.admin-layout.a
 body.admin-layout.theme-dark .admin-content table thead th,body.admin-layout.admin-dark .admin-content table thead th{background:#172a23!important;color:var(--theme-heading)!important;-webkit-text-fill-color:var(--theme-heading)!important}
 body.admin-layout.theme-dark .admin-content table tbody tr:nth-child(even),body.admin-layout.admin-dark .admin-content table tbody tr:nth-child(even){background:#101d19!important}
 body.admin-layout.theme-dark .admin-content canvas,body.admin-layout.admin-dark .admin-content canvas{color:var(--theme-copy)!important}
+
+/* Professional control hierarchy in dark mode. Secondary actions must not
+   remain white rectangles with white labels; primary actions stay filled. */
+body.admin-layout.theme-dark .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft),
+body.admin-layout.admin-dark .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft){background:#12211c!important;color:#d7e3dd!important;-webkit-text-fill-color:#d7e3dd!important;border:1px solid #50675d!important;box-shadow:none!important}
+body.admin-layout.theme-dark .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft):hover,
+body.admin-layout.admin-dark .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft):hover{background:#1a3028!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:#65b998!important}
+body.admin-layout.theme-dark .admin-content :is(.button:not(.secondary):not(.soft),button[type=submit]:not(.secondary):not(.soft)),
+body.admin-layout.admin-dark .admin-content :is(.button:not(.secondary):not(.soft),button[type=submit]:not(.secondary):not(.soft)){background:#08775b!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:#3cbb8b!important}
+body.admin-layout.theme-dark .admin-content .feature-disclosure>summary,body.admin-layout.admin-dark .admin-content .feature-disclosure>summary{background:#12211c!important;color:#f4faf7!important;border-color:#50675d!important}
+body.admin-layout.theme-dark .admin-content .feature-disclosure>summary :is(span,strong,small),body.admin-layout.admin-dark .admin-content .feature-disclosure>summary :is(span,strong,small){color:#f4faf7!important;-webkit-text-fill-color:#f4faf7!important;opacity:1!important}
+
+/* Light mode uses restrained contrast rather than washed-out green-on-white. */
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content{color:#30473e!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content :is(.mbw-card,.card,.panel,.frm-section,.mbw-kpi,.ov-kpi){border-color:#cbded4!important;box-shadow:0 5px 16px rgba(22,70,53,.055)!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content :is(h1,h2,h3,h4,h5,h6,strong,.mbw-heading,.mbw-kpi-value,.ov-kpi-value){color:#15382c!important;-webkit-text-fill-color:#15382c!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content :is(p,small,.meta,.muted,.help,.hint,.description,.subtitle,.mbw-kpi-label,.mbw-kpi-delta,.ov-kpi-label,.ov-kpi-sub){color:#5d756b!important;-webkit-text-fill-color:#5d756b!important;opacity:1!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft){background:#fff!important;color:#17664e!important;-webkit-text-fill-color:#17664e!important;border-color:#78ad99!important;box-shadow:none!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft):hover{background:#edf7f2!important;color:#084f3b!important;-webkit-text-fill-color:#084f3b!important;border-color:#398d6d!important}
