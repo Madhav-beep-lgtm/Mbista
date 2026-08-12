@@ -23,15 +23,31 @@ if(isset($_GET['export'])){
  foreach(jw_aml_cases($companyId,$from,$to,$status) as $c)$data[]=[(int)$c['id'],$c['case_type'],$c['case_date'],$c['due_on'],$c['party_name'],$c['pan_no'],$c['aggregate_amount'],$c['transaction_count'],$c['risk_score'],$c['rule_code'],$c['status'],$c['goaml_reference']];
  export_dispatch('csv','jewellery-goaml-register-'.$from.'-'.$to,$data,'Jewellery AML / goAML Register',['Rule'=>'FIU-Nepal July 2025']);
 }
-if(jw_aml_ready()) jw_aml_scan($companyId,$from,$to,0);
+$amlLoadError = '';
+if(jw_aml_ready()) {
+ try { jw_aml_scan($companyId,$from,$to,0); }
+ catch(Throwable $e) {
+  $amlLoadError = $e->getMessage();
+  error_log('Jewellery AML automatic scan failed for company '.$companyId.': '.$e->getMessage());
+ }
+}
 $amlSettings=jw_aml_settings($companyId);
-$cases=jw_aml_cases($companyId,$from,$to,$status); $selectedId=(int)($_GET['case_id']??0); $selected=null; foreach($cases as $c)if((int)$c['id']===$selectedId)$selected=$c;
+$cases=[];
+if($amlLoadError==='') {
+ try { $cases=jw_aml_cases($companyId,$from,$to,$status); }
+ catch(Throwable $e) {
+  $amlLoadError=$e->getMessage();
+  error_log('Jewellery AML register load failed for company '.$companyId.': '.$e->getMessage());
+ }
+}
+$selectedId=(int)($_GET['case_id']??0); $selected=null; foreach($cases as $c)if((int)$c['id']===$selectedId)$selected=$c;
 $transactions=$selected?jw_aml_case_transactions($companyId,$selectedId):[];
 $pageTitle='Jewellery AML / goAML'; $pageSubtitle='FIU-Nepal candidate detection, compliance review and filing register'; $bodyClass='admin-layout';
 include __DIR__.'/../../app/views/partials/admin_header.php';
 ?>
 <section class="mbw-card"><div class="mbw-card-head"><div><h1>AML / goAML Reporting</h1><p>TTR candidates are deterministic. STR/SAR candidates are internal red flags and require compliance-officer examination before filing.</p></div></div>
 <?php if(!jw_aml_ready()): ?><div class="alert error">Migration 114 is required before AML reporting can run.</div><?php else: ?>
+<?php if($amlLoadError!==''): ?><div class="alert error"><strong>AML data scan could not run.</strong> The page remains available, but the production database must be upgraded or repaired. Administrator detail: <?=e($amlLoadError)?></div><?php endif;?>
 <form method="get" class="actions"><label>From <input type="date" name="from" value="<?=e($from)?>"></label><label>To <input type="date" name="to" value="<?=e($to)?>"></label><label>Status <select name="status"><option value="">All</option><?php foreach(['candidate','under_review','approved','dismissed','filed'] as $s):?><option value="<?=e($s)?>" <?=$status===$s?'selected':''?>><?=e(ucwords(str_replace('_',' ',$s)))?></option><?php endforeach;?></select></label><button class="button" type="submit">Filter</button><a class="button secondary" href="<?=e(url('admin/jewellery-aml.php?from='.$from.'&to='.$to.'&status='.$status.'&export=csv'))?>">Export register</a></form>
 <?php if($canReview):?><form method="post" style="margin-top:12px"><?=csrf_field()?><input type="hidden" name="action" value="scan"><button class="button" type="submit">Scan posted transactions</button></form><?php endif;?>
 <?php if($canReview):?><details style="margin-top:12px"><summary>Create SAR candidate for attempted transaction or suspicious activity</summary><form method="post" class="stack" style="margin-top:10px"><?=csrf_field()?><input type="hidden" name="action" value="manual_sar"><label>Activity date<input type="date" name="activity_date" value="<?=e(date('Y-m-d'))?>" required></label><label>Party ID (optional)<input type="number" min="1" name="party_id"></label><label>Reason / red flags<textarea name="reason" rows="3" required></textarea></label><label>Initial narrative<textarea name="narrative" rows="5"></textarea></label><button class="button" type="submit">Create review candidate</button></form></details><?php endif;?>

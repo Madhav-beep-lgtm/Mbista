@@ -69,7 +69,7 @@ if ($zplMode !== '') {
         $items = $loadItems($requestedIds());
         $zpl = jewellery_tag_batch_zpl($items, $cfg, $copies);
         $filename = count($items) === 1
-            ? 'tag-' . preg_replace('/[^A-Za-z0-9._-]+/', '-', (string) $items[0]['sku']) . '.zpl'
+            ? 'tag-' . preg_replace('/[^A-Za-z0-9._-]+/', '-', (string) ($items[0]['code'] ?? $items[0]['sku'] ?? 'item')) . '.zpl'
             : 'tags-' . count($items) . '.zpl';
     }
 
@@ -172,7 +172,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <tr>
                         <td><input type="checkbox" class="tag-item" name="items[]" value="<?= $id ?>"
                                    <?= in_array($id, $selected, true) ? 'checked' : '' ?>></td>
-                        <td><?= e((string) $row['sku']) ?></td>
+                        <td><?= e((string) ($row['code'] ?? $row['sku'] ?? '')) ?></td>
                         <td><?= e((string) $row['name']) ?></td>
                         <td><?= e((string) ($row['purity_code'] ?? '')) ?></td>
                         <td class="num"><?= e(number_format((float) $row['gross_weight'], 3)) ?> <?= e($unit) ?></td>
