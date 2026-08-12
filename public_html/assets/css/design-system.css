@@ -326,7 +326,8 @@ body.admin-layout .admin-sidebar-toggle-label {color:inherit!important;-webkit-t
     opacity:1!important;
     pointer-events:auto!important;
   }
-  body.admin-layout.sidebar-collapsed .admin-sidebar :is(.admin-sidebar-context,.admin-nav-group,.brand-admin-sub,.mbw-nav-caret,.mbw-subnav) {
+  html body.admin-layout.sidebar-collapsed .admin-shell>.admin-sidebar .admin-sidebar-context,
+  html body.admin-layout.sidebar-collapsed .admin-shell>.admin-sidebar :is(.admin-nav-group,.brand-admin-sub,.mbw-nav-caret,.mbw-subnav) {
     display:none!important;
   }
   body.admin-layout.sidebar-collapsed .admin-sidebar .admin-nav a,
