@@ -1651,6 +1651,27 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Opening Stock — <?= e((string) $fiscalYear['label']) ?> (<?= count($openingRows) ?>)</h2></div>
+        <div class="jw-opening-filter" style="display:flex;flex-wrap:wrap;gap:10px 12px;align-items:end;padding:0 0 14px">
+            <label style="display:grid;gap:5px;min-width:220px;flex:1 1 220px">Search
+                <input type="search" placeholder="Item name or code" aria-label="Search by item or code" data-col="<?= $canEdit ? 1 : 0 ?>">
+            </label>
+            <label style="display:grid;gap:5px;min-width:160px;flex:1 1 160px">Stock group
+                <input type="search" placeholder="All groups" aria-label="Filter by stock group" data-col="<?= $canEdit ? 2 : 1 ?>">
+            </label>
+            <label style="display:grid;gap:5px;min-width:150px;flex:0 1 170px">Stock type
+                <select aria-label="Filter by stock type" data-col="<?= $canEdit ? 3 : 2 ?>"><option value="">All types</option><option value="Showroom">Showroom</option><option value="Customer Ordered">Customer ordered</option></select>
+            </label>
+            <label style="display:grid;gap:5px;min-width:130px;flex:0 1 150px">Purity
+                <input type="search" placeholder="All purities" aria-label="Filter by purity" data-col="<?= $canEdit ? 4 : 3 ?>">
+            </label>
+            <label style="display:grid;gap:5px;min-width:150px;flex:0 1 170px">Status
+                <select aria-label="Filter by posting status" data-col="<?= $canEdit ? 15 : 14 ?>"><option value="">All statuses</option><option value="Posted">Posted</option><option value="Weight only">Weight only</option><option value="Not in stock">Not in stock</option></select>
+            </label>
+            <div style="display:flex;gap:6px;align-items:end">
+                <button type="button" class="button jw-filter-apply">Filter</button>
+                <button type="button" class="button soft jw-filter-clear">Clear</button>
+            </div>
+        </div>
         <div style="overflow-x:auto"><table>
             <thead>
                 <tr>
@@ -1671,39 +1692,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <th class="is-numeric">Value</th>
                     <th>Posted</th>
                     <?php if ($canEdit): ?><th></th><?php endif; ?>
-                </tr>
-                <tr class="jw-filter-row">
-                    <?php
-                    $col = 0;
-                    if ($canEdit) { echo '<th></th>'; $col++; }
-                    // Use specific prompts/dropdowns so it is clear what each
-                    // filter does, rather than presenting several identical boxes.
-                    echo '<th><input type="search" placeholder="Item / code" aria-label="Filter by item or code" style="width:100%" data-col="' . $col . '"></th>'; $col++;
-                    // Stock group
-                    echo '<th><input type="search" placeholder="Stock group" aria-label="Filter by stock group" style="width:100%" data-col="' . $col . '"></th>'; $col++;
-                    // Stock type
-                    echo '<th><select aria-label="Filter by stock type" style="width:100%" data-col="' . $col . '"><option value="">All types</option><option value="Showroom">Showroom</option><option value="Customer Ordered">Customer ordered</option></select></th>'; $col++;
-                    // Purity
-                    echo '<th><input type="search" placeholder="Purity" aria-label="Filter by purity" style="width:100%" data-col="' . $col . '"></th>'; $col++;
-                    // Gross
-                    echo '<th></th>'; $col++;
-                    // Stone and diamond are numeric columns.
-                    echo '<th></th>'; $col++;
-                    echo '<th></th>'; $col++;
-                    echo '<th></th>'; $col++;
-                    echo '<th></th>'; $col++;
-                    echo '<th></th>'; $col++;
-                    echo '<th></th>'; $col++;
-                    // Fine
-                    echo '<th></th>'; $col++;
-                    // Rate
-                    echo '<th></th>'; $col++;
-                    // Value
-                    echo '<th></th>'; $col++;
-                    // Posted
-                    echo '<th><select aria-label="Filter by posting status" style="width:100%" data-col="' . $col . '"><option value="">All statuses</option><option value="Posted">Posted</option><option value="Weight only">Weight only</option><option value="Not in stock">Not in stock</option></select></th>'; $col++;
-                    if ($canEdit) { echo '<th><button type="button" class="button soft jw-filter-clear" title="Clear all filters" aria-label="Clear all filters" style="min-height:30px;padding:3px 8px">' . icon('x') . '</button></th>'; }
-                    ?>
                 </tr>
             </thead>
             <tbody>
@@ -1777,7 +1765,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             if (!openingSection || !openingSection.h) { return; }
             var section = openingSection.h.closest('section'); if (!section) { return; }
             var table = section.querySelector('table'); if (!table) { return; }
-            var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row [data-col]'));
+            var filterBar = section.querySelector('.jw-opening-filter');
+            var inputs = Array.from((filterBar || section).querySelectorAll('[data-col]'));
             if (!inputs.length) { return; }
             function apply() {
                 var rows = Array.from(table.querySelectorAll('tbody tr'));
@@ -1802,13 +1791,15 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 inp.addEventListener('input', apply);
                 inp.addEventListener('change', apply);
             });
-            var clear = table.querySelector('.jw-filter-clear');
+            var clear = section.querySelector('.jw-filter-clear');
             if (clear) {
                 clear.addEventListener('click', function () {
                     inputs.forEach(function (inp) { inp.value = ''; });
                     apply();
                 });
             }
+            var applyButton = section.querySelector('.jw-filter-apply');
+            if (applyButton) { applyButton.addEventListener('click', apply); }
             window.jwApplyFilters = apply;
         }
         if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachOpeningFilters); } else { attachOpeningFilters(); }

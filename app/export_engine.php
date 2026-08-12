@@ -189,6 +189,8 @@ function export_print(string $title, array $rows, array $meta = [], array $optio
         || (is_string($v) && $v !== '' && preg_match('/^-?[\d,]+(\.\d+)?$/', $v) === 1);
 
     $companyName = '';
+    $compact = !empty($options['compact']);
+    $landscape = !empty($options['landscape']);
     if (function_exists('current_company')) {
         $company = current_company();
         $companyName = (string) ($company['name'] ?? '');
@@ -201,12 +203,13 @@ function export_print(string $title, array $rows, array $meta = [], array $optio
     echo 'body{font:13px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111;margin:24px;background:#fff}';
     echo 'h1{font-size:18px;margin:0 0 4px}.org{font-size:14px;font-weight:600;margin:0 0 2px}';
     echo '.meta{color:#555;font-size:12px;margin:0 0 14px}.meta span{margin-right:16px;white-space:nowrap}';
-    echo 'table{border-collapse:collapse;width:100%}';
-    echo 'th,td{border:1px solid #bbb;padding:5px 7px;text-align:left;vertical-align:top}';
+    echo 'table{border-collapse:collapse;width:100%;' . ($compact ? 'table-layout:fixed;font-size:8px;line-height:1.2' : '') . '}';
+    echo 'th,td{border:1px solid #bbb;padding:' . ($compact ? '3px 4px' : '5px 7px') . ';text-align:left;vertical-align:top;' . ($compact ? 'overflow-wrap:anywhere;word-break:normal' : '') . '}';
     echo 'th{background:#eee;font-weight:600}td.n,th.n{text-align:right;white-space:nowrap}';
     echo 'tbody tr:nth-child(even){background:#fafafa}';
     echo '.bar{margin:0 0 16px}.bar button{font:inherit;padding:7px 14px;margin-right:8px;cursor:pointer}';
-    echo '@media print{.bar{display:none}body{margin:0}th{background:#eee!important;-webkit-print-color-adjust:exact}}';
+    echo ($landscape ? '@page{size:A3 landscape;margin:8mm}' : '');
+    echo '@media print{.bar{display:none}body{margin:0}thead{display:table-header-group}tr{break-inside:avoid}th{background:#eee!important;-webkit-print-color-adjust:exact}}';
     echo '</style></head><body>';
 
     echo '<div class="bar"><button onclick="window.print()">Print / Save as PDF</button>';
@@ -448,7 +451,7 @@ function spreadsheet_read_rows(string $path, string $originalName, int $maxRows 
  *
  * @param string $format csv | xlsx | print
  */
-function export_dispatch(string $format, string $basename, array $rows, string $title, array $meta = []): void
+function export_dispatch(string $format, string $basename, array $rows, string $title, array $meta = [], array $options = []): void
 {
     switch ($format) {
         case 'xlsx':
@@ -456,7 +459,7 @@ function export_dispatch(string $format, string $basename, array $rows, string $
             // no break — export_xlsx exits
         case 'print':
         case 'pdf':
-            export_print($title, $rows, $meta, ['auto_print' => true]);
+            export_print($title, $rows, $meta, $options + ['auto_print' => true]);
             // no break — export_print exits
         default:
             export_csv($basename . '.csv', $rows);

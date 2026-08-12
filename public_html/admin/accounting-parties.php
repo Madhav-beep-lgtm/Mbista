@@ -1,5 +1,16 @@
 <?php
 declare(strict_types=1);
+
+// Export data is assembled later on this page, after the same calculations
+// used by the directory. Buffer any intervening layout so download/print
+// headers can still be sent cleanly, then discard that layout before export.
+$partyExportRequested = isset($_GET['export'])
+    && in_array((string) $_GET['export'], ['csv', 'xlsx', 'print'], true);
+$partyExportBufferLevel = ob_get_level();
+if ($partyExportRequested) {
+    ob_start();
+}
+
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/export_engine.php';
@@ -1607,7 +1618,17 @@ if (isset($_GET['export']) && in_array((string) $_GET['export'], ['csv', 'xlsx',
             (string) ($party['address'] ?? ''),
         ];
     }
-    export_dispatch((string) $_GET['export'], 'party-master-' . date('Ymd'), $exportRows, 'Party Master');
+    while ($partyExportRequested && ob_get_level() > $partyExportBufferLevel) {
+        ob_end_clean();
+    }
+    export_dispatch(
+        (string) $_GET['export'],
+        'party-master-' . date('Ymd'),
+        $exportRows,
+        'Party Master',
+        [],
+        ['landscape' => true, 'compact' => true]
+    );
 }
 
 $totalPages = max(1, (int) ceil($totalRows / $perPage));
