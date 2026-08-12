@@ -130,6 +130,9 @@ $page = max(1, (int) ($_GET['page'] ?? 1));
 $pageCount = max(1, (int) ceil(count($rows) / $perPage));
 $page = min($page, $pageCount);
 $pageRows = array_slice($rows, ($page - 1) * $perPage, $perPage);
+$rowCount = count($rows);
+$showingFrom = $rowCount > 0 ? (($page - 1) * $perPage) + 1 : 0;
+$showingTo = min($page * $perPage, $rowCount);
 
 // The exact filter query string, reused by exports and the drill-down return.
 $qs = http_build_query(array_filter([
@@ -467,13 +470,33 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </tbody>
     </table>
     </div>
-    <?php if ($pageCount > 1): ?>
-        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-            <?php for ($p = 1; $p <= $pageCount; $p++): ?>
-                <a class="button secondary" style="min-height:30px;padding:3px 10px<?= $p === $page ? ';font-weight:700;border-color:var(--mbw-accent,#2f7fb8)' : '' ?>" href="?<?= e($qs) ?>&amp;per_page=<?= $perPage ?>&amp;page=<?= $p ?>"><?= $p ?></a>
-            <?php endfor; ?>
-        </div>
-    <?php endif; ?>
+    <nav class="ssr-pagination" aria-label="Stock summary pages">
+        <div class="ssr-pagination-summary">Showing <strong><?= $showingFrom ?>–<?= $showingTo ?></strong> of <strong><?= $rowCount ?></strong> records</div>
+        <?php if ($pageCount > 1): ?>
+            <?php
+            $pageUrl = static fn (int $target): string => '?' . $qs . '&per_page=' . $perPage . '&page=' . $target;
+            $windowStart = max(2, $page - 2);
+            $windowEnd = min($pageCount - 1, $page + 2);
+            if ($page <= 4) $windowEnd = min($pageCount - 1, 6);
+            if ($page >= $pageCount - 3) $windowStart = max(2, $pageCount - 5);
+            ?>
+            <div class="ssr-pagination-pages">
+                <?php if ($page > 1): ?><a href="<?= e($pageUrl(1)) ?>" aria-label="First page">&laquo;</a><a href="<?= e($pageUrl($page - 1)) ?>" aria-label="Previous page">&lsaquo; Previous</a><?php endif; ?>
+                <a class="<?= $page === 1 ? 'is-active' : '' ?>" href="<?= e($pageUrl(1)) ?>" <?= $page === 1 ? 'aria-current="page"' : '' ?>>1</a>
+                <?php if ($windowStart > 2): ?><span class="ssr-pagination-gap">…</span><?php endif; ?>
+                <?php for ($p = $windowStart; $p <= $windowEnd; $p++): ?><a class="<?= $p === $page ? 'is-active' : '' ?>" href="<?= e($pageUrl($p)) ?>" <?= $p === $page ? 'aria-current="page"' : '' ?>><?= $p ?></a><?php endfor; ?>
+                <?php if ($windowEnd < $pageCount - 1): ?><span class="ssr-pagination-gap">…</span><?php endif; ?>
+                <a class="<?= $page === $pageCount ? 'is-active' : '' ?>" href="<?= e($pageUrl($pageCount)) ?>" <?= $page === $pageCount ? 'aria-current="page"' : '' ?>><?= $pageCount ?></a>
+                <?php if ($page < $pageCount): ?><a href="<?= e($pageUrl($page + 1)) ?>" aria-label="Next page">Next &rsaquo;</a><a href="<?= e($pageUrl($pageCount)) ?>" aria-label="Last page">&raquo;</a><?php endif; ?>
+            </div>
+            <form method="get" class="ssr-pagination-jump">
+                <?php foreach (array_filter(['from'=>$from,'to'=>$to,'q'=>$filters['search'],'valuation'=>$filters['valuation'],'status'=>$filters['stock_status'],'jewellery_stock_kind'=>$filters['jewellery_stock_kind'],'group_by'=>$filters['group_by'],'ledger'=>$filters['ledger_id'] ?: null,'zero_movement'=>$filters['zero_movement'] ? 1 : null,'zero_closing'=>$filters['zero_closing'] ? 1 : null,'applied'=>1], static fn ($value): bool => $value !== null && $value !== '') as $name => $value): ?><input type="hidden" name="<?= e((string) $name) ?>" value="<?= e((string) $value) ?>"><?php endforeach; ?>
+                <?php foreach ($filters['warehouse_ids'] as $value): ?><input type="hidden" name="warehouses[]" value="<?= (int) $value ?>"><?php endforeach; ?>
+                <?php foreach ($filters['types'] as $value): ?><input type="hidden" name="types[]" value="<?= e((string) $value) ?>"><?php endforeach; ?>
+                <input type="hidden" name="per_page" value="<?= $perPage ?>"><label for="ssr-page-jump">Go to page</label><input id="ssr-page-jump" type="number" name="page" min="1" max="<?= $pageCount ?>" value="<?= $page ?>"><button type="submit" class="button secondary">Go</button>
+            </form>
+        <?php endif; ?>
+    </nav>
     <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
         Outward and damage amounts are inventory <strong>cost</strong> (FIFO / weighted average replay), never selling price. Damage rows (damage, expiry, write-off) are excluded from normal outward — no double counting.
         Closing = opening + inward − outward − damage, and its amount comes from the remaining valuation layers as of <?= e($to) ?>.
