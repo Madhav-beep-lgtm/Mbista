@@ -88,7 +88,7 @@ $headerPageIcons = [
     'payment-gateways.php' => 'card',
     'insights.php' => 'insights',
     'jewellery.php' => 'coins', 'jewellery-trade.php' => 'coins',
-    'jewellery-workshop.php' => 'handshake', 'jewellery-assign.php' => 'handshake', 'jewellery-receive.php' => 'box', 'jewellery-reports.php' => 'reports',
+    'jewellery-workshop.php' => 'handshake', 'jewellery-assign.php' => 'handshake', 'jewellery-receive.php' => 'box', 'jewellery-reports.php' => 'reports', 'jewellery-aml.php' => 'compliance',
     'jewellery-tags.php' => 'documents',
 ];
 $headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php', 'payroll-overtime.php', 'payroll-service-charge.php'];
@@ -153,7 +153,7 @@ if ($headerIsClientBooks) {
 }
 // The module spans four pages, so "is this section open?" keys off the script
 // rather than a single filename.
-$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php', 'jewellery-tags.php'];
+$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php', 'jewellery-tags.php', 'jewellery-aml.php'];
 $headerJewelleryActive = in_array($headerScript, $headerJewelleryScripts, true);
 $headerJewelleryView = (string) ($_GET['view'] ?? '');
 $headerJewelleryMenu = '';
@@ -178,6 +178,7 @@ if ($headerJewellery) {
         ['jewellery-workshop.php', 'karigars', 'Kaligads', 'teams'],
         ['jewellery-workshop.php', 'refinery', 'Refinery', 'layers'],
         ['jewellery-reports.php', 'summary', 'Reports', 'reports'],
+        ['jewellery-aml.php', '', 'AML / goAML Reporting', 'compliance'],
         // Tagging sits next to the stock it labels, after the trade pages that
         // create that stock and before the masters.
         ['jewellery-tags.php', '', 'Print Tags', 'documents'],
