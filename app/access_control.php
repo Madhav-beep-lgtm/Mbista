@@ -641,9 +641,25 @@ function authorized_company_ids(?array $user = null): array
     // exactly its own books, which is the branch further down.
     if ($role === 'staff') {
         $restricted = staff_restricted_company_ids($userId);
-        $cache[$cacheKey] = access_control_active_company_ids(
-            $restricted !== [] ? $restricted : access_control_all_company_ids()
-        );
+        $homeCompanyId = (int) ($user['company_id'] ?? 0);
+        $ids = $restricted !== [] ? $restricted : ($homeCompanyId > 0 ? [$homeCompanyId] : []);
+
+        // Client assignment controls WHERE staff may work. The granular
+        // permission matrix independently controls WHAT they may do there.
+        if (table_exists('client_profiles') && column_exists('client_profiles', 'books_company_id')) {
+            $grantedClientIds = staff_accounting_client_ids($userId);
+            $clientWhere = ['assigned_staff_user_id = ?'];
+            $clientBindings = [$userId];
+            if ($grantedClientIds !== []) {
+                $clientWhere[] = 'id IN (' . implode(',', array_fill(0, count($grantedClientIds), '?')) . ')';
+                $clientBindings = array_merge($clientBindings, $grantedClientIds);
+            }
+            $stmt = db()->prepare('SELECT books_company_id FROM client_profiles WHERE is_active = 1 AND books_company_id IS NOT NULL AND (' . implode(' OR ', $clientWhere) . ')');
+            $stmt->execute($clientBindings);
+            $ids = array_merge($ids, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        }
+
+        $cache[$cacheKey] = access_control_active_company_ids($ids);
 
         return $cache[$cacheKey];
     }

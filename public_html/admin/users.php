@@ -414,8 +414,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string) ($_POST['action']
         $validClientIds = [];
         if ($requestedClientIds !== []) {
             $placeholders = implode(',', array_fill(0, count($requestedClientIds), '?'));
-            $checkStmt = db()->prepare('SELECT id FROM client_profiles WHERE company_id = ? AND is_active = 1 AND id IN (' . $placeholders . ')');
-            $checkStmt->execute(array_merge([$companyId], $requestedClientIds));
+            $scopeCompanyIds = user_is_super_admin($currentAdmin) ? [] : authorized_company_ids($currentAdmin);
+            $scopeSql = '';
+            $bindings = $requestedClientIds;
+            if ($scopeCompanyIds !== []) {
+                $scopeSql = ' AND company_id IN (' . implode(',', array_fill(0, count($scopeCompanyIds), '?')) . ')';
+                $bindings = array_merge($requestedClientIds, $scopeCompanyIds);
+            } elseif (!user_is_super_admin($currentAdmin)) {
+                $scopeSql = ' AND 0 = 1';
+            }
+            $checkStmt = db()->prepare('SELECT id FROM client_profiles WHERE is_active = 1 AND id IN (' . $placeholders . ')' . $scopeSql);
+            $checkStmt->execute($bindings);
             $validClientIds = array_map('intval', $checkStmt->fetchAll(PDO::FETCH_COLUMN));
         }
         set_staff_accounting_clients($targetUserId, $validClientIds, (int) ($currentAdmin['id'] ?? 0));
@@ -1254,16 +1263,28 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
                 <?php if (table_exists('staff_client_accounting_access')): ?>
                     <?php
-                    $accessClientsStmt = db()->prepare('SELECT id, organization_name, client_code, books_company_id FROM client_profiles WHERE company_id = :company_id AND is_active = 1 ORDER BY organization_name ASC');
-                    $accessClientsStmt->execute(['company_id' => $companyId]);
+                    $accessScopeCompanyIds = user_is_super_admin($currentAdmin) ? [] : authorized_company_ids($currentAdmin);
+                    $accessClientsSql = 'SELECT cp.id, cp.organization_name, cp.client_code, cp.books_company_id, c.name AS serving_company
+                        FROM client_profiles cp LEFT JOIN companies c ON c.id = cp.company_id WHERE cp.is_active = 1';
+                    $accessClientBindings = [];
+                    if ($accessScopeCompanyIds !== []) {
+                        $accessClientsSql .= ' AND cp.company_id IN (' . implode(',', array_fill(0, count($accessScopeCompanyIds), '?')) . ')';
+                        $accessClientBindings = $accessScopeCompanyIds;
+                    } elseif (!user_is_super_admin($currentAdmin)) {
+                        $accessClientsSql .= ' AND 0 = 1';
+                    }
+                    $accessClientsSql .= ' ORDER BY cp.organization_name ASC, cp.id ASC';
+                    $accessClientsStmt = db()->prepare($accessClientsSql);
+                    $accessClientsStmt->execute($accessClientBindings);
                     $accessClients = $accessClientsStmt->fetchAll();
                     $grantedClientIds = staff_accounting_client_ids((int) $viewUser['id']);
                     ?>
                     <div class="form-card">
                         <h3>Client accounting access</h3>
                         <p class="muted">
-                            Tick the clients this staff accountant may keep books for. They can open only the ticked
-                            clients' accounting books, and every voucher they enter there is
+                            Assign this staff member to one, several, or all clients shown below. Inside an assigned
+                            client's workspace, they can perform only the actions granted in the permission matrix.
+                            Every voucher they enter there is
                             <strong>sent for approval to the client and the admin</strong> — it posts only after one of
                             them approves it.
                             <?php if ($grantedClientIds !== []): ?>
@@ -1277,14 +1298,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <input type="hidden" name="action" value="save_client_accounting_access">
                             <input type="hidden" name="user_id" value="<?= e((int) $viewUser['id']) ?>">
                             <?php if ($accessClients === []): ?>
-                                <p class="muted">No active clients in this company portal yet.</p>
+                                <p class="muted">No active clients are available in your authorized scope.</p>
                             <?php else: ?>
+                                <div class="actions" style="margin-bottom:12px;">
+                                    <button type="button" class="button secondary" data-client-grants="all">Select all</button>
+                                    <button type="button" class="button secondary" data-client-grants="none">Clear all</button>
+                                    <span class="muted"><?= e((string) count($accessClients)) ?> active client(s) available</span>
+                                </div>
                                 <div class="users-edit-grid">
                                     <?php foreach ($accessClients as $accessClient): ?>
                                         <label class="checkbox-line">
                                             <input type="checkbox" name="client_ids[]" value="<?= e((int) $accessClient['id']) ?>" <?= in_array((int) $accessClient['id'], $grantedClientIds, true) ? 'checked' : '' ?>>
                                             <?= e($accessClient['organization_name']) ?>
-                                            <small>(<?= e($accessClient['client_code'] ?? 'no code') ?><?= (int) ($accessClient['books_company_id'] ?? 0) > 0 ? '' : ', books not set up yet' ?>)</small>
+                                            <small>(<?= e($accessClient['client_code'] ?? 'no code') ?> · <?= e($accessClient['serving_company'] ?? 'No serving company') ?><?= (int) ($accessClient['books_company_id'] ?? 0) > 0 ? '' : ' · books not set up yet' ?>)</small>
                                         </label>
                                     <?php endforeach; ?>
                                 </div>
@@ -1293,6 +1319,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <button type="submit" class="button">Save client accounting access</button>
                             </div>
                         </form>
+                        <script>
+                        document.addEventListener('click', function (event) {
+                            const trigger = event.target.closest('[data-client-grants]');
+                            if (!trigger) return;
+                            const form = trigger.closest('form');
+                            if (!form) return;
+                            const checked = trigger.dataset.clientGrants === 'all';
+                            form.querySelectorAll('input[name="client_ids[]"]').forEach(function (input) { input.checked = checked; });
+                        });
+                        </script>
                     </div>
                 <?php endif; ?>
             <?php endif; ?>

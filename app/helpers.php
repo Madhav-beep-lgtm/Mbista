@@ -2181,6 +2181,14 @@ function staff_scoped_client_ids(int $staffId, int $companyId): array
         $where .= " OR EXISTS (SELECT 1 FROM client_tasks ct3 WHERE ct3.client_id = cp.id AND ct3.team_id IN ($teamPlaceholders))";
         $bindings = array_merge($bindings, $myTeamIds);
     }
+    if (function_exists('staff_accounting_client_ids')) {
+        $grantedClientIds = staff_accounting_client_ids($staffId);
+        if ($grantedClientIds !== []) {
+            $grantPlaceholders = implode(',', array_fill(0, count($grantedClientIds), '?'));
+            $where .= " OR cp.id IN ($grantPlaceholders)";
+            $bindings = array_merge($bindings, $grantedClientIds);
+        }
+    }
     $where .= ')';
 
     $stmt = db()->prepare("SELECT cp.id FROM client_profiles cp WHERE $where");
@@ -7043,7 +7051,9 @@ function client_books_access_level(array $clientProfile): string
         $granted = function_exists('staff_accounting_client_ids')
             && in_array((int) ($clientProfile['id'] ?? 0), staff_accounting_client_ids((int) ($user['id'] ?? 0)), true);
         $reachable = $assigned || $granted;
-        return ($reachable && $servesFromPortal) ? 'approval' : ($reachable && $portalCode === 'MBAACA' ? 'approval' : '');
+        $booksCompanyId = (int) ($clientProfile['books_company_id'] ?? 0);
+        $insideAssignedBooks = $booksCompanyId > 0 && $booksCompanyId === (int) ($portal['id'] ?? 0);
+        return ($reachable && ($insideAssignedBooks || $servesFromPortal || $portalCode === 'MBAACA')) ? 'approval' : '';
     }
     if ($role === 'customer') {
         // A client login works directly in its own books — owner or a portal
