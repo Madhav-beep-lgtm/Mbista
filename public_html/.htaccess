@@ -101,9 +101,22 @@ DirectoryIndex index.php
     RewriteCond %{HTTP:X-Forwarded-Proto} !=https
     RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
 
-    # /login.php is the single sign-in page. The old admin entry points are kept
+    # Browser-facing application routes omit the implementation suffix. Old
+    # bookmarks remain valid and are canonicalized with a permanent redirect;
+    # THE_REQUEST prevents an internal rewrite from redirecting in a loop.
+    RewriteCond %{THE_REQUEST} \s/+(.+?)\.php(?:[?\s]) [NC]
+    RewriteRule ^(.+)\.php$ /$1 [R=308,L,NE]
+
+    # /login is the single sign-in page. The old admin entry points are kept
     # as external 301s so bookmarks land on it visibly instead of dead-ending.
-    RewriteRule ^adminlogin/?$ /login.php [R=301,QSA,L]
+    RewriteRule ^adminlogin/?$ /login [R=301,QSA,L]
+
+    # Resolve /admin/reports-center to /admin/reports-center.php internally.
+    # Existing files and directories win, so assets and uploads are untouched.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME}.php -f
+    RewriteRule ^(.+?)/?$ $1.php [END,QSA]
 
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d

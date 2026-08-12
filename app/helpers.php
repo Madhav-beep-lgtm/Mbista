@@ -645,6 +645,11 @@ function url(string $path = ''): string
 {
     $path = ltrim($path, '/');
 
+    // Public routes are extensionless. Keep the physical .php files (and all
+    // server-side includes) unchanged; only remove the suffix when it is the
+    // end of the URL path, immediately before a query string or fragment.
+    $path = (string) preg_replace('/\.php(?=$|[?#])/i', '', $path);
+
     if (APP_URL !== '') {
         return APP_URL . ($path !== '' ? '/' . $path : '');
     }
