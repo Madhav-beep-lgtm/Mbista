@@ -1980,9 +1980,19 @@ body.admin-layout.theme-dark .admin-content table :is(th,td),body.admin-layout.a
 body.admin-layout.theme-dark .admin-content :is(a,.mbw-view-all,.ov-view-all),body.admin-layout.admin-dark .admin-content :is(a,.mbw-view-all,.ov-view-all){color:#65d6a8!important;-webkit-text-fill-color:#65d6a8!important}
 body.admin-layout.theme-dark .admin-content :is(.badge,.tag,.mbw-pill,[class*="status-"]),body.admin-layout.admin-dark .admin-content :is(.badge,.tag,.mbw-pill,[class*="status-"]){-webkit-text-fill-color:currentColor!important}
 
-/* The light account popup sits inside a green topbar whose global rule makes
-   every descendant white. Override the descendants, not the card surface. */
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-dropdown :is(a,span,strong,small,p){color:#173a2f!important;-webkit-text-fill-color:#173a2f!important;opacity:1!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-dropdown a>span>small{color:#6d857b!important;-webkit-text-fill-color:#6d857b!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-dropdown>a:hover :is(span,strong,small){color:#08775b!important;-webkit-text-fill-color:#08775b!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-dropdown>a.is-logout :is(span,strong,small),body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-dropdown>a.is-logout{color:#b42318!important;-webkit-text-fill-color:#b42318!important}
+/* Reference account menu: one compact dark surface in either app theme. */
+body.admin-layout .admin-topbar .admin-profile-dropdown{width:350px!important;padding:12px 14px!important;border:1px solid rgba(255,255,255,.16)!important;border-radius:13px!important;background:#071a15!important;color:#fff!important;box-shadow:0 22px 48px rgba(0,0,0,.34)!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown-head{gap:13px!important;padding:4px 8px 14px!important;margin-bottom:6px!important;border-bottom:1px solid rgba(255,255,255,.13)!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown-head .admin-profile-avatar{width:50px!important;height:50px!important;flex-basis:50px!important;border-radius:12px!important;background:linear-gradient(135deg,#3abb8b,#168866)!important;font-size:14px!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown :is(a,span,strong,small,p){opacity:1!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown-head strong{color:#fff!important;-webkit-text-fill-color:#fff!important;font-size:15px!important;line-height:1.25!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown-head small{color:#d8e5df!important;-webkit-text-fill-color:#d8e5df!important;font-size:12px!important;line-height:1.35!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a{min-height:60px!important;gap:15px!important;padding:9px 10px!important;border-radius:9px!important;color:#fff!important;-webkit-text-fill-color:#fff!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a>.ui-icon{width:20px!important;height:20px!important;color:#fff!important;stroke-width:1.8!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a strong{color:#fff!important;-webkit-text-fill-color:#fff!important;font-size:14px!important;line-height:1.2!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a small{color:#d8e5df!important;-webkit-text-fill-color:#d8e5df!important;font-size:11.5px!important;line-height:1.3!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a:hover{background:rgba(60,187,139,.14)!important;color:#fff!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a:hover :is(span,strong,small){color:#fff!important;-webkit-text-fill-color:#fff!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a.is-logout{margin-top:6px!important;padding-top:13px!important;border-top:1px solid rgba(255,255,255,.13)!important;border-radius:0 0 9px 9px!important;color:#fff!important;-webkit-text-fill-color:#fff!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a.is-logout :is(span,strong,small){color:#fff!important;-webkit-text-fill-color:#fff!important}
+@media(max-width:520px){body.admin-layout .admin-topbar .admin-profile-dropdown{position:fixed!important;right:12px!important;left:12px!important;top:76px!important;width:auto!important}}
