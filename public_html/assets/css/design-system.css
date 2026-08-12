@@ -447,6 +447,39 @@ html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .topbar-bs-cale
 html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .topbar-bs-calendar-panel :is(strong,span,button) {color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important}
 html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar :is(.bs-calendar-head button,.bs-calendar-today) {background:#12211c!important;border-color:#668276!important}
 
+/* Final dark-header foreground contract. Some legacy sheets target nested
+   SVG paths and placeholder text directly, so paint every interactive child
+   at the same high specificity as its dark surface. */
+html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar :is(
+  .admin-sidebar-toggle,.admin-icon-button,.admin-topbar-search,
+  .admin-profile-menu>summary,.topbar-segment
+) :is(svg,path,circle,rect,line,polyline,polygon,.ui-icon,span,strong,small) {
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  stroke:currentColor!important;
+  opacity:1!important;
+}
+html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .admin-topbar-search :is(input,input[type="search"]) {
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  caret-color:#fff!important;
+  opacity:1!important;
+}
+html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .admin-topbar-search input::placeholder {
+  color:#d8e5df!important;
+  -webkit-text-fill-color:#d8e5df!important;
+  opacity:.85!important;
+}
+html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .admin-topbar-search .mbw-search-glyph {
+  color:#d8e5df!important;
+  opacity:1!important;
+}
+html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .topbar-segment-next {
+  background:#0b8a69!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+}
+
 @media (min-width:1181px) and (max-width:1700px) {
   body.admin-layout .admin-profile-identity {display:none!important}
   body.admin-layout .admin-profile-menu>summary {width:42px!important;padding:5px!important}
