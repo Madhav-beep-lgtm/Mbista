@@ -123,6 +123,24 @@ rsync -a "${NEVER_PUBLISH[@]}" app/ "$APP_BASE/app/" \
 rsync -a "${NEVER_PUBLISH[@]}" database/ "$APP_BASE/database/" \
     || die "could not copy database/ into $APP_BASE/database/"
 
+# Apply idempotent schema upgrades once per deployment. The repair function
+# deliberately does no work during web requests, so ordinary page loads never
+# pay for hundreds of information_schema checks. A failed upgrade stops the
+# deployment before its commit is recorded as live, allowing the next cron run
+# to retry safely.
+if ! php -r '
+    require $argv[1] . "/app/bootstrap.php";
+    require $argv[1] . "/app/accounting_module_repair.php";
+    $errors = accounting_module_repair_database();
+    if ($errors !== []) {
+        fwrite(STDERR, implode(PHP_EOL, $errors) . PHP_EOL);
+        exit(1);
+    }
+' "$APP_BASE"; then
+    die "database schema repair failed"
+fi
+echo "deploy: database schema is current"
+
 # Prove the copy actually landed, rather than trusting that it did.
 #
 # Everything above can report success and still leave the served files
