@@ -505,9 +505,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 })();
                 </script>
             <?php endif; ?>
+            <?php $headerBsToday = ad_to_bs(date('Y-m-d')); ?>
             <div class="topbar-bs-calendar">
                 <button type="button" class="topbar-bs-date" data-bs-calendar-toggle data-ad-today="<?= e(date('Y-m-d')) ?>" aria-expanded="false" title="Open Nepali calendar">
-                    <?= icon('calendar') ?><span><?= e(bs_format(date('Y-m-d'))) ?> BS</span>
+                    <?= icon('calendar') ?><span><?= $headerBsToday ? e(sprintf('%02d/%02d/%04d BS', $headerBsToday[2], $headerBsToday[1], $headerBsToday[0])) : '' ?></span>
                 </button>
                 <div class="topbar-bs-calendar-panel" data-bs-calendar-panel hidden></div>
             </div>
