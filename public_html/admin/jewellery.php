@@ -846,7 +846,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $defaultMetalId = (int) ($settings['default_metal_id'] ?? 0);
     ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-collapsible data-draggable>
+    <section id="record-opening-stock" class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head"><h2>Quote a Rate</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1731,13 +1731,14 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             <?php endif; ?>
                         </td>
                         <?php if ($canEdit): ?>
-                        <td>
+                        <td style="white-space:nowrap;display:flex;gap:6px;align-items:center">
+                            <a class="button soft" href="#record-opening-stock" title="Add another opening stock item" aria-label="Add opening stock" style="min-height:30px;padding:3px 8px"><?= icon('plus') ?></a>
                             <form method="post" data-confirm="Clear this opening stock? Its voucher and metal movement will be removed.">
                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                 <input type="hidden" name="action" value="clear_opening">
                                 <input type="hidden" name="back_view" value="opening">
                                 <input type="hidden" name="item_id" value="<?= (int) $row['id'] ?>">
-                                <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Clear</button>
+                                <button type="submit" class="button soft" title="Delete opening stock" aria-label="Delete opening stock" style="min-height:30px;padding:3px 8px"><?= icon('trash') ?></button>
                             </form>
                         </td>
                         <?php endif; ?>
