@@ -113,8 +113,13 @@ ok(accounting_repair_column_exists('jewellery_item_profiles', 'stock_kind'),
     'Jewellery item profiles classify showroom and customer-ordered stock');
 ok(accounting_repair_column_exists('inventory_opening_import_rows', 'raw_group')
     && accounting_repair_column_exists('inventory_opening_import_rows', 'proposed_code')
-    && accounting_repair_column_exists('inventory_opening_import_rows', 'stock_kind'),
-    'Opening import staging carries editable group, code, name and stock type fields');
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'stock_kind')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'stone_weight')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'diamond_weight')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'stone_amount')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'diamond_amount')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'making_amount'),
+    'Opening import staging carries classification and stone, diamond and making fields');
 ok(accounting_repair_column_exists('jewellery_order_assignments', 'stock_order_no')
     && accounting_repair_column_exists('jewellery_order_lines', 'stock_unit_id')
     && accounting_repair_column_exists('jewellery_sale_lines', 'stock_unit_id')

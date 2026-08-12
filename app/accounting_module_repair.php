@@ -3457,6 +3457,14 @@ function accounting_module_repair_database(): array
             '`diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `stone_amount`');
         accounting_repair_add_column('jewellery_stock_txns', 'making_amount',
             '`making_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_amount`');
+        // The amount columns below are positioned AFTER diamond_weight. Older
+        // databases created by migration 081 do not have either component
+        // weight yet, so create both prerequisites before referencing them.
+        // Each call is idempotent and also repairs partially applied schemas.
+        accounting_repair_add_column('inventory_opening_import_rows', 'stone_weight',
+            '`stone_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `gross_weight`');
+        accounting_repair_add_column('inventory_opening_import_rows', 'diamond_weight',
+            '`diamond_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `stone_weight`');
         accounting_repair_add_column('inventory_opening_import_rows', 'stone_amount',
             '`stone_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_weight`');
         accounting_repair_add_column('inventory_opening_import_rows', 'diamond_amount',

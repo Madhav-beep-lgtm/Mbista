@@ -347,6 +347,22 @@ $onHand = [];
 foreach ($items as $itemRow) {
     $onHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
 }
+$componentStmt = db()->prepare("SELECT item_id,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_weight ELSE -stone_weight END), 0) AS stone_weight,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_carat ELSE -stone_carat END), 0) AS stone_carat,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_carat ELSE -diamond_carat END), 0) AS diamond_carat,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_amount ELSE -stone_amount END), 0) AS stone_amount,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_amount ELSE -diamond_amount END), 0) AS diamond_amount
+    FROM jewellery_stock_txns
+    WHERE company_id = :cid AND holder_type = 'stock' AND txn_date <= :asof
+    GROUP BY item_id");
+$componentStmt->execute(['cid' => $companyId, 'asof' => date('Y-m-d')]);
+foreach ($componentStmt->fetchAll(PDO::FETCH_ASSOC) as $componentRow) {
+    $itemId = (int) $componentRow['item_id'];
+    if (isset($onHand[$itemId])) {
+        $onHand[$itemId] += $componentRow;
+    }
+}
 
 $partyStmt = db()->prepare('SELECT id, code, name, party_type FROM accounting_parties WHERE company_id = :cid AND status = \'active\' ORDER BY name ASC');
 $partyStmt->execute(['cid' => $companyId]);
@@ -665,6 +681,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $onHand,
         'head_actions' => $headActions,
         'stock_units' => $view === 'sales' && $prefix === 'l' ? $saleStockUnits : [],
+        'autofill_stock' => $view === 'sales' && $prefix === 'l',
     ]);
 };
 ?>

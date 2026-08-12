@@ -200,10 +200,10 @@ function export_print(string $title, array $rows, array $meta = [], array $optio
     echo '<!doctype html><html lang="en"><head><meta charset="utf-8">';
     echo '<meta name="viewport" content="width=device-width,initial-scale=1">';
     echo '<title>' . $esc($title) . '</title><style>';
-    echo 'body{font:13px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111;margin:24px;background:#fff}';
+    echo 'body{font:' . ($compact ? '10px/1.3' : '13px/1.45') . ' -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111;margin:24px;background:#fff}';
     echo 'h1{font-size:18px;margin:0 0 4px}.org{font-size:14px;font-weight:600;margin:0 0 2px}';
     echo '.meta{color:#555;font-size:12px;margin:0 0 14px}.meta span{margin-right:16px;white-space:nowrap}';
-    echo 'table{border-collapse:collapse;width:100%;' . ($compact ? 'table-layout:fixed;font-size:8px;line-height:1.2' : '') . '}';
+    echo 'table{border-collapse:collapse;width:100%;' . ($compact ? 'table-layout:auto;font-size:9px;line-height:1.25' : '') . '}';
     echo 'th,td{border:1px solid #bbb;padding:' . ($compact ? '3px 4px' : '5px 7px') . ';text-align:left;vertical-align:top;' . ($compact ? 'overflow-wrap:anywhere;word-break:normal' : '') . '}';
     echo 'th{background:#eee;font-weight:600}td.n,th.n{text-align:right;white-space:nowrap}';
     echo 'tbody tr:nth-child(even){background:#fafafa}';

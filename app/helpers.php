@@ -2463,6 +2463,12 @@ function backup_status_read(): array
  */
 function backup_health_warning(): ?string
 {
+    $requestHost = strtolower((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    $requestHost = preg_replace('/:\d+$/', '', $requestHost) ?: $requestHost;
+    if (in_array($requestHost, ['127.0.0.1', 'localhost', '::1'], true)) {
+        return null;
+    }
+
     // NOT A PRODUCTION SERVER, NOT A PRODUCTION PROBLEM.
     //
     // This guard used to sit inside the "never reported in" branch only, so a

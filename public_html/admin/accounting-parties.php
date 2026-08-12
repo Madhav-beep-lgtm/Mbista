@@ -1,15 +1,8 @@
 <?php
 declare(strict_types=1);
 
-// Export data is assembled later on this page, after the same calculations
-// used by the directory. Buffer any intervening layout so download/print
-// headers can still be sent cleanly, then discard that layout before export.
 $partyExportRequested = isset($_GET['export'])
     && in_array((string) $_GET['export'], ['csv', 'xlsx', 'print'], true);
-$partyExportBufferLevel = ob_get_level();
-if ($partyExportRequested) {
-    ob_start();
-}
 
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
@@ -1451,7 +1444,6 @@ if (isset($_GET['statement']) && $selectedParty) {
 }
 
 $bodyClass = 'admin-layout accounting-module-page accounting-reference-layout party-master-page';
-include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 $tabLinks = [
     'directory' => ['All Parties', parties_page_url(['tab' => 'directory', 'type' => null, 'page' => null])],
@@ -1618,9 +1610,6 @@ if (isset($_GET['export']) && in_array((string) $_GET['export'], ['csv', 'xlsx',
             (string) ($party['address'] ?? ''),
         ];
     }
-    while ($partyExportRequested && ob_get_level() > $partyExportBufferLevel) {
-        ob_end_clean();
-    }
     export_dispatch(
         (string) $_GET['export'],
         'party-master-' . date('Ymd'),
@@ -1630,6 +1619,10 @@ if (isset($_GET['export']) && in_array((string) $_GET['export'], ['csv', 'xlsx',
         ['landscape' => true, 'compact' => true]
     );
 }
+
+// Export responses have exited above. Only normal interactive requests may
+// now render the admin shell, so download headers can never follow page HTML.
+include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 $totalPages = max(1, (int) ceil($totalRows / $perPage));
 $page = min($page, $totalPages);

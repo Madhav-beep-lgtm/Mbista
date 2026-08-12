@@ -226,10 +226,14 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
     $karigars = $ctx['karigars'] ?? null;
     $withWorkshop = is_array($karigars);
     $stockUnits = is_array($ctx['stock_units'] ?? null) ? $ctx['stock_units'] : [];
+    $autofillStock = !empty($ctx['autofill_stock']);
     ?>
     <?php $full = $prefix === 'l'; ?>
-    <fieldset class="jw-lines-box" style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:12px 0;min-width:0">
+    <fieldset class="jw-lines-box"<?= $autofillStock ? ' data-autofill-stock="1"' : '' ?> style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:12px 0;min-width:0">
         <legend style="padding:0 6px;font-weight:600"><?= $legend ?></legend>
+        <?php if ($autofillStock): ?>
+            <script type="application/json" class="jw-stock-data"><?= json_encode($onHand, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
+        <?php endif; ?>
         <?php
             // Controls that belong to this grid — load a template, import a
             // sheet — sit on its own header rather than loose on the page, so
@@ -531,6 +535,34 @@ function jw_line_grid_scripts(): void
             var itemRow = item.closest("tr");
             var traceSelect = itemRow && itemRow.querySelector(".jw-trace-select");
             if (traceSelect) { traceSelect.value = "0"; }
+            var grid = item.closest('.jw-lines-box[data-autofill-stock="1"]');
+            var dataNode = grid && grid.querySelector('.jw-stock-data');
+            if (!grid || !dataNode || !itemRow || !item.value || item.value === "0") { return; }
+            var stock = {};
+            try { stock = JSON.parse(dataNode.textContent || "{}")[item.value] || {}; } catch (ignore) { return; }
+            var selected = item.options[item.selectedIndex];
+            function fillSelect(suffix, value) {
+                var field = itemRow.querySelector('select[name$="' + suffix + '[]"]');
+                if (field) { field.value = value || "0"; field.dispatchEvent(new Event("change", {bubbles:true})); }
+            }
+            function fillInput(suffix, value) {
+                var field = itemRow.querySelector('input[name$="' + suffix + '[]"]');
+                if (field) {
+                    field.value = value === undefined || value === null || value === "" ? "0" : value;
+                    field.dispatchEvent(new Event("input", {bubbles:true}));
+                }
+            }
+            fillSelect("_purity_id", selected && selected.dataset.purity);
+            fillSelect("_unit_id", selected && selected.dataset.unit);
+            fillInput("_qty_pieces", stock.qty_pieces);
+            fillInput("_gross_weight", stock.gross_weight);
+            fillInput("_stone_weight", stock.stone_weight);
+            fillInput("_stone_carat", stock.stone_carat);
+            fillInput("_diamond_carat", stock.diamond_carat);
+            fillInput("_stone_amount", stock.stone_amount);
+            fillInput("_diamond_amount", stock.diamond_amount);
+            fillInput("_other_diamond_carat", "0");
+            fillInput("_other_diamond_amount", "0");
         }
     });
 
