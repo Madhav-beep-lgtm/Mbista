@@ -131,6 +131,16 @@ function accounting_module_missing_tables(): array
 
 function accounting_module_repair_database(): array
 {
+    // Schema repair is a deployment task, not request-time application work.
+    // Running this large collection of information_schema checks and DDL
+    // guards on every page added about one second to authenticated requests.
+    // The deployment script invokes this function through PHP CLI after the
+    // new application files have been copied. Keep the web calls as harmless
+    // no-ops for backwards compatibility with pages that still include it.
+    if (PHP_SAPI !== 'cli') {
+        return [];
+    }
+
     $errors = [];
     $run = static function (string $label, callable $callback) use (&$errors): void {
         try {
