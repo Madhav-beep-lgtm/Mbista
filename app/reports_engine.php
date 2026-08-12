@@ -42,6 +42,7 @@ function rc_report_registry(): array
         'service-charge-report' => ['Service Charge Allocation', 'Declared totals, 68% employee pool, 32% employer share and per-employee distribution', 'handshake'],
         'payroll-posting' => ['Payroll Posting Report', 'Component-to-ledger accounting detail behind each payroll voucher', 'reconcile'],
         'financial-ratios' => ['Financial Ratios', 'Key financial ratios analysis', 'dashboard'],
+        'jewellery-aml-register' => ['Jewellery AML / goAML Register', 'TTR, STR and SAR compliance review register', 'compliance'],
     ];
 }
 
@@ -417,6 +418,31 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
     $ctx += ['vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => 'all', 'dims' => [],
              'company_id' => $scopeCompanyId, 'company_name' => '', 'subsidiaries' => []];
     switch ($reportId) {
+        case 'jewellery-aml-register': {
+            require_once __DIR__ . '/jewellery_aml.php';
+            if (jw_aml_ready()) {
+                jw_aml_scan($scopeCompanyId, $from, $to, 0);
+            }
+            $cases = jw_aml_cases($scopeCompanyId, $from, $to);
+            $rows = [];
+            $amount = 0.0;
+            foreach ($cases as $case) {
+                $amount += (float) $case['aggregate_amount'];
+                $rows[] = rc_row([
+                    '#' . $case['id'], $case['case_type'], app_date((string) $case['case_date']),
+                    $case['due_on'] ? app_date((string) $case['due_on']) : 'Review promptly',
+                    $case['party_name'], $case['rule_code'], (string) $case['transaction_count'],
+                    rc_fmt((float) $case['aggregate_amount']), (string) $case['risk_score'],
+                    ucwords(str_replace('_', ' ', (string) $case['status'])),
+                ]);
+            }
+            return [
+                'number' => 'AML-1', 'title' => 'Jewellery AML / goAML Register',
+                'subtitle' => 'Automatically detected FIU-Nepal reporting candidates. STR/SAR rows remain subject to compliance-officer review.',
+                'columns' => [['Case','left',''],['Type','left',''],['Date','left',''],['Due','left',''],['Customer','left',''],['Rule','left',''],['Txns','right',''],['Amount','right',''],['Risk','right',''],['Status','left','']],
+                'rows' => $rows, 'totals' => ['', 'Total', '', '', '', '', (string) array_sum(array_map(static fn($c)=>(int)$c['transaction_count'],$cases)), rc_fmt($amount), '', ''],
+            ];
+        }
         case 'trial-balance': {
             $balances = rc_ledger_balances($scopeCompanyId, $from, $to, (string) $ctx['vtype'], (int) $ctx['group_id'], (int) $ctx['ledger_id'], (array) ($ctx['dims'] ?? []), rc_ctx_fy_start($ctx));
             // Master -> Group -> Ledger hierarchy in natural chart order.
