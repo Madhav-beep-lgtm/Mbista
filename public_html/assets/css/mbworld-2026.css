@@ -2020,3 +2020,28 @@ body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar :is(input,sele
 body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar-search button{background:#08775b!important;color:#fff!important;border-color:#08775b!important}
 body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-sidebar::-webkit-scrollbar-track{background:#edf5f1!important}
 body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-sidebar::-webkit-scrollbar-thumb{background:#8eb9a7!important;border-color:#edf5f1!important}
+
+/* Component-level contrast matrix -----------------------------------------
+   KPI tiles and module tabs use their own foreground declarations, so they
+   must be mapped explicitly instead of depending on card inheritance. */
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-tabbar{background:#fff!important;border-color:#cfe0d7!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-tab{color:#08775b!important;-webkit-text-fill-color:#08775b!important;opacity:1!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-tab :is(span,strong,small),body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-tab .ui-icon{color:inherit!important;-webkit-text-fill-color:inherit!important;opacity:1!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-tab.is-active{background:#08634a!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:#08634a!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-kpi{border-color:#cfe0d7!important;color:#173a2f!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-kpi :is(.mbw-kpi-label,.mbw-kpi-value,strong,span){color:#173a2f!important;-webkit-text-fill-color:#173a2f!important;opacity:1!important}
+
+body.admin-layout.theme-dark .admin-content .mbw-tabbar,body.admin-layout.admin-dark .admin-content .mbw-tabbar{background:#0d1815!important;border:1px solid rgba(255,255,255,.45)!important}
+body.admin-layout.theme-dark .admin-content .mbw-tab,body.admin-layout.admin-dark .admin-content .mbw-tab{color:#c9eee0!important;-webkit-text-fill-color:#c9eee0!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content .mbw-tab :is(span,strong,small),body.admin-layout.theme-dark .admin-content .mbw-tab .ui-icon,
+body.admin-layout.admin-dark .admin-content .mbw-tab :is(span,strong,small),body.admin-layout.admin-dark .admin-content .mbw-tab .ui-icon{color:inherit!important;-webkit-text-fill-color:inherit!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content .mbw-tab:hover,body.admin-layout.admin-dark .admin-content .mbw-tab:hover{background:#16271f!important;color:#fff!important;-webkit-text-fill-color:#fff!important}
+body.admin-layout.theme-dark .admin-content .mbw-tab.is-active,body.admin-layout.admin-dark .admin-content .mbw-tab.is-active{background:#08775b!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:#50c99b!important}
+body.admin-layout.theme-dark .admin-content .mbw-kpi,body.admin-layout.admin-dark .admin-content .mbw-kpi{border-color:rgba(255,255,255,.52)!important;color:#fff!important;box-shadow:0 0 0 1px rgba(255,255,255,.06)!important}
+body.admin-layout.theme-dark .admin-content .mbw-kpi :is(.mbw-kpi-label,.mbw-kpi-value,.mbw-kpi-delta,strong,span),
+body.admin-layout.admin-dark .admin-content .mbw-kpi :is(.mbw-kpi-label,.mbw-kpi-value,.mbw-kpi-delta,strong,span){color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content .mbw-chip,body.admin-layout.admin-dark .admin-content .mbw-chip{border:1px solid rgba(255,255,255,.32)!important}
+body.admin-layout.theme-dark .admin-content .mbw-chip .ui-icon,body.admin-layout.admin-dark .admin-content .mbw-chip .ui-icon{color:currentColor!important;stroke:currentColor!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content .mbw-pill.tone-green,body.admin-layout.admin-dark .admin-content .mbw-pill.tone-green{background:#123a2e!important;color:#b9f4dc!important;-webkit-text-fill-color:#b9f4dc!important}
+body.admin-layout.theme-dark .admin-content .mbw-pill.tone-gray,body.admin-layout.admin-dark .admin-content .mbw-pill.tone-gray{background:#24342e!important;color:#e1ebe6!important;-webkit-text-fill-color:#e1ebe6!important}
+body.admin-layout.theme-dark .admin-content .mbw-pill.tone-amber,body.admin-layout.admin-dark .admin-content .mbw-pill.tone-amber{background:#493711!important;color:#ffd77f!important;-webkit-text-fill-color:#ffd77f!important}
