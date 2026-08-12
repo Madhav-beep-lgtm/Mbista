@@ -963,8 +963,7 @@ jw_filter_bar_styles();
         <?php if ($orderAdvances['rows'] !== []): ?>
         <style>
         .jw-order-action-select{min-height:32px;min-width:145px;padding:3px 28px 3px 8px}
-        .jw-order-postpone{display:none!important;margin-top:6px}.jw-order-postpone.is-open{display:inline-flex!important}
-.jw-order-legacy-action{display:inline}.jw-order-legacy-action>a,.jw-order-legacy-action>button,.jw-order-legacy-action>form{display:none!important}
+        .jw-order-postpone{margin-top:6px}
         </style>
         <div class="mbw-tablewrap"><table>
             <thead><tr><th>Date</th><th>Ref</th><th>What</th><th class="is-numeric">Weight</th><th class="is-numeric">Value</th></tr></thead>
@@ -1083,27 +1082,18 @@ jw_filter_bar_styles();
                         <td><?= ($row['delivery_date'] ?? null) ? e(app_date((string) $row['delivery_date'])) : '—' ?></td>
                         <td><span class="mbw-pill <?= e($statusTone[$row['status']] ?? 'tone-gray') ?>"><?= e($statusLabel((string) $row['status'])) ?></span></td>
                         <td style="white-space:nowrap">
-                            <select class="jw-order-action-select" aria-label="Order actions">
+                            <select class="jw-order-action-select" aria-label="Order actions"
+                                    data-edit-url="<?= $canEdit ? e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) : '' ?>"
+                                    data-preview-url="<?= $canEdit ? e(url('admin/jewellery-print.php?doc=order&id=' . (int) $row['id'])) : '' ?>"
+                                    data-assign-url="<?= in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost ? e(url('admin/jewellery-assign.php?kind=customer&order=' . (int) $row['id'])) : '' ?>">
                                 <option value="">Select action</option>
                                 <?php if ($canEdit): ?><option value="edit">Edit</option><option value="preview">Preview</option><?php endif; ?>
                                 <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?><option value="assign">Assign</option><?php endif; ?>
                                 <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?><option value="postpone">Postpone</option><option value="cancel">Cancel</option><?php endif; ?>
                                 <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?><option value="delete">Delete</option><?php endif; ?>
                             </select>
-                            <div class="jw-order-legacy-action">
-                            <?php if ($canEdit): ?>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) ?>">Edit</a>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=order&id=' . (int) $row['id'])) ?>">Preview</a>
-                            <?php endif; ?>
-                            <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?>
-                                <?php // Assigning is its own page. The order rides along so
-                                      // the grid opens with this one already picked — the
-                                      // reason somebody pressed Assign on THIS row. ?>
-                                <a class="button secondary" style="min-height:30px;padding:3px 10px"
-                                   href="<?= e(url('admin/jewellery-assign.php?kind=customer&order=' . (int) $row['id'])) ?>">Assign</a>
-                            <?php endif; ?>
                             <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?>
-                                <form method="post" class="jw-order-postpone" style="display:inline-flex;gap:4px;align-items:center">
+                                <form method="post" class="jw-order-postpone" hidden style="display:none;gap:4px;align-items:center;margin-top:5px">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="postpone_order">
                                     <input type="hidden" name="back_view" value="orders">
@@ -1111,36 +1101,25 @@ jw_filter_bar_styles();
                                     <input type="date" name="delivery_date" required
                                            value="<?= e((string) ($row['delivery_date'] ?? '')) ?>"
                                            style="min-height:30px;padding:2px 6px;max-width:140px">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Postpone</button>
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Confirm</button>
                                 </form>
-                                <form method="post" class="jw-order-cancel" style="display:inline"
+                                <form method="post" class="jw-order-cancel" hidden
                                       onsubmit="return confirm('Cancel order <?= e((string) $row['order_no']) ?>?')">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="cancel_order">
                                     <input type="hidden" name="back_view" value="orders">
                                     <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px" title="Cancel this order">Cancel</button>
                                 </form>
                             <?php endif; ?>
                             <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?>
-                                <form method="post" class="jw-order-delete" style="display:inline"
+                                <form method="post" class="jw-order-delete" hidden
                                       onsubmit="return confirm('Delete order <?= e((string) $row['order_no']) ?> for good?')">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="delete_order">
                                     <input type="hidden" name="back_view" value="orders">
                                     <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:var(--mbw-red,#e5484d)" title="Delete this order">&times;</button>
                                 </form>
-                            <?php elseif ($canEdit): ?>
-                                <?php // The button is HERE, and it says why it will not fire. An
-                                      // order that reached the workshop or the customer is a
-                                      // financial record — its metal moved, its bill posted.
-                                      // The road back is cancel / unpost, never deletion. ?>
-                                <button type="button" class="button soft" disabled
-                                        style="min-height:30px;padding:3px 8px;opacity:.45;cursor:not-allowed"
-                                        title="A <?= e(str_replace('_', ' ', (string) $row['status'])) ?> order is a financial record — metal and money moved against it. Cancel or unpost the documents instead; deletion is not allowed.">&times;</button>
                             <?php endif; ?>
-                            </div>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -1150,15 +1129,17 @@ jw_filter_bar_styles();
         (function(){
             document.querySelectorAll('.jw-order-action-select').forEach(function(select){
                 select.addEventListener('change', function(){
-                    var legacy = select.parentElement.querySelector('.jw-order-legacy-action');
-                    var links = legacy ? Array.from(legacy.querySelectorAll('a')) : [];
-                    var postpone = legacy && legacy.querySelector('.jw-order-postpone');
-                    if (postpone) { postpone.classList.toggle('is-open', select.value === 'postpone'); }
-                    if (select.value === 'edit' && links[0]) window.location.href = links[0].href;
-                    if (select.value === 'preview' && links[1]) { window.open(links[1].href, '_blank', 'noopener'); select.value = ''; }
-                    if (select.value === 'assign') { var a = links.find(function(x){return x.textContent.trim()==='Assign';}); if(a) window.location.href=a.href; }
-                    if (select.value === 'cancel') { var c=legacy.querySelector('.jw-order-cancel'); if(c)c.requestSubmit(); }
-                    if (select.value === 'delete') { var d=legacy.querySelector('.jw-order-delete'); if(d)d.requestSubmit(); }
+                    var cell = select.closest('td');
+                    var postpone = cell.querySelector('.jw-order-postpone');
+                    if (postpone) {
+                        postpone.hidden = select.value !== 'postpone';
+                        postpone.style.display = select.value === 'postpone' ? 'inline-flex' : 'none';
+                    }
+                    if (select.value === 'edit' && select.dataset.editUrl) window.location.href = select.dataset.editUrl;
+                    if (select.value === 'preview' && select.dataset.previewUrl) { window.open(select.dataset.previewUrl, '_blank', 'noopener'); select.value = ''; }
+                    if (select.value === 'assign' && select.dataset.assignUrl) window.location.href = select.dataset.assignUrl;
+                    if (select.value === 'cancel') { var c=cell.querySelector('.jw-order-cancel'); if(c)c.requestSubmit(); }
+                    if (select.value === 'delete') { var d=cell.querySelector('.jw-order-delete'); if(d)d.requestSubmit(); }
                 });
             });
         })();
