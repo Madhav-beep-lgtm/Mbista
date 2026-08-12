@@ -1371,7 +1371,7 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
         if (abs($gross) < 0.00005 && abs($amount) < 0.005) {
             continue;
         }
-        $txn = db()->prepare("SELECT id, voucher_id, stone_weight, stone_carat, diamond_carat, stone_amount, diamond_amount, making_amount, fine_weight FROM jewellery_stock_txns
+        $txn = db()->prepare("SELECT id, voucher_id, qty_pieces, stone_weight, stone_carat, diamond_carat, stone_amount, diamond_amount, making_amount, fine_weight FROM jewellery_stock_txns
             WHERE company_id = :cid AND item_id = :iid AND txn_type = 'opening' LIMIT 1");
         $txn->execute(['cid' => $companyId, 'iid' => (int) $item['id']]);
         $txnRow = $txn->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -1384,6 +1384,7 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
         $rows[] = [
             'as_on' => $asOn,
             'gross_weight' => $gross,
+            'qty_pieces' => (float) ($txnRow['qty_pieces'] ?? 0),
             'stone_carat' => (float) ($txnRow['stone_carat'] ?? 0),
             'diamond_carat' => (float) ($txnRow['diamond_carat'] ?? 0),
             'stone_amount' => (float) ($txnRow['stone_amount'] ?? 0),

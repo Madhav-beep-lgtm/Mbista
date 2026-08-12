@@ -662,17 +662,6 @@ $partyStmt = db()->prepare($partySql);
 $partyStmt->execute(['company_id' => $companyId]);
 $parties = $partyStmt->fetchAll();
 
-if (isset($_GET['export']) && in_array((string) $_GET['export'], ['csv', 'xlsx', 'print'], true)) {
-    require_permission('accounting', 'export');
-    $exportRows = [['Code', 'Name', 'Type', 'Phone', 'Email', 'PAN / VAT', 'Address', 'Status']];
-    foreach ($parties as $party) {
-        $exportRows[] = [(string) $party['code'], (string) $party['name'], (string) $party['party_type'],
-            (string) ($party['phone'] ?? ''), (string) ($party['email'] ?? ''), (string) ($party['pan_vat'] ?? ''),
-            (string) ($party['address'] ?? ''), (string) $party['status']];
-    }
-    export_dispatch((string) $_GET['export'], 'party-master-' . date('Ymd'), $exportRows, 'Party Master');
-}
-
 // Repair each active Party Master once from its classification. This adopts
 // existing ledgers into the canonical groups and creates only a missing primary
 // receivable/payable ledger; advance ledgers remain demand-driven.
@@ -1576,6 +1565,51 @@ $activeRows = match ($tab) {
     'unlinked' => $unlinkedRows,
     default => $directoryRows,
 };$totalRows = count($activeRows);
+
+// Party Master exports mirror the complete directory table, not the earlier
+// basic-contact-only list. Export all matching directory rows (not just the
+// currently paged rows) so Excel, CSV and PDF are useful working reports.
+if (isset($_GET['export']) && in_array((string) $_GET['export'], ['csv', 'xlsx', 'print'], true)) {
+    require_permission('accounting', 'export');
+    $exportRows = [[
+        'Party', 'Code', 'Classification', 'Phone', 'Email', 'PAN / VAT',
+        'Receivable Ledger', 'Receivable Balance', 'Payable Ledger', 'Payable Balance',
+        'Customer Advance Ledger', 'Customer Advance Balance',
+        'Supplier Advance Ledger', 'Supplier Advance Balance',
+        'Jewellery Activity', 'Outstanding', 'Link Status', 'Record Status', 'Address',
+    ]];
+    foreach ($activeRows as $party) {
+        $netBalance = (float) ($party['_net_balance'] ?? 0);
+        $balanceText = static fn (float $amount): string => number_format(abs($amount), 2)
+            . ($amount > 0.004 ? ' Dr' : ($amount < -0.004 ? ' Cr' : ' Settled'));
+        $linkStatus = !empty($party['_duplicate']) ? 'Possible duplicate'
+            : ((string) ($party['_link_status'] ?? 'unlinked') === 'linked' ? 'Linked' : 'Review link');
+        $jewelleryItems = (int) ($party['_jewellery_items'] ?? 0);
+        $exportRows[] = [
+            (string) ($party['name'] ?? ''),
+            (string) ($party['code'] ?? ''),
+            (string) ($party['party_type'] ?? ''),
+            (string) ($party['phone'] ?? ''),
+            (string) ($party['email'] ?? ''),
+            (string) (($party['pan_no'] ?? '') ?: ($party['pan_vat'] ?? '')),
+            (string) (($party['ledger_code'] ?? '') ?: '—'),
+            $balanceText((float) ($party['_receivable_balance'] ?? 0)),
+            (string) (($party['payable_ledger_code'] ?? '') ?: '—'),
+            $balanceText((float) ($party['_payable_balance'] ?? 0)),
+            (string) (($party['advance_ledger_code'] ?? '') ?: '—'),
+            $balanceText((float) ($party['_advance_balance'] ?? 0)),
+            (string) (($party['supplier_advance_ledger_code'] ?? '') ?: '—'),
+            $balanceText((float) ($party['_supplier_advance_balance'] ?? 0)),
+            $jewelleryItems > 0 ? $jewelleryItems . ' items — Sales and purchases' : 'No activity',
+            $balanceText($netBalance),
+            $linkStatus,
+            (string) ($party['status'] ?? ''),
+            (string) ($party['address'] ?? ''),
+        ];
+    }
+    export_dispatch((string) $_GET['export'], 'party-master-' . date('Ymd'), $exportRows, 'Party Master');
+}
+
 $totalPages = max(1, (int) ceil($totalRows / $perPage));
 $page = min($page, $totalPages);
 $pagedRows = array_slice($activeRows, ($page - 1) * $perPage, $perPage);
@@ -1666,9 +1700,6 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
 ?>
 <div class="reference-toolbar">
     <div class="reference-toolbar-actions">
-        <a class="button secondary" href="<?= e(parties_page_url(['export' => 'xlsx'])) ?>">Excel</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['export' => 'csv'])) ?>">CSV</a>
-        <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['export' => 'print'])) ?>">PDF</a>
         <a class="button<?= $primaryAction === 'invoice' ? '' : ' secondary' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Create Invoice</a>
         <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'payment', 'edit_id' => null])) ?>"><?= icon('receipt-voucher') ?>Record Payment</a>
         <a class="button<?= $primaryAction === 'purchase' ? '' : ' secondary' ?>" href="<?= e(parties_page_url(['panel' => 'purchase', 'edit_id' => null])) ?>"><?= icon('cart') ?>Record Purchase</a>
@@ -1915,7 +1946,14 @@ $tabHeadings = [
     <main id="documents" class="mbw-card reference-table-card">
         <div class="mbw-card-head">
             <h2><?= e($tabHeadings[$tab] ?? 'Documents') ?></h2>
-            <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=party-wise')) ?>">Aging Report</a></div>
+            <div class="mbw-card-tools">
+                <?php if (in_array($tab, $partyDirectoryTabs, true)): ?>
+                    <a class="button secondary" href="<?= e(parties_page_url(['export' => 'xlsx'])) ?>">Excel</a>
+                    <a class="button secondary" href="<?= e(parties_page_url(['export' => 'csv'])) ?>">CSV</a>
+                    <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['export' => 'print'])) ?>">PDF</a>
+                <?php endif; ?>
+                <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=party-wise')) ?>">Aging Report</a>
+            </div>
         </div>
         <?php if ($tab === 'sales'): ?>
             <div class="reference-bulk-bar" id="invoice-bulk-bar" style="display:none;align-items:center;gap:10px;margin:0 0 10px;padding:8px 12px;border:1px solid var(--mbw-border,#dcebf5);border-radius:9px;background:var(--mbw-primary-soft,#e0f2fe)">

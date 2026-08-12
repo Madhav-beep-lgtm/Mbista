@@ -846,7 +846,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $defaultMetalId = (int) ($settings['default_metal_id'] ?? 0);
     ?>
     <?php if ($canEdit): ?>
-    <section id="record-opening-stock" class="mbw-card" data-collapsible data-draggable>
+    <section class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head"><h2>Quote a Rate</h2></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1578,9 +1578,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php endif; ?>
 
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-collapsible data-draggable>
+    <section id="record-opening-stock" class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head"><h2>Record Opening Stock</h2></div>
-        <form method="post" class="workspace-form-grid">
+        <form id="opening-stock-form" method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_opening">
             <input type="hidden" name="back_view" value="opening">
@@ -1612,7 +1612,10 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label>Opening value (<?= e($sym) ?>)<input type="number" name="amount" step="0.01" min="0" value="0"></label>
             <label>Customer name<input type="text" name="customer_name" maxlength="190"></label>
             <label>Order number<input type="text" name="order_number" maxlength="120"></label>
-            <div style="grid-column:1/-1"><button type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save &amp; Post</button></div>
+            <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center">
+                <button id="opening-stock-submit" type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save &amp; Post</button>
+                <button id="opening-stock-cancel-edit" type="button" class="button soft" hidden>Cancel edit</button>
+            </div>
         </form>
         <script>
         (function () {
@@ -1673,14 +1676,15 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <?php
                     $col = 0;
                     if ($canEdit) { echo '<th></th>'; $col++; }
-                    // Item
-                    echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
+                    // Use specific prompts/dropdowns so it is clear what each
+                    // filter does, rather than presenting several identical boxes.
+                    echo '<th><input type="search" placeholder="Item / code" aria-label="Filter by item or code" style="width:100%" data-col="' . $col . '"></th>'; $col++;
                     // Stock group
-                    echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
+                    echo '<th><input type="search" placeholder="Stock group" aria-label="Filter by stock group" style="width:100%" data-col="' . $col . '"></th>'; $col++;
                     // Stock type
-                    echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
+                    echo '<th><select aria-label="Filter by stock type" style="width:100%" data-col="' . $col . '"><option value="">All types</option><option value="Showroom">Showroom</option><option value="Customer Ordered">Customer ordered</option></select></th>'; $col++;
                     // Purity
-                    echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
+                    echo '<th><input type="search" placeholder="Purity" aria-label="Filter by purity" style="width:100%" data-col="' . $col . '"></th>'; $col++;
                     // Gross
                     echo '<th></th>'; $col++;
                     // Stone and diamond are numeric columns.
@@ -1697,8 +1701,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     // Value
                     echo '<th></th>'; $col++;
                     // Posted
-                    echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
-                    if ($canEdit) { echo '<th></th>'; }
+                    echo '<th><select aria-label="Filter by posting status" style="width:100%" data-col="' . $col . '"><option value="">All statuses</option><option value="Posted">Posted</option><option value="Weight only">Weight only</option><option value="Not in stock">Not in stock</option></select></th>'; $col++;
+                    if ($canEdit) { echo '<th><button type="button" class="button soft jw-filter-clear" title="Clear all filters" aria-label="Clear all filters" style="min-height:30px;padding:3px 8px">' . icon('x') . '</button></th>'; }
                     ?>
                 </tr>
             </thead>
@@ -1733,6 +1737,21 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         <?php if ($canEdit): ?>
                         <td style="white-space:nowrap;display:flex;gap:6px;align-items:center">
                             <a class="button soft" href="#record-opening-stock" title="Add another opening stock item" aria-label="Add opening stock" style="min-height:30px;padding:3px 8px"><?= icon('plus') ?></a>
+                            <button type="button" class="button soft jw-opening-edit" title="Edit opening stock" aria-label="Edit opening stock" style="min-height:30px;padding:3px 8px"
+                                data-item-id="<?= (int) $row['id'] ?>"
+                                data-pieces="<?= e((string) ($row['qty_pieces'] ?? 0)) ?>"
+                                data-stock-kind="<?= e((string) ($row['stock_kind'] ?? 'showroom')) ?>"
+                                data-stock-group="<?= e((string) ($row['category'] ?? '')) ?>"
+                                data-gross="<?= e((string) $row['gross_weight']) ?>"
+                                data-stone-carat="<?= e((string) ($row['stone_carat'] ?? 0)) ?>"
+                                data-diamond-carat="<?= e((string) ($row['diamond_carat'] ?? 0)) ?>"
+                                data-stone-amount="<?= e((string) ($row['stone_amount'] ?? 0)) ?>"
+                                data-diamond-amount="<?= e((string) ($row['diamond_amount'] ?? 0)) ?>"
+                                data-making-amount="<?= e((string) ($row['making_amount'] ?? 0)) ?>"
+                                data-rate="<?= e((string) ($row['rate'] ?? 0)) ?>"
+                                data-amount="<?= e((string) ($row['amount'] ?? 0)) ?>"
+                                data-customer-name="<?= e((string) ($row['customer_name'] ?? '')) ?>"
+                                data-order-number="<?= e((string) ($row['customer_order_no'] ?? '')) ?>"><?= icon('edit') ?></button>
                             <form method="post" data-confirm="Clear this opening stock? Its voucher and metal movement will be removed.">
                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                 <input type="hidden" name="action" value="clear_opening">
@@ -1758,7 +1777,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             if (!openingSection || !openingSection.h) { return; }
             var section = openingSection.h.closest('section'); if (!section) { return; }
             var table = section.querySelector('table'); if (!table) { return; }
-            var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row input[type="search"]'));
+            var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row [data-col]'));
             if (!inputs.length) { return; }
             function apply() {
                 var rows = Array.from(table.querySelectorAll('tbody tr'));
@@ -1781,10 +1800,74 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     else if (inp.getAttribute('data-col')) inp.dataset.colIndex = inp.getAttribute('data-col');
                 }
                 inp.addEventListener('input', apply);
+                inp.addEventListener('change', apply);
             });
+            var clear = table.querySelector('.jw-filter-clear');
+            if (clear) {
+                clear.addEventListener('click', function () {
+                    inputs.forEach(function (inp) { inp.value = ''; });
+                    apply();
+                });
+            }
             window.jwApplyFilters = apply;
         }
         if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachOpeningFilters); } else { attachOpeningFilters(); }
+    })();
+    </script>
+
+    <script>
+    // Editing reuses the opening form: saving replaces this item's prior
+    // opening voucher and metal movement, so it never duplicates stock.
+    (function () {
+        function attachOpeningEdit() {
+            var form = document.getElementById('opening-stock-form');
+            if (!form) { return; }
+            var submit = document.getElementById('opening-stock-submit');
+            var cancel = document.getElementById('opening-stock-cancel-edit');
+            var original = new FormData(form);
+            function setValue(name, value) {
+                var input = form.querySelector('[name="' + name + '"]');
+                if (input) { input.value = value == null ? '' : value; }
+            }
+            function updateNet() {
+                ['gross_weight', 'stone_carat', 'diamond_carat'].forEach(function (name) {
+                    var input = form.querySelector('[name="' + name + '"]');
+                    if (input) { input.dispatchEvent(new Event('input', {bubbles:true})); }
+                });
+            }
+            document.querySelectorAll('.jw-opening-edit').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    var data = button.dataset;
+                    setValue('item_id', data.itemId);
+                    setValue('qty_pieces', data.pieces);
+                    setValue('stock_kind', data.stockKind);
+                    setValue('stock_group', data.stockGroup);
+                    setValue('gross_weight', data.gross);
+                    setValue('stone_carat', data.stoneCarat);
+                    setValue('diamond_carat', data.diamondCarat);
+                    setValue('stone_amount', data.stoneAmount);
+                    setValue('diamond_amount', data.diamondAmount);
+                    setValue('making_amount', data.makingAmount);
+                    setValue('rate', data.rate);
+                    setValue('amount', data.amount);
+                    setValue('customer_name', data.customerName);
+                    setValue('order_number', data.orderNumber);
+                    updateNet();
+                    if (submit) { submit.textContent = 'Update & Post'; }
+                    if (cancel) { cancel.hidden = false; }
+                    form.closest('section').scrollIntoView({behavior: 'smooth', block: 'start'});
+                });
+            });
+            if (cancel) {
+                cancel.addEventListener('click', function () {
+                    original.forEach(function (value, name) { setValue(name, value); });
+                    updateNet();
+                    if (submit) { submit.textContent = 'Save & Post'; }
+                    cancel.hidden = true;
+                });
+            }
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachOpeningEdit); } else { attachOpeningEdit(); }
     })();
     </script>
 
