@@ -1968,3 +1968,21 @@ body.admin-layout.theme-dark .admin-content :is(input,textarea)::placeholder,bod
 body.admin-layout.theme-dark .admin-content :is(input,select,textarea):disabled,body.admin-layout.admin-dark .admin-content :is(input,select,textarea):disabled{background:#16271f!important;color:#b0c2ba!important;-webkit-text-fill-color:#b0c2ba!important;opacity:1!important}
 body.admin-layout.theme-dark .admin-content :is(button,.button,input[type=submit]),body.admin-layout.admin-dark .admin-content :is(button,.button,input[type=submit]){color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important}
 body.admin-layout.theme-dark .admin-content :is(.mbw-pill.tone-amber,.badge.warning,.status-pending),body.admin-layout.admin-dark .admin-content :is(.mbw-pill.tone-amber,.badge.warning,.status-pending){color:#f0bd62!important;-webkit-text-fill-color:#f0bd62!important}
+
+/* Keep dark cards intact: improve separation with a light outline and make all
+   ordinary dashboard/table copy white. Status pills and action links retain
+   their semantic accent colours. */
+body.admin-layout.theme-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section),
+body.admin-layout.admin-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section){border-color:rgba(255,255,255,.48)!important;box-shadow:0 0 0 1px rgba(255,255,255,.07),0 10px 28px rgba(0,0,0,.24)!important}
+body.admin-layout.theme-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section,table) :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,li,dt,dd,th,td,label,legend),
+body.admin-layout.admin-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section,table) :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,li,dt,dd,th,td,label,legend){color:#f4faf7!important;-webkit-text-fill-color:#f4faf7!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content table :is(th,td),body.admin-layout.admin-dark .admin-content table :is(th,td){border-color:rgba(255,255,255,.48)!important}
+body.admin-layout.theme-dark .admin-content :is(a,.mbw-view-all,.ov-view-all),body.admin-layout.admin-dark .admin-content :is(a,.mbw-view-all,.ov-view-all){color:#65d6a8!important;-webkit-text-fill-color:#65d6a8!important}
+body.admin-layout.theme-dark .admin-content :is(.badge,.tag,.mbw-pill,[class*="status-"]),body.admin-layout.admin-dark .admin-content :is(.badge,.tag,.mbw-pill,[class*="status-"]){-webkit-text-fill-color:currentColor!important}
+
+/* The light account popup sits inside a green topbar whose global rule makes
+   every descendant white. Override the descendants, not the card surface. */
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-dropdown :is(a,span,strong,small,p){color:#173a2f!important;-webkit-text-fill-color:#173a2f!important;opacity:1!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-dropdown a>span>small{color:#6d857b!important;-webkit-text-fill-color:#6d857b!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-dropdown>a:hover :is(span,strong,small){color:#08775b!important;-webkit-text-fill-color:#08775b!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-dropdown>a.is-logout :is(span,strong,small),body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-dropdown>a.is-logout{color:#b42318!important;-webkit-text-fill-color:#b42318!important}
