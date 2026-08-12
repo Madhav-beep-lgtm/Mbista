@@ -1290,16 +1290,16 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 <?php endif; ?>
 
 <script>
-// Picking a customer reloads the sale form with their open orders listed, so
-// somebody collecting a finished piece is recognised at the counter rather than
-// having to be asked which order it was.
+// Picking a customer must not navigate away from the sale currently being
+// prepared. A redirect to `for_party` re-rendered the order panel and moved the
+// summary card below the form, losing the counter user's current context. The
+// selected party is already posted with the sale; order collection remains an
+// explicit action through the order links instead.
 document.addEventListener("change", function (event) {
     var select = event.target.closest("#jw-sale-party");
     if (!select) { return; }
-    var base = select.getAttribute("data-orders-url") || "";
     var party = parseInt(select.value, 10) || 0;
-    if (!base) { return; }
-    window.location.href = base + (party > 0 ? "&for_party=" + party : "");
+    select.closest("form").setAttribute("data-selected-party", String(party));
 });
 
 // The advance picker: the running total of what the user has chosen to apply,
