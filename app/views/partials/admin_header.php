@@ -249,6 +249,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <?php /* Last on purpose: the 2026 appearance layer restates the tokens the
              four sheets above each define, so it must have the final word. */ ?>
     <link rel="stylesheet" href="<?= e(asset_url('assets/css/mbworld-2026.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('assets/css/design-system.css')) ?>">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <?php require __DIR__ . '/sidebar_boot.php'; ?>

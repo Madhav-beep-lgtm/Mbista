@@ -53,6 +53,7 @@ if ($navSection === '') {
     <?php /* Last on purpose: the 2026 appearance layer restates the tokens the
              sheets above each define, so it must have the final word. */ ?>
     <link rel="stylesheet" href="<?= e(asset_url('assets/css/mbworld-2026.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('assets/css/design-system.css')) ?>">
 </head>
 <body class="<?= e($bodyClass) ?>">
 <?php if ($headerSupportPhone !== '' || $headerSupportEmail !== ''): ?>
