@@ -2045,3 +2045,47 @@ body.admin-layout.theme-dark .admin-content .mbw-chip .ui-icon,body.admin-layout
 body.admin-layout.theme-dark .admin-content .mbw-pill.tone-green,body.admin-layout.admin-dark .admin-content .mbw-pill.tone-green{background:#123a2e!important;color:#b9f4dc!important;-webkit-text-fill-color:#b9f4dc!important}
 body.admin-layout.theme-dark .admin-content .mbw-pill.tone-gray,body.admin-layout.admin-dark .admin-content .mbw-pill.tone-gray{background:#24342e!important;color:#e1ebe6!important;-webkit-text-fill-color:#e1ebe6!important}
 body.admin-layout.theme-dark .admin-content .mbw-pill.tone-amber,body.admin-layout.admin-dark .admin-content .mbw-pill.tone-amber{background:#493711!important;color:#ffd77f!important;-webkit-text-fill-color:#ffd77f!important}
+
+/* Unified dark surface contract -------------------------------------------
+   Final compatibility layer for legacy pages that hard-code white dashboard,
+   chart and reporting surfaces. Every shared container resolves through the
+   same four dark tokens; component accents are intentionally left intact. */
+body.admin-layout.theme-dark .admin-content,body.admin-layout.admin-dark .admin-content{
+  --theme-canvas:#070f0c;--theme-surface:#0d1815;--theme-raised:#12211c;
+  --theme-border:rgba(255,255,255,.42);--theme-heading:#f4faf7;
+  --theme-copy:#d7e3dd;--theme-muted:#a9bbb2
+}
+body.admin-layout.theme-dark .admin-content :is(
+  .mbw-page-head,.cr-head,.accounting-page-head,.mbw-tabbar,.card,.panel,
+  .form-card,.table-card,.stat-card,.metric-card,.dashboard-card,.report-card,
+  .settings-card,.workspace-card,.admin-card,.admin-panel,.cr-card,.rc-card,
+  .mbw-card,.ad-panel,.ad-kpi-card,.ad-chart-card,.chart-card,.analytics-card,
+  .admin-chart-card,.admin-analysis-card,.accounting-stat-card,.dashboard-stat,
+  .admin-stat-card,.kpi-card,.ov-kpi,.mbw-kpi,.modal-content,.dialog,.popover,
+  .dropdown-panel,.company-card,.frm-section
+),
+body.admin-layout.admin-dark .admin-content :is(
+  .mbw-page-head,.cr-head,.accounting-page-head,.mbw-tabbar,.card,.panel,
+  .form-card,.table-card,.stat-card,.metric-card,.dashboard-card,.report-card,
+  .settings-card,.workspace-card,.admin-card,.admin-panel,.cr-card,.rc-card,
+  .mbw-card,.ad-panel,.ad-kpi-card,.ad-chart-card,.chart-card,.analytics-card,
+  .admin-chart-card,.admin-analysis-card,.accounting-stat-card,.dashboard-stat,
+  .admin-stat-card,.kpi-card,.ov-kpi,.mbw-kpi,.modal-content,.dialog,.popover,
+  .dropdown-panel,.company-card,.frm-section
+){background:var(--theme-surface)!important;background-image:none!important;color:var(--theme-copy)!important;border-color:var(--theme-border)!important;box-shadow:0 8px 24px rgba(0,0,0,.22)!important}
+body.admin-layout.theme-dark .admin-content :is(.mbw-chart-wrap,.mbw-donut-box,.chart-wrap,.chart-container,.table-responsive,.mbw-tablewrap,.empty-state,.frm-entry-totals),
+body.admin-layout.admin-dark .admin-content :is(.mbw-chart-wrap,.mbw-donut-box,.chart-wrap,.chart-container,.table-responsive,.mbw-tablewrap,.empty-state,.frm-entry-totals){background:var(--theme-raised)!important;background-image:none!important;color:var(--theme-copy)!important;border-color:var(--theme-border)!important}
+body.admin-layout.theme-dark .admin-content :is(.ov-kpi,.mbw-kpi,.ad-kpi-card,.stat-card,.metric-card) :is(h1,h2,h3,h4,strong,.ov-kpi-value,.mbw-kpi-value,.stat-value,.metric-value,.ad-kpi-value),
+body.admin-layout.admin-dark .admin-content :is(.ov-kpi,.mbw-kpi,.ad-kpi-card,.stat-card,.metric-card) :is(h1,h2,h3,h4,strong,.ov-kpi-value,.mbw-kpi-value,.stat-value,.metric-value,.ad-kpi-value){color:var(--theme-heading)!important;-webkit-text-fill-color:var(--theme-heading)!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(.ov-kpi,.mbw-kpi,.ad-kpi-card,.stat-card,.metric-card) :is(.ov-kpi-label,.ov-kpi-sub,.mbw-kpi-label,.mbw-kpi-delta,.stat-label,.metric-label,.ad-kpi-label,.ad-kpi-meta),
+body.admin-layout.admin-dark .admin-content :is(.ov-kpi,.mbw-kpi,.ad-kpi-card,.stat-card,.metric-card) :is(.ov-kpi-label,.ov-kpi-sub,.mbw-kpi-label,.mbw-kpi-delta,.stat-label,.metric-label,.ad-kpi-label,.ad-kpi-meta){color:var(--theme-muted)!important;-webkit-text-fill-color:var(--theme-muted)!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(.ov-card-head,.mbw-card-head,.frm-section-head) :is(h1,h2,h3,h4,strong),
+body.admin-layout.admin-dark .admin-content :is(.ov-card-head,.mbw-card-head,.frm-section-head) :is(h1,h2,h3,h4,strong){color:var(--theme-heading)!important;-webkit-text-fill-color:var(--theme-heading)!important}
+body.admin-layout.theme-dark .admin-content :is(.ov-legend-row,.ov-donut-center,.empty-state) :is(span,b,em,small,p),
+body.admin-layout.admin-dark .admin-content :is(.ov-legend-row,.ov-donut-center,.empty-state) :is(span,b,em,small,p){color:var(--theme-copy)!important;-webkit-text-fill-color:var(--theme-copy)!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content .ov-ring,body.admin-layout.admin-dark .admin-content .ov-ring{background:radial-gradient(closest-side,var(--theme-surface) 72%,transparent 73% 100%),conic-gradient(#3cbb8b calc(var(--p,0)*1%),#2a3f37 0)!important}
+body.admin-layout.theme-dark .admin-content table,body.admin-layout.admin-dark .admin-content table{background:var(--theme-surface)!important;color:var(--theme-copy)!important;border-color:var(--theme-border)!important}
+body.admin-layout.theme-dark .admin-content table :is(th,td),body.admin-layout.admin-dark .admin-content table :is(th,td){color:var(--theme-copy)!important;-webkit-text-fill-color:var(--theme-copy)!important;border-color:var(--theme-border)!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content table thead th,body.admin-layout.admin-dark .admin-content table thead th{background:#172a23!important;color:var(--theme-heading)!important;-webkit-text-fill-color:var(--theme-heading)!important}
+body.admin-layout.theme-dark .admin-content table tbody tr:nth-child(even),body.admin-layout.admin-dark .admin-content table tbody tr:nth-child(even){background:#101d19!important}
+body.admin-layout.theme-dark .admin-content canvas,body.admin-layout.admin-dark .admin-content canvas{color:var(--theme-copy)!important}
