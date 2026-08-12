@@ -1997,20 +1997,8 @@ body.admin-layout .admin-topbar .admin-profile-dropdown>a.is-logout{margin-top:6
 body.admin-layout .admin-topbar .admin-profile-dropdown>a.is-logout :is(span,strong,small){color:#fff!important;-webkit-text-fill-color:#fff!important}
 @media(max-width:520px){body.admin-layout .admin-topbar .admin-profile-dropdown{position:fixed!important;right:12px!important;left:12px!important;top:76px!important;width:auto!important}}
 
-/* Light-mode application chrome. The legacy brand theme deliberately pinned
-   the sidebar and topbar to dark green, which made the theme switch look only
-   half complete. Keep their structure, but let their surfaces participate. */
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-sidebar{background:#fff!important;border-right:1px solid #cfe0d7!important;box-shadow:8px 0 24px rgba(19,70,52,.08)!important;color:#173a2f!important;scrollbar-color:#8eb9a7 #edf5f1!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-sidebar :is(.brand strong,.brand small,.brand-admin-sub,.admin-nav-group,.admin-sidebar-context strong){color:#173a2f!important;-webkit-text-fill-color:#173a2f!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-sidebar .brand-mark{background:#08775b!important;color:#fff!important;border-color:#08775b!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-sidebar-context{background:#f1f8f4!important;border-color:#c9ddd3!important;color:#324f44!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-nav a,
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-nav .mbw-nav-parent>a[data-nav-toggle]{background:transparent!important;color:#324f44!important;-webkit-text-fill-color:#324f44!important;border-color:transparent!important;box-shadow:none!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-nav a :is(span,strong,small),body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-nav a .ui-icon{color:inherit!important;-webkit-text-fill-color:inherit!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-nav a:hover,
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-nav .mbw-nav-parent>a[data-nav-toggle]:hover{background:#e8f5ef!important;color:#08775b!important;-webkit-text-fill-color:#08775b!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-nav a.is-active,
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-nav a[aria-current=page]{background:#dff2e9!important;color:#065f49!important;-webkit-text-fill-color:#065f49!important;border:1px solid #8fc7b2!important;box-shadow:inset 3px 0 0 #08775b!important}
+/* Light mode changes the workspace and topbar only. The product navigation
+   rail is permanent brand green in every mode (see the shared contract below). */
 body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar{background:#fff!important;border-bottom:1px solid #cfe0d7!important;box-shadow:0 7px 20px rgba(19,70,52,.08)!important;color:#173a2f!important}
 body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar :is(.admin-topbar-crumbs,.admin-topbar-crumbs a,.admin-topbar-crumbs strong,.admin-profile-identity strong){color:#173a2f!important;-webkit-text-fill-color:#173a2f!important}
 body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-identity small{color:#6d857b!important;-webkit-text-fill-color:#6d857b!important}
@@ -2018,8 +2006,6 @@ body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar :is(.admin-ico
 body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar :is(.admin-icon-button,.theme-toggle-link,.admin-profile-menu>summary):hover{background:#dff2e9!important;border-color:#7dbba4!important;color:#065f49!important}
 body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar :is(input,select){background:#fff!important;color:#173a2f!important;-webkit-text-fill-color:#173a2f!important;border-color:#bcd7ca!important;color-scheme:light!important}
 body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar-search button{background:#08775b!important;color:#fff!important;border-color:#08775b!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-sidebar::-webkit-scrollbar-track{background:#edf5f1!important}
-body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-sidebar::-webkit-scrollbar-thumb{background:#8eb9a7!important;border-color:#edf5f1!important}
 
 /* Component-level contrast matrix -----------------------------------------
    KPI tiles and module tabs use their own foreground declarations, so they
