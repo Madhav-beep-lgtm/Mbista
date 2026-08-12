@@ -445,7 +445,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="admin-icon-button" href="<?= e(url('admin/reports-center.php')) ?>" aria-label="Open Reports Center" title="Reports Center"><?= icon('analytics') ?></a>
             <?php if ($headerCompany): ?>
                 <div class="admin-context-chip" aria-label="Current admin portal" title="<?= e($headerPortalLabel) ?>">
-                    <span class="admin-context-icon"><?= icon($headerCompanyCode === 'MBAACA' ? 'admin' : 'companies') ?></span>
+                    <span class="admin-context-icon"><?= icon('companies') ?></span>
                     <span>
                         <strong><?= e($headerCompany['name'] ?? 'Company') ?></strong>
                         <small><?= $headerShowFiscalYear ? e($headerFiscalYear['label'] ?? 'No fiscal year') : e($headerPortalLabel) ?></small>
