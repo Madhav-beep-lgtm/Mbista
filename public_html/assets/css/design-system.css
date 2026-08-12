@@ -48,10 +48,38 @@ body.admin-layout.admin-dark {
 /* Permanent product navigation. */
 body.admin-layout .admin-sidebar {
   background:linear-gradient(180deg,var(--ui-green-900),var(--ui-green-800))!important;
+  border-right:1px solid rgba(255,255,255,.16)!important;
+  box-shadow:8px 0 24px rgba(3,46,36,.20)!important;
   color:#fff!important;
+  color-scheme:dark!important;
+  scrollbar-color:rgba(255,255,255,.42) transparent!important;
 }
 body.admin-layout .admin-sidebar :is(a,button,span,strong,small,p,.ui-icon) {
   color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important;
+}
+body.admin-layout .admin-sidebar .brand.brand-admin {
+  min-height:94px!important;
+  padding:18px 14px!important;
+  border-bottom:1px solid rgba(255,255,255,.09)!important;
+  background:transparent!important;
+  color:#fff!important;
+}
+body.admin-layout .admin-sidebar .brand :is(img,.mbw-logo,.mbw-logo-sidebar) {
+  opacity:1!important;
+  filter:none!important;
+}
+body.admin-layout .admin-sidebar .brand-mark {
+  background:transparent!important;
+  color:#fff!important;
+  border-color:rgba(255,255,255,.62)!important;
+}
+body.admin-layout .admin-sidebar .brand-admin-sub {
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  font-size:11px!important;
+  font-weight:750!important;
+  letter-spacing:.08em!important;
+  text-transform:uppercase!important;
 }
 body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-sidebar .admin-sidebar-context,
 body.admin-layout.theme-dark .admin-sidebar .admin-sidebar-context,
@@ -85,9 +113,41 @@ body.admin-layout .admin-sidebar .admin-sidebar-context small {
   font-size:11px!important;
   line-height:1.3!important;
 }
-body.admin-layout .admin-nav a {min-height:40px;border-radius:9px!important;font-size:13px!important;line-height:1.2!important}
+body.admin-layout .admin-sidebar .admin-nav-group {
+  margin:16px 7px 6px!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  font-size:10.5px!important;
+  font-weight:750!important;
+  letter-spacing:.045em!important;
+  line-height:1.3!important;
+  text-transform:uppercase!important;
+}
+body.admin-layout .admin-sidebar .admin-nav {gap:3px!important}
+body.admin-layout .admin-nav a {min-height:40px;padding:9px 11px!important;border-radius:9px!important;font-size:13px!important;font-weight:650!important;line-height:1.2!important}
 body.admin-layout .admin-nav a:is(:hover,:focus-visible){background:rgba(255,255,255,.1)!important}
 body.admin-layout .admin-nav a:is(.is-active,[aria-current="page"]){background:var(--ui-green-700)!important;border-color:rgba(255,255,255,.3)!important;box-shadow:inset 3px 0 0 var(--ui-gold)!important}
+body.admin-layout .admin-sidebar .mbw-nav-parent>a[data-nav-toggle] {
+  background:transparent!important;
+  color:#fff!important;
+  border-color:transparent!important;
+  box-shadow:none!important;
+}
+body.admin-layout .admin-sidebar .mbw-nav-parent>a[data-nav-toggle]:hover {background:rgba(255,255,255,.1)!important}
+body.admin-layout .admin-sidebar .mbw-nav-caret {color:#fff!important;opacity:1!important}
+body.admin-layout .admin-sidebar .mbw-subnav {
+  margin-left:20px!important;
+  padding-left:9px!important;
+  border-left:1px solid rgba(255,255,255,.22)!important;
+}
+body.admin-layout .admin-sidebar .mbw-subnav a {min-height:38px!important;padding:8px 10px!important}
+body.admin-layout .admin-sidebar::-webkit-scrollbar-track {background:transparent!important}
+body.admin-layout .admin-sidebar::-webkit-scrollbar-thumb {
+  background:rgba(255,255,255,.42)!important;
+  border:2px solid transparent!important;
+  background-clip:padding-box!important;
+  border-radius:999px!important;
+}
 
 /* Base content typography and surfaces. */
 body.admin-layout .admin-content{background:var(--ui-bg)!important;color:var(--ui-text)!important;font-size:var(--ui-body-size)}
