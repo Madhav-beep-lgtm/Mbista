@@ -223,23 +223,47 @@ body.admin-layout :is(.dropdown-menu,.menu-popover,details[open]>.dropdown-panel
 body.admin-layout :is(.dropdown-menu,.menu-popover) a{min-height:40px;border-radius:8px;color:var(--ui-text)!important}
 body.admin-layout :is(.dropdown-menu,.menu-popover) a:hover{background:var(--ui-green-100)!important;color:var(--ui-green-800)!important}
 
-/* The account menu is permanent dark chrome in both themes.  Keeping this
-   separate from content popovers prevents light-mode surface rules from
-   producing pale text on a white menu. */
-html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown {
-  background:#071a15!important;
-  color:#fff!important;
-  border-color:rgba(255,255,255,.18)!important;
-  color-scheme:dark!important;
+/* Account menu follows the selected workspace theme. */
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown {
+  background:#fff!important;
+  color:#101828!important;
+  border-color:#cbded4!important;
+  color-scheme:light!important;
 }
-html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown :is(a,span,strong,small,p,.ui-icon) {
-  color:#fff!important;
-  -webkit-text-fill-color:#fff!important;
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown :is(a,span,strong,p,.ui-icon) {
+  color:#101828!important;
+  -webkit-text-fill-color:#101828!important;
   opacity:1!important;
 }
-html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown a:hover {
-  background:rgba(60,187,139,.16)!important;
-  color:#fff!important;
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown small {
+  color:#475467!important;
+  -webkit-text-fill-color:#475467!important;
+  opacity:1!important;
+}
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown-head {
+  border-bottom-color:#e4ebe7!important;
+}
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown :is(.ui-icon,svg,path) {
+  stroke:currentColor!important;
+  opacity:1!important;
+}
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown a:hover {
+  background:#eaf6f0!important;
+  color:#101828!important;
+}
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown a.is-logout,
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown a.is-logout :is(span,strong,small,.ui-icon) {
+  color:#d92d20!important;
+  -webkit-text-fill-color:#d92d20!important;
+}
+html body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown a.is-logout {
+  border-top-color:#e4ebe7!important;
+}
+html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown {
+  background:#071a15!important;color:#fff!important;border-color:rgba(255,255,255,.18)!important;color-scheme:dark!important;
+}
+html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .admin-profile-menu .admin-profile-dropdown :is(a,span,strong,small,p,.ui-icon) {
+  color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important;
 }
 
 /* Professional application header ---------------------------------------
