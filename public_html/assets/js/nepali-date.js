@@ -125,6 +125,50 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     if (!document.body.classList.contains('admin-layout')) { return; }
+    document.querySelectorAll('[data-bs-calendar-toggle]').forEach(function (toggle) {
+      var panel = toggle.parentElement.querySelector('[data-bs-calendar-panel]');
+      var today = adToBs(toggle.getAttribute('data-ad-today'));
+      if (!panel || !today) { return; }
+      var shownYear = today.y;
+      var shownMonth = today.m;
+
+      function renderCalendar() {
+        var firstAd = bsToAd(shownYear, shownMonth, 1);
+        var startDay = firstAd ? new Date(firstAd + 'T00:00:00Z').getUTCDay() : 0;
+        var cells = '';
+        for (var blank = 0; blank < startDay; blank++) { cells += '<span class="is-empty"></span>'; }
+        for (var day = 1; day <= monthDays(shownYear, shownMonth); day++) {
+          var current = shownYear === today.y && shownMonth === today.m && day === today.d;
+          cells += '<span' + (current ? ' class="is-today"' : '') + '>' + day + '</span>';
+        }
+        panel.innerHTML = '<div class="bs-calendar-head"><button type="button" data-bs-prev aria-label="Previous Nepali month">‹</button><strong>' + MONTHS[shownMonth - 1] + ' ' + shownYear + '</strong><button type="button" data-bs-next aria-label="Next Nepali month">›</button></div>' +
+          '<div class="bs-calendar-week"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>' +
+          '<div class="bs-calendar-grid">' + cells + '</div>' +
+          '<button type="button" class="bs-calendar-today" data-bs-today>Today · ' + today.str + '</button>';
+      }
+      function shiftMonth(delta) {
+        shownMonth += delta;
+        if (shownMonth < 1) { shownMonth = 12; shownYear--; }
+        if (shownMonth > 12) { shownMonth = 1; shownYear++; }
+        if (shownYear < FIRST_YEAR) { shownYear = FIRST_YEAR; shownMonth = 1; }
+        if (shownYear >= FIRST_YEAR + DATA.length) { shownYear = FIRST_YEAR + DATA.length - 1; shownMonth = 12; }
+        renderCalendar();
+      }
+      toggle.addEventListener('click', function () {
+        var open = panel.hasAttribute('hidden');
+        panel.toggleAttribute('hidden', !open);
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) { renderCalendar(); }
+      });
+      panel.addEventListener('click', function (event) {
+        if (event.target.closest('[data-bs-prev]')) { shiftMonth(-1); }
+        if (event.target.closest('[data-bs-next]')) { shiftMonth(1); }
+        if (event.target.closest('[data-bs-today]')) { shownYear = today.y; shownMonth = today.m; renderCalendar(); }
+      });
+      document.addEventListener('click', function (event) {
+        if (!toggle.parentElement.contains(event.target)) { panel.setAttribute('hidden', ''); toggle.setAttribute('aria-expanded', 'false'); }
+      });
+    });
     var mode = document.body.getAttribute('data-date-mode') || 'both';
     if (mode === 'ad') { return; }
 

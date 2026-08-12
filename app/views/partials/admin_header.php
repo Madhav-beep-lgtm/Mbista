@@ -505,26 +505,31 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 })();
                 </script>
             <?php endif; ?>
-            <?php if (date_mode() !== 'ad'): ?><span class="mbw-pill tone-amber" title="Bikram Sambat (today)" style="align-self:center"><?= e(bs_format(date('Y-m-d'))) ?> BS</span><?php endif; ?>
+            <div class="topbar-bs-calendar">
+                <button type="button" class="topbar-bs-date" data-bs-calendar-toggle data-ad-today="<?= e(date('Y-m-d')) ?>" aria-expanded="false" title="Open Nepali calendar">
+                    <?= icon('calendar') ?><span><?= e(bs_format(date('Y-m-d'))) ?> BS</span>
+                </button>
+                <div class="topbar-bs-calendar-panel" data-bs-calendar-panel hidden></div>
+            </div>
             <div class="admin-topbar-actions">
-                <form method="get" class="no-search" style="align-self:center;margin:0" title="Language / भाषा">
+                <form method="get" class="no-search topbar-language-control" style="align-self:center;margin:0" title="Language">
                     <?php foreach ($_GET as $langKeepKey => $langKeepValue): if ($langKeepKey === 'lang' || !is_scalar($langKeepValue)) { continue; } ?>
                         <input type="hidden" name="<?= e((string) $langKeepKey) ?>" value="<?= e((string) $langKeepValue) ?>">
                     <?php endforeach; ?>
-                    <select name="lang" onchange="this.form.submit()" style="cursor:pointer">
+                    <label class="topbar-icon-select" aria-label="Language"><?= icon('language') ?><select name="lang" onchange="this.form.submit()" style="cursor:pointer">
                         <?php foreach (APP_LANGS as $langCode => $langLabel): ?>
                             <option value="<?= e($langCode) ?>" <?= app_lang() === $langCode ? 'selected' : '' ?>><?= e($langLabel) ?></option>
                         <?php endforeach; ?>
-                    </select>
+                    </select></label>
                 </form>
-                <form method="post" action="<?= e(url('set-date-mode.php')) ?>" style="align-self:center;margin:0">
+                <form method="post" action="<?= e(url('set-date-mode.php')) ?>" class="topbar-date-control" style="align-self:center;margin:0">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="return" value="<?= e($_SERVER['REQUEST_URI'] ?? '') ?>">
-                    <select name="date_mode" onchange="this.form.submit()" title="Date display: English / Nepali" style="cursor:pointer">
+                    <label class="topbar-icon-select" aria-label="Date display"><?= icon('calendar') ?><select name="date_mode" onchange="this.form.submit()" title="Date display: English / Nepali" style="cursor:pointer">
                         <option value="ad" <?= date_mode() === 'ad' ? 'selected' : '' ?>>AD</option>
                         <option value="bs" <?= date_mode() === 'bs' ? 'selected' : '' ?>>BS</option>
                         <option value="both" <?= date_mode() === 'both' ? 'selected' : '' ?>>AD+BS</option>
-                    </select>
+                    </select></label>
                 </form>
 
                 <?php if (!$headerIsCustomer): ?>
@@ -563,9 +568,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                             <span class="sr-only">Open selected subsidiary</span>
                         </button>
                     </form>
-                <?php endif; ?>
-                <?php if (!$headerIsClientBooks): ?>
-                    <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
                 <?php endif; ?>
                 <?php endif; ?>
                 <?php include __DIR__ . '/attention_bell.php'; ?>

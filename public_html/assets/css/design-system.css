@@ -248,7 +248,7 @@ html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown
 @media (min-width:1181px) {
   body.admin-layout .admin-topbar {
     display:grid!important;
-    grid-template-columns:auto minmax(130px,auto) minmax(230px,1fr) auto minmax(210px,280px) minmax(180px,230px) auto auto!important;
+    grid-template-columns:auto minmax(130px,auto) minmax(190px,320px) auto minmax(210px,280px) minmax(180px,230px) auto auto!important;
     align-items:center!important;
     column-gap:10px!important;
     row-gap:8px!important;
@@ -262,11 +262,11 @@ html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown
   body.admin-layout #fy-switcher-form {width:100%!important;min-width:0!important}
   body.admin-layout #fy-switcher {width:100%!important;max-width:none!important}
   body.admin-layout .admin-topbar-actions {
-    grid-column:1/-1!important;
+    grid-column:auto!important;
     justify-self:end!important;
     justify-content:flex-end!important;
     flex-wrap:nowrap!important;
-    gap:7px!important;
+    gap:6px!important;
   }
 }
 
@@ -391,6 +391,25 @@ body.admin-layout .admin-context-chip small {font-size:10.5px!important}
 body.admin-layout .admin-topbar select {min-height:42px!important;border-radius:10px!important;padding-inline:11px 34px!important}
 body.admin-layout .admin-profile-menu>summary {min-height:42px!important;border-radius:11px!important;padding:5px 10px 5px 5px!important}
 body.admin-layout .admin-profile-avatar {width:32px!important;height:32px!important;flex-basis:32px!important}
+body.admin-layout .topbar-icon-select {
+  position:relative;display:grid;place-items:center;width:42px;height:42px;border:1px solid var(--ui-border);border-radius:11px;background:var(--ui-surface);color:var(--ui-green-800);cursor:pointer;
+}
+body.admin-layout .topbar-icon-select>.ui-icon {width:18px;height:18px}
+body.admin-layout .topbar-icon-select select {position:absolute!important;inset:0!important;width:100%!important;height:100%!important;min-height:0!important;padding:0!important;opacity:0!important;cursor:pointer!important}
+body.admin-layout .topbar-bs-calendar {position:relative;align-self:center}
+body.admin-layout .topbar-bs-date {display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:7px 10px;border:1px solid #eadcb4;border-radius:999px;background:#fff7df;color:#6e5600;font-size:11px;font-weight:750;white-space:nowrap;cursor:pointer}
+body.admin-layout .topbar-bs-date .ui-icon {width:15px;height:15px}
+body.admin-layout .topbar-bs-calendar-panel {position:absolute;z-index:180;right:0;top:calc(100% + 8px);width:294px;padding:12px;border:1px solid var(--ui-border);border-radius:13px;background:var(--ui-surface);color:var(--ui-text);box-shadow:0 18px 44px rgba(5,40,29,.22)}
+body.admin-layout .topbar-bs-calendar-panel[hidden] {display:none!important}
+body.admin-layout .bs-calendar-head {display:grid;grid-template-columns:34px 1fr 34px;align-items:center;gap:7px;margin-bottom:10px}
+body.admin-layout .bs-calendar-head strong {text-align:center;color:var(--ui-heading)}
+body.admin-layout .bs-calendar-head button,.bs-calendar-today {min-height:32px;border:1px solid var(--ui-border);border-radius:8px;background:var(--ui-surface-soft);color:var(--ui-text);cursor:pointer}
+body.admin-layout .bs-calendar-week,.bs-calendar-grid {display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}
+body.admin-layout .bs-calendar-week {margin-bottom:5px;color:var(--ui-muted);font-size:9px;font-weight:750;text-transform:uppercase}
+body.admin-layout .bs-calendar-grid span {display:grid;place-items:center;min-height:30px;border-radius:7px;font-size:11px}
+body.admin-layout .bs-calendar-grid .is-today {background:var(--ui-green-700);color:#fff!important;font-weight:800}
+body.admin-layout .bs-calendar-grid .is-empty {visibility:hidden}
+body.admin-layout .bs-calendar-today {width:100%;margin-top:10px;font-size:11px;font-weight:700}
 
 body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar {
   background:#064e3b!important;
@@ -409,6 +428,8 @@ body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar :is(.admin-icon-butt
 body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar .admin-context-chip :is(strong,small,.ui-icon) {
   color:#fff!important;-webkit-text-fill-color:#fff!important;
 }
+body.admin-layout:is(.theme-dark,.admin-dark) .topbar-icon-select {background:#0d1815;color:#fff;border-color:rgba(255,255,255,.36)}
+body.admin-layout:is(.theme-dark,.admin-dark) .topbar-bs-date {background:#493711;color:#fff;border-color:#8a6b24}
 
 @media (max-width:1180px) {
   body.admin-layout .admin-topbar {display:flex!important;min-height:64px!important}
