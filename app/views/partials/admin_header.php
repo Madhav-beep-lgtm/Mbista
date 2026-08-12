@@ -429,7 +429,8 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
         <header class="admin-topbar">
             <?php require __DIR__ . '/sidebar_toggle.php'; ?>
             <?php if ($pageHero !== false): ?>
-                <nav class="admin-topbar-crumbs" aria-label="Breadcrumb"><?= $headerBreadcrumbHtml ?></nav>
+                <?php /* Page identity is presented in the hero below; repeating
+                          its breadcrumb here wastes the primary toolbar space. */ ?>
             <?php else: ?>
                 <div class="admin-topbar-title">
                     <h1><?= e($pageTitle) ?></h1>
@@ -443,15 +444,8 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <button type="submit" aria-label="Search" title="Search"><?= icon('search') ?></button>
             </form>
             <a class="admin-icon-button" href="<?= e(url('admin/reports-center.php')) ?>" aria-label="Open Reports Center" title="Reports Center"><?= icon('analytics') ?></a>
-            <?php if ($headerCompany): ?>
-                <div class="admin-context-chip" aria-label="Current admin portal" title="<?= e($headerPortalLabel) ?>">
-                    <span class="admin-context-icon"><?= icon('companies') ?></span>
-                    <span>
-                        <strong><?= e($headerCompany['name'] ?? 'Company') ?></strong>
-                        <small><?= $headerShowFiscalYear ? e($headerFiscalYear['label'] ?? 'No fiscal year') : e($headerPortalLabel) ?></small>
-                    </span>
-                </div>
-            <?php endif; ?>
+            <?php /* Current company is already displayed persistently in the
+                      sidebar portal card, so it is not duplicated here. */ ?>
             <?php
             // Global fiscal-year switcher: the accounting context selector for
             // every module, report, export, and transaction screen. Selection

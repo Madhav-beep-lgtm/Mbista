@@ -248,14 +248,13 @@ html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown
 @media (min-width:1181px) {
   body.admin-layout .admin-topbar {
     display:grid!important;
-    grid-template-columns:40px minmax(90px,140px) minmax(150px,225px) 40px minmax(165px,210px) minmax(140px,175px) 116px minmax(320px,1fr)!important;
+    grid-template-columns:40px minmax(260px,1fr) 40px minmax(165px,210px) 116px minmax(320px,auto)!important;
     align-items:center!important;
     column-gap:10px!important;
     row-gap:8px!important;
     min-height:104px!important;
     padding-block:10px!important;
   }
-  body.admin-layout .admin-topbar-crumbs,
   body.admin-layout .admin-topbar-title {min-width:0!important;overflow:hidden!important}
   body.admin-layout .admin-topbar-search {width:100%!important;max-width:none!important;margin-left:0!important}
   body.admin-layout .admin-context-chip {width:100%!important;max-width:280px!important}
@@ -456,8 +455,7 @@ body.admin-layout:is(.theme-dark,.admin-dark) .topbar-switch-value.is-current {c
   body.admin-layout .admin-profile-chevron {display:none!important}
 }
 @media (min-width:1181px) and (max-width:1360px) {
-  body.admin-layout .admin-topbar {grid-template-columns:42px minmax(95px,135px) minmax(150px,240px) 42px minmax(170px,220px) minmax(145px,180px) auto minmax(220px,auto)!important;column-gap:7px!important}
-  body.admin-layout .admin-context-chip strong {max-width:135px!important}
+  body.admin-layout .admin-topbar {grid-template-columns:40px minmax(210px,1fr) 40px minmax(145px,180px) 42px minmax(220px,auto)!important;column-gap:7px!important}
   body.admin-layout .topbar-bs-date span {display:none!important}
   body.admin-layout .topbar-bs-date {width:42px!important;min-width:42px!important;height:42px!important;padding:0!important;justify-content:center!important;border-radius:11px!important}
 }
