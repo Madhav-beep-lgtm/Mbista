@@ -329,9 +329,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result = jewellery_save_opening($companyId, $fiscalYearId, [
             'item_id' => (int) ($_POST['item_id'] ?? 0),
             'stock_kind' => (string) ($_POST['stock_kind'] ?? 'showroom'),
+            'stock_group' => (string) ($_POST['stock_group'] ?? ''),
             'qty_pieces' => (float) ($_POST['qty_pieces'] ?? 0),
             'gross_weight' => (float) ($_POST['gross_weight'] ?? 0),
+            'stone_carat' => (float) ($_POST['stone_carat'] ?? 0),
+            'diamond_carat' => (float) ($_POST['diamond_carat'] ?? 0),
+            'stone_amount' => (float) ($_POST['stone_amount'] ?? 0),
+            'diamond_amount' => (float) ($_POST['diamond_amount'] ?? 0),
+            'making_amount' => (float) ($_POST['making_amount'] ?? 0),
+            'rate' => (float) ($_POST['rate'] ?? 0),
             'amount' => (float) ($_POST['amount'] ?? 0),
+            'customer_name' => (string) ($_POST['customer_name'] ?? ''),
+            'customer_order_no' => (string) ($_POST['order_number'] ?? ''),
         ], $userId);
         if (!$result['ok']) {
             flash('error', $result['error']);
@@ -552,7 +561,7 @@ if (($_GET['template'] ?? '') !== '' && $view === 'opening') {
     if ((string) $_GET['template'] === 'csv') {
         export_csv('opening-stock-template.csv', $templateRows);
     }
-    export_xlsx('opening-stock-template.xlsx', $templateRows, 'Opening Stock',
+        export_xlsx('opening-stock-template-v4.xlsx', $templateRows, 'Opening Stock',
         [0 => 7, 1 => 20, 2 => 18, 3 => 15, 4 => 22, 5 => 12, 6 => 10, 7 => 9,
             8 => 10, 9 => 15, 10 => 14, 11 => 16, 12 => 22, 13 => 18],
         ['styled_table' => true, 'freeze_header' => true, 'auto_filter' => true]);
@@ -1394,7 +1403,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <section class="mbw-card" data-collapsible style="margin-bottom:14px">
         <div class="mbw-card-head">
             <h2>Upload Opening Stock from a Spreadsheet</h2>
-            <a class="button soft" style="min-height:32px" href="<?= e(url('admin/jewellery.php?view=opening&template=xlsx')) ?>">Download template</a>
+            <a class="button soft" style="min-height:32px" href="<?= e(url('admin/jewellery.php?view=opening&template=xlsx&v=4')) ?>">Download template v4</a>
         </div>
         <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1450,7 +1459,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <div class="mbw-tablewrap jw-opening-import-wrap"><table class="jw-opening-import-table">
             <thead><tr>
                 <th>Source Excel Row</th><th>Stock Type *</th><th>Stock Group *</th><th>Item Code *</th><th>Item Name *</th>
-                <th>Metal *</th><th>Purity Code</th><th>Unit *</th><th>Pieces *</th><th>Gross Weight (GM) *</th>
+                <th>Metal *</th><th>Purity Code</th><th>Unit *</th><th>Pieces *</th><th>Gross Weight (GM) *</th><th>Stone Weight (ct)</th><th>Stone Amount</th><th>Diamond Weight (ct)</th><th>Diamond Amount</th><th>Net Weight (auto)</th><th>Making Charge</th>
                 <th>Derived Rate</th><th>Opening Amount *</th><th>Customer Name</th><th>Order Number</th>
                 <th style="min-width:220px">Existing Item / Create</th><th style="min-width:220px">Validation Status</th><th>Actions</th>
             </tr></thead>
@@ -1469,6 +1478,12 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             <td><?= e((string) ($ir['unit_code'] ?? '')) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['qty_pieces'], 3) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['gross_weight'], 4) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) ($ir['stone_weight'] ?? 0), 4) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) ($ir['stone_amount'] ?? 0)) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) ($ir['diamond_weight'] ?? 0), 4) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) ($ir['diamond_amount'] ?? 0)) ?></td>
+                            <td class="is-numeric">Calculated when posted</td>
+                            <td class="is-numeric"><?= $fmt((float) ($ir['making_amount'] ?? 0)) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['rate'], 4) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['amount']) ?></td>
                             <td><?= e((string) $ir['customer_name']) ?></td>
@@ -1513,6 +1528,12 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             </td>
                             <td><input type="number" name="qty_pieces" step="0.001" min="0" style="width:80px" value="<?= e((string) $ir['qty_pieces']) ?>"></td>
                             <td><input type="number" name="gross_weight" step="0.0001" min="0" style="width:100px" value="<?= e((string) $ir['gross_weight']) ?>"></td>
+                            <td><input type="number" name="stone_weight" step="0.0001" min="0" style="width:100px" value="<?= e((string) ($ir['stone_weight'] ?? 0)) ?>"></td>
+                            <td><input type="number" name="stone_amount" step="0.01" min="0" style="width:110px" value="<?= e((string) ($ir['stone_amount'] ?? 0)) ?>"></td>
+                            <td><input type="number" name="diamond_weight" step="0.0001" min="0" style="width:100px" value="<?= e((string) ($ir['diamond_weight'] ?? 0)) ?>"></td>
+                            <td><input type="number" name="diamond_amount" step="0.01" min="0" style="width:110px" value="<?= e((string) ($ir['diamond_amount'] ?? 0)) ?>"></td>
+                            <td class="is-numeric">Auto</td>
+                            <td><input type="number" name="making_amount" step="0.01" min="0" style="width:110px" value="<?= e((string) ($ir['making_amount'] ?? 0)) ?>"></td>
                             <td><input type="number" name="rate" step="0.0001" min="0" style="width:110px" value="<?= e((string) $ir['rate']) ?>"></td>
                             <td><input type="number" name="amount" step="0.01" min="0" style="width:120px" value="<?= e((string) $ir['amount']) ?>"></td>
                             <td><input type="text" name="customer_name" style="width:150px" value="<?= e((string) $ir['customer_name']) ?>"></td>
@@ -1547,7 +1568,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     </tr>
                 <?php endforeach; ?>
                 <?php if ($importRows === []): ?>
-                    <tr><td colspan="17" class="frm-optional">Every row in this import has been dealt with.</td></tr>
+                    <tr><td colspan="23" class="frm-optional">Every row in this import has been dealt with.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table></div>
@@ -1572,10 +1593,42 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </label>
             <label>Pieces<input type="number" name="qty_pieces" step="0.001" min="0" value="0"></label>
             <label>Stock type<select name="stock_kind" required><option value="showroom">Showroom Stock</option><option value="customer_ordered">Customer Ordered Stock</option></select></label>
+            <label>Stock group
+                <select name="stock_group">
+                    <option value="">Select stock group</option>
+                    <?php foreach (jewellery_categories_list($companyId, false) as $category): ?>
+                        <option value="<?= e((string) $category['name']) ?>"><?= e((string) $category['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <label>Gross weight                <input type="number" name="gross_weight" step="0.0001" min="0" value="0"></label>
+            <label>Stone weight (ct)<input type="number" name="stone_carat" step="0.0001" min="0" value="0"></label>
+            <label>Diamond weight (ct)<input type="number" name="diamond_carat" step="0.0001" min="0" value="0"></label>
+            <label>Net weight (gm)<input type="number" id="opening-net-weight" step="0.0001" readonly value="0"></label>
+            <label>Stone amount<input type="number" name="stone_amount" step="0.01" min="0" value="0"></label>
+            <label>Diamond amount<input type="number" name="diamond_amount" step="0.01" min="0" value="0"></label>
+            <label>Making charge<input type="number" name="making_amount" step="0.01" min="0" value="0"></label>
+            <label>Rate<input type="number" name="rate" step="0.0001" min="0" value="0"></label>
             <label>Opening value (<?= e($sym) ?>)<input type="number" name="amount" step="0.01" min="0" value="0"></label>
+            <label>Customer name<input type="text" name="customer_name" maxlength="190"></label>
+            <label>Order number<input type="text" name="order_number" maxlength="120"></label>
             <div style="grid-column:1/-1"><button type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save &amp; Post</button></div>
         </form>
+        <script>
+        (function () {
+            var form = document.currentScript.previousElementSibling;
+            var gross = form.querySelector('[name="gross_weight"]');
+            var stone = form.querySelector('[name="stone_carat"]');
+            var diamond = form.querySelector('[name="diamond_carat"]');
+            var net = form.querySelector('#opening-net-weight');
+            function updateNet() {
+                var lessInGrams = ((Number(stone.value) || 0) + (Number(diamond.value) || 0)) * 0.2;
+                net.value = Math.max(0, (Number(gross.value) || 0) - lessInGrams).toFixed(4);
+            }
+            [gross, stone, diamond].forEach(function (field) { field.addEventListener('input', updateNet); field.addEventListener('change', updateNet); });
+            updateNet();
+        })();
+        </script>
         <?php if ($items === []): ?>
         <?php else: ?>
         <?php endif; ?>
@@ -1604,6 +1657,12 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <th>Stock type</th>
                     <th>Purity</th>
                     <th class="is-numeric">Gross</th>
+                    <th class="is-numeric">Stone (ct)</th>
+                    <th class="is-numeric">Diamond (ct)</th>
+                    <th class="is-numeric">Net weight</th>
+                    <th class="is-numeric">Stone amt</th>
+                    <th class="is-numeric">Diamond amt</th>
+                    <th class="is-numeric">Making</th>
                     <th class="is-numeric">Fine</th>
                     <th class="is-numeric">Rate</th>
                     <th class="is-numeric">Value</th>
@@ -1624,6 +1683,13 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     echo '<th><input type="search" placeholder="Filter" style="width:100%" data-col="' . $col . '"></th>'; $col++;
                     // Gross
                     echo '<th></th>'; $col++;
+                    // Stone and diamond are numeric columns.
+                    echo '<th></th>'; $col++;
+                    echo '<th></th>'; $col++;
+                    echo '<th></th>'; $col++;
+                    echo '<th></th>'; $col++;
+                    echo '<th></th>'; $col++;
+                    echo '<th></th>'; $col++;
                     // Fine
                     echo '<th></th>'; $col++;
                     // Rate
@@ -1637,7 +1703,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </tr>
             </thead>
             <tbody>
-                <?php if ($openingRows === []): ?><tr><td colspan="<?= $canEdit ? 10 : 9 ?>">No item carries opening stock for this fiscal year.</td></tr><?php endif; ?>
+                <?php if ($openingRows === []): ?><tr><td colspan="<?= $canEdit ? 16 : 15 ?>">No item carries opening stock for this fiscal year.</td></tr><?php endif; ?>
                 <?php foreach ($openingRows as $row): ?>
                     <tr>
                         <?php if ($canEdit): ?><td><input type="checkbox" class="opening-select-checkbox" value="<?= (int) $row['id'] ?>" aria-label="Select opening stock for <?= e($row['item_code']) ?>"></td><?php endif; ?>
@@ -1646,6 +1712,12 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         <td><span class="mbw-pill <?= (string) ($row['stock_kind'] ?? 'showroom') === 'customer_ordered' ? 'tone-blue' : 'tone-green' ?>"><?= (string) ($row['stock_kind'] ?? 'showroom') === 'customer_ordered' ? 'Customer Ordered' : 'Showroom' ?></span></td>
                         <td><?= e($row['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['stone_carat'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['diamond_carat'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['gross_weight'] - (float) ($row['stone_weight'] ?? 0), 4) ?> <small><?= e($row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['stone_amount'] ?? 0)) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['diamond_amount'] ?? 0)) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['making_amount'] ?? 0)) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['fine_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['rate']) ?></td>
                         <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) $row['amount']) ?></td>
@@ -1814,15 +1886,21 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Stock by Item (<?= count($stockRows) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Item</th><th>Purity</th><th class="is-numeric">Pieces</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine (total)</th><th class="is-numeric">Fine (own)</th><th class="is-numeric">With others</th><th class="is-numeric">Value</th><th class="is-numeric">Avg cost / fine</th><th></th></tr></thead>
+            <thead><tr><th>Item</th><th>Purity</th><th class="is-numeric">Pieces</th><th class="is-numeric">Gross</th><th class="is-numeric">Stone (ct)</th><th class="is-numeric">Diamond (ct)</th><th class="is-numeric">Net</th><th class="is-numeric">Stone amt</th><th class="is-numeric">Diamond amt</th><th class="is-numeric">Making</th><th class="is-numeric">Fine (total)</th><th class="is-numeric">Fine (own)</th><th class="is-numeric">With others</th><th class="is-numeric">Value</th><th class="is-numeric">Avg cost / fine</th><th></th></tr></thead>
             <tbody>
-                <?php if ($stockRows === []): ?><tr><td colspan="10">No item holds stock yet.</td></tr><?php endif; ?>
+                <?php if ($stockRows === []): ?><tr><td colspan="16">No item holds stock yet.</td></tr><?php endif; ?>
                 <?php foreach ($stockRows as $row): ?>
                     <tr>
                         <td><?= e($row['code']) ?><br><small><?= e($row['name']) ?></small></td>
                         <td><?= e($row['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt($row['balance']['qty_pieces'], 3) ?></td>
                         <td class="is-numeric"><?= $fmt($row['balance']['gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['components']['stone_carat'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['components']['diamond_carat'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['balance']['gross_weight'] - (float) ($row['components']['stone_weight'] ?? 0), 4) ?> <small><?= e($row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['components']['stone_amount'] ?? 0)) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['components']['diamond_amount'] ?? 0)) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['components']['making_amount'] ?? 0)) ?></td>
                         <td class="is-numeric"><?= $fmt($row['balance']['fine_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $fmt($row['own_stock']['fine_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $row['with_others_fine'] > 0 ? '<span class="mbw-pill tone-amber">' . $fmt($row['with_others_fine'], 4) . '</span>' : '—' ?></td>

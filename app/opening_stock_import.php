@@ -40,6 +40,11 @@ function opening_import_columns(): array
         'unit' => ['Unit', ['unit', 'uom', 'weight unit']],
         'qty_pieces' => ['Pieces', ['pieces', 'qty', 'quantity', 'pcs', 'nos']],
         'gross_weight' => ['Gross weight', ['gross weight', 'weight', 'gross', 'gross wt']],
+        'stone_weight' => ['Stone weight (ct)', ['stone weight', 'stone weight (ct)', 'stone wt', 'stone']],
+        'diamond_weight' => ['Diamond weight (ct)', ['diamond weight', 'diamond weight (ct)', 'diamond wt', 'diamond']],
+        'stone_amount' => ['Stone amount', ['stone amount', 'stone amt', 'stone value']],
+        'diamond_amount' => ['Diamond amount', ['diamond amount', 'diamond amt', 'diamond value']],
+        'making_amount' => ['Making charge', ['making charge', 'making amount', 'making', 'making charge amount']],
         'rate' => ['Rate', ['rate', 'unit cost', 'cost', 'price']],
         'amount' => ['Amount', ['amount', 'opening amount', 'value', 'total', 'opening value']],
         'customer_name' => ['Customer name', ['customer name', 'customer']],
@@ -55,7 +60,7 @@ function opening_import_map_headers(array $headerCells): array
         foreach ($headerCells as $index => $cell) {
             $needle = strtolower(trim(preg_replace('/\s+/', ' ', (string) $cell) ?? ''));
             $needle = trim((string) preg_replace('/\s*\*+\s*$/', '', $needle));
-            $needle = trim((string) preg_replace('/\s*\((?:gm|g|npr|rs\.?|pcs)\)\s*$/', '', $needle));
+            $needle = trim((string) preg_replace('/\s*\((?:gm|g|ct|crt|npr|rs\.?|pcs)\)\s*$/', '', $needle));
             if ($needle !== '' && in_array($needle, $aliases, true)) {
                 $map[$key] = (int) $index;
                 break;
@@ -71,13 +76,13 @@ function opening_import_template_rows(bool $jewellery): array
 {
     $header = $jewellery
         ? ['SN', 'Stock type', 'Stock group', 'Item code', 'Item name', 'Metal', 'Purity', 'Unit',
-            'Pieces', 'Gross weight', 'Rate', 'Amount', 'Customer name', 'Order number']
+            'Pieces', 'Gross weight', 'Stone weight (ct)', 'Stone amount', 'Diamond weight (ct)', 'Diamond amount', 'Net weight (auto)', 'Making charge', 'Rate', 'Amount', 'Customer name', 'Order number']
         : ['Item code', 'Item name', 'Unit', 'Pieces', 'Rate', 'Amount'];
 
     $sample = $jewellery
-        ? [[1, 'Showroom Stock', 'Bangles', 'BG-1', 'Bangle 1', 'Gold', '22K', 'GM', 1, 13.77, 22250.69, 306392, '', ''],
-           [2, 'Showroom Stock', 'Bangles', 'BG-2', 'Bangle 2', 'Gold', '22K', 'GM', 1, 13.77, 22250.69, 306392, '', ''],
-           [3, 'Customer Ordered Stock', 'Rings', 'RG-1', 'Ring 1', 'Gold', '22K', 'GM', 1, 8.50, 22250.69, 189130.87, 'Customer name', 'JO-000001']]
+        ? [[1, 'Showroom Stock', 'Bangles', 'BG-1', 'Bangle 1', 'Gold', '22K', 'GM', 1, 13.77, 0, 0, 0, 0, 13.77, 0, 22250.69, 306392, '', ''],
+           [2, 'Showroom Stock', 'Bangles', 'BG-2', 'Bangle 2', 'Gold', '22K', 'GM', 1, 13.77, 0, 0, 0, 0, 13.77, 0, 22250.69, 306392, '', ''],
+           [3, 'Customer Ordered Stock', 'Rings', 'RG-1', 'Ring 1', 'Gold', '22K', 'GM', 1, 8.50, 0.2, 500, 0.1, 1000, 8.44, 800, 22250.69, 189130.87, 'Customer name', 'JO-000001']]
         : [['ITEM-01', 'Sample Item', 'PCS', 10, 250, 2500],
            ['', 'Fill either Rate or Amount. Rows with neither are flagged, not dropped.', '', '', '', '']];
 
@@ -168,10 +173,10 @@ function opening_import_stage(int $companyId, int $fiscalYearId, string $path, s
     $insert = db()->prepare('INSERT INTO inventory_opening_import_rows (import_id, company_id, source_row_no,
             raw_code, raw_name, raw_unit, raw_purity, stock_kind, raw_group, proposed_code, proposed_name,
             metal_id, create_item, customer_name, order_number, item_id, purity_id, unit_id,
-            qty_pieces, gross_weight, rate, amount, status, error_text)
+            qty_pieces, gross_weight, stone_weight, diamond_weight, stone_amount, diamond_amount, making_amount, rate, amount, status, error_text)
         VALUES (:imp, :cid, :rowno, :rcode, :rname, :runit, :rpurity, :kind, :grp, :pcode, :pname,
             :metal, :create_item, :customer, :order_no, :item, :purity, :unit,
-            :pieces, :gross, :rate, :amount, :status, :err)');
+            :pieces, :gross, :stone, :diamond, :stone_amount, :diamond_amount, :making_amount, :rate, :amount, :status, :err)');
 
     $total = 0;
     $valid = 0;
@@ -262,9 +267,14 @@ function opening_import_stage(int $companyId, int $fiscalYearId, string $path, s
 
         $pieces = opening_import_number($cell('qty_pieces'));
         $gross = opening_import_number($cell('gross_weight'));
+        $stone = opening_import_number($cell('stone_weight'));
+        $diamond = opening_import_number($cell('diamond_weight'));
+        $stoneAmount = opening_import_number($cell('stone_amount'));
+        $diamondAmount = opening_import_number($cell('diamond_amount'));
+        $makingAmount = opening_import_number($cell('making_amount'));
         $rate = opening_import_number($cell('rate'));
         $amount = opening_import_number($cell('amount'));
-        if ($pieces < 0 || $gross < 0 || $rate < 0 || $amount < 0) {
+        if ($pieces < 0 || $gross < 0 || $stone < 0 || $diamond < 0 || $stoneAmount < 0 || $diamondAmount < 0 || $makingAmount < 0 || $rate < 0 || $amount < 0) {
             $errors[] = 'Negative figures are not an opening balance.';
         }
         // Rate x quantity when only a rate was given, and the implied rate when
@@ -297,7 +307,9 @@ function opening_import_stage(int $companyId, int $fiscalYearId, string $path, s
             'create_item' => $createItem ? 1 : 0,
             'customer' => mb_substr($customerName, 0, 190), 'order_no' => mb_substr($orderNumber, 0, 120),
             'item' => $itemId ?: null, 'purity' => $purityId ?: null, 'unit' => $unitId ?: null,
-            'pieces' => $pieces, 'gross' => $gross, 'rate' => $rate, 'amount' => $amount,
+            'pieces' => $pieces, 'gross' => $gross, 'stone' => $stone, 'diamond' => $diamond,
+            'stone_amount' => $stoneAmount, 'diamond_amount' => $diamondAmount, 'making_amount' => $makingAmount,
+            'rate' => $rate, 'amount' => $amount,
             'status' => $status, 'err' => $errors === [] ? null : mb_substr(implode(' ', $errors), 0, 500),
         ]);
     }
@@ -410,6 +422,8 @@ function opening_import_update_row(int $companyId, int $rowId, array $input): ar
 
     $pieces = round((float) ($input['qty_pieces'] ?? $row['qty_pieces']), 3);
     $gross = round((float) ($input['gross_weight'] ?? $row['gross_weight']), 4);
+    $stone = round((float) ($input['stone_weight'] ?? $row['stone_weight']), 4);
+    $diamond = round((float) ($input['diamond_weight'] ?? $row['diamond_weight']), 4);
     $rate = round((float) ($input['rate'] ?? $row['rate']), 4);
     $amount = round((float) ($input['amount'] ?? $row['amount']), 2);
     $basis = $jewellery ? ($gross > 0 ? $gross : $pieces) : ($pieces > 0 ? $pieces : $gross);
@@ -477,9 +491,10 @@ function opening_import_update_row(int $companyId, int $rowId, array $input): ar
             }
         }
     }
-    if ($pieces < 0 || $gross < 0 || $rate < 0 || $amount < 0) {
+    if ($pieces < 0 || $gross < 0 || $stone < 0 || $diamond < 0 || $rate < 0 || $amount < 0) {
         $errors[] = 'Negative figures are not an opening balance.';
     }
+    if (($stone + $diamond) > $gross + 0.00005) { $errors[] = 'Stone and diamond weight cannot exceed gross weight.'; }
     if ($amount <= 0) {
         $errors[] = 'No value on this row.';
     }
@@ -490,7 +505,7 @@ function opening_import_update_row(int $companyId, int $rowId, array $input): ar
     db()->prepare('UPDATE inventory_opening_import_rows SET item_id = :item, purity_id = :purity, unit_id = :unit,
             stock_kind = :kind, raw_group = :grp, proposed_code = :code, proposed_name = :name,
             metal_id = :metal, create_item = :create_item, customer_name = :customer, order_number = :order_no,
-            qty_pieces = :pieces, gross_weight = :gross, rate = :rate, amount = :amount,
+            qty_pieces = :pieces, gross_weight = :gross, stone_weight = :stone, diamond_weight = :diamond, rate = :rate, amount = :amount,
             status = :status, error_text = :err
         WHERE id = :id AND company_id = :cid')
         ->execute([
@@ -500,7 +515,7 @@ function opening_import_update_row(int $companyId, int $rowId, array $input): ar
             'code' => mb_substr($code, 0, 120), 'name' => mb_substr($name, 0, 255),
             'metal' => $metalId ?: null, 'create_item' => $createItem ? 1 : 0,
             'customer' => mb_substr($customerName, 0, 190), 'order_no' => mb_substr($orderNumber, 0, 120),
-            'pieces' => $pieces, 'gross' => $gross, 'rate' => $rate, 'amount' => $amount,
+            'pieces' => $pieces, 'gross' => $gross, 'stone' => $stone, 'diamond' => $diamond, 'rate' => $rate, 'amount' => $amount,
             'status' => $errors === [] ? 'ready' : 'error',
             'err' => $errors === [] ? null : implode(' ', $errors),
             'id' => $rowId, 'cid' => $companyId,
@@ -637,6 +652,11 @@ function opening_import_commit(int $companyId, int $importId, int $fiscalYearId,
                         'stock_kind' => (string) ($row['stock_kind'] ?? 'showroom'),
                         'qty_pieces' => (float) $row['qty_pieces'],
                         'gross_weight' => (float) $row['gross_weight'],
+                        'stone_carat' => (float) $row['stone_weight'],
+                        'diamond_carat' => (float) $row['diamond_weight'],
+                        'stone_amount' => (float) $row['stone_amount'],
+                        'diamond_amount' => (float) $row['diamond_amount'],
+                        'making_amount' => (float) $row['making_amount'],
                         'amount' => (float) $row['amount'],
                         'notes' => 'Imported from ' . (string) $batch['original_name'],
                         'origin_type' => 'opening_import',

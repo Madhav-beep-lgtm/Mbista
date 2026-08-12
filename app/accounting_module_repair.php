@@ -3443,6 +3443,26 @@ function accounting_module_repair_database(): array
             'inventory_opening_import_rows',
             'idx_inv_opimprow_stock_kind'
         );
+        accounting_repair_add_column('jewellery_stock_txns', 'stone_weight',
+            '`stone_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `gross_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'diamond_weight',
+            '`diamond_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `stone_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'stone_carat',
+            '`stone_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `diamond_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'diamond_carat',
+            '`diamond_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `stone_carat`');
+        accounting_repair_add_column('jewellery_stock_txns', 'stone_amount',
+            '`stone_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'diamond_amount',
+            '`diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `stone_amount`');
+        accounting_repair_add_column('jewellery_stock_txns', 'making_amount',
+            '`making_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_amount`');
+        accounting_repair_add_column('inventory_opening_import_rows', 'stone_amount',
+            '`stone_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_weight`');
+        accounting_repair_add_column('inventory_opening_import_rows', 'diamond_amount',
+            '`diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `stone_amount`');
+        accounting_repair_add_column('inventory_opening_import_rows', 'making_amount',
+            '`making_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_amount`');
     });
 
     $run('Every physical jewellery item has one traceable lifecycle (migration 111)', static function (): void {
