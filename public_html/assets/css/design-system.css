@@ -248,18 +248,18 @@ html body.admin-layout .admin-topbar .admin-profile-menu .admin-profile-dropdown
 @media (min-width:1181px) {
   body.admin-layout .admin-topbar {
     display:grid!important;
-    grid-template-columns:40px minmax(190px,250px) 40px minmax(205px,235px) 116px auto!important;
+    grid-template-columns:40px minmax(165px,220px) 40px minmax(250px,285px) 116px auto!important;
     align-items:center!important;
-    column-gap:10px!important;
+    column-gap:8px!important;
     row-gap:8px!important;
-    min-height:104px!important;
-    padding-block:10px!important;
+    min-height:62px!important;
+    padding-block:9px!important;
   }
   body.admin-layout .admin-topbar-title {min-width:0!important;overflow:hidden!important}
   body.admin-layout .admin-topbar-search {width:100%!important;max-width:none!important;margin-left:0!important}
   body.admin-layout .admin-context-chip {width:100%!important;max-width:280px!important}
   body.admin-layout #fy-switcher-form {width:100%!important;min-width:0!important}
-  body.admin-layout #fy-switcher {width:100%!important;max-width:none!important}
+  body.admin-layout #fy-switcher {width:100%!important;max-width:none!important;padding-inline:13px 36px!important;font-size:12px!important;text-overflow:ellipsis!important}
   body.admin-layout .admin-topbar-actions {
     grid-column:auto!important;
     justify-self:end!important;
@@ -453,7 +453,7 @@ html body.admin-layout:is(.theme-dark,.admin-dark) .admin-topbar :is(.bs-calenda
   body.admin-layout .admin-profile-chevron {display:none!important}
 }
 @media (min-width:1181px) and (max-width:1360px) {
-  body.admin-layout .admin-topbar {grid-template-columns:40px minmax(190px,1fr) 40px minmax(170px,200px) 42px minmax(300px,auto)!important;column-gap:7px!important}
+  body.admin-layout .admin-topbar {grid-template-columns:40px minmax(150px,1fr) 40px minmax(220px,250px) 42px minmax(300px,auto)!important;column-gap:8px!important}
   body.admin-layout .topbar-bs-date span {display:none!important}
   body.admin-layout .topbar-bs-date {width:42px!important;min-width:42px!important;height:42px!important;padding:0!important;justify-content:center!important;border-radius:11px!important}
 }
