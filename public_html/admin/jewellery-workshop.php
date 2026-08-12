@@ -172,6 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'purity_id' => (int) ($_POST['purity_id'] ?? 0),
                 'unit_id' => (int) ($_POST['unit_id'] ?? 0),
                 'expected_gross_weight' => (float) ($_POST['expected_gross_weight'] ?? 0),
+                'fulfilment_mode' => (string) ($_POST['fulfilment_mode'] ?? 'new_assignment'),
                 'design_no' => (string) ($_POST['design_no'] ?? ''),
                 'expected_item' => (string) ($_POST['expected_item'] ?? ''),
                 'description' => (string) ($_POST['description'] ?? ''),
@@ -732,6 +733,13 @@ jw_filter_bar_styles();
                 <label>Order date<input type="date" name="order_date" data-jw-required="Order date" value="<?= e((string) ($orderField('order_date', $todayInFy) ?: $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required>
                 </label>
                 <label>Promised delivery<input type="date" name="delivery_date" value="<?= e((string) $orderField('delivery_date')) ?>"></label>
+                <label>Order fulfilment
+                    <select name="fulfilment_mode" id="jw-fulfilment-mode">
+                        <option value="new_assignment" <?= (string) $orderField('fulfilment_mode', 'new_assignment') === 'new_assignment' ? 'selected' : '' ?>>New Assignment (Kaligad)</option>
+                        <option value="existing_stock" <?= (string) $orderField('fulfilment_mode', '') === 'existing_stock' ? 'selected' : '' ?>>Existing Stock Assignment</option>
+                    </select>
+                    <small>Existing stock uses the selected Item; it does not create stock.</small>
+                </label>
                 <label>Existing customer
                     <select name="party_id" data-jw-customer-select>
                         <option value="0">— new customer →</option>
@@ -908,6 +916,32 @@ jw_filter_bar_styles();
             problems.forEach(function (p) { if (p.field) { p.field.classList.add("jw-field-invalid"); } });
             if (problems[0].field) { problems[0].field.focus(); }
             box.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+
+        // Existing-stock orders are ready to deliver from the showroom; they
+        // do not need a Kaligad. Keep those inputs out of the submitted line
+        // so a stale selection cannot accidentally create an assignment.
+        var fulfilment = form.querySelector('[name="fulfilment_mode"]');
+        function syncFulfilment() {
+            if (!fulfilment) { return; }
+            var stockMode = fulfilment.value === "existing_stock";
+            form.querySelectorAll('select[name="l_karigar_id[]"], input[name="l_delivery_date[]"]').forEach(function (field) {
+                field.disabled = stockMode;
+                if (stockMode) { field.value = field.tagName === "SELECT" ? "0" : ""; }
+            });
+        }
+        if (fulfilment) { fulfilment.addEventListener("change", syncFulfilment); syncFulfilment(); }
+        document.addEventListener("change", function (event) {
+            var item = event.target.closest('select[name="l_item_id[]"]');
+            if (!item || !fulfilment || fulfilment.value !== "existing_stock") { return; }
+            var row = item.closest("tr"), option = item.options[item.selectedIndex];
+            if (!row || !option || !option.value) { return; }
+            var purity = row.querySelector('select[name="l_purity_id[]"]'), unit = row.querySelector('select[name="l_unit_id[]"]');
+            if (purity) { purity.value = option.dataset.purity || purity.value; }
+            if (unit) { unit.value = option.dataset.unit || unit.value; }
+            [["l_qty_pieces[]", option.dataset.pieces], ["l_gross_weight[]", option.dataset.gross], ["l_stone_weight[]", "0"], ["l_wastage_pct[]", "0"], ["l_wastage_weight[]", "0"]].forEach(function (pair) {
+                var input = row.querySelector('[name="' + pair[0] + '"]'); if (input) { input.value = pair[1] || "0"; }
+            });
         });
     })();
     </script>

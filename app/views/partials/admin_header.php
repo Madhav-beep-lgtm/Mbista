@@ -154,7 +154,7 @@ if ($headerIsClientBooks) {
 }
 // The module spans four pages, so "is this section open?" keys off the script
 // rather than a single filename.
-$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php', 'jewellery-tags.php', 'jewellery-trace.php', 'accounting-parties.php'];
+$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php', 'jewellery-tags.php', 'accounting-parties.php'];
 $headerJewelleryActive = in_array($headerScript, $headerJewelleryScripts, true);
 $headerJewelleryView = (string) ($_GET['view'] ?? '');
 $headerJewelleryMenu = '';
@@ -166,7 +166,6 @@ if ($headerJewellery) {
         ['jewellery.php', 'items', 'Items', 'box'],
         ['jewellery.php', 'opening', 'Opening Stock', 'journal'],
         ['jewellery.php', 'stock', 'Stock &amp; Metal Position', 'layers'],
-        ['jewellery-trace.php', '', 'Item Traceability', 'search'],
         ['jewellery-trade.php', 'purchases', 'Purchases', 'box'],
         ['jewellery-trade.php', 'sales', 'Sales', 'receipt-voucher'],
         ['accounting-parties.php', 'directory', 'Party Master', 'users'],

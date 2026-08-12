@@ -334,10 +334,10 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                             . $fmt((float) $stock['fine_weight'], 3) . ' fine'
                                         : '';
                                 ?>
-                                <option value="<?= (int) $it['id'] ?>" data-type="<?= e((string) ($it['item_type'] ?? '')) ?>" title="<?= e($it['code'] . ' — ' . $it['name'] . $left) ?>" <?= (int) ($row['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name'] . $left) ?></option>
+                                <option value="<?= (int) $it['id'] ?>" data-type="<?= e((string) ($it['item_type'] ?? '')) ?>" data-purity="<?= (int) ($it['purity_id'] ?? 0) ?>" data-unit="<?= (int) ($it['unit_id'] ?? 0) ?>" data-pieces="<?= e((string) ($stock['qty_pieces'] ?? 0)) ?>" data-gross="<?= e((string) ($stock['gross_weight'] ?? 0)) ?>" title="<?= e($it['code'] . ' — ' . $it['name'] . $left) ?>" <?= (int) ($row['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name'] . $left) ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <?php if ($full && $stockUnits !== []): ?>
+                        <?php if (false): /* Physical trace selection is intentionally not part of the sales/order workflow. */ ?>
                             <select name="<?= $prefix ?>_stock_unit_id[]" class="jw-trace-select" title="Use an exact physical item already in the showroom">
                                 <option value="0">— make / sell by item —</option>
                                 <?php foreach ($stockUnits as $stockUnit): ?>

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/export_engine.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -660,6 +661,17 @@ $partySql = '
 $partyStmt = db()->prepare($partySql);
 $partyStmt->execute(['company_id' => $companyId]);
 $parties = $partyStmt->fetchAll();
+
+if (isset($_GET['export']) && in_array((string) $_GET['export'], ['csv', 'xlsx', 'print'], true)) {
+    require_permission('accounting', 'export');
+    $exportRows = [['Code', 'Name', 'Type', 'Phone', 'Email', 'PAN / VAT', 'Address', 'Status']];
+    foreach ($parties as $party) {
+        $exportRows[] = [(string) $party['code'], (string) $party['name'], (string) $party['party_type'],
+            (string) ($party['phone'] ?? ''), (string) ($party['email'] ?? ''), (string) ($party['pan_vat'] ?? ''),
+            (string) ($party['address'] ?? ''), (string) $party['status']];
+    }
+    export_dispatch((string) $_GET['export'], 'party-master-' . date('Ymd'), $exportRows, 'Party Master');
+}
 
 // Repair each active Party Master once from its classification. This adopts
 // existing ledgers into the canonical groups and creates only a missing primary
@@ -1654,6 +1666,9 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
 ?>
 <div class="reference-toolbar">
     <div class="reference-toolbar-actions">
+        <a class="button secondary" href="<?= e(parties_page_url(['export' => 'xlsx'])) ?>">Excel</a>
+        <a class="button secondary" href="<?= e(parties_page_url(['export' => 'csv'])) ?>">CSV</a>
+        <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['export' => 'print'])) ?>">PDF</a>
         <a class="button<?= $primaryAction === 'invoice' ? '' : ' secondary' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Create Invoice</a>
         <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'payment', 'edit_id' => null])) ?>"><?= icon('receipt-voucher') ?>Record Payment</a>
         <a class="button<?= $primaryAction === 'purchase' ? '' : ' secondary' ?>" href="<?= e(parties_page_url(['panel' => 'purchase', 'edit_id' => null])) ?>"><?= icon('cart') ?>Record Purchase</a>

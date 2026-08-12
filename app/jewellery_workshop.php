@@ -544,7 +544,11 @@ function jewellery_orders_list(int $companyId, array $filters = []): array
             $params[$key] = $needle;
         }
     }
-    $sql .= ' ORDER BY o.order_date DESC, o.id DESC LIMIT ' . max(1, min(1000, (int) ($filters['limit'] ?? 300)));
+    // Order numbers can have different prefixes/year parts (JO-00001,
+    // JO-2083-000003). The final segment is the actual running number, so
+    // sort by it numerically rather than lexically or by date.
+    $sql .= ' ORDER BY CAST(SUBSTRING_INDEX(o.order_no, \'-\', -1) AS UNSIGNED) ASC, o.order_no ASC, o.id ASC LIMIT '
+        . max(1, min(1000, (int) ($filters['limit'] ?? 300)));
 
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
@@ -601,6 +605,8 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     $orderId = (int) ($input['id'] ?? 0);
     $settings = jewellery_settings($companyId);
     $orderDate = (string) ($input['order_date'] ?? date('Y-m-d'));
+    $fulfilmentMode = (string) ($input['fulfilment_mode'] ?? 'new_assignment') === 'existing_stock'
+        ? 'existing_stock' : 'new_assignment';
 
     // A caller that does not mention a field leaves it as it was, so removing
     // a field from the order form can never make the SCREEN decide what the
@@ -654,6 +660,21 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     // that permanent identity from here onward.
     $claimedStockUnits = [];
     foreach ($lines as $lineIndex => $line) {
+        if ($fulfilmentMode === 'existing_stock') {
+            $available = jw_item_balance($companyId, (int) ($line['item_id'] ?? 0), $orderDate, 'stock');
+            $needsGross = jw_round_weight((float) ($line['gross_weight'] ?? 0));
+            $needsPieces = round((float) ($line['qty_pieces'] ?? 0), 3);
+            if ((float) ($available['gross_weight'] ?? 0) + 0.00005 < $needsGross
+                || (float) ($available['qty_pieces'] ?? 0) + 0.0005 < $needsPieces) {
+                throw new RuntimeException('Item ' . ($lineIndex + 1) . ' does not have enough showroom stock for this order.');
+            }
+            $lines[$lineIndex]['source'] = 'stock';
+            $lines[$lineIndex]['stock_unit_id'] = 0;
+            $lines[$lineIndex]['stock_receipt_id'] = 0;
+            $lines[$lineIndex]['karigar_id'] = 0;
+            $lines[$lineIndex]['delivery_date'] = '';
+            continue;
+        }
         $stockUnitId = (int) ($line['stock_unit_id'] ?? 0);
         $stockReceiptId = (int) ($line['stock_receipt_id'] ?? 0);
         if ($stockUnitId <= 0 && $stockReceiptId > 0) {
@@ -2756,7 +2777,7 @@ function jewellery_open_orders_for_party(int $companyId, int $partyId): array
         INNER JOIN jewellery_metals m ON m.id = o.metal_id
         WHERE o.company_id = :cid AND o.party_id = :pid
           AND o.status IN ('confirmed', 'assigned', 'partially_received', 'received')
-        ORDER BY o.status = 'received' DESC, o.order_date ASC, o.id ASC");
+        ORDER BY CAST(SUBSTRING_INDEX(o.order_no, '-', -1) AS UNSIGNED) ASC, o.order_no ASC, o.id ASC");
     $stmt->execute(['cid' => $companyId, 'pid' => $partyId]);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
