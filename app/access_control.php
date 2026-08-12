@@ -846,7 +846,7 @@ function revoke_user_sessions(int $userId): void
     try {
         // Stamp with PHP's clock, not MySQL NOW(): session_is_revoked() parses
         // this value with strtotime() in PHP's timezone, and the two clocks can
-        // disagree (e.g. XAMPP ships date.timezone=Europe/Berlin while MySQL
+        // disagree (e.g. a local PHP package ships a timezone differing from MySQL
         // runs on system time). A NOW() written hours "ahead" of PHP's reading
         // locked every re-login out until the skew elapsed.
         db()->prepare('UPDATE users SET sessions_valid_from = :now WHERE id = :id')

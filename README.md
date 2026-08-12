@@ -135,12 +135,12 @@ php -S localhost:8000 -t public_html
 
 3. Open `http://localhost:8000` in your browser.
 
-### Option 2: XAMPP
+### Option 2: Laragon
 
-If you use XAMPP on Windows:
+If you use Laragon on Windows:
 
-1. Install XAMPP and start Apache and MySQL from the control panel.
-2. Copy the project into your XAMPP `htdocs` folder or set the virtual host document root to `public_html`.
+1. Install Laragon and start Apache and MariaDB from the control panel.
+2. Set the Laragon virtual-host document root to this project's `public_html` directory.
 3. Create/select a blank database, then import `database/schema.sql` into MySQL from phpMyAdmin.
 4. Update the database credentials in `app/config.php` if needed.
 5. Open the site in your browser, then log in with the default admin account and change the password.

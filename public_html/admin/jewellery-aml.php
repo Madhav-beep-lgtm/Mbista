@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__.'/../../app/bootstrap.php';
 require_once __DIR__.'/../../app/accounting_module_repair.php';
+require_once __DIR__.'/../../app/jewellery_engine.php';
 require_once __DIR__.'/../../app/jewellery_aml.php';
 require_once __DIR__.'/../../app/export_engine.php';
 accounting_module_repair_database(); require_jewellery(); require_permission('jewellery','post');
