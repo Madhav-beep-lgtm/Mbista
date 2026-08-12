@@ -415,6 +415,8 @@ document.addEventListener('DOMContentLoaded', () => {
       button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       button.setAttribute('aria-label', action);
       button.setAttribute('title', action + ' (Ctrl + B)');
+      const label = button.querySelector('.admin-sidebar-toggle-label');
+      if (label) { label.textContent = collapsed ? 'Show sidebar' : 'Collapse sidebar'; }
     });
     try {
       // NOT REMEMBERED ON A PHONE. Under 900px this class drives a drawer, and
