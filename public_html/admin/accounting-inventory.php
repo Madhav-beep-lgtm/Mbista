@@ -1937,12 +1937,12 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 
 <nav class="inventory-action-tabs" aria-label="Inventory tasks">
     <?php if ($invView === 'inventory'): ?>
-        <button type="button" class="inventory-action-tab is-active" data-workspace-target="create-item"><?= icon('services') ?><span>Item Master</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="warehouses"><?= icon('companies') ?><span>Warehouses</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="movement-purchase"><?= icon('cart') ?><span>Purchase Stock</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="movement-sale"><?= icon('invoices') ?><span>Sales & Returns</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="movement-adjust"><?= icon('settings') ?><span>Adjustments</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="movement-transfer"><?= icon('services') ?><span>Transfers</span></button>
+        <button type="button" class="inventory-action-tab is-active btn btn-info" data-workspace-target="create-item"><?= icon('services') ?><span>Item Master</span></button>
+        <button type="button" class="inventory-action-tab btn btn-success" data-workspace-target="warehouses"><?= icon('companies') ?><span>Warehouses</span></button>
+        <button type="button" class="inventory-action-tab btn btn-warning" data-workspace-target="movement-purchase"><?= icon('cart') ?><span>Purchase Stock</span></button>
+        <button type="button" class="inventory-action-tab btn btn-danger" data-workspace-target="movement-sale"><?= icon('invoices') ?><span>Sales & Returns</span></button>
+        <button type="button" class="inventory-action-tab btn btn-secondary" data-workspace-target="movement-adjust"><?= icon('settings') ?><span>Adjustments</span></button>
+        <button type="button" class="inventory-action-tab btn btn-primary" data-workspace-target="movement-transfer"><?= icon('services') ?><span>Transfers</span></button>
     <?php else: ?>
         <button type="button" class="inventory-action-tab is-active" data-workspace-target="manufacturing"><?= icon('settings') ?><span>Production Order</span></button>
         <button type="button" class="inventory-action-tab" data-workspace-target="bom"><?= icon('documents') ?><span>Bill of Materials</span></button>
@@ -2749,3 +2749,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
+
