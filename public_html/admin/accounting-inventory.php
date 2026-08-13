@@ -1937,12 +1937,12 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 
 <nav class="inventory-action-tabs" aria-label="Inventory tasks">
     <?php if ($invView === 'inventory'): ?>
-        <button type="button" class="inventory-action-tab is-active btn btn-info" data-workspace-target="create-item"><?= icon('services') ?><span>Item Master</span></button>
-        <button type="button" class="inventory-action-tab btn btn-success" data-workspace-target="warehouses"><?= icon('companies') ?><span>Warehouses</span></button>
-        <button type="button" class="inventory-action-tab btn btn-warning" data-workspace-target="movement-purchase"><?= icon('cart') ?><span>Purchase Stock</span></button>
-        <button type="button" class="inventory-action-tab btn btn-danger" data-workspace-target="movement-sale"><?= icon('invoices') ?><span>Sales & Returns</span></button>
-        <button type="button" class="inventory-action-tab btn btn-secondary" data-workspace-target="movement-adjust"><?= icon('settings') ?><span>Adjustments</span></button>
-        <button type="button" class="inventory-action-tab btn btn-primary" data-workspace-target="movement-transfer"><?= icon('services') ?><span>Transfers</span></button>
+        <button type="button" class="inventory-action-tab is-active btn btn-info" style="background:#0dcaf0;border-color:#0dcaf0;color:#000" data-workspace-target="create-item"><?= icon('services') ?><span>Item Master</span></button>
+        <button type="button" class="inventory-action-tab btn btn-success" style="background:#198754;border-color:#198754;color:#fff" data-workspace-target="warehouses"><?= icon('companies') ?><span>Warehouses</span></button>
+        <button type="button" class="inventory-action-tab btn btn-warning" style="background:#ffc107;border-color:#ffc107;color:#000" data-workspace-target="movement-purchase"><?= icon('cart') ?><span>Purchase Stock</span></button>
+        <button type="button" class="inventory-action-tab btn btn-danger" style="background:#dc3545;border-color:#dc3545;color:#fff" data-workspace-target="movement-sale"><?= icon('invoices') ?><span>Sales & Returns</span></button>
+        <button type="button" class="inventory-action-tab btn btn-secondary" style="background:#6c757d;border-color:#6c757d;color:#fff" data-workspace-target="movement-adjust"><?= icon('settings') ?><span>Adjustments</span></button>
+        <button type="button" class="inventory-action-tab btn btn-primary" style="background:#0d6efd;border-color:#0d6efd;color:#fff" data-workspace-target="movement-transfer"><?= icon('services') ?><span>Transfers</span></button>
     <?php else: ?>
         <button type="button" class="inventory-action-tab is-active" data-workspace-target="manufacturing"><?= icon('settings') ?><span>Production Order</span></button>
         <button type="button" class="inventory-action-tab" data-workspace-target="bom"><?= icon('documents') ?><span>Bill of Materials</span></button>
@@ -2772,3 +2772,4 @@ nav.inventory-action-tabs .inventory-action-tab.btn-primary { background: #0d6ef
 
 nav.inventory-action-tabs .inventory-action-tab.btn:hover { opacity: 0.85 !important; }
 </style>
+
