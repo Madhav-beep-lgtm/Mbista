@@ -2773,3 +2773,35 @@ nav.inventory-action-tabs .inventory-action-tab.btn-primary { background: #0d6ef
 nav.inventory-action-tabs .inventory-action-tab.btn:hover { opacity: 0.85 !important; }
 </style>
 
+
+<style>
+.inventory-action-tab { color: #ffffff !important; }
+.inventory-action-tab span { color: #ffffff !important; }
+.inventory-action-tab svg { fill: #ffffff !important; }
+</style>
+
+<style>
+/* Make active tab green bg + white text */
+.nav-link.active, .nav-tabs .nav-link.active { background: #0f6b4f !important; color: #ffffff !important; border-color: #0f6b4f !important; }
+
+/* Make inactive tabs white bg + green text */
+.nav-link, .nav-tabs .nav-link { background: #ffffff !important; color: #0f6b4f !important; border: 1px solid #0f6b4f !important; }
+
+.nav-link:hover { background: #e6f4f0 !important; color: #0f6b4f !important; }
+</style>
+
+<style>
+/* Active tab: green background + white text */
+.nav-link.active, .nav-tabs .nav-link.active, 
+.inventory-nav .nav-link.active { 
+    background: #0f6b4f !important; 
+    color: #ffffff !important; 
+    border-color: #0f6b4f !important; 
+}
+
+/* Make sure span and icon inside also white */
+.nav-link.active span, .nav-link.active svg { 
+    color: #ffffff !important; 
+    fill: #ffffff !important; 
+}
+</style>
