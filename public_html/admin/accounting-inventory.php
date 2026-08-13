@@ -2750,3 +2750,14 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
 
+
+<style>
+.inventory-action-tab.btn-info { background: #0dcaf0; border-color: #0dcaf0; color: #000; }
+.inventory-action-tab.btn-success { background: #198754; border-color: #198754; color: #fff; }
+.inventory-action-tab.btn-warning { background: #ffc107; border-color: #ffc107; color: #000; }
+.inventory-action-tab.btn-danger { background: #dc3545; border-color: #dc3545; color: #fff; }
+.inventory-action-tab.btn-secondary { background: #6c757d; border-color: #6c757d; color: #fff; }
+.inventory-action-tab.btn-primary { background: #0d6efd; border-color: #0d6efd; color: #fff; }
+
+.inventory-action-tab.btn:hover { opacity: 0.85; }
+</style>
