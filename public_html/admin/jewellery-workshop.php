@@ -155,6 +155,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('jewellery', 'edit');
         $isCreate = (int) ($_POST['order_id'] ?? 0) === 0;
         try {
+            if (!$isCreate) {
+                $orderBeingEdited = jewellery_order($companyId, (int) ($_POST['order_id'] ?? 0));
+                if ($orderBeingEdited && in_array((string) $orderBeingEdited['status'], ['received', 'delivered'], true)) {
+                    throw new RuntimeException('Received and delivered orders cannot be edited.');
+                }
+            }
             $savedOrderId = jewellery_save_order($companyId, $fiscalYearId, [
                 'id' => (int) ($_POST['order_id'] ?? 0),
                 // Blank means "number it for me" on a new order and "keep the
@@ -172,6 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'purity_id' => (int) ($_POST['purity_id'] ?? 0),
                 'unit_id' => (int) ($_POST['unit_id'] ?? 0),
                 'expected_gross_weight' => (float) ($_POST['expected_gross_weight'] ?? 0),
+                'fulfilment_mode' => (string) ($_POST['fulfilment_mode'] ?? 'new_assignment'),
                 'design_no' => (string) ($_POST['design_no'] ?? ''),
                 'expected_item' => (string) ($_POST['expected_item'] ?? ''),
                 'description' => (string) ($_POST['description'] ?? ''),
@@ -456,6 +463,10 @@ $advancedInUse = $filterStatus !== '' || $filterParty > 0 || $filterKarigar > 0 
 $orders = $view === 'orders' ? jewellery_orders_list($companyId, $listFilters) : [];
 $editKarigar = $view === 'karigars' ? jewellery_karigar($companyId, (int) ($_GET['edit'] ?? 0)) : null;
 $editOrder = $view === 'orders' ? jewellery_order($companyId, (int) ($_GET['edit'] ?? 0)) : null;
+if ($editOrder && in_array((string) $editOrder['status'], ['received', 'delivered'], true)) {
+    flash('error', 'Received and delivered orders cannot be edited.');
+    redirect(url('admin/jewellery-workshop.php?view=orders'));
+}
 $orderAdvances = $editOrder ? jewellery_order_advances($companyId, (int) $editOrder['id'])
     : ['rows' => [], 'cash_total' => 0.0, 'metal_total' => 0.0, 'total' => 0.0];
 $advanceAvailable = $editOrder ? jewellery_order_advance_available($companyId, (int) $editOrder['id']) : 0.0;
@@ -475,6 +486,19 @@ if ($view === 'orders' && $editOrder === null && is_array($orderStash)) {
 } else {
     $orderFormPrefill = null;
 }
+if ($view === 'orders' && $editOrder === null && !is_array($orderFormPrefill)
+    && (int) ($_GET['stock_unit'] ?? 0) > 0) {
+    $directUnit = jewellery_trace_unit($companyId, (int) $_GET['stock_unit']);
+    if ($directUnit && (string) $directUnit['stock_kind'] === 'showroom'
+        && (string) $directUnit['status'] === 'in_stock') {
+        $orderLines = [[
+            'stock_unit_id' => (int) $directUnit['id'], 'source' => 'stock',
+            'item_id' => (int) $directUnit['item_id'], 'purity_id' => (int) $directUnit['purity_id'],
+            'unit_id' => (int) $directUnit['unit_id'], 'qty_pieces' => (float) $directUnit['qty_pieces'],
+            'gross_weight' => (float) $directUnit['gross_weight'], 'stone_weight' => (float) $directUnit['stone_weight'],
+        ]];
+    }
+}
 // The form reads header values through this: the stashed value when a refused
 // save is being corrected, else the stored order being edited, else blank.
 $orderField = static function (string $key, $fallback = '') use (&$editOrder, &$orderFormPrefill) {
@@ -487,17 +511,10 @@ $orderField = static function (string $key, $fallback = '') use (&$editOrder, &$
 // What is on the shelf, shown on the item options the same way the sale form
 // shows it — an order for a piece the shop already has is filled off the tray.
 $orderOnHand = [];
-// The Ready to Sale shelf, offered on the order form itself: a customer who
-// points at a ring in the case is placing an order for THAT piece, and there is
-// nothing for a kaligad to make. Pieces another live order is already holding
-// are not on the list; the ones this order holds stay on it, or revising the
-// order would strike out its own items.
-$orderStockPieces = [];
 if ($view === 'orders') {
     foreach ($items as $itemRow) {
         $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
     }
-    $orderStockPieces = jewellery_ready_to_sale_options($companyId, (int) ($editOrder['id'] ?? 0));
 }
 $cashBankLedgers = [];
 if ($view === 'orders' && table_exists('ledgers')) {
@@ -557,15 +574,14 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
         export_dispatch($exportFormat, 'jewellery-issues-' . $stamp, $data, 'Kaligad Issues', $exportMeta);
     }
     if ($view === 'ready-to-sale') {
-        $data = [['Assignment', 'Kaligad', 'Ornament', 'Size/Design', 'Received on', 'Gross', 'Stone',
-            'Net', 'Fine', 'Purity', 'Making charge', 'Held for', 'Order']];
+        $data = [['Trace', 'Origin', 'Stock order', 'Assignment', 'Kaligad', 'Ornament', 'Size/Design',
+            'Received on', 'Gross', 'Stone', 'Net', 'Fine', 'Purity', 'Reservation']];
         foreach ($readyToSale as $r) {
-            $data[] = [$r['assignment_no'], (string) ($r['karigar_name'] ?? ''),
+            $data[] = [$r['trace_code'], $r['origin_type'], (string) ($r['stock_order_no'] ?? ''),
+                (string) ($r['assignment_no'] ?? ''), (string) ($r['karigar_name'] ?? ''),
                 (string) ($r['expected_ornament'] ?: $r['item_name'] ?? ''), (string) ($r['size_design'] ?? ''),
                 (string) $r['receive_date'], $r['received_gross_weight'], $r['stone_weight'],
                 $r['net_gold_weight'], $r['received_fine_weight'], (string) ($r['purity_code'] ?? ''),
-                $r['making_amount'] ?? 0,
-                (string) ($r['reserved_for'] ?? '') !== '' ? (string) $r['reserved_for'] : 'On the shelf',
                 (string) ($r['reserved_order_no'] ?? '')];
         }
         export_dispatch($exportFormat, 'jewellery-ready-to-sale-' . $stamp, $data, 'Ready to Sale', $exportMeta);
@@ -698,7 +714,7 @@ jw_filter_bar_styles();
                             </td>
                             <td><input type="number" name="tender_gross_weight[]" step="0.0001" min="0" value="0"></td>
                             <td><input type="number" name="tender_amount[]" class="jw-tender-amount" step="0.01" min="0" value="0"></td>
-                            <td><button type="button" class="button secondary jw-line-remove" title="Remove this way of paying"><?= icon('close') ?></button></td>
+                            <td><button type="button" class="button secondary jw-line-remove" title="Remove this way of paying">&times;</button></td>
                         </tr>
                     </tbody>
                 </table></div>
@@ -727,6 +743,13 @@ jw_filter_bar_styles();
                 <label>Order date<input type="date" name="order_date" data-jw-required="Order date" value="<?= e((string) ($orderField('order_date', $todayInFy) ?: $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required>
                 </label>
                 <label>Promised delivery<input type="date" name="delivery_date" value="<?= e((string) $orderField('delivery_date')) ?>"></label>
+                <label>Order fulfilment
+                    <select name="fulfilment_mode" id="jw-fulfilment-mode">
+                        <option value="new_assignment" <?= (string) $orderField('fulfilment_mode', 'new_assignment') === 'new_assignment' ? 'selected' : '' ?>>New Assignment (Kaligad)</option>
+                        <option value="existing_stock" <?= (string) $orderField('fulfilment_mode', '') === 'existing_stock' ? 'selected' : '' ?>>Existing Stock Assignment</option>
+                    </select>
+                    <small>Existing stock uses the selected Item; it does not create stock.</small>
+                </label>
                 <label>Existing customer
                     <select name="party_id" data-jw-customer-select>
                         <option value="0">— new customer →</option>
@@ -785,12 +808,10 @@ jw_filter_bar_styles();
                 jw_render_line_grid('l', $orderLines, max(3, count($orderLines) + 2), 'Items ordered', [
                     'items' => $items, 'purities' => $purities, 'units' => $units,
                     'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $orderOnHand,
+                    'stock_units' => jewellery_ready_to_sale_options($companyId, (int) ($editOrder['id'] ?? 0)),
                     // Handing over a kaligad list is what turns on the two
                     // workshop columns: who makes each piece, and when it is due.
                     'karigars' => $karigars,
-                    // And handing over the shelf turns on the third: not every
-                    // item ordered has to be made.
-                    'stock_pieces' => $orderStockPieces,
                 ]);
             ?>
 
@@ -906,6 +927,32 @@ jw_filter_bar_styles();
             if (problems[0].field) { problems[0].field.focus(); }
             box.scrollIntoView({ behavior: "smooth", block: "center" });
         });
+
+        // Existing-stock orders are ready to deliver from the showroom; they
+        // do not need a Kaligad. Keep those inputs out of the submitted line
+        // so a stale selection cannot accidentally create an assignment.
+        var fulfilment = form.querySelector('[name="fulfilment_mode"]');
+        function syncFulfilment() {
+            if (!fulfilment) { return; }
+            var stockMode = fulfilment.value === "existing_stock";
+            form.querySelectorAll('select[name="l_karigar_id[]"], input[name="l_delivery_date[]"]').forEach(function (field) {
+                field.disabled = stockMode;
+                if (stockMode) { field.value = field.tagName === "SELECT" ? "0" : ""; }
+            });
+        }
+        if (fulfilment) { fulfilment.addEventListener("change", syncFulfilment); syncFulfilment(); }
+        document.addEventListener("change", function (event) {
+            var item = event.target.closest('select[name="l_item_id[]"]');
+            if (!item || !fulfilment || fulfilment.value !== "existing_stock") { return; }
+            var row = item.closest("tr"), option = item.options[item.selectedIndex];
+            if (!row || !option || !option.value) { return; }
+            var purity = row.querySelector('select[name="l_purity_id[]"]'), unit = row.querySelector('select[name="l_unit_id[]"]');
+            if (purity) { purity.value = option.dataset.purity || purity.value; }
+            if (unit) { unit.value = option.dataset.unit || unit.value; }
+            [["l_qty_pieces[]", option.dataset.pieces], ["l_gross_weight[]", option.dataset.gross], ["l_stone_weight[]", "0"], ["l_wastage_pct[]", "0"], ["l_wastage_weight[]", "0"]].forEach(function (pair) {
+                var input = row.querySelector('[name="' + pair[0] + '"]'); if (input) { input.value = pair[1] || "0"; }
+            });
+        });
     })();
     </script>
     <?php endif; ?>
@@ -924,6 +971,10 @@ jw_filter_bar_styles();
         </div>
 
         <?php if ($orderAdvances['rows'] !== []): ?>
+        <style>
+        .jw-order-action-select{min-height:32px;min-width:145px;padding:3px 28px 3px 8px}
+        .jw-order-postpone{margin-top:6px}
+        </style>
         <div class="mbw-tablewrap"><table>
             <thead><tr><th>Date</th><th>Ref</th><th>What</th><th class="is-numeric">Weight</th><th class="is-numeric">Value</th></tr></thead>
             <tbody>
@@ -1019,16 +1070,20 @@ jw_filter_bar_styles();
             ],
         ]); ?>
         <div class="mbw-tablewrap"><table>
-            <thead><tr><th>No.</th><th>Date</th><th>Customer</th><th>Metal</th><th class="is-numeric">Expected wt</th><th>Delivery</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Order no.</th><th>Date / design</th><th>Customer</th><th>Expected item</th><th>Metal / purity</th><th>Unit</th><th class="is-numeric">Gross wt</th><th class="is-numeric">Fine wt</th><th>Delivery</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
-                <?php if ($orders === []): ?><tr><td colspan="8">No orders yet.</td></tr><?php endif; ?>
+                <?php if ($orders === []): ?><tr><td colspan="11">No orders yet.</td></tr><?php endif; ?>
                 <?php foreach ($orders as $row): ?>
                     <tr>
-                        <td><?= e($row['order_no']) ?><?= ($row['design_no'] ?? '') !== '' ? '<br><small>' . e((string) $row['design_no']) . '</small>' : '' ?></td>
-                        <td><?= e(app_date((string) $row['order_date'])) ?></td>
+                        <td><strong><?= e($row['order_no']) ?></strong></td>
+                        <td><?= e(app_date((string) $row['order_date'])) ?><?= ($row['design_no'] ?? '') !== '' ? '<br><small>' . e((string) $row['design_no']) . '</small>' : '' ?></td>
                         <td><?= e((string) ($row['party_name'] ?? $row['customer_name'] ?? 'Walk-in')) ?></td>
+                        <td><?= e((string) (($row['expected_item'] ?? '') ?: ($row['item_code'] ?? '—'))) ?></td>
                         <td><?= e($row['metal_name'] . ' · ' . $row['purity_code']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $row['expected_gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small>
+                        <td><?= e((string) $row['unit_code']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['expected_gross_weight'], 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['expected_fine_weight'], 4) ?></td>
+                        <td style="display:none">
                             <?php // Actual weight and pure-metal content together — the pair a jewellery figure is read as. ?>
                             <?php if ((float) $row['expected_fine_weight'] > 0.00005): ?>
                                 <br><small><?= $fmt((float) $row['expected_fine_weight'], 4) ?> fine</small>
@@ -1037,19 +1092,19 @@ jw_filter_bar_styles();
                         <td><?= ($row['delivery_date'] ?? null) ? e(app_date((string) $row['delivery_date'])) : '—' ?></td>
                         <td><span class="mbw-pill <?= e($statusTone[$row['status']] ?? 'tone-gray') ?>"><?= e($statusLabel((string) $row['status'])) ?></span></td>
                         <td style="white-space:nowrap">
-                            <?php if ($canEdit): ?>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) ?>">Edit</a>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=order&id=' . (int) $row['id'])) ?>">Preview</a>
-                            <?php endif; ?>
-                            <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?>
-                                <?php // Assigning is its own page. The order rides along so
-                                      // the grid opens with this one already picked — the
-                                      // reason somebody pressed Assign on THIS row. ?>
-                                <a class="button secondary" style="min-height:30px;padding:3px 10px"
-                                   href="<?= e(url('admin/jewellery-assign.php?kind=customer&order=' . (int) $row['id'])) ?>">Assign</a>
-                            <?php endif; ?>
+                            <select class="jw-order-action-select" aria-label="Order actions"
+                                    data-edit-url="<?= $canEdit && !in_array((string) $row['status'], ['received', 'delivered'], true) ? e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) : '' ?>"
+                                    data-preview-url="<?= $canEdit ? e(url('admin/jewellery-print.php?doc=order&id=' . (int) $row['id'])) : '' ?>"
+                                    data-assign-url="<?= in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost ? e(url('admin/jewellery-assign.php?kind=customer&order=' . (int) $row['id'])) : '' ?>">
+                                <option value="">Select action</option>
+                                <?php if ($canEdit && !in_array((string) $row['status'], ['received', 'delivered'], true)): ?><option value="edit">Edit</option><?php endif; ?>
+                                <?php if ($canEdit): ?><option value="preview">Preview</option><?php endif; ?>
+                                <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?><option value="assign">Assign</option><?php endif; ?>
+                                <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?><option value="postpone">Postpone</option><option value="cancel">Cancel</option><?php endif; ?>
+                                <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?><option value="delete">Delete</option><?php endif; ?>
+                            </select>
                             <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?>
-                                <form method="post" style="display:inline-flex;gap:4px;align-items:center">
+                                <form method="post" class="jw-order-postpone" hidden style="display:none;gap:4px;align-items:center;margin-top:5px">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="postpone_order">
                                     <input type="hidden" name="back_view" value="orders">
@@ -1057,40 +1112,49 @@ jw_filter_bar_styles();
                                     <input type="date" name="delivery_date" required
                                            value="<?= e((string) ($row['delivery_date'] ?? '')) ?>"
                                            style="min-height:30px;padding:2px 6px;max-width:140px">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Postpone</button>
+                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Confirm</button>
                                 </form>
-                                <form method="post" style="display:inline"
+                                <form method="post" class="jw-order-cancel" hidden
                                       onsubmit="return confirm('Cancel order <?= e((string) $row['order_no']) ?>?')">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="cancel_order">
                                     <input type="hidden" name="back_view" value="orders">
                                     <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px" title="Cancel this order">Cancel</button>
                                 </form>
                             <?php endif; ?>
                             <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?>
-                                <form method="post" style="display:inline"
+                                <form method="post" class="jw-order-delete" hidden
                                       onsubmit="return confirm('Delete order <?= e((string) $row['order_no']) ?> for good?')">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="delete_order">
                                     <input type="hidden" name="back_view" value="orders">
                                     <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:var(--mbw-red,#e5484d)" title="Delete this order"><?= icon('trash') ?></button>
                                 </form>
-                            <?php elseif ($canEdit): ?>
-                                <?php // The button is HERE, and it says why it will not fire. An
-                                      // order that reached the workshop or the customer is a
-                                      // financial record — its metal moved, its bill posted.
-                                      // The road back is cancel / unpost, never deletion. ?>
-                                <button type="button" class="button soft" disabled
-                                        style="min-height:30px;padding:3px 8px;opacity:.45;cursor:not-allowed"
-                                        title="A <?= e(str_replace('_', ' ', (string) $row['status'])) ?> order is a financial record — metal and money moved against it. Cancel or unpost the documents instead; deletion is not allowed."><?= icon('close') ?></button>
                             <?php endif; ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <script>
+        (function(){
+            document.querySelectorAll('.jw-order-action-select').forEach(function(select){
+                select.addEventListener('change', function(){
+                    var cell = select.closest('td');
+                    var postpone = cell.querySelector('.jw-order-postpone');
+                    if (postpone) {
+                        postpone.hidden = select.value !== 'postpone';
+                        postpone.style.display = select.value === 'postpone' ? 'inline-flex' : 'none';
+                    }
+                    if (select.value === 'edit' && select.dataset.editUrl) window.location.href = select.dataset.editUrl;
+                    if (select.value === 'preview' && select.dataset.previewUrl) { window.open(select.dataset.previewUrl, '_blank', 'noopener'); select.value = ''; }
+                    if (select.value === 'assign' && select.dataset.assignUrl) window.location.href = select.dataset.assignUrl;
+                    if (select.value === 'cancel') { var c=cell.querySelector('.jw-order-cancel'); if(c)c.requestSubmit(); }
+                    if (select.value === 'delete') { var d=cell.querySelector('.jw-order-delete'); if(d)d.requestSubmit(); }
+                });
+            });
+        })();
+        </script>
     </section>
 
 <?php elseif ($view === 'karigars'): ?>
@@ -1380,38 +1444,31 @@ jw_filter_bar_styles();
     </section>
 
 <?php elseif ($view === 'ready-to-sale'): ?>
-    <?php // Sold is the stock ledger's business, but PROMISED is this board's:
-          // a customer can order one of these pieces off the shelf, and the
-          // counter has to know at a glance which ones are still free. ?>
-    <?php $heldCount = count(array_filter($readyToSale, static fn (array $r): bool => (int) ($r['reserved_order_id'] ?? 0) > 0)); ?>
     <div class="notice" style="margin-bottom:14px">
         Pieces made for the showroom, back from the kaligad and on the shelf. Nobody ordered these — they replace
-        minimum stock, so they wait for whoever walks in rather than for a name. A customer who does want one is
-        given an order against that exact piece on the <a href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">order form</a>,
-        and no kaligad is ever assigned to it.
+        minimum stock, so they wait for whoever walks in rather than for a name.
     </div>
     <section class="mbw-card">
         <div class="mbw-card-head">
-            <h2>Ready to Sale (<?= count($readyToSale) ?><?= $heldCount > 0 ? ' — ' . $heldCount . ' promised' : '' ?>)</h2>
+            <h2>Ready to Sale (<?= count($readyToSale) ?>)</h2>
             <div class="mbw-card-tools"><?= $canExport && $readyToSale !== [] ? 'Export' . $exportLinks() : '' ?></div>
         </div>
         <div class="mbw-tablewrap"><table>
-            <thead><tr><th>Assignment</th><th>Ornament</th><th>Size / design</th><th>Kaligad</th>
+            <thead><tr><th>Trace</th><th>Origin</th><th>Ornament</th><th>Size / design</th><th>Kaligad</th>
                 <th>Received on</th><th class="is-numeric">Gross</th><th class="is-numeric">Stone</th>
                 <th class="is-numeric">Net</th><th class="is-numeric">Fine</th><th>Purity</th>
-                <th class="is-numeric">Making charge</th><th class="is-numeric">Days on shelf</th>
-                <th>Held for</th></tr></thead>
+                <th>Reservation</th><th class="is-numeric">Days on shelf</th><th></th></tr></thead>
             <tbody>
                 <?php if ($readyToSale === []): ?>
-                    <tr><td colspan="13" style="text-align:center;color:var(--mbw-muted);padding:18px">
+                    <tr><td colspan="14" style="text-align:center;color:var(--mbw-muted);padding:18px">
                         Nothing has come back for the showroom yet. Assign showroom work under
                         <a href="<?= e(url('admin/jewellery-assign.php?kind=self')) ?>">Kaligad Assign</a>.
                     </td></tr>
                 <?php endif; ?>
                 <?php foreach ($readyToSale as $row): ?>
-                    <?php $heldOrder = (string) ($row['reserved_order_no'] ?? ''); ?>
                     <tr>
-                        <td><strong><?= e((string) $row['assignment_no']) ?></strong><br><small><?= e((string) $row['receipt_no']) ?></small></td>
+                        <td><a class="reference-link" href="<?= e(url('admin/jewellery-trace.php?id=' . (int) $row['stock_unit_id'])) ?>"><strong><?= e((string) $row['trace_code']) ?></strong></a></td>
+                        <td><?= e((string) ($row['stock_order_no'] ?: $row['receipt_no'] ?: ucfirst(str_replace('_', ' ', (string) $row['origin_type'])))) ?></td>
                         <td><?= e((string) ($row['expected_ornament'] ?: $row['item_name'] ?? '')) ?></td>
                         <td><?= e((string) ($row['size_design'] ?? '')) ?: '—' ?></td>
                         <td><?= e((string) ($row['karigar_name'] ?? '')) ?></td>
@@ -1421,15 +1478,16 @@ jw_filter_bar_styles();
                         <td class="is-numeric"><?= $fmt((float) ($row['net_gold_weight'] ?? 0), 4) ?></td>
                         <td class="is-numeric"><strong><?= $fmt((float) $row['received_fine_weight'], 4) ?></strong></td>
                         <td><?= e((string) ($row['purity_code'] ?? '')) ?></td>
-                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['making_amount'] ?? 0)) ?></td>
+                        <td><?= (int) ($row['reserved_order_id'] ?? 0) > 0
+                            ? '<span class="mbw-pill tone-amber">Held for ' . e((string) ($row['reserved_for'] ?: $row['reserved_order_no'])) . '</span>'
+                            : '<span class="mbw-pill tone-green">Available</span>' ?></td>
                         <td class="is-numeric"><?= (int) ($row['days_on_shelf'] ?? 0) ?></td>
-                        <td>
-                            <?php if ($heldOrder === ''): ?>
-                                <span style="color:var(--mbw-muted)">On the shelf</span>
+                        <td style="white-space:nowrap">
+                            <?php if ((int) ($row['reserved_order_id'] ?? 0) === 0): ?>
+                                <a class="button secondary" style="min-height:30px;padding:3px 9px" href="<?= e(url('admin/jewellery-workshop.php?view=orders&stock_unit=' . (int) $row['stock_unit_id'])) ?>">Reserve</a>
+                                <a class="button" style="min-height:30px;padding:3px 9px" href="<?= e(url('admin/jewellery-trade.php?view=sales&stock_unit=' . (int) $row['stock_unit_id'])) ?>">Sell now</a>
                             <?php else: ?>
-                                <strong><?= e((string) ($row['reserved_for'] ?? '')) ?></strong><br>
-                                <small><a href="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['reserved_order_id'])) ?>"><?= e($heldOrder) ?></a>
-                                    · <?= e((string) ($row['reserved_order_status'] ?? '')) ?></small>
+                                <a class="button" style="min-height:30px;padding:3px 9px" href="<?= e(url('admin/jewellery-trade.php?view=sales&sell_order=' . (int) $row['reserved_order_id'])) ?>">Bill order</a>
                             <?php endif; ?>
                         </td>
                     </tr>

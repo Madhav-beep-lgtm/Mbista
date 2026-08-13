@@ -690,16 +690,21 @@ function jw_record_stock_txn(int $companyId, array $txn): int
     }
 
     $gross = jw_round_weight((float) ($txn['gross_weight'] ?? 0));
+    $stone = jw_round_weight((float) ($txn['stone_weight'] ?? 0));
+    $diamond = jw_round_weight((float) ($txn['diamond_weight'] ?? 0));
     $pieces = round((float) ($txn['qty_pieces'] ?? 0), 3);
-    if ($gross < 0 || $pieces < 0) {
+    if ($gross < 0 || $stone < 0 || $diamond < 0 || $pieces < 0) {
         throw new RuntimeException('A stock movement cannot carry a negative weight or piece count.');
+    }
+    if (($stone + $diamond) > $gross + 0.00005) {
+        throw new RuntimeException('Stone and diamond weight cannot exceed gross weight.');
     }
     if ($gross <= 0 && $pieces <= 0) {
         throw new RuntimeException('A stock movement must carry a weight or a piece count.');
     }
     $fine = array_key_exists('fine_weight', $txn)
         ? jw_round_weight((float) $txn['fine_weight'])
-        : jw_fine_weight($gross, (float) $purity['fineness']);
+        : jw_fine_weight($gross - $stone - $diamond, (float) $purity['fineness']);
 
     $holderType = (string) ($txn['holder_type'] ?? 'stock');
     if (!in_array($holderType, ['stock', 'karigar', 'refinery', 'customer'], true)) {
@@ -762,10 +767,10 @@ function jw_record_stock_txn(int $companyId, array $txn): int
 
     db()->prepare('INSERT INTO jewellery_stock_txns
             (company_id, fiscal_year_id, item_id, txn_type, direction, txn_date, ref_no, holder_type, holder_id,
-             metal_id, purity_id, unit_id, qty_pieces, gross_weight, gross_grams, fine_weight, fine_grams, rate, amount,
+             metal_id, purity_id, unit_id, qty_pieces, gross_weight, stone_weight, diamond_weight, gross_grams, fine_weight, fine_grams, rate, amount,
              source_type, source_id, voucher_id, party_id, notes, created_by)
         VALUES (:cid, :fy, :iid, :type, :dir, :d, :ref, :ht, :hid,
-             :mid, :pid, :uid, :pieces, :gross, :ggrams, :fine, :fgrams, :rate, :amount,
+             :mid, :pid, :uid, :pieces, :gross, :stone, :diamond, :ggrams, :fine, :fgrams, :rate, :amount,
              :stype, :sid, :vid, :party, :notes, :by)')
         ->execute([
             'cid' => $companyId,
@@ -782,6 +787,8 @@ function jw_record_stock_txn(int $companyId, array $txn): int
             'uid' => $unitId,
             'pieces' => $pieces,
             'gross' => $gross,
+            'stone' => $stone,
+            'diamond' => $diamond,
             // The canonical figure, written once at the only choke point that
             // records a movement. Every balance sums THESE, so a tola in and a
             // gram out no longer cancel each other out. See migration 082.
@@ -1085,7 +1092,7 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
         if (abs($gross) < 0.00005 && abs($amount) < 0.005) {
             continue;
         }
-        $txn = db()->prepare("SELECT id, voucher_id FROM jewellery_stock_txns
+        $txn = db()->prepare("SELECT id, voucher_id, stone_weight, diamond_weight, fine_weight FROM jewellery_stock_txns
             WHERE company_id = :cid AND item_id = :iid AND txn_type = 'opening' LIMIT 1");
         $txn->execute(['cid' => $companyId, 'iid' => (int) $item['id']]);
         $txnRow = $txn->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -1098,7 +1105,9 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
         $rows[] = [
             'as_on' => $asOn,
             'gross_weight' => $gross,
-            'fine_weight' => jw_fine_weight($gross, (float) $item['fineness']),
+            'stone_weight' => (float) ($txnRow['stone_weight'] ?? 0),
+            'diamond_weight' => (float) ($txnRow['diamond_weight'] ?? 0),
+            'fine_weight' => (float) ($txnRow['fine_weight'] ?? jw_fine_weight($gross, (float) $item['fineness'])),
             'amount' => $amount,
             'rate' => $gross > 0 ? jw_round_rate($amount / $gross) : 0.0,
             'item_code' => $item['code'],
@@ -1137,10 +1146,19 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
     $asOn = (string) $fiscalYear['start_date'];
 
     $gross = jw_round_weight((float) ($input['gross_weight'] ?? 0));
+    $stone = jw_round_weight((float) ($input['stone_weight'] ?? 0));
+    $diamond = jw_round_weight((float) ($input['diamond_weight'] ?? 0));
     $pieces = round((float) ($input['qty_pieces'] ?? 0), 3);
     $amount = jw_round_money((float) ($input['amount'] ?? 0));
-    if ($gross < 0 || $pieces < 0 || $amount < 0) {
+    $rate = jw_round_rate((float) ($input['rate'] ?? 0));
+    if ($amount <= 0 && $rate > 0 && $gross > 0) {
+        $amount = jw_round_money($rate * $gross);
+    }
+    if ($gross < 0 || $stone < 0 || $diamond < 0 || $pieces < 0 || $amount < 0) {
         return ['ok' => false, 'error' => 'Opening weight, pieces and value cannot be negative.', 'note' => '', 'voucher_id' => 0, 'item_id' => $itemId];
+    }
+    if (($stone + $diamond) > $gross + 0.00005) {
+        return ['ok' => false, 'error' => 'Stone and diamond weight cannot exceed gross weight.', 'note' => '', 'voucher_id' => 0, 'item_id' => $itemId];
     }
 
     $ownsTransaction = !db()->inTransaction();
@@ -1182,7 +1200,9 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
                 'unit_id' => (int) $item['unit_id'],
                 'qty_pieces' => $pieces,
                 'gross_weight' => $gross,
-                'rate' => $gross > 0 ? jw_round_rate($amount / $gross) : 0.0,
+                'stone_weight' => $stone,
+                'diamond_weight' => $diamond,
+                'rate' => $gross > 0 ? jw_round_rate($amount / $gross) : $rate,
                 'amount' => $amount,
                 'source_type' => 'inventory_opening',
                 'source_id' => $itemId,

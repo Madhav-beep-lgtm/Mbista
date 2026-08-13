@@ -136,6 +136,15 @@ if ! php -r '
         fwrite(STDERR, implode(PHP_EOL, $errors) . PHP_EOL);
         exit(1);
     }
+    accounting_repair_run_migration_file(
+        "114_jewellery_goaml_reporting.sql",
+        [
+            "jewellery_aml_settings",
+            "jewellery_aml_cases",
+            "jewellery_aml_case_transactions",
+            "jewellery_aml_case_events",
+        ]
+    );
 ' "$APP_BASE"; then
     die "database schema repair failed"
 fi

@@ -41,8 +41,9 @@ function xlsx_column_letters(int $columnIndex): string
  * @param array $rows       list of rows; each row a list of scalars
  * @param string $sheetName worksheet tab name
  * @param array $colWidths  optional [columnIndex => width]
+ * @param array $options    styled_table, freeze_header and auto_filter
  */
-function xlsx_build(array $rows, string $sheetName = 'Sheet1', array $colWidths = []): string
+function xlsx_build(array $rows, string $sheetName = 'Sheet1', array $colWidths = [], array $options = []): string
 {
     if (!class_exists('ZipArchive')) {
         throw new RuntimeException('The server is missing the PHP zip extension needed to write .xlsx files. Export as CSV instead.');
@@ -56,29 +57,35 @@ function xlsx_build(array $rows, string $sheetName = 'Sheet1', array $colWidths 
 
     $rowsXml = '';
     $maxColumns = 0;
+    $styledTable = !empty($options['styled_table']);
     foreach (array_values($rows) as $rowIndex => $row) {
         $cellsXml = '';
         foreach (array_values((array) $row) as $columnIndex => $value) {
             $maxColumns = max($maxColumns, $columnIndex + 1);
             $ref = xlsx_column_letters($columnIndex) . ($rowIndex + 1);
+            $style = $styledTable ? ' s="' . ($rowIndex === 0 ? '1' : '2') . '"' : '';
             if (is_int($value) || (is_float($value) && is_finite($value))) {
-                $cellsXml .= '<c r="' . $ref . '"><v>' . $value . '</v></c>';
+                $cellsXml .= '<c r="' . $ref . '"' . $style . '><v>' . $value . '</v></c>';
                 continue;
             }
             $text = (string) ($value ?? '');
             if ($text === '') {
+                if ($styledTable) {
+                    $cellsXml .= '<c r="' . $ref . '"' . $style . '/>';
+                }
                 continue;
             }
             // A numeric string is written as a number so Excel can total it;
             // anything else is an inline string, which also neutralises the
             // formula-injection that a leading = would otherwise cause.
             if (preg_match('/^-?\d+(\.\d+)?$/', $text) === 1) {
-                $cellsXml .= '<c r="' . $ref . '"><v>' . $text . '</v></c>';
+                $cellsXml .= '<c r="' . $ref . '"' . $style . '><v>' . $text . '</v></c>';
             } else {
-                $cellsXml .= '<c r="' . $ref . '" t="inlineStr"><is><t xml:space="preserve">' . $xml($text) . '</t></is></c>';
+                $cellsXml .= '<c r="' . $ref . '"' . $style . ' t="inlineStr"><is><t xml:space="preserve">' . $xml($text) . '</t></is></c>';
             }
         }
-        $rowsXml .= '<row r="' . ($rowIndex + 1) . '">' . $cellsXml . '</row>';
+        $rowsXml .= '<row r="' . ($rowIndex + 1) . '"' . ($styledTable && $rowIndex === 0 ? ' ht="24" customHeight="1"' : '')
+            . '>' . $cellsXml . '</row>';
     }
 
     $colsXml = '';
@@ -116,15 +123,21 @@ function xlsx_build(array $rows, string $sheetName = 'Sheet1', array $colWidths 
             . '</Relationships>',
         'xl/styles.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
-            . '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
-            . '<borders count="1"><border/></borders>'
+            . '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+            . '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+            . '<fill><patternFill patternType="solid"><fgColor rgb="FFF5E7C7"/><bgColor indexed="64"/></patternFill></fill></fills>'
+            . '<borders count="2"><border/><border><left style="thin"><color rgb="FFD0D5DD"/></left><right style="thin"><color rgb="FFD0D5DD"/></right>'
+            . '<top style="thin"><color rgb="FFD0D5DD"/></top><bottom style="thin"><color rgb="FFD0D5DD"/></bottom></border></borders>'
             . '<cellStyleXfs count="1"><xf/></cellStyleXfs>'
-            . '<cellXfs count="1"><xf xfId="0"/></cellXfs>'
+            . '<cellXfs count="3"><xf xfId="0"/><xf xfId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
+            . '<xf xfId="0" borderId="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf></cellXfs>'
             . '</styleSheet>',
         'xl/worksheets/sheet1.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . $colsXml . '<sheetData>' . $rowsXml . '</sheetData></worksheet>',
+            . (!empty($options['freeze_header']) ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : '')
+            . $colsXml . '<sheetData>' . $rowsXml . '</sheetData>'
+            . (!empty($options['auto_filter']) && $maxColumns > 0 ? '<autoFilter ref="A1:' . xlsx_column_letters($maxColumns - 1) . max(1, count($rows)) . '"/>' : '')
+            . '</worksheet>',
     ];
 
     $tmp = tempnam(sys_get_temp_dir(), 'xlsx');
@@ -147,9 +160,9 @@ function xlsx_build(array $rows, string $sheetName = 'Sheet1', array $colWidths 
 }
 
 /** Stream a table of rows as a .xlsx download and stop. */
-function export_xlsx(string $filename, array $rows, string $sheetName = 'Export', array $colWidths = []): void
+function export_xlsx(string $filename, array $rows, string $sheetName = 'Export', array $colWidths = [], array $options = []): void
 {
-    $bytes = xlsx_build($rows, $sheetName, $colWidths);
+    $bytes = xlsx_build($rows, $sheetName, $colWidths, $options);
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     header('Content-Length: ' . strlen($bytes));

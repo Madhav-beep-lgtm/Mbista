@@ -153,7 +153,7 @@ if ($headerIsClientBooks) {
 }
 // The module spans four pages, so "is this section open?" keys off the script
 // rather than a single filename.
-$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php', 'jewellery-tags.php', 'jewellery-aml.php'];
+$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php', 'jewellery-tags.php', 'jewellery-trace.php', 'jewellery-aml.php'];
 $headerJewelleryActive = in_array($headerScript, $headerJewelleryScripts, true);
 $headerJewelleryView = (string) ($_GET['view'] ?? '');
 $headerJewelleryMenu = '';
@@ -177,6 +177,7 @@ if ($headerJewellery) {
         ['jewellery-workshop.php', 'delivery', 'Ready to Deliver', 'box'],
         ['jewellery-workshop.php', 'karigars', 'Kaligads', 'teams'],
         ['jewellery-workshop.php', 'refinery', 'Refinery', 'layers'],
+        ['jewellery-trace.php', '', 'Traceability', 'search'],
         ['jewellery-reports.php', 'summary', 'Reports', 'reports'],
         ['jewellery-aml.php', '', 'AML / goAML Reporting', 'compliance'],
         // Tagging sits next to the stock it labels, after the trade pages that

@@ -349,6 +349,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    if ($action === 'clear_opening_bulk') {
+        require_permission('jewellery', 'post');
+        $itemIds = array_values(array_filter(array_map('intval', (array) ($_POST['item_ids'] ?? []))));
+        if ($itemIds === []) {
+            flash('error', 'No opening stock item was selected.');
+            redirect($back);
+        }
+
+        $cleared = 0;
+        $errors = [];
+        foreach (array_unique($itemIds) as $itemId) {
+            if ($itemId <= 0) {
+                continue;
+            }
+            $result = jewellery_clear_opening($companyId, $itemId, $userId, $fiscalYearId);
+            if ($result['ok']) {
+                $cleared++;
+            } else {
+                $errors[] = 'Item #' . $itemId . ': ' . $result['error'];
+            }
+        }
+
+        if ($cleared > 0) {
+            flash('success', $cleared . ' opening stock item' . ($cleared === 1 ? '' : 's') . ' cleared.');
+        }
+        if ($errors !== []) {
+            flash('error', implode(' ', $errors));
+        }
+        redirect($back);
+    }
+
     if ($action === 'save_mapping') {
         require_permission('jewellery', 'edit');
         try {
@@ -1095,6 +1126,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </script>
 
 <?php elseif ($view === 'opening'): ?>
+    <!-- JEWELLERY_PHP_FILE: <?= __FILE__ ?> -->
     <?php
     $openingValue = 0.0;
     $openingFine = 0.0;
@@ -1177,7 +1209,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <div style="overflow-x:auto"><table>
             <thead><tr>
                 <th>Sheet row</th><th>From the sheet</th><th style="min-width:200px">Item</th>
-                <th>Purity</th><th>Unit</th><th>Pieces</th><th>Gross wt</th><th>Rate</th><th>Amount</th><th></th>
+                <th>Purity</th><th>Unit</th><th>Pieces</th><th>Gross wt</th><th>Stone wt</th><th>Diamond wt</th><th>Rate</th><th>Amount</th><th></th>
             </tr></thead>
             <tbody>
                 <?php foreach ($importRows as $ir): ?>
@@ -1191,6 +1223,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             <td><?= e((string) ($ir['unit_code'] ?? '')) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['qty_pieces'], 3) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['gross_weight'], 4) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) $ir['stone_weight'], 4) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) $ir['diamond_weight'], 4) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['rate'], 4) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['amount']) ?></td>
                             <td><span class="mbw-pill tone-green">Committed</span></td>
@@ -1236,6 +1270,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             </td>
                             <td><input type="number" name="qty_pieces" step="0.001" min="0" style="width:80px" value="<?= e((string) $ir['qty_pieces']) ?>"></td>
                             <td><input type="number" name="gross_weight" step="0.0001" min="0" style="width:100px" value="<?= e((string) $ir['gross_weight']) ?>"></td>
+                            <td><input type="number" name="stone_weight" step="0.0001" min="0" style="width:100px" value="<?= e((string) $ir['stone_weight']) ?>"></td>
+                            <td><input type="number" name="diamond_weight" step="0.0001" min="0" style="width:100px" value="<?= e((string) $ir['diamond_weight']) ?>"></td>
                             <td><input type="number" name="rate" step="0.0001" min="0" style="width:110px" value="<?= e((string) $ir['rate']) ?>"></td>
                             <td><input type="number" name="amount" step="0.01" min="0" style="width:120px" value="<?= e((string) $ir['amount']) ?>"></td>
                             <td style="white-space:nowrap">
@@ -1253,7 +1289,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     </tr>
                 <?php endforeach; ?>
                 <?php if ($importRows === []): ?>
-                    <tr><td colspan="10" class="frm-optional">Every row in this import has been dealt with.</td></tr>
+                    <tr><td colspan="12" class="frm-optional">Every row in this import has been dealt with.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table></div>
@@ -1277,6 +1313,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </label>
             <label>Pieces<input type="number" name="qty_pieces" step="0.001" min="0" value="0"></label>
             <label>Gross weight                <input type="number" name="gross_weight" step="0.0001" min="0" value="0"></label>
+            <label>Stone weight<input type="number" name="stone_weight" step="0.0001" min="0" value="0"></label>
+            <label>Diamond weight<input type="number" name="diamond_weight" step="0.0001" min="0" value="0"></label>
+            <label>Rate<input type="number" name="rate" step="0.0001" min="0" value="0"></label>
             <label>Opening value (<?= e($sym) ?>)<input type="number" name="amount" step="0.01" min="0" value="0"></label>
             <div style="grid-column:1/-1"><button type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save &amp; Post</button></div>
         </form>
@@ -1286,17 +1325,29 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
     <?php endif; ?>
 
+    <?php if ($canEdit && $openingRows !== []): ?>
+    <!-- BULK_CLEAR_TEST -->
+    <form id="opening-bulk-clear-form" method="post" style="margin-bottom:14px">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="clear_opening_bulk">
+        <input type="hidden" name="back_view" value="opening">
+        <button type="submit" class="button danger">Clear selected opening stock</button>
+    </form>
+    <?php endif; ?>
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Opening Stock — <?= e((string) $fiscalYear['label']) ?> (<?= count($openingRows) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Value</th><th>Posted</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
+            <thead><tr><?php if ($canEdit): ?><th style="width:34px"><input type="checkbox" id="opening-select-all" aria-label="Select all opening stock rows"></th><?php endif; ?><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Stone</th><th class="is-numeric">Diamond</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Value</th><th>Posted</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
             <tbody>
                 <?php if ($openingRows === []): ?><tr><td colspan="<?= $canEdit ? 8 : 7 ?>">No item carries opening stock for this fiscal year.</td></tr><?php endif; ?>
                 <?php foreach ($openingRows as $row): ?>
                     <tr>
+                        <?php if ($canEdit): ?><td><input type="checkbox" class="opening-select-checkbox" value="<?= (int) $row['id'] ?>" aria-label="Select opening stock for <?= e($row['item_code']) ?>"></td><?php endif; ?>
                         <td><?= e($row['item_code']) ?><br><small><?= e($row['item_name']) ?></small></td>
                         <td><?= e($row['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['stone_weight'], 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['diamond_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['fine_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['rate']) ?></td>
                         <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) $row['amount']) ?></td>
@@ -1325,6 +1376,42 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </tbody>
         </table></div>
     </section>
+    <?php if ($canEdit): ?>
+    <script>
+    (function () {
+        var form = document.getElementById('opening-bulk-clear-form');
+        if (!form) { return; }
+        var selectAll = document.getElementById('opening-select-all');
+        if (selectAll) {
+            selectAll.addEventListener('change', function () {
+                // Query checkboxes at event time and only affect visible rows
+                var checkboxes = Array.from(document.querySelectorAll('.opening-select-checkbox'))
+                    .filter(function (cb) { var tr = cb.closest('tr'); return tr && tr.style.display !== 'none'; });
+                checkboxes.forEach(function (cb) { cb.checked = selectAll.checked; cb.dispatchEvent(new Event('change', { bubbles: true })); });
+            });
+        }
+        form.addEventListener('submit', function (event) {
+            // Query checkboxes at submit time to avoid stale references
+            var checkboxes = Array.from(document.querySelectorAll('.opening-select-checkbox'));
+            var selected = checkboxes.filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
+            if (selected.length === 0) {
+                alert('Select at least one opening stock item to clear.');
+                event.preventDefault();
+                return;
+            }
+            form.querySelectorAll('input[name="item_ids[]"]').forEach(function (existing) { existing.remove(); });
+            selected.forEach(function (id) {
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'item_ids[]';
+                input.value = id;
+                form.appendChild(input);
+            });
+            return confirm('Clear opening stock for ' + selected.length + ' selected item(s)? This will remove their voucher and metal movement.');
+        });
+    })();
+    </script>
+    <?php endif; ?>
 <?php elseif ($view === 'stock'): ?>
     <?php
     $holderLabels = ['stock' => 'Own stock', 'karigar' => 'With karigar', 'refinery' => 'With refinery', 'customer' => 'With customer'];

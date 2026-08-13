@@ -2519,6 +2519,14 @@ function accounting_module_repair_database(): array
     $run('Opening stock import staging (migration 081)', static function (): void {
         accounting_repair_run_migration_file('081_opening_stock_import.sql',
             ['inventory_opening_imports', 'inventory_opening_import_rows']);
+        accounting_repair_add_column('inventory_opening_import_rows', 'stone_weight',
+            '`stone_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `gross_weight`');
+        accounting_repair_add_column('inventory_opening_import_rows', 'diamond_weight',
+            '`diamond_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `stone_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'stone_weight',
+            '`stone_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `gross_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'diamond_weight',
+            '`diamond_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `stone_weight`');
     });
 
     $run('Chart of accounts import staging (migration 104)', static function (): void {
@@ -3363,6 +3371,58 @@ function accounting_module_repair_database(): array
         accounting_repair_add_constraint('jewellery_order_lines', 'fk_jw_oline_stock_receipt',
             'CONSTRAINT `fk_jw_oline_stock_receipt` FOREIGN KEY (`stock_receipt_id`) '
             . 'REFERENCES `jewellery_order_receipts` (`id`) ON DELETE SET NULL');
+    });
+
+    $run('Every physical jewellery item has one traceable lifecycle (migration 111)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_stock_units')) {
+            accounting_repair_run_migration_file('111_jewellery_item_traceability.sql', [
+                'jewellery_stock_units', 'jewellery_stock_unit_events',
+            ]);
+            return;
+        }
+        if (!accounting_repair_table_exists('jewellery_stock_unit_events')) {
+            db()->exec("CREATE TABLE `jewellery_stock_unit_events` (
+                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL, `stock_unit_id` INT UNSIGNED NOT NULL,
+                `event_type` VARCHAR(40) NOT NULL, `event_date` DATE NOT NULL,
+                `from_status` VARCHAR(30) DEFAULT NULL, `to_status` VARCHAR(30) DEFAULT NULL,
+                `from_holder_type` VARCHAR(30) DEFAULT NULL, `from_holder_id` INT UNSIGNED DEFAULT NULL,
+                `to_holder_type` VARCHAR(30) DEFAULT NULL, `to_holder_id` INT UNSIGNED DEFAULT NULL,
+                `source_type` VARCHAR(40) DEFAULT NULL, `source_id` INT UNSIGNED DEFAULT NULL,
+                `source_line_id` INT UNSIGNED DEFAULT NULL, `reference_no` VARCHAR(120) DEFAULT NULL,
+                `notes` VARCHAR(255) DEFAULT NULL, `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_jw_trace_event_unit` (`company_id`,`stock_unit_id`,`id`),
+                KEY `idx_jw_trace_event_source` (`company_id`,`source_type`,`source_id`),
+                CONSTRAINT `fk_jw_trace_event_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_trace_event_unit` FOREIGN KEY (`stock_unit_id`) REFERENCES `jewellery_stock_units` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (accounting_repair_table_exists('jewellery_order_assignments')) {
+            accounting_repair_add_column('jewellery_order_assignments', 'stock_order_no',
+                '`stock_order_no` VARCHAR(60) DEFAULT NULL AFTER `assignment_no`');
+            accounting_repair_add_column('jewellery_order_assignments', 'stock_unit_id',
+                '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `stock_order_no`');
+            accounting_repair_add_index('jewellery_order_assignments', 'idx_jw_assign_stock_order',
+                'KEY `idx_jw_assign_stock_order` (`company_id`,`stock_order_no`)');
+            accounting_repair_add_index('jewellery_order_assignments', 'idx_jw_assign_trace',
+                'KEY `idx_jw_assign_trace` (`company_id`,`stock_unit_id`)');
+        }
+        foreach ([
+            ['jewellery_order_receipts', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `assignment_id`', 'idx_jw_receipt_trace', 'KEY `idx_jw_receipt_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_order_lines', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `stock_receipt_id`', 'idx_jw_oline_trace', 'KEY `idx_jw_oline_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_purchase_lines', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`', 'idx_jw_pline_trace', 'KEY `idx_jw_pline_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_sale_lines', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`', 'idx_jw_sline_trace', 'KEY `idx_jw_sline_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_sale_exchanges', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`', 'idx_jw_sexchange_trace', 'KEY `idx_jw_sexchange_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_stock_txns', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`', 'idx_jw_stock_trace', 'KEY `idx_jw_stock_trace` (`company_id`,`stock_unit_id`,`txn_date`)'],
+            ['inventory_opening_import_rows', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`', 'idx_inv_opimprow_trace', 'KEY `idx_inv_opimprow_trace` (`company_id`,`stock_unit_id`)'],
+        ] as [$table, $column, $definition, $index, $indexDefinition]) {
+            if (accounting_repair_table_exists($table)) {
+                accounting_repair_add_column($table, $column, $definition);
+                accounting_repair_add_index($table, $index, $indexDefinition);
+            }
+        }
     });
 
     return $errors;

@@ -670,6 +670,9 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     // a field from the order form can never make the SCREEN decide what the
     // database forgets. A caller that does send it still overwrites it.
     $existingOrder = $orderId > 0 ? jewellery_order($companyId, $orderId) : null;
+    if ($existingOrder && in_array((string) $existingOrder['status'], ['received', 'delivered'], true)) {
+        throw new RuntimeException('Received and delivered orders cannot be edited.');
+    }
     $keep = static function (string $field, $fallback) use ($input, $existingOrder) {
         if (array_key_exists($field, $input)) {
             return $input[$field];
