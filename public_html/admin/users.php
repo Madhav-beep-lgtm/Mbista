@@ -855,7 +855,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
-<details class="role-matrix-panel uw-role-matrix" id="role-matrix" open>
+<details class="role-matrix-panel uw-role-matrix" id="role-matrix" hidden>
     <summary>
     <span class="uw-section-title">
         <span class="uw-section-icon"><?= icon('users') ?></span>
