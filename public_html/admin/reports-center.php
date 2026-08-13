@@ -34,7 +34,7 @@ if (!($companyBusinessProfile['show_manufacturing'] ?? false)) {
 // Fixed-asset reports (register / depreciation / asset-GL reconciliation) apply
 // to every company, so they are not gated by the trading/manufacturing profile.
 $allowedReportRegistry = array_intersect_key($reportRegistry, array_flip($allowedReportKeys));
-if (!jewellery_enabled_for_company($companyId) || !user_can_do('jewellery', 'post')) {
+if (! user_can_do('reports', 'view')) {
     unset($allowedReportRegistry['jewellery-aml-register']);
 }
 
@@ -666,7 +666,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <div class="rc2-note-row">
                     <input type="text" name="note_no[]" value="<?= e((string) $note['note_no']) ?>" maxlength="10" aria-label="Note number" placeholder="No.">
                     <textarea name="note_body[]" rows="2" aria-label="Note text" placeholder="Note text..."><?= e((string) $note['body']) ?></textarea>
-                    <button type="button" class="rc2-note-remove" data-note-remove title="Remove this note" aria-label="Remove note"><?= icon('close') ?></button>
+                    <button type="button" class="rc2-note-remove" data-note-remove title="Remove this note" aria-label="Remove note">&times;</button>
                 </div>
             <?php endforeach; ?>
         </div>
@@ -674,7 +674,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <div class="rc2-note-row">
                 <input type="text" name="note_no[]" value="" maxlength="10" aria-label="Note number" placeholder="No.">
                 <textarea name="note_body[]" rows="2" aria-label="Note text" placeholder="Note text..."></textarea>
-                <button type="button" class="rc2-note-remove" data-note-remove title="Remove this note" aria-label="Remove note"><?= icon('close') ?></button>
+                <button type="button" class="rc2-note-remove" data-note-remove title="Remove this note" aria-label="Remove note">&times;</button>
             </div>
         </template>
         <div class="rc2-notes-actions">
