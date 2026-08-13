@@ -128,7 +128,14 @@ rsync -a "${NEVER_PUBLISH[@]}" database/ "$APP_BASE/database/" \
 # pay for hundreds of information_schema checks. A failed upgrade stops the
 # deployment before its commit is recorded as live, allowing the next cron run
 # to retry safely.
-if ! php -r 'require $argv[1]."/app/bootstrap.php"; require $argv[1]."/app/accounting_module_repair.php"; $errors=accounting_module_repair_database(); if($errors!==[]){fwrite(STDERR,implode(PHP_EOL,$errors).PHP_EOL); exit(1);} accounting_repair_run_migration_file("114_jewellery_goaml_reporting.sql",["jewellery_aml_settings","jewellery_aml_cases","jewellery_aml_case_transactions","jewellery_aml_case_events"]);' "$APP_BASE"; then
+# cPanel may expose php-cgi as `php`; php-cgi rejects the CLI-only `-r` option.
+# Prefer the standard cPanel CLI binary while allowing a host-specific override.
+PHP_CLI="${PHP_CLI:-/usr/local/bin/php}"
+if [ ! -x "$PHP_CLI" ]; then
+    PHP_CLI="$(command -v php 2>/dev/null || true)"
+fi
+[ -n "$PHP_CLI" ] && [ -x "$PHP_CLI" ] || die "PHP CLI executable not found (set PHP_CLI to its absolute path)"
+if ! "$PHP_CLI" -r 'require $argv[1]."/app/bootstrap.php"; require $argv[1]."/app/accounting_module_repair.php"; $errors=accounting_module_repair_database(); if($errors!==[]){fwrite(STDERR,implode(PHP_EOL,$errors).PHP_EOL); exit(1);} accounting_repair_run_migration_file("114_jewellery_goaml_reporting.sql",["jewellery_aml_settings","jewellery_aml_cases","jewellery_aml_case_transactions","jewellery_aml_case_events"]);' "$APP_BASE"; then
     die "database schema repair failed"
 fi
 echo "deploy: database schema is current"
