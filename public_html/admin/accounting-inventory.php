@@ -1935,17 +1935,8 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     </div>
 </div>
 
-<nav class="inventory-action-tabs" aria-label="Inventory tasks">
     <?php if ($invView === 'inventory'): ?>
-        <button type="button" class="inventory-action-tab is-active btn btn-info" style="background:#0dcaf0;border-color:#0dcaf0;color:#000" data-workspace-target="create-item"><?= icon('services') ?><span>Item Master</span></button>
-        <button type="button" class="inventory-action-tab btn btn-success" style="background:#198754;border-color:#198754;color:#fff" data-workspace-target="warehouses"><?= icon('companies') ?><span>Warehouses</span></button>
-        <button type="button" class="inventory-action-tab btn btn-warning" style="background:#ffc107;border-color:#ffc107;color:#000" data-workspace-target="movement-purchase"><?= icon('cart') ?><span>Purchase Stock</span></button>
-        <button type="button" class="inventory-action-tab btn btn-danger" style="background:#dc3545;border-color:#dc3545;color:#fff" data-workspace-target="movement-sale"><?= icon('invoices') ?><span>Sales & Returns</span></button>
-        <button type="button" class="inventory-action-tab btn btn-secondary" style="background:#6c757d;border-color:#6c757d;color:#fff" data-workspace-target="movement-adjust"><?= icon('settings') ?><span>Adjustments</span></button>
-        <button type="button" class="inventory-action-tab btn btn-primary" style="background:#0d6efd;border-color:#0d6efd;color:#fff" data-workspace-target="movement-transfer"><?= icon('services') ?><span>Transfers</span></button>
     <?php else: ?>
-        <button type="button" class="inventory-action-tab is-active" data-workspace-target="manufacturing"><?= icon('settings') ?><span>Production Order</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="bom"><?= icon('documents') ?><span>Bill of Materials</span></button>
     <?php endif; ?>
 </nav>
 <div class="workspace-feature-stack">
@@ -2698,7 +2689,6 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 <?php endif; ?>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const tabs = Array.from(document.querySelectorAll('.inventory-action-tab'));
     const panels = Array.from(document.querySelectorAll('.workspace-feature-stack .feature-disclosure'));
 
     if (!tabs.length || !panels.length) {
@@ -2751,68 +2741,33 @@ document.addEventListener('DOMContentLoaded', function () {
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
 
 
-<style>
-.inventory-action-tab.btn-info { background: #0dcaf0; border-color: #0dcaf0; color: #000; }
-.inventory-action-tab.btn-success { background: #198754; border-color: #198754; color: #fff; }
-.inventory-action-tab.btn-warning { background: #ffc107; border-color: #ffc107; color: #000; }
-.inventory-action-tab.btn-danger { background: #dc3545; border-color: #dc3545; color: #fff; }
-.inventory-action-tab.btn-secondary { background: #6c757d; border-color: #6c757d; color: #fff; }
-.inventory-action-tab.btn-primary { background: #0d6efd; border-color: #0d6efd; color: #fff; }
-
-.inventory-action-tab.btn:hover { opacity: 0.85; }
-</style>
-
-<style>
-nav.inventory-action-tabs .inventory-action-tab.btn-info { background: #0dcaf0 !important; border-color: #0dcaf0 !important; color: #000 !important; }
-nav.inventory-action-tabs .inventory-action-tab.btn-success { background: #198754 !important; border-color: #198754 !important; color: #fff !important; }
-nav.inventory-action-tabs .inventory-action-tab.btn-warning { background: #ffc107 !important; border-color: #ffc107 !important; color: #000 !important; }
-nav.inventory-action-tabs .inventory-action-tab.btn-danger { background: #dc3545 !important; border-color: #dc3545 !important; color: #fff !important; }
-nav.inventory-action-tabs .inventory-action-tab.btn-secondary { background: #6c757d !important; border-color: #6c757d !important; color: #fff !important; }
-nav.inventory-action-tabs .inventory-action-tab.btn-primary { background: #0d6efd !important; border-color: #0d6efd !important; color: #fff !important; }
-
-nav.inventory-action-tabs .inventory-action-tab.btn:hover { opacity: 0.85 !important; }
-</style>
 
 
-<style>
-.inventory-action-tab { color: #ffffff !important; }
-.inventory-action-tab span { color: #ffffff !important; }
-.inventory-action-tab svg { fill: #ffffff !important; }
-</style>
 
-<style>
+
+
+
 /* Make active tab green bg + white text */
-.nav-link.active, .nav-tabs .nav-link.active { background: #0f6b4f !important; color: #ffffff !important; border-color: #0f6b4f !important; }
 
 /* Make inactive tabs white bg + green text */
 .nav-link, .nav-tabs .nav-link { background: #ffffff !important; color: #0f6b4f !important; border: 1px solid #0f6b4f !important; }
 
 .nav-link:hover { background: #e6f4f0 !important; color: #0f6b4f !important; }
-</style>
 
-<style>
 /* Active tab: green background + white text */
-.nav-link.active, .nav-tabs .nav-link.active, 
-.inventory-nav .nav-link.active { 
  background: #0f6b4f!important;
  color: #ffffff!important;
  border-color: #0f6b4f!important;
 }
 
 /* Make sure span and icon inside also white */
-.nav-link.active span, .nav-link.active svg { 
     color: #ffffff !important; 
     fill: #ffffff !important; 
 }
-</style>
 
-<style>
-.inventory-action-tab, .nav-link.active, .nav-tabs .nav-link.active {
     background: #0f6b4f !important;
     color: #ffffff !important;
     border-color: #0f6b4f !important;
 }
-.inventory-action-tab svg {
     fill: #ffffff !important;
 }
-</style>
