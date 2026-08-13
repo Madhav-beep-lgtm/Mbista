@@ -1924,24 +1924,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     </section>
 <?php endif; ?>
 
-<?php if ($invView === 'inventory'): ?>
-<details class="mbw-card" data-collapsible aria-label="Help and workflow">
-    <summary class="mbw-card-head" style="cursor:pointer"><h2>Help &amp; Workflow</h2><span class="mbw-card-tools" style="color:var(--mbw-muted);font-size:12.5px">Process flow and item types — click to open</span></summary>
-    <div class="inventory-process-grid" style="margin-bottom:14px">
-        <?php foreach ($inventoryProcessSteps as $index => $process): ?>
-            <article><b><?= e((string) ($index + 1)) ?></b><span><?= icon($index === 0 ? 'services' : ($index === count($inventoryProcessSteps) - 1 ? 'reports' : 'documents')) ?></span><strong><?= e($process[0]) ?></strong><small><?= e($process[1]) ?></small></article>
-        <?php endforeach; ?>
-    </div>
-    <div class="inventory-type-grid">
-        <?php foreach ($inventoryTypeCards as [$typeLabel, $typeDescription]): ?>
-            <article><strong><?= e($typeLabel) ?></strong><span><?= e($typeDescription) ?></span></article>
-        <?php endforeach; ?>
-    </div>
-</details>
-
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
-
-<?php endif; ?>
 
 <?php if (in_array($invView, ['inventory', 'manufacturing'], true)): ?>
 <section class="mbw-card" data-collapsible aria-label="Inventory workbench">
