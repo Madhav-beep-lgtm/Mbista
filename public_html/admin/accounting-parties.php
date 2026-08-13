@@ -1716,13 +1716,11 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
 <div class="reference-toolbar">
     <div class="reference-toolbar-actions">
         <a class="button<?= $primaryAction === 'invoice' ? '' : ' secondary' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Create Invoice</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'payment', 'edit_id' => null])) ?>"><?= icon('receipt-voucher') ?>Record Payment</a>
         <a class="button<?= $primaryAction === 'purchase' ? '' : ' secondary' ?>" href="<?= e(parties_page_url(['panel' => 'purchase', 'edit_id' => null])) ?>"><?= icon('cart') ?>Record Purchase</a>
         <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=sales')) ?>"><?= icon('receipt-voucher') ?>Sales Voucher</a>
         <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=purchase')) ?>"><?= icon('documents') ?>Purchase Voucher</a>
         <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=debit_note')) ?>"><?= icon('trend-down') ?>Debit Note</a>
         <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=credit_note')) ?>"><?= icon('trend-up') ?>Credit Note</a>
-        <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'supplier-payment', 'edit_id' => null])) ?>"><?= icon('wallet') ?>Pay Supplier</a>
         <?php if ($partyPicked): ?>
             <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) $selectedParty['id']])) ?>"><?= icon('documents') ?>Print Statement</a>
             <a class="button secondary" href="<?= e(parties_page_url(['ptab' => 'ledger', 'party_id' => (int) $selectedParty['id'], 'panel' => null, 'edit_id' => null])) ?>"><?= icon('accounting') ?>View Party Ledger</a>
@@ -2356,7 +2354,6 @@ $tabHeadings = [
                     </form>
                 </section>
             <?php endif; ?>
-            <a class="button" href="<?= e(parties_page_url(['panel' => 'payment', 'party_id' => (int) $selectedParty['id']])) ?>"><?= icon('documents') ?>Record Payment</a>
             <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) $selectedParty['id']])) ?>"><?= icon('documents') ?>Send Statement</a>
         <?php else: ?>
             <section><h3>No party selected</h3><p class="muted">Create a customer or supplier to populate this panel.</p></section>
