@@ -23,12 +23,31 @@ $allowedSort = [
 $perPageOptions = [10, 20, 50, 100];
 $staffWorkflowActions = ['save_staff_profile', 'upload_kyc_document', 'review_kyc_document', 'save_permissions', 'save_client_accounting_access'];
 $hasAccessLevels = column_exists('users', 'access_level');
+$isPlatformAdmin = user_is_super_admin($currentAdmin);
+$assignableRoles = $isPlatformAdmin ? ['customer', 'staff', 'admin'] : ['customer', 'staff'];
+$assignableAccessLevels = static function (string $role) use ($isPlatformAdmin): array {
+    if ($role === 'admin') {
+        return $isPlatformAdmin
+            ? ['super_admin', 'parent_admin', 'subsidiary_admin']
+            : ['subsidiary_admin'];
+    }
+    if ($role === 'staff') {
+        return ['accountant', 'approver', 'viewer', 'support'];
+    }
+    // Client member authority is deliberately set through the client-books
+    // workflow (owner/approver/entry maker), never through staff tiers.
+    return ['viewer'];
+};
 
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST'
     && (string) ($_POST['action'] ?? '') === 'save_role_matrix'
 ) {
     verify_csrf();
+
+    if (!$isPlatformAdmin) {
+        deny_access('Only a Platform Super Admin can change default access permissions.');
+    }
 
     try {
         $submittedMatrix = (array) ($_POST['cap'] ?? []);
@@ -69,6 +88,10 @@ if (
 ) {
     verify_csrf();
 
+    if (!$isPlatformAdmin) {
+        deny_access('Only a Platform Super Admin can reset default access permissions.');
+    }
+
     try {
         reset_access_level_capabilities($companyId);
 
@@ -108,6 +131,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
         $role = $action === 'create' ? 'staff' : (string) ($_POST['role'] ?? 'staff');
         $status = (string) ($_POST['status'] ?? 'active');
         $accessLevel = $hasAccessLevels ? (string) ($_POST['access_level'] ?? '') : '';
+        $permissionMode = !empty($_POST['use_custom_permissions']) ? 'custom' : 'default';
+        $initialGrants = array_values(array_filter((array) ($_POST['perm'] ?? []), 'is_string'));
         $phone = trim((string) ($_POST['phone'] ?? ''));
         $selectedCompanyId = $action === 'create' ? $companyId : (int) ($_POST['company_id'] ?? $companyId);
 
@@ -137,15 +162,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
             redirect('admin/users.php' . ($action === 'update' && $userId > 0 ? '?edit=' . $userId : ''));
         }
 
-        if (!in_array($role, ['customer', 'staff', 'admin'], true)) {
-            $role = 'customer';
+        if (!in_array($role, $assignableRoles, true)) {
+            flash('error', 'You are not allowed to assign that account role.');
+            redirect('admin/users.php');
         }
 
         if (!in_array($status, ['active', 'inactive'], true)) {
             $status = 'active';
         }
-        if ($hasAccessLevels && !array_key_exists($accessLevel, ACCESS_LEVELS)) {
-            $accessLevel = default_access_level_for_role($role);
+        if ($hasAccessLevels && !in_array($accessLevel, $assignableAccessLevels($role), true)) {
+            $accessLevel = $assignableAccessLevels($role)[0];
+        }
+        if ($action === 'create' && $role === 'staff' && $permissionMode === 'custom' && $initialGrants === []) {
+            flash('error', 'Select at least one custom module permission, or leave custom permissions unticked to use the access-level default.');
+            redirect('admin/users.php');
         }
 
         if ($action === 'create') {
@@ -161,6 +191,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
                     'company' => null,
                     'access_level' => $accessLevel,
                 ]);
+
+                if ($role === 'staff' && $permissionMode === 'custom') {
+                    set_staff_permissions($newUserId, $initialGrants, (int) ($currentAdmin['id'] ?? 0));
+                }
 
                 log_activity('user', $newUserId, 'created', 'User profile created from admin workflow.', (int) ($currentAdmin['id'] ?? 0));
                 log_activity('user', $newUserId, 'status_changed', 'User status set to ' . $status . '.', (int) ($currentAdmin['id'] ?? 0));
@@ -185,6 +219,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array((string) ($_POST['action'
         $existingUser = $existingStmt->fetch();
         if (!$existingUser) {
             flash('error', 'User not found.');
+            redirect('admin/users.php');
+        }
+
+        if (!$isPlatformAdmin && (string) ($existingUser['role'] ?? '') === 'admin') {
+            flash('error', 'Only a Platform Super Admin can change an administrator account.');
             redirect('admin/users.php');
         }
 
@@ -820,14 +859,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <summary>
     <span class="uw-section-title">
         <span class="uw-section-icon"><?= icon('users') ?></span>
-        <span>Role Matrix</span>
+        <span>Access-level baseline</span>
     </span>
-    <small>Who can do what</small>
+    <small>High-level safety controls</small>
 </summary>
 
     <?php $roleCapabilityMatrix = access_level_capabilities($companyId); ?>
 
-    <form method="post">
+    <div class="notice info" style="margin:14px 0;">
+        <strong>Default permission policy:</strong> a new staff account inherits the checked capabilities for its access level.
+        A custom module-by-module permission set can override that default when you create or edit the user.
+        Client-book members use their own Owner, Approver or Entry Maker assignment.
+    </div>
+
+    <?php if ($isPlatformAdmin): ?><form method="post">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="save_role_matrix">
 
@@ -876,7 +921,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                             . $cap
                                         ) ?>"
                                         <?= !empty($caps[$cap]) ? 'checked' : '' ?>
-                                        <?= $levelKey === 'super_admin' ? 'disabled' : '' ?>
+                                        <?= ($levelKey === 'super_admin' || !$isPlatformAdmin) ? 'disabled' : '' ?>
                                     >
                                 </td>
                             <?php endforeach; ?>
@@ -892,8 +937,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </button>
 
             <span class="muted">
-                Super Admin remains protected. Other role permissions apply
-                to users assigned that access level in this company.
+                Super Admin remains protected. These checked defaults are applied to newly created staff users with the matching access level.
             </span>
         </div>
     </form>
@@ -905,7 +949,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <button type="submit" class="button secondary">Reset to defaults</button>
             <span class="muted">Use this if roles ever end up with no permissions (all boxes unchecked).</span>
         </div>
-    </form>
+    </form><?php else: ?>
+        <p class="notice info" style="margin:14px 0;">Only a Platform Super Admin may change these company defaults. You may still apply custom module permissions to staff members you manage.</p>
+    <?php endif; ?>
 </details>
 <section class="mbw-kpi-grid uw-summary-grid">
     <a class="mbw-kpi" href="<?= e(url('admin/users.php')) ?>">
@@ -1529,9 +1575,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         </label>
                         <label>Role
                             <select name="role" required>
-                                <option value="customer" <?= ($editUser['role'] ?? 'customer') === 'customer' ? 'selected' : '' ?>>Customer</option>
-                                <option value="staff" <?= ($editUser['role'] ?? '') === 'staff' ? 'selected' : '' ?>>Staff</option>
-                                <option value="admin" <?= ($editUser['role'] ?? '') === 'admin' ? 'selected' : '' ?>>Admin</option>
+                                <?php foreach ($assignableRoles as $assignableRole): ?>
+                                    <option value="<?= e($assignableRole) ?>" <?= ($editUser['role'] ?? 'customer') === $assignableRole ? 'selected' : '' ?>><?= e(ucfirst($assignableRole)) ?></option>
+                                <?php endforeach; ?>
                             </select>
                         </label>
                         <label>Status
@@ -1543,7 +1589,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <?php if ($hasAccessLevels): ?>
                             <label>Access level
                                 <select name="access_level" required>
-                                    <?php foreach (ACCESS_LEVELS as $levelKey => $levelLabel): ?>
+                                    <?php foreach ($assignableAccessLevels((string) ($editUser['role'] ?? 'staff')) as $levelKey): ?>
+                                        <?php $levelLabel = ACCESS_LEVELS[$levelKey] ?? $levelKey; ?>
                                         <option value="<?= e($levelKey) ?>" <?= ($editUser['access_level'] ?? '') === $levelKey ? 'selected' : '' ?>><?= e($levelLabel) ?></option>
                                     <?php endforeach; ?>
                                 </select>
@@ -1591,7 +1638,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php if ($hasAccessLevels): ?>
                         <label>Access level
                             <select name="access_level" required>
-                                <?php foreach (ACCESS_LEVELS as $levelKey => $levelLabel): ?>
+                                <?php foreach ($assignableAccessLevels('staff') as $levelKey): ?>
+                                    <?php $levelLabel = ACCESS_LEVELS[$levelKey] ?? $levelKey; ?>
                                     <option value="<?= e($levelKey) ?>" <?= $levelKey === 'accountant' ? 'selected' : '' ?>><?= e($levelLabel) ?></option>
                                 <?php endforeach; ?>
                             </select>
@@ -1601,6 +1649,26 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <input type="hidden" name="company_id" value="<?= e($companyId) ?>">
                     <label class="users-full">Company portal<input type="text" value="<?= e($company['name'] ?? 'Current company') ?><?= !empty($company['code']) ? ' (' . e($company['code']) . ')' : '' ?>" readonly></label>
                 </div>
+
+                <details class="users-permission-template">
+                    <summary>Set custom module permissions instead of the access-level default</summary>
+                    <p class="muted">Leave this closed to use the selected access-level default. Opening it lets you set this user's exact allowed actions now; any selected action makes this a custom override.</p>
+                    <label class="users-full"><input type="checkbox" name="use_custom_permissions" value="1"> Use the selected custom permissions for this user</label>
+                    <div class="rc-table-scroll">
+                        <table class="rc-table role-matrix-table perm-matrix-table">
+                            <thead><tr><th>Module</th><?php foreach (rbac_action_labels() as $actionLabel): ?><th class="align-center"><?= e($actionLabel) ?></th><?php endforeach; ?></tr></thead>
+                            <tbody>
+                            <?php foreach (rbac_modules() as $moduleKey => $module): ?>
+                                <tr><td><strong><?= e($module['label']) ?></strong></td>
+                                <?php foreach (array_keys(rbac_action_labels()) as $actionKey): ?>
+                                    <td class="align-center"><?php if (in_array($actionKey, $module['actions'], true)): ?><input type="checkbox" name="perm[]" value="<?= e($moduleKey . '.' . $actionKey) ?>" aria-label="<?= e($module['label'] . ' ' . $actionKey) ?>"><?php else: ?><span class="matrix-no">â€“</span><?php endif; ?></td>
+                                <?php endforeach; ?>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
 
                 <div class="actions">
                     <button type="submit" id="user-create-submit">Create user</button>

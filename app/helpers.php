@@ -5459,7 +5459,9 @@ function access_level_capabilities(?int $companyId = null): array
     );
     $stmt->execute(['company_id' => $companyId]);
 
-    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    $storedRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $hasAnyAllowedCapability = false;
+    foreach ($storedRows as $row) {
         $level = (string) ($row['access_level'] ?? '');
         $capability = (string) ($row['capability'] ?? '');
 
@@ -5469,7 +5471,17 @@ function access_level_capabilities(?int $companyId = null): array
             && $level !== 'super_admin'
         ) {
             $matrix[$level][$capability] = (int) $row['is_allowed'] === 1;
+            $hasAnyAllowedCapability = $hasAnyAllowedCapability || (int) $row['is_allowed'] === 1;
         }
+    }
+
+    // Older versions could persist a matrix in which every editable role was
+    // unchecked. That state can never be saved by the current editor and is
+    // not a meaningful permission policy: it makes the access screen unreadable
+    // and can lock ordinary users out of routine controls. Treat it as a
+    // recoverable legacy record and expose the standard safe baseline instead.
+    if ($storedRows !== [] && !$hasAnyAllowedCapability) {
+        return default_access_level_capabilities();
     }
 
     return $matrix;

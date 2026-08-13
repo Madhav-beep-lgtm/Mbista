@@ -1062,6 +1062,21 @@ function staff_permissions_configured(int $userId): bool
     return staff_permission_keys($userId) !== [];
 }
 
+/** Map a detailed module action to the access-level baseline capability. */
+function access_level_capability_for_action(string $action): string
+{
+    return match ($action) {
+        'view' => 'view',
+        'create', 'generate' => 'create',
+        'edit', 'adjust' => 'edit',
+        'approve', 'review' => 'approve',
+        'post', 'finalize', 'issue' => 'post',
+        'export' => 'report',
+        'manage' => 'admin',
+        default => $action,
+    };
+}
+
 /**
  * The core check: may this user take $action in $module?
  */
@@ -1137,12 +1152,17 @@ function user_can_do(string $module, string $action, ?array $user = null): bool
 
     $userId = (int) $user['id'];
 
-    // Staff permissions remain exactly as configured by the administrator.
-    if (!staff_permissions_configured($userId)) {
-        return true;
+    // A custom per-user grant list is an explicit override. Otherwise a staff
+    // account inherits the Super-Admin-maintained default for its access level.
+    // This replaces the unsafe historical fallback where a new staff account
+    // silently received full application access until someone configured it.
+    if (staff_permissions_configured($userId)) {
+        return isset(staff_permission_keys($userId)[$module . '.' . $action]);
     }
 
-    return isset(staff_permission_keys($userId)[$module . '.' . $action]);
+    $level = current_access_level_for($user);
+    $baseline = access_level_capabilities(current_company_id());
+    return !empty($baseline[$level][access_level_capability_for_action($action)]);
 }
 /**
  * Page/endpoint gate. Admins pass; a configured staff member without the grant
