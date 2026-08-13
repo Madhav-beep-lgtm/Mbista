@@ -2794,9 +2794,9 @@ nav.inventory-action-tabs .inventory-action-tab.btn:hover { opacity: 0.85 !impor
 /* Active tab: green background + white text */
 .nav-link.active, .nav-tabs .nav-link.active, 
 .inventory-nav .nav-link.active { 
-    background: #0f6b4f !important; 
-    color: #ffffff !important; 
-    border-color: #0f6b4f !important; 
+ background: #0f6b4f!important;
+ color: #ffffff!important;
+ border-color: #0f6b4f!important;
 }
 
 /* Make sure span and icon inside also white */
