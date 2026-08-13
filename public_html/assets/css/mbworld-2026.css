@@ -2353,3 +2353,24 @@ body:has(.portal-selector-page) .portal-selector-page .portal-company-illustrati
   body:has(.portal-selector-page) .portal-selector-page .admin-grid.portal-company-grid { grid-template-columns: 1fr !important; }
   body:has(.portal-selector-page) .portal-selector-page form.card { min-height: 205px !important; }
 }
+
+/* User creation: optional custom permission review panel. */
+body.admin-layout .users-permission-template {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-md);
+  background: var(--c-surface-2);
+  color: var(--c-ink);
+}
+
+body.admin-layout .users-permission-template > summary {
+  cursor: pointer;
+  color: var(--c-primary);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+body.admin-layout .users-permission-template[open] > summary {
+  margin-bottom: 10px;
+}

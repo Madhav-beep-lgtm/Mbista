@@ -1643,7 +1643,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="clear_opening_bulk">
         <input type="hidden" name="back_view" value="opening">
-        <button type="submit" class="button danger" aria-label="Clear selected opening stock" style="display:inline-flex;align-items:center;gap:8px;padding:10px 14px;background:#d9534f !important;border:1px solid #c9302c !important;color:#ffffff !important;font-weight:600;box-shadow:0 1px 0 rgba(0,0,0,0.08) !important;">
+        <button type="submit" class="button danger" aria-label="Clear selected opening stock" style="display:inline-flex;align-items:center;gap:8px;padding:10px 14px;background:var(--danger) !important;border:1px solid var(--danger) !important;color:var(--c-on-primary) !important;font-weight:600;box-shadow:var(--shadow-sm) !important;">
             <?= icon('trash') ?> <span>Clear selected opening stock</span>
         </button>
     </form>

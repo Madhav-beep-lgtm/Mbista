@@ -1,7 +1,4 @@
 <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
@@ -380,28 +377,13 @@ if (isset($_GET['view']) && $_GET['view'] === 'print') {
     </head>
     <body>
         <div class="rpt-bar"><?= e($reportNumberedTitle) ?></div>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); rc_render_letterhead($report, $reportMeta); ?>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); rc_render_table($report, $hasGroups); ?>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); rc_render_notes($reportNotes); ?>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); rc_render_report_foot(['generated_by' => $reportMeta['generated_by']]); ?>
+        <?php rc_render_letterhead($report, $reportMeta); ?>
+        <?php rc_render_table($report, $hasGroups); ?>
+        <?php rc_render_notes($reportNotes); ?>
+        <?php rc_render_report_foot(['generated_by' => $reportMeta['generated_by']]); ?>
         <button class="print-button" onclick="window.print()">Print / Save as PDF</button>
     </body>
     </html><?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
     exit;
 }
 
@@ -429,15 +411,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?= icon('reports') ?>
         <span class="sr-only">Report view</span>
         <select onchange="if (this.value) { window.location = this.value; }" aria-label="Choose report">
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($allowedReportRegistry as $key => [$label, $description, $iconName]): ?>
+            <?php foreach ($allowedReportRegistry as $key => [$label, $description, $iconName]): ?>
                 <option value="<?= e(rc_url(['report' => $key])) ?>" <?= $key === $reportId ? 'selected' : '' ?>><?= e($label) ?></option>
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+            <?php endforeach; ?>
         </select>
         <span class="rc2-caret"><?= icon('chevron') ?></span>
     </label>
@@ -465,24 +441,12 @@ error_reporting(E_ALL); endforeach; ?>
     </button>
 </div>
 
-<?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); if ($dateFilterNotice !== ''): ?>
+<?php if ($dateFilterNotice !== ''): ?>
     <div class="notice" style="margin-bottom:12px" role="status"><?= e($dateFilterNotice) ?></div>
-<?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endif; ?>
+<?php endif; ?>
 <form method="get" action="<?= e(url('admin/reports-center.php')) ?>" class="rc-filter-card rc2-filters" id="rc2FilterForm" data-fy-start="<?= e((string) ($selectedFiscalYear['start_date'] ?? '')) ?>" data-fy-end="<?= e((string) ($selectedFiscalYear['end_date'] ?? '')) ?>">
     <input type="hidden" name="report" value="<?= e($reportId) ?>">
-    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); if ($compareEnabled): ?><input type="hidden" name="compare" value="1"><?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endif; ?>
+    <?php if ($compareEnabled): ?><input type="hidden" name="compare" value="1"><?php endif; ?>
     <div class="rc2-filters-head">
         <span class="rc2-filters-title">
             <?= icon('filter') ?>
@@ -497,22 +461,10 @@ error_reporting(E_ALL); endif; ?>
     <div class="rc-filter-grid">
         <label>Fiscal Year
             <select name="fy" id="rc2-fy-select">
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($fiscalYears as $fiscalYearRow): ?>
+                <?php foreach ($fiscalYears as $fiscalYearRow): ?>
                     <option value="<?= e((int) $fiscalYearRow['id']) ?>" <?= (int) $fiscalYearRow['id'] === $fiscalYearId ? 'selected' : '' ?>><?= e($fiscalYearRow['label']) ?> (<?= e(date('d M Y', strtotime((string) $fiscalYearRow['start_date']))) ?> - <?= e(date('d M Y', strtotime((string) $fiscalYearRow['end_date']))) ?>)</option>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); if ($fiscalYears === []): ?><option value="0">No fiscal year</option><?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endif; ?>
+                <?php endforeach; ?>
+                <?php if ($fiscalYears === []): ?><option value="0">No fiscal year</option><?php endif; ?>
             </select>
         </label>
         <script>
@@ -530,211 +482,106 @@ error_reporting(E_ALL); endif; ?>
         <label>From Date<input type="date" name="from" value="<?= e($fromDate) ?>"></label>
         <label>To Date<input type="date" name="to" value="<?= e($toDate) ?>"></label>
         <label>Branch
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); if (isset($dimensionOptions['location'])): ?>
+            <?php if (isset($dimensionOptions['location'])): ?>
                 <select name="dim_location">
                     <option value="">All Branches</option>
-                    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($dimensionOptions['location'] as $dimValue): ?>
+                    <?php foreach ($dimensionOptions['location'] as $dimValue): ?>
                         <option value="<?= e($dimValue) ?>" <?= ($dimensionFilters['location'] ?? '') === $dimValue ? 'selected' : '' ?>><?= e($dimValue) ?></option>
-                    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+                    <?php endforeach; ?>
                 </select>
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); else: ?>
+            <?php else: ?>
                 <select disabled title="No branch/location has been recorded on vouchers yet. Set it in the voucher form's Location field."><option>All Branches</option></select>
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endif; ?>
+            <?php endif; ?>
         </label>
         <label>Company
             <select name="scope_company">
                 <option value="<?= e($companyId) ?>" <?= $scopeCompanyId === $companyId ? 'selected' : '' ?>><?= e($company['name'] ?? 'Current company') ?></option>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($subsidiaries as $subsidiary): ?>
+                <?php foreach ($subsidiaries as $subsidiary): ?>
                     <option value="<?= e((int) $subsidiary['id']) ?>" <?= $scopeCompanyId === (int) $subsidiary['id'] ? 'selected' : '' ?>><?= e($subsidiary['name']) ?></option>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+                <?php endforeach; ?>
             </select>
         </label>
         <label>Department / Project
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); if (isset($dimensionOptions['department'])): ?>
+            <?php if (isset($dimensionOptions['department'])): ?>
                 <select name="dim_department">
                     <option value="">All Departments</option>
-                    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($dimensionOptions['department'] as $dimValue): ?>
+                    <?php foreach ($dimensionOptions['department'] as $dimValue): ?>
                         <option value="<?= e($dimValue) ?>" <?= ($dimensionFilters['department'] ?? '') === $dimValue ? 'selected' : '' ?>><?= e($dimValue) ?></option>
-                    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+                    <?php endforeach; ?>
                 </select>
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); else: ?>
+            <?php else: ?>
                 <select disabled title="No department/project has been recorded on vouchers yet. Set it in the voucher form's Department field."><option>All Departments</option></select>
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endif; ?>
+            <?php endif; ?>
         </label>
         <label>Cost Center
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); if (isset($dimensionOptions['cost_centre'])): ?>
+            <?php if (isset($dimensionOptions['cost_centre'])): ?>
                 <select name="dim_cost_centre">
                     <option value="">All Cost Centers</option>
-                    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($dimensionOptions['cost_centre'] as $dimValue): ?>
+                    <?php foreach ($dimensionOptions['cost_centre'] as $dimValue): ?>
                         <option value="<?= e($dimValue) ?>" <?= ($dimensionFilters['cost_centre'] ?? '') === $dimValue ? 'selected' : '' ?>><?= e($dimValue) ?></option>
-                    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+                    <?php endforeach; ?>
                 </select>
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); else: ?>
+            <?php else: ?>
                 <select disabled title="No cost centre has been recorded on vouchers yet. Set it in the voucher form's Cost Centre field."><option>All Cost Centers</option></select>
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endif; ?>
+            <?php endif; ?>
         </label>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); if ($reportId === 'salary-sheet'): ?>
+        <?php if ($reportId === 'salary-sheet'): ?>
             <label>Payroll Run
                 <select name="payroll_run">
                     <option value="0">Latest run in period</option>
-                    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($payrollRunOptions as $payrollRunOption): ?>
+                    <?php foreach ($payrollRunOptions as $payrollRunOption): ?>
                         <option value="<?= e((int) $payrollRunOption['id']) ?>" <?= $payrollRunFilter === (int) $payrollRunOption['id'] ? 'selected' : '' ?>>
                             <?= e($payrollRunOption['period_label'] . ' — ' . ucfirst((string) $payrollRunOption['status'])) ?>
                         </option>
-                    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+                    <?php endforeach; ?>
                 </select>
             </label>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endif; ?>
+        <?php endif; ?>
         <label>Voucher Type
             <select name="vtype">
                 <option value="">All Voucher Types</option>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($voucherTypes as $type): ?>
+                <?php foreach ($voucherTypes as $type): ?>
                     <option value="<?= e($type) ?>" <?= $voucherType === $type ? 'selected' : '' ?>><?= e(ucfirst(str_replace('_', ' ', $type))) ?></option>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+                <?php endforeach; ?>
             </select>
         </label>
         <label>Ledger
             <select name="ledger_id">
                 <option value="0">All Ledgers</option>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($allLedgers as $ledger): ?>
+                <?php foreach ($allLedgers as $ledger): ?>
                     <option value="<?= e((int) $ledger['id']) ?>" <?= $ledgerFilterId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+                <?php endforeach; ?>
             </select>
         </label>
         <label>Group
             <select name="group_id">
                 <option value="0">All Groups</option>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($allGroups as $group): ?>
+                <?php foreach ($allGroups as $group): ?>
                     <option value="<?= e((int) $group['id']) ?>" <?= $groupFilterId === (int) $group['id'] ? 'selected' : '' ?>><?= e($group['name']) ?></option>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+                <?php endforeach; ?>
             </select>
         </label>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); if (($companyBusinessProfile['show_inventory'] ?? false) && $allItems !== []): ?>
+        <?php if (($companyBusinessProfile['show_inventory'] ?? false) && $allItems !== []): ?>
             <label>Inventory Item
                 <select name="item_id">
                     <option value="0">First item by SKU (default)</option>
-                    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($allItems as $item): ?>
+                    <?php foreach ($allItems as $item): ?>
                         <option value="<?= e((int) $item['id']) ?>" <?= $itemFilterId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option>
-                    <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+                    <?php endforeach; ?>
                 </select>
             </label>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endif; ?>
+        <?php endif; ?>
         <label>Organization Type
             <select name="biz">
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($businessTypeOptions as $bizValue => $bizLabel): ?>
+                <?php foreach ($businessTypeOptions as $bizValue => $bizLabel): ?>
                     <option value="<?= e($bizValue) ?>" <?= $businessType === $bizValue ? 'selected' : '' ?>><?= e($bizLabel) ?></option>
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+                <?php endforeach; ?>
             </select>
         </label>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); if ($compareEnabled): ?>
+        <?php if ($compareEnabled): ?>
             <label>Compare From<input type="date" name="cfrom" value="<?= e($compareFrom) ?>"></label>
             <label>Compare To<input type="date" name="cto" value="<?= e($compareTo) ?>"></label>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endif; ?>
+        <?php endif; ?>
     </div>
     <div class="rc2-filter-actions">
         <button type="submit" class="rc2-apply"><?= icon('filter') ?>Apply Filters</button>
@@ -781,39 +628,18 @@ error_reporting(E_ALL); endif; ?>
     </div>
 <div class="rpt-fullwidth">
     <main class="rc-report-view rpt-statement" id="rc2Statement">
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); rc_render_letterhead($report, $reportMeta); ?>
+        <?php rc_render_letterhead($report, $reportMeta); ?>
         <div class="rc-table-scroll">
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); rc_render_table($report, $hasGroups); ?>
+            <?php rc_render_table($report, $hasGroups); ?>
         </div>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); if ($compareEnabled && $compareReport !== null): ?>
+        <?php if ($compareEnabled && $compareReport !== null): ?>
             <div class="rpt-bar rpt-bar-compare">Comparison Period — <?= e(date('d M Y', strtotime($compareFrom))) ?> to <?= e(date('d M Y', strtotime($compareTo))) ?></div>
             <div class="rc-table-scroll">
-                <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); rc_render_table($compareReport, $hasGroups); ?>
+                <?php rc_render_table($compareReport, $hasGroups); ?>
             </div>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endif; ?>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); rc_render_notes($reportNotes); ?>
-        <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); rc_render_report_foot(['generated_by' => $reportMeta['generated_by']]); ?>
+        <?php endif; ?>
+        <?php rc_render_notes($reportNotes); ?>
+        <?php rc_render_report_foot(['generated_by' => $reportMeta['generated_by']]); ?>
 
         <div class="rc-report-foot">
             <span><?= e($report['subtitle']) ?></span>
@@ -836,19 +662,13 @@ error_reporting(E_ALL); rc_render_report_foot(['generated_by' => $reportMeta['ge
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="save_report_notes">
         <div id="rc2NotesRows">
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); foreach ($reportNotes as $note): ?>
+            <?php foreach ($reportNotes as $note): ?>
                 <div class="rc2-note-row">
                     <input type="text" name="note_no[]" value="<?= e((string) $note['note_no']) ?>" maxlength="10" aria-label="Note number" placeholder="No.">
                     <textarea name="note_body[]" rows="2" aria-label="Note text" placeholder="Note text..."><?= e((string) $note['body']) ?></textarea>
                     <button type="button" class="rc2-note-remove" data-note-remove title="Remove this note" aria-label="Remove note"><?= icon('close') ?></button>
                 </div>
-            <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); endforeach; ?>
+            <?php endforeach; ?>
         </div>
         <template id="rc2NoteTemplate">
             <div class="rc2-note-row">
@@ -1079,7 +899,4 @@ error_reporting(E_ALL); endforeach; ?>
     }
 })();
 </script>
-<?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
+<?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
