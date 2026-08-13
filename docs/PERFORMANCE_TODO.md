@@ -112,3 +112,18 @@ or production-like benchmark rather than relying only on source inspection.
   passed 17/17, all changed PHP files passed PHP 8.3 syntax validation, and
   `git diff --check` passed. Production index and OPcache confirmation remains
   part of live verification after deployment.
+
+- 2026-08-13 — Second-pass walkthrough removed five additional scaling paths:
+  Work Portal staff workload changed from roughly 3–6 queries per staff member
+  to three batched queries; invoice stock validation changed from one query per
+  inventory item to one grouped query; open-bill summary changed from loading
+  every bill to one aggregate query while the register is paginated at 200;
+  Chart of Accounts now loads at most 500 matching ledgers and streams CSV rows;
+  and jewellery invoice tax display changed from one lookup per tax to the
+  historically stored line-tax rate returned by the existing aggregate query.
+  All seven changed PHP files passed PHP 8.3 syntax validation,
+  `test_stock_summary.php` passed 84/84, trading-report assertions passed, and
+  `git diff --check` passed. Interactive browser automation was unavailable due
+  to the local browser-control runtime; Apache answered on port 8095 but rejected
+  command-line requests with HTTP 400, so signed-in page timing and live
+  deployment verification remain post-deployment checks.

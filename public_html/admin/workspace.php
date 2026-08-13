@@ -1535,62 +1535,71 @@ if ($missingTables === []) {
     }
 
     if ($view === 'staff' && table_exists('team_members')) {
+        $staffIds = array_values(array_filter(array_map('intval', array_column($staffUsers, 'id'))));
+        $teamCounts = [];
+        if ($staffIds !== []) {
+            $idMarks = implode(',', array_fill(0, count($staffIds), '?'));
+            $teamCountStmt = db()->prepare("SELECT user_id,COUNT(DISTINCT team_id) total
+                FROM team_members WHERE user_id IN ($idMarks) GROUP BY user_id");
+            $teamCountStmt->execute($staffIds);
+            foreach ($teamCountStmt->fetchAll() as $row) $teamCounts[(int)$row['user_id']] = (int)$row['total'];
+        }
+
+        // Resolve every staff/task relationship in one derived set instead of
+        // repeating team, stage, direct and multi-assignee queries per person.
+        $assignmentParts = [];
+        $assignmentBindings = [];
+        if ($hasTaskAssignment) {
+            $assignmentParts[] = 'SELECT assigned_staff_user_id staff_id,id task_id,client_id FROM client_tasks WHERE company_id=? AND assigned_staff_user_id IS NOT NULL';
+            $assignmentBindings[] = $companyId;
+        }
+        if ($hasStageAssignment) {
+            $assignmentParts[] = 'SELECT ts.assigned_staff_user_id,t.id,t.client_id FROM task_stages ts INNER JOIN client_tasks t ON t.id=ts.task_id WHERE t.company_id=? AND ts.assigned_staff_user_id IS NOT NULL';
+            $assignmentBindings[] = $companyId;
+        }
+        if ($hasMultiAssignees) {
+            $assignmentParts[] = 'SELECT cta.user_id,t.id,t.client_id FROM client_task_assignees cta INNER JOIN client_tasks t ON t.id=cta.task_id WHERE t.company_id=?';
+            $assignmentBindings[] = $companyId;
+        }
+        $assignmentParts[] = 'SELECT tm.user_id,t.id,t.client_id FROM team_members tm INNER JOIN client_tasks t ON t.team_id=tm.team_id WHERE t.company_id=?';
+        $assignmentBindings[] = $companyId;
+
+        $workloadMap = [];
+        $clientCountMap = [];
+        if ($assignmentParts !== []) {
+            $assignmentSql = implode(' UNION ALL ', $assignmentParts);
+            $workloadStmt = db()->prepare("SELECT a.staff_id,
+                    COUNT(DISTINCT CASE WHEN t.status IN ('new','in_progress','on_hold') THEN t.id END) open_tasks,
+                    COUNT(DISTINCT CASE WHEN t.status='completed' THEN t.id END) completed_tasks
+                FROM ($assignmentSql) a INNER JOIN client_tasks t ON t.id=a.task_id
+                GROUP BY a.staff_id");
+            $workloadStmt->execute($assignmentBindings);
+            foreach ($workloadStmt->fetchAll() as $row) {
+                $workloadMap[(int)$row['staff_id']]=$row;
+            }
+            $clientSources = ["SELECT staff_id,client_id FROM ($assignmentSql) assigned_clients"];
+            $clientBindings = $assignmentBindings;
+            if (table_exists('staff_client_accounting_access')) {
+                $clientSources[] = 'SELECT staff_user_id,client_id FROM staff_client_accounting_access WHERE is_active=1 AND company_id=?';
+                $clientBindings[] = $companyId;
+            }
+            $clientCountStmt = db()->prepare('SELECT staff_id,COUNT(DISTINCT client_id) total FROM ('
+                . implode(' UNION ALL ', $clientSources) . ') scoped_clients GROUP BY staff_id');
+            $clientCountStmt->execute($clientBindings);
+            foreach ($clientCountStmt->fetchAll() as $row) {
+                $clientCountMap[(int)$row['staff_id']] = (int)$row['total'];
+            }
+        }
         foreach ($staffUsers as $staffUser) {
             $staffUserId = (int) $staffUser['id'];
-
-            $staffTeamIdsStmt = db()->prepare('SELECT team_id FROM team_members WHERE user_id = :user_id');
-            $staffTeamIdsStmt->execute(['user_id' => $staffUserId]);
-            $staffTeamIds = array_map('intval', array_column($staffTeamIdsStmt->fetchAll(), 'team_id'));
-
-            $staffClientIds = staff_scoped_client_ids($staffUserId, $companyId);
-
-            $staffOpenTasks = 0;
-            $staffCompletedTasks = 0;
-            if (table_exists('client_tasks')) {
-                // Task-wise/stage-wise assignment (with team as fallback), not client-wise.
-                $staffTaskWhere = 't.company_id = ? AND (';
-                $staffTaskBindings = [$companyId];
-                if ($hasTaskAssignment) {
-                    $staffTaskWhere .= 't.assigned_staff_user_id = ?';
-                    $staffTaskBindings[] = $staffUserId;
-                } else {
-                    $staffTaskWhere .= '1 = 0';
-                }
-                if ($staffTeamIds !== []) {
-                    $staffTeamPlaceholders = implode(',', array_fill(0, count($staffTeamIds), '?'));
-                    $staffTaskWhere .= " OR t.team_id IN ($staffTeamPlaceholders)";
-                    $staffTaskBindings = array_merge($staffTaskBindings, $staffTeamIds);
-                }
-                if ($hasStageAssignment) {
-                    $staffTaskWhere .= ' OR EXISTS (SELECT 1 FROM task_stages sts WHERE sts.task_id = t.id AND sts.assigned_staff_user_id = ?)';
-                    $staffTaskBindings[] = $staffUserId;
-                }
-                if ($hasMultiAssignees) {
-                    $staffTaskWhere .= ' OR EXISTS (SELECT 1 FROM client_task_assignees cta WHERE cta.task_id = t.id AND cta.user_id = ?)';
-                    $staffTaskBindings[] = $staffUserId;
-                }
-                $staffTaskWhere .= ')';
-
-                $staffTaskStmt = db()->prepare("SELECT t.status, COUNT(*) AS total FROM client_tasks t WHERE $staffTaskWhere GROUP BY t.status");
-                $staffTaskStmt->execute($staffTaskBindings);
-                foreach ($staffTaskStmt->fetchAll() as $statusRow) {
-                    $statusCount = (int) $statusRow['total'];
-                    if (in_array($statusRow['status'], ['new', 'in_progress', 'on_hold'], true)) {
-                        $staffOpenTasks += $statusCount;
-                    } elseif ($statusRow['status'] === 'completed') {
-                        $staffCompletedTasks += $statusCount;
-                    }
-                }
-            }
-
             $staffWorkloads[] = [
                 'id' => $staffUserId,
                 'name' => $staffUser['name'],
                 'email' => $staffUser['email'],
-                'team_count' => count($staffTeamIds),
-                'client_count' => count($staffClientIds),
-                'open_tasks' => $staffOpenTasks,
-                'completed_tasks' => $staffCompletedTasks,
+                'team_count' => $teamCounts[$staffUserId] ?? 0,
+                'client_count' => $clientCountMap[$staffUserId] ?? 0,
+                'open_tasks' => (int)($workloadMap[$staffUserId]['open_tasks'] ?? 0),
+                'completed_tasks' => (int)($workloadMap[$staffUserId]['completed_tasks'] ?? 0),
             ];
         }
     }

@@ -804,9 +804,14 @@ function jw_report_karigar_wages(int $companyId, string $from, string $to): arra
 // ---------------------------------------------------------------------------
 
 /** Outstanding bills grouped by party — the bill-wise seller/buyer statement. */
-function jw_report_bill_outstanding(int $companyId, string $billType = ''): array
+function jw_report_bill_outstanding(int $companyId, string $billType = '', int $limit = 500, int $offset = 0): array
 {
-    $bills = jewellery_bills_list($companyId, ['bill_type' => $billType, 'open_only' => true]);
+    $bills = jewellery_bills_list($companyId, [
+        'bill_type' => $billType,
+        'open_only' => true,
+        'limit' => $limit,
+        'offset' => $offset,
+    ]);
 
     $parties = [];
     foreach ($bills as $bill) {
@@ -855,14 +860,9 @@ function jw_report_summary(int $companyId, string $from, string $to): array
         $stockValue += (float) $row['value'];
     }
 
-    $receivable = 0.0; $payable = 0.0;
-    foreach (jewellery_bills_list($companyId, ['open_only' => true]) as $bill) {
-        if ((string) $bill['bill_type'] === 'sale') {
-            $receivable += (float) $bill['outstanding'];
-        } else {
-            $payable += (float) $bill['outstanding'];
-        }
-    }
+    $billTotals = jewellery_open_bill_totals($companyId);
+    $receivable = (float) $billTotals['receivable'];
+    $payable = (float) $billTotals['payable'];
 
     $pendingDelivery = count(jewellery_pending_delivery($companyId));
     $openOrders = db()->prepare("SELECT COUNT(*) FROM jewellery_orders WHERE company_id = :cid

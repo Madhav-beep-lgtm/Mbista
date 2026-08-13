@@ -128,7 +128,7 @@ function jw_document_taxes(int $companyId, string $docType, int $docId): array
         return [];
     }
     $stmt = db()->prepare('SELECT tax_code, tax_name, output_purpose, input_purpose, MIN(sequence) AS sequence,
-            SUM(base_amount) AS base_amount, SUM(amount) AS amount
+            MAX(rate) AS rate, SUM(base_amount) AS base_amount, SUM(amount) AS amount
         FROM jewellery_line_taxes
         WHERE company_id = :cid AND doc_type = :dt AND doc_id = :did
         GROUP BY tax_code, tax_name, output_purpose, input_purpose
@@ -2688,12 +2688,26 @@ function jewellery_bills_list(int $companyId, array $filters = []): array
     if (!empty($filters['open_only'])) {
         $sql .= " AND b.status IN ('open', 'part_settled')";
     }
-    $sql .= ' ORDER BY ap.name ASC, b.bill_date ASC, b.id ASC';
+    $limit = max(1, min(5000, (int) ($filters['limit'] ?? 500)));
+    $offset = max(0, (int)($filters['offset'] ?? 0));
+    $sql .= ' ORDER BY ap.name ASC, b.bill_date ASC, b.id ASC LIMIT ' . $limit . ' OFFSET ' . $offset;
 
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function jewellery_open_bill_totals(int $companyId): array
+{
+    $stmt = db()->prepare("SELECT
+            COALESCE(SUM(CASE WHEN bill_type = 'sale' THEN bill_amount - settled_amount ELSE 0 END), 0) AS receivable,
+            COALESCE(SUM(CASE WHEN bill_type = 'purchase' THEN bill_amount - settled_amount ELSE 0 END), 0) AS payable,
+            COUNT(*) AS bill_count
+        FROM jewellery_bills WHERE company_id = :cid AND status IN ('open', 'part_settled')");
+    $stmt->execute(['cid' => $companyId]);
+
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: ['receivable' => 0, 'payable' => 0, 'bill_count' => 0];
 }
 
 function jewellery_settlement(int $companyId, int $settlementId): ?array

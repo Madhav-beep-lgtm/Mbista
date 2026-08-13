@@ -80,11 +80,9 @@ $sdRate = 0.0;
 $vatRate = 0.0;
 foreach ($taxRows as $t) {
     if ((string) $t['output_purpose'] === 'vat_output') {
-        $vatRate = (float) db()->query('SELECT rate FROM jewellery_taxes WHERE company_id=' . $companyId
-            . " AND code=" . db()->quote((string) $t['tax_code']) . ' LIMIT 1')->fetchColumn();
+        $vatRate = (float) ($t['rate'] ?? 0);
     } else {
-        $sdRate = (float) db()->query('SELECT rate FROM jewellery_taxes WHERE company_id=' . $companyId
-            . " AND code=" . db()->quote((string) $t['tax_code']) . ' LIMIT 1')->fetchColumn();
+        $sdRate = (float) ($t['rate'] ?? 0);
     }
 }
 
