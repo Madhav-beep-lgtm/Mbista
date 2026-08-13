@@ -29,6 +29,12 @@ function access_control_ensure_schema(): void
     }
     $done = true;
 
+    // DDL belongs to deployment. Authorization requests must never wait on
+    // information_schema scans or attempt CREATE/ALTER operations.
+    if (PHP_SAPI !== 'cli') {
+        return;
+    }
+
     try {
         if (!table_exists('company_memberships') && table_exists('users') && table_exists('companies')) {
             db()->exec(
@@ -641,9 +647,25 @@ function authorized_company_ids(?array $user = null): array
     // exactly its own books, which is the branch further down.
     if ($role === 'staff') {
         $restricted = staff_restricted_company_ids($userId);
-        $cache[$cacheKey] = access_control_active_company_ids(
-            $restricted !== [] ? $restricted : access_control_all_company_ids()
-        );
+        $homeCompanyId = (int) ($user['company_id'] ?? 0);
+        $ids = $restricted !== [] ? $restricted : ($homeCompanyId > 0 ? [$homeCompanyId] : []);
+
+        // Client assignment controls WHERE staff may work. The granular
+        // permission matrix independently controls WHAT they may do there.
+        if (table_exists('client_profiles') && column_exists('client_profiles', 'books_company_id')) {
+            $grantedClientIds = staff_accounting_client_ids($userId);
+            $clientWhere = ['assigned_staff_user_id = ?'];
+            $clientBindings = [$userId];
+            if ($grantedClientIds !== []) {
+                $clientWhere[] = 'id IN (' . implode(',', array_fill(0, count($grantedClientIds), '?')) . ')';
+                $clientBindings = array_merge($clientBindings, $grantedClientIds);
+            }
+            $stmt = db()->prepare('SELECT books_company_id FROM client_profiles WHERE is_active = 1 AND books_company_id IS NOT NULL AND (' . implode(' OR ', $clientWhere) . ')');
+            $stmt->execute($clientBindings);
+            $ids = array_merge($ids, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        }
+
+        $cache[$cacheKey] = access_control_active_company_ids($ids);
 
         return $cache[$cacheKey];
     }
@@ -830,7 +852,7 @@ function revoke_user_sessions(int $userId): void
     try {
         // Stamp with PHP's clock, not MySQL NOW(): session_is_revoked() parses
         // this value with strtotime() in PHP's timezone, and the two clocks can
-        // disagree (e.g. XAMPP ships date.timezone=Europe/Berlin while MySQL
+        // disagree (e.g. a local PHP package ships a timezone differing from MySQL
         // runs on system time). A NOW() written hours "ahead" of PHP's reading
         // locked every re-login out until the skew elapsed.
         db()->prepare('UPDATE users SET sessions_valid_from = :now WHERE id = :id')
@@ -1040,6 +1062,21 @@ function staff_permissions_configured(int $userId): bool
     return staff_permission_keys($userId) !== [];
 }
 
+/** Map a detailed module action to the access-level baseline capability. */
+function access_level_capability_for_action(string $action): string
+{
+    return match ($action) {
+        'view' => 'view',
+        'create', 'generate' => 'create',
+        'edit', 'adjust' => 'edit',
+        'approve', 'review' => 'approve',
+        'post', 'finalize', 'issue' => 'post',
+        'export' => 'report',
+        'manage' => 'admin',
+        default => $action,
+    };
+}
+
 /**
  * The core check: may this user take $action in $module?
  */
@@ -1071,14 +1108,16 @@ function user_can_do(string $module, string $action, ?array $user = null): bool
         $profile = client_profile_for_user((int) $user['id']);
         $memberRole = (string) ($profile['portal_member_role'] ?? '');
         $canApprove = in_array($memberRole, ['owner', 'approver'], true);
+        $isOwner = $memberRole === 'owner';
 
         $clientAccountingPermissions = [
             'accounting' => ['view', 'create', 'edit', 'approve', 'post', 'export'],
+            'opening_balance' => ['view', 'generate', 'adjust', 'finalize'],
             'sales' => ['view', 'create', 'edit', 'export'],
             'purchases' => ['view', 'create', 'edit', 'export'],
             'receipts' => ['view', 'create', 'edit', 'export'],
             'inventory' => ['view', 'create', 'edit', 'post', 'export'],
-            'payroll' => ['view', 'create', 'post', 'export'],
+            'payroll' => ['view', 'create', 'adjust', 'approve', 'post', 'export'],
             'reports' => ['view', 'export'],
             // Client admins run their own hospitality costing (reference only;
             // page gates additionally require the Super-Admin-set client flag).
@@ -1089,7 +1128,18 @@ function user_can_do(string $module, string $action, ?array $user = null): bool
             'jewellery' => ['view', 'create', 'edit', 'post', 'adjust', 'export'],
         ];
 
+        if ($module === 'opening_balance' && !$isOwner) {
+            return $action === 'view';
+        }
+
         if (!$canApprove && in_array($action, ['approve', 'post'], true)) {
+            return false;
+        }
+
+        // Organization-wide configuration is owned by the primary client
+        // account. Approvers may release transactions but cannot change the
+        // shop's gateway credentials, payroll rules, or similar controls.
+        if ($action === 'manage' && !$isOwner) {
             return false;
         }
 
@@ -1102,12 +1152,17 @@ function user_can_do(string $module, string $action, ?array $user = null): bool
 
     $userId = (int) $user['id'];
 
-    // Staff permissions remain exactly as configured by the administrator.
-    if (!staff_permissions_configured($userId)) {
-        return true;
+    // A custom per-user grant list is an explicit override. Otherwise a staff
+    // account inherits the Super-Admin-maintained default for its access level.
+    // This replaces the unsafe historical fallback where a new staff account
+    // silently received full application access until someone configured it.
+    if (staff_permissions_configured($userId)) {
+        return isset(staff_permission_keys($userId)[$module . '.' . $action]);
     }
 
-    return isset(staff_permission_keys($userId)[$module . '.' . $action]);
+    $level = current_access_level_for($user);
+    $baseline = access_level_capabilities(current_company_id());
+    return !empty($baseline[$level][access_level_capability_for_action($action)]);
 }
 /**
  * Page/endpoint gate. Admins pass; a configured staff member without the grant

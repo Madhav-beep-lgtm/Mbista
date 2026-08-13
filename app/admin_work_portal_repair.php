@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 function admin_work_portal_repair_table_exists(string $tableName): bool
 {
+    if (function_exists('table_exists')) {
+        return table_exists($tableName);
+    }
     $stmt = db()->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = :db_name AND table_name = :table_name');
     $stmt->execute(['db_name' => DB_NAME, 'table_name' => $tableName]);
 
@@ -11,6 +14,9 @@ function admin_work_portal_repair_table_exists(string $tableName): bool
 
 function admin_work_portal_repair_column_exists(string $tableName, string $columnName): bool
 {
+    if (function_exists('column_exists')) {
+        return column_exists($tableName, $columnName);
+    }
     $stmt = db()->prepare('SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = :db_name AND table_name = :table_name AND column_name = :column_name');
     $stmt->execute(['db_name' => DB_NAME, 'table_name' => $tableName, 'column_name' => $columnName]);
 
@@ -78,6 +84,9 @@ function admin_work_portal_missing_repair_tables(): array
 
 function admin_work_portal_repair_database(): array
 {
+    if (PHP_SAPI !== 'cli') {
+        return [];
+    }
     $errors = [];
 
     $run = static function (string $label, callable $callback) use (&$errors): void {

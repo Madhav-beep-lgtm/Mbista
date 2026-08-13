@@ -241,6 +241,12 @@ function voucher_type_url(string $type): string
     return 'admin/voucher-form.php?type=' . rawurlencode($type);
 }
 
+/** Voucher types intentionally entered from the compact voucher workspace. */
+function voucher_entry_type_catalog(): array
+{
+    return array_intersect_key(voucher_type_catalog(), array_flip(['contra', 'payment', 'receipt', 'journal']));
+}
+
 // ---------------------------------------------------------------------------
 // Ledgers, tagged with the roles they can play
 // ---------------------------------------------------------------------------

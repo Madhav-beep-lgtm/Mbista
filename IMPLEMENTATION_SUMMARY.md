@@ -122,7 +122,7 @@ Company Field: AUTO-FILLED & DISABLED ✓
 **To verify changes manually:**
 ```php
 // Run this in terminal from project root:
-C:\xampp\php\php.exe test_dropdown.php
+C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64\php.exe test_dropdown.php
 
 // Output will show:
 // - All companies and their active status

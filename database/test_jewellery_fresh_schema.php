@@ -93,6 +93,7 @@ echo "\n3. Every jewellery table was created\n";
 $expected = [
     'jewellery_units', 'jewellery_metals', 'jewellery_purities', 'jewellery_settings',
     'jewellery_daily_rates', 'inventory_ledger_mappings', 'jewellery_item_profiles', 'jewellery_stock_txns',
+    'jewellery_stock_units', 'jewellery_stock_unit_events',
     'jewellery_purchases', 'jewellery_purchase_lines', 'jewellery_sales',
     'jewellery_sale_lines', 'jewellery_sale_exchanges', 'jewellery_bills', 'jewellery_settlements',
     'jewellery_settlement_allocations', 'jewellery_karigars', 'jewellery_orders',
@@ -108,6 +109,22 @@ ok($missing === [], 'All ' . count($expected) . ' jewellery tables exist'
     . ($missing === [] ? '' : ' — missing: ' . implode(', ', $missing)));
 ok(accounting_repair_column_exists('client_profiles', 'jewellery_accounting_enabled'),
     'The client activation flag was added to client_profiles');
+ok(accounting_repair_column_exists('jewellery_item_profiles', 'stock_kind'),
+    'Jewellery item profiles classify showroom and customer-ordered stock');
+ok(accounting_repair_column_exists('inventory_opening_import_rows', 'raw_group')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'proposed_code')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'stock_kind')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'stone_weight')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'diamond_weight')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'stone_amount')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'diamond_amount')
+    && accounting_repair_column_exists('inventory_opening_import_rows', 'making_amount'),
+    'Opening import staging carries classification and stone, diamond and making fields');
+ok(accounting_repair_column_exists('jewellery_order_assignments', 'stock_order_no')
+    && accounting_repair_column_exists('jewellery_order_lines', 'stock_unit_id')
+    && accounting_repair_column_exists('jewellery_sale_lines', 'stock_unit_id')
+    && accounting_repair_column_exists('jewellery_sale_exchanges', 'stock_unit_id'),
+    'Stock orders, customer orders and sales all retain the exact physical trace id');
 
 echo "\n4. Foreign keys actually resolved\n";
 // The repair steps must run in an order where every referenced table already
@@ -125,6 +142,9 @@ ok($sharedFk >= 11, "Every jewellery item reference points at inventory_items ($
 $saleFk = (int) db()->query("SELECT COUNT(*) FROM information_schema.referential_constraints
     WHERE constraint_schema = '$testDb' AND constraint_name = 'fk_jw_orders_sale'")->fetchColumn();
 ok($saleFk === 1, 'Orders reference sales, so migration 073 correctly ran after 072');
+$stockBridgeFk = (int) db()->query("SELECT COUNT(*) FROM information_schema.referential_constraints
+    WHERE constraint_schema = '$testDb' AND constraint_name = 'fk_inventory_jewellery_stock_txn'")->fetchColumn();
+ok($stockBridgeFk === 1, 'Core inventory movements retain their Jewellery source link');
 
 echo "\n5. Column shapes survived the file-replay splitter\n";
 $colType = static function (string $table, string $column) use ($testDb): string {
@@ -143,6 +163,13 @@ ok(str_contains($colType('jewellery_item_profiles', 'vat_base'), "'making_only'"
 // The ENUM in 073 spans two source lines; a naive splitter could truncate it.
 ok(str_contains($colType('jewellery_stock_txns', 'txn_type'), "'receive_refinery'"),
     'The multi-line txn_type enum survived — the splitter did not cut it short');
+$stockSourceType = $colType('inventory_transactions', 'jewellery_stock_txn_id');
+ok(str_contains($stockSourceType, 'int') && str_contains($stockSourceType, 'unsigned'),
+    'Core inventory has the traceable Jewellery movement id');
+$stockBridgeIndex = (int) db()->query("SELECT COUNT(*) FROM information_schema.statistics
+    WHERE table_schema='$testDb' AND table_name='inventory_transactions'
+      AND index_name='uniq_inventory_jewellery_stock_txn' AND non_unique=0")->fetchColumn();
+ok($stockBridgeIndex === 1, 'One Jewellery movement can create only one core inventory movement');
 
 echo "\n6. Replay is idempotent\n";
 $before = (int) db()->query("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$testDb'")->fetchColumn();

@@ -3,8 +3,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
-require_admin();
+require_staff_admin_or_client_books();
 require_company_context();
+require_permission('accounting', 'view');
 accounting_module_repair_database();
 
 $company = current_company();
@@ -22,6 +23,7 @@ $sym = site_currency_symbol();
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     if ((string) ($_POST['action'] ?? '') === 'save_budgets') {
+        require_permission('accounting', 'edit');
         $amounts = (array) ($_POST['budget'] ?? []);
         $saved = 0;
         $upsert = db()->prepare('INSERT INTO budgets (company_id, fiscal_year_id, ledger_id, amount, created_by)

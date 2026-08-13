@@ -41,9 +41,8 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Opening Balances', 'admin/opening-balances.php', 'reconcile', $headerScript === 'opening-balances.php'],
     ['Day Book', 'admin/day-book.php', 'calendar', $headerScript === 'day-book.php'],
     ['Voucher Import (Excel)', 'admin/voucher-import.php', 'upload', $headerScript === 'voucher-import.php'],
-    ['Sales & Invoices', 'admin/accounting-parties.php?tab=sales', 'receipt-voucher', $headerScript === 'accounting-parties.php' && in_array($headerTab, ['', 'sales'], true)],
+    ['Unified Transaction and Party Master', 'admin/accounting-parties.php', 'users', $headerScript === 'accounting-parties.php'],
     ['Payment Gateways', 'admin/payment-gateways.php', 'card', $headerScript === 'payment-gateways.php'],
-    ['Purchases', 'admin/accounting-parties.php?tab=purchases', 'cart', $headerScript === 'accounting-parties.php' && $headerTab === 'purchases'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
@@ -88,7 +87,8 @@ $headerPageIcons = [
     'payment-gateways.php' => 'card',
     'insights.php' => 'insights',
     'jewellery.php' => 'coins', 'jewellery-trade.php' => 'coins',
-    'jewellery-workshop.php' => 'handshake', 'jewellery-assign.php' => 'handshake', 'jewellery-receive.php' => 'box', 'jewellery-reports.php' => 'reports',
+    'jewellery-workshop.php' => 'handshake', 'jewellery-assign.php' => 'handshake', 'jewellery-receive.php' => 'box', 'jewellery-reports.php' => 'reports', 'jewellery-aml.php' => 'aml',
+    'jewellery-trace.php' => 'search',
     'jewellery-tags.php' => 'documents',
 ];
 $headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php', 'payroll-overtime.php', 'payroll-service-charge.php'];
@@ -135,7 +135,7 @@ if ($headerHospitality) {
         ['settings', 'Settings', 'sliders'],
     ];
     $headerHospitalityMenu = '<div class="mbw-nav-parent' . ($headerHospitalityActive ? ' is-open' : '') . '" data-nav-parent="hospitality">'
-        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerHospitalityActive ? 'true' : 'false') . '" class="' . ($headerHospitalityActive ? 'is-active' : '') . '">'
+        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerHospitalityActive ? 'true' : 'false') . '">'
         . icon('services') . 'Hospitality Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
     foreach ($hospLinks as [$hospView, $hospLabel, $hospIcon]) {
         $isActive = $headerHospitalityActive && ($headerHospitalityView === $hospView || ($headerHospitalityView === '' && $hospView === 'dashboard'));
@@ -153,7 +153,7 @@ if ($headerIsClientBooks) {
 }
 // The module spans four pages, so "is this section open?" keys off the script
 // rather than a single filename.
-$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php', 'jewellery-tags.php'];
+$headerJewelleryScripts = ['jewellery.php', 'jewellery-trade.php', 'jewellery-workshop.php', 'jewellery-assign.php', 'jewellery-receive.php', 'jewellery-reports.php', 'jewellery-tags.php', 'accounting-parties.php', 'jewellery-trace.php', 'jewellery-aml.php'];
 $headerJewelleryActive = in_array($headerScript, $headerJewelleryScripts, true);
 $headerJewelleryView = (string) ($_GET['view'] ?? '');
 $headerJewelleryMenu = '';
@@ -167,6 +167,7 @@ if ($headerJewellery) {
         ['jewellery.php', 'stock', 'Stock &amp; Metal Position', 'layers'],
         ['jewellery-trade.php', 'purchases', 'Purchases', 'box'],
         ['jewellery-trade.php', 'sales', 'Sales', 'receipt-voucher'],
+        ['accounting-parties.php', 'directory', 'Party Master', 'users'],
         ['jewellery-trade.php', 'bills', 'Bills &amp; Settlement', 'wallet'],
         ['jewellery-workshop.php', 'orders', 'Orders', 'journal'],
         // Assigning the work comes before issuing the metal, and reads that way
@@ -178,6 +179,7 @@ if ($headerJewellery) {
         ['jewellery-workshop.php', 'karigars', 'Kaligads', 'teams'],
         ['jewellery-workshop.php', 'refinery', 'Refinery', 'layers'],
         ['jewellery-reports.php', 'summary', 'Reports', 'reports'],
+        ['jewellery-aml.php', '', 'AML / goAML Reporting', 'aml'],
         // Tagging sits next to the stock it labels, after the trade pages that
         // create that stock and before the masters.
         ['jewellery-tags.php', '', 'Print Tags', 'documents'],
@@ -186,16 +188,32 @@ if ($headerJewellery) {
     ];
     // Each page's first tab is its default, so a bare URL still highlights.
     $jewDefaults = ['jewellery.php' => 'dashboard', 'jewellery-trade.php' => 'purchases',
-        'jewellery-workshop.php' => 'orders', 'jewellery-reports.php' => 'summary'];
+        'jewellery-workshop.php' => 'orders', 'jewellery-reports.php' => 'summary',
+        'accounting-parties.php' => 'directory'];
     $headerJewelleryMenu = '<div class="mbw-nav-parent' . ($headerJewelleryActive ? ' is-open' : '') . '" data-nav-parent="jewellery">'
-        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerJewelleryActive ? 'true' : 'false') . '" class="' . ($headerJewelleryActive ? 'is-active' : '') . '">'
+        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerJewelleryActive ? 'true' : 'false') . '">'
         . icon('coins') . 'Jewellery Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
     foreach ($jewLinks as [$jewScript, $jewView, $jewLabel, $jewIcon]) {
-        $isActive = $headerScript === $jewScript
-            && ($headerJewelleryView === $jewView
-                || ($headerJewelleryView === '' && ($jewDefaults[$jewScript] ?? '') === $jewView));
-        $headerJewelleryMenu .= '<a class="' . ($isActive ? 'is-active' : '') . '" href="' . e(url('admin/' . $jewScript . '?view=' . $jewView)) . '">'
-            . icon($jewIcon) . $jewLabel . '</a>';
+        $jewQueryKey = $jewScript === 'accounting-parties.php' ? 'tab' : 'view';
+        $jewCurrentValue = $jewQueryKey === 'tab'
+            ? (string) ($_GET['tab'] ?? '')
+            : $headerJewelleryView;
+
+        $isPartyMaster = $jewScript === 'accounting-parties.php'
+            && $headerScript === $jewScript
+            && in_array($jewCurrentValue, ['', 'directory', 'customers', 'suppliers', 'unlinked'], true);
+
+        $isActive = $isPartyMaster || (
+            $headerScript === $jewScript
+            && ($jewCurrentValue === $jewView
+                || ($jewCurrentValue === ''
+                    && ($jewDefaults[$jewScript] ?? '') === $jewView))
+        );
+
+        $headerJewelleryMenu .= '<a class="' . ($isActive ? 'is-active' : '')
+            . '" href="' . e(url(
+                'admin/' . $jewScript . '?' . $jewQueryKey . '=' . rawurlencode($jewView)
+            )) . '">' . icon($jewIcon) . $jewLabel . '</a>';
     }
     $headerJewelleryMenu .= '</div></div>';
 }
@@ -203,7 +221,10 @@ if ($headerJewellery) {
 $headerIsCustomer = (string) ($currentUser['role'] ?? '') === 'customer';
 $headerClientBooksOptions = [];
 if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') && column_exists('client_profiles', 'books_company_id')) {
-    $headerClientsStmt = db()->query('SELECT * FROM client_profiles WHERE is_active = 1 AND books_company_id IS NOT NULL ORDER BY organization_name ASC');
+    $headerClientsStmt = db()->query('SELECT id, organization_name, company_id, assigned_staff_user_id, books_company_id
+        FROM client_profiles
+        WHERE is_active = 1 AND books_company_id IS NOT NULL
+        ORDER BY organization_name ASC');
     foreach ($headerClientsStmt->fetchAll() as $headerClientRow) {
         if (client_books_access_level($headerClientRow) === 'direct') {
             $headerClientBooksOptions[] = $headerClientRow;
@@ -231,6 +252,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <?php /* Last on purpose: the 2026 appearance layer restates the tokens the
              four sheets above each define, so it must have the final word. */ ?>
     <link rel="stylesheet" href="<?= e(asset_url('assets/css/mbworld-2026.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('assets/css/design-system.css')) ?>">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <?php require __DIR__ . '/sidebar_boot.php'; ?>
@@ -264,21 +286,25 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a href="<?= e(url('my-profile.php')) ?>"><?= icon('profile') ?>My Profile &amp; Users</a>
             <span class="admin-nav-group">Accounting Workspace</span>
             <div class="mbw-nav-parent is-open" data-nav-parent="accounting">
-                <a href="#" data-nav-toggle aria-expanded="true" class="is-active">
+                <a href="#" data-nav-toggle aria-expanded="true">
                     <?= icon('accounting') ?>Accounting
                     <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                 </a>
                 <div class="mbw-subnav">
                     <?php foreach ($headerAccountingChildren as [$headerChildLabel, $headerChildUrl, $headerChildIcon, $headerChildActive]): ?>
-                        <?php if (str_starts_with($headerChildUrl, 'admin/budgets.php')) { continue; } // budgets stay firm-side ?>
+                        <?php if (str_starts_with($headerChildUrl, 'admin/payment-gateways.php') && !client_portal_user_is_owner()) { continue; } ?>
                         <a class="<?= $headerChildActive ? 'is-active' : '' ?>" href="<?= e(url($headerChildUrl)) ?>"><?= icon($headerChildIcon) ?><?= e($headerChildLabel) ?></a>
                     <?php endforeach; ?>
                 </div>
             </div>
             <span class="admin-nav-group">Payroll</span>
+            <a class="<?= $headerScript === 'payroll.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll.php')) ?>"><?= icon('card') ?>Payroll Processing</a>
             <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('teams') ?>Employees &amp; Advances</a>
             <a class="<?= $headerScript === 'payroll-overtime.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-overtime.php')) ?>"><?= icon('attendance') ?>Overtime Review</a>
             <a class="<?= $headerScript === 'payroll-service-charge.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-service-charge.php')) ?>"><?= icon('handshake') ?>Service Charge</a>
+            <?php if (client_portal_user_is_owner()): ?>
+                <a class="<?= $headerScript === 'payroll-settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-settings.php')) ?>"><?= icon('sliders') ?>Payroll Settings</a>
+            <?php endif; ?>
             <?php if ($headerHospitality): ?>
                 <span class="admin-nav-group">Hospitality</span>
                 <?= $headerHospitalityMenu ?>
@@ -289,6 +315,8 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <?php endif; ?>
             <span class="admin-nav-group">Reports</span>
             <a class="<?= $headerScript === 'reports-center.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
+            <a class="<?= $headerScript === 'report-schedules.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/report-schedules.php')) ?>"><?= icon('calendar') ?>Report Schedules</a>
+            <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Trail &amp; Approvals</a>
             <span class="admin-nav-group">System</span>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
             <?php else: ?>
@@ -313,7 +341,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <?php endif; ?>
             <?php else: ?>
             <div class="mbw-nav-parent<?= $headerAccountingActive ? ' is-open' : '' ?>" data-nav-parent="accounting">
-                <a href="#" data-nav-toggle aria-expanded="<?= $headerAccountingActive ? 'true' : 'false' ?>" class="<?= $headerAccountingActive ? 'is-active' : '' ?>">
+                <a href="#" data-nav-toggle aria-expanded="<?= $headerAccountingActive ? 'true' : 'false' ?>">
                     <?= icon('accounting') ?>Accounting
                     <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                 </a>
@@ -341,7 +369,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <?php endif; ?>
             <?php if ($headerIsClientBooks): ?>
                 <div class="mbw-nav-parent is-open" data-nav-parent="client-accounting">
-                    <a href="#" data-nav-toggle aria-expanded="true" class="is-active">
+                    <a href="#" data-nav-toggle aria-expanded="true">
                         <?= icon('accounting') ?>Client Accounting
                         <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                     </a>
@@ -369,7 +397,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
             <a class="<?= $headerScript === 'hr.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>HR &amp; Attendance</a>
             <div class="mbw-nav-parent<?= $headerPayrollActive ? ' is-open' : '' ?>" data-nav-parent="payroll">
-                <a href="#" data-nav-toggle aria-expanded="<?= $headerPayrollActive ? 'true' : 'false' ?>" class="<?= $headerPayrollActive ? 'is-active' : '' ?>">
+                <a href="#" data-nav-toggle aria-expanded="<?= $headerPayrollActive ? 'true' : 'false' ?>">
                     <?= icon('wallet') ?>Payroll
                     <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                 </a>
@@ -384,13 +412,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </div>
             </div>
 
-            <span class="admin-nav-group">Users &amp; System</span>
-            <a class="<?= $headerScript === 'users.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?>Users</a>
             <?php if ($headerCompanyCode === 'MBAACA'): ?>
+                <span class="admin-nav-group">Website</span>
                 <a class="<?= $headerScript === 'insights.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/insights.php')) ?>"><?= icon('insights') ?>Website Insights</a>
             <?php endif; ?>
-            <a class="<?= $headerScript === 'settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
-            <a href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?>Logout</a>
             <?php endif; ?>
         </nav>
     </aside>
@@ -413,7 +438,8 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
         <header class="admin-topbar">
             <?php require __DIR__ . '/sidebar_toggle.php'; ?>
             <?php if ($pageHero !== false): ?>
-                <nav class="admin-topbar-crumbs" aria-label="Breadcrumb"><?= $headerBreadcrumbHtml ?></nav>
+                <?php /* Page identity is presented in the hero below; repeating
+                          its breadcrumb here wastes the primary toolbar space. */ ?>
             <?php else: ?>
                 <div class="admin-topbar-title">
                     <h1><?= e($pageTitle) ?></h1>
@@ -427,15 +453,8 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 <button type="submit" aria-label="Search" title="Search"><?= icon('search') ?></button>
             </form>
             <a class="admin-icon-button" href="<?= e(url('admin/reports-center.php')) ?>" aria-label="Open Reports Center" title="Reports Center"><?= icon('analytics') ?></a>
-            <?php if ($headerCompany): ?>
-                <div class="admin-context-chip" aria-label="Current admin portal" title="<?= e($headerPortalLabel) ?>">
-                    <span class="admin-context-icon"><?= icon($headerCompanyCode === 'MBAACA' ? 'admin' : 'companies') ?></span>
-                    <span>
-                        <strong><?= e($headerCompany['name'] ?? 'Company') ?></strong>
-                        <small><?= $headerShowFiscalYear ? e($headerFiscalYear['label'] ?? 'No fiscal year') : e($headerPortalLabel) ?></small>
-                    </span>
-                </div>
-            <?php endif; ?>
+            <?php /* Current company is already displayed persistently in the
+                      sidebar portal card, so it is not duplicated here. */ ?>
             <?php
             // Global fiscal-year switcher: the accounting context selector for
             // every module, report, export, and transaction screen. Selection
@@ -489,26 +508,35 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 })();
                 </script>
             <?php endif; ?>
-            <?php if (date_mode() !== 'ad'): ?><span class="mbw-pill tone-amber" title="Bikram Sambat (today)" style="align-self:center"><?= e(bs_format(date('Y-m-d'))) ?> BS</span><?php endif; ?>
+            <?php $headerBsToday = ad_to_bs(date('Y-m-d')); ?>
+            <div class="topbar-bs-calendar">
+                <button type="button" class="topbar-bs-date" data-bs-calendar-toggle data-ad-today="<?= e(date('Y-m-d')) ?>" aria-expanded="false" title="Open Nepali calendar">
+                    <?= icon('calendar') ?><span><?= $headerBsToday ? e(sprintf('%02d/%02d/%04d BS', $headerBsToday[2], $headerBsToday[1], $headerBsToday[0])) : '' ?></span>
+                </button>
+                <div class="topbar-bs-calendar-panel" data-bs-calendar-panel hidden></div>
+            </div>
             <div class="admin-topbar-actions">
-                <form method="get" class="no-search" style="align-self:center;margin:0" title="Language / भाषा">
-                    <?php foreach ($_GET as $langKeepKey => $langKeepValue): if ($langKeepKey === 'lang' || !is_scalar($langKeepValue)) { continue; } ?>
-                        <input type="hidden" name="<?= e((string) $langKeepKey) ?>" value="<?= e((string) $langKeepValue) ?>">
-                    <?php endforeach; ?>
-                    <select name="lang" onchange="this.form.submit()" style="cursor:pointer">
-                        <?php foreach (APP_LANGS as $langCode => $langLabel): ?>
-                            <option value="<?= e($langCode) ?>" <?= app_lang() === $langCode ? 'selected' : '' ?>><?= e($langLabel) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </form>
-                <form method="post" action="<?= e(url('set-date-mode.php')) ?>" style="align-self:center;margin:0">
+                <?php
+                $headerLanguageCodes = array_keys(APP_LANGS);
+                $headerLanguageIndex = array_search(app_lang(), $headerLanguageCodes, true);
+                $headerNextLanguage = $headerLanguageCodes[((int) $headerLanguageIndex + 1) % count($headerLanguageCodes)];
+                $headerLanguageQuery = $_GET;
+                $headerLanguageQuery['lang'] = $headerNextLanguage;
+                $headerDateModes = ['ad', 'bs', 'both'];
+                $headerDateModeIndex = array_search(date_mode(), $headerDateModes, true);
+                $headerNextDateMode = $headerDateModes[((int) $headerDateModeIndex + 1) % count($headerDateModes)];
+                ?>
+                <a class="topbar-segment" href="?<?= e(http_build_query($headerLanguageQuery)) ?>"
+                   aria-label="Switch language to <?= e(APP_LANGS[$headerNextLanguage]) ?>" title="Language: <?= e(APP_LANGS[app_lang()]) ?> — switch to <?= e(APP_LANGS[$headerNextLanguage]) ?>">
+                    <?= icon('globe-language') ?><span><?= e(strtoupper(app_lang())) ?></span><span class="topbar-segment-next"><?= e(strtoupper($headerNextLanguage)) ?></span>
+                </a>
+                <form method="post" action="<?= e(url('set-date-mode.php')) ?>" class="topbar-date-control topbar-icon-form">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="return" value="<?= e($_SERVER['REQUEST_URI'] ?? '') ?>">
-                    <select name="date_mode" onchange="this.form.submit()" title="Date display: English / Nepali" style="cursor:pointer">
-                        <option value="ad" <?= date_mode() === 'ad' ? 'selected' : '' ?>>AD</option>
-                        <option value="bs" <?= date_mode() === 'bs' ? 'selected' : '' ?>>BS</option>
-                        <option value="both" <?= date_mode() === 'both' ? 'selected' : '' ?>>AD+BS</option>
-                    </select>
+                    <input type="hidden" name="date_mode" value="<?= e($headerNextDateMode) ?>">
+                    <button type="submit" class="topbar-segment" aria-label="Switch date display to <?= e(strtoupper($headerNextDateMode)) ?>" title="Date display: <?= e(strtoupper(date_mode())) ?> — switch to <?= e(strtoupper($headerNextDateMode)) ?>">
+                        <?= icon('calendar-range') ?><span><?= e(strtoupper(date_mode() === 'both' ? 'AD+BS' : date_mode())) ?></span><span class="topbar-segment-next"><?= e(strtoupper($headerNextDateMode === 'both' ? 'AD+BS' : $headerNextDateMode)) ?></span>
+                    </button>
                 </form>
 
                 <?php if (!$headerIsCustomer): ?>
@@ -548,15 +576,42 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                         </button>
                     </form>
                 <?php endif; ?>
-                <?php if (!$headerIsClientBooks): ?>
-                    <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
-                <?php endif; ?>
                 <?php endif; ?>
                 <?php include __DIR__ . '/attention_bell.php'; ?>
                 <button type="button" class="theme-toggle-link admin-icon-button" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
-                    <?= icon('theme') ?>
+                    <span data-theme-icon="dark"><?= icon('theme') ?></span>
+                    <span data-theme-icon="light" hidden><?= icon('sun') ?></span>
                     <span class="sr-only" data-theme-toggle-label>Dark mode</span>
                 </button>
+                <?php if (!$headerIsCustomer): ?>
+                    <?php
+                    $headerUserName = trim((string) ($currentUser['name'] ?? 'Super Admin')) ?: 'Super Admin';
+                    $headerUserInitials = '';
+                    foreach (preg_split('/\s+/', $headerUserName) ?: [] as $headerNamePart) {
+                        $headerUserInitials .= mb_substr($headerNamePart, 0, 1);
+                        if (mb_strlen($headerUserInitials) >= 2) { break; }
+                    }
+                    $headerUserInitials = mb_strtoupper($headerUserInitials ?: 'SA');
+                    $headerUserRole = (string) ($currentUser['role'] ?? '') === 'admin' ? 'Super Admin' : ucfirst((string) ($currentUser['role'] ?? 'User'));
+                    ?>
+                    <details class="admin-profile-menu">
+                        <summary aria-label="Open user menu" title="<?= e($headerUserName) ?>">
+                            <span class="admin-profile-avatar"><?= e($headerUserInitials) ?></span>
+                            <span class="admin-profile-identity"><strong><?= e($headerUserName) ?></strong><small><?= e($headerUserRole) ?></small></span>
+                            <span class="admin-profile-chevron"><?= icon('chevron') ?></span>
+                        </summary>
+                        <div class="admin-profile-dropdown">
+                            <div class="admin-profile-dropdown-head">
+                                <span class="admin-profile-avatar is-large"><?= e($headerUserInitials) ?></span>
+                                <span><strong><?= e($headerUserName) ?></strong><small><?= e((string) ($currentUser['email'] ?? $headerUserRole)) ?></small></span>
+                            </div>
+                            <a href="<?= e(url('admin/profile.php')) ?>"><?= icon('profile') ?><span><strong>My profile</strong><small>Personal details and security</small></span></a>
+                            <a href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?><span><strong>Users</strong><small>Accounts and permissions</small></span></a>
+                            <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?><span><strong>Settings</strong><small>System preferences</small></span></a>
+                            <a class="is-logout" href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?><span><strong>Logout</strong><small>End this session</small></span></a>
+                        </div>
+                    </details>
+                <?php endif; ?>
             </div>
         </header>
         <div class="admin-content">

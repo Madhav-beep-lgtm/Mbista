@@ -151,7 +151,7 @@ function sr_replay_balance(array $state): array
  * (string[] master/location types), valuation (''|fifo|weighted_average|
  * specific), search (code/name), stock_status (''|positive|zero|negative),
  * zero_movement (bool include), zero_closing (bool include),
- * group_by (''|type|location|valuation).
+ * group_by (''|type|location|valuation|ledger|stock_kind).
  *
  * Returns ['rows' => [...], 'totals' => [...], 'generated' => meta].
  * One query for items + one for transactions — no per-item queries.
@@ -168,19 +168,28 @@ function sr_stock_summary(int $companyId, array $f): array
     $includeZeroMovement = (bool) ($f['zero_movement'] ?? true);
     $includeZeroClosing = (bool) ($f['zero_closing'] ?? true);
 
-    $itemSql = "SELECT id, sku, name, item_type, valuation_method, unit, purchase_rate, opening_qty, opening_amount, default_warehouse_id
-        FROM inventory_items WHERE company_id = :cid AND item_type <> 'service'";
+    $itemSql = "SELECT i.id, i.sku, i.name, i.item_type, i.valuation_method, i.unit, i.purchase_rate,
+            i.opening_qty, i.opening_amount, i.default_warehouse_id, i.category,
+            jp.stock_kind AS jewellery_stock_kind
+        FROM inventory_items i
+        LEFT JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id AND jp.company_id = i.company_id
+        WHERE i.company_id = :cid AND i.item_type <> 'service'";
     $params = ['cid' => $companyId];
     if ($search !== '') {
-        $itemSql .= ' AND (sku LIKE :q OR name LIKE :q2)';
+        $itemSql .= ' AND (i.sku LIKE :q OR i.name LIKE :q2)';
         $params['q'] = '%' . $search . '%';
         $params['q2'] = '%' . $search . '%';
     }
     if ($valuation !== '') {
-        $itemSql .= ' AND valuation_method = :vm';
+        $itemSql .= ' AND i.valuation_method = :vm';
         $params['vm'] = $valuation;
     }
-    $itemSql .= ' ORDER BY sku ASC';
+    $stockKind = (string) ($f['jewellery_stock_kind'] ?? '');
+    if (in_array($stockKind, ['showroom', 'customer_ordered'], true)) {
+        $itemSql .= ' AND jp.stock_kind = :stock_kind';
+        $params['stock_kind'] = $stockKind;
+    }
+    $itemSql .= ' ORDER BY i.sku ASC';
     $stmt = db()->prepare($itemSql);
     $stmt->execute($params);
     $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -356,6 +365,13 @@ function sr_stock_summary(int $companyId, array $f): array
             'name' => (string) $item['name'],
             'item_type' => $displayType,
             'item_type_label' => sr_item_type_labels()[$displayType] ?? ucfirst($displayType),
+            'stock_group' => (string) ($item['category'] ?? ''),
+            'jewellery_stock_kind' => (string) ($item['jewellery_stock_kind'] ?? ''),
+            'jewellery_stock_kind_label' => match ((string) ($item['jewellery_stock_kind'] ?? '')) {
+                'customer_ordered' => 'Customer Ordered',
+                'showroom' => 'Showroom',
+                default => '—',
+            },
             'location' => $warehouseLabel,
             'unit' => (string) $item['unit'],
             'valuation_method' => $method,
@@ -396,6 +412,9 @@ function sr_stock_summary(int $companyId, array $f): array
         usort($rows, static fn (array $a, array $b): int => [$a['valuation_method'], $a['sku']] <=> [$b['valuation_method'], $b['sku']]);
     } elseif ($groupBy === 'ledger') {
         usort($rows, static fn (array $a, array $b): int => [$a['ledger_code'], $a['sku']] <=> [$b['ledger_code'], $b['sku']]);
+    } elseif ($groupBy === 'stock_kind') {
+        usort($rows, static fn (array $a, array $b): int => [$a['jewellery_stock_kind'], $a['stock_group'], $a['sku']]
+            <=> [$b['jewellery_stock_kind'], $b['stock_group'], $b['sku']]);
     }
 
     return ['rows' => $rows, 'totals' => $totals, 'item_count' => count($rows)];
@@ -469,8 +488,12 @@ function sr_txn_costs(int $companyId, array $item): array
 function sr_unposted_summary(int $companyId): array
 {
     $result = ['movements' => 0, 'movements_value' => 0.0, 'manufacturing' => 0, 'openings' => 0, 'openings_value' => 0.0];
+    $jewelleryExclusion = column_exists('inventory_transactions', 'jewellery_stock_txn_id')
+        ? ' AND t.jewellery_stock_txn_id IS NULL'
+        : '';
     $stmt = db()->prepare('SELECT t.id, t.item_id, t.transaction_type, t.qty_in, t.qty_out
-        FROM inventory_transactions t WHERE t.company_id = :cid AND t.voucher_id IS NULL');
+        FROM inventory_transactions t WHERE t.company_id = :cid AND t.voucher_id IS NULL'
+        . $jewelleryExclusion);
     $stmt->execute(['cid' => $companyId]);
     $byItem = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
@@ -526,10 +549,14 @@ function sr_unposted_summary(int $companyId): array
 function sr_post_missing_movement_vouchers(int $companyId, int $userId): array
 {
     $result = ['posted' => 0, 'posted_value' => 0.0, 'skipped' => [], 'manufacturing' => 0];
+    $jewelleryExclusion = column_exists('inventory_transactions', 'jewellery_stock_txn_id')
+        ? ' AND t.jewellery_stock_txn_id IS NULL'
+        : '';
     $stmt = db()->prepare('SELECT t.*, i.sku FROM inventory_transactions t
         JOIN inventory_items i ON i.id = t.item_id
-        WHERE t.company_id = :cid AND t.voucher_id IS NULL
-        ORDER BY t.item_id, t.transaction_date ASC, t.id ASC');
+        WHERE t.company_id = :cid AND t.voucher_id IS NULL'
+        . $jewelleryExclusion
+        . ' ORDER BY t.item_id, t.transaction_date ASC, t.id ASC');
     $stmt->execute(['cid' => $companyId]);
     $txns = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $itemCache = [];
@@ -625,6 +652,497 @@ function sr_inventory_gl_total(int $companyId, ?string $asAt = null): float
 }
 
 /**
+ * Explain an Inventory-to-GL difference instead of merely reporting it.
+ *
+ * Every cause carries a SIGNED impact in the same direction as the headline
+ * comparison (stock subledger minus inventory GL):
+ *   positive = stock is greater than GL; negative = GL is greater than stock.
+ *
+ * The diagnosis is read-only. It matches item openings and replay-valued stock
+ * movements to the posted inventory effect of their vouchers, then identifies
+ * every remaining GL-only voucher that touched a designated inventory ledger.
+ * The unmatched remainder is reported explicitly; it is never hidden inside a
+ * balancing recommendation.
+ *
+ * @return array{
+ *   stock: float,
+ *   gl: float,
+ *   difference: float,
+ *   explained: float,
+ *   unexplained: float,
+ *   ledger_rows: array<int,array<string,mixed>>,
+ *   causes: array<int,array<string,mixed>>,
+ *   controls: array<int,array<string,mixed>>,
+ *   wip: float
+ * }
+ */
+function sr_inventory_gl_diagnostics(int $companyId, string $asAt): array
+{
+    $asAt = trim($asAt) !== '' ? $asAt : date('Y-m-d');
+    $summary = sr_stock_summary($companyId, ['from' => $asAt, 'to' => $asAt]);
+    $stockTotal = round((float) ($summary['totals']['closing_amount'] ?? 0), 2);
+    $glTotal = sr_inventory_gl_total($companyId, $asAt);
+    $difference = round($stockTotal - $glTotal, 2);
+    $ledgerIds = array_values(array_unique(array_filter(array_map('intval', sr_inventory_ledger_ids($companyId)))));
+
+    $result = [
+        'stock' => $stockTotal,
+        'gl' => $glTotal,
+        'difference' => $difference,
+        'explained' => 0.0,
+        'unexplained' => $difference,
+        'ledger_rows' => [],
+        'causes' => [],
+        'controls' => [],
+        'wip' => 0.0,
+    ];
+
+    $addCause = static function (
+        array &$causes,
+        string $type,
+        string $reference,
+        string $title,
+        string $detail,
+        string $recommendation,
+        float $impact,
+        string $severity = 'High'
+    ): void {
+        $causes[] = [
+            'type' => $type,
+            'reference' => $reference,
+            'title' => $title,
+            'detail' => $detail,
+            'recommendation' => $recommendation,
+            'impact' => round($impact, 2),
+            'severity' => $severity,
+        ];
+    };
+    $addControl = static function (
+        array &$controls,
+        string $reference,
+        string $title,
+        string $detail,
+        string $recommendation,
+        float $riskAmount = 0.0,
+        string $severity = 'Review'
+    ): void {
+        $controls[] = [
+            'reference' => $reference,
+            'title' => $title,
+            'detail' => $detail,
+            'recommendation' => $recommendation,
+            'risk_amount' => round($riskAmount, 2),
+            'severity' => $severity,
+        ];
+    };
+
+    $itemStmt = db()->prepare('SELECT * FROM inventory_items WHERE company_id = :cid ORDER BY id ASC');
+    $itemStmt->execute(['cid' => $companyId]);
+    $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Allocate the item subledger to the same stock-control ledger resolver
+    // used by posting, then compare every ledger separately.
+    $subledgerByLedger = [];
+    foreach ((array) ($summary['rows'] ?? []) as $row) {
+        $ledgerId = (int) ($row['ledger_id'] ?? 0);
+        $subledgerByLedger[$ledgerId] = ($subledgerByLedger[$ledgerId] ?? 0.0)
+            + (float) ($row['closing_amount'] ?? 0);
+        if ($ledgerId <= 0 && abs((float) ($row['closing_amount'] ?? 0)) >= 0.005) {
+            $addControl(
+                $result['controls'],
+                (string) ($row['sku'] ?? ('Item #' . (int) ($row['item_id'] ?? 0))),
+                'Item has stock value but no stock-control ledger',
+                (string) ($row['name'] ?? 'Item') . ' carries ' . number_format((float) $row['closing_amount'], 2)
+                    . ' in the item subledger, but the current mapping resolver returns no inventory ledger.',
+                'Set the item/category/global inventory-asset mapping, then re-post only the affected source documents through their normal module.',
+                (float) $row['closing_amount'],
+                'High'
+            );
+        }
+        if ((float) ($row['closing_qty'] ?? 0) < -INV_EPSILON) {
+            $addControl(
+                $result['controls'],
+                (string) ($row['sku'] ?? ('Item #' . (int) ($row['item_id'] ?? 0))),
+                'Negative stock quantity',
+                (string) ($row['name'] ?? 'Item') . ' closes at ' . number_format((float) $row['closing_qty'], 3)
+                    . ' ' . (string) ($row['unit'] ?? '') . '. Negative stock prevents complete historical cost allocation.',
+                'Enter or correct the genuine earlier opening/purchase/receipt, or correct the outward movement date and quantity. Do not create a balancing journal.',
+                abs((float) ($row['closing_amount'] ?? 0)),
+                'High'
+            );
+        }
+    }
+
+    $voucherMeta = [];
+    $voucherBySource = [];
+    $voucherStmt = db()->prepare('SELECT id, voucher_no, voucher_date, status, source_type, source_id, narration
+        FROM vouchers WHERE company_id = :cid');
+    $voucherStmt->execute(['cid' => $companyId]);
+    foreach ($voucherStmt->fetchAll(PDO::FETCH_ASSOC) as $voucher) {
+        $voucherId = (int) $voucher['id'];
+        $voucherMeta[$voucherId] = $voucher;
+        $sourceType = (string) ($voucher['source_type'] ?? '');
+        $sourceId = (int) ($voucher['source_id'] ?? 0);
+        if ($sourceType !== '' && $sourceId > 0) {
+            $voucherBySource[$sourceType . ':' . $sourceId] = $voucherId;
+        }
+    }
+
+    $actualVoucherEffects = [];
+    $glByLedger = [];
+    $ledgerInfo = [];
+    if ($ledgerIds !== []) {
+        $placeholders = implode(',', array_fill(0, count($ledgerIds), '?'));
+        $ledgerStmt = db()->prepare("SELECT l.id, l.code, l.name,
+                COALESCE(SUM(CASE WHEN v.id IS NULL THEN 0 WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0) AS balance
+            FROM ledgers l
+            LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
+            LEFT JOIN vouchers v ON v.id = ve.voucher_id
+                AND v.company_id = l.company_id
+                AND v.status = 'posted'
+                AND (v.voucher_date IS NULL OR v.voucher_date <= ?)
+            WHERE l.company_id = ? AND l.id IN ($placeholders)
+            GROUP BY l.id ORDER BY l.code");
+        $ledgerStmt->execute(array_merge([$asAt, $companyId], $ledgerIds));
+        foreach ($ledgerStmt->fetchAll(PDO::FETCH_ASSOC) as $ledger) {
+            $ledgerId = (int) $ledger['id'];
+            $ledgerInfo[$ledgerId] = $ledger;
+            $glByLedger[$ledgerId] = round((float) $ledger['balance'], 2);
+        }
+
+        $effectStmt = db()->prepare("SELECT v.id, v.voucher_no, v.voucher_date, v.source_type, v.source_id, v.narration,
+                GROUP_CONCAT(DISTINCT CONCAT(l.code, ' - ', l.name) ORDER BY l.code SEPARATOR ', ') AS ledgers,
+                COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0) AS effect
+            FROM vouchers v
+            INNER JOIN voucher_entries ve ON ve.voucher_id = v.id
+            INNER JOIN ledgers l ON l.id = ve.ledger_id
+            WHERE v.company_id = ? AND v.status = 'posted'
+              AND (v.voucher_date IS NULL OR v.voucher_date <= ?)
+              AND ve.ledger_id IN ($placeholders)
+            GROUP BY v.id ORDER BY v.voucher_date, v.id");
+        $effectStmt->execute(array_merge([$companyId, $asAt], $ledgerIds));
+        foreach ($effectStmt->fetchAll(PDO::FETCH_ASSOC) as $effect) {
+            $effect['effect'] = round((float) $effect['effect'], 2);
+            $actualVoucherEffects[(int) $effect['id']] = $effect;
+        }
+    }
+
+    $allLedgerIds = array_values(array_unique(array_merge($ledgerIds, array_keys($subledgerByLedger))));
+    sort($allLedgerIds);
+    foreach ($allLedgerIds as $ledgerId) {
+        $subledger = round((float) ($subledgerByLedger[$ledgerId] ?? 0), 2);
+        $gl = round((float) ($glByLedger[$ledgerId] ?? 0), 2);
+        $result['ledger_rows'][] = [
+            'ledger_id' => $ledgerId,
+            'code' => $ledgerId > 0 ? (string) ($ledgerInfo[$ledgerId]['code'] ?? ('#' . $ledgerId)) : 'UNMAPPED',
+            'name' => $ledgerId > 0 ? (string) ($ledgerInfo[$ledgerId]['name'] ?? 'Inventory ledger') : 'Items without a resolved stock ledger',
+            'subledger' => $subledger,
+            'gl' => $gl,
+            'difference' => round($subledger - $gl, 2),
+        ];
+    }
+
+    // WIP remains informational: it belongs to in-process production, while
+    // this reconciliation is deliberately the item-on-shelf subledger.
+    if (table_exists('inventory_ledger_mappings')) {
+        $wipStmt = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings
+            WHERE company_id = :cid AND purpose = 'wip'");
+        $wipStmt->execute(['cid' => $companyId]);
+        $wipIds = array_values(array_unique(array_filter(array_map('intval', $wipStmt->fetchAll(PDO::FETCH_COLUMN)))));
+        if ($wipIds !== []) {
+            $wipPlaceholders = implode(',', array_fill(0, count($wipIds), '?'));
+            $wipBalanceStmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0)
+                FROM voucher_entries ve INNER JOIN vouchers v ON v.id = ve.voucher_id
+                WHERE ve.ledger_id IN ($wipPlaceholders) AND v.company_id = ? AND v.status = 'posted'
+                  AND (v.voucher_date IS NULL OR v.voucher_date <= ?)");
+            $wipBalanceStmt->execute(array_merge($wipIds, [$companyId, $asAt]));
+            $result['wip'] = round((float) $wipBalanceStmt->fetchColumn(), 2);
+        }
+    }
+
+    $expectedByVoucher = [];
+    $matchedVoucherIds = [];
+    $appendExpected = static function (
+        array &$expectedByVoucher,
+        int $voucherId,
+        float $effect,
+        string $reference,
+        float $uncoveredQty = 0.0,
+        float $storedAmount = 0.0
+    ): void {
+        if (!isset($expectedByVoucher[$voucherId])) {
+            $expectedByVoucher[$voucherId] = [
+                'effect' => 0.0,
+                'references' => [],
+                'uncovered_qty' => 0.0,
+                'stored_amount' => 0.0,
+            ];
+        }
+        $expectedByVoucher[$voucherId]['effect'] += $effect;
+        $expectedByVoucher[$voucherId]['references'][] = $reference;
+        $expectedByVoucher[$voucherId]['uncovered_qty'] += $uncoveredQty;
+        $expectedByVoucher[$voucherId]['stored_amount'] += $storedAmount;
+    };
+
+    // Master openings are item-backed stock value. Their normal voucher must
+    // debit the resolved stock ledger by the same frozen opening amount.
+    foreach ($items as $item) {
+        $openingQty = (float) ($item['opening_qty'] ?? 0);
+        if ($openingQty <= INV_EPSILON) {
+            continue;
+        }
+        $openingValue = round($openingQty * inv_item_opening_unit_cost($item), 2);
+        $reference = (string) ($item['sku'] ?? ('Item #' . (int) $item['id'])) . ' opening';
+        if ($openingValue <= 0.004) {
+            $addControl(
+                $result['controls'],
+                (string) ($item['sku'] ?? ('Item #' . (int) $item['id'])),
+                'Opening quantity has no opening value',
+                number_format($openingQty, 3) . ' ' . (string) ($item['unit'] ?? '')
+                    . ' opens with zero cost. Later outward movements cannot be fully valued from this layer.',
+                'Enter the genuine frozen opening amount through Opening Balances and retain its supporting valuation schedule.',
+                0.0,
+                'High'
+            );
+        }
+        $voucherId = (int) ($voucherBySource['inventory_opening:' . (int) $item['id']] ?? 0);
+        if ($voucherId > 0) {
+            $appendExpected($expectedByVoucher, $voucherId, $openingValue, $reference, 0.0, $openingValue);
+            $matchedVoucherIds[$voucherId] = true;
+        } elseif ($openingValue > 0.004) {
+            $addCause(
+                $result['causes'],
+                'missing_opening_voucher',
+                (string) ($item['sku'] ?? ('Item #' . (int) $item['id'])),
+                'Item opening exists without its GL opening voucher',
+                (string) ($item['name'] ?? 'Item') . ' carries opening stock of ' . number_format($openingQty, 3)
+                    . ' ' . (string) ($item['unit'] ?? '') . ' valued at ' . number_format($openingValue, 2)
+                    . ', but no inventory_opening voucher is linked to the item.',
+                'Use Opening Balances > Post missing opening-stock vouchers after confirming the quantity and frozen value. Do not enter a separate ledger opening.',
+                $openingValue
+            );
+        }
+    }
+
+    $jewelleryBridgeReady = table_exists('jewellery_stock_txns')
+        && column_exists('inventory_transactions', 'jewellery_stock_txn_id');
+    $jewellerySelect = $jewelleryBridgeReady
+        ? ', jt.voucher_id AS jewellery_voucher_id, jt.txn_type AS jewellery_txn_type, jt.ref_no AS jewellery_ref_no'
+        : ', NULL AS jewellery_voucher_id, NULL AS jewellery_txn_type, NULL AS jewellery_ref_no';
+    $jewelleryJoin = $jewelleryBridgeReady
+        ? ' LEFT JOIN jewellery_stock_txns jt ON jt.id = t.jewellery_stock_txn_id AND jt.company_id = t.company_id'
+        : '';
+    $transactionStmt = db()->prepare('SELECT t.*, i.sku, i.name, i.unit' . $jewellerySelect . '
+        FROM inventory_transactions t
+        INNER JOIN inventory_items i ON i.id = t.item_id AND i.company_id = t.company_id'
+        . $jewelleryJoin . '
+        WHERE t.company_id = :cid AND t.transaction_date <= :as_at
+        ORDER BY t.item_id, t.transaction_date, t.id');
+    $transactionStmt->execute(['cid' => $companyId, 'as_at' => $asAt]);
+    $transactionsByItem = [];
+    foreach ($transactionStmt->fetchAll(PDO::FETCH_ASSOC) as $transaction) {
+        $transactionsByItem[(int) $transaction['item_id']][] = $transaction;
+    }
+
+    foreach ($items as $item) {
+        $itemId = (int) $item['id'];
+        $state = sr_replay_new((string) ($item['valuation_method'] ?? 'weighted_average'));
+        if ((float) ($item['opening_qty'] ?? 0) > INV_EPSILON) {
+            sr_replay_in($state, (float) $item['opening_qty'], inv_item_opening_unit_cost($item));
+        }
+        foreach ($transactionsByItem[$itemId] ?? [] as $transaction) {
+            $type = (string) ($transaction['transaction_type'] ?? '');
+            $qtyIn = (float) ($transaction['qty_in'] ?? 0);
+            $qtyOut = (float) ($transaction['qty_out'] ?? 0);
+            $expectedEffect = 0.0;
+            $uncoveredQty = 0.0;
+            if (!in_array($type, SR_LOCATION_TYPES, true)) {
+                if ($qtyIn > INV_EPSILON) {
+                    $value = round($qtyIn * (float) ($transaction['rate'] ?? 0), 2);
+                    sr_replay_in($state, $qtyIn, (float) ($transaction['rate'] ?? 0));
+                    $expectedEffect = $value;
+                } elseif ($qtyOut > INV_EPSILON) {
+                    $before = sr_replay_balance($state);
+                    $uncoveredQty = max(0.0, round($qtyOut - (float) $before['qty'], 3));
+                    $expectedEffect = -sr_replay_out($state, $qtyOut);
+                }
+            }
+
+            $voucherId = (int) ($transaction['voucher_id'] ?? 0);
+            if ($voucherId <= 0) {
+                $voucherId = (int) ($transaction['jewellery_voucher_id'] ?? 0);
+            }
+            if ($voucherId <= 0) {
+                $voucherId = (int) ($voucherBySource['inventory_movement:' . (int) $transaction['id']] ?? 0);
+            }
+            $reference = (string) ($transaction['sku'] ?? ('Item #' . $itemId))
+                . ' txn #' . (int) $transaction['id']
+                . ' (' . str_replace('_', ' ', $type) . ', ' . (string) $transaction['transaction_date'] . ')';
+            $storedAmount = abs((float) ($transaction['amount'] ?? 0));
+
+            if ($voucherId > 0) {
+                $appendExpected(
+                    $expectedByVoucher,
+                    $voucherId,
+                    $expectedEffect,
+                    $reference,
+                    $uncoveredQty,
+                    $storedAmount
+                );
+                $matchedVoucherIds[$voucherId] = true;
+            } elseif (abs($expectedEffect) >= 0.005) {
+                $directionLabel = $expectedEffect > 0 ? 'inward' : 'outward';
+                $addCause(
+                    $result['causes'],
+                    'movement_without_voucher',
+                    (string) ($transaction['sku'] ?? ('Item #' . $itemId)) . ' / txn #' . (int) $transaction['id'],
+                    'Stock movement has no GL voucher',
+                    ucfirst($directionLabel) . ' movement dated ' . (string) $transaction['transaction_date']
+                        . ' changes the item subledger by ' . number_format($expectedEffect, 2)
+                        . ', but no voucher is linked to the movement.',
+                    'Correct missing ledger mappings or a locked-period problem, then use Stock Summary > Reconcile to post the movement through the normal inventory source.',
+                    $expectedEffect
+                );
+            }
+
+            if ($uncoveredQty > INV_EPSILON) {
+                $addControl(
+                    $result['controls'],
+                    (string) ($transaction['sku'] ?? ('Item #' . $itemId)) . ' / txn #' . (int) $transaction['id'],
+                    'Outward movement exceeded available cost layers',
+                    number_format($uncoveredQty, 3) . ' ' . (string) ($transaction['unit'] ?? '')
+                        . ' of the movement dated ' . (string) $transaction['transaction_date']
+                        . ' had no earlier opening/inward layer from which cost could be drawn.',
+                    'Restore the genuine earlier opening/purchase/receipt or correct the movement date/quantity, rebuild the item cost layers, and rerun this report. Do not post the difference as an expense or journal.',
+                    $storedAmount,
+                    'High'
+                );
+            }
+        }
+    }
+
+    // A matched voucher can still be wrong: wrong stock ledger, wrong amount,
+    // draft/future status, or a full GL credit for an outward quantity that the
+    // replay could only partly cost because stock had already gone negative.
+    foreach ($expectedByVoucher as $voucherId => $expected) {
+        $expectedEffect = round((float) $expected['effect'], 2);
+        $actualEffect = round((float) ($actualVoucherEffects[$voucherId]['effect'] ?? 0), 2);
+        $impact = round($expectedEffect - $actualEffect, 2);
+        if (abs($impact) < 0.005) {
+            continue;
+        }
+        $meta = $voucherMeta[$voucherId] ?? [];
+        $voucherNo = (string) (($meta['voucher_no'] ?? '') ?: ('Voucher #' . $voucherId));
+        $references = array_values(array_unique((array) $expected['references']));
+        $referenceText = implode('; ', array_slice($references, 0, 4));
+        if (count($references) > 4) {
+            $referenceText .= '; +' . (count($references) - 4) . ' more';
+        }
+        $status = (string) ($meta['status'] ?? 'missing');
+        $date = (string) ($meta['voucher_date'] ?? '');
+        $uncoveredQty = (float) ($expected['uncovered_qty'] ?? 0);
+        if ($uncoveredQty > INV_EPSILON) {
+            $title = 'Voucher value exceeds the cost available to the stock replay';
+            $detail = $voucherNo . ' (' . ($date !== '' ? $date : 'no date') . ') affects inventory GL by '
+                . number_format($actualEffect, 2) . ', while the linked movements affect replayed stock by '
+                . number_format($expectedEffect, 2) . '. ' . number_format($uncoveredQty, 3)
+                . ' unit(s) had no earlier cost layer. Sources: ' . $referenceText . '.';
+            $recommendation = 'Find the genuine missing/incorrect earlier opening, purchase or receipt and correct it in its source module. Rebuild cost layers and rerun. Never plug this difference with a manual journal.';
+            $type = 'cost_layer_shortage';
+        } elseif (abs($actualEffect) < 0.005) {
+            $title = 'Linked voucher has no posted effect on the current inventory ledgers';
+            $detail = $voucherNo . ' is ' . $status . ' and should represent ' . number_format($expectedEffect, 2)
+                . ' of stock value for ' . $referenceText . ', but its posted effect on the currently designated inventory ledgers is zero.';
+            $recommendation = 'Check voucher status/date and historical item/category ledger mapping. Correct or re-post through the originating module so the item movement and GL use the same stock-control ledger.';
+            $type = 'voucher_without_inventory_effect';
+        } else {
+            $title = 'Stock movement value and linked voucher value differ';
+            $detail = $voucherNo . ' (' . ($date !== '' ? $date : 'no date') . ') posts ' . number_format($actualEffect, 2)
+                . ' to inventory GL, while replayed stock expects ' . number_format($expectedEffect, 2)
+                . ' for ' . $referenceText . '.';
+            $recommendation = 'Compare the source document quantity, historical cost/rate, voucher entries and ledger mapping. Correct the source transaction or reverse and re-post it with an audit trail.';
+            $type = 'movement_voucher_value_mismatch';
+        }
+        $addCause(
+            $result['causes'],
+            $type,
+            $voucherNo,
+            $title,
+            $detail,
+            $recommendation,
+            $impact
+        );
+    }
+
+    // Anything still touching an inventory GL ledger has no matched item
+    // opening or movement. That is the common direct-opening/manual-journal
+    // cause which the previous report could only describe generically.
+    foreach ($actualVoucherEffects as $voucherId => $actual) {
+        if (isset($matchedVoucherIds[$voucherId])) {
+            continue;
+        }
+        $actualEffect = round((float) ($actual['effect'] ?? 0), 2);
+        if (abs($actualEffect) < 0.005) {
+            continue;
+        }
+        $impact = -$actualEffect;
+        $sourceType = (string) ($actual['source_type'] ?? '');
+        $voucherNo = (string) (($actual['voucher_no'] ?? '') ?: ('Voucher #' . $voucherId));
+        $date = (string) ($actual['voucher_date'] ?? '');
+        $ledgerNames = (string) (($actual['ledgers'] ?? '') ?: 'inventory ledger');
+        $direction = $actualEffect > 0 ? 'net debit' : 'net credit';
+        if ($sourceType === 'ledger_opening') {
+            $type = 'direct_ledger_opening';
+            $title = 'Direct ledger opening is not backed by item opening stock';
+            $recommendation = 'Confirm the physical item-wise opening first. Record it against the items, then remove or correct this direct ledger opening only through Opening Balances so stock is not counted twice.';
+        } elseif ($sourceType === 'inventory_opening_adj') {
+            $type = 'fiscal_opening_adjustment';
+            $title = 'Fiscal-year opening adjustment is present only in the GL comparison';
+            $recommendation = 'Compare the adjusted fiscal-year item opening with the carried closing quantity and value. Correct it through the Inventory Opening adjustment workflow, then regenerate/rebuild the carried opening.';
+        } elseif (str_starts_with($sourceType, 'inventory_nrv')) {
+            $type = 'nrv_posting_on_stock_ledger';
+            $title = 'NRV allowance activity touches a cost-control inventory ledger';
+            $recommendation = 'Review the NRV assessment and map write-downs to the separate allowance-for-inventory ledger. Do not change the item cost layers for an allowance-only adjustment.';
+        } elseif (str_starts_with($sourceType, 'jewellery_')) {
+            $type = 'unlinked_jewellery_voucher';
+            $title = 'Jewellery stock voucher has no matched shared inventory movement';
+            $recommendation = 'Repair the Jewellery-to-core source link for the existing movement. Do not create another stock row or duplicate voucher.';
+        } elseif (str_starts_with($sourceType, 'inventory_')) {
+            $type = 'orphan_inventory_voucher';
+            $title = 'Inventory voucher is no longer linked to an item movement/opening';
+            $recommendation = 'Inspect the source record and audit trail. Restore the valid link or reverse the orphan voucher through the Inventory module; do not delete posted history directly.';
+        } else {
+            $type = 'direct_inventory_journal';
+            $title = 'Direct/manual voucher changed an inventory-control ledger';
+            $recommendation = 'Verify the supporting item movement. If stock really moved, record it in Inventory and reverse/reclassify this direct entry; otherwise move it off the inventory-control ledger with an approved correcting voucher.';
+        }
+        $detail = $voucherNo . ' dated ' . ($date !== '' ? $date : 'without a date') . ' ('
+            . ($sourceType !== '' ? $sourceType : 'manual/unspecified source') . ') posts a ' . $direction . ' of '
+            . number_format(abs($actualEffect), 2) . ' to ' . $ledgerNames
+            . ', but no item-backed opening or stock movement in the subledger points to it.';
+        $addCause(
+            $result['causes'],
+            $type,
+            $voucherNo,
+            $title,
+            $detail,
+            $recommendation,
+            $impact,
+            $type === 'fiscal_opening_adjustment' ? 'Review' : 'High'
+        );
+    }
+
+    $explained = 0.0;
+    foreach ($result['causes'] as $cause) {
+        $explained += (float) ($cause['impact'] ?? 0);
+    }
+    $result['explained'] = round($explained, 2);
+    $result['unexplained'] = round($difference - $result['explained'], 2);
+
+    return $result;
+}
+
+/**
  * Retro-post production journals for manufacturing consume/produce rows that
  * never got one. Grouped by ref_no (the order number): Dr the finished item's
  * stock ledger at the produce txn value (what the stock subledger carries),
@@ -636,10 +1154,14 @@ function sr_inventory_gl_total(int $companyId, ?string $asAt = null): float
 function sr_post_missing_production_journals(int $companyId, int $userId): array
 {
     $result = ['posted' => 0, 'posted_value' => 0.0, 'skipped' => []];
+    $jewelleryExclusion = column_exists('inventory_transactions', 'jewellery_stock_txn_id')
+        ? ' AND t.jewellery_stock_txn_id IS NULL'
+        : '';
     $stmt = db()->prepare("SELECT t.*, i.sku FROM inventory_transactions t
         JOIN inventory_items i ON i.id = t.item_id
-        WHERE t.company_id = :cid AND t.voucher_id IS NULL AND t.transaction_type IN ('consume', 'produce')
-        ORDER BY t.transaction_date ASC, t.id ASC");
+        WHERE t.company_id = :cid AND t.voucher_id IS NULL AND t.transaction_type IN ('consume', 'produce')"
+        . $jewelleryExclusion
+        . ' ORDER BY t.transaction_date ASC, t.id ASC');
     $stmt->execute(['cid' => $companyId]);
     $groups = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {

@@ -27,7 +27,7 @@ function cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
-        foreach (['jewellery_line_taxes', 'jewellery_advance_allocations', 'jewellery_settlement_tenders',
+        foreach (['jewellery_stock_unit_events', 'jewellery_stock_units', 'jewellery_line_taxes', 'jewellery_advance_allocations', 'jewellery_settlement_tenders',
                   'jewellery_settlement_allocations', 'jewellery_settlements', 'jewellery_bills',
                   'jewellery_sale_exchanges', 'jewellery_sale_lines', 'jewellery_sales',
                   'jewellery_purchase_lines', 'jewellery_purchases',

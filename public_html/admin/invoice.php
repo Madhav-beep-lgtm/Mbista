@@ -242,15 +242,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                     if ($requestedByItem !== []) {
-                        $onHandStmt = db()->prepare('
-                            SELECT i.sku, i.name,
-                                   i.opening_qty + COALESCE((SELECT SUM(t.qty_in - t.qty_out) FROM inventory_transactions t WHERE t.item_id = i.id), 0) AS on_hand
-                            FROM inventory_items i WHERE i.id = :id AND i.company_id = :company_id LIMIT 1
-                        ');
+                        $requestedIds = array_keys($requestedByItem);
+                        $itemMarks = implode(',', array_fill(0, count($requestedIds), '?'));
+                        $onHandStmt = db()->prepare("SELECT i.id,i.sku,i.name,
+                                i.opening_qty+COALESCE(SUM(t.qty_in-t.qty_out),0) on_hand
+                            FROM inventory_items i
+                            LEFT JOIN inventory_transactions t ON t.item_id=i.id
+                            WHERE i.company_id=? AND i.id IN ($itemMarks)
+                            GROUP BY i.id,i.sku,i.name,i.opening_qty");
+                        $onHandStmt->execute(array_merge([(int)$currentCompany['id']], $requestedIds));
+                        $onHandByItem = [];
+                        foreach ($onHandStmt->fetchAll() as $row) $onHandByItem[(int)$row['id']] = $row;
                         $shortages = [];
                         foreach ($requestedByItem as $requestedItemId => $requestedQty) {
-                            $onHandStmt->execute(['id' => $requestedItemId, 'company_id' => (int) $currentCompany['id']]);
-                            $onHandRow = $onHandStmt->fetch();
+                            $onHandRow = $onHandByItem[$requestedItemId] ?? null;
                             if (!$onHandRow) {
                                 $shortages[] = 'item #' . $requestedItemId . ' not found';
                                 continue;

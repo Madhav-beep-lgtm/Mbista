@@ -68,12 +68,12 @@ $reach = static function (int $userId): array {
 };
 
 // ---------------------------------------------------------------------------
-echo "1. A staff member nobody has restricted reaches the whole group\n";
+echo "1. Unassigned staff reach their internal work company only\n";
 // ---------------------------------------------------------------------------
 $freeReach = $reach($staffFree);
 ok(in_array($companyA, $freeReach, true), 'Their own company, as before');
-ok(in_array($companyB, $freeReach, true), 'A sister company they were never a member of');
-ok(in_array($clientBooks, $freeReach, true), "And a client's books, which is what the firm was asking for");
+ok(!in_array($companyB, $freeReach, true), 'Not an unrelated sister company');
+ok(!in_array($clientBooks, $freeReach, true), "Not an unassigned client's books");
 
 // ---------------------------------------------------------------------------
 echo "\n2. Naming companies for a staff member narrows them to those\n";
@@ -86,6 +86,18 @@ ok(!in_array($clientBooks, $tiedReach, true), "And nothing else — the client's
 ok(!in_array($companyA, $tiedReach, true),
     'Not even the company that created them: a restriction that leaked the home company would not be one');
 ok(count($tiedReach) === 1, 'Exactly the one company named, and no more');
+
+// ---------------------------------------------------------------------------
+echo "\n2b. Explicit client assignment adds only that client's books\n";
+// ---------------------------------------------------------------------------
+$staffGranted = create_user(['name' => 'Granted Staff', 'email' => 'scr-granted@test.local',
+    'password' => 'Secret#12345', 'role' => 'staff', 'status' => 'active', 'company_id' => $companyA]);
+$clientProfileId = (int) db()->query("SELECT id FROM client_profiles WHERE client_code = 'SCRC-1'")->fetchColumn();
+set_staff_accounting_clients($staffGranted, [$clientProfileId]);
+$grantedReach = $reach($staffGranted);
+ok(in_array($companyA, $grantedReach, true), 'The internal work company remains available');
+ok(in_array($clientBooks, $grantedReach, true), "The assigned client's books are available");
+ok(!in_array($companyB, $grantedReach, true), 'An unrelated company remains unavailable');
 
 // ---------------------------------------------------------------------------
 echo "\n3. A client is untouched by any of it\n";

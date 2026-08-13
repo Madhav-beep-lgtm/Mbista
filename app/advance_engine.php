@@ -24,23 +24,7 @@ declare(strict_types=1);
  */
 function customer_advance_group_id(int $companyId): int
 {
-    if ($companyId <= 0 || !table_exists('ledger_groups')) {
-        return 0;
-    }
-    $groupStmt = db()->prepare("SELECT id FROM ledger_groups
-        WHERE company_id = :cid AND is_active = 1 AND is_cash_or_bank = 0
-          AND (code = 'CURR_LIAB' OR master_key = 'current_liability')
-        ORDER BY (code = 'CURR_LIAB') DESC, id ASC LIMIT 1");
-    $groupStmt->execute(['cid' => $companyId]);
-    $groupId = (int) ($groupStmt->fetchColumn() ?: 0);
-    if ($groupId > 0) {
-        return $groupId;
-    }
-
-    db()->prepare("INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, 'Current Liabilities', 'current_liability', 0, 1)")
-        ->execute(['cid' => $companyId, 'code' => coa_next_group_code($companyId, 'current_liability')]);
-
-    return (int) db()->lastInsertId();
+    return party_ledger_group_id($companyId, 'customer_advance');
 }
 
 /**
@@ -59,7 +43,14 @@ function ensure_customer_advance_ledger(int $companyId, int $partyId = 0): int
         return 0;
     }
 
-    $code = $partyId > 0 ? 'ADV-' . $partyId : 'CUST-ADV';
+    // Every identifiable customer uses their own Party Master advance ledger.
+    // The shared CUST-ADV account remains only as a legacy/no-party fallback;
+    // existing posted vouchers are intentionally left untouched.
+    if ($partyId > 0) {
+        return ensure_party_role_ledger($companyId, $partyId, 'customer_advance');
+    }
+
+    $code = 'CUST-ADV';
     $stmt = db()->prepare('SELECT id FROM ledgers WHERE company_id = :cid AND code = :code LIMIT 1');
     $stmt->execute(['cid' => $companyId, 'code' => $code]);
     $ledgerId = (int) ($stmt->fetchColumn() ?: 0);
@@ -68,15 +59,6 @@ function ensure_customer_advance_ledger(int $companyId, int $partyId = 0): int
     }
 
     $name = 'Advances from Customers';
-    if ($partyId > 0) {
-        $partyStmt = db()->prepare('SELECT name FROM accounting_parties WHERE id = :id AND company_id = :cid LIMIT 1');
-        $partyStmt->execute(['id' => $partyId, 'cid' => $companyId]);
-        $partyName = (string) ($partyStmt->fetchColumn() ?: '');
-        if ($partyName === '') {
-            return 0;
-        }
-        $name = 'Advance from ' . $partyName;
-    }
 
     $groupId = customer_advance_group_id($companyId);
     if ($groupId <= 0) {
@@ -84,8 +66,7 @@ function ensure_customer_advance_ledger(int $companyId, int $partyId = 0): int
     }
     db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status)
         VALUES (:cid, :gid, :code, :name, 'liability', :sys, 'active')")
-        ->execute(['cid' => $companyId, 'gid' => $groupId, 'code' => $code, 'name' => $name,
-            'sys' => $partyId > 0 ? 0 : 1]);
+        ->execute(['cid' => $companyId, 'gid' => $groupId, 'code' => $code, 'name' => $name, 'sys' => 1]);
 
     return (int) db()->lastInsertId();
 }
@@ -155,7 +136,7 @@ function record_task_advance(int $companyId, int $taskId, float $amount, string 
         return ['ok' => false, 'voucher_id' => 0, 'error' => 'Task not found for this company.'];
     }
     $cashLedger = get_mapped_ledger($companyId, 'default_cash_bank');
-    $advanceLedgerId = ensure_customer_advance_ledger($companyId);
+    $advanceLedgerId = ensure_customer_advance_ledger($companyId, (int) $ctx['party_id']);
     $fiscalYearId = current_fiscal_year_id() ?: (int) (($def = resolve_default_company_and_fiscal_year()) ? $def['fiscal_year']['id'] : 0);
     if (!$cashLedger || $advanceLedgerId <= 0 || $fiscalYearId <= 0) {
         return ['ok' => false, 'voucher_id' => 0, 'error' => 'Map a cash/bank ledger in Settings before recording an advance.'];
@@ -252,7 +233,22 @@ function apply_task_advance_to_invoice(int $invoiceId, ?int $userId = null): voi
     if (task_advance_posted($companyId, $taskId) <= 0) {
         return;
     }
-    $advanceLedgerId = ensure_customer_advance_ledger($companyId);
+    $partyId = invoice_party_id(['party_id' => $invoice['party_id'] ?? null, 'task_id' => $taskId], $companyId);
+    // Debit the exact liability ledger the original advance credited. This
+    // keeps legacy shared CUST-ADV vouchers balanced while all new identifiable
+    // advances use the party-specific ledger.
+    $advanceEntryStmt = db()->prepare("SELECT ve.ledger_id
+        FROM vouchers v
+        INNER JOIN voucher_entries ve ON ve.voucher_id = v.id AND ve.entry_type = 'credit'
+        INNER JOIN ledgers l ON l.id = ve.ledger_id AND l.company_id = v.company_id AND l.type = 'liability'
+        WHERE v.company_id = :cid AND v.source_type = 'task_advance' AND v.source_id = :tid
+          AND v.status = 'posted'
+        ORDER BY ve.id ASC LIMIT 1");
+    $advanceEntryStmt->execute(['cid' => $companyId, 'tid' => $taskId]);
+    $advanceLedgerId = (int) ($advanceEntryStmt->fetchColumn() ?: 0);
+    if ($advanceLedgerId <= 0) {
+        $advanceLedgerId = ensure_customer_advance_ledger($companyId, $partyId);
+    }
     $fiscalYearId = current_fiscal_year_id() ?: (int) (($def = resolve_default_company_and_fiscal_year()) ? $def['fiscal_year']['id'] : 0);
     if ($advanceLedgerId <= 0 || $fiscalYearId <= 0) {
         return;
@@ -264,7 +260,6 @@ function apply_task_advance_to_invoice(int $invoiceId, ?int $userId = null): voi
     $arStmt->execute(['iid' => $invoiceId]);
     $receivableLedgerId = (int) ($arStmt->fetchColumn() ?: 0);
     if ($receivableLedgerId <= 0) {
-        $partyId = invoice_party_id(['party_id' => $invoice['party_id'] ?? null, 'task_id' => $taskId], $companyId);
         $receivableLedgerId = $partyId > 0 ? ensure_party_ledger($companyId, $partyId, 'receivable') : 0;
     }
     if ($receivableLedgerId <= 0) {

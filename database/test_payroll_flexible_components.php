@@ -245,8 +245,9 @@ ok(empty($cross['ok']), 'Company B\'s run refuses company A\'s employee/componen
 
 echo "\nPermission enforcement (staff grants)\n";
 $staffId = create_user(['name'=>'PFC Staff','email'=>'pfctest-staff@test.local','password'=>'Secret#12345','role'=>'staff','status'=>'active','company_id'=>$cid]);
-$staffUser = ['id'=>$staffId,'role'=>'staff','company_id'=>$cid];
-ok(user_can_do('payroll', 'approve', $staffUser), 'Unconfigured staff keeps legacy full access');
+$staffUser = ['id'=>$staffId,'role'=>'staff','company_id'=>$cid,'access_level'=>'accountant'];
+ok(user_can_do('payroll', 'view', $staffUser) && user_can_do('payroll', 'create', $staffUser)
+    && !user_can_do('payroll', 'approve', $staffUser), 'Unconfigured staff inherits the Accountant default instead of full access');
 set_staff_permissions($staffId, ['payroll.view', 'payroll.create'], $actorId);
 ok(user_can_do('payroll', 'view', $staffUser) && user_can_do('payroll', 'create', $staffUser), 'Granted payroll view/create pass');
 ok(!user_can_do('payroll', 'approve', $staffUser) && !user_can_do('payroll', 'post', $staffUser), 'Ungranted approve/post are DENIED in strict mode');

@@ -297,11 +297,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'purity_id' => (int) ($_POST['purity_id'] ?? 0),
                 'unit_id' => (int) ($_POST['unit_id'] ?? 0),
                 'track_mode' => (string) ($_POST['track_mode'] ?? 'weight'),
-                // The per-piece figures — weight, wastage, making charge, stone
-                // value — are deliberately NOT sent from here. They are punched
-                // on the sale or purchase line, where each piece has its own,
-                // and jewellery_save_item() leaves anything it is not told about
-                // exactly as it found it.
+                'stock_kind' => (string) ($_POST['stock_kind'] ?? 'showroom'),
+                'design_no' => (string) ($_POST['design_no'] ?? ''),
+                'hallmark' => (string) ($_POST['hallmark'] ?? ''),
+                'gross_weight' => (float) ($_POST['gross_weight'] ?? 0),
+                'stone_weight' => (float) ($_POST['stone_weight'] ?? 0),
+                'wastage_pct' => (float) ($_POST['wastage_pct'] ?? 0),
+                'making_charge_basis' => (string) ($_POST['making_charge_basis'] ?? 'default'),
+                'making_charge_rate' => (float) ($_POST['making_charge_rate'] ?? 0),
+                'stone_value' => (float) ($_POST['stone_value'] ?? 0),
+                'reorder_weight' => (float) ($_POST['reorder_weight'] ?? 0),
                 'vat_applicable' => isset($_POST['vat_applicable']) ? 1 : 0,
                 'vat_base' => (string) ($_POST['vat_base'] ?? 'default'),
                 'hs_code' => (string) ($_POST['hs_code'] ?? ''),
@@ -323,9 +328,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('jewellery', 'post');
         $result = jewellery_save_opening($companyId, $fiscalYearId, [
             'item_id' => (int) ($_POST['item_id'] ?? 0),
+            'stock_kind' => (string) ($_POST['stock_kind'] ?? 'showroom'),
+            'stock_group' => (string) ($_POST['stock_group'] ?? ''),
             'qty_pieces' => (float) ($_POST['qty_pieces'] ?? 0),
             'gross_weight' => (float) ($_POST['gross_weight'] ?? 0),
+            'stone_carat' => (float) ($_POST['stone_carat'] ?? 0),
+            'diamond_carat' => (float) ($_POST['diamond_carat'] ?? 0),
+            'stone_amount' => (float) ($_POST['stone_amount'] ?? 0),
+            'diamond_amount' => (float) ($_POST['diamond_amount'] ?? 0),
+            'making_amount' => (float) ($_POST['making_amount'] ?? 0),
+            'rate' => (float) ($_POST['rate'] ?? 0),
             'amount' => (float) ($_POST['amount'] ?? 0),
+            'customer_name' => (string) ($_POST['customer_name'] ?? ''),
+            'customer_order_no' => (string) ($_POST['order_number'] ?? ''),
         ], $userId);
         if (!$result['ok']) {
             flash('error', $result['error']);
@@ -346,6 +361,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash($result['ok'] ? 'success' : 'error', $result['ok']
             ? 'Opening stock cleared — its voucher and metal movement were removed.'
             : $result['error']);
+        redirect($back);
+    }
+
+    if ($action === 'clear_opening_bulk') {
+        require_permission('jewellery', 'post');
+        $itemIds = array_values(array_filter(array_map('intval', (array) ($_POST['item_ids'] ?? []))));
+        if ($itemIds === []) {
+            flash('error', 'No opening stock item was selected.');
+            redirect($back);
+        }
+
+        $cleared = 0;
+        $errors = [];
+        foreach (array_unique($itemIds) as $itemId) {
+            if ($itemId <= 0) {
+                continue;
+            }
+            $result = jewellery_clear_opening($companyId, $itemId, $userId, $fiscalYearId);
+            if ($result['ok']) {
+                $cleared++;
+            } else {
+                $errors[] = 'Item #' . $itemId . ': ' . $result['error'];
+            }
+        }
+
+        if ($cleared > 0) {
+            flash('success', 'Cleared opening stock for ' . $cleared . ' selected item' . ($cleared === 1 ? '' : 's') . '.');
+        }
+        if ($errors !== []) {
+            flash('error', implode(' ', $errors));
+        }
         redirect($back);
     }
 
@@ -393,8 +439,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('jewellery', 'edit');
         $result = opening_import_update_row($companyId, (int) ($_POST['row_id'] ?? 0), [
             'item_id' => (int) ($_POST['item_id'] ?? 0),
+            'stock_kind' => (string) ($_POST['stock_kind'] ?? ''),
+            'raw_group' => trim((string) ($_POST['raw_group'] ?? '')),
+            'proposed_code' => trim((string) ($_POST['proposed_code'] ?? '')),
+            'proposed_name' => trim((string) ($_POST['proposed_name'] ?? '')),
+            'metal_id' => (int) ($_POST['metal_id'] ?? 0),
             'purity_id' => (int) ($_POST['purity_id'] ?? 0),
             'unit_id' => (int) ($_POST['unit_id'] ?? 0),
+            'customer_name' => trim((string) ($_POST['customer_name'] ?? '')),
+            'order_number' => trim((string) ($_POST['order_number'] ?? '')),
             'qty_pieces' => (float) ($_POST['qty_pieces'] ?? 0),
             'gross_weight' => (float) ($_POST['gross_weight'] ?? 0),
             'rate' => (float) ($_POST['rate'] ?? 0),
@@ -508,7 +561,10 @@ if (($_GET['template'] ?? '') !== '' && $view === 'opening') {
     if ((string) $_GET['template'] === 'csv') {
         export_csv('opening-stock-template.csv', $templateRows);
     }
-    export_xlsx('opening-stock-template.xlsx', $templateRows, 'Opening Stock');
+        export_xlsx('opening-stock-template-v4.xlsx', $templateRows, 'Opening Stock',
+        [0 => 7, 1 => 20, 2 => 18, 3 => 15, 4 => 22, 5 => 12, 6 => 10, 7 => 9,
+            8 => 10, 9 => 15, 10 => 14, 11 => 16, 12 => 22, 13 => 18],
+        ['styled_table' => true, 'freeze_header' => true, 'auto_filter' => true]);
 }
 
 // ---------------------------------------------------------------------------
@@ -873,9 +929,85 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <script>
+        (function () {
+            var table = document.querySelector('table');
+            if (!table) { return; }
+            function applyFilters() {
+                var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row input[type="search"]'));
+                var rows = Array.from(table.querySelectorAll('tbody tr'));
+                rows.forEach(function (row) {
+                    var cells = Array.from(row.querySelectorAll('td'));
+                    var show = true;
+                    inputs.forEach(function (inp) {
+                        var col = parseInt(inp.dataset.colIndex || inp.getAttribute('data-col') || inp.dataset.col, 10);
+                        if (Number.isNaN(col)) { return; }
+                        var cell = cells[col];
+                        var text = cell ? cell.innerText.toLowerCase() : '';
+                        if (inp.value && text.indexOf(inp.value.toLowerCase()) === -1) {
+                            show = false;
+                        }
+                    });
+                    row.style.display = show ? '' : 'none';
+                });
+            }
+            window.jwApplyFilters = applyFilters;
+            var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row input[type="search"]'));
+            inputs.forEach(function (inp) {
+                if (!inp.dataset.colIndex) {
+                    if (inp.dataset.col) inp.dataset.colIndex = inp.dataset.col;
+                    else if (inp.getAttribute('data-col')) inp.dataset.colIndex = inp.getAttribute('data-col');
+                }
+                inp.addEventListener('input', applyFilters);
+            });
+        })();
+        </script>
     </section>
 
     <script>
+    // Simple client-side filters for the Opening Stock table
+    (function () {
+        function attachFilters() {
+            // Find the Opening Stock section and its table specifically
+            var openingSection = Array.from(document.querySelectorAll('.mbw-card-head h2')).
+                map(function (h) { return {h:h, txt: (h.innerText||'').trim()}; }).
+                find(function (o) { return o.txt && o.txt.indexOf('Opening Stock') === 0; });
+            var table = null;
+            if (openingSection && openingSection.h) {
+                var section = openingSection.h.closest('section');
+                if (section) { table = section.querySelector('table'); }
+            }
+            if (!table) { return; }
+            var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row input[type="search"]'));
+            if (!inputs.length) { return; }
+            function applyFilters() {
+                var rows = Array.from(table.querySelectorAll('tbody tr'));
+                rows.forEach(function (row) {
+                    var cells = Array.from(row.querySelectorAll('td'));
+                    var show = true;
+                    inputs.forEach(function (inp) {
+                        var col = parseInt(inp.dataset.colIndex || inp.getAttribute('data-col') || inp.dataset.col, 10);
+                        if (Number.isNaN(col)) { return; }
+                        var cell = cells[col];
+                        var text = cell ? cell.innerText.toLowerCase() : '';
+                        if (inp.value && text.indexOf(inp.value.toLowerCase()) === -1) { show = false; }
+                    });
+                    row.style.display = show ? '' : 'none';
+                });
+            }
+            inputs.forEach(function (inp) {
+                if (!inp.dataset.colIndex) {
+                    if (inp.dataset.col) inp.dataset.colIndex = inp.dataset.col;
+                    else if (inp.getAttribute('data-col')) inp.dataset.colIndex = inp.getAttribute('data-col');
+                }
+                inp.addEventListener('input', applyFilters);
+            });
+            window.jwApplyFilters = applyFilters;
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachFilters); } else { attachFilters(); }
+    })();
+
+    </script>
     // Keep the purity list to the chosen metal — a purity from another metal
     // is rejected server-side, so filtering here just avoids a pointless trip.
     (function () {
@@ -938,6 +1070,12 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <?php endforeach; ?>
                 </select>
             </label>
+            <label>Default stock type
+                <select name="stock_kind" required>
+                    <option value="showroom" <?= (string) ($editItem['stock_kind'] ?? 'showroom') === 'showroom' ? 'selected' : '' ?>>Showroom Stock</option>
+                    <option value="customer_ordered" <?= (string) ($editItem['stock_kind'] ?? '') === 'customer_ordered' ? 'selected' : '' ?>>Customer Ordered Stock</option>
+                </select>
+            </label>
             <label>Metal
                 <select name="metal_id" id="jw-item-metal" required>
                     <?php foreach ($metals as $m): ?>
@@ -968,6 +1106,21 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <option value="piece" <?= (string) ($editItem['track_mode'] ?? '') === 'piece' ? 'selected' : '' ?>>Piece</option>
                 </select>
             </label>
+            <label>Design / reference no.<input type="text" name="design_no" maxlength="100" value="<?= e((string) ($editItem['design_no'] ?? '')) ?>"></label>
+            <label>Hallmark<input type="text" name="hallmark" maxlength="100" value="<?= e((string) ($editItem['hallmark'] ?? '')) ?>"></label>
+            <label>Reference gross weight<input type="number" name="gross_weight" min="0" step="0.0001" value="<?= e((string) ($editItem['gross_weight'] ?? '0')) ?>"></label>
+            <label>Reference stone weight<input type="number" name="stone_weight" min="0" step="0.0001" value="<?= e((string) ($editItem['stone_weight'] ?? '0')) ?>"></label>
+            <label>Default wastage %<input type="number" name="wastage_pct" min="0" max="99.999" step="0.001" value="<?= e((string) ($editItem['wastage_pct'] ?? '0')) ?>"></label>
+            <label>Making basis
+                <select name="making_charge_basis">
+                    <?php foreach (['default' => 'Company default', 'per_unit_weight' => 'Per unit weight', 'percent_of_metal' => 'Percent of metal', 'flat' => 'Flat'] as $mkKey => $mkLabel): ?>
+                        <option value="<?= e($mkKey) ?>" <?= (string) ($editItem['making_charge_basis'] ?? 'default') === $mkKey ? 'selected' : '' ?>><?= e($mkLabel) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label>Default making rate<input type="number" name="making_charge_rate" min="0" step="0.0001" value="<?= e((string) ($editItem['making_charge_rate'] ?? '0')) ?>"></label>
+            <label>Default stone value<input type="number" name="stone_value" min="0" step="0.01" value="<?= e((string) ($editItem['stone_value'] ?? '0')) ?>"></label>
+            <label>Reorder weight<input type="number" name="reorder_weight" min="0" step="0.0001" value="<?= e((string) ($editItem['reorder_weight'] ?? '0')) ?>"></label>
             <label>VAT base
                 <select name="vat_base">
                     <?php foreach (['default' => 'Use company default', 'full_value' => 'Full line value', 'making_only' => 'Making charge only', 'stone_only' => 'Stone value only'] as $vbKey => $vbLabel): ?>
@@ -979,7 +1132,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label class="frm-check"><input type="checkbox" name="vat_applicable" <?= (int) ($editItem['vat_applicable'] ?? 0) === 1 ? 'checked' : '' ?>> VAT applicable</label>
             <label class="frm-check"><input type="checkbox" name="active" <?= $editItem === null || (string) $editItem['status'] === 'active' ? 'checked' : '' ?>> Active</label>
             <label style="grid-column:1/-1">Notes<input type="text" name="notes" maxlength="255" value="<?= e((string) ($editItem['notes'] ?? '')) ?>"></label>
-            <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editItem ? 'Update Item' : 'Add Item' ?></button></div>
+            <p class="frm-optional" style="grid-column:1/-1;margin:0">This creates the item/style master. Physical trace IDs are created when opening stock is imported, a purchase is posted, or a stock/customer order is assigned.</p>
+            <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editItem ? 'Update Item' : 'Create New Item' ?></button></div>
         </form>
     </section>
     <?php endif; ?>
@@ -1015,9 +1169,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 ksort($grouped, SORT_NATURAL | SORT_FLAG_CASE);
                 $serial = 0;
             ?>
-            <thead><tr><th class="is-numeric" style="width:44px">SN</th><th>Item group</th><th>Item name</th><th>Item code</th><th>Type</th><th>Metal / Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Net</th><th>VAT</th><th class="is-numeric">In stock (fine)</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
+            <thead><tr><th class="is-numeric" style="width:44px">SN</th><th>Item group</th><th>Item name</th><th>Item code</th><th>Stock type</th><th>Type</th><th>Metal / Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Net</th><th>VAT</th><th class="is-numeric">In stock (fine)</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
             <tbody>
-                <?php if ($items === []): ?><tr><td colspan="<?= $canEdit ? 12 : 11 ?>">No items yet.</td></tr><?php endif; ?>
+                <?php if ($items === []): ?><tr><td colspan="<?= $canEdit ? 13 : 12 ?>">No items yet.</td></tr><?php endif; ?>
                 <?php foreach ($grouped as $groupName => $groupRows): ?>
                     <?php
                         // The group's own line: how many items it holds and what
@@ -1031,10 +1185,10 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     ?>
                     <tr style="background:var(--mbw-accent-soft,#eef7f1)">
                         <td></td>
-                        <td colspan="<?= $canEdit ? 8 : 7 ?>"><strong><?= e((string) $groupName) ?></strong>
+                        <td colspan="<?= $canEdit ? 9 : 8 ?>"><strong><?= e((string) $groupName) ?></strong>
                             <small style="color:var(--mbw-muted,#64748b)">— <?= count($groupRows) ?> item<?= count($groupRows) > 1 ? 's' : '' ?></small></td>
                         <td class="is-numeric"><strong><?= $fmt($groupFine, 4) ?></strong></td>
-                        <td colspan="<?= $canEdit ? 2 : 1 ?>"></td>
+                        <td colspan="2"></td>
                     </tr>
                 <?php foreach ($groupRows as $row): ?>
                     <?php $rowBalance = jw_item_balance($companyId, (int) $row['id'], null, ''); ?>
@@ -1043,6 +1197,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         <td style="color:var(--mbw-muted,#64748b)"><?= e((string) $groupName) ?></td>
                         <td><?= e($row['name']) ?></td>
                         <td><?= e($row['code']) ?></td>
+                        <td><span class="mbw-pill <?= (string) ($row['stock_kind'] ?? 'showroom') === 'customer_ordered' ? 'tone-blue' : 'tone-green' ?>"><?= (string) ($row['stock_kind'] ?? 'showroom') === 'customer_ordered' ? 'Customer Ordered' : 'Showroom' ?></span></td>
                         <td><?= e(ucfirst((string) $row['item_type'])) ?></td>
                         <td><?= e($row['metal_name'] . ' · ' . $row['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small></td>
@@ -1074,6 +1229,132 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </tbody>
         </table></div>
     </section>
+    <?php if ($canEdit): ?>
+    <script>
+    (function () {
+        var start = function () {
+        var form = document.getElementById('opening-bulk-clear-form');
+        if (!form) { return; }
+
+        // Find the Opening Stock section and its table specifically so we don't
+        // accidentally bind to an earlier preview table.
+        var openingSection = Array.from(document.querySelectorAll('.mbw-card-head h2')).
+            map(function (h) { return {h:h, txt: (h.innerText||'').trim()}; }).
+            find(function (o) { return o.txt && o.txt.indexOf('Opening Stock') === 0; });
+        var table = null;
+        if (openingSection && openingSection.h) {
+            var section = openingSection.h.closest('section');
+            if (section) { table = section.querySelector('table'); }
+        }
+        if (!table) {
+            // Fallback: first table on the page
+            table = document.querySelector('table');
+        }
+
+        // Attach select-all behavior scoped to this table only.
+        var selectAll = table ? table.querySelector('#opening-select-all') : null;
+        if (selectAll) {
+            selectAll.addEventListener('change', function () {
+                var checkboxes = table.querySelectorAll('.opening-select-checkbox');
+                checkboxes.forEach(function (cb) { cb.checked = selectAll.checked; });
+            });
+        }
+
+        // Submit handler: collect checked rows from this table only.
+        form.addEventListener('submit', function (event) {
+            var checkboxes = (table ? Array.from(table.querySelectorAll('.opening-select-checkbox')) : Array.from(document.querySelectorAll('.opening-select-checkbox')));
+            var selected = checkboxes.filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
+            if (selected.length === 0) {
+                alert('Select at least one opening stock item to clear.');
+                event.preventDefault();
+                return;
+            }
+            form.querySelectorAll('input[name="item_ids[]"]').forEach(function (existing) { existing.remove(); });
+            selected.forEach(function (id) {
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'item_ids[]';
+                input.value = id;
+                form.appendChild(input);
+            });
+            return confirm('Clear opening stock for ' + selected.length + ' selected item(s)? This will remove their voucher and metal movement.');
+        });
+
+        // Add per-column simple client-side filters under the opening stock table
+        if (table) {
+            var thead = table.querySelector('thead');
+            if (thead) {
+                // Reuse an existing server-rendered filter row if present,
+                // otherwise create one. Always attach listeners to the inputs.
+                var filterRow = thead.querySelector('.jw-filter-row');
+                if (!filterRow) {
+                    var headerCells = Array.from(thead.querySelectorAll('th'));
+                    filterRow = document.createElement('tr');
+                    filterRow.className = 'jw-filter-row';
+                    headerCells.forEach(function (th, idx) {
+                        var cell = document.createElement('th');
+                        // Skip filter for checkbox and action columns
+                        if (th.querySelector('#opening-select-all') || idx === headerCells.length - 1) {
+                            cell.innerHTML = '';
+                        } else {
+                            var input = document.createElement('input');
+                            input.type = 'search';
+                            input.placeholder = 'Filter';
+                            input.style.width = '100%';
+                            input.dataset.colIndex = idx;
+                            cell.appendChild(input);
+                        }
+                        filterRow.appendChild(cell);
+                    });
+                    thead.appendChild(filterRow);
+                }
+
+                // Attach listeners to inputs whether server or client rendered.
+                var inputs = Array.from(thead.querySelectorAll('.jw-filter-row input[type="search"]'));
+                inputs.forEach(function (inp) {
+                    // Accept server-provided `data-col` and normalise to `data-colIndex`.
+                    if (!inp.dataset.colIndex) {
+                        if (inp.dataset.col) {
+                            inp.dataset.colIndex = inp.dataset.col;
+                        } else if (inp.getAttribute('data-col')) {
+                            inp.dataset.colIndex = inp.getAttribute('data-col');
+                        }
+                    }
+                    inp.addEventListener('input', function () { applyFilters(); });
+                });
+            }
+
+            function applyFilters() {
+                var inputs = Array.from(table.querySelectorAll('thead .jw-filter-row input[type="search"]'));
+                var rows = Array.from(table.querySelectorAll('tbody tr'));
+                rows.forEach(function (row) {
+                    var cells = Array.from(row.querySelectorAll('td'));
+                    var show = true;
+                    inputs.forEach(function (inp) {
+                        var col = parseInt(inp.dataset.colIndex, 10);
+                        if (Number.isNaN(col)) { return; }
+                        var cell = cells[col];
+                        var text = cell ? cell.innerText.toLowerCase() : '';
+                        if (inp.value && text.indexOf(inp.value.toLowerCase()) === -1) {
+                            show = false;
+                        }
+                    });
+                    row.style.display = show ? '' : 'none';
+                    });
+                }
+                // Expose for debugging and manual invocation
+                window.jwApplyFilters = applyFilters;
+            }
+
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', start);
+        } else {
+            start();
+        }
+    })();
+    </script>
+    <?php endif; ?>
 
     <script>
     (function () {
@@ -1122,7 +1403,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <section class="mbw-card" data-collapsible style="margin-bottom:14px">
         <div class="mbw-card-head">
             <h2>Upload Opening Stock from a Spreadsheet</h2>
-            <a class="button soft" style="min-height:32px" href="<?= e(url('admin/jewellery.php?view=opening&template=xlsx')) ?>">Download template</a>
+            <a class="button soft" style="min-height:32px" href="<?= e(url('admin/jewellery.php?view=opening&template=xlsx&v=4')) ?>">Download template v4</a>
         </div>
         <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1174,26 +1455,42 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <?php endif; ?>
         </div>
 
-        <div style="overflow-x:auto"><table>
+        <p class="frm-optional" style="margin:0 0 10px">The spreadsheet columns appear first, in the same order as the Opening Stock Import template. Existing item, validation status and actions are review controls — they are not spreadsheet columns. Every uncommitted row remains editable until you deliberately commit it.</p>
+        <div class="mbw-tablewrap jw-opening-import-wrap"><table class="jw-opening-import-table">
             <thead><tr>
-                <th>Sheet row</th><th>From the sheet</th><th style="min-width:200px">Item</th>
-                <th>Purity</th><th>Unit</th><th>Pieces</th><th>Gross wt</th><th>Rate</th><th>Amount</th><th></th>
+                <th>Source Excel Row</th><th>Stock Type *</th><th>Stock Group *</th><th>Item Code *</th><th>Item Name *</th>
+                <th>Metal *</th><th>Purity Code</th><th>Unit *</th><th>Pieces *</th><th>Gross Weight (GM) *</th><th>Stone Weight (ct)</th><th>Stone Amount</th><th>Diamond Weight (ct)</th><th>Diamond Amount</th><th>Net Weight (auto)</th><th>Making Charge</th>
+                <th>Derived Rate</th><th>Opening Amount *</th><th>Customer Name</th><th>Order Number</th>
+                <th style="min-width:220px">Existing Item / Create</th><th style="min-width:220px">Validation Status</th><th>Actions</th>
             </tr></thead>
             <tbody>
                 <?php foreach ($importRows as $ir): ?>
                     <?php $isCommitted = (string) $ir['status'] === 'committed'; ?>
-                    <tr<?= (string) $ir['status'] === 'error' ? ' style="background:var(--mbw-red-soft,#fdf5ef)"' : '' ?>>
+                    <tr<?= (string) $ir['status'] === 'error' ? ' style="background:var(--mbw-red-soft)"' : '' ?>>
                         <?php if ($isCommitted): ?>
                             <td><?= (int) $ir['source_row_no'] ?></td>
-                            <td><?= e((string) $ir['raw_code']) ?> <?= e((string) $ir['raw_name']) ?></td>
-                            <td><?= e((string) ($ir['item_code'] ?? '')) ?> — <?= e((string) ($ir['item_name'] ?? '')) ?></td>
+                            <td><?= e((string) $ir['stock_kind'] === 'customer_ordered' ? 'Customer Ordered' : 'Showroom') ?></td>
+                            <td><?= e((string) $ir['raw_group']) ?></td>
+                            <td><?= e((string) $ir['proposed_code']) ?></td>
+                            <td><?= e((string) $ir['proposed_name']) ?></td>
+                            <td><?= e((string) ($ir['metal_code'] ?? '')) ?></td>
                             <td><?= e((string) ($ir['purity_code'] ?? '')) ?></td>
                             <td><?= e((string) ($ir['unit_code'] ?? '')) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['qty_pieces'], 3) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['gross_weight'], 4) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) ($ir['stone_weight'] ?? 0), 4) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) ($ir['stone_amount'] ?? 0)) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) ($ir['diamond_weight'] ?? 0), 4) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) ($ir['diamond_amount'] ?? 0)) ?></td>
+                            <td class="is-numeric">Calculated when posted</td>
+                            <td class="is-numeric"><?= $fmt((float) ($ir['making_amount'] ?? 0)) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['rate'], 4) ?></td>
                             <td class="is-numeric"><?= $fmt((float) $ir['amount']) ?></td>
+                            <td><?= e((string) $ir['customer_name']) ?></td>
+                            <td><?= e((string) $ir['order_number']) ?></td>
+                            <td><?= e((string) ($ir['item_code'] ?? '')) ?> — <?= e((string) ($ir['item_name'] ?? '')) ?></td>
                             <td><span class="mbw-pill tone-green">Committed</span></td>
+                            <td>—</td>
                         <?php else: ?>
                         <form method="post">
                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1201,23 +1498,18 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             <input type="hidden" name="import_id" value="<?= (int) $importBatch['id'] ?>">
                             <input type="hidden" name="row_id" value="<?= (int) $ir['id'] ?>">
                             <td><?= (int) $ir['source_row_no'] ?></td>
-                            <td class="frm-optional">
-                                <?= e(trim((string) $ir['raw_code'] . ' ' . (string) $ir['raw_name'])) ?>
-                                <?php if ((string) $ir['raw_purity'] !== '' || (string) $ir['raw_unit'] !== ''): ?>
-                                    <br><small><?= e(trim((string) $ir['raw_purity'] . ' ' . (string) $ir['raw_unit'])) ?></small>
-                                <?php endif; ?>
-                                <?php if ((string) $ir['error_text'] !== ''): ?>
-                                    <br><span class="mbw-pill tone-amber"><?= e((string) $ir['error_text']) ?></span>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <select name="item_id">
-                                    <option value="0">— not matched —</option>
-                                    <?php foreach ($items as $it): ?>
-                                        <option value="<?= (int) $it['id'] ?>" <?= (int) $ir['item_id'] === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name']) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </td>
+                            <td><select name="stock_kind" required>
+                                <option value="">Select</option>
+                                <option value="showroom" <?= (string) $ir['stock_kind'] === 'showroom' ? 'selected' : '' ?>>Showroom Stock</option>
+                                <option value="customer_ordered" <?= (string) $ir['stock_kind'] === 'customer_ordered' ? 'selected' : '' ?>>Customer Ordered Stock</option>
+                            </select></td>
+                            <td><input type="text" name="raw_group" value="<?= e((string) $ir['raw_group']) ?>" list="jw-import-groups" required></td>
+                            <td><input type="text" name="proposed_code" value="<?= e((string) ($ir['proposed_code'] ?: $ir['raw_code'])) ?>" style="width:120px" required></td>
+                            <td><input type="text" name="proposed_name" value="<?= e((string) ($ir['proposed_name'] ?: $ir['raw_name'])) ?>" style="width:180px" required></td>
+                            <td><select name="metal_id" required>
+                                <option value="0">Select metal</option>
+                                <?php foreach ($metals as $m): ?><option value="<?= (int) $m['id'] ?>" <?= (int) $ir['metal_id'] === (int) $m['id'] ? 'selected' : '' ?>><?= e($m['code'] . ' — ' . $m['name']) ?></option><?php endforeach; ?>
+                            </select></td>
                             <td>
                                 <select name="purity_id">
                                     <option value="0">—</option>
@@ -1236,35 +1528,59 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             </td>
                             <td><input type="number" name="qty_pieces" step="0.001" min="0" style="width:80px" value="<?= e((string) $ir['qty_pieces']) ?>"></td>
                             <td><input type="number" name="gross_weight" step="0.0001" min="0" style="width:100px" value="<?= e((string) $ir['gross_weight']) ?>"></td>
+                            <td><input type="number" name="stone_weight" step="0.0001" min="0" style="width:100px" value="<?= e((string) ($ir['stone_weight'] ?? 0)) ?>"></td>
+                            <td><input type="number" name="stone_amount" step="0.01" min="0" style="width:110px" value="<?= e((string) ($ir['stone_amount'] ?? 0)) ?>"></td>
+                            <td><input type="number" name="diamond_weight" step="0.0001" min="0" style="width:100px" value="<?= e((string) ($ir['diamond_weight'] ?? 0)) ?>"></td>
+                            <td><input type="number" name="diamond_amount" step="0.01" min="0" style="width:110px" value="<?= e((string) ($ir['diamond_amount'] ?? 0)) ?>"></td>
+                            <td class="is-numeric">Auto</td>
+                            <td><input type="number" name="making_amount" step="0.01" min="0" style="width:110px" value="<?= e((string) ($ir['making_amount'] ?? 0)) ?>"></td>
                             <td><input type="number" name="rate" step="0.0001" min="0" style="width:110px" value="<?= e((string) $ir['rate']) ?>"></td>
                             <td><input type="number" name="amount" step="0.01" min="0" style="width:120px" value="<?= e((string) $ir['amount']) ?>"></td>
+                            <td><input type="text" name="customer_name" style="width:150px" value="<?= e((string) $ir['customer_name']) ?>"></td>
+                            <td><input type="text" name="order_number" style="width:120px" value="<?= e((string) $ir['order_number']) ?>"></td>
+                            <td>
+                                <select name="item_id">
+                                    <option value="0"><?= (int) ($ir['create_item'] ?? 0) === 1 ? 'Create new item from code' : '— not matched —' ?></option>
+                                    <?php foreach ($items as $it): ?>
+                                        <option value="<?= (int) $it['id'] ?>" <?= (int) $ir['item_id'] === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                            <td>
+                                <?php if ((string) $ir['error_text'] !== ''): ?>
+                                    <span class="mbw-pill tone-amber"><?= e((string) $ir['error_text']) ?></span>
+                                <?php else: ?>
+                                    <span class="mbw-pill tone-green">Ready to commit</span>
+                                <?php endif; ?>
+                            </td>
                             <td style="white-space:nowrap">
-                                <button type="submit" class="button secondary" style="min-height:30px;padding:3px 9px">Save</button>
+                                <button type="submit" class="button secondary jw-import-action"><?= icon('save') ?><span>Save</span></button>
                         </form>
                                 <form method="post" style="display:inline" onsubmit="return confirm('Remove sheet row <?= (int) $ir['source_row_no'] ?> from this import?');">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="delete_import_row">
                                     <input type="hidden" name="import_id" value="<?= (int) $importBatch['id'] ?>">
                                     <input type="hidden" name="row_id" value="<?= (int) $ir['id'] ?>">
-                                    <button type="submit" class="button secondary" style="min-height:30px;padding:3px 9px">Delete</button>
+                                    <button type="submit" class="button secondary jw-import-action jw-import-delete"><?= icon('trash') ?><span>Delete</span></button>
                                 </form>
                             </td>
                         <?php endif; ?>
                     </tr>
                 <?php endforeach; ?>
                 <?php if ($importRows === []): ?>
-                    <tr><td colspan="10" class="frm-optional">Every row in this import has been dealt with.</td></tr>
+                    <tr><td colspan="23" class="frm-optional">Every row in this import has been dealt with.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table></div>
+        <datalist id="jw-import-groups"><?php foreach (jewellery_categories_list($companyId, false) as $category): ?><option value="<?= e((string) $category['name']) ?>"><?php endforeach; ?></datalist>
     </section>
     <?php endif; ?>
     <?php endif; ?>
 
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-collapsible data-draggable>
+    <section id="record-opening-stock" class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head"><h2>Record Opening Stock</h2></div>
-        <form method="post" class="workspace-form-grid">
+        <form id="opening-stock-form" method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_opening">
             <input type="hidden" name="back_view" value="opening">
@@ -1276,27 +1592,124 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </select>
             </label>
             <label>Pieces<input type="number" name="qty_pieces" step="0.001" min="0" value="0"></label>
+            <label>Stock type<select name="stock_kind" required><option value="showroom">Showroom Stock</option><option value="customer_ordered">Customer Ordered Stock</option></select></label>
+            <label>Stock group
+                <select name="stock_group">
+                    <option value="">Select stock group</option>
+                    <?php foreach (jewellery_categories_list($companyId, false) as $category): ?>
+                        <option value="<?= e((string) $category['name']) ?>"><?= e((string) $category['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <label>Gross weight                <input type="number" name="gross_weight" step="0.0001" min="0" value="0"></label>
+            <label>Stone weight (ct)<input type="number" name="stone_carat" step="0.0001" min="0" value="0"></label>
+            <label>Diamond weight (ct)<input type="number" name="diamond_carat" step="0.0001" min="0" value="0"></label>
+            <label>Net weight (gm)<input type="number" id="opening-net-weight" step="0.0001" readonly value="0"></label>
+            <label>Stone amount<input type="number" name="stone_amount" step="0.01" min="0" value="0"></label>
+            <label>Diamond amount<input type="number" name="diamond_amount" step="0.01" min="0" value="0"></label>
+            <label>Making charge<input type="number" name="making_amount" step="0.01" min="0" value="0"></label>
+            <label>Rate<input type="number" name="rate" step="0.0001" min="0" value="0"></label>
             <label>Opening value (<?= e($sym) ?>)<input type="number" name="amount" step="0.01" min="0" value="0"></label>
-            <div style="grid-column:1/-1"><button type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save &amp; Post</button></div>
+            <label>Customer name<input type="text" name="customer_name" maxlength="190"></label>
+            <label>Order number<input type="text" name="order_number" maxlength="120"></label>
+            <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center">
+                <button id="opening-stock-submit" type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save &amp; Post</button>
+                <button id="opening-stock-cancel-edit" type="button" class="button soft" hidden>Cancel edit</button>
+            </div>
         </form>
+        <script>
+        (function () {
+            var form = document.currentScript.previousElementSibling;
+            var gross = form.querySelector('[name="gross_weight"]');
+            var stone = form.querySelector('[name="stone_carat"]');
+            var diamond = form.querySelector('[name="diamond_carat"]');
+            var net = form.querySelector('#opening-net-weight');
+            function updateNet() {
+                var lessInGrams = ((Number(stone.value) || 0) + (Number(diamond.value) || 0)) * 0.2;
+                net.value = Math.max(0, (Number(gross.value) || 0) - lessInGrams).toFixed(4);
+            }
+            [gross, stone, diamond].forEach(function (field) { field.addEventListener('input', updateNet); field.addEventListener('change', updateNet); });
+            updateNet();
+        })();
+        </script>
         <?php if ($items === []): ?>
         <?php else: ?>
         <?php endif; ?>
     </section>
     <?php endif; ?>
 
+    <?php if ($canEdit && $openingRows !== []): ?>
+    <form id="opening-bulk-clear-form" method="post" style="margin-bottom:14px">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="clear_opening_bulk">
+        <input type="hidden" name="back_view" value="opening">
+        <button type="submit" class="button danger" aria-label="Clear selected opening stock" style="display:inline-flex;align-items:center;gap:8px;padding:10px 14px;background:#d9534f !important;border:1px solid #c9302c !important;color:#ffffff !important;font-weight:600;box-shadow:0 1px 0 rgba(0,0,0,0.08) !important;">
+            <?= icon('trash') ?> <span>Clear selected opening stock</span>
+        </button>
+    </form>
+    <?php endif; ?>
+
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Opening Stock — <?= e((string) $fiscalYear['label']) ?> (<?= count($openingRows) ?>)</h2></div>
+        <div class="jw-opening-filter" style="display:flex;flex-wrap:wrap;gap:10px 12px;align-items:end;padding:0 0 14px">
+            <label style="display:grid;gap:5px;min-width:220px;flex:1 1 220px">Search
+                <input type="search" placeholder="Item name or code" aria-label="Search by item or code" data-col="<?= $canEdit ? 1 : 0 ?>">
+            </label>
+            <label style="display:grid;gap:5px;min-width:160px;flex:1 1 160px">Stock group
+                <input type="search" placeholder="All groups" aria-label="Filter by stock group" data-col="<?= $canEdit ? 2 : 1 ?>">
+            </label>
+            <label style="display:grid;gap:5px;min-width:150px;flex:0 1 170px">Stock type
+                <select aria-label="Filter by stock type" data-col="<?= $canEdit ? 3 : 2 ?>"><option value="">All types</option><option value="Showroom">Showroom</option><option value="Customer Ordered">Customer ordered</option></select>
+            </label>
+            <label style="display:grid;gap:5px;min-width:130px;flex:0 1 150px">Purity
+                <input type="search" placeholder="All purities" aria-label="Filter by purity" data-col="<?= $canEdit ? 4 : 3 ?>">
+            </label>
+            <label style="display:grid;gap:5px;min-width:150px;flex:0 1 170px">Status
+                <select aria-label="Filter by posting status" data-col="<?= $canEdit ? 15 : 14 ?>"><option value="">All statuses</option><option value="Posted">Posted</option><option value="Weight only">Weight only</option><option value="Not in stock">Not in stock</option></select>
+            </label>
+            <div style="display:flex;gap:6px;align-items:end">
+                <button type="button" class="button jw-filter-apply">Filter</button>
+                <button type="button" class="button soft jw-filter-clear">Clear</button>
+            </div>
+        </div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Value</th><th>Posted</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
+            <thead>
+                <tr>
+                    <?php if ($canEdit): ?><th style="width:34px"><input type="checkbox" id="opening-select-all" aria-label="Select all opening stock rows"></th><?php endif; ?>
+                    <th>Item</th>
+                    <th>Stock group</th>
+                    <th>Stock type</th>
+                    <th>Purity</th>
+                    <th class="is-numeric">Gross</th>
+                    <th class="is-numeric">Stone (ct)</th>
+                    <th class="is-numeric">Diamond (ct)</th>
+                    <th class="is-numeric">Net weight</th>
+                    <th class="is-numeric">Stone amt</th>
+                    <th class="is-numeric">Diamond amt</th>
+                    <th class="is-numeric">Making</th>
+                    <th class="is-numeric">Fine</th>
+                    <th class="is-numeric">Rate</th>
+                    <th class="is-numeric">Value</th>
+                    <th>Posted</th>
+                    <?php if ($canEdit): ?><th></th><?php endif; ?>
+                </tr>
+            </thead>
             <tbody>
-                <?php if ($openingRows === []): ?><tr><td colspan="<?= $canEdit ? 8 : 7 ?>">No item carries opening stock for this fiscal year.</td></tr><?php endif; ?>
+                <?php if ($openingRows === []): ?><tr><td colspan="<?= $canEdit ? 16 : 15 ?>">No item carries opening stock for this fiscal year.</td></tr><?php endif; ?>
                 <?php foreach ($openingRows as $row): ?>
                     <tr>
+                        <?php if ($canEdit): ?><td><input type="checkbox" class="opening-select-checkbox" value="<?= (int) $row['id'] ?>" aria-label="Select opening stock for <?= e($row['item_code']) ?>"></td><?php endif; ?>
                         <td><?= e($row['item_code']) ?><br><small><?= e($row['item_name']) ?></small></td>
+                        <td><?= e((string) ($row['category'] ?? 'Uncategorised')) ?></td>
+                        <td><span class="mbw-pill <?= (string) ($row['stock_kind'] ?? 'showroom') === 'customer_ordered' ? 'tone-blue' : 'tone-green' ?>"><?= (string) ($row['stock_kind'] ?? 'showroom') === 'customer_ordered' ? 'Customer Ordered' : 'Showroom' ?></span></td>
                         <td><?= e($row['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['stone_carat'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['diamond_carat'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['gross_weight'] - (float) ($row['stone_weight'] ?? 0), 4) ?> <small><?= e($row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['stone_amount'] ?? 0)) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['diamond_amount'] ?? 0)) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['making_amount'] ?? 0)) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['fine_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['rate']) ?></td>
                         <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) $row['amount']) ?></td>
@@ -1310,13 +1723,29 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             <?php endif; ?>
                         </td>
                         <?php if ($canEdit): ?>
-                        <td>
+                        <td style="white-space:nowrap;display:flex;gap:6px;align-items:center">
+                            <a class="button soft" href="#record-opening-stock" title="Add another opening stock item" aria-label="Add opening stock" style="min-height:30px;padding:3px 8px"><?= icon('plus') ?></a>
+                            <button type="button" class="button soft jw-opening-edit" title="Edit opening stock" aria-label="Edit opening stock" style="min-height:30px;padding:3px 8px"
+                                data-item-id="<?= (int) $row['id'] ?>"
+                                data-pieces="<?= e((string) ($row['qty_pieces'] ?? 0)) ?>"
+                                data-stock-kind="<?= e((string) ($row['stock_kind'] ?? 'showroom')) ?>"
+                                data-stock-group="<?= e((string) ($row['category'] ?? '')) ?>"
+                                data-gross="<?= e((string) $row['gross_weight']) ?>"
+                                data-stone-carat="<?= e((string) ($row['stone_carat'] ?? 0)) ?>"
+                                data-diamond-carat="<?= e((string) ($row['diamond_carat'] ?? 0)) ?>"
+                                data-stone-amount="<?= e((string) ($row['stone_amount'] ?? 0)) ?>"
+                                data-diamond-amount="<?= e((string) ($row['diamond_amount'] ?? 0)) ?>"
+                                data-making-amount="<?= e((string) ($row['making_amount'] ?? 0)) ?>"
+                                data-rate="<?= e((string) ($row['rate'] ?? 0)) ?>"
+                                data-amount="<?= e((string) ($row['amount'] ?? 0)) ?>"
+                                data-customer-name="<?= e((string) ($row['customer_name'] ?? '')) ?>"
+                                data-order-number="<?= e((string) ($row['customer_order_no'] ?? '')) ?>"><?= icon('edit') ?></button>
                             <form method="post" data-confirm="Clear this opening stock? Its voucher and metal movement will be removed.">
                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                 <input type="hidden" name="action" value="clear_opening">
                                 <input type="hidden" name="back_view" value="opening">
                                 <input type="hidden" name="item_id" value="<?= (int) $row['id'] ?>">
-                                <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Clear</button>
+                                <button type="submit" class="button soft" title="Delete opening stock" aria-label="Delete opening stock" style="min-height:30px;padding:3px 8px"><?= icon('trash') ?></button>
                             </form>
                         </td>
                         <?php endif; ?>
@@ -1325,6 +1754,165 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </tbody>
         </table></div>
     </section>
+    
+    <script>
+    // Attach per-column filters specifically for the Opening Stock table
+    (function () {
+        function attachOpeningFilters() {
+            var openingSection = Array.from(document.querySelectorAll('.mbw-card-head h2')).
+                map(function (h) { return {h:h, txt: (h.innerText||'').trim()}; }).
+                find(function (o) { return o.txt && o.txt.indexOf('Opening Stock') === 0; });
+            if (!openingSection || !openingSection.h) { return; }
+            var section = openingSection.h.closest('section'); if (!section) { return; }
+            var table = section.querySelector('table'); if (!table) { return; }
+            var filterBar = section.querySelector('.jw-opening-filter');
+            var inputs = Array.from((filterBar || section).querySelectorAll('[data-col]'));
+            if (!inputs.length) { return; }
+            function apply() {
+                var rows = Array.from(table.querySelectorAll('tbody tr'));
+                rows.forEach(function (row) {
+                    var cells = Array.from(row.querySelectorAll('td'));
+                    var show = true;
+                    inputs.forEach(function (inp) {
+                        var col = parseInt(inp.dataset.colIndex || inp.getAttribute('data-col') || inp.dataset.col, 10);
+                        if (Number.isNaN(col)) { return; }
+                        var cell = cells[col];
+                        var text = cell ? cell.innerText.toLowerCase() : '';
+                        if (inp.value && text.indexOf(inp.value.toLowerCase()) === -1) { show = false; }
+                    });
+                    row.style.display = show ? '' : 'none';
+                });
+            }
+            inputs.forEach(function (inp) {
+                if (!inp.dataset.colIndex) {
+                    if (inp.dataset.col) inp.dataset.colIndex = inp.dataset.col;
+                    else if (inp.getAttribute('data-col')) inp.dataset.colIndex = inp.getAttribute('data-col');
+                }
+                inp.addEventListener('input', apply);
+                inp.addEventListener('change', apply);
+            });
+            var clear = section.querySelector('.jw-filter-clear');
+            if (clear) {
+                clear.addEventListener('click', function () {
+                    inputs.forEach(function (inp) { inp.value = ''; });
+                    apply();
+                });
+            }
+            var applyButton = section.querySelector('.jw-filter-apply');
+            if (applyButton) { applyButton.addEventListener('click', apply); }
+            window.jwApplyFilters = apply;
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachOpeningFilters); } else { attachOpeningFilters(); }
+    })();
+    </script>
+
+    <script>
+    // Editing reuses the opening form: saving replaces this item's prior
+    // opening voucher and metal movement, so it never duplicates stock.
+    (function () {
+        function attachOpeningEdit() {
+            var form = document.getElementById('opening-stock-form');
+            if (!form) { return; }
+            var submit = document.getElementById('opening-stock-submit');
+            var cancel = document.getElementById('opening-stock-cancel-edit');
+            var original = new FormData(form);
+            function setValue(name, value) {
+                var input = form.querySelector('[name="' + name + '"]');
+                if (input) { input.value = value == null ? '' : value; }
+            }
+            function updateNet() {
+                ['gross_weight', 'stone_carat', 'diamond_carat'].forEach(function (name) {
+                    var input = form.querySelector('[name="' + name + '"]');
+                    if (input) { input.dispatchEvent(new Event('input', {bubbles:true})); }
+                });
+            }
+            document.querySelectorAll('.jw-opening-edit').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    var data = button.dataset;
+                    setValue('item_id', data.itemId);
+                    setValue('qty_pieces', data.pieces);
+                    setValue('stock_kind', data.stockKind);
+                    setValue('stock_group', data.stockGroup);
+                    setValue('gross_weight', data.gross);
+                    setValue('stone_carat', data.stoneCarat);
+                    setValue('diamond_carat', data.diamondCarat);
+                    setValue('stone_amount', data.stoneAmount);
+                    setValue('diamond_amount', data.diamondAmount);
+                    setValue('making_amount', data.makingAmount);
+                    setValue('rate', data.rate);
+                    setValue('amount', data.amount);
+                    setValue('customer_name', data.customerName);
+                    setValue('order_number', data.orderNumber);
+                    updateNet();
+                    if (submit) { submit.textContent = 'Update & Post'; }
+                    if (cancel) { cancel.hidden = false; }
+                    form.closest('section').scrollIntoView({behavior: 'smooth', block: 'start'});
+                });
+            });
+            if (cancel) {
+                cancel.addEventListener('click', function () {
+                    original.forEach(function (value, name) { setValue(name, value); });
+                    updateNet();
+                    if (submit) { submit.textContent = 'Save & Post'; }
+                    cancel.hidden = true;
+                });
+            }
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachOpeningEdit); } else { attachOpeningEdit(); }
+    })();
+    </script>
+
+    <script>
+    // Robust fallback: ensure the Opening Stock master checkbox always toggles
+    // visible `.opening-select-checkbox` inputs even if other scripts run.
+    (function () {
+        function attachMaster() {
+            var master = document.getElementById('opening-select-all');
+            if (!master) { return; }
+            // avoid double-binding
+            if (master.__jw_master_attached) { return; }
+            master.__jw_master_attached = true;
+            master.addEventListener('change', function () {
+                var table = (master.closest('table')) || document.querySelector('table');
+                var boxes = Array.from((table || document).querySelectorAll('.opening-select-checkbox'))
+                    .filter(function (cb) { var tr = cb.closest('tr'); return !tr || tr.style.display !== 'none'; });
+                boxes.forEach(function (cb) { cb.checked = master.checked; cb.dispatchEvent(new Event('change', { bubbles: true })); });
+            });
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachMaster); } else { attachMaster(); }
+    })();
+    </script>
+
+    <script>
+    // Ensure the form includes item_ids[] for selected rows before submission
+    (function () {
+        function attachSubmitFix() {
+            var form = document.getElementById('opening-bulk-clear-form');
+            if (!form) return;
+            if (form.__jw_submit_fixed) return; form.__jw_submit_fixed = true;
+            form.addEventListener('submit', function (event) {
+                // If hidden inputs already present, do nothing.
+                if (form.querySelectorAll('input[name="item_ids[]"]').length > 0) { return; }
+                var openingSection = Array.from(document.querySelectorAll('.mbw-card-head h2')).
+                    map(function (h) { return {h:h, txt: (h.innerText||'').trim()}; }).
+                    find(function (o) { return o.txt && o.txt.indexOf('Opening Stock') === 0; });
+                var table = openingSection && openingSection.h ? openingSection.h.closest('section').querySelector('table') : document.querySelector('table');
+                var checkboxes = table ? Array.from(table.querySelectorAll('.opening-select-checkbox')) : Array.from(document.querySelectorAll('.opening-select-checkbox'));
+                var selected = checkboxes.filter(function (cb) { var tr = cb.closest('tr'); if (tr && tr.style.display === 'none') return false; return cb.checked; }).map(function (cb) { return cb.value; });
+                if (selected.length === 0) {
+                    alert('Select at least one opening stock item to clear.');
+                    event.preventDefault();
+                    return;
+                }
+                selected.forEach(function (id) {
+                    var input = document.createElement('input'); input.type = 'hidden'; input.name = 'item_ids[]'; input.value = id; form.appendChild(input);
+                });
+            }, true);
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachSubmitFix); } else { attachSubmitFix(); }
+    })();
+    </script>
+
 <?php elseif ($view === 'stock'): ?>
     <?php
     $holderLabels = ['stock' => 'Own stock', 'karigar' => 'With karigar', 'refinery' => 'With refinery', 'customer' => 'With customer'];
@@ -1373,15 +1961,21 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Stock by Item (<?= count($stockRows) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Item</th><th>Purity</th><th class="is-numeric">Pieces</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine (total)</th><th class="is-numeric">Fine (own)</th><th class="is-numeric">With others</th><th class="is-numeric">Value</th><th class="is-numeric">Avg cost / fine</th><th></th></tr></thead>
+            <thead><tr><th>Item</th><th>Purity</th><th class="is-numeric">Pieces</th><th class="is-numeric">Gross</th><th class="is-numeric">Stone (ct)</th><th class="is-numeric">Diamond (ct)</th><th class="is-numeric">Net</th><th class="is-numeric">Stone amt</th><th class="is-numeric">Diamond amt</th><th class="is-numeric">Making</th><th class="is-numeric">Fine (total)</th><th class="is-numeric">Fine (own)</th><th class="is-numeric">With others</th><th class="is-numeric">Value</th><th class="is-numeric">Avg cost / fine</th><th></th></tr></thead>
             <tbody>
-                <?php if ($stockRows === []): ?><tr><td colspan="10">No item holds stock yet.</td></tr><?php endif; ?>
+                <?php if ($stockRows === []): ?><tr><td colspan="16">No item holds stock yet.</td></tr><?php endif; ?>
                 <?php foreach ($stockRows as $row): ?>
                     <tr>
                         <td><?= e($row['code']) ?><br><small><?= e($row['name']) ?></small></td>
                         <td><?= e($row['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt($row['balance']['qty_pieces'], 3) ?></td>
                         <td class="is-numeric"><?= $fmt($row['balance']['gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['components']['stone_carat'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['components']['diamond_carat'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['balance']['gross_weight'] - (float) ($row['components']['stone_weight'] ?? 0), 4) ?> <small><?= e($row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['components']['stone_amount'] ?? 0)) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['components']['diamond_amount'] ?? 0)) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) ($row['components']['making_amount'] ?? 0)) ?></td>
                         <td class="is-numeric"><?= $fmt($row['balance']['fine_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $fmt($row['own_stock']['fine_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $row['with_others_fine'] > 0 ? '<span class="mbw-pill tone-amber">' . $fmt($row['with_others_fine'], 4) . '</span>' : '—' ?></td>

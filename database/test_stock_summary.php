@@ -315,6 +315,66 @@ $recRun2 = sr_reconcile_stock_to_gl($cid, $adminUid, true);
 ok($recRun2['openings']['posted'] === 0 && $recRun2['movements']['posted'] === 0 && $recRun2['production']['posted'] === 0 && $recRun2['reconciled'] === true,
     'Second reconcile run posts nothing and stays reconciled (idempotent)');
 
+echo "\nDetailed reconciliation diagnosis: cause, impact and recommendation\n";
+// A direct inventory-ledger opening has no item behind it: GL-only debit 123.
+$diagDirectVoucher = (int) create_voucher_with_entries([
+    'company_id' => $cid, 'fiscal_year_id' => (int) $fy['id'],
+    'voucher_no' => 'STK-DIAG-DIRECT', 'voucher_type' => 'journal',
+    'voucher_date' => '2026-08-20', 'source_type' => 'ledger_opening',
+    'source_id' => $lINV, 'total_amount' => 123, 'status' => 'posted',
+    'posted_by' => $adminUid,
+], [
+    ['ledger_id' => $lINV, 'entry_type' => 'debit', 'amount' => 123],
+    ['ledger_id' => $lOEQ2, 'entry_type' => 'credit', 'amount' => 123],
+]);
+// A legacy outward row with no earlier layer: the subledger can cost none of
+// it, while its already-posted voucher credits inventory by 90.
+$diagItem = $mkItem('STK-DIAG-NEG', 'stock', 'fifo', 0, 0, $whA);
+$diagTxn = $txn($diagItem, 'sale', '2026-08-21', 0, 1, 90, $whA);
+$diagMovementVoucher = (int) create_voucher_with_entries([
+    'company_id' => $cid, 'fiscal_year_id' => (int) $fy['id'],
+    'voucher_no' => 'STK-DIAG-MOVE', 'voucher_type' => 'journal',
+    'voucher_date' => '2026-08-21', 'source_type' => 'inventory_movement',
+    'source_id' => $diagTxn, 'total_amount' => 90, 'status' => 'posted',
+    'posted_by' => $adminUid,
+], [
+    ['ledger_id' => $lCOGS, 'entry_type' => 'debit', 'amount' => 90],
+    ['ledger_id' => $lINV, 'entry_type' => 'credit', 'amount' => 90],
+]);
+db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id')
+    ->execute(['vid' => $diagMovementVoucher, 'id' => $diagTxn]);
+
+$diagnosis = sr_inventory_gl_diagnostics($cid, '2027-07-16');
+$diagnosisTypes = array_column($diagnosis['causes'], 'type');
+ok(in_array('direct_ledger_opening', $diagnosisTypes, true),
+    'Automatic diagnosis names the direct item-unbacked ledger opening');
+ok(in_array('cost_layer_shortage', $diagnosisTypes, true),
+    'Automatic diagnosis names the outward movement whose cost layer was short');
+ok(near((float) $diagnosis['explained'], (float) $diagnosis['difference']),
+    'Cause impacts explain the complete headline difference (' . number_format((float) $diagnosis['difference'], 2) . ')');
+$allHaveRecommendations = $diagnosis['causes'] !== [];
+foreach ($diagnosis['causes'] as $diagnosisCause) {
+    if (trim((string) ($diagnosisCause['recommendation'] ?? '')) === '') {
+        $allHaveRecommendations = false;
+        break;
+    }
+}
+ok($allHaveRecommendations, 'Every diagnosed cause carries a controlled correction recommendation');
+$diagnosticReport = rc_generate('inventory-gl-reconciliation', $cid, '2026-07-17', '2027-07-16', ['currency' => 'Rs.']);
+$diagnosticText = '';
+foreach ($diagnosticReport['rows'] as $diagnosticRow) {
+    $diagnosticText .= ' ' . implode(' ', array_map('strval', rc_row_cells($diagnosticRow)));
+}
+ok(str_contains($diagnosticText, 'AUTOMATIC DIAGNOSIS')
+    && str_contains($diagnosticText, 'Recommendation:'),
+    'Reports Center prints detailed cause rows and recommendations');
+
+// Leave the remaining stock-summary scenarios on their reconciled baseline.
+db()->exec("DELETE FROM vouchers WHERE id IN ($diagDirectVoucher, $diagMovementVoucher)");
+db()->exec("DELETE FROM inventory_transactions WHERE id=$diagTxn");
+db()->exec("DELETE FROM inventory_cost_layers WHERE item_id=$diagItem AND company_id=$cid");
+db()->exec("DELETE FROM inventory_items WHERE id=$diagItem AND company_id=$cid");
+
 echo "\nSample-data purge (report derives ONLY from real module data)\n";
 $itSample = $mkItem('SMP-DEMO', 'stock', 'fifo', 0, 0, $whA);
 $txn($itSample, 'purchase', '2026-08-02', 6, 0, 40, $whA);

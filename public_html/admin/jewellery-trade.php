@@ -347,6 +347,22 @@ $onHand = [];
 foreach ($items as $itemRow) {
     $onHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
 }
+$componentStmt = db()->prepare("SELECT item_id,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_weight ELSE -stone_weight END), 0) AS stone_weight,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_carat ELSE -stone_carat END), 0) AS stone_carat,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_carat ELSE -diamond_carat END), 0) AS diamond_carat,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_amount ELSE -stone_amount END), 0) AS stone_amount,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_amount ELSE -diamond_amount END), 0) AS diamond_amount
+    FROM jewellery_stock_txns
+    WHERE company_id = :cid AND holder_type = 'stock' AND txn_date <= :asof
+    GROUP BY item_id");
+$componentStmt->execute(['cid' => $companyId, 'asof' => date('Y-m-d')]);
+foreach ($componentStmt->fetchAll(PDO::FETCH_ASSOC) as $componentRow) {
+    $itemId = (int) $componentRow['item_id'];
+    if (isset($onHand[$itemId])) {
+        $onHand[$itemId] += $componentRow;
+    }
+}
 
 $partyStmt = db()->prepare('SELECT id, code, name, party_type FROM accounting_parties WHERE company_id = :cid AND status = \'active\' ORDER BY name ASC');
 $partyStmt->execute(['cid' => $companyId]);
@@ -412,6 +428,7 @@ $lineTemplates = in_array($view, ['purchases', 'sales'], true)
 $saleParty = (int) ($_GET['for_party'] ?? ($editDoc['party_id'] ?? 0));
 $openOrders = [];
 $orderPrefill = null;
+$sellingOrderIds = [];
 $openAdvances = [];
 $editAdvanceAllocs = [];
 if ($view === 'sales') {
@@ -456,6 +473,41 @@ if ($view === 'sales') {
             }
         }
     }
+    if ($editDoc === null && $editLines === [] && (int) ($_GET['stock_unit'] ?? 0) > 0) {
+        $directUnit = jewellery_trace_unit($companyId, (int) $_GET['stock_unit']);
+        if ($directUnit && (string) $directUnit['stock_kind'] === 'showroom'
+            && (string) $directUnit['status'] === 'in_stock') {
+            $editLines = [[
+                'stock_unit_id' => (int) $directUnit['id'], 'item_id' => (int) $directUnit['item_id'],
+                'purity_id' => (int) $directUnit['purity_id'], 'unit_id' => (int) $directUnit['unit_id'],
+                'qty_pieces' => (float) $directUnit['qty_pieces'], 'gross_weight' => (float) $directUnit['gross_weight'],
+                'stone_weight' => (float) $directUnit['stone_weight'],
+            ]];
+        }
+    }
+}
+
+$saleStockUnits = [];
+if ($view === 'sales') {
+    $byTrace = [];
+    foreach (jewellery_ready_to_sale_options($companyId) as $unit) {
+        $byTrace[(int) $unit['id']] = $unit;
+    }
+    foreach ($sellingOrderIds as $sellingOrderId) {
+        foreach (jewellery_ready_to_sale_options($companyId, $sellingOrderId) as $unit) {
+            $byTrace[(int) $unit['id']] = $unit;
+        }
+    }
+    foreach ($editLines as $editLine) {
+        $traceId = (int) ($editLine['stock_unit_id'] ?? 0);
+        if ($traceId > 0 && !isset($byTrace[$traceId])) {
+            $traceUnit = jewellery_trace_unit($companyId, $traceId);
+            if ($traceUnit) {
+                $byTrace[$traceId] = $traceUnit;
+            }
+        }
+    }
+    $saleStockUnits = array_values($byTrace);
 }
 
 // Posting is confirmed with the mapping ON THE SCREEN. The Post button leads
@@ -623,11 +675,13 @@ $renderGridToolbar = static function (string $docType) use ($lineTemplates): str
     return (string) ob_get_clean();
 };
 
-$renderLineRows = static function (string $prefix, array $existing, int $slots, string $legend, string $headActions = '') use ($items, $purities, $units, $baseUnit, $fmt, $onHand): void {
+$renderLineRows = static function (string $prefix, array $existing, int $slots, string $legend, string $headActions = '') use ($items, $purities, $units, $baseUnit, $fmt, $onHand, $saleStockUnits, $view): void {
     jw_render_line_grid($prefix, $existing, $slots, $legend, [
         'items' => $items, 'purities' => $purities, 'units' => $units,
         'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $onHand,
         'head_actions' => $headActions,
+        'stock_units' => $view === 'sales' && $prefix === 'l' ? $saleStockUnits : [],
+        'autofill_stock' => $view === 'sales' && $prefix === 'l',
     ]);
 };
 ?>
@@ -1253,16 +1307,16 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 <?php endif; ?>
 
 <script>
-// Picking a customer reloads the sale form with their open orders listed, so
-// somebody collecting a finished piece is recognised at the counter rather than
-// having to be asked which order it was.
+// Picking a customer must not navigate away from the sale currently being
+// prepared. A redirect to `for_party` re-rendered the order panel and moved the
+// summary card below the form, losing the counter user's current context. The
+// selected party is already posted with the sale; order collection remains an
+// explicit action through the order links instead.
 document.addEventListener("change", function (event) {
     var select = event.target.closest("#jw-sale-party");
     if (!select) { return; }
-    var base = select.getAttribute("data-orders-url") || "";
     var party = parseInt(select.value, 10) || 0;
-    if (!base) { return; }
-    window.location.href = base + (party > 0 ? "&for_party=" + party : "");
+    select.closest("form").setAttribute("data-selected-party", String(party));
 });
 
 // The advance picker: the running total of what the user has chosen to apply,

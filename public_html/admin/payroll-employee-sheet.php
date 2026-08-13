@@ -4,8 +4,9 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/payroll_engine.php';
 
-require_admin();
+require_staff_admin_or_client_books();
 require_company_context();
+require_permission('payroll', 'view');
 accounting_module_repair_database();
 
 $company = current_company();

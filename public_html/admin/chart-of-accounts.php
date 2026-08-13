@@ -24,10 +24,6 @@ foreach ($groups as $g) {
     $groupsById[(int) $g['id']] = $g;
 }
 
-$ledgersStmt = db()->prepare('SELECT * FROM ledgers WHERE company_id = :cid ORDER BY code ASC');
-$ledgersStmt->execute(['cid' => $companyId]);
-$ledgers = $ledgersStmt->fetchAll();
-
 // ---------------------------------------------------------------------------
 // Export COA as CSV.
 // ---------------------------------------------------------------------------
@@ -53,13 +49,52 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     foreach ($groups as $g) {
         fputcsv($out, ['Group', $g['code'], $g['name'], $g['master_key'], ledger_master_nature((string) $g['master_key']) ?? '', '', '', '', ((int) $g['is_active'] === 1 ? 'Active' : 'Inactive')]);
     }
-    foreach ($ledgers as $l) {
+    // Stream the potentially large ledger set instead of retaining it in PHP
+    // memory. CSV responses are consumed one row at a time by the browser.
+    $exportLedgers = db()->prepare('SELECT * FROM ledgers WHERE company_id = :cid ORDER BY code ASC');
+    $exportLedgers->execute(['cid' => $companyId]);
+    while ($l = $exportLedgers->fetch(PDO::FETCH_ASSOC)) {
         $g = $groupsById[(int) ($l['group_id'] ?? 0)] ?? null;
         fputcsv($out, ['Ledger', $l['code'], $l['name'], $g['master_key'] ?? '', $l['type'], $g['code'] ?? '', '', '', ucfirst((string) $l['status'])]);
     }
     fclose($out);
     exit;
 }
+
+// Keep the interactive hierarchy bounded. Large charts previously loaded
+// every ledger, even when the user only needed one account. Search and group
+// filters make the bounded view useful without restoring that memory spike.
+$coaSearch = trim((string) ($_GET['q'] ?? ''));
+$coaGroupId = max(0, (int) ($_GET['group_id'] ?? 0));
+$coaWhere = ['company_id = :cid'];
+$coaBindings = ['cid' => $companyId];
+if ($coaSearch !== '') {
+    // Native PDO prepares cannot reuse one named placeholder twice.
+    $coaWhere[] = '(code LIKE :coa_code_search OR name LIKE :coa_name_search)';
+    $coaBindings['coa_code_search'] = '%' . $coaSearch . '%';
+    $coaBindings['coa_name_search'] = '%' . $coaSearch . '%';
+}
+if ($coaGroupId > 0) {
+    $coaWhere[] = 'group_id = :coa_group_id';
+    $coaBindings['coa_group_id'] = $coaGroupId;
+}
+$coaWhereSql = implode(' AND ', $coaWhere);
+$ledgerStatsStmt = db()->prepare("SELECT COUNT(*) AS total_count,
+        COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0) AS active_count
+    FROM ledgers WHERE company_id = :cid");
+$ledgerStatsStmt->execute(['cid' => $companyId]);
+$ledgerStats = $ledgerStatsStmt->fetch(PDO::FETCH_ASSOC) ?: ['total_count' => 0, 'active_count' => 0];
+$totalLedgers = (int) $ledgerStats['total_count'];
+$activeLedgers = (int) $ledgerStats['active_count'];
+$activePct = $totalLedgers > 0 ? (int) round($activeLedgers / $totalLedgers * 100) : 0;
+
+$filteredCountStmt = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE ' . $coaWhereSql);
+$filteredCountStmt->execute($coaBindings);
+$filteredLedgerCount = (int) $filteredCountStmt->fetchColumn();
+$ledgerViewLimit = 500;
+$ledgersStmt = db()->prepare('SELECT * FROM ledgers WHERE ' . $coaWhereSql . ' ORDER BY code ASC LIMIT ' . $ledgerViewLimit);
+$ledgersStmt->execute($coaBindings);
+$ledgers = $ledgersStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // ---------------------------------------------------------------------------
 // The blank template, in either format.
@@ -187,9 +222,6 @@ if (table_exists('company_ledger_mappings')) {
     $mapStmt->execute(['cid' => $companyId]);
     $mappingsCount = (int) $mapStmt->fetchColumn();
 }
-$activeLedgers = count(array_filter($ledgers, static fn (array $l): bool => (string) $l['status'] === 'active'));
-$activePct = count($ledgers) > 0 ? (int) round($activeLedgers / count($ledgers) * 100) : 0;
-
 $pageTitle = 'Chart of Accounts';
 $pageSubtitle = 'Manage masters, groups, ledgers, opening balances, and posting structure.';
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
@@ -206,6 +238,27 @@ $statusPill = static fn (string $status): string => $status === 'active'
     <a class="button" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('layers') ?>＋ Create Group</a>
     <a class="button" href="<?= e(url('admin/chart-ledgers.php')) ?>" id="create-ledger"><?= icon('journal') ?>＋ Create Ledger</a>
 </div>
+
+<form method="get" class="workspace-form-grid" style="margin:14px 0">
+    <label>Find ledger
+        <input type="search" name="q" value="<?= e($coaSearch) ?>" placeholder="Code or account name">
+    </label>
+    <label>Group
+        <select name="group_id">
+            <option value="0">All groups</option>
+            <?php foreach ($groups as $group): ?>
+                <option value="<?= (int) $group['id'] ?>"<?= $coaGroupId === (int) $group['id'] ? ' selected' : '' ?>><?= e((string) $group['name']) ?></option>
+            <?php endforeach; ?>
+        </select>
+    </label>
+    <div style="align-self:end;display:flex;gap:10px">
+        <button class="button" type="submit"><?= icon('search') ?>Filter</button>
+        <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>">Clear</a>
+    </div>
+</form>
+<?php if ($filteredLedgerCount > count($ledgers)): ?>
+    <div class="notice">Showing the first <?= count($ledgers) ?> of <?= $filteredLedgerCount ?> matching ledgers. Narrow the search or group to locate another account.</div>
+<?php endif; ?>
 
 <?php
 // The verdict on each row, said in the words the preview uses. "Create" rather
@@ -376,7 +429,7 @@ $coaRowPill = static function (string $status): string {
 <section class="mbw-kpi-grid" aria-label="Chart of accounts overview">
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Masters</span><div class="mbw-kpi-value"><?= count($natureOrder) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">System-defined</span></span></div><span class="mbw-chip tone-blue"><?= icon('layers') ?></span></article>
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Groups</span><div class="mbw-kpi-value"><?= count($groups) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Active</span></span></div><span class="mbw-chip tone-green"><?= icon('tree') ?></span></article>
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Ledgers</span><div class="mbw-kpi-value"><?= count($ledgers) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Posting accounts</span></span></div><span class="mbw-chip tone-purple"><?= icon('journal') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Ledgers</span><div class="mbw-kpi-value"><?= $totalLedgers ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Posting accounts</span></span></div><span class="mbw-chip tone-purple"><?= icon('journal') ?></span></article>
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Posting Mappings</span><div class="mbw-kpi-value"><?= $mappingsCount ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Configured</span></span></div><span class="mbw-chip tone-amber"><?= icon('settings') ?></span></article>
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Active Ledgers</span><div class="mbw-kpi-value"><?= $activeLedgers ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= $activePct ?>% of total</span></span></div><span class="mbw-chip tone-teal"><?= icon('tasks') ?></span></article>
 </section>

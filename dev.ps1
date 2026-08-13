@@ -8,11 +8,13 @@
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = "C:\M.Bista New"
-$XamppRoot = "C:\xampp"
-$Php = "$XamppRoot\php\php.exe"
-$Mysql = "$XamppRoot\mysql\bin\mysql.exe"
-$MysqlAdmin = "$XamppRoot\mysql\bin\mysqladmin.exe"
-$XamppStart = "$XamppRoot\xampp_start.exe"
+$LaragonRoot = "C:\laragon"
+$PhpRoot = "$LaragonRoot\bin\php\php-8.3.30-Win32-vs16-x64"
+$MysqlRoot = "$LaragonRoot\bin\mysql\mariadb-10.11.18-winx64"
+$Php = "$PhpRoot\php.exe"
+$Mysql = "$MysqlRoot\bin\mysql.exe"
+$MysqlAdmin = "$MysqlRoot\bin\mysqladmin.exe"
+$ServerStart = "$ProjectRoot\.runtime\start-servers.ps1"
 $AppUrl = "https://127.0.0.1:8095"
 $MainDatabase = "mbista_altiora_complete_hosting"
 $TestDatabase = "mbista_schema_smoke_test"
@@ -42,14 +44,14 @@ function Initialize-DevelopmentEnvironment {
     Write-Section "DEVELOPMENT ENVIRONMENT"
 
     if (-not (Test-Path $Php)) {
-        throw "XAMPP PHP was not found at $Php"
+        throw "Laragon PHP was not found at $Php"
     }
 
     if (-not (Test-Path $Mysql)) {
-        throw "XAMPP MySQL was not found at $Mysql"
+        throw "Laragon MariaDB was not found at $Mysql"
     }
 
-    $env:Path = "$XamppRoot\php;$XamppRoot\mysql\bin;$env:Path"
+    $env:Path = "$PhpRoot;$MysqlRoot\bin;$env:Path"
     Set-Alias -Name php -Value $Php -Scope Script
 
     Write-Host "Project: $ProjectRoot"
@@ -62,7 +64,7 @@ function Initialize-DevelopmentEnvironment {
     $drivers = & $Php -r "echo implode(',', PDO::getAvailableDrivers());"
 
     if ($drivers -notmatch "(^|,)mysql(,|$)") {
-        throw "PDO MySQL is not available in XAMPP PHP."
+        throw "PDO MySQL is not available in Laragon PHP."
     }
 
     Write-Host "[PASS] PDO MySQL driver available" -ForegroundColor Green
@@ -85,9 +87,9 @@ function Initialize-DevelopmentEnvironment {
         -ErrorAction SilentlyContinue
 
     if (-not $mysqlRunning -or -not $apacheRunning) {
-        if (Test-Path $XamppStart) {
-            Write-Host "Starting XAMPP services..." -ForegroundColor Yellow
-            Start-Process -FilePath $XamppStart
+        if (Test-Path $ServerStart) {
+            Write-Host "Starting Laragon services..." -ForegroundColor Yellow
+            & $ServerStart
             Start-Sleep -Seconds 6
         }
     }
@@ -95,7 +97,7 @@ function Initialize-DevelopmentEnvironment {
     $ping = & $MysqlAdmin -u root ping 2>&1
 
     if ($ping -notmatch "mysqld is alive") {
-        throw "XAMPP MySQL is not running."
+        throw "Laragon MariaDB is not running."
     }
 
     Write-Host "[PASS] MySQL is running" -ForegroundColor Green

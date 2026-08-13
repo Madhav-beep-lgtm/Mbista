@@ -108,7 +108,7 @@ When adding new analytics cards:
 Run these checks after dashboard changes:
 
 ```powershell
-& "c:/xampp/php/php.exe" -l "c:/M.Bista New/public_html/admin/index.php"
+& "C:/laragon/bin/php/php-8.3.30-Win32-vs16-x64/php.exe" -l "C:/M.Bista New/public_html/admin/index.php"
 ```
 
 Use editor diagnostics for CSS:

@@ -101,11 +101,13 @@ CREATE TABLE IF NOT EXISTS `activity_logs` (
   `action` VARCHAR(80) NOT NULL,
   `details` TEXT DEFAULT NULL,
   `actor_id` INT UNSIGNED DEFAULT NULL,
+  `company_id` INT UNSIGNED DEFAULT NULL,
   `ip_address` VARCHAR(60) DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_activity_entity` (`entity_type`, `entity_id`, `created_at`),
   KEY `idx_activity_actor` (`actor_id`),
+  KEY `idx_activity_company_created` (`company_id`, `created_at`),
   CONSTRAINT `fk_activity_actor` FOREIGN KEY (`actor_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

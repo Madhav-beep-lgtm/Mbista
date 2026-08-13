@@ -40,7 +40,7 @@ require_once __DIR__ . '/jewellery_engine.php';
 // screen that was supposed to show it back had nothing to read.
 const JW_ITEM_SELECT = 'i.id, i.company_id, i.sku AS code, i.name, i.category, i.status, i.notes,
         i.hs_code, i.unit AS unit_label, i.ledger_id, i.opening_qty, i.opening_amount,
-        j.jewellery_type AS item_type, j.metal_id, j.purity_id, j.unit_id, j.track_mode,
+        j.jewellery_type AS item_type, j.metal_id, j.purity_id, j.unit_id, j.track_mode, j.stock_kind,
         j.gross_weight, j.stone_weight, j.net_weight, j.wastage_pct,
         j.making_charge_basis, j.making_charge_rate, j.stone_value,
         j.vat_applicable, j.vat_base, j.hallmark, j.design_no, j.reorder_weight';
@@ -313,6 +313,8 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
         'unit_id' => $unitId,
         'jewellery_type' => $jewelleryType,
         'track_mode' => (string) ($input['track_mode'] ?? '') === 'piece' ? 'piece' : 'weight',
+        'stock_kind' => (string) ($input['stock_kind'] ?? ($existingItem['stock_kind'] ?? 'showroom')) === 'customer_ordered'
+            ? 'customer_ordered' : 'showroom',
         'gross_weight' => $gross,
         'stone_weight' => $stone,
         'net_weight' => $net,
@@ -354,7 +356,7 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
                 WHERE id = :id AND company_id = :cid')
                 ->execute($shared + ['id' => $itemId]);
             db()->prepare('UPDATE jewellery_item_profiles SET metal_id = :metal_id, purity_id = :purity_id,
-                    unit_id = :unit_id, jewellery_type = :jewellery_type, track_mode = :track_mode,
+                    unit_id = :unit_id, jewellery_type = :jewellery_type, track_mode = :track_mode, stock_kind = :stock_kind,
                     gross_weight = :gross_weight, stone_weight = :stone_weight, net_weight = :net_weight,
                     wastage_pct = :wastage_pct, making_charge_basis = :making_charge_basis,
                     making_charge_rate = :making_charge_rate, stone_value = :stone_value,
@@ -368,10 +370,10 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
                 ->execute($shared);
             $itemId = (int) db()->lastInsertId();
             db()->prepare('INSERT INTO jewellery_item_profiles (inventory_item_id, company_id, metal_id, purity_id, unit_id,
-                    jewellery_type, track_mode, gross_weight, stone_weight, net_weight, wastage_pct,
+                    jewellery_type, track_mode, stock_kind, gross_weight, stone_weight, net_weight, wastage_pct,
                     making_charge_basis, making_charge_rate, stone_value, vat_applicable, vat_base,
                     hallmark, design_no, reorder_weight)
-                VALUES (:id, :cid, :metal_id, :purity_id, :unit_id, :jewellery_type, :track_mode, :gross_weight,
+                VALUES (:id, :cid, :metal_id, :purity_id, :unit_id, :jewellery_type, :track_mode, :stock_kind, :gross_weight,
                     :stone_weight, :net_weight, :wastage_pct, :making_charge_basis, :making_charge_rate,
                     :stone_value, :vat_applicable, :vat_base, :hallmark, :design_no, :reorder_weight)')
                 ->execute($profile + ['id' => $itemId, 'cid' => $companyId]);
@@ -641,6 +643,247 @@ function jw_stock_txn_types(): array
 }
 
 /**
+ * True once migration 109 has made the shared inventory movement ledger able
+ * to identify the Jewellery movement it mirrors.
+ *
+ * Jewellery stock remains the canonical metal/purity/holder ledger. The core
+ * row exists so Stock Summary, stock valuation, warehouse stock and the other
+ * generic inventory reports see the same own-stock movement without guessing
+ * from a voucher or reference number.
+ */
+function jw_core_inventory_sync_ready(): bool
+{
+    return table_exists('inventory_transactions')
+        && table_exists('jewellery_stock_txns')
+        && column_exists('inventory_transactions', 'jewellery_stock_txn_id')
+        && column_exists('jewellery_stock_txns', 'gross_grams');
+}
+
+/** Map the richer Jewellery vocabulary onto the core inventory vocabulary. */
+function jw_core_inventory_transaction_type(string $type): string
+{
+    return match ($type) {
+        'purchase' => 'purchase',
+        'purchase_return' => 'purchase_return',
+        'sale' => 'sale',
+        'sales_return' => 'sales_return',
+        'issue_karigar', 'issue_refinery' => 'consume',
+        'receive_karigar', 'receive_refinery' => 'produce',
+        'wastage' => 'write_off',
+        default => 'adjustment',
+    };
+}
+
+/**
+ * Mirror one own-stock Jewellery movement into inventory_transactions.
+ *
+ * Holder rows for a kaligad/refinery/customer are deliberately excluded: they
+ * describe where company-owned metal sits, while the core inventory ledger is
+ * the quantity on the company's own shelf. Opening is excluded too because it
+ * already lives on inventory_items.opening_qty; copying it would count it
+ * twice in every core report.
+ *
+ * @return int the linked core movement id, or zero when no mirror is required
+ */
+function jw_sync_core_inventory_txn(int $companyId, int $jewelleryTxnId): int
+{
+    if ($companyId <= 0 || $jewelleryTxnId <= 0 || !jw_core_inventory_sync_ready()) {
+        return 0;
+    }
+
+    $stmt = db()->prepare('SELECT t.*, i.default_warehouse_id, i.valuation_method,
+            ju.grams AS item_unit_grams, tu.grams AS txn_unit_grams
+        FROM jewellery_stock_txns t
+        INNER JOIN inventory_items i ON i.id = t.item_id AND i.company_id = t.company_id
+        INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id AND jp.company_id = i.company_id
+        INNER JOIN jewellery_units ju ON ju.id = jp.unit_id AND ju.company_id = t.company_id
+        INNER JOIN jewellery_units tu ON tu.id = t.unit_id AND tu.company_id = t.company_id
+        WHERE t.id = :id AND t.company_id = :cid
+        LIMIT 1');
+    $stmt->execute(['id' => $jewelleryTxnId, 'cid' => $companyId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return 0;
+    }
+
+    $existingStmt = db()->prepare('SELECT id FROM inventory_transactions
+        WHERE company_id = :cid AND jewellery_stock_txn_id = :jid LIMIT 1');
+    $existingStmt->execute(['cid' => $companyId, 'jid' => $jewelleryTxnId]);
+    $existingId = (int) ($existingStmt->fetchColumn() ?: 0);
+
+    if ((string) $row['holder_type'] !== 'stock' || (string) $row['txn_type'] === 'opening') {
+        if ($existingId > 0) {
+            db()->prepare('DELETE FROM inventory_transactions WHERE id = :id AND company_id = :cid')
+                ->execute(['id' => $existingId, 'cid' => $companyId]);
+            inv_rebuild_item($companyId, (int) $row['item_id']);
+        }
+        return 0;
+    }
+
+    $itemUnitGrams = (float) ($row['item_unit_grams'] ?? 0);
+    if ($itemUnitGrams <= 0) {
+        $itemUnitGrams = 1.0;
+    }
+    $grossGrams = (float) ($row['gross_grams'] ?? 0);
+    if ($grossGrams <= 0 && (float) $row['gross_weight'] > 0) {
+        $grossGrams = (float) $row['gross_weight'] * max(0.000001, (float) ($row['txn_unit_grams'] ?? 1));
+    }
+    $quantity = round($grossGrams / $itemUnitGrams, 3);
+    if ($quantity <= 0) {
+        $quantity = round((float) ($row['qty_pieces'] ?? 0), 3);
+    }
+    if ($quantity <= 0) {
+        if ($existingId > 0) {
+            db()->prepare('DELETE FROM inventory_transactions WHERE id = :id AND company_id = :cid')
+                ->execute(['id' => $existingId, 'cid' => $companyId]);
+            inv_rebuild_item($companyId, (int) $row['item_id']);
+        }
+        return 0;
+    }
+
+    $direction = (string) $row['direction'];
+    $qtyIn = $direction === 'in' ? $quantity : 0.0;
+    $qtyOut = $direction === 'out' ? $quantity : 0.0;
+    $amount = round((float) ($row['amount'] ?? 0), 2);
+    $rate = $quantity > 0 ? round($amount / $quantity, 2) : 0.0;
+    $notes = trim('Jewellery — ' . (jw_stock_txn_types()[(string) $row['txn_type']] ?? (string) $row['txn_type'])
+        . (($row['notes'] ?? '') !== '' ? ': ' . (string) $row['notes'] : ''));
+    $params = [
+        'cid' => $companyId,
+        'fy' => (int) ($row['fiscal_year_id'] ?? 0) ?: null,
+        'iid' => (int) $row['item_id'],
+        'warehouse' => (int) ($row['default_warehouse_id'] ?? 0) ?: null,
+        'voucher' => (int) ($row['voucher_id'] ?? 0) ?: null,
+        'type' => jw_core_inventory_transaction_type((string) $row['txn_type']),
+        'ref' => ($row['ref_no'] ?? '') !== '' ? (string) $row['ref_no'] : null,
+        'date' => (string) $row['txn_date'],
+        'qin' => $qtyIn,
+        'qout' => $qtyOut,
+        'rate' => $rate,
+        'amount' => $amount,
+        'notes' => $notes,
+        'jid' => $jewelleryTxnId,
+    ];
+
+    if ($existingId > 0) {
+        db()->prepare('UPDATE inventory_transactions
+            SET fiscal_year_id = :fy, item_id = :iid, warehouse_id = :warehouse,
+                voucher_id = :voucher, transaction_type = :type, ref_no = :ref,
+                transaction_date = :date, qty_in = :qin, qty_out = :qout,
+                rate = :rate, amount = :amount, notes = :notes,
+                jewellery_stock_txn_id = :jid
+            WHERE id = :id AND company_id = :cid')
+            ->execute($params + ['id' => $existingId]);
+        $inventoryTxnId = $existingId;
+    } else {
+        db()->prepare('INSERT INTO inventory_transactions
+                (company_id, fiscal_year_id, item_id, warehouse_id, voucher_id,
+                 jewellery_stock_txn_id, transaction_type, ref_no, transaction_date,
+                 qty_in, qty_out, rate, amount, notes)
+            VALUES (:cid, :fy, :iid, :warehouse, :voucher,
+                 :jid, :type, :ref, :date, :qin, :qout, :rate, :amount, :notes)')
+            ->execute($params);
+        $inventoryTxnId = (int) db()->lastInsertId();
+    }
+
+    // Jewellery accepts legitimate backdated corrections and, by company
+    // setting, may allow temporary negative stock. Replaying is therefore
+    // safer than applying only the newest row to the perpetual cost layers.
+    inv_rebuild_item($companyId, (int) $row['item_id']);
+
+    return $inventoryTxnId;
+}
+
+/** Keep a voucher link identical on both sides of the stock bridge. */
+function jw_link_stock_txn_voucher(int $companyId, array $jewelleryTxnIds, ?int $voucherId): void
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $jewelleryTxnIds))));
+    if ($companyId <= 0 || $ids === []) {
+        return;
+    }
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $params = array_merge([$voucherId ?: null, $companyId], $ids);
+    db()->prepare("UPDATE jewellery_stock_txns SET voucher_id = ? WHERE company_id = ? AND id IN ($placeholders)")
+        ->execute($params);
+    if (jw_core_inventory_sync_ready()) {
+        db()->prepare("UPDATE inventory_transactions SET voucher_id = ?
+            WHERE company_id = ? AND jewellery_stock_txn_id IN ($placeholders)")
+            ->execute($params);
+    }
+}
+
+/**
+ * Delete Jewellery movements and their core mirrors as one operation, then
+ * rebuild the affected item valuations. Callers normally use the source-based
+ * wrapper below when unposting a document.
+ */
+function jw_delete_stock_txns(int $companyId, array $jewelleryTxnIds): int
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $jewelleryTxnIds))));
+    if ($companyId <= 0 || $ids === []) {
+        return 0;
+    }
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $select = db()->prepare("SELECT id, item_id, holder_type FROM jewellery_stock_txns
+        WHERE company_id = ? AND id IN ($placeholders)");
+    $select->execute(array_merge([$companyId], $ids));
+    $rows = $select->fetchAll(PDO::FETCH_ASSOC);
+    if ($rows === []) {
+        return 0;
+    }
+
+    $actualIds = array_map(static fn (array $row): int => (int) $row['id'], $rows);
+    $actualPlaceholders = implode(',', array_fill(0, count($actualIds), '?'));
+    $affectedItems = [];
+    foreach ($rows as $row) {
+        if ((string) $row['holder_type'] === 'stock') {
+            $affectedItems[(int) $row['item_id']] = (int) $row['item_id'];
+        }
+    }
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        if (jw_core_inventory_sync_ready()) {
+            db()->prepare("DELETE FROM inventory_transactions
+                WHERE company_id = ? AND jewellery_stock_txn_id IN ($actualPlaceholders)")
+                ->execute(array_merge([$companyId], $actualIds));
+        }
+        db()->prepare("DELETE FROM jewellery_stock_txns WHERE company_id = ? AND id IN ($actualPlaceholders)")
+            ->execute(array_merge([$companyId], $actualIds));
+        foreach ($affectedItems as $itemId) {
+            inv_rebuild_item($companyId, $itemId);
+        }
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+        return count($actualIds);
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        throw $exception;
+    }
+}
+
+/** Delete every stock row written by one source document. */
+function jw_delete_stock_txns_by_source(int $companyId, array $sourceTypes, int $sourceId): int
+{
+    $sourceTypes = array_values(array_unique(array_filter(array_map('strval', $sourceTypes))));
+    if ($companyId <= 0 || $sourceId <= 0 || $sourceTypes === []) {
+        return 0;
+    }
+    $placeholders = implode(',', array_fill(0, count($sourceTypes), '?'));
+    $stmt = db()->prepare("SELECT id FROM jewellery_stock_txns
+        WHERE company_id = ? AND source_id = ? AND source_type IN ($placeholders)");
+    $stmt->execute(array_merge([$companyId, $sourceId], $sourceTypes));
+
+    return jw_delete_stock_txns($companyId, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+}
+
+/**
  * Record one metal movement. THE single entry point — every module phase goes
  * through here.
  *
@@ -690,16 +933,21 @@ function jw_record_stock_txn(int $companyId, array $txn): int
     }
 
     $gross = jw_round_weight((float) ($txn['gross_weight'] ?? 0));
+    $stone = jw_round_weight((float) ($txn['stone_weight'] ?? 0));
+    $diamond = jw_round_weight((float) ($txn['diamond_weight'] ?? 0));
     $pieces = round((float) ($txn['qty_pieces'] ?? 0), 3);
-    if ($gross < 0 || $pieces < 0) {
+    if ($gross < 0 || $stone < 0 || $diamond < 0 || $pieces < 0) {
         throw new RuntimeException('A stock movement cannot carry a negative weight or piece count.');
+    }
+    if (($stone + $diamond) > $gross + 0.00005) {
+        throw new RuntimeException('Stone and diamond weight cannot exceed gross weight.');
     }
     if ($gross <= 0 && $pieces <= 0) {
         throw new RuntimeException('A stock movement must carry a weight or a piece count.');
     }
     $fine = array_key_exists('fine_weight', $txn)
         ? jw_round_weight((float) $txn['fine_weight'])
-        : jw_fine_weight($gross, (float) $purity['fineness']);
+        : jw_fine_weight($gross - $stone - $diamond, (float) $purity['fineness']);
 
     $holderType = (string) ($txn['holder_type'] ?? 'stock');
     if (!in_array($holderType, ['stock', 'karigar', 'refinery', 'customer'], true)) {
@@ -760,17 +1008,23 @@ function jw_record_stock_txn(int $companyId, array $txn): int
         $fiscalYearId = (int) $dateFiscalYear['id'];
     }
 
-    db()->prepare('INSERT INTO jewellery_stock_txns
-            (company_id, fiscal_year_id, item_id, txn_type, direction, txn_date, ref_no, holder_type, holder_id,
-             metal_id, purity_id, unit_id, qty_pieces, gross_weight, gross_grams, fine_weight, fine_grams, rate, amount,
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        db()->prepare('INSERT INTO jewellery_stock_txns
+            (company_id, fiscal_year_id, item_id, stock_unit_id, txn_type, direction, txn_date, ref_no, holder_type, holder_id,
+             metal_id, purity_id, unit_id, qty_pieces, gross_weight, stone_weight, diamond_weight, stone_carat, diamond_carat, stone_amount, diamond_amount, making_amount, gross_grams, fine_weight, fine_grams, rate, amount,
              source_type, source_id, voucher_id, party_id, notes, created_by)
-        VALUES (:cid, :fy, :iid, :type, :dir, :d, :ref, :ht, :hid,
-             :mid, :pid, :uid, :pieces, :gross, :ggrams, :fine, :fgrams, :rate, :amount,
+        VALUES (:cid, :fy, :iid, :trace, :type, :dir, :d, :ref, :ht, :hid,
+             :mid, :pid, :uid, :pieces, :gross, :stone, :diamond, :stone_carat, :diamond_carat, :stone_amount, :diamond_amount, :making_amount, :ggrams, :fine, :fgrams, :rate, :amount,
              :stype, :sid, :vid, :party, :notes, :by)')
         ->execute([
             'cid' => $companyId,
             'fy' => $fiscalYearId,
             'iid' => $itemId,
+            'trace' => (int) ($txn['stock_unit_id'] ?? 0) ?: null,
             'type' => $type,
             'dir' => $direction,
             'd' => $txnDate,
@@ -782,6 +1036,13 @@ function jw_record_stock_txn(int $companyId, array $txn): int
             'uid' => $unitId,
             'pieces' => $pieces,
             'gross' => $gross,
+            'stone' => $stone,
+            'diamond' => $diamond,
+            'stone_carat' => jw_round_weight((float) ($txn['stone_carat'] ?? 0)),
+            'diamond_carat' => jw_round_weight((float) ($txn['diamond_carat'] ?? 0)),
+            'stone_amount' => jw_round_money((float) ($txn['stone_amount'] ?? 0)),
+            'diamond_amount' => jw_round_money((float) ($txn['diamond_amount'] ?? 0)),
+            'making_amount' => jw_round_money((float) ($txn['making_amount'] ?? 0)),
             // The canonical figure, written once at the only choke point that
             // records a movement. Every balance sums THESE, so a tola in and a
             // gram out no longer cancel each other out. See migration 082.
@@ -797,8 +1058,19 @@ function jw_record_stock_txn(int $companyId, array $txn): int
             'notes' => ($txn['notes'] ?? '') !== '' ? mb_substr((string) $txn['notes'], 0, 255) : null,
             'by' => (int) ($txn['created_by'] ?? 0) ?: null,
         ]);
+        $jewelleryTxnId = (int) db()->lastInsertId();
+        jw_sync_core_inventory_txn($companyId, $jewelleryTxnId);
+        if ($ownsTransaction) {
+            db()->commit();
+        }
 
-    return (int) db()->lastInsertId();
+        return $jewelleryTxnId;
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        throw $exception;
+    }
 }
 
 /**
@@ -1043,10 +1315,24 @@ function jewellery_stock_valuation(int $companyId, ?string $asOf = null): array
             continue;
         }
         $own = jw_item_balance($companyId, (int) $item['id'], $asOf, 'stock');
+        $componentSql = "SELECT
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_carat ELSE -stone_carat END), 0) AS stone_carat,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_carat ELSE -diamond_carat END), 0) AS diamond_carat,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_weight ELSE -stone_weight END), 0) AS stone_weight,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_amount ELSE -stone_amount END), 0) AS stone_amount,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_amount ELSE -diamond_amount END), 0) AS diamond_amount,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN making_amount ELSE -making_amount END), 0) AS making_amount
+            FROM jewellery_stock_txns WHERE company_id = :cid AND item_id = :iid";
+        $componentParams = ['cid' => $companyId, 'iid' => (int) $item['id']];
+        if ($asOf !== null) { $componentSql .= ' AND txn_date <= :asof'; $componentParams['asof'] = $asOf; }
+        $componentStmt = db()->prepare($componentSql);
+        $componentStmt->execute($componentParams);
+        $components = $componentStmt->fetch(PDO::FETCH_ASSOC) ?: [];
         $out[] = $item + [
             'balance' => $balance,
             'own_stock' => $own,
             'with_others_fine' => jw_round_weight($balance['fine_weight'] - $own['fine_weight']),
+            'components' => $components,
         ];
     }
 
@@ -1085,7 +1371,7 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
         if (abs($gross) < 0.00005 && abs($amount) < 0.005) {
             continue;
         }
-        $txn = db()->prepare("SELECT id, voucher_id FROM jewellery_stock_txns
+        $txn = db()->prepare("SELECT id, voucher_id, qty_pieces, stone_weight, stone_carat, diamond_carat, stone_amount, diamond_amount, making_amount, fine_weight FROM jewellery_stock_txns
             WHERE company_id = :cid AND item_id = :iid AND txn_type = 'opening' LIMIT 1");
         $txn->execute(['cid' => $companyId, 'iid' => (int) $item['id']]);
         $txnRow = $txn->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -1098,7 +1384,13 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
         $rows[] = [
             'as_on' => $asOn,
             'gross_weight' => $gross,
-            'fine_weight' => jw_fine_weight($gross, (float) $item['fineness']),
+            'qty_pieces' => (float) ($txnRow['qty_pieces'] ?? 0),
+            'stone_carat' => (float) ($txnRow['stone_carat'] ?? 0),
+            'diamond_carat' => (float) ($txnRow['diamond_carat'] ?? 0),
+            'stone_amount' => (float) ($txnRow['stone_amount'] ?? 0),
+            'diamond_amount' => (float) ($txnRow['diamond_amount'] ?? 0),
+            'making_amount' => (float) ($txnRow['making_amount'] ?? 0),
+            'fine_weight' => (float) ($txnRow['fine_weight'] ?? jw_fine_weight($gross, (float) $item['fineness'])),
             'amount' => $amount,
             'rate' => $gross > 0 ? jw_round_rate($amount / $gross) : 0.0,
             'item_code' => $item['code'],
@@ -1119,7 +1411,7 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
  * movement rather than stacking a second one, so correcting an opening is
  * simply saving it again.
  *
- * @return array{ok: bool, error: string, note: string, voucher_id: int, item_id: int}
+ * @return array{ok: bool, error: string, note: string, voucher_id: int, item_id: int, stock_unit_ids?: array}
  */
 function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input, int $userId = 0): array
 {
@@ -1137,10 +1429,22 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
     $asOn = (string) $fiscalYear['start_date'];
 
     $gross = jw_round_weight((float) ($input['gross_weight'] ?? 0));
+    $stoneCarat = jw_round_weight((float) ($input['stone_carat'] ?? 0));
+    $diamondCarat = jw_round_weight((float) ($input['diamond_carat'] ?? 0));
+    $unitGrams = (float) ($item['grams'] ?? 1.0) ?: 1.0;
+    $stone = jw_round_weight(($stoneCarat + $diamondCarat) * 0.2 / $unitGrams);
+    $stoneAmount = jw_round_money((float) ($input['stone_amount'] ?? 0));
+    $diamondAmount = jw_round_money((float) ($input['diamond_amount'] ?? 0));
+    $makingAmount = jw_round_money((float) ($input['making_amount'] ?? 0));
     $pieces = round((float) ($input['qty_pieces'] ?? 0), 3);
     $amount = jw_round_money((float) ($input['amount'] ?? 0));
-    if ($gross < 0 || $pieces < 0 || $amount < 0) {
+    $rate = jw_round_rate((float) ($input['rate'] ?? 0));
+    if ($amount <= 0 && $rate > 0 && $gross > 0) { $amount = jw_round_money($rate * $gross); }
+    if ($gross < 0 || $stoneCarat < 0 || $diamondCarat < 0 || $pieces < 0 || $amount < 0 || $stoneAmount < 0 || $diamondAmount < 0 || $makingAmount < 0) {
         return ['ok' => false, 'error' => 'Opening weight, pieces and value cannot be negative.', 'note' => '', 'voucher_id' => 0, 'item_id' => $itemId];
+    }
+    if ($stone > $gross + 0.00005) {
+        return ['ok' => false, 'error' => 'Converted stone and diamond weight cannot exceed gross weight.', 'note' => '', 'voucher_id' => 0, 'item_id' => $itemId];
     }
 
     $ownsTransaction = !db()->inTransaction();
@@ -1148,6 +1452,17 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
         db()->beginTransaction();
     }
     try {
+        $stockKind = (string) ($input['stock_kind'] ?? ($item['stock_kind'] ?? 'showroom')) === 'customer_ordered'
+            ? 'customer_ordered' : 'showroom';
+        $stockGroup = trim((string) ($input['stock_group'] ?? ''));
+        if ($stockGroup !== '') {
+            db()->prepare('UPDATE inventory_items SET category = :category WHERE id = :id AND company_id = :cid')
+                ->execute(['category' => mb_substr($stockGroup, 0, 190), 'id' => $itemId, 'cid' => $companyId]);
+        }
+        db()->prepare('UPDATE jewellery_item_profiles SET stock_kind = :kind
+            WHERE inventory_item_id = :id AND company_id = :cid')
+            ->execute(['kind' => $stockKind, 'id' => $itemId, 'cid' => $companyId]);
+
         // 1. The shared master carries the numbers, so the core Inventory page
         //    and the Opening Balances reconciliation see the same opening.
         db()->prepare('UPDATE inventory_items SET opening_qty = :qty, opening_amount = :amount
@@ -1170,9 +1485,27 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
         db()->prepare("DELETE FROM jewellery_stock_txns
             WHERE company_id = :cid AND item_id = :iid AND txn_type = 'opening'")
             ->execute(['cid' => $companyId, 'iid' => $itemId]);
+        $traceIds = jewellery_trace_replace_opening($companyId, $fiscalYearId, [
+            'item_id' => $itemId,
+            'purity_id' => (int) $item['purity_id'],
+            'unit_id' => (int) $item['unit_id'],
+            'stock_kind' => $stockKind,
+            'qty_pieces' => $pieces,
+            'gross_weight' => $gross,
+            'stone_weight' => $stone + $diamond,
+            'cost_amount' => $amount,
+            'origin_type' => (string) ($input['origin_type'] ?? 'manual_opening'),
+            'origin_id' => (int) ($input['origin_id'] ?? $itemId),
+            'origin_line_id' => (int) ($input['origin_line_id'] ?? 0),
+            'customer_name' => (string) ($input['customer_name'] ?? ''),
+            'customer_order_no' => (string) ($input['customer_order_no'] ?? ''),
+            'event_date' => $asOn,
+            'reference_no' => (string) ($input['reference_no'] ?? 'OPENING'),
+        ], $userId);
         if ($gross > 0 || $pieces > 0) {
             jw_record_stock_txn($companyId, [
                 'item_id' => $itemId,
+                'stock_unit_id' => (int) ($traceIds[0] ?? 0),
                 'txn_type' => 'opening',
                 'direction' => 'in',
                 'txn_date' => $asOn,
@@ -1182,6 +1515,12 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
                 'unit_id' => (int) $item['unit_id'],
                 'qty_pieces' => $pieces,
                 'gross_weight' => $gross,
+                'stone_weight' => $stone,
+                'stone_carat' => $stoneCarat,
+                'diamond_carat' => $diamondCarat,
+                'stone_amount' => $stoneAmount,
+                'diamond_amount' => $diamondAmount,
+                'making_amount' => $makingAmount,
                 'rate' => $gross > 0 ? jw_round_rate($amount / $gross) : 0.0,
                 'amount' => $amount,
                 'source_type' => 'inventory_opening',
@@ -1200,6 +1539,7 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
             'note' => (string) ($posted['note'] ?? ''),
             'voucher_id' => (int) ($posted['voucher_id'] ?? 0),
             'item_id' => $itemId,
+            'stock_unit_ids' => $traceIds,
         ];
     } catch (Throwable $openingException) {
         if ($ownsTransaction && db()->inTransaction()) {
@@ -1254,3 +1594,9 @@ function jewellery_next_document_no(int $companyId, string $prefix): string
 
     return $prefix . '-' . str_pad((string) $next, 5, '0', STR_PAD_LEFT);
 }
+
+// Physical-piece identity sits above the aggregate metal ledger in this file.
+// Requiring it here makes the same trace engine available to opening stock,
+// purchases, workshop receipts, orders and sales without another copy of the
+// rules in each module.
+require_once __DIR__ . '/jewellery_trace.php';

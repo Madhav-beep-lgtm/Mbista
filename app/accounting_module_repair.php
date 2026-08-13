@@ -109,6 +109,42 @@ function accounting_repair_run_migration_file(string $migrationFile, array $sent
     }
 }
 
+/**
+ * Replay a migration until a named index proves that it completed.
+ *
+ * This is used for data-link migrations where all tables already exist, so a
+ * missing-table sentinel cannot tell whether the migration ran.
+ */
+function accounting_repair_run_migration_file_if_index_missing(
+    string $migrationFile,
+    string $tableName,
+    string $indexName
+): void {
+    if (accounting_repair_index_exists($tableName, $indexName)) {
+        return;
+    }
+
+    $path = dirname(__DIR__) . '/database/migrations/' . $migrationFile;
+    if (!is_file($path)) {
+        return;
+    }
+
+    $lines = [];
+    foreach (preg_split('/\R/', (string) file_get_contents($path)) ?: [] as $line) {
+        if (preg_match('/^\s*--/', $line)) {
+            continue;
+        }
+        $lines[] = $line;
+    }
+
+    foreach (explode(';', implode("\n", $lines)) as $statement) {
+        $statement = trim($statement);
+        if ($statement !== '') {
+            db()->exec($statement);
+        }
+    }
+}
+
 function accounting_module_required_tables(): array
 {
     return [
@@ -277,6 +313,19 @@ function accounting_module_repair_database(): array
         // client's My Invoices.
         accounting_repair_add_column('accounting_parties', 'client_profile_id', '`client_profile_id` INT UNSIGNED DEFAULT NULL AFTER `payable_ledger_id`');
         accounting_repair_add_index('accounting_parties', 'idx_accounting_parties_client_profile', 'KEY `idx_accounting_parties_client_profile` (`client_profile_id`)');
+    });
+
+    $run('Unify client, sales party and ledger identity (migration 107)', static function (): void {
+        foreach (['accounting_parties', 'client_profiles', 'client_tasks', 'task_invoices'] as $requiredTable) {
+            if (!accounting_repair_table_exists($requiredTable)) {
+                return;
+            }
+        }
+        accounting_repair_run_migration_file_if_index_missing(
+            '107_unified_party_identity.sql',
+            'accounting_parties',
+            'uniq_accounting_parties_company_client'
+        );
     });
 
     $run('Create budgets and report notes', static function (): void {
@@ -477,6 +526,22 @@ function accounting_module_repair_database(): array
               CONSTRAINT `fk_accounting_parties_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers`(`id`) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
+    });
+
+    $run('Unify Party Master ledger roles (migration 108)', static function (): void {
+        if (!accounting_repair_table_exists('ledger_groups') || !accounting_repair_table_exists('accounting_parties')) {
+            return;
+        }
+        accounting_repair_run_migration_file_if_index_missing(
+            '108_party_ledger_roles.sql',
+            'ledger_groups',
+            'uniq_ledger_groups_company_party_role'
+        );
+        // Complete a partially-applied deployment as well as a clean one.
+        accounting_repair_add_column('accounting_parties', 'advance_ledger_id', '`advance_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `payable_ledger_id`');
+        accounting_repair_add_column('accounting_parties', 'supplier_advance_ledger_id', '`supplier_advance_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `advance_ledger_id`');
+        accounting_repair_add_index('accounting_parties', 'idx_parties_advance_ledger', 'KEY `idx_parties_advance_ledger` (`advance_ledger_id`)');
+        accounting_repair_add_index('accounting_parties', 'idx_parties_supplier_advance_ledger', 'KEY `idx_parties_supplier_advance_ledger` (`supplier_advance_ledger_id`)');
     });
 
     $run('Create inventory items', static function (): void {
@@ -3278,6 +3343,44 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Jewellery movements visible in core stock reports (migration 109)', static function (): void {
+        if (!accounting_repair_table_exists('inventory_transactions')
+            || !accounting_repair_table_exists('jewellery_stock_txns')
+            || !accounting_repair_table_exists('jewellery_item_profiles')
+            || !accounting_repair_column_exists('jewellery_stock_txns', 'gross_grams')) {
+            return;
+        }
+
+        $needsBackfill = !accounting_repair_index_exists(
+            'inventory_transactions',
+            'uniq_inventory_jewellery_stock_txn'
+        );
+        accounting_repair_run_migration_file_if_index_missing(
+            '109_jewellery_core_stock_sync.sql',
+            'inventory_transactions',
+            'uniq_inventory_jewellery_stock_txn'
+        );
+        accounting_repair_add_constraint(
+            'inventory_transactions',
+            'fk_inventory_jewellery_stock_txn',
+            '`fk_inventory_jewellery_stock_txn` FOREIGN KEY (`jewellery_stock_txn_id`) '
+                . 'REFERENCES `jewellery_stock_txns` (`id`) ON DELETE CASCADE'
+        );
+
+        // The migration adds historical movements. Cost layers are cached, so
+        // replay every affected item once or the quantity reports would be
+        // correct while the Inventory valuation card still showed the old
+        // value until a later edit happened to rebuild it.
+        if ($needsBackfill && accounting_repair_index_exists('inventory_transactions', 'uniq_inventory_jewellery_stock_txn')) {
+            $affected = db()->query('SELECT DISTINCT company_id, item_id
+                FROM inventory_transactions WHERE jewellery_stock_txn_id IS NOT NULL')
+                ->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($affected as $item) {
+                inv_rebuild_item((int) $item['company_id'], (int) $item['item_id']);
+            }
+        }
+    });
+
     $run('Kaligad assignment carries the piece it asks for (migration 102)', static function (): void {
         // The ornament's specification, kept apart from the metal handed over:
         // a shop assigns work long before any bar leaves the safe, and assigns
@@ -3363,6 +3466,118 @@ function accounting_module_repair_database(): array
         accounting_repair_add_constraint('jewellery_order_lines', 'fk_jw_oline_stock_receipt',
             'CONSTRAINT `fk_jw_oline_stock_receipt` FOREIGN KEY (`stock_receipt_id`) '
             . 'REFERENCES `jewellery_order_receipts` (`id`) ON DELETE SET NULL');
+    });
+
+    $run('Jewellery opening stock can be segregated and create item masters (migration 110)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_item_profiles')
+            || !accounting_repair_table_exists('inventory_opening_import_rows')) {
+            return;
+        }
+        accounting_repair_run_migration_file_if_index_missing(
+            '110_jewellery_opening_stock_classification.sql',
+            'inventory_opening_import_rows',
+            'idx_inv_opimprow_stock_kind'
+        );
+        accounting_repair_add_column('jewellery_stock_txns', 'stone_weight',
+            '`stone_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `gross_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'diamond_weight',
+            '`diamond_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `stone_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'stone_carat',
+            '`stone_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `diamond_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'diamond_carat',
+            '`diamond_carat` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `stone_carat`');
+        accounting_repair_add_column('jewellery_stock_txns', 'stone_amount',
+            '`stone_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_weight`');
+        accounting_repair_add_column('jewellery_stock_txns', 'diamond_amount',
+            '`diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `stone_amount`');
+        accounting_repair_add_column('jewellery_stock_txns', 'making_amount',
+            '`making_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_amount`');
+        // The amount columns below are positioned AFTER diamond_weight. Older
+        // databases created by migration 081 do not have either component
+        // weight yet, so create both prerequisites before referencing them.
+        // Each call is idempotent and also repairs partially applied schemas.
+        accounting_repair_add_column('inventory_opening_import_rows', 'stone_weight',
+            '`stone_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `gross_weight`');
+        accounting_repair_add_column('inventory_opening_import_rows', 'diamond_weight',
+            '`diamond_weight` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER `stone_weight`');
+        accounting_repair_add_column('inventory_opening_import_rows', 'stone_amount',
+            '`stone_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_weight`');
+        accounting_repair_add_column('inventory_opening_import_rows', 'diamond_amount',
+            '`diamond_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `stone_amount`');
+        accounting_repair_add_column('inventory_opening_import_rows', 'making_amount',
+            '`making_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_amount`');
+    });
+
+    $run('Every physical jewellery item has one traceable lifecycle (migration 111)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_stock_units')) {
+            accounting_repair_run_migration_file('111_jewellery_item_traceability.sql', [
+                'jewellery_stock_units', 'jewellery_stock_unit_events',
+            ]);
+            return;
+        }
+
+        if (!accounting_repair_table_exists('jewellery_stock_unit_events')) {
+            db()->exec("CREATE TABLE `jewellery_stock_unit_events` (
+                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `stock_unit_id` INT UNSIGNED NOT NULL,
+                `event_type` VARCHAR(40) NOT NULL,
+                `event_date` DATE NOT NULL,
+                `from_status` VARCHAR(30) DEFAULT NULL,
+                `to_status` VARCHAR(30) DEFAULT NULL,
+                `from_holder_type` VARCHAR(30) DEFAULT NULL,
+                `from_holder_id` INT UNSIGNED DEFAULT NULL,
+                `to_holder_type` VARCHAR(30) DEFAULT NULL,
+                `to_holder_id` INT UNSIGNED DEFAULT NULL,
+                `source_type` VARCHAR(40) DEFAULT NULL,
+                `source_id` INT UNSIGNED DEFAULT NULL,
+                `source_line_id` INT UNSIGNED DEFAULT NULL,
+                `reference_no` VARCHAR(120) DEFAULT NULL,
+                `notes` VARCHAR(255) DEFAULT NULL,
+                `created_by` INT UNSIGNED DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_jw_trace_event_unit` (`company_id`,`stock_unit_id`,`id`),
+                KEY `idx_jw_trace_event_source` (`company_id`,`source_type`,`source_id`),
+                CONSTRAINT `fk_jw_trace_event_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_jw_trace_event_unit` FOREIGN KEY (`stock_unit_id`) REFERENCES `jewellery_stock_units` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+
+        // A deployment interrupted after the two new tables were created must
+        // still finish the links safely on the next page load.
+        if (accounting_repair_table_exists('jewellery_order_assignments')) {
+            accounting_repair_add_column('jewellery_order_assignments', 'stock_order_no',
+                '`stock_order_no` VARCHAR(60) DEFAULT NULL AFTER `assignment_no`');
+            accounting_repair_add_column('jewellery_order_assignments', 'stock_unit_id',
+                '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `stock_order_no`');
+            accounting_repair_add_index('jewellery_order_assignments', 'idx_jw_assign_stock_order',
+                'KEY `idx_jw_assign_stock_order` (`company_id`,`stock_order_no`)');
+            accounting_repair_add_index('jewellery_order_assignments', 'idx_jw_assign_trace',
+                'KEY `idx_jw_assign_trace` (`company_id`,`stock_unit_id`)');
+        }
+        foreach ([
+            ['jewellery_order_receipts', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `assignment_id`',
+                'idx_jw_receipt_trace', 'KEY `idx_jw_receipt_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_order_lines', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `stock_receipt_id`',
+                'idx_jw_oline_trace', 'KEY `idx_jw_oline_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_purchase_lines', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`',
+                'idx_jw_pline_trace', 'KEY `idx_jw_pline_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_sale_lines', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`',
+                'idx_jw_sline_trace', 'KEY `idx_jw_sline_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_sale_exchanges', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`',
+                'idx_jw_sexchange_trace', 'KEY `idx_jw_sexchange_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_stock_txns', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`',
+                'idx_jw_stock_trace', 'KEY `idx_jw_stock_trace` (`company_id`,`stock_unit_id`,`txn_date`)'],
+            ['inventory_opening_import_rows', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`',
+                'idx_inv_opimprow_trace', 'KEY `idx_inv_opimprow_trace` (`company_id`,`stock_unit_id`)'],
+        ] as [$table, $column, $definition, $index, $indexDefinition]) {
+            if (!accounting_repair_table_exists($table)) {
+                continue;
+            }
+            accounting_repair_add_column($table, $column, $definition);
+            accounting_repair_add_index($table, $index, $indexDefinition);
+        }
     });
 
     return $errors;

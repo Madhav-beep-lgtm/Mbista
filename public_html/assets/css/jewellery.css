@@ -61,10 +61,19 @@
    still there at the bottom of a twenty-row grid. */
 .jw-rail { position: sticky; top: 14px; display: grid; gap: 14px; }
 
-@media (max-width: 1100px) {
+.jw-rail { align-self: start; z-index: 3; min-width: 260px; width: 320px !important; max-width: 320px !important; box-sizing: border-box; }
+.jw-layout { grid-template-columns: minmax(0, 1fr) 320px !important; }
+
+@media (max-width: 900px) {
     .jw-layout { grid-template-columns: minmax(0, 1fr); }
     .jw-rail { position: static; }
 }
+
+/* Ensure the rail stays visually attached to the right column
+   at intermediate widths and above the page content when sticky */
+.jw-rail { align-self: start; z-index: 3; min-width: 260px; width: 320px; max-width: 320px; box-sizing: border-box; }
+/* Ensure the main column cannot be covered by the rail when the page is wide */
+.jw-layout { grid-template-columns: minmax(0, 1fr) 320px; }
 
 /* --- cards -------------------------------------------------------------- */
 
@@ -219,6 +228,113 @@ table.jw-lines .jw-derived {
 .jw-grid-toolbar input[type="file"] { min-height: 32px; font-size: .85rem; max-width: 200px; }
 
 .jw-lines-actions .button { min-height: 32px; }
+
+/* Opening-stock review deliberately keeps the spreadsheet columns in their
+   original order. Give every editable value enough room to be read instead of
+   allowing the browser to squeeze select boxes down to a single letter. The
+   table owns the extra width and its wrapper owns the horizontal scroll, so
+   the page itself never becomes wider than the screen. */
+.jw-opening-import-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-color: var(--mbw-primary, #08634a) var(--mbw-green-soft, #e5f6ec);
+    scrollbar-width: thin;
+}
+
+.jw-opening-import-wrap::-webkit-scrollbar { height: 11px; }
+.jw-opening-import-wrap::-webkit-scrollbar-track {
+    background: var(--mbw-green-soft, #e5f6ec);
+    border-radius: 999px;
+}
+.jw-opening-import-wrap::-webkit-scrollbar-thumb {
+    background: var(--mbw-primary, #08634a);
+    border: 2px solid var(--mbw-green-soft, #e5f6ec);
+    border-radius: 999px;
+}
+
+table.jw-opening-import-table {
+    width: max-content;
+    min-width: 2940px;
+    table-layout: auto;
+}
+
+table.jw-opening-import-table th,
+table.jw-opening-import-table td {
+    vertical-align: middle;
+}
+
+table.jw-opening-import-table th {
+    white-space: normal;
+    line-height: 1.35;
+}
+
+table.jw-opening-import-table td > input,
+table.jw-opening-import-table td > select {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 0;
+    min-height: 42px;
+    padding-inline: 12px;
+    font-size: 14px;
+}
+
+table.jw-opening-import-table th:nth-child(1),
+table.jw-opening-import-table td:nth-child(1) { min-width: 92px; }
+table.jw-opening-import-table th:nth-child(2),
+table.jw-opening-import-table td:nth-child(2) { min-width: 190px; }
+table.jw-opening-import-table th:nth-child(3),
+table.jw-opening-import-table td:nth-child(3) { min-width: 170px; }
+table.jw-opening-import-table th:nth-child(4),
+table.jw-opening-import-table td:nth-child(4) { min-width: 150px; }
+table.jw-opening-import-table th:nth-child(5),
+table.jw-opening-import-table td:nth-child(5) { min-width: 220px; }
+table.jw-opening-import-table th:nth-child(6),
+table.jw-opening-import-table td:nth-child(6) { min-width: 180px; }
+table.jw-opening-import-table th:nth-child(7),
+table.jw-opening-import-table td:nth-child(7) { min-width: 125px; }
+table.jw-opening-import-table th:nth-child(8),
+table.jw-opening-import-table td:nth-child(8) { min-width: 110px; }
+table.jw-opening-import-table th:nth-child(9),
+table.jw-opening-import-table td:nth-child(9) { min-width: 110px; }
+table.jw-opening-import-table th:nth-child(10),
+table.jw-opening-import-table td:nth-child(10) { min-width: 145px; }
+table.jw-opening-import-table th:nth-child(11),
+table.jw-opening-import-table td:nth-child(11) { min-width: 155px; }
+table.jw-opening-import-table th:nth-child(12),
+table.jw-opening-import-table td:nth-child(12) { min-width: 170px; }
+table.jw-opening-import-table th:nth-child(13),
+table.jw-opening-import-table td:nth-child(13) { min-width: 180px; }
+table.jw-opening-import-table th:nth-child(14),
+table.jw-opening-import-table td:nth-child(14) { min-width: 150px; }
+table.jw-opening-import-table th:nth-child(15),
+table.jw-opening-import-table td:nth-child(15) { min-width: 240px; }
+table.jw-opening-import-table th:nth-child(16),
+table.jw-opening-import-table td:nth-child(16) { min-width: 250px; }
+table.jw-opening-import-table th:nth-child(17),
+table.jw-opening-import-table td:nth-child(17) { min-width: 190px; }
+
+.jw-import-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 40px !important;
+    padding: 7px 11px !important;
+    white-space: nowrap;
+}
+
+.jw-import-action svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+}
+
+.jw-import-delete {
+    color: var(--mbw-red, #b42318) !important;
+    border-color: color-mix(in srgb, var(--mbw-red, #b42318) 45%, var(--mbw-border, #d9e2ec)) !important;
+}
+
 /* "Add another item" spans the grid as a ghost row rather than a stray button. */
 .jw-add-row {
     width: 100%;
@@ -430,4 +546,66 @@ table.jw-lines .jw-derived {
     .jw-shortcuts { grid-template-columns: minmax(0, 1fr); }
     .jw-page-foot { flex-direction: column; align-items: stretch; gap: 8px; }
     .jw-add-row, .jw-lines-actions button { min-height: 44px; }
+}
+
+/* Kaligad Assign: readable register and server-backed inline editor. */
+.jw-assign-page .jw-page-head { margin-bottom: 12px; }
+.jw-assign-page .jw-assignment-edit { border-color: color-mix(in srgb, var(--mbw-primary) 30%, var(--mbw-border)); }
+.jw-assign-page .jw-assignment-kicker { color: var(--mbw-primary); font-size: 12px; font-weight: 750; letter-spacing: .03em; text-transform: uppercase; }
+.jw-assign-page .jw-assignment-context { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.jw-assign-page .jw-assignment-context span { display: grid; gap: 3px; padding: 10px 12px; background: var(--mbw-green-soft); border: 1px solid var(--mbw-border); border-radius: 10px; }
+.jw-assign-page .jw-assignment-context strong { color: var(--mbw-muted); font-size: 11px; text-transform: uppercase; }
+.jw-assign-page .jw-assignment-edit-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.jw-assign-page .jw-assignment-edit-form label,
+.jw-assign-page .jw-remove-assignment label,
+.jw-assign-page .jw-filter-bar label { display: grid; gap: 5px; color: var(--mbw-text); font-size: 12px; font-weight: 650; }
+.jw-assign-page .jw-assignment-edit-form input,
+.jw-assign-page .jw-assignment-edit-form select,
+.jw-assign-page .jw-assignment-edit-form textarea,
+.jw-assign-page .jw-remove-assignment input,
+.jw-assign-page .jw-filter-bar input { width: 100%; min-height: 40px; }
+.jw-assign-page .jw-span-2 { grid-column: span 2; }
+.jw-assign-page .jw-span-all { grid-column: 1 / -1; }
+.jw-assign-page .jw-assignment-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.jw-assign-page .jw-remove-assignment { display: flex; align-items: end; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--mbw-border); }
+.jw-assign-page .jw-remove-assignment label { flex: 1 1 320px; }
+.jw-assign-page .jw-register-tools { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.jw-assign-page .jw-filter-bar { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: end; gap: 8px; }
+.jw-assign-page .jw-filter-search { flex: 1 1 280px; }
+.jw-assign-page .jw-search-control { position: relative; display: block; }
+.jw-assign-page .jw-search-control > svg { position: absolute; top: 50%; left: 11px; width: 16px; height: 16px; color: var(--mbw-muted); transform: translateY(-50%); }
+.jw-assign-page .jw-search-control input { padding-left: 34px; }
+.jw-assign-page .jw-filter-actions,
+.jw-assign-page .jw-export-group { display: flex; align-items: center; gap: 8px; }
+.jw-assign-page .jw-export-group > span { color: var(--mbw-muted); font-size: 11px; font-weight: 750; text-transform: uppercase; }
+.jw-assign-page .jw-assignment-register { min-width: 1780px; font-size: 12px; }
+.jw-assign-page .jw-assignment-register thead th { position: sticky; top: 0; z-index: 2; background: var(--mbw-surface); }
+.jw-assign-page .jw-assignment-register tbody tr:nth-child(even) { background: color-mix(in srgb, var(--mbw-green-soft) 42%, transparent); }
+.jw-assign-page .jw-assignment-register tbody tr:hover { background: var(--mbw-green-soft); }
+.jw-assign-page .jw-assignment-register td { vertical-align: top; }
+.jw-assign-page .jw-assignment-register td:nth-last-child(3) { max-width: 280px; white-space: normal; }
+.jw-assign-page .jw-action-column { position: sticky !important; right: 0; z-index: 3 !important; min-width: 92px; background: var(--mbw-surface) !important; box-shadow: var(--mbw-shadow); }
+.jw-assign-page tbody tr:nth-child(even) .jw-action-column { background: color-mix(in srgb, var(--mbw-green-soft) 42%, var(--mbw-surface)) !important; }
+.jw-assign-page .jw-edit-action { display: inline-flex; min-height: 36px; align-items: center; gap: 6px; padding: 7px 10px; color: var(--mbw-primary); border: 1px solid var(--mbw-primary); border-radius: 8px; font-weight: 700; text-decoration: none; }
+.jw-assign-page .jw-edit-action svg { width: 15px; height: 15px; }
+.jw-assign-page .jw-edit-action:hover { color: var(--mbw-card); background: var(--mbw-primary); }
+.jw-assign-page .jw-edit-action:focus-visible { outline: 3px solid var(--mbw-primary-soft); outline-offset: 2px; }
+.jw-assign-page .jw-assignment-register .is-numeric { font-variant-numeric: tabular-nums; }
+.jw-assign-page .mbw-pill svg { width: 13px; height: 13px; }
+
+@media (max-width: 1100px) {
+    .jw-assign-page .jw-assignment-context { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .jw-assign-page .jw-assignment-edit-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .jw-assign-page .jw-register-tools { align-items: stretch; flex-direction: column; }
+}
+@media (max-width: 720px) {
+    .jw-assign-page .jw-assignment-context,
+    .jw-assign-page .jw-assignment-edit-form { grid-template-columns: minmax(0, 1fr); }
+    .jw-assign-page .jw-span-2 { grid-column: span 1; }
+    .jw-assign-page .jw-filter-bar,
+    .jw-assign-page .jw-filter-actions,
+    .jw-assign-page .jw-remove-assignment { align-items: stretch; flex-direction: column; }
+    .jw-assign-page .jw-filter-bar > *,
+    .jw-assign-page .jw-filter-actions > *,
+    .jw-assign-page .jw-export-group > * { width: 100%; }
 }

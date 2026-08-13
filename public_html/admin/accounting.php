@@ -423,7 +423,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="mbw-card-tools"><span class="mbw-view-all">Each type has its own screen</span></div>
     </div>
     <div class="mbw-qa-grid" id="post-voucher">
-        <?php foreach (voucher_type_catalog() as $qaTypeKey => $qaType): ?>
+        <?php foreach (voucher_entry_type_catalog() as $qaTypeKey => $qaType): ?>
             <a class="mbw-qa" href="<?= e(url(voucher_type_url($qaTypeKey))) ?>">
                 <span class="mbw-chip is-square tone-<?= e((string) $qaType['tone']) ?>"><?= icon((string) $qaType['icon']) ?></span>
                 <div><strong><?= e((string) $qaType['label']) ?></strong><span><?= e((string) $qaType['blurb']) ?></span></div>

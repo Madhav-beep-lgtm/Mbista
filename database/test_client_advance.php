@@ -13,7 +13,13 @@ declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { exit('CLI only.'); }
 
 require __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/accounting_module_repair.php';
 require_once __DIR__ . '/../app/advance_engine.php';
+
+$repairErrors = accounting_module_repair_database();
+if ($repairErrors !== []) {
+    throw new RuntimeException('Accounting repair failed: ' . implode(' | ', $repairErrors));
+}
 
 $pass = 0; $fail = 0;
 function ok(bool $c, string $l): void { global $pass, $fail; if ($c) { $pass++; echo "  PASS  $l\n"; } else { $fail++; echo "  FAIL  $l\n"; } }
@@ -71,12 +77,13 @@ db()->prepare("UPDATE fiscal_years SET status='open' WHERE id=?")->execute([$fy[
 $_SESSION['fiscal_year_id'] = (int) $fy['id'];
 
 $uid = (int) db()->query('SELECT id FROM users ORDER BY id ASC LIMIT 1')->fetchColumn();
-db()->prepare("INSERT INTO client_profiles (user_id, organization_name) VALUES (?, 'ADV Test Client')")->execute([$uid]);
+db()->prepare("INSERT INTO client_profiles (user_id, company_id, organization_name) VALUES (?, ?, 'ADV Test Client')")->execute([$uid, $cid]);
 $clientId = (int) db()->lastInsertId();
 db()->prepare("INSERT INTO client_tasks (company_id, client_id, title, quoted_fee, status) VALUES (?,?,?,?, 'new')")->execute([$cid, $clientId, 'Audit engagement', 8000]);
 $taskId = (int) db()->lastInsertId();
 
-$advLedgerId = ensure_customer_advance_ledger($cid);
+$advanceContext = advance_task_context($cid, $taskId);
+$advLedgerId = ensure_customer_advance_ledger($cid, (int) ($advanceContext['party_id'] ?? 0));
 
 // ---------------------------------------------------------------------------
 // Record the advance

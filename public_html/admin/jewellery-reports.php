@@ -57,6 +57,8 @@ $orderStatusFilter = jw_enum($_GET['status'] ?? null,
     ['draft', 'confirmed', 'assigned', 'partially_received', 'received', 'invoiced', 'delivered', 'closed', 'cancelled', ''], '');
 $pendingOnly = (string) ($_GET['pending'] ?? '') === '1';
 $workshopGroup = jw_enum($_GET['wgroup'] ?? null, ['none', 'karigar', 'purity'], 'none');
+$billPage = max(1, (int) ($_GET['bill_page'] ?? 1));
+$billPageSize = 200;
 
 // Revaluing writes to the ledger, so it is a POST like every other posting.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -153,12 +155,19 @@ if (isset($_GET['export']) && $canExport) {
     }
     if ($view === 'bills') {
         $data = [['Party', 'Bill no', 'Type', 'Date', 'Billed', 'Settled', 'Outstanding', 'Status']];
-        foreach (jw_report_bill_outstanding($companyId) as $party) {
-            foreach ($party['bills'] as $bill) {
-                $data[] = [$party['party_name'], $bill['bill_no'], $bill['bill_type'], $bill['bill_date'],
-                    $bill['bill_amount'], $bill['settled_amount'], $bill['outstanding'], $bill['status']];
+        $exportOffset = 0;
+        do {
+            $exportParties = jw_report_bill_outstanding($companyId, '', 5000, $exportOffset);
+            $exportBillCount = 0;
+            foreach ($exportParties as $party) {
+                foreach ($party['bills'] as $bill) {
+                    $data[] = [$party['party_name'], $bill['bill_no'], $bill['bill_type'], $bill['bill_date'],
+                        $bill['bill_amount'], $bill['settled_amount'], $bill['outstanding'], $bill['status']];
+                    $exportBillCount++;
+                }
             }
-        }
+            $exportOffset += $exportBillCount;
+        } while ($exportBillCount === 5000);
         export_dispatch($format, 'jewellery-bills-' . $stamp, $data, 'Bill-wise Outstanding', $meta);
     }
     if ($view === 'karigar' && $karigarId > 0) {
@@ -839,7 +848,8 @@ $reportUrl = static fn (string $v): string => url('admin/jewellery-reports.php?v
     <?php endif; ?>
 
 <?php elseif ($view === 'bills'): ?>
-    <?php $outstanding = jw_report_bill_outstanding($companyId); ?>
+    <?php $billTotals = jewellery_open_bill_totals($companyId); $billTotal = (int) $billTotals['bill_count'];
+        $outstanding = jw_report_bill_outstanding($companyId, '', $billPageSize, ($billPage - 1) * $billPageSize); ?>
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Bill-wise Outstanding (<?= count($outstanding) ?> parties)</h2></div>
         <div style="overflow-x:auto"><table>
@@ -862,6 +872,7 @@ $reportUrl = static fn (string $v): string => url('admin/jewellery-reports.php?v
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <?php $billPages=max(1,(int)ceil($billTotal/$billPageSize)); if($billPages>1):?><nav class="actions" style="margin-top:12px" aria-label="Outstanding bill pages"><?php if($billPage>1):?><a class="button secondary" href="<?=e(url('admin/jewellery-reports.php?view=bills&from='.$from.'&to='.$to.'&bill_page='.($billPage-1)))?>">Previous</a><?php endif;?><span>Page <?=e((string)$billPage)?> of <?=e((string)$billPages)?> · <?=e((string)$billTotal)?> bills</span><?php if($billPage<$billPages):?><a class="button secondary" href="<?=e(url('admin/jewellery-reports.php?view=bills&from='.$from.'&to='.$to.'&bill_page='.($billPage+1)))?>">Next</a><?php endif;?></nav><?php endif;?>
     </section>
 
 <?php elseif ($view === 'uncollected'): ?>

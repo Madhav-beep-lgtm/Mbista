@@ -42,6 +42,7 @@ function rc_report_registry(): array
         'service-charge-report' => ['Service Charge Allocation', 'Declared totals, 68% employee pool, 32% employer share and per-employee distribution', 'handshake'],
         'payroll-posting' => ['Payroll Posting Report', 'Component-to-ledger accounting detail behind each payroll voucher', 'reconcile'],
         'financial-ratios' => ['Financial Ratios', 'Key financial ratios analysis', 'dashboard'],
+        'jewellery-aml-register' => ['Jewellery AML / goAML Register', 'TTR, STR and SAR compliance review register', 'compliance'],
     ];
 }
 
@@ -417,6 +418,31 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
     $ctx += ['vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => 'all', 'dims' => [],
              'company_id' => $scopeCompanyId, 'company_name' => '', 'subsidiaries' => []];
     switch ($reportId) {
+        case 'jewellery-aml-register': {
+            require_once __DIR__ . '/jewellery_aml.php';
+            if (jw_aml_ready()) {
+                jw_aml_scan($scopeCompanyId, $from, $to, 0);
+            }
+            $cases = jw_aml_cases($scopeCompanyId, $from, $to);
+            $rows = [];
+            $amount = 0.0;
+            foreach ($cases as $case) {
+                $amount += (float) $case['aggregate_amount'];
+                $rows[] = rc_row([
+                    '#' . $case['id'], $case['case_type'], app_date((string) $case['case_date']),
+                    $case['due_on'] ? app_date((string) $case['due_on']) : 'Review promptly',
+                    $case['party_name'], $case['rule_code'], (string) $case['transaction_count'],
+                    rc_fmt((float) $case['aggregate_amount']), (string) $case['risk_score'],
+                    ucwords(str_replace('_', ' ', (string) $case['status'])),
+                ]);
+            }
+            return [
+                'number' => 'AML-1', 'title' => 'Jewellery AML / goAML Register',
+                'subtitle' => 'Automatically detected FIU-Nepal reporting candidates. STR/SAR rows remain subject to compliance-officer review.',
+                'columns' => [['Case','left',''],['Type','left',''],['Date','left',''],['Due','left',''],['Customer','left',''],['Rule','left',''],['Txns','right',''],['Amount','right',''],['Risk','right',''],['Status','left','']],
+                'rows' => $rows, 'totals' => ['', 'Total', '', '', '', '', (string) array_sum(array_map(static fn($c)=>(int)$c['transaction_count'],$cases)), rc_fmt($amount), '', ''],
+            ];
+        }
         case 'trial-balance': {
             $balances = rc_ledger_balances($scopeCompanyId, $from, $to, (string) $ctx['vtype'], (int) $ctx['group_id'], (int) $ctx['ledger_id'], (array) ($ctx['dims'] ?? []), rc_ctx_fy_start($ctx));
             // Master -> Group -> Ledger hierarchy in natural chart order.
@@ -2174,83 +2200,104 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             if (!table_exists('inventory_items') || !function_exists('inv_company_valuation')) {
                 return ['subtitle' => 'Inventory module not available.', 'columns' => [['Info', 'left', '']], 'rows' => [], 'totals' => null];
             }
-            // Subledger: the SAME historical replay the Stock Summary uses,
-            // valued as at $to (not today's layer state).
             require_once __DIR__ . '/stock_report_engine.php';
-            $srAsAt = sr_stock_summary($scopeCompanyId, ['from' => $to, 'to' => $to]);
-            $subledger = (float) $srAsAt['totals']['closing_amount'];
-            $items = db()->prepare('SELECT * FROM inventory_items WHERE company_id = :cid');
-            $items->execute(['cid' => $scopeCompanyId]);
-            $itemRows = $items->fetchAll(PDO::FETCH_ASSOC);
-            // GL: closing balance of every ledger designated as inventory (item
-            // links + global inventory mappings) from posted vouchers up to $to.
-            $ledgerIds = [];
-            foreach ($itemRows as $it) { if ((int) ($it['ledger_id'] ?? 0) > 0) { $ledgerIds[(int) $it['ledger_id']] = true; } }
-            // WIP is excluded from the comparison set — the ITEM subledger can
-            // never carry in-process value; WIP is reported separately below.
-            $wipLedgerIds = [];
-            if (table_exists('inventory_ledger_mappings')) {
-                $mp = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND purpose IN ('inventory_asset','raw_material','finished_goods','scrap_inventory')");
-                $mp->execute(['cid' => $scopeCompanyId]);
-                foreach ($mp->fetchAll(PDO::FETCH_COLUMN) as $lid) { $ledgerIds[(int) $lid] = true; }
-                $wp = db()->prepare("SELECT DISTINCT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND purpose = 'wip'");
-                $wp->execute(['cid' => $scopeCompanyId]);
-                foreach ($wp->fetchAll(PDO::FETCH_COLUMN) as $lid) { $wipLedgerIds[(int) $lid] = true; unset($ledgerIds[(int) $lid]); }
-            }
+            $diagnosis = sr_inventory_gl_diagnostics($scopeCompanyId, $to);
             $rows = [];
-            $glTotal = 0.0;
-            if ($ledgerIds !== []) {
-                $ph = implode(',', array_fill(0, count($ledgerIds), '?'));
-                // The vouchers filter sits in the LEFT JOIN's ON clause, so entries
-                // whose voucher is a draft/cancelled/future row still survive the join.
-                // Guard the SUM on v.id IS NOT NULL so only posted, in-period entries
-                // contribute, while ledgers with no matching entries still show as 0.
-                $q = db()->prepare("SELECT l.code, l.name, l.id,
-                        COALESCE(SUM(CASE WHEN v.id IS NULL THEN 0 WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0) AS bal
-                    FROM ledgers l
-                    LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
-                    LEFT JOIN vouchers v ON v.id = ve.voucher_id AND v.status='posted' AND v.company_id = l.company_id AND (v.voucher_date IS NULL OR v.voucher_date <= ?)
-                    WHERE l.id IN ($ph) GROUP BY l.id ORDER BY l.code");
-                $q->execute(array_merge([$to], array_keys($ledgerIds)));
-                foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $lr) {
-                    $rows[] = [(string) $lr['code'], (string) $lr['name'], 'GL ledger balance', rc_fmt((float) $lr['bal'])];
-                    $glTotal += (float) $lr['bal'];
-                }
+
+            $rows[] = rc_row(['LEDGER-BY-LEDGER RECONCILIATION', 'Item subledger and posted GL compared on every inventory-control ledger', 'Section', ''], 'section');
+            foreach ((array) $diagnosis['ledger_rows'] as $ledgerRow) {
+                $ledgerCode = (string) ($ledgerRow['code'] ?? 'UNMAPPED');
+                $ledgerName = (string) ($ledgerRow['name'] ?? 'Inventory ledger');
+                $ledgerDifference = (float) ($ledgerRow['difference'] ?? 0);
+                $rows[] = [$ledgerCode, $ledgerName . ': item subledger at replayed cost', 'Subledger', rc_fmt((float) ($ledgerRow['subledger'] ?? 0))];
+                $rows[] = ['', $ledgerName . ': posted general-ledger balance', 'GL', rc_fmt((float) ($ledgerRow['gl'] ?? 0))];
+                $rows[] = ['', $ledgerName . ': difference (subledger minus GL)', abs($ledgerDifference) < 0.005 ? 'Reconciled' : 'Investigate', rc_fmt($ledgerDifference)];
             }
-            $diff = round($subledger - $glTotal, 2);
-            if ($wipLedgerIds !== []) {
-                $wph = implode(',', array_fill(0, count($wipLedgerIds), '?'));
-                $wq = db()->prepare("SELECT COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0)
-                    FROM voucher_entries ve JOIN vouchers v ON v.id=ve.voucher_id
-                    WHERE ve.ledger_id IN ($wph) AND v.status='posted' AND v.company_id = ? AND (v.voucher_date IS NULL OR v.voucher_date <= ?)");
-                $wq->execute(array_merge(array_keys($wipLedgerIds), [$scopeCompanyId, $to]));
-                $wipBal = round((float) $wq->fetchColumn(), 2);
-                if (abs($wipBal) >= 0.005) {
-                    $rows[] = ['', 'Work in Progress ledger (in-process value — outside the item subledger by design)', 'Info', rc_fmt($wipBal)];
-                }
+            if (abs((float) $diagnosis['wip']) >= 0.005) {
+                $rows[] = ['', 'Work in Progress balance. This is in-process value and is excluded from the item-on-shelf comparison by design.', 'Information', rc_fmt((float) $diagnosis['wip'])];
             }
-            $rows[] = ['', 'Stock subledger at replayed cost (as at date)', 'Subledger', rc_fmt($subledger)];
-            $rows[] = ['', 'General-ledger inventory balance (excl. WIP)', 'GL', rc_fmt($glTotal)];
-            $rows[] = ['', 'DIFFERENCE (subledger − GL)', abs($diff) < 0.005 ? 'Reconciled' : 'Investigate', rc_fmt($diff)];
-            // EXPLAIN the difference: what has value in stock but no voucher in
-            // the GL, and where the one-click fixes live.
-            if (abs($diff) >= 0.005) {
-                $gap = sr_unposted_summary($scopeCompanyId);
-                if ($gap['openings'] > 0) {
-                    $rows[] = ['', $gap['openings'] . ' item(s) with master opening stock but NO opening voucher — post them from Opening Balances → "Post missing opening-stock vouchers"', 'Cause', rc_fmt($gap['openings_value'])];
+
+            $rows[] = rc_row(['CONTROL TOTALS', 'Overall reconciliation as at the selected date', 'Section', ''], 'section');
+            $rows[] = ['', 'Stock subledger at replayed cost', 'Subledger', rc_fmt((float) $diagnosis['stock'])];
+            $rows[] = ['', 'General-ledger inventory balance, excluding WIP', 'GL', rc_fmt((float) $diagnosis['gl'])];
+            // Keep this as a plain row because older exports/tests identify the
+            // report contract by this exact difference line.
+            $rows[] = ['', 'DIFFERENCE (subledger - GL)', abs((float) $diagnosis['difference']) < 0.005 ? 'Reconciled' : 'Investigate', rc_fmt((float) $diagnosis['difference'])];
+
+            $hasCauses = (array) $diagnosis['causes'] !== [];
+            if ($hasCauses || abs((float) $diagnosis['difference']) >= 0.005) {
+                $rows[] = rc_row(['AUTOMATIC DIAGNOSIS', 'Each cause is matched to its item, movement or voucher. Impact uses the same sign as subledger minus GL.', 'Section', ''], 'section');
+                $rows[] = [
+                    'COVERAGE',
+                    count((array) $diagnosis['causes']) . ' identified cause(s). Explained difference '
+                        . rc_fmt((float) $diagnosis['explained']) . '; remaining unexplained difference '
+                        . rc_fmt((float) $diagnosis['unexplained']) . '.',
+                    abs((float) $diagnosis['unexplained']) < 0.005 ? 'Fully explained' : 'Further review',
+                    rc_fmt((float) $diagnosis['explained']),
+                ];
+                $rows[] = [
+                    'SIGN',
+                    'Positive impact means item stock is greater than GL. Negative impact means GL inventory is greater than item stock.',
+                    'Reading guide',
+                    '–',
+                ];
+                foreach ((array) $diagnosis['causes'] as $index => $cause) {
+                    $causeNo = str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT);
+                    $causeType = ucwords(str_replace('_', ' ', (string) ($cause['type'] ?? 'difference')));
+                    $rows[] = [
+                        'C-' . $causeNo . ' ' . (string) ($cause['reference'] ?? ''),
+                        (string) ($cause['title'] ?? 'Difference cause') . '. ' . (string) ($cause['detail'] ?? ''),
+                        (string) ($cause['severity'] ?? 'Review') . ' cause: ' . $causeType,
+                        rc_fmt((float) ($cause['impact'] ?? 0)),
+                    ];
+                    $rows[] = [
+                        'R-' . $causeNo,
+                        'Recommendation: ' . (string) ($cause['recommendation'] ?? 'Review the source transaction and audit trail.'),
+                        'Recommended action',
+                        '–',
+                    ];
                 }
-                if ($gap['movements'] > 0) {
-                    $rows[] = ['', $gap['movements'] . ' stock movement(s) recorded without a GL voucher — post them from Stock Summary → "Post missing movement vouchers"', 'Cause', rc_fmt($gap['movements_value'])];
+                if (abs((float) $diagnosis['unexplained']) >= 0.005) {
+                    $rows[] = [
+                        'C-RESIDUAL',
+                        'A residual remains after matching every current item opening, stock movement and posted voucher on the designated inventory ledgers.',
+                        'Unclassified residual',
+                        rc_fmt((float) $diagnosis['unexplained']),
+                    ];
+                    $rows[] = [
+                        'R-RESIDUAL',
+                        'Recommendation: Review historical ledger mapping changes and the voucher drill-down for the affected ledger. Correct only the originating record with approval and an audit trail; do not force a balancing journal.',
+                        'Recommended action',
+                        '–',
+                    ];
                 }
-                if ($gap['manufacturing'] > 0) {
-                    $rows[] = ['', $gap['manufacturing'] . ' manufacturing consume/produce row(s) whose production journal never posted — complete/re-post the order in Inventory & Manufacturing', 'Cause', '–'];
+            } else {
+                $rows[] = rc_row(['AUTOMATIC DIAGNOSIS', 'No value difference or offsetting cause was found. Item stock and the designated inventory GL ledgers reconcile.', 'Reconciled', ''], 'section');
+            }
+
+            if ((array) $diagnosis['controls'] !== []) {
+                $rows[] = rc_row(['RELATED DATA-QUALITY WARNINGS', 'These conditions may create future valuation differences even when they do not explain the entire current amount.', 'Section', ''], 'section');
+                foreach ((array) $diagnosis['controls'] as $index => $control) {
+                    $controlNo = str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT);
+                    $rows[] = [
+                        'W-' . $controlNo . ' ' . (string) ($control['reference'] ?? ''),
+                        (string) ($control['title'] ?? 'Control warning') . '. ' . (string) ($control['detail'] ?? ''),
+                        (string) ($control['severity'] ?? 'Review') . ' warning',
+                        abs((float) ($control['risk_amount'] ?? 0)) >= 0.005 ? rc_fmt((float) $control['risk_amount']) : '–',
+                    ];
+                    $rows[] = [
+                        'WR-' . $controlNo,
+                        'Recommendation: ' . (string) ($control['recommendation'] ?? 'Review the source data.'),
+                        'Recommended action',
+                        '–',
+                    ];
                 }
-                $rows[] = ['', 'Any remainder is usually a DIRECT opening/journal typed straight on an inventory GL ledger (not item-backed) — compare and adjust it from Opening Balances', 'Note', '–'];
             }
             return [
                 'title' => 'Inventory-to-GL Reconciliation', 'as_at' => true,
-                'subtitle' => 'Perpetual cost-layer subledger vs general-ledger inventory as at ' . date('d M Y', strtotime($to)) . '. Any difference is shown, never hidden.',
-                'columns' => [['Ledger', 'left', ''], ['Description', 'left', ''], ['Source', 'left', ''], ['Amount (' . $sym . ')', 'right', '']],
+                'subtitle' => 'Detailed automatic reconciliation as at ' . date('d M Y', strtotime($to))
+                    . '. The report matches item openings and movements to posted vouchers, identifies GL-only entries and cost-layer shortages, and recommends the controlled correction path.',
+                'columns' => [['Reference / Ledger', 'left', ''], ['Description and cause', 'left', ''], ['Classification', 'left', ''], ['Impact / Amount (' . $sym . ')', 'right', '']],
                 'rows' => $rows,
                 'totals' => null,
             ];

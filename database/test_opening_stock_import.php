@@ -30,9 +30,10 @@ function osi_cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
-        foreach (['inventory_opening_import_rows', 'inventory_opening_imports',
+        foreach (['jewellery_stock_unit_events', 'jewellery_stock_units', 'inventory_opening_import_rows', 'inventory_opening_imports',
                   'jewellery_line_taxes', 'jewellery_item_taxes', 'jewellery_taxes',
                   'jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items',
+                  'jewellery_item_categories',
                   'jewellery_daily_rates', 'inventory_ledger_mappings', 'jewellery_settings',
                   'jewellery_purities', 'jewellery_metals', 'jewellery_units'] as $t) {
             db()->exec("DELETE FROM `$t` WHERE company_id=$s");
@@ -241,6 +242,53 @@ $second = opening_import_commit($cid, $importId, $fy, $uid);
 ok($second['ok'] === false || $second['committed'] === 0, 'A second commit of the same rows posts nothing more');
 ok($q("SELECT COUNT(*) FROM vouchers WHERE company_id=$cid AND source_type='inventory_opening'") === $vouchersBefore,
     'And no extra opening voucher appears');
+
+echo "\n10. Jewellery spreadsheet can create groups and coded items after editable review\n";
+$newCsv = "Stock Type *,Stock Group *,Item Code *,Item Name *,Metal *,Purity % *,Purity Code,Unit *,Pieces *,Gross Weight (GM) *,Opening Amount *,Customer Name,Order Number\n"
+    . "Showroom Stock,Bangles,BG-1,Bangle 1,Gold,92,22K,TOLA,1,2,250000,,\n"
+    . "Customer Ordered Stock,Rings,RG-1,Ring 1,Gold,92,22K,TOLA,1,1,125000,Test Customer,JO-TEST-1\n";
+$newPath = tempnam(sys_get_temp_dir(), 'osi-new') . '.csv';
+file_put_contents($newPath, $newCsv);
+$newStage = opening_import_stage($cid, $fy, $newPath, 'csv', 'segregated-openings.csv', 'jewellery', $uid);
+ok($newStage['row_count'] === 2 && $newStage['valid_count'] === 2,
+    'Two classified, previously unknown coded items stage as ready-to-create rows');
+$newRows = opening_import_rows($cid, (int) $newStage['import_id']);
+ok((int) $newRows[0]['create_item'] === 1 && (string) $newRows[0]['raw_group'] === 'Bangles',
+    'The staged row keeps its create-item decision and stock group');
+$editedRow = opening_import_update_row($cid, (int) $newRows[0]['id'], [
+    'stock_kind' => 'customer_ordered', 'customer_name' => 'Review Customer', 'order_number' => 'JO-REVIEW-1',
+    'proposed_name' => 'Bangle 1 Edited',
+]);
+ok($editedRow['ok'] && $editedRow['status'] === 'ready',
+    'Stock type, customer link and item name remain editable in the staged preview');
+$editedBack = opening_import_update_row($cid, (int) $newRows[0]['id'], [
+    'stock_kind' => 'showroom', 'customer_name' => '', 'order_number' => '',
+]);
+ok($editedBack['ok'] && $editedBack['status'] === 'ready',
+    'A reviewed row can be returned to Showroom Stock before anything is posted');
+$newCommit = opening_import_commit($cid, (int) $newStage['import_id'], $fy, $uid);
+ok($newCommit['ok'] && $newCommit['committed'] === 2, 'Commit creates and opens both reviewed items atomically');
+$created = db()->query("SELECT i.sku, i.name, i.category, jp.stock_kind
+    FROM inventory_items i INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id=i.id
+    WHERE i.company_id=$cid AND i.sku IN ('BG-1','RG-1') ORDER BY i.sku")->fetchAll(PDO::FETCH_ASSOC);
+ok(count($created) === 2 && $created[0]['name'] === 'Bangle 1 Edited' && $created[0]['category'] === 'Bangles',
+    'BG-1 is created with its reviewed name under the Bangles stock group');
+ok($created[0]['stock_kind'] === 'showroom' && $created[1]['stock_kind'] === 'customer_ordered',
+    'Showroom and customer-ordered classifications remain separate on the item masters');
+ok($q("SELECT COUNT(*) FROM jewellery_item_categories WHERE company_id=$cid AND name IN ('Bangles','Rings')") === 2,
+    'Missing stock groups are created once in the Jewellery category master');
+$templateHeader = opening_import_template_rows(true)[0];
+ok($templateHeader === [
+    'SN', 'Stock type', 'Stock group', 'Item code', 'Item name', 'Metal', 'Purity',
+    'Unit', 'Pieces', 'Gross weight', 'Rate', 'Amount', 'Customer name', 'Order number',
+], 'The downloadable template exactly matches the supplied stock workbook columns');
+$openingScreen = (string) file_get_contents(__DIR__ . '/../public_html/admin/jewellery.php');
+ok(str_contains($openingScreen, 'Source Excel Row')
+    && str_contains($openingScreen, 'Existing Item / Create')
+    && str_contains($openingScreen, 'Validation Status')
+    && stripos($openingScreen, 'from the sheet') === false,
+    'The staged preview mirrors the template and keeps matching/validation in separate review columns');
+@unlink($newPath);
 
 @unlink($path);
 osi_cleanup();

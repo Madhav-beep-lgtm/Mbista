@@ -570,12 +570,12 @@ if ($clientProfile) {
             FROM service_agreements
             WHERE client_id = :client_id
               AND workflow_status IN ('issued','accepted','signed','active','expired','terminated','superseded')
-            ORDER BY id DESC");
+            ORDER BY id DESC LIMIT 100");
         $agreementStmt->execute(['client_id' => (int) $clientProfile['id']]);
         $clientAgreements = $agreementStmt->fetchAll();
     }
     if (table_exists('service_contracts')) {
-        $stmt = db()->prepare('SELECT * FROM service_contracts WHERE client_id = :client_id ORDER BY created_at DESC');
+        $stmt = db()->prepare('SELECT * FROM service_contracts WHERE client_id = :client_id ORDER BY created_at DESC LIMIT 100');
         $stmt->execute(['client_id' => $clientId]);
         $contracts = $stmt->fetchAll();
     }
@@ -589,7 +589,7 @@ if ($clientProfile) {
             LEFT JOIN teams tm ON tm.id = t.team_id
             LEFT JOIN service_contracts sc ON sc.id = t.contract_id{$taskAssignedJoin}
             WHERE t.client_id = :client_id
-            ORDER BY t.created_at DESC");
+            ORDER BY t.created_at DESC LIMIT 200");
         $stmt->execute(['client_id' => $clientId]);
         $tasks = $stmt->fetchAll();
 
@@ -626,7 +626,7 @@ if ($clientProfile) {
                 LEFT JOIN client_tasks t ON t.id = ti.task_id
                 LEFT JOIN task_stages ts ON ts.id = ti.stage_id
                 WHERE " . implode(' OR ', $invoiceConditions) . "
-                ORDER BY ti.created_at DESC");
+                ORDER BY ti.created_at DESC LIMIT 200");
             $stmt->execute($invoiceParams);
             $invoices = $stmt->fetchAll();
 
@@ -647,7 +647,7 @@ if ($clientProfile) {
     }
 
     if (table_exists('documents')) {
-        $stmt = db()->prepare("SELECT * FROM documents WHERE client_id = :client_id AND visibility = 'client' AND is_active = 1 ORDER BY created_at DESC");
+        $stmt = db()->prepare("SELECT * FROM documents WHERE client_id = :client_id AND visibility = 'client' AND is_active = 1 ORDER BY created_at DESC LIMIT 500");
         $stmt->execute(['client_id' => $clientId]);
         $allClientDocuments = $stmt->fetchAll();
 
@@ -662,7 +662,7 @@ if ($clientProfile) {
     }
 
     if (table_exists('document_requests')) {
-        $stmt = db()->prepare('SELECT * FROM document_requests WHERE client_id = :client_id ORDER BY created_at DESC');
+        $stmt = db()->prepare('SELECT * FROM document_requests WHERE client_id = :client_id ORDER BY created_at DESC LIMIT 200');
         $stmt->execute(['client_id' => $clientId]);
         $documentRequests = $stmt->fetchAll();
     }
@@ -673,7 +673,7 @@ if ($clientProfile) {
             INNER JOIN compliance_types ct ON ct.id = cd.compliance_type_id
             LEFT JOIN documents d ON d.id = cd.document_id
             WHERE cd.client_id = :client_id
-            ORDER BY cd.statutory_due_date ASC');
+            ORDER BY cd.statutory_due_date ASC LIMIT 200');
         $stmt->execute(['client_id' => $clientId]);
         $rawComplianceDeadlines = $stmt->fetchAll();
 
@@ -774,9 +774,9 @@ if ($clientProfile && $view === 'messages') {
                 db()->prepare('UPDATE message_thread_participants SET last_read_at = NOW() WHERE thread_id = :thread_id AND user_id = :user_id')
                     ->execute(['thread_id' => $requestedThreadId, 'user_id' => $userId]);
 
-                $msgStmt = db()->prepare('SELECT m.*, u.name AS sender_name FROM messages m INNER JOIN users u ON u.id = m.sender_id WHERE m.thread_id = :thread_id ORDER BY m.created_at ASC');
+                $msgStmt = db()->prepare('SELECT m.*, u.name AS sender_name FROM messages m INNER JOIN users u ON u.id = m.sender_id WHERE m.thread_id = :thread_id ORDER BY m.created_at DESC LIMIT 500');
                 $msgStmt->execute(['thread_id' => $requestedThreadId]);
-                $threadMessages = $msgStmt->fetchAll();
+                $threadMessages = array_reverse($msgStmt->fetchAll());
             }
         } else {
             flash('error', 'You do not have access to that thread.');
@@ -791,7 +791,7 @@ if ($clientProfile && $view === 'messages') {
             FROM message_threads mt
             INNER JOIN message_thread_participants mtp ON mtp.thread_id = mt.id AND mtp.user_id = :self2
             WHERE mt.client_id = :client_id
-            ORDER BY mt.updated_at DESC");
+            ORDER BY mt.updated_at DESC LIMIT 100");
         $inboxStmt->execute(['self1' => $userId, 'self2' => $userId, 'client_id' => $clientId]);
         $threads = $inboxStmt->fetchAll();
     }
@@ -816,9 +816,9 @@ if ($clientProfile && $view === 'tickets') {
         $ticket = $ticketStmt->fetch() ?: null;
 
         if ($ticket) {
-            $msgStmt = db()->prepare('SELECT tm.*, u.name AS sender_name FROM support_ticket_messages tm INNER JOIN users u ON u.id = tm.sender_id WHERE tm.ticket_id = :ticket_id ORDER BY tm.created_at ASC');
+            $msgStmt = db()->prepare('SELECT tm.*, u.name AS sender_name FROM support_ticket_messages tm INNER JOIN users u ON u.id = tm.sender_id WHERE tm.ticket_id = :ticket_id ORDER BY tm.created_at DESC LIMIT 500');
             $msgStmt->execute(['ticket_id' => $requestedTicketId]);
-            $ticketMessages = $msgStmt->fetchAll();
+            $ticketMessages = array_reverse($msgStmt->fetchAll());
         } else {
             flash('error', 'That ticket is not available.');
         }
@@ -833,7 +833,7 @@ if ($clientProfile && $view === 'tickets') {
         if ($hasTicketRequests) {
             $listSql .= ' LEFT JOIN support_ticket_requests tr ON tr.ticket_id = st.id';
         }
-        $listSql .= ' WHERE st.client_id = :client_id ORDER BY st.created_at DESC';
+        $listSql .= ' WHERE st.client_id = :client_id ORDER BY st.created_at DESC LIMIT 100';
         $listStmt = db()->prepare($listSql);
         $listStmt->execute(['client_id' => $clientId]);
         $tickets = $listStmt->fetchAll();
@@ -1007,6 +1007,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
         $abFy = null;
         $abVouchers = [];
         $abPending = [];
+        $abPendingTotal = 0;
         $abSnapshot = ['cash' => 0.0, 'receivables' => 0.0, 'payables' => 0.0, 'income' => 0.0, 'expenses' => 0.0, 'net' => 0.0];
         $abFyList = [];
         if ($abCompanyId > 0) {
@@ -1041,7 +1042,18 @@ include __DIR__ . '/../app/views/partials/client_header.php';
             $abVoucherStmt = db()->prepare('SELECT * FROM vouchers WHERE company_id = :cid ORDER BY id DESC LIMIT 25');
             $abVoucherStmt->execute(['cid' => $abCompanyId]);
             $abVouchers = $abVoucherStmt->fetchAll();
-            $abPending = array_values(array_filter($abVouchers, static fn (array $v): bool => (string) $v['approval_state'] === 'pending_approval' && (int) ($v['requires_client_approval'] ?? 0) === 1));
+            // Approval work is not a subset of "recent" work. The previous
+            // filter silently hid an old pending voucher as soon as 25 newer
+            // entries existed. Count independently and load a bounded queue.
+            $abPendingCountStmt = db()->prepare("SELECT COUNT(*) FROM vouchers
+                WHERE company_id = :cid AND approval_state = 'pending_approval' AND requires_client_approval = 1");
+            $abPendingCountStmt->execute(['cid' => $abCompanyId]);
+            $abPendingTotal = (int) $abPendingCountStmt->fetchColumn();
+            $abPendingStmt = db()->prepare("SELECT * FROM vouchers
+                WHERE company_id = :cid AND approval_state = 'pending_approval' AND requires_client_approval = 1
+                ORDER BY created_at ASC, id ASC LIMIT 100");
+            $abPendingStmt->execute(['cid' => $abCompanyId]);
+            $abPending = $abPendingStmt->fetchAll();
         }
         $abCurrency = site_currency_symbol();
         $abMoney = static fn (float $a): string => $abCurrency . number_format($a, 2);
@@ -1072,7 +1084,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
             </section>
 
             <section class="mbw-card">
-                <div class="mbw-card-head"><h2>Entries Awaiting Your Approval</h2><span class="mbw-pill <?= $abPending === [] ? 'tone-green' : 'tone-amber' ?>"><?= count($abPending) ?> pending</span></div>
+                <div class="mbw-card-head"><h2>Entries Awaiting Your Approval</h2><span class="mbw-pill <?= $abPendingTotal === 0 ? 'tone-green' : 'tone-amber' ?>"><?= $abPendingTotal ?> pending</span></div>
                 <?php if ($abPending === []): ?>
                     <p style="color:var(--mbw-muted);font-size:13px">Nothing waiting for you. Entries submitted by your accountant will appear here for approval.</p>
                 <?php else: ?>
@@ -1087,18 +1099,21 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                 <td><?= e((string) ($v['narration'] ?: '—')) ?></td>
                                 <td class="is-numeric"><?= e($abMoney((float) $v['total_amount'])) ?></td>
                                 <td>
-                                    <form method="post" style="display:inline-flex;gap:6px">
+                                    <?php if (client_portal_capability('approve')): ?><form method="post" style="display:inline-flex;gap:6px">
                                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                         <input type="hidden" name="action" value="client_voucher_decision">
                                         <input type="hidden" name="voucher_id" value="<?= (int) $v['id'] ?>">
                                         <button type="submit" name="decision" value="approve" class="button success" style="min-height:32px;padding:4px 12px">Approve</button>
                                         <button type="submit" name="decision" value="reject" class="button danger" style="min-height:32px;padding:4px 12px">Reject</button>
-                                    </form>
+                                    </form><?php else: ?><span class="frm-optional">Owner or approver review required</span><?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>
                     </table></div>
+                <?php endif; ?>
+                <?php if ($abPendingTotal > count($abPending)): ?>
+                    <p class="notice">Showing the oldest <?= count($abPending) ?> of <?= $abPendingTotal ?> pending entries. Complete this page to reveal the next entries.</p>
                 <?php endif; ?>
             </section>
 

@@ -42,7 +42,7 @@ function jwt_cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
-        foreach (['jewellery_advance_allocations', 'jewellery_settlement_tenders', 'jewellery_settlement_allocations', 'jewellery_settlements', 'jewellery_bills',
+        foreach (['jewellery_stock_unit_events', 'jewellery_stock_units', 'jewellery_advance_allocations', 'jewellery_settlement_tenders', 'jewellery_settlement_allocations', 'jewellery_settlements', 'jewellery_bills',
                   'jewellery_sale_exchanges', 'jewellery_sale_lines', 'jewellery_sales',
                   'jewellery_purchase_lines', 'jewellery_purchases',                   'jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items', 'jewellery_daily_rates',
                   'inventory_ledger_mappings', 'jewellery_settings', 'jewellery_purities',
@@ -274,6 +274,10 @@ ok(near((float) $s2Row['received_amount'], 0.0) && near((float) $s2Row['balance_
 $oldBefore = jw_item_balance($cidA, $oldGold)['fine_weight'];
 $r = jewellery_post_sale($cidA, $s2, $userA);
 ok($r['ok'], 'The metal-to-metal sale posts' . ($r['ok'] ? '' : ' — ' . $r['error']));
+$exchangeTrace = db()->query("SELECT id, status FROM jewellery_stock_units
+    WHERE company_id=$cidA AND origin_type='sale_exchange' AND origin_id=$s2 LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+ok($exchangeTrace !== false && (string) $exchangeTrace['status'] === 'in_stock',
+    'Old jewellery accepted in exchange receives its own physical trace');
 $v = voucher_shape((int) $r['voucher_id']);
 ok(near($v['dr'], $v['cr']), 'It balances with no cash leg at all');
 ok(!isset($v['ledgers'][$cash]), 'The cash ledger is NOT touched');
@@ -349,10 +353,14 @@ ok(!$registerDelete['ok'] && str_contains($registerDelete['error'], 'Jewellery')
     'The Voucher Register REFUSES to delete a jewellery sale voucher');
 $unposted = jewellery_unpost_sale($cidA, $s2, $userA);
 ok($unposted['ok'], 'A sale with no settled bill CAN be unposted' . ($unposted['ok'] ? '' : ' — ' . $unposted['error']));
+ok((string) db()->query('SELECT status FROM jewellery_stock_units WHERE id=' . (int) $exchangeTrace['id'])->fetchColumn() === 'cancelled',
+    'Unposting cancels the incoming old-jewellery trace without erasing its history');
 ok(near(jw_item_balance($cidA, $oldGold)['fine_weight'], $oldBefore), 'Unposting removed the exchange metal too');
 ok(near(jw_item_balance($cidA, $chain)['fine_weight'], 18.32 - 4.58), 'And returned the sold chain to stock');
 ok((string) jewellery_sale($cidA, $s2)['status'] === 'draft', 'The sale is back to draft');
 jewellery_post_sale($cidA, $s2, $userA);
+ok((string) db()->query('SELECT status FROM jewellery_stock_units WHERE id=' . (int) $exchangeTrace['id'])->fetchColumn() === 'in_stock',
+    'Reposting reactivates the same old-jewellery trace');
 
 echo "\n11. Reports\n";
 $salesReport = jw_report_sales_detail($cidA, '2026-07-16', '2027-07-15');

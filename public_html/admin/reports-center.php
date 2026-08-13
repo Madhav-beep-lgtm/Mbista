@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_once __DIR__ . '/../../app/reports_engine.php';
+require_once __DIR__ . '/../../app/jewellery_aml.php';
 require_once __DIR__ . '/../../app/mailer.php';
 require_staff_admin_or_client_books();
 require_company_context();
@@ -33,6 +34,9 @@ if (!($companyBusinessProfile['show_manufacturing'] ?? false)) {
 // Fixed-asset reports (register / depreciation / asset-GL reconciliation) apply
 // to every company, so they are not gated by the trading/manufacturing profile.
 $allowedReportRegistry = array_intersect_key($reportRegistry, array_flip($allowedReportKeys));
+if (!jewellery_enabled_for_company($companyId) || !user_can_do('jewellery', 'post')) {
+    unset($allowedReportRegistry['jewellery-aml-register']);
+}
 
 // ---------------------------------------------------------------------------
 // Filters.

@@ -50,7 +50,7 @@ Do all three of these:
 
 Also in the history: `.env` was committed in the first commit and removed in
 `05b3680`. `DB_USER` and `DB_NAME` are therefore public and are still the ones
-in use. `DB_PASS` was **blank** at the time — a XAMPP default — so no password
+in use. `DB_PASS` was **blank** at the time — a local-development default — so no password
 leaked. Lower severity, but rename the database user if it is convenient.
 
 ---

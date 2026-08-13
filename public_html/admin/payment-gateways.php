@@ -5,8 +5,12 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/payment_gateway_engine.php';
 
-require_admin();
+require_staff_admin_or_client_books();
 require_company_context();
+if ((string) (current_user()['role'] ?? '') === 'customer' && !client_portal_user_is_owner()) {
+    deny_access('Only the client organization owner may manage payment gateway credentials.');
+}
+require_permission('accounting', 'edit');
 accounting_module_repair_database();
 
 $company = current_company();
@@ -16,11 +20,17 @@ if (!$company) {
 }
 $companyId = (int) $company['id'];
 $userId = (int) (current_user()['id'] ?? 0);
+$cashLedger = get_mapped_ledger($companyId, 'default_cash_bank');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $provider = (string) ($_POST['provider'] ?? '');
     if (isset(pg_providers()[$provider])) {
+        $enableRequested = !empty($_POST['enabled']);
+        if ($enableRequested && !$cashLedger) {
+            flash('error', 'Choose the default cash / bank account in Posting Accounts before enabling an online payment gateway.');
+            redirect('admin/chart-posting-accounts.php#default-cash-bank');
+        }
         $extra = [];
         if ($provider === 'stripe') {
             $cur = strtolower(trim((string) ($_POST['stripe_currency'] ?? 'usd')));
@@ -29,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         pg_save_config($companyId, $provider, [
             'mode' => (string) ($_POST['mode'] ?? 'test'),
-            'enabled' => !empty($_POST['enabled']),
+            'enabled' => $enableRequested,
             'merchant_code' => (string) ($_POST['merchant_code'] ?? ''),
             'secret_key' => (string) ($_POST['secret_key'] ?? ''),
             'public_key' => (string) ($_POST['public_key'] ?? ''),
@@ -42,7 +52,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $configs = pg_all_configs($companyId);
-$cashLedger = get_mapped_ledger($companyId, 'default_cash_bank');
 
 $pageTitle = 'Payment Gateways';
 $pageSubtitle = 'Let clients pay their invoices online — the confirmed payment posts a receipt voucher automatically.';
@@ -55,9 +64,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
       // mapping a confirmed payment has nowhere to post, so this is a warning
       // about a setup that will fail, not a note about how the feature works. ?>
 <?php if (!$cashLedger): ?>
-    <div class="notice error">
-        No <code>default_cash_bank</code> ledger is mapped, so a confirmed payment cannot post its receipt.
-        Map it in Settings before taking payments online.
+    <div class="notice error" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+        <span><strong>Cash / bank account setup is required.</strong> Choose the account that will receive confirmed online payments before enabling a gateway.</span>
+        <a class="button secondary" href="<?= e(url('admin/chart-posting-accounts.php#default-cash-bank')) ?>">Set posting account</a>
     </div>
 <?php endif; ?>
 
@@ -92,7 +101,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </select>
             </label>
             <label style="display:flex;align-items:center;gap:8px;flex-direction:row;align-self:end">
-                <input type="checkbox" name="enabled" value="1" <?= $enabled ? 'checked' : '' ?> style="width:auto;min-height:auto"> Enabled (show to clients)
+                <input type="checkbox" name="enabled" value="1" <?= $enabled ? 'checked' : '' ?> <?= !$cashLedger ? 'disabled' : '' ?> style="width:auto;min-height:auto"> Enabled (show to clients)
             </label>
             <?php foreach ($meta['fields'] as $field => $fieldLabel): ?>
                 <label class="workspace-span-2"><?= e($fieldLabel) ?>

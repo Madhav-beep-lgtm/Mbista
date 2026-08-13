@@ -23,6 +23,7 @@ if (PHP_SAPI !== 'cli') { exit('CLI only.'); }
 require __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/accounting_module_repair.php';
 require_once __DIR__ . '/../app/jewellery_assign.php';
+require_once __DIR__ . '/../app/opening_stock_import.php';
 accounting_module_repair_database();
 
 $pass = 0; $fail = 0;
@@ -36,7 +37,7 @@ function jwfs_cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
-        foreach (['jewellery_order_receipts', 'jewellery_assignment_components', 'jewellery_order_lines',
+        foreach (['jewellery_stock_unit_events', 'jewellery_stock_units', 'jewellery_order_receipts', 'jewellery_assignment_components', 'jewellery_order_lines',
                   'jewellery_order_assignments', 'jewellery_orders', 'jewellery_karigars',
                   'jewellery_settlement_allocations', 'jewellery_settlements', 'jewellery_bills',
                   'jewellery_sale_lines', 'jewellery_sales', 'jewellery_purchase_lines', 'jewellery_purchases',
@@ -130,6 +131,12 @@ $karigar = jewellery_save_karigar($cid, ['code' => 'BHARAT', 'name' => 'Bharat S
     'engagement_type' => 'contractor', 'default_making_basis' => 'flat',
     'default_making_rate' => 4000, 'wastage_allowed_pct' => 1.0], $uid);
 
+echo "\n0. The Excel template matches the accepted counter sheet\n";
+$template = opening_import_template_rows(true);
+ok($template[0] === ['SN', 'Stock type', 'Stock group', 'Item code', 'Item name', 'Metal', 'Purity',
+    'Unit', 'Pieces', 'Gross weight', 'Rate', 'Amount', 'Customer name', 'Order number'],
+    'The downloadable Excel columns match the supplied sheet exactly');
+
 /** Make one showroom piece and put it on the shelf; returns its receipt id. */
 $makeShelfPiece = static function (string $ornament, float $issue, float $back, float $stone, string $size = '')
         use ($cid, $fyId, $uid, $karigar, $ring, $bar, $p22, $tola): int {
@@ -217,6 +224,8 @@ ok(near((float) $line['making_amount'], 6000.0),
 ok($line['karigar_id'] === null, 'No kaligad is put against it');
 ok($line['delivery_date'] === null, 'And no day to wait for — it is already made');
 ok((string) $line['stock_assignment_no'] !== '', 'The line can name the assignment the piece came back on');
+ok((int) $line['stock_unit_id'] > 0 && (string) $line['trace_code'] !== '',
+    'And it keeps the permanent physical trace id, not only a legacy receipt link');
 
 echo "\n3. The order is finished the moment it is written\n";
 ok((string) jewellery_order($cid, $order)['status'] === 'received',
@@ -339,6 +348,26 @@ ok((int) $prefill['lines'][0]['item_id'] === $ring
     && near((float) $prefill['lines'][0]['gross_weight'], 1.9)
     && near((float) $prefill['lines'][0]['stone_weight'], 0.1),
     'And the bill carries the piece\'s own item and weights, not a workshop receipt\'s');
+
+echo "\n11. Posting and reversing the bill completes and restores the lifecycle\n";
+$saleId = jewellery_save_sale($cid, $fyId, [
+    'sale_date' => '2026-08-25', 'party_id' => $gita, 'deliver_order_ids' => [$order],
+    'received_amount' => 0, 'advance_amount' => 0,
+], $prefill['lines'], [], $uid);
+$savedSaleLine = jewellery_sale_line_rows($cid, $saleId)[0];
+ok((int) $savedSaleLine['stock_unit_id'] === (int) $line['stock_unit_id'],
+    'The draft sale reserves the same exact trace item');
+$postedSale = jewellery_post_sale($cid, $saleId, $uid);
+ok($postedSale['ok'], 'The direct showroom sale posts' . ($postedSale['ok'] ? '' : ': ' . $postedSale['error']));
+$soldTrace = jewellery_trace_unit($cid, (int) $line['stock_unit_id']);
+ok((string) ($soldTrace['status'] ?? '') === 'sold' && (int) ($soldTrace['sold_sale_id'] ?? 0) === $saleId,
+    'The trace ends at the exact sale that disposed of it');
+$unpostedSale = jewellery_unpost_sale($cid, $saleId, $uid);
+ok($unpostedSale['ok'], 'Unposting reverses the sale safely');
+$restoredTrace = jewellery_trace_unit($cid, (int) $line['stock_unit_id']);
+ok((string) ($restoredTrace['status'] ?? '') === 'reserved'
+    && (int) ($restoredTrace['reserved_order_id'] ?? 0) === $order,
+    'The exact item returns to its customer-order reservation after reversal');
 
 jwfs_cleanup();
 echo "\n==================================================\n";

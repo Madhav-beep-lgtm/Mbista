@@ -2,9 +2,12 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/admin_work_portal_repair.php';
+require_once __DIR__ . '/../../app/accounting_module_repair.php';
+require_once __DIR__ . '/../../app/mailer.php';
 
 require_admin();
 require_company_context();
+accounting_module_repair_database();
 $pageTitle = 'Admin Work Portal';
 $pageSubtitle = 'Operations hub for clients, teams, contracts, tasks, and invoicing';
 $bodyClass = 'admin-layout admin-workspace';
@@ -36,15 +39,6 @@ foreach ($requiredTables as $tableName) {
     }
 }
 $autoRepairErrors = [];
-if (array_intersect($missingTables, admin_work_portal_repair_required_tables()) !== []) {
-    $autoRepairErrors = admin_work_portal_repair_database();
-    $missingTables = [];
-    foreach ($requiredTables as $tableName) {
-        if (!admin_work_portal_repair_table_exists($tableName)) {
-            $missingTables[] = $tableName;
-        }
-    }
-}
 
 $allowedRoles = ['admin', 'staff', 'customer'];
 $allowedStatus = ['active', 'inactive'];
@@ -327,7 +321,11 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             db()->commit();
             log_activity('client_profile', $clientProfileId, 'created', 'Client created with generated code ' . $clientCode . '.', $adminId);
-            flash('success', 'Client created successfully. Code: ' . $clientCode . ' / Login: ' . $email);
+            $credentialMail = send_account_credentials_email($email, $name, $password, 'client portal account');
+            $mailNote = !empty($credentialMail['ok']) && ($credentialMail['transport'] ?? '') !== 'log'
+                ? ' Credentials emailed.'
+                : (($credentialMail['transport'] ?? '') === 'log' ? ' SMTP is not configured; credential email saved to storage/mail only.' : ' Credential email failed.');
+            flash('success', 'Client created successfully. Code: ' . $clientCode . ' / Login: ' . $email . $mailNote);
         } catch (Throwable $exception) {
             if (db()->inTransaction()) {
                 db()->rollBack();
@@ -1528,82 +1526,100 @@ $serviceProviderEntities = [];
 $selectedClientServiceProviderIds = [];
 
 if ($missingTables === []) {
-    $staffStmt = db()->prepare("SELECT id, name, email FROM users WHERE role = 'staff' AND status = 'active' AND company_id = :company_id ORDER BY name ASC");
-    $staffStmt->execute(['company_id' => $companyId]);
-    $staffUsers = $staffStmt->fetchAll();
-    $portalStmt = db()->prepare("SELECT id, name, email, role, status, created_at FROM users WHERE company_id = :company_id ORDER BY created_at DESC LIMIT 150");
-    $portalStmt->execute(['company_id' => $companyId]);
-    $portalUsers = $portalStmt->fetchAll();
+    if (in_array($view, ['teams', 'tasks', 'invoices', 'staff'], true)) {
+        $staffStmt = db()->prepare("SELECT id, name, email FROM users WHERE role = 'staff' AND status = 'active' AND company_id = :company_id ORDER BY name ASC");
+        $staffStmt->execute(['company_id' => $companyId]);
+        $staffUsers = $staffStmt->fetchAll();
+    }
+    if ($view === 'home') {
+        $portalStmt = db()->prepare("SELECT id, name, email, role, status, created_at FROM users WHERE company_id = :company_id ORDER BY created_at DESC LIMIT 150");
+        $portalStmt->execute(['company_id' => $companyId]);
+        $portalUsers = $portalStmt->fetchAll();
+    }
 
     if ($view === 'staff' && table_exists('team_members')) {
+        $staffIds = array_values(array_filter(array_map('intval', array_column($staffUsers, 'id'))));
+        $teamCounts = [];
+        if ($staffIds !== []) {
+            $idMarks = implode(',', array_fill(0, count($staffIds), '?'));
+            $teamCountStmt = db()->prepare("SELECT user_id,COUNT(DISTINCT team_id) total
+                FROM team_members WHERE user_id IN ($idMarks) GROUP BY user_id");
+            $teamCountStmt->execute($staffIds);
+            foreach ($teamCountStmt->fetchAll() as $row) $teamCounts[(int)$row['user_id']] = (int)$row['total'];
+        }
+
+        // Resolve every staff/task relationship in one derived set instead of
+        // repeating team, stage, direct and multi-assignee queries per person.
+        $assignmentParts = [];
+        $assignmentBindings = [];
+        if ($hasTaskAssignment) {
+            $assignmentParts[] = 'SELECT assigned_staff_user_id staff_id,id task_id,client_id FROM client_tasks WHERE company_id=? AND assigned_staff_user_id IS NOT NULL';
+            $assignmentBindings[] = $companyId;
+        }
+        if ($hasStageAssignment) {
+            $assignmentParts[] = 'SELECT ts.assigned_staff_user_id,t.id,t.client_id FROM task_stages ts INNER JOIN client_tasks t ON t.id=ts.task_id WHERE t.company_id=? AND ts.assigned_staff_user_id IS NOT NULL';
+            $assignmentBindings[] = $companyId;
+        }
+        if ($hasMultiAssignees) {
+            $assignmentParts[] = 'SELECT cta.user_id,t.id,t.client_id FROM client_task_assignees cta INNER JOIN client_tasks t ON t.id=cta.task_id WHERE t.company_id=?';
+            $assignmentBindings[] = $companyId;
+        }
+        $assignmentParts[] = 'SELECT tm.user_id,t.id,t.client_id FROM team_members tm INNER JOIN client_tasks t ON t.team_id=tm.team_id WHERE t.company_id=?';
+        $assignmentBindings[] = $companyId;
+
+        $workloadMap = [];
+        $clientCountMap = [];
+        if ($assignmentParts !== []) {
+            $assignmentSql = implode(' UNION ALL ', $assignmentParts);
+            $workloadStmt = db()->prepare("SELECT a.staff_id,
+                    COUNT(DISTINCT CASE WHEN t.status IN ('new','in_progress','on_hold') THEN t.id END) open_tasks,
+                    COUNT(DISTINCT CASE WHEN t.status='completed' THEN t.id END) completed_tasks
+                FROM ($assignmentSql) a INNER JOIN client_tasks t ON t.id=a.task_id
+                GROUP BY a.staff_id");
+            $workloadStmt->execute($assignmentBindings);
+            foreach ($workloadStmt->fetchAll() as $row) {
+                $workloadMap[(int)$row['staff_id']]=$row;
+            }
+            $clientSources = ["SELECT staff_id,client_id FROM ($assignmentSql) assigned_clients"];
+            $clientBindings = $assignmentBindings;
+            if (table_exists('staff_client_accounting_access')) {
+                $clientSources[] = 'SELECT staff_user_id,client_id FROM staff_client_accounting_access WHERE is_active=1 AND company_id=?';
+                $clientBindings[] = $companyId;
+            }
+            $clientCountStmt = db()->prepare('SELECT staff_id,COUNT(DISTINCT client_id) total FROM ('
+                . implode(' UNION ALL ', $clientSources) . ') scoped_clients GROUP BY staff_id');
+            $clientCountStmt->execute($clientBindings);
+            foreach ($clientCountStmt->fetchAll() as $row) {
+                $clientCountMap[(int)$row['staff_id']] = (int)$row['total'];
+            }
+        }
         foreach ($staffUsers as $staffUser) {
             $staffUserId = (int) $staffUser['id'];
-
-            $staffTeamIdsStmt = db()->prepare('SELECT team_id FROM team_members WHERE user_id = :user_id');
-            $staffTeamIdsStmt->execute(['user_id' => $staffUserId]);
-            $staffTeamIds = array_map('intval', array_column($staffTeamIdsStmt->fetchAll(), 'team_id'));
-
-            $staffClientIds = staff_scoped_client_ids($staffUserId, $companyId);
-
-            $staffOpenTasks = 0;
-            $staffCompletedTasks = 0;
-            if (table_exists('client_tasks')) {
-                // Task-wise/stage-wise assignment (with team as fallback), not client-wise.
-                $staffTaskWhere = 't.company_id = ? AND (';
-                $staffTaskBindings = [$companyId];
-                if ($hasTaskAssignment) {
-                    $staffTaskWhere .= 't.assigned_staff_user_id = ?';
-                    $staffTaskBindings[] = $staffUserId;
-                } else {
-                    $staffTaskWhere .= '1 = 0';
-                }
-                if ($staffTeamIds !== []) {
-                    $staffTeamPlaceholders = implode(',', array_fill(0, count($staffTeamIds), '?'));
-                    $staffTaskWhere .= " OR t.team_id IN ($staffTeamPlaceholders)";
-                    $staffTaskBindings = array_merge($staffTaskBindings, $staffTeamIds);
-                }
-                if ($hasStageAssignment) {
-                    $staffTaskWhere .= ' OR EXISTS (SELECT 1 FROM task_stages sts WHERE sts.task_id = t.id AND sts.assigned_staff_user_id = ?)';
-                    $staffTaskBindings[] = $staffUserId;
-                }
-                if ($hasMultiAssignees) {
-                    $staffTaskWhere .= ' OR EXISTS (SELECT 1 FROM client_task_assignees cta WHERE cta.task_id = t.id AND cta.user_id = ?)';
-                    $staffTaskBindings[] = $staffUserId;
-                }
-                $staffTaskWhere .= ')';
-
-                $staffTaskStmt = db()->prepare("SELECT t.status, COUNT(*) AS total FROM client_tasks t WHERE $staffTaskWhere GROUP BY t.status");
-                $staffTaskStmt->execute($staffTaskBindings);
-                foreach ($staffTaskStmt->fetchAll() as $statusRow) {
-                    $statusCount = (int) $statusRow['total'];
-                    if (in_array($statusRow['status'], ['new', 'in_progress', 'on_hold'], true)) {
-                        $staffOpenTasks += $statusCount;
-                    } elseif ($statusRow['status'] === 'completed') {
-                        $staffCompletedTasks += $statusCount;
-                    }
-                }
-            }
-
             $staffWorkloads[] = [
                 'id' => $staffUserId,
                 'name' => $staffUser['name'],
                 'email' => $staffUser['email'],
-                'team_count' => count($staffTeamIds),
-                'client_count' => count($staffClientIds),
-                'open_tasks' => $staffOpenTasks,
-                'completed_tasks' => $staffCompletedTasks,
+                'team_count' => $teamCounts[$staffUserId] ?? 0,
+                'client_count' => $clientCountMap[$staffUserId] ?? 0,
+                'open_tasks' => (int)($workloadMap[$staffUserId]['open_tasks'] ?? 0),
+                'completed_tasks' => (int)($workloadMap[$staffUserId]['completed_tasks'] ?? 0),
             ];
         }
     }
 
-    $industries = active_industries();
-    $serviceProviderEntities = active_service_provider_entities();
+    if (in_array($view, ['clients', 'industries'], true)) {
+        $industries = active_industries();
+    }
+    if (in_array($view, ['clients', 'service-providers', 'tasks'], true)) {
+        $serviceProviderEntities = active_service_provider_entities();
+    }
     $clientMode = (string) ($_GET['mode'] ?? '');
     $selectedClientId = (int) ($_GET['client_id'] ?? 0);
     $selectedClient = null;
     $selectedClientServiceProviderIds = [];
 
-    $clientStmt = db()->prepare("SELECT cp.*, u.name, u.email, i.name AS industry_name
+    if (in_array($view, ['home', 'clients', 'contracts', 'tasks'], true)) {
+        $clientStmt = db()->prepare("SELECT cp.*, u.name, u.email, i.name AS industry_name
         FROM client_profiles cp
         INNER JOIN users u ON u.id = cp.user_id
         LEFT JOIN industries i ON i.id = cp.industry_id
@@ -1612,10 +1628,12 @@ if ($missingTables === []) {
     $clientStmt->execute(['company_id' => $companyId]);
     $clients = $clientStmt->fetchAll();
 
+    $clientServiceProviderNames = client_service_provider_names_by_client(array_column($clients, 'id'));
     foreach ($clients as &$clientRow) {
-        $clientRow['service_provider_names'] = client_service_provider_names((int) $clientRow['id']);
+        $clientRow['service_provider_names'] = $clientServiceProviderNames[(int) $clientRow['id']] ?? '';
     }
     unset($clientRow);
+    }
 
     if ($view === 'clients') {
         // Customer LOGINS with no client profile (created from user management
@@ -1645,7 +1663,7 @@ if ($missingTables === []) {
         }
     }
 
-    if ($selectedClientId > 0) {
+    if ($view === 'clients' && $selectedClientId > 0) {
         $selectedStmt = db()->prepare("SELECT cp.*, u.name, u.email, i.name AS industry_name
             FROM client_profiles cp
             INNER JOIN users u ON u.id = cp.user_id
@@ -1663,7 +1681,8 @@ if ($missingTables === []) {
         }
     }
 
-    $teamStmt = db()->prepare("SELECT t.*, u.name AS leader_name, COUNT(tm.id) AS member_count
+    if (in_array($view, ['home', 'teams', 'tasks'], true)) {
+        $teamStmt = db()->prepare("SELECT t.*, u.name AS leader_name, COUNT(tm.id) AS member_count
         FROM teams t
         INNER JOIN users u ON u.id = t.leader_user_id
         LEFT JOIN team_members tm ON tm.team_id = t.id
@@ -1672,8 +1691,10 @@ if ($missingTables === []) {
         ORDER BY t.created_at DESC");
     $teamStmt->execute(['company_id' => $companyId]);
     $teams = $teamStmt->fetchAll();
+    }
 
-    $agreementJoin = table_exists('service_agreements') && column_exists('service_agreements', 'contract_id');
+    if (in_array($view, ['contracts', 'tasks'], true)) {
+        $agreementJoin = table_exists('service_agreements') && column_exists('service_agreements', 'contract_id');
     $contractStmt = db()->prepare("SELECT sc.*, cp.organization_name, u.name AS created_by_name"
         . ($agreementJoin ? ', sa.id AS agreement_id, sa.status AS agreement_status' : ', NULL AS agreement_id, NULL AS agreement_status') . "
         FROM service_contracts sc
@@ -1684,15 +1705,19 @@ if ($missingTables === []) {
         ORDER BY sc.created_at DESC LIMIT 100");
     $contractStmt->execute(['company_id' => $companyId]);
     $contracts = $contractStmt->fetchAll();
+    }
 
-    $taskOptionsStmt = db()->prepare("SELECT t.id, t.title, cp.organization_name
+    if (in_array($view, ['tasks', 'invoices'], true)) {
+        $taskOptionsStmt = db()->prepare("SELECT t.id, t.title, cp.organization_name
         FROM client_tasks t
         INNER JOIN client_profiles cp ON cp.id = t.client_id
         WHERE t.company_id = :company_id
         ORDER BY t.created_at DESC LIMIT 500");
     $taskOptionsStmt->execute(['company_id' => $companyId]);
     $taskOptions = $taskOptionsStmt->fetchAll();
+    }
 
+    if ($view === 'tasks') {
     $where = [];
     $params = [];
 
@@ -1732,19 +1757,38 @@ if ($missingTables === []) {
     $assignedNameSelect = $hasTaskAssignment ? ', au.name AS assigned_staff_name' : ', NULL AS assigned_staff_name';
     $assignedNameJoin = $hasTaskAssignment ? ' LEFT JOIN users au ON au.id = t.assigned_staff_user_id' : '';
     $agreementLinkSelect = table_exists('agreement_task_links')
-        ? ", (SELECT atl.agreement_id FROM agreement_task_links atl WHERE atl.task_id = t.id ORDER BY atl.id ASC LIMIT 1) AS linked_agreement_id,
-            (SELECT sa.agreement_no FROM agreement_task_links atl2 INNER JOIN service_agreements sa ON sa.id = atl2.agreement_id WHERE atl2.task_id = t.id ORDER BY atl2.id ASC LIMIT 1) AS linked_agreement_no,
-            (SELECT sa2.workflow_status FROM agreement_task_links atl3 INNER JOIN service_agreements sa2 ON sa2.id = atl3.agreement_id WHERE atl3.task_id = t.id ORDER BY atl3.id ASC LIMIT 1) AS linked_agreement_status"
+        ? ', linked_agreement.agreement_id AS linked_agreement_id, linked_agreement.agreement_no AS linked_agreement_no, linked_agreement.workflow_status AS linked_agreement_status'
         : ', NULL AS linked_agreement_id, NULL AS linked_agreement_no, NULL AS linked_agreement_status';
+    $agreementLinkJoin = table_exists('agreement_task_links')
+        ? ' LEFT JOIN (
+                SELECT atl.task_id, atl.agreement_id, sa.agreement_no, sa.workflow_status
+                FROM agreement_task_links atl
+                INNER JOIN (SELECT task_id, MIN(id) AS first_link_id FROM agreement_task_links GROUP BY task_id) first_link
+                    ON first_link.first_link_id = atl.id
+                INNER JOIN service_agreements sa ON sa.id = atl.agreement_id
+            ) linked_agreement ON linked_agreement.task_id = t.id'
+        : '';
     $tasksSql = "SELECT t.*, cp.organization_name, tm.name AS team_name, sc.contract_no, u.name AS created_by_name{$assignedNameSelect}{$agreementLinkSelect},
-            COALESCE((SELECT SUM(si.amount) FROM task_invoices si WHERE si.task_id = t.id AND si.company_id = t.company_id AND si.status <> 'cancelled'), 0) AS invoiced_total,
-            (SELECT COUNT(*) FROM task_stages sct WHERE sct.task_id = t.id) AS stage_total,
-            (SELECT COUNT(*) FROM task_stages scc WHERE scc.task_id = t.id AND scc.status = 'completed') AS stage_completed
+            COALESCE(invoice_totals.invoiced_total, 0) AS invoiced_total,
+            COALESCE(stage_totals.stage_total, 0) AS stage_total,
+            COALESCE(stage_totals.stage_completed, 0) AS stage_completed
         FROM client_tasks t
         INNER JOIN client_profiles cp ON cp.id = t.client_id
         LEFT JOIN teams tm ON tm.id = t.team_id
         LEFT JOIN service_contracts sc ON sc.id = t.contract_id
-        LEFT JOIN users u ON u.id = t.created_by{$assignedNameJoin}
+        LEFT JOIN users u ON u.id = t.created_by{$assignedNameJoin}{$agreementLinkJoin}
+        LEFT JOIN (
+            SELECT task_id, company_id, SUM(amount) AS invoiced_total
+            FROM task_invoices
+            WHERE status <> 'cancelled'
+            GROUP BY task_id, company_id
+        ) invoice_totals ON invoice_totals.task_id = t.id AND invoice_totals.company_id = t.company_id
+        LEFT JOIN (
+            SELECT task_id, COUNT(*) AS stage_total,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS stage_completed
+            FROM task_stages
+            GROUP BY task_id
+        ) stage_totals ON stage_totals.task_id = t.id
         " . $whereSql .
         ' ORDER BY ' . $allowedSort[$sort] . ' LIMIT :limit OFFSET :offset';
 
@@ -1773,8 +1817,10 @@ if ($missingTables === []) {
             }
         }
     }
+    }
 
-    $stageNameSelect = $hasStageAssignment ? ', sau.name AS assigned_staff_name' : ', NULL AS assigned_staff_name';
+    if (in_array($view, ['tasks', 'invoices'], true)) {
+        $stageNameSelect = $hasStageAssignment ? ', sau.name AS assigned_staff_name' : ', NULL AS assigned_staff_name';
     $stageNameJoin = $hasStageAssignment ? ' LEFT JOIN users sau ON sau.id = ts.assigned_staff_user_id' : '';
     $stageStmt = db()->prepare("SELECT ts.*, t.title AS task_title, cp.organization_name{$stageNameSelect}
         FROM task_stages ts
@@ -1787,8 +1833,10 @@ if ($missingTables === []) {
         'task_company_id' => $companyId,
     ]);
     $stages = $stageStmt->fetchAll();
+    }
 
-    $invoiceStmt = db()->prepare("SELECT ti.*, t.title AS task_title, cp.organization_name, ts.stage_name, u.name AS issued_by_name
+    if ($view === 'invoices') {
+        $invoiceStmt = db()->prepare("SELECT ti.*, t.title AS task_title, cp.organization_name, ts.stage_name, u.name AS issued_by_name
         FROM task_invoices ti
         INNER JOIN client_tasks t ON t.id = ti.task_id
         INNER JOIN client_profiles cp ON cp.id = t.client_id
@@ -1801,6 +1849,7 @@ if ($missingTables === []) {
         'task_company_id' => $companyId,
     ]);
     $invoices = $invoiceStmt->fetchAll();
+    }
 }
 
 $mbwStatusTone = [

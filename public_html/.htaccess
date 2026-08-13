@@ -1,6 +1,26 @@
 Options -Indexes
 DirectoryIndex index.php
 
+# Compress text payloads and cache fingerprinted static assets. asset_url()
+# appends each file's mtime, so a long browser lifetime remains deploy-safe.
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/css text/javascript application/javascript application/json application/xml image/svg+xml
+</IfModule>
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType text/javascript "access plus 1 year"
+    ExpiresByType font/woff2 "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+</IfModule>
+<IfModule mod_headers.c>
+    <FilesMatch "\.(css|js|woff2|svg|png)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+</IfModule>
+
 <IfModule mod_headers.c>
     Header always set X-Content-Type-Options "nosniff"
     Header always set X-Frame-Options "SAMEORIGIN"
@@ -81,9 +101,22 @@ DirectoryIndex index.php
     RewriteCond %{HTTP:X-Forwarded-Proto} !=https
     RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
 
-    # /login.php is the single sign-in page. The old admin entry points are kept
+    # Browser-facing application routes omit the implementation suffix. Old
+    # bookmarks remain valid and are canonicalized with a permanent redirect;
+    # THE_REQUEST prevents an internal rewrite from redirecting in a loop.
+    RewriteCond %{THE_REQUEST} \s/+(.+?)\.php(?:[?\s]) [NC]
+    RewriteRule ^(.+)\.php$ /$1 [R=308,L,NE]
+
+    # /login is the single sign-in page. The old admin entry points are kept
     # as external 301s so bookmarks land on it visibly instead of dead-ending.
-    RewriteRule ^adminlogin/?$ /login.php [R=301,QSA,L]
+    RewriteRule ^adminlogin/?$ /login [R=301,QSA,L]
+
+    # Resolve /admin/reports-center to /admin/reports-center.php internally.
+    # Existing files and directories win, so assets and uploads are untouched.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME}.php -f
+    RewriteRule ^(.+?)/?$ $1.php [END,QSA]
 
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d

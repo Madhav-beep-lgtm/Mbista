@@ -25,6 +25,7 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
     <?php /* Last on purpose: the 2026 appearance layer restates the tokens the
              four sheets above each define, so it must have the final word. */ ?>
     <link rel="stylesheet" href="<?= e(asset_url('assets/css/mbworld-2026.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('assets/css/design-system.css')) ?>">
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <?php require __DIR__ . '/sidebar_boot.php'; ?>
@@ -114,7 +115,8 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
                 <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
                 <?php include __DIR__ . '/attention_bell.php'; ?>
                 <button type="button" class="theme-toggle-link admin-icon-button" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
-                    <?= icon('theme') ?>
+                    <span data-theme-icon="dark"><?= icon('theme') ?></span>
+                    <span data-theme-icon="light" hidden><?= icon('sun') ?></span>
                     <span class="sr-only" data-theme-toggle-label>Dark mode</span>
                 </button>
             </div>

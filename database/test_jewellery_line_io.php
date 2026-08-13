@@ -25,7 +25,7 @@ function jwio_cleanup(): void
 {
     foreach (db()->query("SELECT id FROM companies WHERE code IN ('JWIOA','JWIOB')")->fetchAll(PDO::FETCH_COLUMN) as $s) {
         $s = (int) $s;
-        foreach (['jewellery_line_templates', 'jewellery_item_profiles', 'inventory_items',
+        foreach (['jewellery_stock_unit_events', 'jewellery_stock_units', 'jewellery_line_templates', 'jewellery_item_profiles', 'inventory_items',
                   'jewellery_settings', 'jewellery_purities', 'jewellery_metals', 'jewellery_units'] as $t) {
             db()->exec("DELETE FROM `$t` WHERE company_id=$s");
         }

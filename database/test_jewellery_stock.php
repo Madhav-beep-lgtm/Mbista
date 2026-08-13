@@ -29,7 +29,7 @@ function jws_cleanup(): void
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
-        foreach (['jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items', 'jewellery_daily_rates',
+        foreach (['jewellery_stock_unit_events', 'jewellery_stock_units', 'jewellery_stock_txns', 'jewellery_item_profiles', 'inventory_items', 'jewellery_daily_rates',
                   'inventory_ledger_mappings', 'jewellery_item_categories', 'jewellery_settings',
                   'jewellery_purities', 'jewellery_metals', 'jewellery_units'] as $t) {
             db()->exec("DELETE FROM `$t` WHERE company_id=$s");
@@ -233,7 +233,7 @@ $oversell = jw_record_stock_txn($cidA, [
     'item_id' => $ringId, 'txn_type' => 'sale', 'direction' => 'out', 'txn_date' => '2026-08-10', 'gross_weight' => 100.0,
 ]);
 ok($oversell > 0, 'With the company opt-in, an over-issue is allowed');
-db()->exec("DELETE FROM jewellery_stock_txns WHERE id=$oversell");
+jw_delete_stock_txns($cidA, [$oversell]);
 jewellery_save_settings($cidA, ['allow_negative_stock' => 0], $userA);
 ok(near(jw_item_balance($cidA, $ringId)['fine_weight'], 18.32), 'Balance restored after removing the test over-issue');
 

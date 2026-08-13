@@ -1202,3 +1202,1154 @@ body.admin-layout .danger-text:hover {
   body.admin-layout .btn,
   a { transition: none; }
 }
+
+/* Unified Party Master - approved visual shell */
+body.party-master-page {
+    --party-master-radius: 14px;
+    --party-master-small-radius: 10px;
+}
+
+body.party-master-page .admin-sidebar {
+    background: var(--mbw-sidebar-deep);
+}
+
+body.party-master-page .mbw-subnav a.is-active {
+    color: var(--mbw-primary) !important;
+    background: var(--mbw-green-soft) !important;
+    border-color: color-mix(in srgb, var(--mbw-primary) 22%, transparent);
+    box-shadow: none;
+}
+
+body.party-master-page .mbw-subnav a.is-active svg {
+    color: currentColor;
+    opacity: 1;
+}
+
+body.party-master-page .admin-main,
+body.party-master-page .admin-content {
+    min-width: 0;
+}
+
+body.party-master-page .cr-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 0 0 14px;
+    padding: 4px 0 12px;
+    color: var(--mbw-text);
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+body.party-master-page .cr-head-icon {
+    display: inline-flex;
+    flex: 0 0 48px;
+    width: 48px;
+    height: 48px;
+    align-items: center;
+    justify-content: center;
+    color: var(--mbw-primary);
+    background: var(--mbw-green-soft);
+    border: 1px solid color-mix(in srgb, var(--mbw-primary) 18%, transparent);
+    border-radius: 14px;
+}
+
+body.party-master-page .cr-head-icon svg {
+    width: 23px;
+    height: 23px;
+}
+
+body.party-master-page .cr-head h2 {
+    margin: 0;
+    color: var(--mbw-heading);
+    font-size: clamp(24px, 2vw, 30px);
+    font-weight: 780;
+    letter-spacing: -0.035em;
+    line-height: 1.08;
+}
+
+body.party-master-page .cr-head p {
+    max-width: 780px;
+    margin: 5px 0 0;
+    color: var(--mbw-muted);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+body.party-master-page .party-master-link-banner {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    margin: 0 0 12px;
+    padding: 13px 16px;
+    color: var(--mbw-primary);
+    background: var(--mbw-green-soft);
+    border: 1px solid color-mix(in srgb, var(--mbw-primary) 20%, transparent);
+    border-radius: var(--party-master-radius);
+}
+
+body.party-master-page .party-master-link-banner-icon {
+    display: inline-flex;
+    flex: 0 0 38px;
+    width: 38px;
+    height: 38px;
+    align-items: center;
+    justify-content: center;
+    background: var(--mbw-card);
+    border: 1px solid color-mix(in srgb, var(--mbw-primary) 18%, transparent);
+    border-radius: 11px;
+}
+
+body.party-master-page .party-master-link-banner-icon svg {
+    width: 19px;
+    height: 19px;
+}
+
+body.party-master-page .party-master-link-banner-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+body.party-master-page .party-master-link-banner strong {
+    color: var(--mbw-heading);
+    font-size: 14px;
+    font-weight: 760;
+}
+
+body.party-master-page .party-master-link-banner small {
+    color: var(--mbw-muted);
+    font-size: 12.5px;
+    line-height: 1.4;
+}
+
+body.party-master-page .party-master-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+body.party-master-page .party-master-kpis .mbw-kpi {
+    min-height: 126px;
+    padding: 17px 18px;
+    background: var(--mbw-card);
+    border: 1px solid var(--mbw-border);
+    border-radius: var(--party-master-radius);
+    box-shadow: none;
+}
+
+body.party-master-page .party-master-kpis .mbw-kpi:hover {
+    border-color: color-mix(in srgb, var(--mbw-primary) 28%, var(--mbw-border));
+    transform: translateY(-1px);
+}
+
+body.party-master-page .party-master-kpis .mbw-kpi-label {
+    color: var(--mbw-muted);
+    font-size: 11px;
+    font-weight: 760;
+    letter-spacing: 0.045em;
+}
+
+body.party-master-page .party-master-kpis .mbw-kpi-value {
+    margin-top: 8px;
+    color: var(--mbw-heading);
+    font-size: clamp(25px, 2.3vw, 34px);
+    font-weight: 790;
+    letter-spacing: -0.04em;
+}
+
+body.party-master-page .party-master-kpis .mbw-chip {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+}
+
+body.party-master-page .reference-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    margin: 0;
+    padding: 0 14px;
+    overflow-x: auto;
+    background: var(--mbw-card);
+    border: 1px solid var(--mbw-border);
+    border-bottom: 0;
+    border-radius: var(--party-master-radius) var(--party-master-radius) 0 0;
+}
+
+body.party-master-page .reference-tabs a {
+    position: relative;
+    min-height: 50px;
+    padding: 16px 15px 13px;
+    color: var(--mbw-muted);
+    font-size: 13px;
+    font-weight: 680;
+    white-space: nowrap;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+body.party-master-page .reference-tabs a:hover {
+    color: var(--mbw-primary);
+    background: transparent;
+}
+
+body.party-master-page .reference-tabs a.is-active,
+body.party-master-page .reference-tabs a.active {
+    color: var(--mbw-primary);
+    background: transparent;
+}
+
+body.party-master-page .reference-tabs a.is-active::after,
+body.party-master-page .reference-tabs a.active::after {
+    position: absolute;
+    right: 13px;
+    bottom: 0;
+    left: 13px;
+    height: 3px;
+    content: "";
+    background: var(--mbw-primary);
+    border-radius: 3px 3px 0 0;
+}
+
+body.party-master-page .reference-toolbar {
+    display: grid;
+    gap: 11px;
+    margin: 0 0 12px;
+    padding: 12px 14px 14px;
+    background: var(--mbw-card);
+    border: 1px solid var(--mbw-border);
+    border-radius: 0 0 var(--party-master-radius) var(--party-master-radius);
+}
+
+body.party-master-page .reference-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 1px;
+}
+
+body.party-master-page .reference-toolbar .button {
+    display: inline-flex;
+    min-height: 38px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 8px 13px;
+    font-size: 12.5px;
+    font-weight: 690;
+    white-space: nowrap;
+    border-radius: 9px;
+}
+
+body.party-master-page .reference-toolbar .button svg {
+    width: 16px;
+    height: 16px;
+}
+
+body.party-master-page .reference-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+}
+
+body.party-master-page .reference-search {
+    flex: 1 1 300px;
+    max-width: 520px;
+}
+
+body.party-master-page .reference-search input,
+body.party-master-page .reference-filter-group select {
+    min-height: 39px;
+    background: var(--mbw-card);
+    border-color: var(--mbw-border);
+    border-radius: 9px;
+}
+
+body.party-master-page .reference-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px;
+    min-width: 0;
+}
+
+body.party-master-page .reference-table-card {
+    overflow: hidden;
+    background: var(--mbw-card);
+    border: 1px solid var(--mbw-border);
+    border-radius: var(--party-master-radius);
+    box-shadow: none;
+}
+
+body.party-master-page .reference-table-wrap {
+    overflow: auto;
+    scrollbar-color: var(--mbw-border) transparent;
+}
+
+body.party-master-page .reference-table {
+    width: 100%;
+    min-width: 860px;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+body.party-master-page .reference-table thead th {
+    height: 43px;
+    padding: 10px 12px;
+    color: var(--mbw-muted);
+    background: color-mix(in srgb, var(--mbw-bg) 72%, var(--mbw-card));
+    border-bottom: 1px solid var(--mbw-border);
+    font-size: 11px;
+    font-weight: 760;
+    letter-spacing: 0.035em;
+    text-align: left;
+    white-space: nowrap;
+}
+
+body.party-master-page .reference-table tbody td {
+    padding: 12px;
+    color: var(--mbw-text);
+    background: var(--mbw-card);
+    border-bottom: 1px solid color-mix(in srgb, var(--mbw-border) 72%, transparent);
+    font-size: 12.5px;
+    vertical-align: middle;
+}
+
+body.party-master-page .reference-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+body.party-master-page .reference-table tbody tr:hover td {
+    background: color-mix(in srgb, var(--mbw-green-soft) 42%, var(--mbw-card));
+}
+
+body.party-master-page .reference-table tbody tr.is-selected td {
+    background: var(--mbw-green-soft);
+}
+
+body.party-master-page .reference-row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+}
+
+body.party-master-page .reference-row-actions .button,
+body.party-master-page .reference-row-actions a,
+body.party-master-page .reference-row-actions button {
+    display: inline-flex;
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 9px;
+}
+
+body.party-master-page .reference-row-actions svg {
+    width: 15px;
+    height: 15px;
+}
+
+body.party-master-page .reference-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--mbw-card);
+    border-top: 1px solid var(--mbw-border);
+}
+
+body.party-master-page .reference-party-panel {
+    position: static !important;
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0;
+    overflow: hidden;
+    background: var(--mbw-card);
+    border: 1px solid var(--mbw-border);
+    border-radius: var(--party-master-radius);
+    box-shadow: none;
+}
+
+body.party-master-page .reference-party-panel > header,
+body.party-master-page .reference-party-panel .reference-party-header {
+    padding: 16px 18px;
+    background: color-mix(in srgb, var(--mbw-green-soft) 36%, var(--mbw-card));
+    border-bottom: 1px solid var(--mbw-border);
+}
+
+body.party-master-page .reference-party-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 14px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--mbw-border);
+}
+
+body.party-master-page .reference-party-tabs a {
+    padding: 13px 12px 11px;
+    color: var(--mbw-muted);
+    font-size: 12px;
+    font-weight: 680;
+    white-space: nowrap;
+}
+
+body.party-master-page .reference-party-tabs a.is-active,
+body.party-master-page .reference-party-tabs a.active {
+    color: var(--mbw-primary);
+    border-bottom: 3px solid var(--mbw-primary);
+}
+
+body.party-master-page .reference-party-panel section,
+body.party-master-page .reference-party-panel .reference-party-content {
+    padding: 17px 18px;
+}
+
+body.party-master-page .status-badge,
+body.party-master-page .badge,
+body.party-master-page .mbw-badge {
+    border-radius: 999px;
+}
+
+body.party-master-page a svg,
+body.party-master-page button svg {
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+@media (max-width: 1100px) {
+    body.party-master-page .party-master-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    body.party-master-page .reference-filter-group {
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 720px) {
+    body.party-master-page .cr-head {
+        align-items: flex-start;
+    }
+
+    body.party-master-page .cr-head-icon {
+        flex-basis: 42px;
+        width: 42px;
+        height: 42px;
+    }
+
+    body.party-master-page .party-master-link-banner {
+        align-items: flex-start;
+        padding: 12px;
+    }
+
+    body.party-master-page .party-master-kpis {
+        grid-template-columns: 1fr;
+    }
+
+    body.party-master-page .party-master-kpis .mbw-kpi {
+        min-height: 112px;
+    }
+
+    body.party-master-page .reference-toolbar-actions {
+        align-items: stretch;
+    }
+
+    body.party-master-page .reference-toolbar .button {
+        min-height: 44px;
+    }
+
+    body.party-master-page .reference-search {
+        flex-basis: 100%;
+        max-width: none;
+    }
+}
+
+/* Unified Party Master - directory data layer */
+body.party-master-page .party-master-kpis {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+body.party-master-page .party-master-kpis .mbw-kpi {
+    display: flex;
+    min-height: 84px;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 13px;
+    padding: 14px 15px;
+}
+
+body.party-master-page .party-master-kpis .mbw-chip {
+    order: -1;
+    flex: 0 0 42px;
+}
+
+body.party-master-page .party-master-kpis .mbw-kpi-value {
+    margin-top: 3px;
+    font-size: 27px;
+}
+
+body.party-master-page .party-master-kpis .mbw-kpi-delta {
+    display: block;
+    margin-top: 2px;
+    color: var(--mbw-muted);
+    font-size: 10.5px;
+}
+
+body.party-master-page .reference-filter-group {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(145px, 190px)) auto auto;
+    width: 100%;
+}
+
+body.party-master-page .reference-filter-group .reference-search {
+    grid-column: 1;
+    grid-row: 1;
+    width: 100%;
+    max-width: none;
+}
+
+body.party-master-page .reference-filter-group select {
+    min-width: 0;
+    width: 100%;
+}
+
+body.party-master-page .party-directory-table {
+    min-width: 1370px;
+}
+
+body.party-master-page .party-directory-identity {
+    display: flex;
+    min-width: 190px;
+    align-items: center;
+    gap: 10px;
+}
+
+body.party-master-page .party-directory-identity > span:last-child {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+body.party-master-page .party-directory-avatar {
+    display: inline-flex;
+    flex: 0 0 38px;
+    width: 38px;
+    height: 38px;
+    align-items: center;
+    justify-content: center;
+    color: var(--mbw-primary);
+    background: var(--mbw-green-soft);
+    border: 1px solid color-mix(in srgb, var(--mbw-primary) 18%, transparent);
+    border-radius: 50%;
+    font-size: 13px;
+    font-weight: 760;
+}
+
+body.party-master-page .party-directory-subtext {
+    display: block;
+    margin-top: 3px;
+    color: var(--mbw-muted);
+    font-size: 10.5px;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+body.party-master-page .party-directory-empty {
+    color: var(--mbw-muted);
+}
+
+body.party-master-page .party-directory-table .reference-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+body.party-master-page .party-directory-table .reference-link svg {
+    width: 14px;
+    height: 14px;
+}
+
+body.party-master-page .party-directory-table td {
+    min-width: 110px;
+}
+
+body.party-master-page .party-directory-table td:first-child {
+    min-width: 210px;
+}
+
+body.party-master-page .party-directory-table td:nth-child(3) {
+    min-width: 155px;
+}
+
+body.party-master-page .party-directory-table td:nth-child(4),
+body.party-master-page .party-directory-table td:nth-child(5),
+body.party-master-page .party-directory-table td:nth-child(6) {
+    min-width: 145px;
+}
+
+@media (max-width: 1250px) {
+    body.party-master-page .party-master-kpis {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    body.party-master-page .reference-filter-group {
+        grid-template-columns: repeat(3, minmax(150px, 1fr));
+    }
+
+    body.party-master-page .reference-filter-group .reference-search {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 820px) {
+    body.party-master-page .party-master-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    body.party-master-page .reference-filter-group {
+        display: flex;
+        align-items: stretch;
+        flex-direction: column;
+    }
+}
+
+@media (max-width: 560px) {
+    body.party-master-page .party-master-kpis {
+        grid-template-columns: 1fr;
+    }
+}
+/* Compact stock-report pagination: keep very large reports navigable without
+   rendering one button for every page. */
+.ssr-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:14px;padding:10px 12px;border:1px solid var(--mbw-border,#d9e8e0);border-radius:12px;background:var(--mbw-surface-soft,#f7fbf9)}
+.ssr-pagination-summary{color:var(--mbw-muted,#64756d);font-size:13px}
+.ssr-pagination-pages{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.ssr-pagination-pages a{display:inline-flex;align-items:center;justify-content:center;min-height:34px;min-width:34px;padding:4px 9px;border:1px solid var(--mbw-green,#08775b);border-radius:8px;color:var(--mbw-green,#08775b);text-decoration:none;background:var(--mbw-surface,#fff)}
+.ssr-pagination-pages a:hover,.ssr-pagination-pages a:focus-visible{background:var(--mbw-green-soft,#e6f5ef)}
+.ssr-pagination-pages a.is-active{background:var(--mbw-green,#08775b);color:#fff;font-weight:700;box-shadow:0 4px 10px rgba(8,119,91,.2)}
+.ssr-pagination-gap{padding:0 3px;color:var(--mbw-muted,#64756d)}
+.ssr-pagination-jump{display:flex;align-items:center;gap:6px;margin:0}
+.ssr-pagination-jump label{font-size:12px;font-weight:700;white-space:nowrap}
+.ssr-pagination-jump input[type=number]{width:70px;min-height:34px;padding:4px 7px}
+.ssr-pagination-jump .button{min-height:34px;padding:4px 10px}
+@media (max-width:760px){.ssr-pagination{align-items:flex-start}.ssr-pagination-pages{order:3;width:100%}.ssr-pagination-pages a{min-width:32px}.ssr-pagination-jump{margin-left:auto}}
+
+/* Voucher entry forms need their labels and action bar to remain readable.
+   Required marks previously became separate grid rows, while the sticky
+   footer covered the debit/credit lines at ordinary laptop heights. */
+body.admin-layout #voucher-form .vch-head-card .frm-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}
+body.admin-layout #voucher-form .vch-head-card .frm-span-3{grid-column:1/-1}
+body.admin-layout #voucher-form .frm-grid label>span:first-child{display:inline-flex;align-items:baseline;gap:4px}
+body.admin-layout #voucher-form .frm-grid label>span:first-child em{color:var(--mbw-red);font-style:normal}
+body.admin-layout #voucher-form .frm-footer{position:static;bottom:auto;margin-top:0}
+@media (max-width:640px){body.admin-layout #voucher-form .vch-head-card .frm-grid-4{grid-template-columns:minmax(0,1fr)}}
+
+/* Only the current voucher type is selected. Tone colours stay on the icon;
+   inactive cards remain neutral instead of resembling a second selection. */
+body.admin-layout .vch-typebar .vch-type{background:var(--mbw-card)!important;border-color:var(--mbw-border)!important;box-shadow:none!important}
+body.admin-layout .vch-typebar .vch-type:hover{border-color:var(--mbw-primary)!important;background:var(--mbw-card-soft)!important}
+body.admin-layout .vch-typebar .vch-type[aria-current="page"]{border-color:var(--mbw-primary)!important;background:var(--mbw-primary-soft)!important;box-shadow:inset 0 -3px 0 var(--mbw-primary)!important}
+
+/* Expanded sidebar groups are containers, not selected pages. Only the exact
+   child link receives the active treatment. */
+body.admin-layout .admin-nav .mbw-nav-parent> a[data-nav-toggle]{background:transparent;box-shadow:none;color:var(--mbw-sidebar-text);font-weight:600}
+body.admin-layout .admin-nav .mbw-nav-parent> a[data-nav-toggle]::before{display:none}
+body.admin-layout .admin-nav .mbw-nav-parent> a[data-nav-toggle]:hover{background:rgba(205,187,175,.10);color:#fff}
+
+/* Top-right signed-in identity and account menu. */
+body.admin-layout .admin-profile-menu{position:relative;align-self:center;margin:0}
+body.admin-layout .admin-profile-menu>summary{display:flex;align-items:center;gap:8px;min-height:40px;padding:4px 8px 4px 5px;border:1px solid var(--mbw-border);border-radius:11px;background:var(--mbw-card);color:var(--mbw-text);cursor:pointer;list-style:none;white-space:nowrap}
+body.admin-layout .admin-profile-menu>summary::-webkit-details-marker{display:none}
+body.admin-layout .admin-profile-menu>summary:hover,body.admin-layout .admin-profile-menu[open]>summary{border-color:var(--mbw-primary);background:var(--mbw-primary-soft)}
+body.admin-layout .admin-profile-avatar{display:grid;place-items:center;width:30px;height:30px;flex:0 0 30px;border-radius:9px;background:linear-gradient(135deg,var(--mbw-primary),#0a604b);color:#fff;font:700 11px/1 var(--f-num);letter-spacing:.04em;box-shadow:0 3px 8px rgba(8,119,91,.2)}
+body.admin-layout .admin-profile-avatar.is-large{width:40px;height:40px;flex-basis:40px;border-radius:11px;font-size:13px}
+body.admin-layout .admin-profile-identity{display:grid;line-height:1.15;text-align:left}
+body.admin-layout .admin-profile-identity strong{max-width:112px;overflow:hidden;text-overflow:ellipsis;font-size:11.5px}
+body.admin-layout .admin-profile-identity small{color:var(--mbw-muted);font-size:9.5px}
+body.admin-layout .admin-profile-chevron{display:inline-flex;color:var(--mbw-muted)}
+body.admin-layout .admin-profile-chevron .ui-icon{width:13px;height:13px;transition:transform .18s ease}
+body.admin-layout .admin-profile-menu[open] .admin-profile-chevron .ui-icon{transform:rotate(180deg)}
+body.admin-layout .admin-profile-dropdown{position:absolute;z-index:120;right:0;top:calc(100% + 9px);width:285px;padding:8px;border:1px solid var(--mbw-border);border-radius:14px;background:var(--mbw-card);box-shadow:0 18px 45px rgba(18,53,41,.22)}
+body.admin-layout .admin-profile-dropdown-head{display:flex;align-items:center;gap:10px;padding:8px 9px 12px;margin-bottom:5px;border-bottom:1px solid var(--mbw-border-soft)}
+body.admin-layout .admin-profile-dropdown-head>span:last-child{display:grid;min-width:0}
+body.admin-layout .admin-profile-dropdown-head strong{font-size:13px;color:var(--mbw-heading)}
+body.admin-layout .admin-profile-dropdown-head small{overflow:hidden;text-overflow:ellipsis;color:var(--mbw-muted);font-size:10.5px}
+body.admin-layout .admin-profile-dropdown>a{display:flex;align-items:center;gap:10px;min-height:48px;padding:7px 9px;border-radius:9px;color:var(--mbw-text);text-decoration:none}
+body.admin-layout .admin-profile-dropdown>a:hover{background:var(--mbw-primary-soft);color:var(--mbw-primary)}
+body.admin-layout .admin-profile-dropdown>a>.ui-icon{width:17px;height:17px;flex:none}
+body.admin-layout .admin-profile-dropdown>a>span{display:grid;line-height:1.2}
+body.admin-layout .admin-profile-dropdown>a strong{font-size:12px}
+body.admin-layout .admin-profile-dropdown>a small{color:var(--mbw-muted);font-size:10px}
+body.admin-layout .admin-profile-dropdown>a.is-logout{margin-top:5px;border-top:1px solid var(--mbw-border-soft);border-radius:0 0 9px 9px;color:var(--mbw-red)}
+@media(max-width:1280px){body.admin-layout .admin-profile-identity{display:none}body.admin-layout .admin-profile-menu>summary{padding-right:5px}.admin-profile-chevron{display:none!important}}
+
+/* True application theme ---------------------------------------------------
+   The legacy compatibility sheet forced the admin canvas back to white even
+   after the theme class changed. These final rules make the shared tokens and
+   common surfaces follow the selected theme throughout every portal. */
+[data-theme-icon]{display:inline-flex;align-items:center;justify-content:center}
+[data-theme-icon][hidden]{display:none!important}
+body.admin-layout.theme-dark,body.admin-layout.admin-dark{
+  --mbw-canvas:#070f0c!important;--mbw-card:#0d1815!important;--mbw-card-soft:#12211c!important;
+  --mbw-border:#2a3f37!important;--mbw-border-soft:#1d2e28!important;--mbw-heading:#eaf2ed!important;
+  --mbw-text:#b9c9c1!important;--mbw-muted:#8fa198!important;--mbw-primary:#3cbb8b!important;
+  --mbw-primary-soft:rgba(60,187,139,.14)!important;--mbw-gray-soft:#16271f!important;
+  color-scheme:dark!important;background:#070f0c!important;color:#b9c9c1!important
+}
+body.admin-layout.theme-dark :is(.admin-main,.admin-content),body.admin-layout.admin-dark :is(.admin-main,.admin-content){background:#070f0c!important;color:#b9c9c1!important}
+body.admin-layout.theme-dark .admin-content :is(.card,.panel,.form-card,.table-card,.stat-card,.metric-card,.dashboard-card,.report-card,.settings-card,.workspace-card,.admin-card,.admin-panel,.cr-card,.rc-card,.mbw-card,.frm-section,.accounting-page-head),
+body.admin-layout.admin-dark .admin-content :is(.card,.panel,.form-card,.table-card,.stat-card,.metric-card,.dashboard-card,.report-card,.settings-card,.workspace-card,.admin-card,.admin-panel,.cr-card,.rc-card,.mbw-card,.frm-section,.accounting-page-head){background-color:#0d1815!important;color:#b9c9c1!important;border-color:#2a3f37!important}
+body.admin-layout.theme-dark .admin-content :is(h1,h2,h3,h4,h5,h6,strong,label,legend,th,td),body.admin-layout.admin-dark .admin-content :is(h1,h2,h3,h4,h5,h6,strong,label,legend,th,td){color:#eaf2ed!important}
+body.admin-layout.theme-dark .admin-content :is(p,small,.meta,.muted,.help,.hint),body.admin-layout.admin-dark .admin-content :is(p,small,.meta,.muted,.help,.hint){color:#8fa198!important}
+body.admin-layout.theme-dark .admin-content :is(input,select,textarea),body.admin-layout.admin-dark .admin-content :is(input,select,textarea){background:#12211c!important;color:#eaf2ed!important;border-color:#2a3f37!important;color-scheme:dark!important}
+body.admin-layout.theme-dark .admin-content table,body.admin-layout.admin-dark .admin-content table{background:#0d1815!important;color:#b9c9c1!important}
+body.admin-layout.theme-dark .admin-content thead th,body.admin-layout.admin-dark .admin-content thead th{background:#16271f!important;color:#eaf2ed!important}
+body.admin-layout.theme-dark .admin-content tbody tr:nth-child(even),body.admin-layout.admin-dark .admin-content tbody tr:nth-child(even){background:#101d19!important}
+body.admin-layout.theme-dark .admin-content tbody tr:hover,body.admin-layout.admin-dark .admin-content tbody tr:hover{background:#16271f!important}
+
+/* Account popup lives inside the dark topbar, so give the floating surface an
+   explicit palette and intrinsic height instead of inheriting topbar paint. */
+body.admin-layout .admin-topbar .admin-profile-dropdown{height:auto!important;min-height:0!important;background:#fff!important;color:#32443d!important;border-color:#d5e5dc!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown :is(strong){color:#173a2f!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown :is(small){color:#6d857b!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a{display:flex!important;color:#32443d!important;visibility:visible!important;opacity:1!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a:hover{background:#e8f5ef!important;color:#08775b!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a.is-logout{color:#b42318!important}
+body.admin-layout.theme-dark .admin-topbar .admin-profile-dropdown,body.admin-layout.admin-dark .admin-topbar .admin-profile-dropdown{background:#0d1815!important;color:#b9c9c1!important;border-color:#2a3f37!important}
+body.admin-layout.theme-dark .admin-topbar .admin-profile-dropdown :is(strong),body.admin-layout.admin-dark .admin-topbar .admin-profile-dropdown :is(strong){color:#eaf2ed!important}
+body.admin-layout.theme-dark .admin-topbar .admin-profile-dropdown :is(small),body.admin-layout.admin-dark .admin-topbar .admin-profile-dropdown :is(small){color:#8fa198!important}
+body.admin-layout.theme-dark .admin-topbar .admin-profile-dropdown>a,body.admin-layout.admin-dark .admin-topbar .admin-profile-dropdown>a{color:#b9c9c1!important}
+
+/* Professional voucher workspace ------------------------------------------------
+   A voucher is one document, so its sections share one calm visual hierarchy
+   instead of looking like unrelated full-width panels. */
+body.voucher-entry-page .admin-content{background:linear-gradient(180deg,rgba(231,244,238,.46),transparent 360px)}
+body.voucher-entry-page .mbw-page-head{max-width:1460px;margin-inline:auto;border-bottom:1px solid var(--mbw-border);box-shadow:none}
+body.voucher-entry-page .mbw-tabbar,
+body.voucher-entry-page .vch-typebar,
+body.voucher-entry-page #voucher-form{width:min(1460px,100%);margin-inline:auto}
+body.voucher-entry-page .mbw-tabbar{padding:7px 10px;border-radius:12px}
+body.voucher-entry-page .vch-typebar{display:flex;gap:6px;padding:7px;margin:10px auto 16px;border:1px solid var(--mbw-border);border-radius:14px;background:rgba(255,255,255,.72);overflow-x:auto}
+body.voucher-entry-page .vch-typebar .vch-type{display:flex;align-items:center;justify-content:center;gap:7px;flex:1 0 125px;min-height:48px;padding:7px 10px;border-radius:9px!important}
+body.voucher-entry-page .vch-typebar .vch-type-icon{width:27px;height:27px;border-radius:8px}
+body.voucher-entry-page .vch-typebar .vch-type-name{font-size:12.5px;white-space:nowrap}
+body.voucher-entry-page .frm-main{gap:13px}
+body.voucher-entry-page #voucher-form .frm-section{position:relative;padding:18px 20px;border-color:#d5e5dc;border-radius:14px;box-shadow:0 5px 18px rgba(25,74,57,.045)}
+body.voucher-entry-page #voucher-form .vch-head-card{overflow:hidden;background:linear-gradient(135deg,#fff 0%,#f3faf6 100%);border-top:3px solid var(--mbw-primary)}
+body.voucher-entry-page #voucher-form .vch-head-card:after{content:"";position:absolute;right:-60px;top:-90px;width:220px;height:220px;border-radius:50%;background:rgba(8,119,91,.045);pointer-events:none}
+body.voucher-entry-page #voucher-form .frm-section-head{position:relative;margin-bottom:16px;padding-bottom:11px;border-bottom:1px solid var(--mbw-border-soft)}
+body.voucher-entry-page #voucher-form .frm-section-head h2{font-size:15px;color:var(--mbw-heading)}
+body.voucher-entry-page #voucher-form .frm-section-head .frm-optional{margin-left:4px;line-height:1.45}
+body.voucher-entry-page #voucher-form .vch-work-section{counter-increment:voucher-section}
+body.voucher-entry-page #voucher-form{counter-reset:voucher-section}
+body.voucher-entry-page #voucher-form .vch-work-section>.frm-section-head:before{content:counter(voucher-section);display:grid;place-items:center;width:23px;height:23px;flex:0 0 23px;border-radius:50%;background:var(--mbw-primary);color:#fff;font:700 11px/1 var(--f-num)}
+body.voucher-entry-page #voucher-form .vch-work-section>.frm-section-head>.mbw-chip{display:none}
+body.voucher-entry-page #voucher-form label{color:#42574e}
+body.voucher-entry-page #voucher-form input,
+body.voucher-entry-page #voucher-form select,
+body.voucher-entry-page #voucher-form textarea{border-color:#cbded4;background:#fff;box-shadow:inset 0 1px 2px rgba(20,61,46,.025)}
+body.voucher-entry-page #voucher-form input:focus,
+body.voucher-entry-page #voucher-form select:focus,
+body.voucher-entry-page #voucher-form textarea:focus{border-color:var(--mbw-primary);box-shadow:0 0 0 3px rgba(8,119,91,.1)}
+body.voucher-entry-page #voucher-form .mbw-tablewrap{border:1px solid var(--mbw-border);border-radius:11px;background:#fff}
+body.voucher-entry-page #voucher-form .vch-table{border-collapse:separate;border-spacing:0}
+body.voucher-entry-page #voucher-form .vch-table thead th{padding:10px 9px;background:#e9f5ef;color:#28483b;font-size:10.5px;letter-spacing:.025em}
+body.voucher-entry-page #voucher-form .vch-table tbody td{padding:8px;border-bottom:1px solid #e4eee9;background:#fff}
+body.voucher-entry-page #voucher-form .vch-table tbody tr:last-child td{border-bottom:0}
+body.voucher-entry-page #voucher-form .frm-entries-foot{margin-top:10px;padding:0 2px}
+body.voucher-entry-page #voucher-form .frm-entry-totals{padding:7px 8px 7px 12px;border:1px solid var(--mbw-border);border-radius:10px;background:#f4faf7}
+body.voucher-entry-page #voucher-form .frm-entry-totals strong{border:0;background:#fff;box-shadow:0 1px 5px rgba(20,61,46,.08);font-size:15px}
+body.voucher-entry-page #voucher-form .frm-dropzone{min-height:118px;border-width:1px;background:linear-gradient(135deg,#fbfdfc,#f2f8f5)}
+body.voucher-entry-page #voucher-form .frm-approvers>div{padding:12px;border:1px solid var(--mbw-border-soft);border-radius:10px;background:#f8fbf9}
+body.voucher-entry-page #voucher-form .frm-footer{position:static;bottom:auto;z-index:20;padding:10px 12px;border:1px solid rgba(8,119,91,.3);background:#fff;box-shadow:0 5px 20px rgba(15,61,45,.1)}
+body.voucher-entry-page #voucher-form .frm-main{padding-bottom:4px}
+@media (max-width:760px){body.voucher-entry-page .vch-typebar{justify-content:flex-start}body.voucher-entry-page #voucher-form .frm-section{padding:15px 13px}body.voucher-entry-page #voucher-form .frm-section-head{align-items:flex-start;flex-wrap:wrap}body.voucher-entry-page #voucher-form .frm-optional{width:100%;margin-left:31px}body.voucher-entry-page #voucher-form .frm-footer{position:static;flex-wrap:wrap}body.voucher-entry-page #voucher-form .frm-footer .frm-submit{width:100%;margin-left:0;order:-1}}
+
+/* Voucher-specific light paints must also yield to the global dark theme. */
+body.voucher-entry-page.theme-dark .admin-content,body.voucher-entry-page.admin-dark .admin-content{background:linear-gradient(180deg,rgba(47,169,124,.06),transparent 360px)!important}
+body.voucher-entry-page.theme-dark .vch-typebar,body.voucher-entry-page.admin-dark .vch-typebar,
+body.voucher-entry-page.theme-dark #voucher-form :is(.vch-head-card,.mbw-tablewrap,.frm-entry-totals,.frm-dropzone,.frm-approvers>div,.frm-footer),
+body.voucher-entry-page.admin-dark #voucher-form :is(.vch-head-card,.mbw-tablewrap,.frm-entry-totals,.frm-dropzone,.frm-approvers>div,.frm-footer){background:#0d1815!important;border-color:#2a3f37!important}
+body.voucher-entry-page.theme-dark #voucher-form :is(label,.vch-table thead th),body.voucher-entry-page.admin-dark #voucher-form :is(label,.vch-table thead th){color:#eaf2ed!important}
+body.voucher-entry-page.theme-dark #voucher-form .vch-table thead th,body.voucher-entry-page.admin-dark #voucher-form .vch-table thead th{background:#16271f!important}
+body.voucher-entry-page.theme-dark #voucher-form .vch-table tbody td,body.voucher-entry-page.admin-dark #voucher-form .vch-table tbody td{background:#0d1815!important;border-color:#1d2e28!important}
+body.voucher-entry-page.theme-dark #voucher-form .frm-entry-totals strong,body.voucher-entry-page.admin-dark #voucher-form .frm-entry-totals strong{background:#12211c!important;color:#eaf2ed!important}
+
+/* Dark-mode contrast guarantee. Older green-theme selectors assign ink
+   colours directly to many descendants (including WebKit text fill), so
+   changing only the card's inherited color is insufficient. */
+body.admin-layout.theme-dark .admin-content :is(.mbw-card,.card,.panel,.frm-section) :is(h1,h2,h3,h4,h5,h6,strong,label,legend,.title,.heading,.card-title,.panel-title),
+body.admin-layout.admin-dark .admin-content :is(.mbw-card,.card,.panel,.frm-section) :is(h1,h2,h3,h4,h5,h6,strong,label,legend,.title,.heading,.card-title,.panel-title){color:#eaf2ed!important;-webkit-text-fill-color:#eaf2ed!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(.mbw-card,.card,.panel,.frm-section) :is(p,span,small,li,dd,dt,.meta,.muted,.help,.hint,.description,.subtitle),
+body.admin-layout.admin-dark .admin-content :is(.mbw-card,.card,.panel,.frm-section) :is(p,span,small,li,dd,dt,.meta,.muted,.help,.hint,.description,.subtitle){color:#b0c2ba!important;-webkit-text-fill-color:#b0c2ba!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(input,select,textarea),body.admin-layout.admin-dark .admin-content :is(input,select,textarea){-webkit-text-fill-color:#eaf2ed!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(input,textarea)::placeholder,body.admin-layout.admin-dark .admin-content :is(input,textarea)::placeholder{color:#87998f!important;-webkit-text-fill-color:#87998f!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(input,select,textarea):disabled,body.admin-layout.admin-dark .admin-content :is(input,select,textarea):disabled{background:#16271f!important;color:#b0c2ba!important;-webkit-text-fill-color:#b0c2ba!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(button,.button,input[type=submit]),body.admin-layout.admin-dark .admin-content :is(button,.button,input[type=submit]){color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(.mbw-pill.tone-amber,.badge.warning,.status-pending),body.admin-layout.admin-dark .admin-content :is(.mbw-pill.tone-amber,.badge.warning,.status-pending){color:#f0bd62!important;-webkit-text-fill-color:#f0bd62!important}
+
+/* Keep dark cards intact: improve separation with a light outline and make all
+   ordinary dashboard/table copy white. Status pills and action links retain
+   their semantic accent colours. */
+body.admin-layout.theme-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section),
+body.admin-layout.admin-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section){border-color:rgba(255,255,255,.48)!important;box-shadow:0 0 0 1px rgba(255,255,255,.07),0 10px 28px rgba(0,0,0,.24)!important}
+body.admin-layout.theme-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section,table) :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,li,dt,dd,th,td,label,legend),
+body.admin-layout.admin-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section,table) :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,li,dt,dd,th,td,label,legend){color:#f4faf7!important;-webkit-text-fill-color:#f4faf7!important;opacity:1!important}
+
+/* Company portal directory: this public shell loads after style.css, so its
+   dark palette has to be declared here to preserve readable, executive-level
+   contrast in both saved theme modes. */
+body.theme-dark:has(.portal-selector-page) .portal-selector-page,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page {
+  background: #032e24 !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page .hero-grid > div,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page .hero-grid > div {
+  background: linear-gradient(135deg, #073d30 0%, #064e3b 100%) !important;
+  border-color: rgba(244, 213, 139, .22) !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .22) !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page .hero-panel h1,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page .hero-panel h1 {
+  color: #f7fbf8 !important;
+  -webkit-text-fill-color: #f7fbf8 !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page .hero-panel p,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page .hero-panel p,
+body.theme-dark:has(.portal-selector-page) .portal-selector-page .portal-section-heading p,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page .portal-section-heading p {
+  color: #b9d4c7 !important;
+  -webkit-text-fill-color: #b9d4c7 !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page .portal-section-heading h2,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page .portal-section-heading h2 {
+  color: #f7fbf8 !important;
+  -webkit-text-fill-color: #f7fbf8 !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page form.card,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page form.card {
+  background: #083f32 !important;
+  border-color: rgba(196, 222, 208, .18) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .20) !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page form.card h3,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page form.card h3 {
+  color: #f7fbf8 !important;
+  -webkit-text-fill-color: #f7fbf8 !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page form.card p,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page form.card p {
+  color: #c4dacf !important;
+  -webkit-text-fill-color: #c4dacf !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page form.card button[type="submit"],
+body.admin-dark:has(.portal-selector-page) .portal-selector-page form.card button[type="submit"] {
+  background: #0b795b !important;
+  border-color: #15916f !important;
+  color: #fff !important;
+}
+body.admin-layout.theme-dark .admin-content table :is(th,td),body.admin-layout.admin-dark .admin-content table :is(th,td){border-color:rgba(255,255,255,.48)!important}
+body.admin-layout.theme-dark .admin-content :is(a,.mbw-view-all,.ov-view-all),body.admin-layout.admin-dark .admin-content :is(a,.mbw-view-all,.ov-view-all){color:#65d6a8!important;-webkit-text-fill-color:#65d6a8!important}
+body.admin-layout.theme-dark .admin-content :is(.badge,.tag,.mbw-pill,[class*="status-"]),body.admin-layout.admin-dark .admin-content :is(.badge,.tag,.mbw-pill,[class*="status-"]){-webkit-text-fill-color:currentColor!important}
+
+/* Reference account menu: one compact dark surface in either app theme. */
+body.admin-layout .admin-topbar .admin-profile-dropdown{width:350px!important;padding:12px 14px!important;border:1px solid rgba(255,255,255,.16)!important;border-radius:13px!important;background:#071a15!important;color:#fff!important;box-shadow:0 22px 48px rgba(0,0,0,.34)!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown-head{gap:13px!important;padding:4px 8px 14px!important;margin-bottom:6px!important;border-bottom:1px solid rgba(255,255,255,.13)!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown-head .admin-profile-avatar{width:50px!important;height:50px!important;flex-basis:50px!important;border-radius:12px!important;background:linear-gradient(135deg,#3abb8b,#168866)!important;font-size:14px!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown :is(a,span,strong,small,p){opacity:1!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown-head strong{color:#fff!important;-webkit-text-fill-color:#fff!important;font-size:15px!important;line-height:1.25!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown-head small{color:#d8e5df!important;-webkit-text-fill-color:#d8e5df!important;font-size:12px!important;line-height:1.35!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a{min-height:60px!important;gap:15px!important;padding:9px 10px!important;border-radius:9px!important;color:#fff!important;-webkit-text-fill-color:#fff!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a>.ui-icon{width:20px!important;height:20px!important;color:#fff!important;stroke-width:1.8!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a strong{color:#fff!important;-webkit-text-fill-color:#fff!important;font-size:14px!important;line-height:1.2!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a small{color:#d8e5df!important;-webkit-text-fill-color:#d8e5df!important;font-size:11.5px!important;line-height:1.3!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a:hover{background:rgba(60,187,139,.14)!important;color:#fff!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a:hover :is(span,strong,small){color:#fff!important;-webkit-text-fill-color:#fff!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a.is-logout{margin-top:6px!important;padding-top:13px!important;border-top:1px solid rgba(255,255,255,.13)!important;border-radius:0 0 9px 9px!important;color:#fff!important;-webkit-text-fill-color:#fff!important}
+body.admin-layout .admin-topbar .admin-profile-dropdown>a.is-logout :is(span,strong,small){color:#fff!important;-webkit-text-fill-color:#fff!important}
+@media(max-width:520px){body.admin-layout .admin-topbar .admin-profile-dropdown{position:fixed!important;right:12px!important;left:12px!important;top:76px!important;width:auto!important}}
+
+/* Light mode changes the workspace and topbar only. The product navigation
+   rail is permanent brand green in every mode (see the shared contract below). */
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar{background:#fff!important;border-bottom:1px solid #cfe0d7!important;box-shadow:0 7px 20px rgba(19,70,52,.08)!important;color:#173a2f!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar :is(.admin-topbar-crumbs,.admin-topbar-crumbs a,.admin-topbar-crumbs strong,.admin-profile-identity strong){color:#173a2f!important;-webkit-text-fill-color:#173a2f!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar .admin-profile-identity small{color:#6d857b!important;-webkit-text-fill-color:#6d857b!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar :is(.admin-icon-button,.theme-toggle-link,.admin-profile-menu>summary){background:#f1f8f4!important;border-color:#bcd7ca!important;color:#08775b!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar :is(.admin-icon-button,.theme-toggle-link,.admin-profile-menu>summary):hover{background:#dff2e9!important;border-color:#7dbba4!important;color:#065f49!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar :is(input,select){background:#fff!important;color:#173a2f!important;-webkit-text-fill-color:#173a2f!important;border-color:#bcd7ca!important;color-scheme:light!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-topbar-search button{background:#08775b!important;color:#fff!important;border-color:#08775b!important}
+
+/* Component-level contrast matrix -----------------------------------------
+   KPI tiles and module tabs use their own foreground declarations, so they
+   must be mapped explicitly instead of depending on card inheritance. */
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-tabbar{background:#fff!important;border-color:#cfe0d7!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-tab{color:#08775b!important;-webkit-text-fill-color:#08775b!important;opacity:1!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-tab :is(span,strong,small),body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-tab .ui-icon{color:inherit!important;-webkit-text-fill-color:inherit!important;opacity:1!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-tab.is-active{background:#08634a!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:#08634a!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-kpi{border-color:#cfe0d7!important;color:#173a2f!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content .mbw-kpi :is(.mbw-kpi-label,.mbw-kpi-value,strong,span){color:#173a2f!important;-webkit-text-fill-color:#173a2f!important;opacity:1!important}
+
+body.admin-layout.theme-dark .admin-content .mbw-tabbar,body.admin-layout.admin-dark .admin-content .mbw-tabbar{background:#0d1815!important;border:1px solid rgba(255,255,255,.45)!important}
+body.admin-layout.theme-dark .admin-content .mbw-tab,body.admin-layout.admin-dark .admin-content .mbw-tab{color:#c9eee0!important;-webkit-text-fill-color:#c9eee0!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content .mbw-tab :is(span,strong,small),body.admin-layout.theme-dark .admin-content .mbw-tab .ui-icon,
+body.admin-layout.admin-dark .admin-content .mbw-tab :is(span,strong,small),body.admin-layout.admin-dark .admin-content .mbw-tab .ui-icon{color:inherit!important;-webkit-text-fill-color:inherit!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content .mbw-tab:hover,body.admin-layout.admin-dark .admin-content .mbw-tab:hover{background:#16271f!important;color:#fff!important;-webkit-text-fill-color:#fff!important}
+body.admin-layout.theme-dark .admin-content .mbw-tab.is-active,body.admin-layout.admin-dark .admin-content .mbw-tab.is-active{background:#08775b!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:#50c99b!important}
+body.admin-layout.theme-dark .admin-content .mbw-kpi,body.admin-layout.admin-dark .admin-content .mbw-kpi{border-color:rgba(255,255,255,.52)!important;color:#fff!important;box-shadow:0 0 0 1px rgba(255,255,255,.06)!important}
+body.admin-layout.theme-dark .admin-content .mbw-kpi :is(.mbw-kpi-label,.mbw-kpi-value,.mbw-kpi-delta,strong,span),
+body.admin-layout.admin-dark .admin-content .mbw-kpi :is(.mbw-kpi-label,.mbw-kpi-value,.mbw-kpi-delta,strong,span){color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content .mbw-chip,body.admin-layout.admin-dark .admin-content .mbw-chip{border:1px solid rgba(255,255,255,.32)!important}
+body.admin-layout.theme-dark .admin-content .mbw-chip .ui-icon,body.admin-layout.admin-dark .admin-content .mbw-chip .ui-icon{color:currentColor!important;stroke:currentColor!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content .mbw-pill.tone-green,body.admin-layout.admin-dark .admin-content .mbw-pill.tone-green{background:#123a2e!important;color:#b9f4dc!important;-webkit-text-fill-color:#b9f4dc!important}
+body.admin-layout.theme-dark .admin-content .mbw-pill.tone-gray,body.admin-layout.admin-dark .admin-content .mbw-pill.tone-gray{background:#24342e!important;color:#e1ebe6!important;-webkit-text-fill-color:#e1ebe6!important}
+body.admin-layout.theme-dark .admin-content .mbw-pill.tone-amber,body.admin-layout.admin-dark .admin-content .mbw-pill.tone-amber{background:#493711!important;color:#ffd77f!important;-webkit-text-fill-color:#ffd77f!important}
+
+/* Unified dark surface contract -------------------------------------------
+   Final compatibility layer for legacy pages that hard-code white dashboard,
+   chart and reporting surfaces. Every shared container resolves through the
+   same four dark tokens; component accents are intentionally left intact. */
+body.admin-layout.theme-dark .admin-content,body.admin-layout.admin-dark .admin-content{
+  --theme-canvas:#070f0c;--theme-surface:#0d1815;--theme-raised:#12211c;
+  --theme-border:rgba(255,255,255,.42);--theme-heading:#f4faf7;
+  --theme-copy:#d7e3dd;--theme-muted:#a9bbb2
+}
+body.admin-layout.theme-dark .admin-content :is(
+  .mbw-page-head,.cr-head,.accounting-page-head,.mbw-tabbar,.card,.panel,
+  .form-card,.table-card,.stat-card,.metric-card,.dashboard-card,.report-card,
+  .settings-card,.workspace-card,.admin-card,.admin-panel,.cr-card,.rc-card,
+  .mbw-card,.ad-panel,.ad-kpi-card,.ad-chart-card,.chart-card,.analytics-card,
+  .admin-chart-card,.admin-analysis-card,.accounting-stat-card,.dashboard-stat,
+  .admin-stat-card,.kpi-card,.ov-kpi,.mbw-kpi,.modal-content,.dialog,.popover,
+  .dropdown-panel,.company-card,.frm-section
+),
+body.admin-layout.admin-dark .admin-content :is(
+  .mbw-page-head,.cr-head,.accounting-page-head,.mbw-tabbar,.card,.panel,
+  .form-card,.table-card,.stat-card,.metric-card,.dashboard-card,.report-card,
+  .settings-card,.workspace-card,.admin-card,.admin-panel,.cr-card,.rc-card,
+  .mbw-card,.ad-panel,.ad-kpi-card,.ad-chart-card,.chart-card,.analytics-card,
+  .admin-chart-card,.admin-analysis-card,.accounting-stat-card,.dashboard-stat,
+  .admin-stat-card,.kpi-card,.ov-kpi,.mbw-kpi,.modal-content,.dialog,.popover,
+  .dropdown-panel,.company-card,.frm-section
+){background:var(--theme-surface)!important;background-image:none!important;color:var(--theme-copy)!important;border-color:var(--theme-border)!important;box-shadow:0 8px 24px rgba(0,0,0,.22)!important}
+body.admin-layout.theme-dark .admin-content :is(.mbw-chart-wrap,.mbw-donut-box,.chart-wrap,.chart-container,.table-responsive,.mbw-tablewrap,.empty-state,.frm-entry-totals),
+body.admin-layout.admin-dark .admin-content :is(.mbw-chart-wrap,.mbw-donut-box,.chart-wrap,.chart-container,.table-responsive,.mbw-tablewrap,.empty-state,.frm-entry-totals){background:var(--theme-raised)!important;background-image:none!important;color:var(--theme-copy)!important;border-color:var(--theme-border)!important}
+body.admin-layout.theme-dark .admin-content :is(.ov-kpi,.mbw-kpi,.ad-kpi-card,.stat-card,.metric-card) :is(h1,h2,h3,h4,strong,.ov-kpi-value,.mbw-kpi-value,.stat-value,.metric-value,.ad-kpi-value),
+body.admin-layout.admin-dark .admin-content :is(.ov-kpi,.mbw-kpi,.ad-kpi-card,.stat-card,.metric-card) :is(h1,h2,h3,h4,strong,.ov-kpi-value,.mbw-kpi-value,.stat-value,.metric-value,.ad-kpi-value){color:var(--theme-heading)!important;-webkit-text-fill-color:var(--theme-heading)!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(.ov-kpi,.mbw-kpi,.ad-kpi-card,.stat-card,.metric-card) :is(.ov-kpi-label,.ov-kpi-sub,.mbw-kpi-label,.mbw-kpi-delta,.stat-label,.metric-label,.ad-kpi-label,.ad-kpi-meta),
+body.admin-layout.admin-dark .admin-content :is(.ov-kpi,.mbw-kpi,.ad-kpi-card,.stat-card,.metric-card) :is(.ov-kpi-label,.ov-kpi-sub,.mbw-kpi-label,.mbw-kpi-delta,.stat-label,.metric-label,.ad-kpi-label,.ad-kpi-meta){color:var(--theme-muted)!important;-webkit-text-fill-color:var(--theme-muted)!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(.ov-card-head,.mbw-card-head,.frm-section-head) :is(h1,h2,h3,h4,strong),
+body.admin-layout.admin-dark .admin-content :is(.ov-card-head,.mbw-card-head,.frm-section-head) :is(h1,h2,h3,h4,strong){color:var(--theme-heading)!important;-webkit-text-fill-color:var(--theme-heading)!important}
+body.admin-layout.theme-dark .admin-content :is(.ov-legend-row,.ov-donut-center,.empty-state) :is(span,b,em,small,p),
+body.admin-layout.admin-dark .admin-content :is(.ov-legend-row,.ov-donut-center,.empty-state) :is(span,b,em,small,p){color:var(--theme-copy)!important;-webkit-text-fill-color:var(--theme-copy)!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content .ov-ring,body.admin-layout.admin-dark .admin-content .ov-ring{background:radial-gradient(closest-side,var(--theme-surface) 72%,transparent 73% 100%),conic-gradient(#3cbb8b calc(var(--p,0)*1%),#2a3f37 0)!important}
+body.admin-layout.theme-dark .admin-content table,body.admin-layout.admin-dark .admin-content table{background:var(--theme-surface)!important;color:var(--theme-copy)!important;border-color:var(--theme-border)!important}
+body.admin-layout.theme-dark .admin-content table :is(th,td),body.admin-layout.admin-dark .admin-content table :is(th,td){color:var(--theme-copy)!important;-webkit-text-fill-color:var(--theme-copy)!important;border-color:var(--theme-border)!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content table thead th,body.admin-layout.admin-dark .admin-content table thead th{background:#172a23!important;color:var(--theme-heading)!important;-webkit-text-fill-color:var(--theme-heading)!important}
+body.admin-layout.theme-dark .admin-content table tbody tr:nth-child(even),body.admin-layout.admin-dark .admin-content table tbody tr:nth-child(even){background:#101d19!important}
+body.admin-layout.theme-dark .admin-content canvas,body.admin-layout.admin-dark .admin-content canvas{color:var(--theme-copy)!important}
+
+/* Professional control hierarchy in dark mode. Secondary actions must not
+   remain white rectangles with white labels; primary actions stay filled. */
+body.admin-layout.theme-dark .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft),
+body.admin-layout.admin-dark .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft){background:#12211c!important;color:#d7e3dd!important;-webkit-text-fill-color:#d7e3dd!important;border:1px solid #50675d!important;box-shadow:none!important}
+body.admin-layout.theme-dark .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft):hover,
+body.admin-layout.admin-dark .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft):hover{background:#1a3028!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:#65b998!important}
+body.admin-layout.theme-dark .admin-content :is(.button:not(.secondary):not(.soft),button[type=submit]:not(.secondary):not(.soft)),
+body.admin-layout.admin-dark .admin-content :is(.button:not(.secondary):not(.soft),button[type=submit]:not(.secondary):not(.soft)){background:#08775b!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:#3cbb8b!important}
+body.admin-layout.theme-dark .admin-content .feature-disclosure>summary,body.admin-layout.admin-dark .admin-content .feature-disclosure>summary{background:#12211c!important;color:#f4faf7!important;border-color:#50675d!important}
+body.admin-layout.theme-dark .admin-content .feature-disclosure>summary :is(span,strong,small),body.admin-layout.admin-dark .admin-content .feature-disclosure>summary :is(span,strong,small){color:#f4faf7!important;-webkit-text-fill-color:#f4faf7!important;opacity:1!important}
+
+/* Light mode uses restrained contrast rather than washed-out green-on-white. */
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content{color:#30473e!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content :is(.mbw-card,.card,.panel,.frm-section,.mbw-kpi,.ov-kpi){border-color:#cbded4!important;box-shadow:0 5px 16px rgba(22,70,53,.055)!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content :is(h1,h2,h3,h4,h5,h6,strong,.mbw-heading,.mbw-kpi-value,.ov-kpi-value){color:#15382c!important;-webkit-text-fill-color:#15382c!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content :is(p,small,.meta,.muted,.help,.hint,.description,.subtitle,.mbw-kpi-label,.mbw-kpi-delta,.ov-kpi-label,.ov-kpi-sub){color:#5d756b!important;-webkit-text-fill-color:#5d756b!important;opacity:1!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft){background:#fff!important;color:#17664e!important;-webkit-text-fill-color:#17664e!important;border-color:#78ad99!important;box-shadow:none!important}
+body.admin-layout:not(.theme-dark):not(.admin-dark) .admin-content :is(.button.secondary,button.secondary,.button.soft,button.soft):hover{background:#edf7f2!important;color:#084f3b!important;-webkit-text-fill-color:#084f3b!important;border-color:#398d6d!important}
+
+/* Permanent brand and form-system contract --------------------------------
+   These are product rules, not page styling: the navigation rail is always
+   brand green; green controls always carry white content; fields share one
+   geometry across modules; dark mode uses pure white copy everywhere. */
+body.admin-layout .admin-sidebar{background:linear-gradient(180deg,#032e24 0%,#064e3b 100%)!important;border-right:1px solid rgba(255,255,255,.18)!important;box-shadow:8px 0 24px rgba(3,46,36,.20)!important;color:#fff!important;scrollbar-color:rgba(255,255,255,.42) transparent!important}
+body.admin-layout .admin-sidebar :is(.brand strong,.brand small,.brand-admin-sub,.admin-nav-group,.admin-sidebar-context strong,.admin-sidebar-context small){color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important}
+body.admin-layout .admin-sidebar .brand-mark{background:transparent!important;color:#fff!important;border-color:rgba(255,255,255,.58)!important}
+body.admin-layout .admin-sidebar-context{background:rgba(255,255,255,.08)!important;border-color:rgba(255,255,255,.24)!important;color:#fff!important}
+body.admin-layout .admin-nav a,body.admin-layout .admin-nav .mbw-nav-parent>a[data-nav-toggle]{background:transparent!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:transparent!important;box-shadow:none!important;opacity:1!important}
+body.admin-layout .admin-nav a :is(span,strong,small),body.admin-layout .admin-nav a .ui-icon,
+body.admin-layout .admin-nav .mbw-nav-parent>a[data-nav-toggle] :is(span,strong,small),body.admin-layout .admin-nav .mbw-nav-parent>a[data-nav-toggle] .ui-icon{color:#fff!important;-webkit-text-fill-color:#fff!important;stroke:currentColor!important;opacity:1!important}
+body.admin-layout .admin-nav a:hover,body.admin-layout .admin-nav .mbw-nav-parent>a[data-nav-toggle]:hover{background:rgba(255,255,255,.10)!important;color:#fff!important;-webkit-text-fill-color:#fff!important}
+body.admin-layout .admin-nav a.is-active,body.admin-layout .admin-nav a[aria-current=page]{background:#08775b!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid rgba(255,255,255,.30)!important;box-shadow:inset 3px 0 0 #d9b75f!important}
+body.admin-layout .admin-sidebar::-webkit-scrollbar-track{background:transparent!important}
+body.admin-layout .admin-sidebar::-webkit-scrollbar-thumb{background:rgba(255,255,255,.42)!important;border-color:transparent!important}
+
+/* Every filled brand-green interactive surface has the same foreground. */
+body.admin-layout :is(.button:not(.secondary):not(.soft),button[type=submit]:not(.secondary):not(.soft),.mbw-tab.is-active,.accounting-tabs a.is-active,.reference-tabs a.is-active,.party-panel-tabs a.is-active,.workspace-module-bar a.is-active){background:#08775b!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border-color:#08775b!important}
+body.admin-layout :is(.button:not(.secondary):not(.soft),button[type=submit]:not(.secondary):not(.soft),.mbw-tab.is-active,.accounting-tabs a.is-active,.reference-tabs a.is-active,.party-panel-tabs a.is-active,.workspace-module-bar a.is-active) :is(span,strong,small),
+body.admin-layout :is(.button:not(.secondary):not(.soft),button[type=submit]:not(.secondary):not(.soft),.mbw-tab.is-active,.accounting-tabs a.is-active,.reference-tabs a.is-active,.party-panel-tabs a.is-active,.workspace-module-bar a.is-active) .ui-icon{color:#fff!important;-webkit-text-fill-color:#fff!important;stroke:currentColor!important;opacity:1!important}
+
+/* One field geometry for every administrative form. */
+body.admin-layout{--control-height:42px;--control-radius:10px;--control-font:13px;--label-font:12.5px;--field-gap:6px;--grid-gap-x:16px;--grid-gap-y:14px}
+body.admin-layout .admin-content :is(.frm-grid,.workspace-form-grid,.form-grid){column-gap:var(--grid-gap-x)!important;row-gap:var(--grid-gap-y)!important;align-items:start!important}
+body.admin-layout .admin-content :is(.frm-grid,.workspace-form-grid,.form-grid) label,
+body.admin-layout .admin-content form>label{gap:var(--field-gap)!important;font-size:var(--label-font)!important;font-weight:600!important;line-height:1.3!important}
+body.admin-layout .admin-content :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]),select,textarea){width:100%;min-height:var(--control-height)!important;padding:9px 12px!important;border-radius:var(--control-radius)!important;font-family:var(--mbw-font)!important;font-size:var(--control-font)!important;line-height:1.35!important;box-sizing:border-box!important}
+body.admin-layout .admin-content textarea{min-height:96px!important;resize:vertical}
+body.admin-layout .admin-content input[type=file]{padding:5px 7px!important;line-height:28px!important}
+body.admin-layout .admin-content :is(.button,button,.btn,input[type=submit]){min-height:var(--control-height)!important;padding:9px 15px!important;border-radius:var(--control-radius)!important;font-size:var(--control-font)!important;line-height:1.25!important}
+body.admin-layout .admin-content input[type=checkbox],body.admin-layout .admin-content input[type=radio]{width:18px!important;height:18px!important;min-height:18px!important;padding:0!important;vertical-align:middle}
+
+/* Explicit user requirement: all ordinary text is pure white in dark mode.
+   Background/status fills remain distinct, but never reduce text contrast. */
+body.admin-layout.theme-dark .admin-content :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,a,label,legend,li,dt,dd,th,td,em,b,i,.meta,.muted,.help,.hint,.description,.subtitle,.title,.heading),
+body.admin-layout.admin-dark .admin-content :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,a,label,legend,li,dt,dd,th,td,em,b,i,.meta,.muted,.help,.hint,.description,.subtitle,.title,.heading){color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important}
+body.admin-layout.theme-dark .admin-content :is(input,select,textarea),body.admin-layout.admin-dark .admin-content :is(input,select,textarea){color:#fff!important;-webkit-text-fill-color:#fff!important}
+body.admin-layout.theme-dark .admin-content :is(input,textarea)::placeholder,body.admin-layout.admin-dark .admin-content :is(input,textarea)::placeholder{color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:.72!important}
+
+/* Company selector: an executive directory rather than a marketing hero. */
+body:has(.portal-selector-page) .portal-selector-page {
+  background: radial-gradient(circle at 92% 8%, rgba(28, 133, 102, .14), transparent 30rem), #061d1b !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .hero-panel {
+  margin: 0 0 18px !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .hero-grid > div {
+  min-height: 0 !important;
+  padding: 8px 0 14px !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .hero-grid > div::before,
+body:has(.portal-selector-page) .portal-selector-page .hero-grid > div::after,
+body:has(.portal-selector-page) .portal-selector-page .kicker { display: none !important; }
+body:has(.portal-selector-page) .portal-selector-page .hero-panel h1 {
+  margin: 0 !important;
+  color: #f7fbf9 !important;
+  -webkit-text-fill-color: #f7fbf9 !important;
+  font-size: clamp(27px, 2.3vw, 35px) !important;
+  font-weight: 760 !important;
+  letter-spacing: -.03em !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .hero-panel p {
+  margin-top: 5px !important;
+  color: #a9c9bb !important;
+  -webkit-text-fill-color: #a9c9bb !important;
+  font-size: 13px !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .portal-section-heading {
+  margin: 0 0 11px !important;
+  padding-top: 2px;
+  border-bottom: 1px solid rgba(208, 235, 222, .16);
+}
+body:has(.portal-selector-page) .portal-selector-page .portal-section-heading h2 {
+  padding-bottom: 10px;
+  color: #edf8f2 !important;
+  -webkit-text-fill-color: #edf8f2 !important;
+  font-size: 13px !important;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+body:has(.portal-selector-page) .portal-selector-page .portal-section-heading p {
+  padding-bottom: 10px;
+  color: #8fb3a4 !important;
+  -webkit-text-fill-color: #8fb3a4 !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .admin-grid.portal-company-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 20px !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card {
+  min-height: 220px !important;
+  padding: 20px !important;
+  overflow: hidden;
+  border: 1px solid rgba(204, 231, 218, .24) !important;
+  border-radius: 12px !important;
+  background: linear-gradient(135deg, rgba(255,255,255,.045), transparent 58%), #142725 !important;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, .23) !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card:hover {
+  transform: translateY(-3px) !important;
+  border-color: rgba(101, 214, 168, .56) !important;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, .30) !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card .badge {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 12px !important;
+  border-color: rgba(194, 219, 205, .18) !important;
+  background: rgba(255,255,255,.09) !important;
+  color: #e7f5ed !important;
+  -webkit-text-fill-color: #e7f5ed !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card h3 {
+  position: relative;
+  z-index: 1;
+  max-width: calc(100% - 100px);
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  font-size: 20px !important;
+  line-height: 1.18 !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card p {
+  position: relative;
+  z-index: 1;
+  max-width: calc(100% - 106px);
+  color: #d4e4dc !important;
+  -webkit-text-fill-color: #d4e4dc !important;
+  font-size: 12px !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card p:last-of-type {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  background: transparent !important;
+  padding: 0 !important;
+  font-size: 11px !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card p:last-of-type::before { display: none; }
+body:has(.portal-selector-page) .portal-selector-page form.card button[type="submit"] {
+  position: relative;
+  z-index: 2;
+  min-height: 38px !important;
+  padding: 8px 14px !important;
+  border-color: rgba(109, 220, 176, .30) !important;
+  background: linear-gradient(135deg, #137d63, #0b604d) !important;
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .portal-company-illustration {
+  position: absolute;
+  right: 18px;
+  bottom: 20px;
+  display: grid;
+  place-items: center;
+  width: 78px;
+  height: 78px;
+  color: rgba(211, 235, 222, .50);
+  filter: drop-shadow(0 5px 8px rgba(0,0,0,.25));
+}
+body:has(.portal-selector-page) .portal-selector-page .portal-company-illustration .ui-icon {
+  width: 76px;
+  height: 76px;
+  stroke-width: 1.25;
+}
+@media (max-width: 1050px) {
+  body:has(.portal-selector-page) .portal-selector-page .admin-grid.portal-company-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 650px) {
+  body:has(.portal-selector-page) .portal-selector-page .admin-grid.portal-company-grid { grid-template-columns: 1fr !important; }
+  body:has(.portal-selector-page) .portal-selector-page form.card { min-height: 205px !important; }
+}

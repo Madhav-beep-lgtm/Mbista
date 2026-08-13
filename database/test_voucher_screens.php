@@ -137,6 +137,9 @@ $vscRendered = [];
 $vscTypeList = array_keys(voucher_type_catalog());
 for ($vscIndex = 0; $vscIndex < count($vscTypeList); $vscIndex++) {
     $_GET = ['type' => $vscTypeList[$vscIndex]];
+    if (in_array($vscTypeList[$vscIndex], ['sales', 'purchase', 'debit_note', 'credit_note'], true)) {
+        $_GET['source'] = 'party-master';
+    }
     $_POST = [];
     ob_start();
     $vscError = null;
@@ -214,8 +217,11 @@ ok(in_array($supplierId, $purchaseParties, true) && !in_array($customerId, $purc
     'And the purchase screen lists suppliers only');
 
 // One "vch-type-key" span per chip, and nowhere else on the page.
-ok(substr_count($rendered['journal'], 'vch-type-key') === 8, 'The type bar offers all eight types from every screen');
-ok(substr_count($rendered['journal'], 'Tally F7') === 1, 'And names the Tally key each one answers to');
+ok(substr_count($rendered['journal'], '<a class="vch-type') === 4,
+    'The type bar offers only Contra, Payment, Receipt and Journal');
+ok(!str_contains($rendered['journal'], '>Sales</span>') && !str_contains($rendered['journal'], '>Purchase</span>')
+    && !str_contains($rendered['journal'], '>Debit Note</span>') && !str_contains($rendered['journal'], '>Credit Note</span>'),
+    'Trade documents are removed from the generic voucher chooser');
 
 // ---------------------------------------------------------------------------
 echo "\n3b. Only the four types that move goods ask about them\n";

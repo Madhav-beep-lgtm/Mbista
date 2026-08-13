@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/payroll_engine.php';
+require_once __DIR__ . '/../../app/mailer.php';
 
 // Admins, staff accountants working in an authorized company, and clients
 // inside their OWN books may manage the payroll roster. Fine-grained rights
@@ -119,6 +120,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'must_change_password' => 1,
                     ]);
                     log_activity('user', $linkedUserId, 'created', 'User ID created for payroll employee ' . $code . '.', $userId);
+                    $credentialMail = send_account_credentials_email($employeeEmail, $fullName, $loginPassword, 'employee self-service account');
+                    if (empty($credentialMail['ok']) || ($credentialMail['transport'] ?? '') === 'log') {
+                        flash('warning', ($credentialMail['transport'] ?? '') === 'log'
+                            ? 'Employee login was created, but SMTP is not configured; the credential email was saved to storage/mail only.'
+                            : 'Employee login was created, but the credential email failed: ' . ($credentialMail['error'] ?? 'unknown mail error'));
+                    }
                 } catch (Throwable $loginException) {
                     flash('error', 'Could not create the user ID — that email may already be in use.');
                     redirect('admin/payroll-employees.php');
