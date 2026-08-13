@@ -2,8 +2,9 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 
-require_staff_or_admin();
+require_staff_admin_or_client_books();
 require_company_context();
+require_permission('accounting', 'view');
 
 $pageTitle = 'Audit Trail & Approvals';
 $pageSubtitle = 'Track who did what, when, and under which company scope.';
@@ -107,11 +108,19 @@ $logSql = '
     WHERE 1 = 1
 ';
 $logParams = [];
-// activity_logs has no company_id column, so the feed is scoped by the actor's
-// company: a non-super-admin only sees activity by users of a company they may
-// access. Previously every admin AND staff member saw the platform-wide feed,
-// including other tenants' financial descriptions embedded in `details`.
-if (!user_is_super_admin()) {
+// Prefer the company recorded with each event. The actor-only fallback is
+// intentionally limited to the client themselves until migration 116 lands.
+if ((string) ($currentUser['role'] ?? '') === 'customer') {
+    if (column_exists('activity_logs', 'company_id')) {
+        $logSql .= ' AND al.company_id = :client_company_id';
+        $logParams['client_company_id'] = $companyId;
+    } else {
+        // Safe fallback until migration 116 has reached the server. Never show
+        // a cross-company feed merely because deployment is between steps.
+        $logSql .= ' AND al.actor_id = :client_actor_id';
+        $logParams['client_actor_id'] = $userId;
+    }
+} elseif (!user_is_super_admin()) {
     $auditCompanyIds = authorized_company_ids();
     if ($auditCompanyIds === []) {
         $logSql .= ' AND 1 = 0';
@@ -141,7 +150,14 @@ $activityRows = $logStmt->fetchAll();
 
 $moduleOptions = [];
 if (table_exists('activity_logs')) {
-    $moduleOptions = db()->query('SELECT DISTINCT entity_type FROM activity_logs ORDER BY entity_type ASC')->fetchAll(PDO::FETCH_COLUMN);
+    if ((string) ($currentUser['role'] ?? '') === 'customer') {
+        $moduleScope = column_exists('activity_logs', 'company_id') ? 'company_id = :scope_id' : 'actor_id = :scope_id';
+        $moduleStmt = db()->prepare('SELECT DISTINCT entity_type FROM activity_logs WHERE ' . $moduleScope . ' ORDER BY entity_type ASC');
+        $moduleStmt->execute(['scope_id' => column_exists('activity_logs', 'company_id') ? $companyId : $userId]);
+        $moduleOptions = $moduleStmt->fetchAll(PDO::FETCH_COLUMN);
+    } else {
+        $moduleOptions = db()->query('SELECT DISTINCT entity_type FROM activity_logs ORDER BY entity_type ASC')->fetchAll(PDO::FETCH_COLUMN);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -149,11 +165,14 @@ if (table_exists('activity_logs')) {
 // ---------------------------------------------------------------------------
 $changeRows = [];
 if (table_exists('audit_change_history')) {
+    $changeCompanyClause = (string) ($currentUser['role'] ?? '') === 'customer'
+        ? 'ch.company_id = :company_id'
+        : '(ch.company_id = :company_id OR ch.company_id IS NULL)';
     $changeStmt = db()->prepare('
         SELECT ch.*, u.name AS actor_name
         FROM audit_change_history ch
         LEFT JOIN users u ON u.id = ch.actor_id
-        WHERE ch.company_id = :company_id OR ch.company_id IS NULL
+        WHERE ' . $changeCompanyClause . '
         ORDER BY ch.created_at DESC
         LIMIT 40
     ');

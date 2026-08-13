@@ -12,7 +12,7 @@ declare(strict_types=1);
  */
 ?>
 <nav class="vch-typebar" aria-label="Voucher type" id="vch-typebar">
-    <?php foreach ($voucherTypes as $typeKey => $typeSpec): ?>
+    <?php foreach (voucher_entry_type_catalog() as $typeKey => $typeSpec): ?>
         <?php $isCurrent = $typeKey === $type; ?>
         <a class="vch-type<?= $isCurrent ? ' is-active' : '' ?> tone-<?= e((string) $typeSpec['tone']) ?>"
            href="<?= e(url(voucher_type_url($typeKey))) ?>"

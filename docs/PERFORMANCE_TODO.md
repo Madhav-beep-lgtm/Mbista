@@ -127,3 +127,13 @@ or production-like benchmark rather than relying only on source inspection.
   to the local browser-control runtime; Apache answered on port 8095 but rejected
   command-line requests with HTTP 400, so signed-in page timing and live
   deployment verification remain post-deployment checks.
+
+- 2026-08-13 — Client-books parity walkthrough keeps approval/post authority
+  with owners and approvers while exposing the full accounting, opening
+  balance, payroll, budget, reporting, export, and audit workflows. Pending
+  approvals now use an independent count plus a bounded 100-row queue; audit
+  feeds are tenant-scoped and capped; report schedules are capped at 200 rows.
+  Migration 116 adds the activity-log company/time index and is wired into the
+  deployment task. Client parity passed 22/22, voucher screens 97/97, opening
+  balances 48/48, staff reach 19/19, all changed PHP linted successfully, and
+  `git diff --check` passed.

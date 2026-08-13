@@ -12,8 +12,8 @@ require_staff_admin_or_client_books();
 require_company_context();
 
 $repairErrors = accounting_module_repair_database();
-$pageTitle = 'Unified Party Master';
-$pageSubtitle = 'One party, one profile and one ledger history across sales, purchases and jewellery.';
+$pageTitle = 'Unified Transaction and Party Master';
+$pageSubtitle = 'One workspace for parties, sales, purchases, notes, payments and complete ledger history.';
 $company = current_company();
 $fiscalYear = current_fiscal_year();
 $companyId = (int) ($company['id'] ?? 0);
@@ -1718,6 +1718,10 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
         <a class="button<?= $primaryAction === 'invoice' ? '' : ' secondary' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Create Invoice</a>
         <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'payment', 'edit_id' => null])) ?>"><?= icon('receipt-voucher') ?>Record Payment</a>
         <a class="button<?= $primaryAction === 'purchase' ? '' : ' secondary' ?>" href="<?= e(parties_page_url(['panel' => 'purchase', 'edit_id' => null])) ?>"><?= icon('cart') ?>Record Purchase</a>
+        <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=sales')) ?>"><?= icon('receipt-voucher') ?>Sales Voucher</a>
+        <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=purchase')) ?>"><?= icon('documents') ?>Purchase Voucher</a>
+        <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=debit_note')) ?>"><?= icon('trend-down') ?>Debit Note</a>
+        <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=credit_note')) ?>"><?= icon('trend-up') ?>Credit Note</a>
         <a class="button secondary" href="<?= e(parties_page_url(['panel' => 'supplier-payment', 'edit_id' => null])) ?>"><?= icon('wallet') ?>Pay Supplier</a>
         <?php if ($partyPicked): ?>
             <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) $selectedParty['id']])) ?>"><?= icon('documents') ?>Print Statement</a>

@@ -5,8 +5,12 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/payment_gateway_engine.php';
 
-require_admin();
+require_staff_admin_or_client_books();
 require_company_context();
+if ((string) (current_user()['role'] ?? '') === 'customer' && !client_portal_user_is_owner()) {
+    deny_access('Only the client organization owner may manage payment gateway credentials.');
+}
+require_permission('accounting', 'edit');
 accounting_module_repair_database();
 
 $company = current_company();

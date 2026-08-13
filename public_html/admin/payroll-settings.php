@@ -4,8 +4,12 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/payroll_engine.php';
 
-require_admin();
+require_staff_admin_or_client_books();
 require_company_context();
+require_permission('payroll', 'view');
+if ((string) (current_user()['role'] ?? '') === 'customer' && !client_portal_user_is_owner()) {
+    deny_access('Only the client organization owner may manage payroll settings.');
+}
 accounting_module_repair_database();
 
 $company = current_company();
@@ -22,6 +26,7 @@ $sym = site_currency_symbol();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
+    require_permission('payroll', 'adjust');
     $action = (string) ($_POST['action'] ?? '');
 
     if ($action === 'save_mappings') {

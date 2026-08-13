@@ -41,9 +41,8 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Opening Balances', 'admin/opening-balances.php', 'reconcile', $headerScript === 'opening-balances.php'],
     ['Day Book', 'admin/day-book.php', 'calendar', $headerScript === 'day-book.php'],
     ['Voucher Import (Excel)', 'admin/voucher-import.php', 'upload', $headerScript === 'voucher-import.php'],
-    ['Sales & Invoices', 'admin/accounting-parties.php?tab=sales', 'receipt-voucher', $headerScript === 'accounting-parties.php' && in_array($headerTab, ['', 'sales'], true)],
+    ['Unified Transaction and Party Master', 'admin/accounting-parties.php', 'users', $headerScript === 'accounting-parties.php'],
     ['Payment Gateways', 'admin/payment-gateways.php', 'card', $headerScript === 'payment-gateways.php'],
-    ['Purchases', 'admin/accounting-parties.php?tab=purchases', 'cart', $headerScript === 'accounting-parties.php' && $headerTab === 'purchases'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
@@ -293,15 +292,19 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </a>
                 <div class="mbw-subnav">
                     <?php foreach ($headerAccountingChildren as [$headerChildLabel, $headerChildUrl, $headerChildIcon, $headerChildActive]): ?>
-                        <?php if (str_starts_with($headerChildUrl, 'admin/budgets.php')) { continue; } // budgets stay firm-side ?>
+                        <?php if (str_starts_with($headerChildUrl, 'admin/payment-gateways.php') && !client_portal_user_is_owner()) { continue; } ?>
                         <a class="<?= $headerChildActive ? 'is-active' : '' ?>" href="<?= e(url($headerChildUrl)) ?>"><?= icon($headerChildIcon) ?><?= e($headerChildLabel) ?></a>
                     <?php endforeach; ?>
                 </div>
             </div>
             <span class="admin-nav-group">Payroll</span>
+            <a class="<?= $headerScript === 'payroll.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll.php')) ?>"><?= icon('card') ?>Payroll Processing</a>
             <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('teams') ?>Employees &amp; Advances</a>
             <a class="<?= $headerScript === 'payroll-overtime.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-overtime.php')) ?>"><?= icon('attendance') ?>Overtime Review</a>
             <a class="<?= $headerScript === 'payroll-service-charge.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-service-charge.php')) ?>"><?= icon('handshake') ?>Service Charge</a>
+            <?php if (client_portal_user_is_owner()): ?>
+                <a class="<?= $headerScript === 'payroll-settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-settings.php')) ?>"><?= icon('sliders') ?>Payroll Settings</a>
+            <?php endif; ?>
             <?php if ($headerHospitality): ?>
                 <span class="admin-nav-group">Hospitality</span>
                 <?= $headerHospitalityMenu ?>
@@ -312,6 +315,8 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <?php endif; ?>
             <span class="admin-nav-group">Reports</span>
             <a class="<?= $headerScript === 'reports-center.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
+            <a class="<?= $headerScript === 'report-schedules.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/report-schedules.php')) ?>"><?= icon('calendar') ?>Report Schedules</a>
+            <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Trail &amp; Approvals</a>
             <span class="admin-nav-group">System</span>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
             <?php else: ?>

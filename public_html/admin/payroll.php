@@ -4,8 +4,9 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/payroll_engine.php';
 
-require_admin();
+require_staff_admin_or_client_books();
 require_company_context();
+require_permission('payroll', 'view');
 accounting_module_repair_database();
 
 $company = current_company();
@@ -24,6 +25,17 @@ $settings = payroll_settings($companyId);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
+    if (in_array($action, ['create_run'], true)) {
+        require_permission('payroll', 'create');
+    } elseif (in_array($action, ['approve_post'], true)) {
+        require_permission('payroll', 'approve');
+    } elseif (in_array($action, ['post_accrual', 'record_payment', 'reopen_run'], true)) {
+        require_permission('payroll', 'post');
+    } elseif ($action === 'delete_run' && (string) (current_user()['role'] ?? '') !== 'admin') {
+        deny_access('Only an administrator may permanently delete a payroll run.', $companyId);
+    } else {
+        require_permission('payroll', 'adjust');
+    }
 
     if ($action === 'create_run') {
         $periodNo = max(1, min(12, (int) ($_POST['period_no'] ?? 1)));

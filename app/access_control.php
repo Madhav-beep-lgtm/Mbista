@@ -1093,14 +1093,16 @@ function user_can_do(string $module, string $action, ?array $user = null): bool
         $profile = client_profile_for_user((int) $user['id']);
         $memberRole = (string) ($profile['portal_member_role'] ?? '');
         $canApprove = in_array($memberRole, ['owner', 'approver'], true);
+        $isOwner = $memberRole === 'owner';
 
         $clientAccountingPermissions = [
             'accounting' => ['view', 'create', 'edit', 'approve', 'post', 'export'],
+            'opening_balance' => ['view', 'generate', 'adjust', 'finalize'],
             'sales' => ['view', 'create', 'edit', 'export'],
             'purchases' => ['view', 'create', 'edit', 'export'],
             'receipts' => ['view', 'create', 'edit', 'export'],
             'inventory' => ['view', 'create', 'edit', 'post', 'export'],
-            'payroll' => ['view', 'create', 'post', 'export'],
+            'payroll' => ['view', 'create', 'adjust', 'approve', 'post', 'export'],
             'reports' => ['view', 'export'],
             // Client admins run their own hospitality costing (reference only;
             // page gates additionally require the Super-Admin-set client flag).
@@ -1111,7 +1113,18 @@ function user_can_do(string $module, string $action, ?array $user = null): bool
             'jewellery' => ['view', 'create', 'edit', 'post', 'adjust', 'export'],
         ];
 
+        if ($module === 'opening_balance' && !$isOwner) {
+            return $action === 'view';
+        }
+
         if (!$canApprove && in_array($action, ['approve', 'post'], true)) {
+            return false;
+        }
+
+        // Organization-wide configuration is owned by the primary client
+        // account. Approvers may release transactions but cannot change the
+        // shop's gateway credentials, payroll rules, or similar controls.
+        if ($action === 'manage' && !$isOwner) {
             return false;
         }
 

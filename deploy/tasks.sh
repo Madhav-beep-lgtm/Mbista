@@ -144,6 +144,9 @@ fi
 if ! "$PHP_CLI" -r 'require $argv[1]."/app/bootstrap.php"; require $argv[1]."/app/accounting_module_repair.php"; accounting_repair_run_migration_file_if_index_missing("115_aml_performance_indexes.sql","jewellery_aml_cases","idx_jw_aml_register");' "$APP_BASE"; then
     die "AML performance index migration failed"
 fi
+if ! "$PHP_CLI" -r 'require $argv[1]."/app/bootstrap.php"; require $argv[1]."/app/accounting_module_repair.php"; accounting_repair_run_migration_file_if_index_missing("116_activity_log_company_scope.sql","activity_logs","idx_activity_company_created");' "$APP_BASE"; then
+    die "activity-log company scope migration failed"
+fi
 echo "deploy: database schema is current"
 
 # Prove the copy actually landed, rather than trusting that it did.

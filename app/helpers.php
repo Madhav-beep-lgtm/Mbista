@@ -5305,8 +5305,9 @@ function store_first_admin(array $data): int
 function log_activity(string $entityType, int $entityId, string $action, ?string $details = null, ?int $actorId = null): void
 {
     $hasIp = column_exists('activity_logs', 'ip_address');
-    $columns = 'entity_type, entity_id, action, details, actor_id' . ($hasIp ? ', ip_address' : '');
-    $values = ':entity_type, :entity_id, :action, :details, :actor_id' . ($hasIp ? ', :ip_address' : '');
+    $hasCompany = column_exists('activity_logs', 'company_id');
+    $columns = ($hasCompany ? 'company_id, ' : '') . 'entity_type, entity_id, action, details, actor_id' . ($hasIp ? ', ip_address' : '');
+    $values = ($hasCompany ? ':company_id, ' : '') . ':entity_type, :entity_id, :action, :details, :actor_id' . ($hasIp ? ', :ip_address' : '');
     $params = [
         'entity_type' => $entityType,
         'entity_id' => $entityId,
@@ -5314,6 +5315,9 @@ function log_activity(string $entityType, int $entityId, string $action, ?string
         'details' => $details,
         'actor_id' => $actorId ?? (current_user()['id'] ?? null),
     ];
+    if ($hasCompany) {
+        $params['company_id'] = current_company_id() ?: null;
+    }
     if ($hasIp) {
         $params['ip_address'] = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
     }

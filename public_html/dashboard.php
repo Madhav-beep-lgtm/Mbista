@@ -1007,6 +1007,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
         $abFy = null;
         $abVouchers = [];
         $abPending = [];
+        $abPendingTotal = 0;
         $abSnapshot = ['cash' => 0.0, 'receivables' => 0.0, 'payables' => 0.0, 'income' => 0.0, 'expenses' => 0.0, 'net' => 0.0];
         $abFyList = [];
         if ($abCompanyId > 0) {
@@ -1041,7 +1042,18 @@ include __DIR__ . '/../app/views/partials/client_header.php';
             $abVoucherStmt = db()->prepare('SELECT * FROM vouchers WHERE company_id = :cid ORDER BY id DESC LIMIT 25');
             $abVoucherStmt->execute(['cid' => $abCompanyId]);
             $abVouchers = $abVoucherStmt->fetchAll();
-            $abPending = array_values(array_filter($abVouchers, static fn (array $v): bool => (string) $v['approval_state'] === 'pending_approval' && (int) ($v['requires_client_approval'] ?? 0) === 1));
+            // Approval work is not a subset of "recent" work. The previous
+            // filter silently hid an old pending voucher as soon as 25 newer
+            // entries existed. Count independently and load a bounded queue.
+            $abPendingCountStmt = db()->prepare("SELECT COUNT(*) FROM vouchers
+                WHERE company_id = :cid AND approval_state = 'pending_approval' AND requires_client_approval = 1");
+            $abPendingCountStmt->execute(['cid' => $abCompanyId]);
+            $abPendingTotal = (int) $abPendingCountStmt->fetchColumn();
+            $abPendingStmt = db()->prepare("SELECT * FROM vouchers
+                WHERE company_id = :cid AND approval_state = 'pending_approval' AND requires_client_approval = 1
+                ORDER BY created_at ASC, id ASC LIMIT 100");
+            $abPendingStmt->execute(['cid' => $abCompanyId]);
+            $abPending = $abPendingStmt->fetchAll();
         }
         $abCurrency = site_currency_symbol();
         $abMoney = static fn (float $a): string => $abCurrency . number_format($a, 2);
@@ -1072,7 +1084,7 @@ include __DIR__ . '/../app/views/partials/client_header.php';
             </section>
 
             <section class="mbw-card">
-                <div class="mbw-card-head"><h2>Entries Awaiting Your Approval</h2><span class="mbw-pill <?= $abPending === [] ? 'tone-green' : 'tone-amber' ?>"><?= count($abPending) ?> pending</span></div>
+                <div class="mbw-card-head"><h2>Entries Awaiting Your Approval</h2><span class="mbw-pill <?= $abPendingTotal === 0 ? 'tone-green' : 'tone-amber' ?>"><?= $abPendingTotal ?> pending</span></div>
                 <?php if ($abPending === []): ?>
                     <p style="color:var(--mbw-muted);font-size:13px">Nothing waiting for you. Entries submitted by your accountant will appear here for approval.</p>
                 <?php else: ?>
@@ -1087,18 +1099,21 @@ include __DIR__ . '/../app/views/partials/client_header.php';
                                 <td><?= e((string) ($v['narration'] ?: '—')) ?></td>
                                 <td class="is-numeric"><?= e($abMoney((float) $v['total_amount'])) ?></td>
                                 <td>
-                                    <form method="post" style="display:inline-flex;gap:6px">
+                                    <?php if (client_portal_capability('approve')): ?><form method="post" style="display:inline-flex;gap:6px">
                                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                         <input type="hidden" name="action" value="client_voucher_decision">
                                         <input type="hidden" name="voucher_id" value="<?= (int) $v['id'] ?>">
                                         <button type="submit" name="decision" value="approve" class="button success" style="min-height:32px;padding:4px 12px">Approve</button>
                                         <button type="submit" name="decision" value="reject" class="button danger" style="min-height:32px;padding:4px 12px">Reject</button>
-                                    </form>
+                                    </form><?php else: ?><span class="frm-optional">Owner or approver review required</span><?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>
                     </table></div>
+                <?php endif; ?>
+                <?php if ($abPendingTotal > count($abPending)): ?>
+                    <p class="notice">Showing the oldest <?= count($abPending) ?> of <?= $abPendingTotal ?> pending entries. Complete this page to reveal the next entries.</p>
                 <?php endif; ?>
             </section>
 
