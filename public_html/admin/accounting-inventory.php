@@ -2805,3 +2805,14 @@ nav.inventory-action-tabs .inventory-action-tab.btn:hover { opacity: 0.85 !impor
     fill: #ffffff !important; 
 }
 </style>
+
+<style>
+.inventory-action-tab, .nav-link.active, .nav-tabs .nav-link.active {
+    background: #0f6b4f !important;
+    color: #ffffff !important;
+    border-color: #0f6b4f !important;
+}
+.inventory-action-tab svg {
+    fill: #ffffff !important;
+}
+</style>
