@@ -2771,3 +2771,4 @@ document.addEventListener('DOMContentLoaded', function () {
 }
     fill: #ffffff !important;
 }
+
