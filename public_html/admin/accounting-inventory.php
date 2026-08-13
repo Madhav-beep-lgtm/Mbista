@@ -2761,3 +2761,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
 .inventory-action-tab.btn:hover { opacity: 0.85; }
 </style>
+
+<style>
+nav.inventory-action-tabs .inventory-action-tab.btn-info { background: #0dcaf0 !important; border-color: #0dcaf0 !important; color: #000 !important; }
+nav.inventory-action-tabs .inventory-action-tab.btn-success { background: #198754 !important; border-color: #198754 !important; color: #fff !important; }
+nav.inventory-action-tabs .inventory-action-tab.btn-warning { background: #ffc107 !important; border-color: #ffc107 !important; color: #000 !important; }
+nav.inventory-action-tabs .inventory-action-tab.btn-danger { background: #dc3545 !important; border-color: #dc3545 !important; color: #fff !important; }
+nav.inventory-action-tabs .inventory-action-tab.btn-secondary { background: #6c757d !important; border-color: #6c757d !important; color: #fff !important; }
+nav.inventory-action-tabs .inventory-action-tab.btn-primary { background: #0d6efd !important; border-color: #0d6efd !important; color: #fff !important; }
+
+nav.inventory-action-tabs .inventory-action-tab.btn:hover { opacity: 0.85 !important; }
+</style>
