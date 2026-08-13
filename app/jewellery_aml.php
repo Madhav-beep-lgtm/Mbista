@@ -51,22 +51,41 @@ function jw_aml_upsert_case(int $companyId, ?int $partyId, string $type, string 
     $sourceKeys = array_map(static fn(array $t): string => $t['source_type'] . ':' . $t['source_id'], $transactions);
     sort($sourceKeys);
     $fingerprint = hash('sha256', implode('|', [$type,$kind,$date,$partyId ?: 0,implode(',',$sourceKeys),$rule,$version]));
-    $stmt = db()->prepare("INSERT INTO jewellery_aml_cases
+    $existingStmt = db()->prepare('SELECT id,aggregate_amount,transaction_count,risk_score,reason,due_on
+        FROM jewellery_aml_cases WHERE company_id=:cid AND fingerprint=:fp LIMIT 1');
+    $existingStmt->execute(['cid'=>$companyId, 'fp'=>$fingerprint]);
+    $existing = $existingStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $unchanged = $existing !== null
+        && abs((float)$existing['aggregate_amount'] - $amount) < 0.005
+        && (int)$existing['transaction_count'] === count($transactions)
+        && (int)$existing['risk_score'] >= $risk
+        && (string)$existing['reason'] === $reason
+        && (string)($existing['due_on'] ?? '') === (string)($dueOn ?? '');
+    if ($unchanged) {
+        $caseId = (int) $existing['id'];
+    } else {
+        $stmt = db()->prepare("INSERT INTO jewellery_aml_cases
         (company_id,party_id,case_type,candidate_kind,case_date,period_from,period_to,aggregate_amount,
          transaction_count,risk_score,rule_code,rule_version,reason,due_on,fingerprint)
         VALUES (:cid,:pid,:type,:kind,:dt,:dt2,:dt3,:amt,:cnt,:risk,:rule,:ver,:reason,:due,:fp)
         ON DUPLICATE KEY UPDATE aggregate_amount=VALUES(aggregate_amount), transaction_count=VALUES(transaction_count),
           risk_score=GREATEST(risk_score,VALUES(risk_score)), reason=VALUES(reason), due_on=VALUES(due_on), id=LAST_INSERT_ID(id)");
-    $stmt->execute(['cid'=>$companyId,'pid'=>$partyId ?: null,'type'=>$type,'kind'=>$kind,'dt'=>$date,'dt2'=>$date,'dt3'=>$date,
-        'amt'=>$amount,'cnt'=>count($transactions),'risk'=>$risk,'rule'=>$rule,'ver'=>$version,'reason'=>$reason,'due'=>$dueOn,'fp'=>$fingerprint]);
-    $caseId = (int) db()->lastInsertId();
-    $link = db()->prepare('INSERT IGNORE INTO jewellery_aml_case_transactions
-        (case_id,company_id,source_type,source_id,transaction_date,document_no,direction,payment_mode,amount,details_json)
-        VALUES (:case_id,:cid,:stype,:sid,:dt,:doc,:direction,:mode,:amount,:details)');
-    foreach ($transactions as $t) {
-        $link->execute(['case_id'=>$caseId,'cid'=>$companyId,'stype'=>$t['source_type'],'sid'=>$t['source_id'],
-            'dt'=>$t['transaction_date'],'doc'=>$t['document_no'],'direction'=>$t['direction'],'mode'=>$t['payment_mode'],
-            'amount'=>$t['amount'],'details'=>json_encode(['party_name'=>$t['party_name'],'pan_no'=>$t['pan_no'],'phone'=>$t['phone']], JSON_UNESCAPED_UNICODE)]);
+        $stmt->execute(['cid'=>$companyId,'pid'=>$partyId ?: null,'type'=>$type,'kind'=>$kind,'dt'=>$date,'dt2'=>$date,'dt3'=>$date,
+            'amt'=>$amount,'cnt'=>count($transactions),'risk'=>$risk,'rule'=>$rule,'ver'=>$version,'reason'=>$reason,'due'=>$dueOn,'fp'=>$fingerprint]);
+        $caseId = (int) db()->lastInsertId();
+    }
+    foreach (array_chunk($transactions, 200) as $chunk) {
+        $values = [];
+        $params = [];
+        foreach ($chunk as $t) {
+            $values[] = '(?,?,?,?,?,?,?,?,?,?)';
+            array_push($params, $caseId, $companyId, $t['source_type'], $t['source_id'],
+                $t['transaction_date'], $t['document_no'], $t['direction'], $t['payment_mode'], $t['amount'],
+                json_encode(['party_name'=>$t['party_name'],'pan_no'=>$t['pan_no'],'phone'=>$t['phone']], JSON_UNESCAPED_UNICODE));
+        }
+        db()->prepare('INSERT IGNORE INTO jewellery_aml_case_transactions
+            (case_id,company_id,source_type,source_id,transaction_date,document_no,direction,payment_mode,amount,details_json)
+            VALUES ' . implode(',', $values))->execute($params);
     }
     return $caseId;
 }
@@ -110,7 +129,29 @@ function jw_aml_scan(int $companyId, string $from, string $to, int $actorId = 0)
     return ['created_or_refreshed'=>$count,'transactions'=>count($rows)];
 }
 
-function jw_aml_cases(int $companyId, string $from, string $to, string $status = ''): array
+/** Refresh only the business date affected by a newly posted document. */
+function jw_aml_scan_posted_date(int $companyId, string $date, int $actorId = 0): void
+{
+    if (!jw_aml_ready() || $companyId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return;
+    }
+    try {
+        // Rebuild only untouched machine candidates. A compliance officer's
+        // reviewed/filed record is audit evidence and is never auto-deleted.
+        db()->prepare("DELETE FROM jewellery_aml_cases
+            WHERE company_id=:cid AND case_date=:dt AND status='candidate'
+              AND candidate_kind<>'manual_activity'")
+            ->execute(['cid'=>$companyId, 'dt'=>$date]);
+        jw_aml_scan($companyId, $date, $date, $actorId);
+    } catch (Throwable $exception) {
+        // Posting the books must remain atomic even if compliance refresh needs
+        // a later manual recovery scan. The AML page exposes that deliberate scan.
+        error_log('Jewellery AML incremental scan failed for company ' . $companyId
+            . ' on ' . $date . ': ' . $exception->getMessage());
+    }
+}
+
+function jw_aml_cases(int $companyId, string $from, string $to, string $status = '', int $limit = 100, int $offset = 0): array
 {
     if (!jw_aml_ready()) return [];
     $sql = 'SELECT c.*, COALESCE(p.name,\'Walk-in / unidentified\') party_name, p.pan_no, p.phone,
@@ -120,7 +161,43 @@ function jw_aml_cases(int $companyId, string $from, string $to, string $status =
     $params=['cid'=>$companyId,'from'=>$from,'to'=>$to];
     if ($status !== '') { $sql .= ' AND c.status=:status'; $params['status']=$status; }
     $sql .= ' ORDER BY CASE WHEN c.status=\'candidate\' THEN 0 WHEN c.status=\'under_review\' THEN 1 ELSE 2 END, c.due_on ASC, c.case_date DESC';
+    $limit = max(1, min(500, $limit));
+    $offset = max(0, $offset);
+    $sql .= ' LIMIT ' . $limit . ' OFFSET ' . $offset;
     $stmt=db()->prepare($sql); $stmt->execute($params); return $stmt->fetchAll();
+}
+
+function jw_aml_case_count(int $companyId, string $from, string $to, string $status = ''): int
+{
+    if (!jw_aml_ready()) return 0;
+    $sql = 'SELECT COUNT(*) FROM jewellery_aml_cases WHERE company_id=:cid AND case_date BETWEEN :from AND :to';
+    $params = ['cid'=>$companyId, 'from'=>$from, 'to'=>$to];
+    if ($status !== '') { $sql .= ' AND status=:status'; $params['status']=$status; }
+    $stmt = db()->prepare($sql); $stmt->execute($params); return (int) $stmt->fetchColumn();
+}
+
+/** Stream the complete filtered register without building it in PHP memory. */
+function jw_aml_stream_csv(int $companyId, string $from, string $to, string $status, string $filename): void
+{
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    $output = fopen('php://output', 'w');
+    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+    fputcsv($output, ['Case','Type','Date','Due','Customer','PAN','Amount','Transactions','Risk','Rule','Status','goAML reference']);
+    $offset = 0;
+    do {
+        $rows = jw_aml_cases($companyId, $from, $to, $status, 500, $offset);
+        foreach ($rows as $c) {
+            $row = [(int)$c['id'],$c['case_type'],$c['case_date'],$c['due_on'],$c['party_name'],$c['pan_no'],
+                $c['aggregate_amount'],$c['transaction_count'],$c['risk_score'],$c['rule_code'],$c['status'],$c['goaml_reference']];
+            fputcsv($output, array_map(static fn($cell) => is_string($cell) && preg_match('/^[=+@\t]/', $cell)
+                ? "'".$cell : $cell, $row));
+        }
+        $offset += count($rows);
+    } while (count($rows) === 500);
+    fclose($output);
+    exit;
 }
 
 function jw_aml_case_transactions(int $companyId, int $caseId): array

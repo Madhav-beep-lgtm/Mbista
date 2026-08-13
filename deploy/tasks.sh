@@ -138,6 +138,12 @@ fi
 if ! "$PHP_CLI" -r 'require $argv[1]."/app/bootstrap.php"; require $argv[1]."/app/accounting_module_repair.php"; $errors=accounting_module_repair_database(); if($errors!==[]){fwrite(STDERR,implode(PHP_EOL,$errors).PHP_EOL); exit(1);} accounting_repair_run_migration_file("114_jewellery_goaml_reporting.sql",["jewellery_aml_settings","jewellery_aml_cases","jewellery_aml_case_transactions","jewellery_aml_case_events"]);' "$APP_BASE"; then
     die "database schema repair failed"
 fi
+if ! "$PHP_CLI" -r 'require $argv[1]."/app/bootstrap.php"; require $argv[1]."/app/admin_work_portal_repair.php"; $errors=admin_work_portal_repair_database(); if($errors!==[]){fwrite(STDERR,implode(PHP_EOL,$errors).PHP_EOL); exit(1);}' "$APP_BASE"; then
+    die "Admin Work Portal schema repair failed"
+fi
+if ! "$PHP_CLI" -r 'require $argv[1]."/app/bootstrap.php"; require $argv[1]."/app/accounting_module_repair.php"; accounting_repair_run_migration_file_if_index_missing("115_aml_performance_indexes.sql","jewellery_aml_cases","idx_jw_aml_register");' "$APP_BASE"; then
+    die "AML performance index migration failed"
+fi
 echo "deploy: database schema is current"
 
 # Prove the copy actually landed, rather than trusting that it did.

@@ -29,6 +29,12 @@ function access_control_ensure_schema(): void
     }
     $done = true;
 
+    // DDL belongs to deployment. Authorization requests must never wait on
+    // information_schema scans or attempt CREATE/ALTER operations.
+    if (PHP_SAPI !== 'cli') {
+        return;
+    }
+
     try {
         if (!table_exists('company_memberships') && table_exists('users') && table_exists('companies')) {
             db()->exec(

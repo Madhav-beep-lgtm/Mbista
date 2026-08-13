@@ -39,15 +39,6 @@ foreach ($requiredTables as $tableName) {
     }
 }
 $autoRepairErrors = [];
-if (array_intersect($missingTables, admin_work_portal_repair_required_tables()) !== []) {
-    $autoRepairErrors = admin_work_portal_repair_database();
-    $missingTables = [];
-    foreach ($requiredTables as $tableName) {
-        if (!admin_work_portal_repair_table_exists($tableName)) {
-            $missingTables[] = $tableName;
-        }
-    }
-}
 
 $allowedRoles = ['admin', 'staff', 'customer'];
 $allowedStatus = ['active', 'inactive'];

@@ -27,6 +27,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/jewellery_stock.php';
+require_once __DIR__ . '/jewellery_aml.php';
 
 // ---------------------------------------------------------------------------
 // Shared posting helpers
@@ -1404,6 +1405,8 @@ function jewellery_post_purchase(int $companyId, int $purchaseId, int $userId = 
             db()->commit();
         }
 
+        jw_aml_scan_posted_date($companyId, (string) $purchase['purchase_date'], $userId);
+
         return ['ok' => true, 'error' => '', 'voucher_id' => $voucherId];
     } catch (Throwable $postingException) {
         if ($ownsTransaction && db()->inTransaction()) {
@@ -1417,6 +1420,7 @@ function jewellery_post_purchase(int $companyId, int $purchaseId, int $userId = 
 /** Reverse a posted purchase back to draft. */
 function jewellery_unpost_purchase(int $companyId, int $purchaseId, int $userId = 0): array
 {
+    $purchase = jewellery_purchase($companyId, $purchaseId);
     if (jewellery_trace_ready()) {
         $blocked = db()->prepare("SELECT trace_code, status FROM jewellery_stock_units
             WHERE company_id = :cid AND origin_type = 'purchase' AND origin_id = :pid
@@ -1448,6 +1452,9 @@ function jewellery_unpost_purchase(int $companyId, int $purchaseId, int $userId 
         }
         if ($ownsTransaction) {
             db()->commit();
+        }
+        if ($result['ok'] && $purchase) {
+            jw_aml_scan_posted_date($companyId, (string) $purchase['purchase_date'], $userId);
         }
         return $result;
     } catch (Throwable $exception) {
@@ -2351,6 +2358,8 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
             db()->commit();
         }
 
+        jw_aml_scan_posted_date($companyId, $saleDate, $userId);
+
         return ['ok' => true, 'error' => '', 'voucher_id' => $voucherId, 'cogs' => $cogsTotal];
     } catch (Throwable $postingException) {
         if ($ownsTransaction && db()->inTransaction()) {
@@ -2424,6 +2433,8 @@ function jewellery_unpost_sale(int $companyId, int $saleId, int $userId = 0): ar
         if ($ownsTransaction) {
             db()->commit();
         }
+
+        jw_aml_scan_posted_date($companyId, (string) $sale['sale_date'], $userId);
 
         return $result;
     } catch (Throwable $exception) {
@@ -3346,6 +3357,8 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
             db()->commit();
         }
 
+        jw_aml_scan_posted_date($companyId, (string) $settlement['settlement_date'], $userId);
+
         return ['ok' => true, 'error' => '', 'voucher_id' => $voucherId];
     } catch (Throwable $postingException) {
         if ($ownsTransaction && db()->inTransaction()) {
@@ -3359,6 +3372,7 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
 /** Reverse a posted settlement and re-open the bills it had settled. */
 function jewellery_unpost_settlement(int $companyId, int $settlementId, int $userId = 0): array
 {
+    $settlementBeforeUnpost = jewellery_settlement($companyId, $settlementId);
     // An advance that has already paid part of a bill cannot be pulled out
     // from under it — the bill's settlement identity would be standing on
     // money that no longer exists. Unwind the sale (or revise its advance
@@ -3390,6 +3404,9 @@ function jewellery_unpost_settlement(int $companyId, int $settlementId, int $use
         }
     }
 
+    if ($result['ok'] && $settlementBeforeUnpost) {
+        jw_aml_scan_posted_date($companyId, (string) $settlementBeforeUnpost['settlement_date'], $userId);
+    }
     return $result;
 }
 

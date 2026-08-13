@@ -226,31 +226,58 @@ function jw_report_inventory_detail(int $companyId, string $from, string $to): a
     $totals = ['opening_fine' => 0.0, 'opening_value' => 0.0, 'in_fine' => 0.0, 'in_value' => 0.0,
         'out_fine' => 0.0, 'out_value' => 0.0, 'closing_fine' => 0.0, 'closing_value' => 0.0, 'with_others_fine' => 0.0];
 
-    $movementStmt = db()->prepare("SELECT
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_grams ELSE 0 END), 0) AS in_fine_g,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE 0 END), 0) AS in_value,
-            COALESCE(SUM(CASE WHEN direction = 'out' THEN fine_grams ELSE 0 END), 0) AS out_fine_g,
-            COALESCE(SUM(CASE WHEN direction = 'out' THEN amount ELSE 0 END), 0) AS out_value
-        FROM jewellery_stock_txns
-        WHERE company_id = :cid AND item_id = :iid AND txn_date BETWEEN :from AND :to");
+    // One grouped pass replaces five balance/movement queries per item. All
+    // weights remain in grams until they are converted to each item's unit.
+    $balanceStmt = db()->prepare("SELECT item_id,
+        SUM(CASE WHEN txn_date <= bounds.opening_on THEN IF(direction='in',qty_pieces,-qty_pieces) ELSE 0 END) opening_pieces,
+        SUM(CASE WHEN txn_date <= bounds.opening_on THEN IF(direction='in',fine_grams,-fine_grams) ELSE 0 END) opening_fine_g,
+        SUM(CASE WHEN txn_date <= bounds.opening_on THEN IF(direction='in',amount,-amount) ELSE 0 END) opening_value,
+        SUM(CASE WHEN txn_date <= bounds.closing_on THEN IF(direction='in',qty_pieces,-qty_pieces) ELSE 0 END) closing_pieces,
+        SUM(CASE WHEN txn_date <= bounds.closing_on THEN IF(direction='in',gross_grams,-gross_grams) ELSE 0 END) closing_gross_g,
+        SUM(CASE WHEN txn_date <= bounds.closing_on THEN IF(direction='in',fine_grams,-fine_grams) ELSE 0 END) closing_fine_g,
+        SUM(CASE WHEN txn_date <= bounds.closing_on THEN IF(direction='in',amount,-amount) ELSE 0 END) closing_value,
+        SUM(CASE WHEN txn_date <= bounds.closing_on AND direction='in' THEN fine_grams ELSE 0 END) closing_fine_in_g,
+        SUM(CASE WHEN txn_date <= bounds.closing_on AND direction='in' THEN amount ELSE 0 END) closing_value_in,
+        SUM(CASE WHEN txn_date <= bounds.closing_on THEN 1 ELSE 0 END) closing_movements,
+        SUM(CASE WHEN txn_date <= bounds.closing_on AND holder_type='stock' THEN IF(direction='in',fine_grams,-fine_grams) ELSE 0 END) own_fine_g,
+        SUM(CASE WHEN txn_date BETWEEN bounds.period_from AND bounds.closing_on AND direction='in' THEN fine_grams ELSE 0 END) in_fine_g,
+        SUM(CASE WHEN txn_date BETWEEN bounds.period_from AND bounds.closing_on AND direction='in' THEN amount ELSE 0 END) in_value,
+        SUM(CASE WHEN txn_date BETWEEN bounds.period_from AND bounds.closing_on AND direction='out' THEN fine_grams ELSE 0 END) out_fine_g,
+        SUM(CASE WHEN txn_date BETWEEN bounds.period_from AND bounds.closing_on AND direction='out' THEN amount ELSE 0 END) out_value
+      FROM jewellery_stock_txns
+      CROSS JOIN (SELECT CAST(:opening AS DATE) opening_on, CAST(:closing AS DATE) closing_on,
+                         CAST(:period_from AS DATE) period_from) bounds
+      WHERE company_id=:cid AND txn_date <= bounds.closing_on
+      GROUP BY item_id");
+    $balanceStmt->execute(['cid'=>$companyId, 'opening'=>$dayBefore, 'closing'=>$to, 'period_from'=>$from]);
+    $balances = [];
+    foreach ($balanceStmt->fetchAll(PDO::FETCH_ASSOC) as $balanceRow) {
+        $balances[(int) $balanceRow['item_id']] = $balanceRow;
+    }
 
     foreach ($items as $item) {
         $itemId = (int) $item['id'];
-        $perUnit = jw_item_unit_grams($companyId, $itemId);
-        $opening = jw_item_balance($companyId, $itemId, $dayBefore, '');
-        $closing = jw_item_balance($companyId, $itemId, $to, '');
-        $ownClosing = jw_item_balance($companyId, $itemId, $to, 'stock');
-        $movementStmt->execute(['cid' => $companyId, 'iid' => $itemId, 'from' => $from, 'to' => $to]);
-        $movement = $movementStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $perUnit = max(0.0000001, (float) ($item['grams'] ?? 1));
+        $movement = $balances[$itemId] ?? [];
+        $openingFine = jw_round_weight((float) ($movement['opening_fine_g'] ?? 0) / $perUnit);
+        $openingValue = jw_round_money((float) ($movement['opening_value'] ?? 0));
+        $closingFine = jw_round_weight((float) ($movement['closing_fine_g'] ?? 0) / $perUnit);
+        $closingValue = jw_round_money((float) ($movement['closing_value'] ?? 0));
+        $closingPieces = round((float) ($movement['closing_pieces'] ?? 0), 3);
+        $ownFine = jw_round_weight((float) ($movement['own_fine_g'] ?? 0) / $perUnit);
+        $fineIn = (float) ($movement['closing_fine_in_g'] ?? 0) / $perUnit;
+        $avgFineRate = $closingFine > 0.00005
+            ? jw_round_rate($closingValue / $closingFine)
+            : ($fineIn > 0.00005 ? jw_round_rate((float) ($movement['closing_value_in'] ?? 0) / $fineIn) : 0.0);
 
         // Skip items that were flat all period and hold nothing — a stock
         // report of a thousand untouched codes helps nobody. The test covers
         // pieces and value as well as weight: a piece-tracked item (a fixed
         // lot, a loose stone) can move real quantity and money while its fine
         // weight stays at zero, and must not be silently omitted.
-        $isQuiet = abs($opening['fine_weight']) < 0.00005 && abs($closing['fine_weight']) < 0.00005
-            && abs($opening['qty_pieces']) < 0.0005 && abs($closing['qty_pieces']) < 0.0005
-            && abs($opening['value']) < 0.005 && abs($closing['value']) < 0.005
+        $isQuiet = abs($openingFine) < 0.00005 && abs($closingFine) < 0.00005
+            && abs((float) ($movement['opening_pieces'] ?? 0)) < 0.0005 && abs($closingPieces) < 0.0005
+            && abs($openingValue) < 0.005 && abs($closingValue) < 0.005
             && (float) ($movement['in_fine_g'] ?? 0) < 0.00005 && (float) ($movement['out_fine_g'] ?? 0) < 0.00005
             && (float) ($movement['in_value'] ?? 0) < 0.005 && (float) ($movement['out_value'] ?? 0) < 0.005;
         if ($isQuiet) {
@@ -258,17 +285,17 @@ function jw_report_inventory_detail(int $companyId, string $from, string $to): a
         }
 
         $row = $item + [
-            'opening_fine' => $opening['fine_weight'], 'opening_value' => $opening['value'],
+            'opening_fine' => $openingFine, 'opening_value' => $openingValue,
             // Grams out of SQL, restated in the item's own unit (migration 082).
             'in_fine' => jw_round_weight((float) ($movement['in_fine_g'] ?? 0) / $perUnit),
             'in_value' => jw_round_money((float) ($movement['in_value'] ?? 0)),
             'out_fine' => jw_round_weight((float) ($movement['out_fine_g'] ?? 0) / $perUnit),
             'out_value' => jw_round_money((float) ($movement['out_value'] ?? 0)),
-            'closing_fine' => $closing['fine_weight'], 'closing_value' => $closing['value'],
-            'closing_pieces' => $closing['qty_pieces'],
-            'avg_fine_rate' => $closing['avg_fine_rate'],
-            'own_fine' => $ownClosing['fine_weight'],
-            'with_others_fine' => jw_round_weight($closing['fine_weight'] - $ownClosing['fine_weight']),
+            'closing_fine' => $closingFine, 'closing_value' => $closingValue,
+            'closing_pieces' => $closingPieces,
+            'avg_fine_rate' => $avgFineRate,
+            'own_fine' => $ownFine,
+            'with_others_fine' => jw_round_weight($closingFine - $ownFine),
         ];
         $rows[] = $row;
 

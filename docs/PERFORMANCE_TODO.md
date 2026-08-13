@@ -23,6 +23,53 @@ files pass syntax validation.
 - [x] P2: Narrow the client-books navigation query to required columns.
 - [x] P2: Add configurable Node API pool size and bounded queue back-pressure.
 
+## Current bottleneck backlog
+
+Work through these items in order. Traceability is outside the requested scope.
+
+- [x] P0: Remove the automatic full-period `jw_aml_scan()` from AML page GET
+  requests. Trigger detection incrementally after posted jewellery transactions
+  and provide a deliberate manual or scheduled rescan for recovery.
+  - Complete when opening the AML register performs no candidate-generation
+    writes and its response time does not grow with the selected scan period.
+- [x] P0: Replace the Jewellery Inventory Detail per-item balance and movement
+  queries with grouped, set-based queries.
+  - Complete when query count remains approximately constant as item count
+    increases, with report totals matching the existing implementation.
+- [x] P1: Paginate the on-screen AML case register and add a separate total-count
+  query while preserving filters and case selection.
+  - Complete when one page loads a bounded number of cases and navigation works
+    for every status/date filter.
+- [x] P1: Batch AML case-transaction link writes and avoid rewriting unchanged
+  candidates during rescans.
+  - Complete when rescanning identical data performs no unnecessary updates and
+    uses bounded batches instead of one database round trip per transaction.
+- [x] P1: Add and deploy a composite AML register index matching the normal
+  `(company_id, case_date, status)` lookup, verified with `EXPLAIN` against
+  production-like data.
+- [x] P1: Move access-control schema creation and alteration out of normal web
+  requests into the deployment migration path.
+  - Complete when authorization requests perform no DDL and do not depend on
+    APCu to avoid repeated `information_schema` queries.
+- [x] P1: Remove the Admin Work Portal request-time schema repair fallback.
+  Replace it with deployment-time repair and a safe maintenance warning if the
+  deployed schema is incomplete.
+- [x] P2: Stream AML CSV exports instead of
+  constructing the complete export in PHP memory.
+  - Complete with a large-data memory benchmark and an export-content parity
+    check.
+- [x] P2: Enable and tune OPcache through the deployed `.user.ini`; confirm the
+  host accepts these values after deployment before considering decomposition
+  of large PHP modules.
+
+## Required verification for current backlog
+
+Each completed item must record PHP syntax checks, focused automated tests,
+`git diff --check`, and a before/after query-count or timing measurement. Schema
+changes must also record successful automatic deployment and the relevant
+production `EXPLAIN` output. After deployment, confirm the deployed Git commit
+in `~/auto-deploy.log` and test the affected live page.
+
 ## Verification record
 
 Add the date, test command, and relevant before/after measurement beneath each
@@ -48,3 +95,20 @@ or production-like benchmark rather than relying only on source inspection.
   classification, bank metadata, and last-movement dates. This removes three
   follow-up queries while keeping every financial total live; PHP lint and a
   MariaDB `EXPLAIN` of the consolidated query passed.
+
+- 2026-08-13 — AML detection was removed from GET requests and moved to
+  affected-date refreshes after posting and unposting. Candidate links now use
+  200-row batches, unchanged candidates skip updates, the screen is paginated
+  at 50 cases, and CSV exports stream in 500-row pages.
+- 2026-08-13 — Jewellery Inventory Detail changed from approximately `5N + 1`
+  balance/movement queries to an item-master query plus one grouped stock query.
+  All inventory-report parity assertions in the trading suite passed. The full
+  suite retains an unrelated legacy traceability reversal failure; traceability
+  is explicitly outside this backlog and was not changed.
+- 2026-08-13 — Added migration `115_aml_performance_indexes.sql` for
+  `(company_id, case_date, status)`. Access-control and Work Portal DDL are now
+  CLI-only and deployment runs both repair paths explicitly.
+- 2026-08-13 — Added production `.user.ini` OPcache defaults. Focused AML tests
+  passed 17/17, all changed PHP files passed PHP 8.3 syntax validation, and
+  `git diff --check` passed. Production index and OPcache confirmation remains
+  part of live verification after deployment.
