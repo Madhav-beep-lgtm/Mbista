@@ -57,14 +57,16 @@ include __DIR__ . '/../app/views/partials/header.php';
                 <div>
                     <?= brand_logo('dark', 'mbw-logo mbw-logo-portal') ?>
                     <div class="kicker">Superadmin workflow</div>
-                    <h1>Open the M.Bista superadmin portal, then manage Altiora and its subsidiaries.</h1>
+                    <h1>Admin workspace</h1>
                     <p>After selecting a company, you will enter a 4-digit admin PIN before opening that company’s management portal.</p>
                 </div>
             </div>
         </div>
 
         <?php if ($mbistaCompany || $altioraCompany): ?>
-            <div class="admin-grid" style="margin-top: 24px;">
+            <section class="portal-company-section portal-company-section-featured">
+                <div class="portal-section-heading"><h2>Priority portals</h2><p>Core management workspaces</p></div>
+                <div class="admin-grid portal-company-grid">
                 <?php if ($mbistaCompany): ?>
                     <form method="post" class="card">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -74,6 +76,7 @@ include __DIR__ . '/../app/views/partials/header.php';
                         <p>Manage the M.Bista and Associates workspace, then open Altiora Global Holdings from its dashboard.</p>
                         <p><?= company_pin_is_set((int) $mbistaCompany['id']) ? 'PIN configured' : 'PIN required' ?></p>
                         <button type="submit">Open M.Bista superadmin portal</button>
+                        <span class="portal-company-illustration" aria-hidden="true"><?= icon('admin') ?></span>
                     </form>
                 <?php endif; ?>
                 <?php if ($altioraCompany): ?>
@@ -85,12 +88,16 @@ include __DIR__ . '/../app/views/partials/header.php';
                         <p>Open the Altiora parent-company admin page and switch into subsidiary company portals.</p>
                         <p><?= company_pin_is_set((int) $altioraCompany['id']) ? 'PIN configured' : 'PIN required' ?></p>
                         <button type="submit">Open Altiora Global Holdings</button>
+                        <span class="portal-company-illustration" aria-hidden="true"><?= icon('bank') ?></span>
                     </form>
                 <?php endif; ?>
-            </div>
+                </div>
+            </section>
         <?php endif; ?>
 
-        <div class="admin-grid" style="margin-top: 24px;">
+        <section class="portal-company-section">
+            <div class="portal-section-heading"><h2>All organizations</h2><p>Authorized company workspaces</p></div>
+            <div class="admin-grid portal-company-grid">
             <?php
             $featuredIds = array_filter([(int) ($mbistaCompany['id'] ?? 0), (int) ($altioraCompany['id'] ?? 0)]);
             foreach ($companies as $company):
@@ -112,9 +119,11 @@ include __DIR__ . '/../app/views/partials/header.php';
                     </p>
                     <p><?= company_pin_is_set((int) $company['id']) ? 'PIN configured' : 'PIN required' ?></p>
                     <button type="submit">Open company portal</button>
+                    <span class="portal-company-illustration" aria-hidden="true"><?= icon('reports') ?></span>
                 </form>
             <?php endforeach; ?>
-        </div>
+            </div>
+        </section>
 
         <?php if (!$mbistaCompany && !$altioraCompany && $companies === []): ?>
             <div class="card" style="margin-top: 24px; text-align: center;">

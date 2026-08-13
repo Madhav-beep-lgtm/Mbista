@@ -1976,6 +1976,59 @@ body.admin-layout.theme-dark .admin-content :is(.mbw-card,.card,.panel,.admin-ch
 body.admin-layout.admin-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section){border-color:rgba(255,255,255,.48)!important;box-shadow:0 0 0 1px rgba(255,255,255,.07),0 10px 28px rgba(0,0,0,.24)!important}
 body.admin-layout.theme-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section,table) :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,li,dt,dd,th,td,label,legend),
 body.admin-layout.admin-dark .admin-content :is(.mbw-card,.card,.panel,.admin-chart-card,.admin-analysis-card,.ov-kpi,.frm-section,table) :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,li,dt,dd,th,td,label,legend){color:#f4faf7!important;-webkit-text-fill-color:#f4faf7!important;opacity:1!important}
+
+/* Company portal directory: this public shell loads after style.css, so its
+   dark palette has to be declared here to preserve readable, executive-level
+   contrast in both saved theme modes. */
+body.theme-dark:has(.portal-selector-page) .portal-selector-page,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page {
+  background: #032e24 !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page .hero-grid > div,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page .hero-grid > div {
+  background: linear-gradient(135deg, #073d30 0%, #064e3b 100%) !important;
+  border-color: rgba(244, 213, 139, .22) !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .22) !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page .hero-panel h1,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page .hero-panel h1 {
+  color: #f7fbf8 !important;
+  -webkit-text-fill-color: #f7fbf8 !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page .hero-panel p,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page .hero-panel p,
+body.theme-dark:has(.portal-selector-page) .portal-selector-page .portal-section-heading p,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page .portal-section-heading p {
+  color: #b9d4c7 !important;
+  -webkit-text-fill-color: #b9d4c7 !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page .portal-section-heading h2,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page .portal-section-heading h2 {
+  color: #f7fbf8 !important;
+  -webkit-text-fill-color: #f7fbf8 !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page form.card,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page form.card {
+  background: #083f32 !important;
+  border-color: rgba(196, 222, 208, .18) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .20) !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page form.card h3,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page form.card h3 {
+  color: #f7fbf8 !important;
+  -webkit-text-fill-color: #f7fbf8 !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page form.card p,
+body.admin-dark:has(.portal-selector-page) .portal-selector-page form.card p {
+  color: #c4dacf !important;
+  -webkit-text-fill-color: #c4dacf !important;
+}
+body.theme-dark:has(.portal-selector-page) .portal-selector-page form.card button[type="submit"],
+body.admin-dark:has(.portal-selector-page) .portal-selector-page form.card button[type="submit"] {
+  background: #0b795b !important;
+  border-color: #15916f !important;
+  color: #fff !important;
+}
 body.admin-layout.theme-dark .admin-content table :is(th,td),body.admin-layout.admin-dark .admin-content table :is(th,td){border-color:rgba(255,255,255,.48)!important}
 body.admin-layout.theme-dark .admin-content :is(a,.mbw-view-all,.ov-view-all),body.admin-layout.admin-dark .admin-content :is(a,.mbw-view-all,.ov-view-all){color:#65d6a8!important;-webkit-text-fill-color:#65d6a8!important}
 body.admin-layout.theme-dark .admin-content :is(.badge,.tag,.mbw-pill,[class*="status-"]),body.admin-layout.admin-dark .admin-content :is(.badge,.tag,.mbw-pill,[class*="status-"]){-webkit-text-fill-color:currentColor!important}
@@ -2133,3 +2186,139 @@ body.admin-layout.theme-dark .admin-content :is(h1,h2,h3,h4,h5,h6,p,span,strong,
 body.admin-layout.admin-dark .admin-content :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,a,label,legend,li,dt,dd,th,td,em,b,i,.meta,.muted,.help,.hint,.description,.subtitle,.title,.heading){color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:1!important}
 body.admin-layout.theme-dark .admin-content :is(input,select,textarea),body.admin-layout.admin-dark .admin-content :is(input,select,textarea){color:#fff!important;-webkit-text-fill-color:#fff!important}
 body.admin-layout.theme-dark .admin-content :is(input,textarea)::placeholder,body.admin-layout.admin-dark .admin-content :is(input,textarea)::placeholder{color:#fff!important;-webkit-text-fill-color:#fff!important;opacity:.72!important}
+
+/* Company selector: an executive directory rather than a marketing hero. */
+body:has(.portal-selector-page) .portal-selector-page {
+  background: radial-gradient(circle at 92% 8%, rgba(28, 133, 102, .14), transparent 30rem), #061d1b !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .hero-panel {
+  margin: 0 0 18px !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .hero-grid > div {
+  min-height: 0 !important;
+  padding: 8px 0 14px !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .hero-grid > div::before,
+body:has(.portal-selector-page) .portal-selector-page .hero-grid > div::after,
+body:has(.portal-selector-page) .portal-selector-page .kicker { display: none !important; }
+body:has(.portal-selector-page) .portal-selector-page .hero-panel h1 {
+  margin: 0 !important;
+  color: #f7fbf9 !important;
+  -webkit-text-fill-color: #f7fbf9 !important;
+  font-size: clamp(27px, 2.3vw, 35px) !important;
+  font-weight: 760 !important;
+  letter-spacing: -.03em !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .hero-panel p {
+  margin-top: 5px !important;
+  color: #a9c9bb !important;
+  -webkit-text-fill-color: #a9c9bb !important;
+  font-size: 13px !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .portal-section-heading {
+  margin: 0 0 11px !important;
+  padding-top: 2px;
+  border-bottom: 1px solid rgba(208, 235, 222, .16);
+}
+body:has(.portal-selector-page) .portal-selector-page .portal-section-heading h2 {
+  padding-bottom: 10px;
+  color: #edf8f2 !important;
+  -webkit-text-fill-color: #edf8f2 !important;
+  font-size: 13px !important;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+body:has(.portal-selector-page) .portal-selector-page .portal-section-heading p {
+  padding-bottom: 10px;
+  color: #8fb3a4 !important;
+  -webkit-text-fill-color: #8fb3a4 !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .admin-grid.portal-company-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 20px !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card {
+  min-height: 220px !important;
+  padding: 20px !important;
+  overflow: hidden;
+  border: 1px solid rgba(204, 231, 218, .24) !important;
+  border-radius: 12px !important;
+  background: linear-gradient(135deg, rgba(255,255,255,.045), transparent 58%), #142725 !important;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, .23) !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card:hover {
+  transform: translateY(-3px) !important;
+  border-color: rgba(101, 214, 168, .56) !important;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, .30) !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card .badge {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 12px !important;
+  border-color: rgba(194, 219, 205, .18) !important;
+  background: rgba(255,255,255,.09) !important;
+  color: #e7f5ed !important;
+  -webkit-text-fill-color: #e7f5ed !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card h3 {
+  position: relative;
+  z-index: 1;
+  max-width: calc(100% - 100px);
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  font-size: 20px !important;
+  line-height: 1.18 !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card p {
+  position: relative;
+  z-index: 1;
+  max-width: calc(100% - 106px);
+  color: #d4e4dc !important;
+  -webkit-text-fill-color: #d4e4dc !important;
+  font-size: 12px !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card p:last-of-type {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  background: transparent !important;
+  padding: 0 !important;
+  font-size: 11px !important;
+}
+body:has(.portal-selector-page) .portal-selector-page form.card p:last-of-type::before { display: none; }
+body:has(.portal-selector-page) .portal-selector-page form.card button[type="submit"] {
+  position: relative;
+  z-index: 2;
+  min-height: 38px !important;
+  padding: 8px 14px !important;
+  border-color: rgba(109, 220, 176, .30) !important;
+  background: linear-gradient(135deg, #137d63, #0b604d) !important;
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+}
+body:has(.portal-selector-page) .portal-selector-page .portal-company-illustration {
+  position: absolute;
+  right: 18px;
+  bottom: 20px;
+  display: grid;
+  place-items: center;
+  width: 78px;
+  height: 78px;
+  color: rgba(211, 235, 222, .50);
+  filter: drop-shadow(0 5px 8px rgba(0,0,0,.25));
+}
+body:has(.portal-selector-page) .portal-selector-page .portal-company-illustration .ui-icon {
+  width: 76px;
+  height: 76px;
+  stroke-width: 1.25;
+}
+@media (max-width: 1050px) {
+  body:has(.portal-selector-page) .portal-selector-page .admin-grid.portal-company-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 650px) {
+  body:has(.portal-selector-page) .portal-selector-page .admin-grid.portal-company-grid { grid-template-columns: 1fr !important; }
+  body:has(.portal-selector-page) .portal-selector-page form.card { min-height: 205px !important; }
+}
