@@ -32,6 +32,15 @@ if (!$canOpen($altioraCompany)) {
     $altioraCompany = null;
 }
 
+$featuredIds = array_filter([
+    (int) ($mbistaCompany['id'] ?? 0),
+    (int) ($altioraCompany['id'] ?? 0),
+]);
+$otherCompanies = array_values(array_filter(
+    $companies,
+    static fn (array $company): bool => !in_array((int) $company['id'], $featuredIds, true)
+));
+
 if (count($companies) === 1 && $_SERVER['REQUEST_METHOD'] !== 'POST') {
     $only = $companies[0];
     if ((string) ($only['code'] ?? '') === 'MBAACA' || company_pin_is_set((int) $only['id'])) {
@@ -43,159 +52,156 @@ include __DIR__ . '/../app/views/partials/header.php';
 ?>
 
 <section class="section portal-selector-page">
-    <div class="container">
-        <div class="hero-panel">
-            <div class="hero-grid">
-                <div>
-                    <?= brand_logo('dark', 'mbw-logo mbw-logo-portal') ?>
-                    <div class="kicker">Superadmin workflow</div>
-                    <h1>Open the M.Bista superadmin portal, then manage Altiora and its subsidiaries.</h1>
-                    <p>After selecting a company, you will enter a 4-digit admin PIN before opening that company's management portal.</p>
+    <div class="container portal-directory">
+        <header class="portal-hero">
+            <div class="portal-hero-copy">
+                <div class="portal-eyebrow">
+                    <span class="portal-eyebrow-icon" aria-hidden="true"><?= icon('admin') ?></span>
+                    Secure organization access
                 </div>
+                <h1>Choose the workspace you want to manage</h1>
+                <p>Start with the M.Bista administration workspace or open an authorized company directly. Your access and company context remain protected at every step.</p>
             </div>
-        </div>
+            <div class="portal-security-note">
+                <span class="portal-security-icon" aria-hidden="true"><?= icon('lock') ?></span>
+                <span>
+                    <strong>Protected access</strong>
+                    <small>4-digit admin PIN verification</small>
+                </span>
+            </div>
+        </header>
 
         <?php if ($mbistaCompany || $altioraCompany): ?>
-            <div class="admin-grid portal-3d-grid" style="margin-top: 32px;">
-                <?php if ($mbistaCompany): ?>
-                    <form method="post" class="card portal-card-3d featured">
-                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                        <input type="hidden" name="company_id" value="<?= e((int) $mbistaCompany['id']) ?>">
+            <section class="portal-company-section portal-company-section-featured" aria-labelledby="primary-workspaces-title">
+                <div class="portal-section-heading">
+                    <div>
+                        <span class="portal-section-label">Primary access</span>
+                        <h2 id="primary-workspaces-title">Administration workspaces</h2>
+                    </div>
+                    <p>Select a workspace to continue securely.</p>
+                </div>
 
-                        <div class="portal-3d-header">
-                            <svg class="portal-icon-3d" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <!-- Crown Icon (Superadmin) -->
-                                <path d="M32 8L42 22H58C59.1 22 60 22.9 60 24C60 25.1 59.1 26 58 26H56L52 50C51.5 52.5 49.3 54 47 54H17C14.7 54 12.5 52.5 12 50L8 26H6C4.9 26 4 25.1 4 24C4 22.9 4.9 22 6 22H22L32 8Z" fill="#d4af37"/>
-                                <circle cx="32" cy="12" r="3" fill="#27a88b"/>
-                                <circle cx="22" cy="18" r="2.5" fill="#27a88b"/>
-                                <circle cx="42" cy="18" r="2.5" fill="#27a88b"/>
-                            </svg>
-                            <div class="badge badge-gold">SUPERADMIN PORTAL</div>
-                        </div>
+                <div class="portal-company-grid portal-company-grid-featured">
+                    <?php if ($mbistaCompany): ?>
+                        <?php $mbistaPinIsSet = company_pin_is_set((int) $mbistaCompany['id']); ?>
+                        <form method="post" class="card portal-company-card portal-company-card-gold">
+                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                            <input type="hidden" name="company_id" value="<?= e((int) $mbistaCompany['id']) ?>">
 
-                        <h3 class="portal-card-title"><?= e($mbistaCompany['name']) ?></h3>
-                        <p class="portal-card-subtitle"><?= e($mbistaCompany['code']) ?></p>
-                        <p class="portal-card-description">Manage the M.Bista and Associates workspace, then open Altiora Global Holdings from its dashboard.</p>
+                            <div class="portal-card-topline">
+                                <span class="portal-icon-shell portal-icon-shell-gold" aria-hidden="true"><?= icon('admin') ?></span>
+                                <span class="portal-type-pill portal-type-pill-gold">Superadmin portal</span>
+                            </div>
 
-                        <div class="status-row">
-                            <span class="status-badge <?= company_pin_is_set((int) $mbistaCompany['id']) ? 'active' : 'pending' ?>">
-                                <span class="status-dot"></span>
-                                <?= company_pin_is_set((int) $mbistaCompany['id']) ? 'PIN configured' : 'PIN required' ?>
-                            </span>
-                        </div>
+                            <div class="portal-card-content">
+                                <p class="portal-company-code"><?= e($mbistaCompany['code']) ?></p>
+                                <h3><?= e($mbistaCompany['name']) ?></h3>
+                                <p class="portal-card-description">Manage the M.Bista &amp; Associates workspace and continue to Altiora Global Holdings from its dashboard.</p>
+                            </div>
 
-                        <button type="submit" class="button button-primary" style="width: 100%;">
-                            <span>Open M.Bista Portal</span>
-                            <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M5 12h14M12 5l7 7-7 7"/>
-                            </svg>
-                        </button>
-                    </form>
-                <?php endif; ?>
+                            <div class="portal-card-footer">
+                                <span class="portal-pin-status <?= $mbistaPinIsSet ? 'is-ready' : 'is-required' ?>">
+                                    <span aria-hidden="true"><?= icon($mbistaPinIsSet ? 'admin' : 'lock') ?></span>
+                                    <?= $mbistaPinIsSet ? 'PIN configured' : 'PIN required' ?>
+                                </span>
+                                <button type="submit" class="button portal-company-action">
+                                    <span>Open M.Bista</span>
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                                </button>
+                            </div>
+                        </form>
+                    <?php endif; ?>
 
-                <?php if ($altioraCompany): ?>
-                    <form method="post" class="card portal-card-3d featured">
-                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                        <input type="hidden" name="company_id" value="<?= e((int) $altioraCompany['id']) ?>">
+                    <?php if ($altioraCompany): ?>
+                        <?php $altioraPinIsSet = company_pin_is_set((int) $altioraCompany['id']); ?>
+                        <form method="post" class="card portal-company-card portal-company-card-blue">
+                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                            <input type="hidden" name="company_id" value="<?= e((int) $altioraCompany['id']) ?>">
 
-                        <div class="portal-3d-header">
-                            <svg class="portal-icon-3d" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <!-- Building Icon (Parent Company) -->
-                                <rect x="12" y="14" width="40" height="42" fill="#2b7dd8" stroke="#1a4d96" stroke-width="2"/>
-                                <rect x="18" y="20" width="6" height="8" fill="#e8f2f9" stroke="#2b7dd8" stroke-width="1"/>
-                                <rect x="28" y="20" width="6" height="8" fill="#e8f2f9" stroke="#2b7dd8" stroke-width="1"/>
-                                <rect x="38" y="20" width="6" height="8" fill="#e8f2f9" stroke="#2b7dd8" stroke-width="1"/>
-                                <rect x="18" y="32" width="6" height="8" fill="#e8f2f9" stroke="#2b7dd8" stroke-width="1"/>
-                                <rect x="28" y="32" width="6" height="8" fill="#e8f2f9" stroke="#2b7dd8" stroke-width="1"/>
-                                <rect x="38" y="32" width="6" height="8" fill="#e8f2f9" stroke="#2b7dd8" stroke-width="1"/>
-                                <path d="M32 8L22 14H42Z" fill="#2b7dd8" stroke="#1a4d96" stroke-width="2"/>
-                            </svg>
-                            <div class="badge badge-blue">PARENT COMPANY</div>
-                        </div>
+                            <div class="portal-card-topline">
+                                <span class="portal-icon-shell portal-icon-shell-blue" aria-hidden="true"><?= icon('companies') ?></span>
+                                <span class="portal-type-pill portal-type-pill-blue">Parent company</span>
+                            </div>
 
-                        <h3 class="portal-card-title"><?= e($altioraCompany['name']) ?></h3>
-                        <p class="portal-card-subtitle"><?= e($altioraCompany['code']) ?></p>
-                        <p class="portal-card-description">Open the parent company admin page and manage subsidiary companies including EBCPL and MBTAS.</p>
+                            <div class="portal-card-content">
+                                <p class="portal-company-code"><?= e($altioraCompany['code']) ?></p>
+                                <h3><?= e($altioraCompany['name']) ?></h3>
+                                <p class="portal-card-description">Manage Altiora Global Holdings and its authorized subsidiaries, including EBCPL and MBTAS.</p>
+                            </div>
 
-                        <div class="status-row">
-                            <span class="status-badge <?= company_pin_is_set((int) $altioraCompany['id']) ? 'active' : 'pending' ?>">
-                                <span class="status-dot"></span>
-                                <?= company_pin_is_set((int) $altioraCompany['id']) ? 'PIN configured' : 'PIN required' ?>
-                            </span>
-                        </div>
-
-                        <button type="submit" class="button button-primary" style="width: 100%;">
-                            <span>Open Altiora Global</span>
-                            <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M5 12h14M12 5l7 7-7 7"/>
-                            </svg>
-                        </button>
-                    </form>
-                <?php endif; ?>
-            </div>
+                            <div class="portal-card-footer">
+                                <span class="portal-pin-status <?= $altioraPinIsSet ? 'is-ready' : 'is-required' ?>">
+                                    <span aria-hidden="true"><?= icon($altioraPinIsSet ? 'admin' : 'lock') ?></span>
+                                    <?= $altioraPinIsSet ? 'PIN configured' : 'PIN required' ?>
+                                </span>
+                                <button type="submit" class="button portal-company-action">
+                                    <span>Open Altiora</span>
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                                </button>
+                            </div>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            </section>
         <?php endif; ?>
 
-        <?php if (!empty($companies)): ?>
-            <div class="admin-grid portal-3d-grid" style="margin-top: 32px;">
-                <?php
-                $featuredIds = array_filter([(int) ($mbistaCompany['id'] ?? 0), (int) ($altioraCompany['id'] ?? 0)]);
-                foreach ($companies as $company):
-                    if (in_array((int) $company['id'], $featuredIds, true)) {
-                        continue;
-                    }
-                    $isSubsidiary = !empty($company['parent_company_name']);
-                    ?>
-                    <form method="post" class="card portal-card-3d">
-                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                        <input type="hidden" name="company_id" value="<?= e((int) $company['id']) ?>">
+        <?php if (!empty($otherCompanies)): ?>
+            <section class="portal-company-section" aria-labelledby="company-workspaces-title">
+                <div class="portal-section-heading">
+                    <div>
+                        <span class="portal-section-label">Company directory</span>
+                        <h2 id="company-workspaces-title">Other authorized workspaces</h2>
+                    </div>
+                    <p><?= e(count($otherCompanies)) ?> <?= count($otherCompanies) === 1 ? 'workspace' : 'workspaces' ?> available</p>
+                </div>
 
-                        <div class="portal-3d-header">
-                            <svg class="portal-icon-3d" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <!-- Factory Icon (Subsidiary) -->
-                                <rect x="10" y="30" width="44" height="26" fill="#8b5cf6" stroke="#6d28d9" stroke-width="2"/>
-                                <rect x="16" y="18" width="8" height="12" fill="#8b5cf6" stroke="#6d28d9" stroke-width="2"/>
-                                <rect x="28" y="12" width="8" height="18" fill="#8b5cf6" stroke="#6d28d9" stroke-width="2"/>
-                                <rect x="40" y="20" width="8" height="10" fill="#8b5cf6" stroke="#6d28d9" stroke-width="2"/>
-                                <rect x="18" y="36" width="4" height="14" fill="#f0e8f9" stroke="#8b5cf6" stroke-width="1"/>
-                                <rect x="30" y="36" width="4" height="14" fill="#f0e8f9" stroke="#8b5cf6" stroke-width="1"/>
-                                <rect x="42" y="36" width="4" height="14" fill="#f0e8f9" stroke="#8b5cf6" stroke-width="1"/>
-                            </svg>
-                            <div class="badge badge-purple"><?= $isSubsidiary ? 'SUBSIDIARY' : 'COMPANY' ?></div>
-                        </div>
+                <div class="portal-company-grid portal-company-grid-directory">
+                    <?php foreach ($otherCompanies as $company): ?>
+                        <?php
+                        $isSubsidiary = !empty($company['parent_company_name']);
+                        $companyPinIsSet = company_pin_is_set((int) $company['id']);
+                        ?>
+                        <form method="post" class="card portal-company-card portal-company-card-neutral">
+                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                            <input type="hidden" name="company_id" value="<?= e((int) $company['id']) ?>">
 
-                        <h3 class="portal-card-title"><?= e($company['name']) ?></h3>
-                        <p class="portal-card-subtitle"><?= e($company['code']) ?></p>
-                        <p class="portal-card-description">
-                            <?php if ($isSubsidiary): ?>
-                                Part of <?= e($company['parent_company_name']) ?> group
-                            <?php else: ?>
-                                Independent or parent company
-                            <?php endif; ?>
-                        </p>
+                            <div class="portal-card-topline">
+                                <span class="portal-icon-shell portal-icon-shell-neutral" aria-hidden="true"><?= icon($isSubsidiary ? 'companies' : 'staff') ?></span>
+                                <span class="portal-type-pill"><?= $isSubsidiary ? 'Subsidiary' : 'Company' ?></span>
+                            </div>
 
-                        <div class="status-row">
-                            <span class="status-badge <?= company_pin_is_set((int) $company['id']) ? 'active' : 'pending' ?>">
-                                <span class="status-dot"></span>
-                                <?= company_pin_is_set((int) $company['id']) ? 'PIN configured' : 'PIN required' ?>
-                            </span>
-                        </div>
+                            <div class="portal-card-content">
+                                <p class="portal-company-code"><?= e($company['code']) ?></p>
+                                <h3><?= e($company['name']) ?></h3>
+                                <p class="portal-card-description">
+                                    <?= $isSubsidiary
+                                        ? 'Part of the ' . e($company['parent_company_name']) . ' group.'
+                                        : 'Independent company administration workspace.' ?>
+                                </p>
+                            </div>
 
-                        <button type="submit" class="button button-secondary" style="width: 100%;">
-                            <span>Open Company Portal</span>
-                            <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M5 12h14M12 5l7 7-7 7"/>
-                            </svg>
-                        </button>
-                    </form>
-                <?php endforeach; ?>
-            </div>
+                            <div class="portal-card-footer">
+                                <span class="portal-pin-status <?= $companyPinIsSet ? 'is-ready' : 'is-required' ?>">
+                                    <span aria-hidden="true"><?= icon($companyPinIsSet ? 'admin' : 'lock') ?></span>
+                                    <?= $companyPinIsSet ? 'PIN configured' : 'PIN required' ?>
+                                </span>
+                                <button type="submit" class="button portal-company-action portal-company-action-secondary">
+                                    <span>Open workspace</span>
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                                </button>
+                            </div>
+                        </form>
+                    <?php endforeach; ?>
+                </div>
+            </section>
         <?php endif; ?>
 
         <?php if (!$mbistaCompany && !$altioraCompany && empty($companies)): ?>
-            <div class="card portal-card-3d" style="margin-top: 24px; text-align: center;">
-                <h3>No organizations assigned yet</h3>
-                <p>Your account is not linked to any company portal. Ask your administrator to grant you access.</p>
-                <p><a class="button secondary" href="<?= e(url('logout.php')) ?>" style="margin-top: 16px;">Log out</a></p>
+            <div class="portal-empty-state">
+                <span class="portal-icon-shell portal-icon-shell-neutral" aria-hidden="true"><?= icon('companies') ?></span>
+                <h2>No organizations assigned yet</h2>
+                <p>Your account is not linked to a company workspace. Ask your administrator to grant access.</p>
+                <a class="button portal-company-action" href="<?= e(url('logout.php')) ?>">Log out</a>
             </div>
         <?php endif; ?>
     </div>
@@ -203,206 +209,593 @@ include __DIR__ . '/../app/views/partials/header.php';
 
 <style>
 .portal-selector-page {
-    background: var(--c-canvas);
-    color: var(--c-ink);
+    --pd-bg: #f3f7f5;
+    --pd-surface: #ffffff;
+    --pd-surface-soft: #f8fbfa;
+    --pd-text: #12231e;
+    --pd-muted: #64756f;
+    --pd-line: #dce7e2;
+    --pd-green: #0b775b;
+    --pd-green-deep: #075642;
+    --pd-gold: #c99632;
+    --pd-blue: #3276b1;
+    --pd-shadow: 0 16px 40px rgba(17, 45, 36, 0.08);
+    min-height: calc(100vh - 120px);
+    padding: 28px 0 64px;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 92% 2%, rgba(19, 139, 102, 0.08), transparent 28rem),
+        var(--pd-bg) !important;
+    color: var(--pd-text);
 }
 
-.portal-3d-grid {
-    perspective: 1000px;
+body.theme-dark .portal-selector-page {
+    --pd-bg: #061d17;
+    --pd-surface: #0d2922;
+    --pd-surface-soft: #102f27;
+    --pd-text: #f3f8f6;
+    --pd-muted: #a7bbb4;
+    --pd-line: rgba(191, 220, 208, 0.16);
+    --pd-green: #2aa986;
+    --pd-green-deep: #167b60;
+    --pd-gold: #e0b354;
+    --pd-blue: #64a8df;
+    --pd-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
 }
 
-.portal-card-3d {
+.portal-selector-page .portal-directory {
     position: relative;
-    border: none !important;
-    background: var(--c-surface) !important;
-    border-top: none !important;
-    padding: 28px !important;
-    border-radius: 16px !important;
-    box-shadow: var(--sh-2),
-                inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
-    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-    transform: translateZ(0);
-    backdrop-filter: blur(10px);
+    z-index: 1;
+    width: min(100% - 48px, 1420px);
 }
 
-.portal-card-3d:hover {
-    transform: translateY(-8px) translateZ(20px);
-    box-shadow: var(--sh-3),
-                inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
-}
-
-.portal-card-3d.featured {
-    border: 1px solid var(--c-gold-line) !important;
-    background: var(--c-gold-tint) !important;
-}
-
-.portal-card-3d.featured:hover {
-    box-shadow: var(--sh-gold),
-                0 4px 12px rgba(0, 0, 0, 0.08),
-                inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
-}
-
-.portal-3d-header {
+.portal-selector-page .portal-hero {
+    position: relative;
     display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 20px;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 32px;
+    min-height: 210px;
+    padding: 36px 40px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 24px;
+    background:
+        radial-gradient(circle at 83% 20%, rgba(224, 179, 84, 0.22), transparent 20rem),
+        linear-gradient(135deg, #062c23 0%, #0a5c48 58%, #087558 100%);
+    box-shadow: 0 24px 54px rgba(4, 50, 38, 0.2);
 }
 
-.portal-icon-3d {
-    width: 56px;
-    height: 56px;
-    filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.1));
+.portal-selector-page .portal-hero::after {
+    content: "";
+    position: absolute;
+    right: -74px;
+    bottom: -156px;
+    width: 390px;
+    height: 390px;
+    border: 62px solid rgba(255, 255, 255, 0.045);
+    border-radius: 50%;
+    pointer-events: none;
 }
 
-.badge {
-    font-size: 9px;
-    font-weight: 800;
-    letter-spacing: 1.2px;
-    text-transform: uppercase;
-    padding: 8px 14px;
-    border-radius: 8px;
-    display: inline-block;
-    white-space: nowrap;
+.portal-hero-copy {
+    position: relative;
+    z-index: 1;
+    max-width: 790px;
 }
 
-.badge-gold {
-    background: var(--c-gold-tint);
-    color: var(--c-gold-ink);
-    box-shadow: 0 2px 8px var(--sh-gold);
-}
-
-.badge-blue {
-    background: var(--c-blue-tint);
-    color: var(--c-blue);
-    box-shadow: 0 2px 8px rgba(87, 180, 204, 0.2);
-}
-
-.badge-purple {
-    background: var(--c-purple-tint);
-    color: var(--c-purple);
-    box-shadow: 0 2px 8px rgba(158, 140, 216, 0.2);
-}
-
-.portal-card-title {
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--c-ink);
-    margin: 0 0 6px 0;
-    font-family: var(--f-ui);
-}
-
-.portal-card-subtitle {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--c-muted);
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    margin: 0 0 12px 0;
-}
-
-.portal-card-description {
-    font-size: 13px;
-    color: var(--c-body);
-    line-height: 1.6;
-    margin: 0 0 16px 0;
-}
-
-.status-row {
-    margin: 16px 0;
-}
-
-.status-badge {
+.portal-selector-page .portal-eyebrow {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 8px 14px;
+    margin-bottom: 14px;
+    color: #f2d58f;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.portal-eyebrow-icon {
+    display: grid;
+    width: 27px;
+    height: 27px;
+    place-items: center;
+    border: 1px solid rgba(242, 213, 143, 0.3);
     border-radius: 8px;
-    background: var(--c-surface-2);
-    color: var(--c-body);
-    transition: all 0.3s ease;
+    background: rgba(242, 213, 143, 0.1);
 }
 
-.status-badge.active {
-    background: var(--c-green-tint);
-    color: var(--c-green);
-    box-shadow: 0 2px 8px rgba(57, 180, 120, 0.15);
+.portal-eyebrow-icon .ui-icon {
+    width: 15px;
+    height: 15px;
 }
 
-.status-badge.pending {
-    background: var(--c-amber-tint);
-    color: var(--c-amber);
-    box-shadow: 0 2px 8px rgba(217, 155, 60, 0.15);
+.portal-selector-page .portal-hero h1 {
+    max-width: 700px;
+    margin: 0;
+    color: #ffffff;
+    font-family: var(--f-ui);
+    font-size: clamp(30px, 3vw, 44px);
+    font-weight: 780;
+    line-height: 1.08;
+    letter-spacing: -0.035em;
 }
 
-.status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+.portal-selector-page .portal-hero p {
+    max-width: 720px;
+    margin: 14px 0 0;
+    color: rgba(236, 249, 244, 0.78);
+    font-size: 14px;
+    line-height: 1.65;
 }
 
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+.portal-security-note {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    min-width: 245px;
+    padding: 14px 16px;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 14px;
+    background: rgba(3, 35, 27, 0.34);
+    color: #fff;
+    backdrop-filter: blur(12px);
 }
 
-.button-primary {
-    background: linear-gradient(135deg, var(--c-primary) 0%, var(--c-primary-deep) 100%) !important;
-    color: var(--c-on-primary) !important;
-    border: none !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    gap: 8px !important;
-    font-weight: 600 !important;
-    transition: all 0.3s ease !important;
-    box-shadow: var(--sh-2) !important;
+.portal-security-icon {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+    place-items: center;
+    border-radius: 11px;
+    background: rgba(242, 213, 143, 0.14);
+    color: #f2d58f;
 }
 
-.button-primary:hover {
-    box-shadow: var(--sh-3) !important;
-    transform: translateY(-2px) !important;
+.portal-security-icon .ui-icon {
+    width: 19px;
+    height: 19px;
 }
 
-.button-secondary {
-    background: var(--c-primary-tint) !important;
-    color: var(--c-primary) !important;
-    border: 1px solid var(--c-primary-line) !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    gap: 8px !important;
-    font-weight: 600 !important;
-    transition: all 0.3s ease !important;
+.portal-security-note strong,
+.portal-security-note small {
+    display: block;
 }
 
-.button-secondary:hover {
-    background: var(--c-primary-line) !important;
-    box-shadow: var(--sh-2) !important;
+.portal-security-note strong {
+    margin-bottom: 3px;
+    font-size: 12px;
+    font-weight: 750;
 }
 
-.button-icon {
-    width: 18px;
-    height: 18px;
+.portal-security-note small {
+    color: rgba(236, 249, 244, 0.68);
+    font-size: 10.5px;
 }
 
-@media (max-width: 768px) {
-    .portal-card-3d {
-        padding: 20px !important;
+.portal-company-section {
+    margin-top: 30px;
+}
+
+.portal-section-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin: 0 2px 13px;
+}
+
+.portal-section-label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--pd-green);
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+}
+
+.portal-section-heading h2 {
+    margin: 0;
+    color: var(--pd-text);
+    font-family: var(--f-ui);
+    font-size: 18px;
+    font-weight: 760;
+    letter-spacing: -0.015em;
+}
+
+.portal-section-heading p {
+    margin: 0 0 2px;
+    color: var(--pd-muted);
+    font-size: 11.5px;
+}
+
+.portal-selector-page .portal-company-grid {
+    display: grid !important;
+    gap: 16px;
+    margin: 0 !important;
+}
+
+.portal-company-grid-featured {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.portal-company-grid-directory {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.portal-selector-page form.card.portal-company-card {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    min-height: 300px;
+    padding: 23px !important;
+    overflow: hidden;
+    flex-direction: column;
+    border: 1px solid var(--pd-line) !important;
+    border-radius: 18px !important;
+    background: var(--pd-surface) !important;
+    box-shadow: var(--pd-shadow) !important;
+    transform: none;
+    transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.portal-selector-page form.card.portal-company-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    border-radius: 18px 0 0 18px;
+    background: var(--pd-green);
+    opacity: 0.9;
+}
+
+.portal-selector-page form.card.portal-company-card-gold::before {
+    background: var(--pd-gold);
+}
+
+.portal-selector-page form.card.portal-company-card-blue::before {
+    background: var(--pd-blue);
+}
+
+.portal-selector-page form.card.portal-company-card:hover {
+    border-color: rgba(40, 142, 111, 0.42) !important;
+    box-shadow: 0 22px 50px rgba(10, 49, 38, 0.13) !important;
+    transform: translateY(-3px);
+}
+
+body.theme-dark .portal-selector-page form.card.portal-company-card:hover {
+    box-shadow: 0 24px 54px rgba(0, 0, 0, 0.32) !important;
+}
+
+.portal-card-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+.portal-icon-shell {
+    display: grid;
+    width: 54px;
+    height: 54px;
+    flex: 0 0 54px;
+    place-items: center;
+    border: 1px solid rgba(49, 118, 177, 0.2);
+    border-radius: 15px;
+    background: linear-gradient(145deg, rgba(49, 118, 177, 0.14), rgba(49, 118, 177, 0.045));
+    color: var(--pd-blue);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+.portal-icon-shell .ui-icon {
+    width: 29px;
+    height: 29px;
+    stroke-width: 1.65;
+}
+
+.portal-icon-shell-gold {
+    border-color: rgba(201, 150, 50, 0.24);
+    background: linear-gradient(145deg, rgba(201, 150, 50, 0.17), rgba(201, 150, 50, 0.05));
+    color: var(--pd-gold);
+}
+
+.portal-icon-shell-neutral {
+    border-color: rgba(42, 169, 134, 0.2);
+    background: linear-gradient(145deg, rgba(42, 169, 134, 0.14), rgba(42, 169, 134, 0.04));
+    color: var(--pd-green);
+}
+
+.portal-type-pill {
+    display: inline-flex;
+    padding: 6px 9px;
+    border: 1px solid var(--pd-line);
+    border-radius: 999px;
+    background: var(--pd-surface-soft);
+    color: var(--pd-muted);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+.portal-type-pill-gold {
+    border-color: rgba(201, 150, 50, 0.24);
+    background: rgba(201, 150, 50, 0.08);
+    color: var(--pd-gold);
+}
+
+.portal-type-pill-blue {
+    border-color: rgba(49, 118, 177, 0.24);
+    background: rgba(49, 118, 177, 0.08);
+    color: var(--pd-blue);
+}
+
+.portal-card-content {
+    flex: 1;
+}
+
+.portal-selector-page form.card .portal-company-code {
+    margin: 0 0 6px;
+    color: var(--pd-green);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.portal-selector-page form.card.portal-company-card h3 {
+    margin: 0 0 10px;
+    color: var(--pd-text);
+    font-family: var(--f-ui);
+    font-size: 19px;
+    font-weight: 760;
+    line-height: 1.3;
+    letter-spacing: -0.018em;
+}
+
+.portal-selector-page form.card p.portal-card-description:last-of-type {
+    display: block;
+    align-self: auto;
+    gap: 0;
+    max-width: 580px;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--pd-muted);
+    font-size: 12.5px;
+    font-weight: 400;
+    line-height: 1.6;
+}
+
+.portal-selector-page form.card p.portal-card-description:last-of-type::before {
+    content: none;
+}
+
+.portal-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 22px;
+    padding-top: 17px;
+    border-top: 1px solid var(--pd-line);
+}
+
+.portal-pin-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--pd-muted);
+    font-size: 10.5px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.portal-pin-status > span {
+    display: grid;
+    width: 25px;
+    height: 25px;
+    place-items: center;
+    border-radius: 8px;
+}
+
+.portal-pin-status .ui-icon {
+    width: 14px;
+    height: 14px;
+}
+
+.portal-pin-status.is-ready {
+    color: #148460;
+}
+
+.portal-pin-status.is-ready > span {
+    background: rgba(20, 132, 96, 0.11);
+}
+
+.portal-pin-status.is-required {
+    color: #b67a13;
+}
+
+.portal-pin-status.is-required > span {
+    background: rgba(182, 122, 19, 0.12);
+}
+
+.portal-selector-page form.card .portal-company-action,
+.portal-selector-page .portal-company-action {
+    display: inline-flex !important;
+    width: auto !important;
+    min-height: 40px;
+    margin: 0;
+    padding: 9px 13px 9px 15px;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border: 1px solid var(--pd-green-deep) !important;
+    border-radius: 10px !important;
+    background: linear-gradient(135deg, var(--pd-green), var(--pd-green-deep)) !important;
+    color: #ffffff !important;
+    font-size: 11px;
+    font-weight: 750;
+    line-height: 1;
+    box-shadow: 0 8px 18px rgba(8, 100, 76, 0.17) !important;
+    transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+.portal-selector-page form.card .portal-company-action::after {
+    content: none !important;
+}
+
+.portal-company-action svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+    transition: transform 160ms ease;
+}
+
+.portal-selector-page form.card .portal-company-action:hover,
+.portal-selector-page .portal-company-action:hover {
+    filter: brightness(1.07);
+    box-shadow: 0 10px 22px rgba(8, 100, 76, 0.22) !important;
+    transform: translateY(-1px);
+}
+
+.portal-company-action:hover svg {
+    transform: translateX(2px);
+}
+
+.portal-selector-page form.card .portal-company-action:focus-visible,
+.portal-selector-page .portal-company-action:focus-visible {
+    outline: 3px solid rgba(42, 169, 134, 0.25);
+    outline-offset: 3px;
+}
+
+.portal-company-grid-directory .portal-company-card {
+    min-height: 270px !important;
+}
+
+.portal-empty-state {
+    max-width: 620px;
+    margin: 30px auto 0;
+    padding: 42px;
+    border: 1px solid var(--pd-line);
+    border-radius: 20px;
+    background: var(--pd-surface);
+    text-align: center;
+    box-shadow: var(--pd-shadow);
+}
+
+.portal-empty-state .portal-icon-shell {
+    margin: 0 auto 18px;
+}
+
+.portal-empty-state h2 {
+    margin: 0 0 8px;
+    color: var(--pd-text);
+    font-size: 21px;
+}
+
+.portal-empty-state p {
+    margin: 0 0 22px;
+    color: var(--pd-muted);
+    font-size: 13px;
+}
+
+@media (max-width: 1080px) {
+    .portal-company-grid-directory {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 820px) {
+    .portal-selector-page {
+        padding-top: 20px;
     }
 
-    .portal-3d-header {
-        flex-direction: column;
+    .portal-selector-page .portal-directory {
+        width: min(100% - 28px, 1420px);
+    }
+
+    .portal-selector-page .portal-hero {
+        min-height: 0;
+        padding: 30px;
         align-items: flex-start;
+        flex-direction: column;
     }
 
-    .portal-icon-3d {
-        width: 48px;
-        height: 48px;
+    .portal-security-note {
+        min-width: 0;
+    }
+
+    .portal-company-grid-featured,
+    .portal-company-grid-directory {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 560px) {
+    .portal-selector-page {
+        padding: 12px 0 40px;
+    }
+
+    .portal-selector-page .portal-directory {
+        width: min(100% - 18px, 1420px);
+    }
+
+    .portal-selector-page .portal-hero {
+        padding: 24px 21px;
+        border-radius: 17px;
+    }
+
+    .portal-selector-page .portal-hero h1 {
+        font-size: 27px;
+    }
+
+    .portal-selector-page .portal-hero p {
+        font-size: 12.5px;
+    }
+
+    .portal-security-note {
+        width: 100%;
+    }
+
+    .portal-section-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .portal-selector-page form.card.portal-company-card {
+        min-height: 0 !important;
+        padding: 20px !important;
+        border-radius: 15px !important;
+    }
+
+    .portal-card-footer {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .portal-selector-page form.card .portal-company-action {
+        width: 100% !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .portal-selector-page form.card.portal-company-card,
+    .portal-selector-page .portal-company-action,
+    .portal-company-action svg {
+        transition: none;
     }
 }
 </style>
