@@ -1523,6 +1523,24 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
         }
     }
 
+    // Preserve the permanent physical identity beside the calculated money
+    // fields. The pricing engine is deliberately concerned with weights and
+    // amounts; the trace ID identifies which actual ring or bangle those
+    // figures belong to.
+    $lineStockUnits = [];
+    $claimedStockUnits = [];
+    foreach ($lines as $lineIndex => $line) {
+        $stockUnitId = (int) ($line['stock_unit_id'] ?? 0);
+        if ($stockUnitId > 0 && isset($claimedStockUnits[$stockUnitId])) {
+            throw new RuntimeException('Sale item ' . ($lineIndex + 1) . ': the same physical trace item is already '
+                . 'used on item ' . $claimedStockUnits[$stockUnitId] . '.');
+        }
+        if ($stockUnitId > 0) {
+            $claimedStockUnits[$stockUnitId] = $lineIndex + 1;
+        }
+        $lineStockUnits[$lineIndex] = $stockUnitId ?: null;
+    }
+
     $settings = jewellery_settings($companyId);
     $date = (string) ($header['sale_date'] ?? date('Y-m-d'));
     $computed = jw_compute_document($companyId, [
@@ -1817,18 +1835,19 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
             $saleId = (int) db()->lastInsertId();
         }
 
-        $lineStmt = db()->prepare('INSERT INTO jewellery_sale_lines (sale_id, company_id, item_id, purity_id, unit_id,
+        $lineStmt = db()->prepare('INSERT INTO jewellery_sale_lines (sale_id, company_id, item_id, purity_id, unit_id, stock_unit_id,
                 qty_pieces, gross_weight, stone_weight, net_weight, fine_weight, rate, metal_amount,
                 wastage_pct, wastage_amount, wastage_weight, total_weight, making_amount, stone_amount,
                 stone_carat, diamond_amount, diamond_carat, other_diamond_amount, other_diamond_carat,
                 vat_base, vat_rate, vat_amount, tax_amount, allocated_adjust, line_total, notes)
-            VALUES (:sid, :cid, :item, :purity, :unit, :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
+            VALUES (:sid, :cid, :item, :purity, :unit, :stockunit, :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
                 :wpct, :wamount, :wweight, :tweight, :making, :stone,
                 :scarat, :diamond, :dcarat, :odiamond, :odcarat, :vbase, :vrate, :vamount, :tamount, :adjust, :ltotal, :notes)');
-        foreach ($computed['lines'] as $row) {
+        foreach ($computed['lines'] as $lineIndex => $row) {
             $lineStmt->execute([
                 'sid' => $saleId, 'cid' => $companyId, 'item' => $row['item_id'], 'purity' => $row['purity_id'],
-                'unit' => $row['unit_id'], 'pieces' => $row['qty_pieces'], 'gross' => $row['gross_weight'],
+                'unit' => $row['unit_id'], 'stockunit' => $lineStockUnits[$lineIndex] ?? null,
+                'pieces' => $row['qty_pieces'], 'gross' => $row['gross_weight'],
                 'sweight' => $row['stone_weight'], 'net' => $row['net_weight'],
                 'fine' => $row['fine_weight'], 'rate' => $row['rate'], 'metal' => $row['metal_amount'],
                 'wpct' => $row['wastage_pct'], 'wamount' => $row['wastage_amount'],
@@ -1841,8 +1860,30 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
                 'adjust' => $row['allocated_adjust'],
                 'ltotal' => $row['line_total'], 'notes' => $row['notes'] !== '' ? $row['notes'] : null,
             ]);
-            jw_save_line_taxes($companyId, 'sale', $saleId, (int) db()->lastInsertId(), $row);
+            $saleLineId = (int) db()->lastInsertId();
+            jw_save_line_taxes($companyId, 'sale', $saleId, $saleLineId, $row);
+            $stockUnitId = (int) ($lineStockUnits[$lineIndex] ?? 0);
+            if ($stockUnitId > 0) {
+                $reserved = jewellery_trace_reserve_for_sale(
+                    $companyId,
+                    $stockUnitId,
+                    $saleId,
+                    $saleLineId,
+                    $deliverOrderIds,
+                    $userId
+                );
+                if (!($reserved['ok'] ?? false)) {
+                    throw new RuntimeException('Sale item ' . ($lineIndex + 1) . ': '
+                        . (string) ($reserved['error'] ?? 'The trace item could not be reserved.'));
+                }
+            }
         }
+        jewellery_trace_release_sale_reservations(
+            $companyId,
+            $saleId,
+            array_values(array_filter(array_map('intval', $lineStockUnits))),
+            $userId
+        );
 
         $exStmt = db()->prepare('INSERT INTO jewellery_sale_exchanges (sale_id, company_id, item_id, purity_id, unit_id,
                 qty_pieces, gross_weight, fine_weight, rate, amount, notes)
@@ -2171,8 +2212,10 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
         // Metal out at cost — the stock ledger must fall by cost, not by price.
         foreach ($lines as $line) {
             $cost = $lineCogs[(int) $line['id']] ?? 0.0;
+            $stockUnitId = (int) ($line['stock_unit_id'] ?? 0);
             $txnId = jw_record_stock_txn($companyId, [
                 'item_id' => (int) $line['item_id'],
+                'stock_unit_id' => $stockUnitId ?: null,
                 'txn_type' => 'sale',
                 'direction' => 'out',
                 'txn_date' => $saleDate,
@@ -2193,6 +2236,21 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
             ]);
             db()->prepare('UPDATE jewellery_sale_lines SET cogs_amount = :c, stock_txn_id = :t WHERE id = :id')
                 ->execute(['c' => $cost, 't' => $txnId, 'id' => (int) $line['id']]);
+            if ($stockUnitId > 0) {
+                $sold = jewellery_trace_mark_sold(
+                    $companyId,
+                    $stockUnitId,
+                    $saleId,
+                    (int) $line['id'],
+                    (int) ($sale['party_id'] ?? 0),
+                    (string) $sale['sale_no'],
+                    $saleDate,
+                    $userId
+                );
+                if (!($sold['ok'] ?? false)) {
+                    throw new RuntimeException((string) ($sold['error'] ?? 'The physical trace item could not be marked sold.'));
+                }
+            }
         }
 
         // Old gold in, at the value it was allowed against the sale.
@@ -2276,6 +2334,7 @@ function jewellery_unpost_sale(int $companyId, int $saleId, int $userId = 0): ar
     $sale = jewellery_sale($companyId, $saleId);
     $result = jw_unpost_document($companyId, 'jewellery_sales', 'jewellery_sale', $saleId, $userId);
     if ($result['ok'] && $sale !== null) {
+        jewellery_trace_release_sale($companyId, $saleId, $userId);
         // The bill is out of the books, so the order it stood on goes back to
         // the workshop's answer. Delivery is undone with it: 'delivered' was
         // this sale's doing, and a draft is evidence of nothing — but the

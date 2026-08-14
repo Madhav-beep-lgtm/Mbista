@@ -562,7 +562,7 @@ function jewellery_order_line_rows(int $companyId, int $orderId): array
             a.issue_no, a.issue_date, a.status AS assignment_status,
             sr.receipt_no AS stock_receipt_no, sr.receive_date AS stock_receive_date,
             sa.assignment_no AS stock_assignment_no, sa.expected_ornament AS stock_ornament,
-            sa.size_design AS stock_size_design
+            sa.size_design AS stock_size_design, su.trace_code
         FROM jewellery_order_lines l
         INNER JOIN inventory_items i ON i.id = l.item_id
         INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
@@ -573,6 +573,7 @@ function jewellery_order_line_rows(int $companyId, int $orderId): array
         LEFT JOIN jewellery_order_assignments a ON a.id = l.assignment_id
         LEFT JOIN jewellery_order_receipts sr ON sr.id = l.stock_receipt_id
         LEFT JOIN jewellery_order_assignments sa ON sa.id = sr.assignment_id
+        LEFT JOIN jewellery_stock_units su ON su.id = l.stock_unit_id AND su.company_id = l.company_id
         WHERE l.company_id = :cid AND l.order_id = :oid ORDER BY l.id ASC');
     $stmt->execute(['cid' => $companyId, 'oid' => $orderId]);
 
@@ -593,6 +594,7 @@ function jewellery_stock_piece(int $companyId, int $receiptId): ?array
         return null;
     }
     $stmt = db()->prepare("SELECT r.id AS receipt_id, r.receipt_no, r.receive_date, r.qty_pieces,
+            r.stock_unit_id,
             r.received_item_id, r.received_purity_id, r.unit_id,
             r.received_gross_weight, r.stone_weight, r.net_gold_weight, r.received_fine_weight,
             r.making_amount,
@@ -611,6 +613,13 @@ function jewellery_stock_piece(int $companyId, int $receiptId): ?array
     if (!$piece) {
         return null;
     }
+    $stockUnitId = (int) ($piece['stock_unit_id'] ?? 0);
+    if ($stockUnitId <= 0 && jewellery_trace_ready()) {
+        $stockUnitId = jewellery_trace_from_receipt($companyId, $receiptId);
+    }
+    $piece['stock_unit_id'] = $stockUnitId ?: null;
+    $trace = $stockUnitId > 0 ? jewellery_trace_unit($companyId, $stockUnitId) : null;
+    $piece['trace_code'] = (string) ($trace['trace_code'] ?? '');
     $name = trim((string) ($piece['expected_ornament'] ?? '')) ?: trim((string) ($piece['item_name'] ?? ''));
     $piece['label'] = trim((string) $piece['assignment_no'] . ($name !== '' ? ' — ' . $name : ''));
 
@@ -757,6 +766,12 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
 
         $lines[$index]['source'] = 'stock';
         $lines[$index]['stock_receipt_id'] = $receiptId;
+        $stockUnitId = (int) ($piece['stock_unit_id'] ?? 0);
+        if (jewellery_trace_ready() && $stockUnitId <= 0) {
+            throw new RuntimeException('Item ' . ($index + 1) . ': that shelf piece has no permanent trace ID. '
+                . 'Run the accounting repair, then choose it again.');
+        }
+        $lines[$index]['stock_unit_id'] = $stockUnitId ?: null;
         $lines[$index]['item_id'] = (int) $piece['received_item_id'];
         $lines[$index]['purity_id'] = (int) $piece['received_purity_id'];
         $lines[$index]['unit_id'] = (int) $piece['unit_id'];
@@ -842,12 +857,14 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     $lineSizes = [];
     $lineSources = [];
     $lineStockReceipts = [];
+    $lineStockUnits = [];
     foreach ($computed['lines'] as $index => $lineRow) {
         // Settled in the pre-pass above, which read the piece and refused
         // anything it could not stand behind.
         $fromStock = (string) ($lineRow['source'] ?? 'workshop') === 'stock';
         $lineSources[$index] = $fromStock ? 'stock' : 'workshop';
         $lineStockReceipts[$index] = $fromStock ? (int) $lineRow['stock_receipt_id'] : null;
+        $lineStockUnits[$index] = (int) ($lines[$index]['stock_unit_id'] ?? 0) ?: null;
 
         $lineKarigarId = (int) ($lineRow['karigar_id'] ?? 0);
         if ($fromStock) {
@@ -1072,13 +1089,13 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         }
 
         $lineStmt = db()->prepare('INSERT INTO jewellery_order_lines (order_id, company_id, item_id, karigar_id,
-                source, stock_receipt_id,
+                source, stock_receipt_id, stock_unit_id,
                 delivery_date, size, assignment_id, purity_id, unit_id,
                 qty_pieces, gross_weight, stone_weight, net_weight, fine_weight, rate, metal_amount,
                 wastage_pct, wastage_weight, total_weight, wastage_amount, making_amount, stone_amount,
                 stone_carat, diamond_amount, diamond_carat, other_diamond_amount, other_diamond_carat,
                 vat_base, vat_rate, vat_amount, tax_amount, allocated_adjust, line_total, notes)
-            VALUES (:oid, :cid, :item, :karigar, :source, :stockreceipt,
+            VALUES (:oid, :cid, :item, :karigar, :source, :stockreceipt, :stockunit,
                 :ldelivery, :lsize, :assignment, :purity, :unit,
                 :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
                 :wpct, :wweight, :tweight, :wamount, :making, :stone,
@@ -1089,6 +1106,7 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                 'karigar' => $lineKarigars[$lineIndex] ?? null,
                 'source' => $lineSources[$lineIndex] ?? 'workshop',
                 'stockreceipt' => $lineStockReceipts[$lineIndex] ?? null,
+                'stockunit' => $lineStockUnits[$lineIndex] ?? null,
                 'ldelivery' => $lineDates[$lineIndex] ?? null,
                 'lsize' => $lineSizes[$lineIndex] ?? null,
                 'assignment' => $priorAssignments[$lineIndex] ?? null,
@@ -1107,7 +1125,30 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                 'ltotal' => $row['line_total'], 'notes' => $row['notes'] !== '' ? $row['notes'] : null,
             ]);
             $insertedLineIds[$lineIndex] = (int) db()->lastInsertId();
+            $stockUnitId = (int) ($lineStockUnits[$lineIndex] ?? 0);
+            if ($stockUnitId > 0) {
+                $reserved = jewellery_trace_reserve_for_order(
+                    $companyId,
+                    $stockUnitId,
+                    $orderId,
+                    $insertedLineIds[$lineIndex],
+                    $userId
+                );
+                if (!($reserved['ok'] ?? false)) {
+                    throw new RuntimeException('Item ' . ($lineIndex + 1) . ': ' . (string) ($reserved['error'] ?? 'The trace item could not be reserved.'));
+                }
+            }
         }
+
+        // Re-saving an order may remove a previously selected shelf piece.
+        // Keep the pieces still present and return every other trace unit to
+        // the showroom in the same transaction as the line replacement.
+        jewellery_trace_release_order(
+            $companyId,
+            $orderId,
+            array_values(array_filter(array_map('intval', $lineStockUnits))),
+            $userId
+        );
 
         // The assignment points back at the line it covers. The line ids just
         // changed, so any issue carried across has to be re-pointed or the
@@ -1187,6 +1228,7 @@ function jewellery_cancel_order(int $companyId, int $orderId, string $reason = '
             'note' => $note !== '' ? "\nCancelled: " . $note : '',
             'id' => $orderId, 'cid' => $companyId,
         ]);
+    jewellery_trace_release_order($companyId, $orderId, [], $userId);
     log_activity('company', $companyId, 'jewellery_order_cancel',
         'Order ' . $order['order_no'] . ' cancelled.' . ($note !== '' ? ' ' . $note : ''), $userId);
 
@@ -1272,12 +1314,35 @@ function jewellery_delete_order(int $companyId, int $orderId): bool
     // waited for. A workshop order cannot reach that word without an
     // assignment, so it is still barred. Deleting simply hands the pieces back
     // to the shelf — the lines go with the order and the reservation with them.
-    $stmt = db()->prepare("DELETE FROM jewellery_orders WHERE id = :id AND company_id = :cid
-        AND status IN ('draft', 'confirmed', 'received', 'cancelled')
-        AND NOT EXISTS (SELECT 1 FROM jewellery_order_assignments a WHERE a.order_id = jewellery_orders.id)");
-    $stmt->execute(['id' => $orderId, 'cid' => $companyId]);
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        jewellery_trace_release_order($companyId, $orderId);
+        $stmt = db()->prepare("DELETE FROM jewellery_orders WHERE id = :id AND company_id = :cid
+            AND status IN ('draft', 'confirmed', 'received', 'cancelled')
+            AND NOT EXISTS (SELECT 1 FROM jewellery_order_assignments a WHERE a.order_id = jewellery_orders.id)");
+        $stmt->execute(['id' => $orderId, 'cid' => $companyId]);
+        $deleted = $stmt->rowCount() > 0;
+        if (!$deleted) {
+            if ($ownsTransaction) {
+                db()->rollBack();
+            }
 
-    return $stmt->rowCount() > 0;
+            return false;
+        }
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+
+        return true;
+    } catch (Throwable $deleteException) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+        throw $deleteException;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2917,6 +2982,7 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
             'item_id' => $isFirst ? $itemId : (int) $orderLine['item_id'],
             'purity_id' => $isFirst ? $purityId : (int) $orderLine['purity_id'],
             'unit_id' => (int) $orderLine['unit_id'],
+            'stock_unit_id' => (int) ($orderLine['stock_unit_id'] ?? 0) ?: null,
             'qty_pieces' => (float) $orderLine['qty_pieces'] ?: 1,
             'gross_weight' => $lineGross,
             // What actually came back governs the first line's stones, exactly
