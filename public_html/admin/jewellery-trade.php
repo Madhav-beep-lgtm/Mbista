@@ -490,11 +490,11 @@ if ($view === 'sales') {
 $saleStockUnits = [];
 if ($view === 'sales') {
     $byTrace = [];
-    foreach (jewellery_ready_to_sale_options($companyId) as $unit) {
+    foreach (jewellery_trace_ready_to_sale_options($companyId) as $unit) {
         $byTrace[(int) $unit['id']] = $unit;
     }
     foreach ($sellingOrderIds as $sellingOrderId) {
-        foreach (jewellery_ready_to_sale_options($companyId, $sellingOrderId) as $unit) {
+        foreach (jewellery_trace_ready_to_sale_options($companyId, $sellingOrderId) as $unit) {
             $byTrace[(int) $unit['id']] = $unit;
         }
     }

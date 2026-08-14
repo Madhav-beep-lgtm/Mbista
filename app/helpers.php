@@ -948,6 +948,52 @@ function client_service_provider_names(int $clientId): string
 }
 
 /**
+ * Return linked service-provider names for several clients in one query.
+ *
+ * @param array<int, int|string> $clientIds
+ * @return array<int, string>
+ */
+function client_service_provider_names_by_client(array $clientIds): array
+{
+    $clientIds = array_values(array_unique(array_filter(
+        array_map('intval', $clientIds),
+        static fn (int $clientId): bool => $clientId > 0
+    )));
+
+    if ($clientIds === []) {
+        return [];
+    }
+    if (!table_exists('client_service_provider_entities')
+        || !table_exists('service_provider_entities')) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($clientIds), '?'));
+    $stmt = db()->prepare(
+        'SELECT cspe.client_id, spe.name
+         FROM client_service_provider_entities cspe
+         INNER JOIN service_provider_entities spe
+             ON spe.id = cspe.service_provider_entity_id
+         WHERE cspe.client_id IN (' . $placeholders . ')
+         ORDER BY cspe.client_id ASC, spe.name ASC'
+    );
+    $stmt->execute($clientIds);
+
+    $groupedNames = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $clientId = (int) $row['client_id'];
+        $groupedNames[$clientId] ??= [];
+        $groupedNames[$clientId][] = (string) $row['name'];
+    }
+
+    $result = [];
+    foreach ($groupedNames as $clientId => $names) {
+        $result[$clientId] = implode(', ', $names);
+    }
+
+    return $result;
+}
+/**
  * A setting, read once per request and then cached.
  *
  * $refresh drops the cache. update_settings() uses it: without that, anything

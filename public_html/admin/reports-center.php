@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_once __DIR__ . '/../../app/reports_engine.php';
+require_once __DIR__ . '/../../app/jewellery_engine.php';
 require_once __DIR__ . '/../../app/jewellery_aml.php';
 require_once __DIR__ . '/../../app/mailer.php';
 require_staff_admin_or_client_books();

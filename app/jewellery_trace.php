@@ -348,7 +348,7 @@ function jewellery_trace_lifecycle(int $companyId, int $stockUnitId): array
 }
 
 /** Showroom pieces that can be selected, plus a current order's own hold. */
-function jewellery_ready_to_sale_options(int $companyId, int $forOrderId = 0): array
+function jewellery_trace_ready_to_sale_options(int $companyId, int $forOrderId = 0): array
 {
     if (!jewellery_trace_ready()) {
         return [];
