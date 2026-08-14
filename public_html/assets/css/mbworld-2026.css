@@ -2374,3 +2374,70 @@ body.admin-layout .users-permission-template > summary {
 body.admin-layout .users-permission-template[open] > summary {
   margin-bottom: 10px;
 }
+/* Jewellery Orders: compact row action selector with on-demand postpone date. */
+.jw-order-action-cell {
+  min-width: 150px;
+  white-space: nowrap;
+}
+
+.jw-order-action-row {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.jw-order-action-select {
+  width: 138px;
+  min-width: 138px;
+  min-height: 36px;
+  padding: 5px 30px 5px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  color: var(--c-ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.jw-order-action-select:focus-visible {
+  border-color: var(--c-primary);
+  outline: 3px solid color-mix(in srgb, var(--c-primary) 18%, transparent);
+}
+
+.jw-order-postpone-form {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.jw-order-postpone-form[hidden],
+.jw-order-cancel-form[hidden],
+.jw-order-delete-form[hidden] {
+  display: none !important;
+}
+
+.jw-order-postpone-form input[type="date"] {
+  min-width: 150px;
+  min-height: 36px;
+}
+
+.jw-order-postpone-form .button {
+  min-height: 36px;
+  padding: 5px 10px;
+}
+
+@media (max-width: 720px) {
+  .jw-order-action-cell,
+  .jw-order-action-row,
+  .jw-order-action-select,
+  .jw-order-postpone-form {
+    width: 100%;
+  }
+
+  .jw-order-action-row,
+  .jw-order-postpone-form {
+    flex-wrap: wrap;
+  }
+}

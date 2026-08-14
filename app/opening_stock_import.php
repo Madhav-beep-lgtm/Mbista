@@ -76,13 +76,13 @@ function opening_import_template_rows(bool $jewellery): array
 {
     $header = $jewellery
         ? ['SN', 'Stock type', 'Stock group', 'Item code', 'Item name', 'Metal', 'Purity', 'Unit',
-            'Pieces', 'Gross weight', 'Rate', 'Amount', 'Customer name', 'Order number']
+            'Pieces', 'Gross weight', 'Stone weight (ct)', 'Stone amount', 'Diamond weight (ct)', 'Diamond amount', 'Net weight (auto)', 'Making charge', 'Rate', 'Amount', 'Customer name', 'Order number']
         : ['Item code', 'Item name', 'Unit', 'Pieces', 'Rate', 'Amount'];
 
     $sample = $jewellery
-        ? [[1, 'Showroom Stock', 'Bangles', 'BG-1', 'Bangle 1', 'Gold', '22K', 'GM', 1, 13.77, 22250.69, 306392, '', ''],
-           [2, 'Showroom Stock', 'Bangles', 'BG-2', 'Bangle 2', 'Gold', '22K', 'GM', 1, 13.77, 22250.69, 306392, '', ''],
-           [3, 'Customer Ordered Stock', 'Rings', 'RG-1', 'Ring 1', 'Gold', '22K', 'GM', 1, 8.50, 22250.69, 189130.87, 'Customer name', 'JO-000001']]
+        ? [[1, 'Showroom Stock', 'Bangles', 'BG-1', 'Bangle 1', 'Gold', '22K', 'GM', 1, 13.77, 0, 0, 0, 0, 13.77, 0, 22250.69, 306392, '', ''],
+           [2, 'Showroom Stock', 'Bangles', 'BG-2', 'Bangle 2', 'Gold', '22K', 'GM', 1, 13.77, 0, 0, 0, 0, 13.77, 0, 22250.69, 306392, '', ''],
+           [3, 'Customer Ordered Stock', 'Rings', 'RG-1', 'Ring 1', 'Gold', '22K', 'GM', 1, 8.50, 0.2, 500, 0.1, 1000, 8.44, 800, 22250.69, 189130.87, 'Customer name', 'JO-000001']]
         : [['ITEM-01', 'Sample Item', 'PCS', 10, 250, 2500],
            ['', 'Fill either Rate or Amount. Rows with neither are flagged, not dropped.', '', '', '', '']];
 

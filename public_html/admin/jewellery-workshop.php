@@ -735,7 +735,7 @@ jw_filter_bar_styles();
                         <?php endforeach; ?>
                     </select>
                 </label>
-                <label>Customer name<input type="text" name="customer_name" data-jw-customer-name maxlength="190" value="<?= e((string) $orderField('customer_name')) ?>" placeholder="Creates the customer and their ledger"></label>
+                <label hidden style="display:none !important">Customer name<input type="text" name="customer_name" data-jw-customer-name maxlength="190" value="<?= e((string) $orderField('customer_name')) ?>" placeholder="Creates the customer and their ledger"></label>
                 <label>Phone<input type="text" name="customer_phone" maxlength="60" value="<?= e((string) $orderField('customer_phone')) ?>"></label>
                 <label>Address<input type="text" name="customer_address" maxlength="255"></label>
                 <?php // The reference is usually minted by the engine (JO-2083-000001);
@@ -1036,62 +1036,136 @@ jw_filter_bar_styles();
                         </td>
                         <td><?= ($row['delivery_date'] ?? null) ? e(app_date((string) $row['delivery_date'])) : '—' ?></td>
                         <td><span class="mbw-pill <?= e($statusTone[$row['status']] ?? 'tone-gray') ?>"><?= e($statusLabel((string) $row['status'])) ?></span></td>
-                        <td style="white-space:nowrap">
-                            <?php if ($canEdit): ?>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) ?>">Edit</a>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=order&id=' . (int) $row['id'])) ?>">Preview</a>
-                            <?php endif; ?>
-                            <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?>
-                                <?php // Assigning is its own page. The order rides along so
-                                      // the grid opens with this one already picked — the
-                                      // reason somebody pressed Assign on THIS row. ?>
-                                <a class="button secondary" style="min-height:30px;padding:3px 10px"
-                                   href="<?= e(url('admin/jewellery-assign.php?kind=customer&order=' . (int) $row['id'])) ?>">Assign</a>
-                            <?php endif; ?>
-                            <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?>
-                                <form method="post" style="display:inline-flex;gap:4px;align-items:center">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="postpone_order">
-                                    <input type="hidden" name="back_view" value="orders">
-                                    <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
-                                    <input type="date" name="delivery_date" required
-                                           value="<?= e((string) ($row['delivery_date'] ?? '')) ?>"
-                                           style="min-height:30px;padding:2px 6px;max-width:140px">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px">Postpone</button>
-                                </form>
-                                <form method="post" style="display:inline"
-                                      onsubmit="return confirm('Cancel order <?= e((string) $row['order_no']) ?>?')">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="cancel_order">
-                                    <input type="hidden" name="back_view" value="orders">
-                                    <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 10px" title="Cancel this order">Cancel</button>
-                                </form>
-                            <?php endif; ?>
-                            <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?>
-                                <form method="post" style="display:inline"
-                                      onsubmit="return confirm('Delete order <?= e((string) $row['order_no']) ?> for good?')">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="delete_order">
-                                    <input type="hidden" name="back_view" value="orders">
-                                    <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
-                                    <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:var(--mbw-red,#e5484d)" title="Delete this order"><?= icon('trash') ?></button>
-                                </form>
-                            <?php elseif ($canEdit): ?>
-                                <?php // The button is HERE, and it says why it will not fire. An
-                                      // order that reached the workshop or the customer is a
-                                      // financial record — its metal moved, its bill posted.
-                                      // The road back is cancel / unpost, never deletion. ?>
-                                <button type="button" class="button soft" disabled
-                                        style="min-height:30px;padding:3px 8px;opacity:.45;cursor:not-allowed"
-                                        title="A <?= e(str_replace('_', ' ', (string) $row['status'])) ?> order is a financial record — metal and money moved against it. Cancel or unpost the documents instead; deletion is not allowed."><?= icon('close') ?></button>
-                            <?php endif; ?>
+                        <td class="jw-order-action-cell">
+                            <div class="jw-order-action-row">
+                                <select class="jw-order-action-select"
+                                        aria-label="Actions for order <?= e((string) $row['order_no']) ?>">
+                                    <option value="">Actions</option>
+                                    <?php if ($canEdit): ?>
+                                        <option value="edit"
+                                                data-url="<?= e(url('admin/jewellery-workshop.php?view=orders&edit=' . (int) $row['id'])) ?>">Edit order</option>
+                                        <option value="preview"
+                                                data-url="<?= e(url('admin/jewellery-print.php?doc=order&id=' . (int) $row['id'])) ?>">Preview / Print</option>
+                                    <?php endif; ?>
+                                    <?php if (in_array((string) $row['status'], ['draft', 'confirmed'], true) && $canPost): ?>
+                                        <option value="assign"
+                                                data-url="<?= e(url('admin/jewellery-assign.php?kind=customer&order=' . (int) $row['id'])) ?>">Assign to Kaligad</option>
+                                    <?php endif; ?>
+                                    <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?>
+                                        <option value="postpone">Postpone delivery</option>
+                                        <option value="cancel">Cancel order</option>
+                                    <?php endif; ?>
+                                    <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?>
+                                        <option value="delete">Delete order</option>
+                                    <?php elseif ($canEdit): ?>
+                                        <option value="" disabled>Delete unavailable</option>
+                                    <?php endif; ?>
+                                </select>
+
+                                <?php if ($canEdit && !in_array((string) $row['status'], ['invoiced', 'delivered', 'closed', 'cancelled'], true)): ?>
+                                    <form method="post" class="jw-order-postpone-form" hidden>
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="postpone_order">
+                                        <input type="hidden" name="back_view" value="orders">
+                                        <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
+                                        <input type="date" name="delivery_date" required
+                                               aria-label="New delivery date"
+                                               value="<?= e((string) ($row['delivery_date'] ?? '')) ?>">
+                                        <button type="submit" class="button soft">Save date</button>
+                                        <button type="button" class="button soft jw-order-postpone-close"
+                                                aria-label="Close postpone date">Close</button>
+                                    </form>
+                                    <form method="post" class="jw-order-cancel-form" hidden
+                                          onsubmit="return confirm('Cancel order <?= e((string) $row['order_no']) ?>?')">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="cancel_order">
+                                        <input type="hidden" name="back_view" value="orders">
+                                        <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
+                                    </form>
+                                <?php endif; ?>
+
+                                <?php if ($canEdit && in_array((string) $row['status'], ['draft', 'confirmed', 'cancelled'], true)): ?>
+                                    <form method="post" class="jw-order-delete-form" hidden
+                                          onsubmit="return confirm('Delete order <?= e((string) $row['order_no']) ?> for good?')">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="delete_order">
+                                        <input type="hidden" name="back_view" value="orders">
+                                        <input type="hidden" name="order_id" value="<?= (int) $row['id'] ?>">
+                                    </form>
+                                <?php endif; ?>
+                            </div>
                         </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table></div>
     </section>
+    <script data-jw-order-actions-script>
+    (() => {
+        const reset = (select) => {
+            select.value = '';
+        };
+
+        document.addEventListener('change', (event) => {
+            const select = event.target.closest('.jw-order-action-select');
+            if (!select) return;
+
+            const row = select.closest('.jw-order-action-row');
+            const option = select.selectedOptions[0];
+            const action = select.value;
+            const url = option ? option.dataset.url : '';
+            const postponeForm = row.querySelector('.jw-order-postpone-form');
+
+            document.querySelectorAll('.jw-order-postpone-form').forEach((form) => {
+                if (form !== postponeForm) form.hidden = true;
+            });
+
+            if (action === 'postpone' && postponeForm) {
+                postponeForm.hidden = false;
+                const firstDateField = postponeForm.querySelector('input:not([type="hidden"]), select');
+                if (firstDateField) firstDateField.focus();
+                reset(select);
+                return;
+            }
+
+            if (postponeForm) postponeForm.hidden = true;
+
+            if (action === 'edit' || action === 'assign') {
+                window.location.href = url;
+                return;
+            }
+
+            if (action === 'preview') {
+                window.open(url, '_blank', 'noopener');
+                reset(select);
+                return;
+            }
+
+            if (action === 'cancel') {
+                const form = row.querySelector('.jw-order-cancel-form');
+                reset(select);
+                if (form) form.requestSubmit();
+                return;
+            }
+
+            if (action === 'delete') {
+                const form = row.querySelector('.jw-order-delete-form');
+                reset(select);
+                if (form) form.requestSubmit();
+                return;
+            }
+
+            reset(select);
+        });
+
+        document.addEventListener('click', (event) => {
+            const close = event.target.closest('.jw-order-postpone-close');
+            if (!close) return;
+            const form = close.closest('.jw-order-postpone-form');
+            if (form) form.hidden = true;
+        });
+    })();
+    </script>
 
 <?php elseif ($view === 'karigars'): ?>
     <?php if ($canEdit): ?>
