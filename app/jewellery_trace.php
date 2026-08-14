@@ -495,8 +495,8 @@ function jewellery_trace_release_sale(int $companyId, int $saleId, int $userId =
         return;
     }
     $stmt = db()->prepare("SELECT id, status, reserved_order_id FROM jewellery_stock_units
-        WHERE company_id = :cid AND (reserved_sale_id = :sid OR sold_sale_id = :sid)");
-    $stmt->execute(['cid' => $companyId, 'sid' => $saleId]);
+        WHERE company_id = ? AND (reserved_sale_id = ? OR sold_sale_id = ?)");
+    $stmt->execute([$companyId, $saleId, $saleId]);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         jewellery_trace_transition($companyId, (int) $row['id'], 'sale_reversed', [
             'status' => (int) ($row['reserved_order_id'] ?? 0) > 0 ? 'reserved' : 'in_stock',
@@ -770,6 +770,7 @@ function jewellery_trace_replace_opening(int $companyId, int $fiscalYearId, arra
         'purity_id' => (int) $input['purity_id'], 'unit_id' => (int) $input['unit_id'],
         'stock_kind' => (string) ($input['stock_kind'] ?? 'showroom'), 'status' => 'in_stock',
         'qty_pieces' => (float) ($input['qty_pieces'] ?? 0), 'gross_weight' => (float) ($input['gross_weight'] ?? 0),
+        'stone_weight' => (float) ($input['stone_weight'] ?? 0),
         'cost_amount' => (float) ($input['cost_amount'] ?? 0),
         'origin_type' => (string) ($input['origin_type'] ?? 'manual_opening'),
         'origin_id' => (int) ($input['origin_id'] ?? $itemId), 'origin_line_id' => (int) ($input['origin_line_id'] ?? 0),

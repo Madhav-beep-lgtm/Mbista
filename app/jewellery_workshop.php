@@ -733,8 +733,59 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
     // What the customer is CHARGED — the metal rate, the making, the stone
     // money, the wastage the shop prices at — is untouched. That is the deal
     // being struck now, not a fact about the object.
+    $claimedStockUnits = [];
     $claimedReceipts = [];
     foreach ($lines as $index => $line) {
+        $stockUnitId = (int) ($line['stock_unit_id'] ?? 0);
+        if ($stockUnitId > 0) {
+            $piece = jewellery_trace_unit($companyId, $stockUnitId);
+            if ($piece === null || (string) ($piece['stock_kind'] ?? '') !== 'showroom') {
+                throw new RuntimeException('Item ' . ($index + 1) . ': that piece is not on this company\'s showroom shelf.');
+            }
+
+            $pieceLabel = trim((string) ($piece['trace_code'] ?? '')) . ' | '
+                . trim((string) ($piece['item_name'] ?? $piece['item_code'] ?? 'Item'));
+            if (isset($claimedStockUnits[$stockUnitId])) {
+                throw new RuntimeException('Item ' . ($index + 1) . ': ' . $pieceLabel . ' is already item '
+                    . $claimedStockUnits[$stockUnitId] . ' of this order. There is only one of it.');
+            }
+            $claimedStockUnits[$stockUnitId] = $index + 1;
+
+            $pieceStatus = (string) ($piece['status'] ?? '');
+            $reservedOrderId = (int) ($piece['reserved_order_id'] ?? 0);
+            if ($pieceStatus === 'reserved' && $reservedOrderId !== $orderId) {
+                $holder = trim((string) ($piece['reserved_order_no'] ?? 'another order'));
+                $customer = trim((string) ($piece['reserved_customer'] ?? ''));
+                throw new RuntimeException('Item ' . ($index + 1) . ': ' . $pieceLabel . ' is already promised on '
+                    . $holder . ($customer !== '' ? ' (' . $customer . ')' : '') . '. There is only one of it.');
+            }
+            if (!in_array($pieceStatus, ['in_stock', 'reserved'], true)) {
+                throw new RuntimeException('Item ' . ($index + 1) . ': ' . $pieceLabel . ' is '
+                    . str_replace('_', ' ', $pieceStatus) . ' and cannot be ordered from stock.');
+            }
+
+            // Preserve the older receipt link when this trace unit came from a
+            // kaligad receipt. Imported opening stock correctly has no receipt.
+            $receiptId = 0;
+            if (column_exists('jewellery_order_receipts', 'stock_unit_id')) {
+                $receiptStmt = db()->prepare("SELECT id FROM jewellery_order_receipts
+                    WHERE company_id = :cid AND stock_unit_id = :uid AND status <> 'cancelled'
+                    ORDER BY id DESC LIMIT 1");
+                $receiptStmt->execute(['cid' => $companyId, 'uid' => $stockUnitId]);
+                $receiptId = (int) ($receiptStmt->fetchColumn() ?: 0);
+            }
+
+            $lines[$index]['source'] = 'stock';
+            $lines[$index]['stock_unit_id'] = $stockUnitId;
+            $lines[$index]['stock_receipt_id'] = $receiptId ?: null;
+            $lines[$index]['item_id'] = (int) ($piece['item_id'] ?? 0);
+            $lines[$index]['purity_id'] = (int) ($piece['purity_id'] ?? 0);
+            $lines[$index]['unit_id'] = (int) ($piece['unit_id'] ?? 0);
+            $lines[$index]['qty_pieces'] = (float) ($piece['qty_pieces'] ?? 0) ?: 1.0;
+            $lines[$index]['gross_weight'] = (float) ($piece['gross_weight'] ?? 0);
+            $lines[$index]['stone_weight'] = (float) ($piece['stone_weight'] ?? 0);
+            continue;
+        }
         $receiptId = (int) ($line['stock_receipt_id'] ?? 0);
         $wantsStock = (string) ($line['source'] ?? 'workshop') === 'stock' || $receiptId > 0;
         if (!$wantsStock) {

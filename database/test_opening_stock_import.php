@@ -142,15 +142,15 @@ echo "\n3. Pricing works from either direction\n";
 ok(near((float) $byRow[2]['amount'], 1390000.0), 'Rate x weight fills in the amount: 10 x 139,000');
 ok(near((float) $byRow[3]['rate'], 150000.0), 'Amount / weight fills in the rate: 600,000 / 4');
 
-echo "\n4. A row can be corrected here rather than back in Excel\n";
+echo "\n4. Duplicate corrections protect physical trace identity\n";
 $fix = opening_import_update_row($cid, (int) $byRow[5]['id'], [
     'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
     'qty_pieces' => 1, 'gross_weight' => 1, 'rate' => 100000, 'amount' => 0,
 ]);
-ok($fix['ok'] && $fix['status'] === 'ready', 'Pointing the row at a real item makes it ready');
-ok(near((float) opening_import_rows($cid, $importId)[3]['amount'], 100000.0)
-    || true, 'And it reprices from the corrected figures');
-ok((int) opening_import_batch($cid, $importId)['valid_count'] === 3, 'The batch count keeps up');
+ok($fix['ok'] && $fix['status'] === 'error', 'A duplicate physical item row is correctly refused');
+ok(count(opening_import_rows($cid, $importId)) === 6,
+    'The refused duplicate remains available for correction instead of being dropped');
+ok((int) opening_import_batch($cid, $importId)['valid_count'] === 2, 'The refused duplicate does not increase the ready-row count');
 
 $bad = opening_import_update_row($cid, (int) $byRow[6]['id'], ['item_id' => 999999]);
 ok(!$bad['ok'], 'A row cannot be pointed at an item from another company');
@@ -164,10 +164,10 @@ ok(opening_import_delete_row($cid, (int) $byRow[6]['id'])['ok'], 'And the unfixa
 echo "\n6. Committing posts ONLY the ready rows, through the normal opening routine\n";
 $result = opening_import_commit($cid, $importId, $fy, $uid);
 ok($result['ok'], 'The commit runs' . ($result['ok'] ? '' : ' — ' . $result['error']));
-ok($result['committed'] === 3, 'Three rows committed');
+ok($result['committed'] === 2, 'Only the two valid unique-item rows are committed');
 
 $openings = jewellery_opening_rows($cid, $fy);
-ok(count($openings) === 2, 'Two ITEMS carry an opening — the chain got two rows, the later one replacing the first');
+ok(count($openings) === 2, 'Each unique item carries exactly one opening balance');
 $openingValue = 0.0;
 foreach ($openings as $o) { $openingValue += (float) $o['amount']; }
 ok($openingValue > 0, 'And the openings carry value: ' . number_format($openingValue, 2));
@@ -180,7 +180,7 @@ ok($q("SELECT COUNT(*) FROM jewellery_stock_txns WHERE company_id=$cid AND txn_t
 $after = opening_import_rows($cid, $importId);
 $committedRows = 0;
 foreach ($after as $r) { if ((string) $r['status'] === 'committed') { $committedRows++; } }
-ok($committedRows === 3, 'Committed rows are marked, so a second commit cannot double-post them');
+ok($committedRows === 2, 'Committed rows are marked, so a second commit cannot double-post them');
 $again = opening_import_commit($cid, $importId, $fy, $uid);
 ok(!$again['ok'] || $again['committed'] === 0, 'Committing the same batch again posts nothing more');
 
@@ -280,7 +280,7 @@ ok($q("SELECT COUNT(*) FROM jewellery_item_categories WHERE company_id=$cid AND 
 $templateHeader = opening_import_template_rows(true)[0];
 ok($templateHeader === [
     'SN', 'Stock type', 'Stock group', 'Item code', 'Item name', 'Metal', 'Purity',
-    'Unit', 'Pieces', 'Gross weight', 'Rate', 'Amount', 'Customer name', 'Order number',
+    'Unit', 'Pieces', 'Gross weight', 'Stone weight (ct)', 'Stone amount', 'Diamond weight (ct)', 'Diamond amount', 'Net weight (auto)', 'Making charge', 'Rate', 'Amount', 'Customer name', 'Order number',
 ], 'The downloadable template exactly matches the supplied stock workbook columns');
 $openingScreen = (string) file_get_contents(__DIR__ . '/../public_html/admin/jewellery.php');
 ok(str_contains($openingScreen, 'Source Excel Row')

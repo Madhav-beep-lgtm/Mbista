@@ -133,8 +133,12 @@ $karigar = jewellery_save_karigar($cid, ['code' => 'BHARAT', 'name' => 'Bharat S
 
 echo "\n0. The Excel template matches the accepted counter sheet\n";
 $template = opening_import_template_rows(true);
-ok($template[0] === ['SN', 'Stock type', 'Stock group', 'Item code', 'Item name', 'Metal', 'Purity',
-    'Unit', 'Pieces', 'Gross weight', 'Rate', 'Amount', 'Customer name', 'Order number'],
+ok($template[0] === [
+    'SN', 'Stock type', 'Stock group', 'Item code', 'Item name', 'Metal', 'Purity', 'Unit',
+    'Pieces', 'Gross weight', 'Stone weight (ct)', 'Stone amount',
+    'Diamond weight (ct)', 'Diamond amount', 'Net weight (auto)',
+    'Making charge', 'Rate', 'Amount', 'Customer name', 'Order number'
+],
     'The downloadable Excel columns match the supplied sheet exactly');
 
 /** Make one showroom piece and put it on the shelf; returns its receipt id. */

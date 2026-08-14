@@ -598,6 +598,7 @@ function jw_posted_lines(array $post, string $prefix): array
             // code — and never goes to a kaligad.
             'source' => (string) ($post[$prefix . '_source'][$index] ?? 'workshop'),
             'stock_receipt_id' => (int) ($post[$prefix . '_stock_receipt_id'][$index] ?? 0),
+            'stock_unit_id' => (int) ($post[$prefix . '_stock_unit_id'][$index] ?? 0),
             // The measurement THIS piece is made to — ring size, chain length,
             // bangle diameter. Free text, because sizes are written a dozen ways.
             'size' => (string) ($post[$prefix . '_size'][$index] ?? ''),

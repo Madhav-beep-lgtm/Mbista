@@ -9,6 +9,7 @@ declare(strict_types=1);
  */
 
 require __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/fixed_asset_engine.php';
 require __DIR__ . '/../app/reports_engine.php';
 
 $pass = 0; $fail = 0;
