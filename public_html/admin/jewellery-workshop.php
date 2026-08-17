@@ -497,7 +497,7 @@ if ($view === 'orders') {
     foreach ($items as $itemRow) {
         $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
     }
-    $orderStockPieces = jewellery_trace_ready_to_sale_options($companyId, (int) ($editOrder['id'] ?? 0));
+    $orderStockPieces = jewellery_ready_to_sale_options($companyId, (int) ($editOrder['id'] ?? 0));
 }
 $cashBankLedgers = [];
 if ($view === 'orders' && table_exists('ledgers')) {
