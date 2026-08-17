@@ -418,7 +418,9 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                 <select name="<?= $prefix ?>_stock_unit_id[]" class="jw-stock-pick"
                                         title="Choose: Showroom stock (ready items) or New assignment (for kaligadh)">
                                     <option value="0">— New assignment —</option>
-                                    <optgroup label="Showroom stock (exact weight available)">
+                                    <?php if (!empty($stockPieces)): ?>
+                                        <option value="0" disabled>─ Showroom stock (exact weight available) ─</option>
+                                    <?php endif; ?>
                                     <?php foreach ($stockPieces as $piece): ?>
                                         <?php
                                             $pieceId = (int) ($piece['id'] ?? 0);
@@ -428,7 +430,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                             $pieceName = trim((string) ($piece['item_name'] ?? ''));
                                             $traceCode = trim((string) ($piece['trace_code'] ?? ''));
                                             $qtyAvailable = (int) ($piece['qty_pieces'] ?? 1);
-                                            $pieceLabel = ($traceCode !== '' ? $traceCode : 'Stock #' . $pieceId)
+                                            $pieceLabel = '  ' . ($traceCode !== '' ? $traceCode : 'Stock #' . $pieceId)
                                                 . ' | ' . ($pieceName !== '' ? $pieceName : (string) ($piece['item_code'] ?? 'Item'))
                                                 . ' | ' . $fmt((float) ($piece['gross_weight'] ?? 0), 4)
                                                 . ' ' . (string) ($piece['unit_code'] ?? '')
@@ -447,7 +449,6 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                                 title="<?= e($pieceLabel) ?>"
                                                 <?= (int) ($row['stock_unit_id'] ?? 0) === $pieceId ? 'selected' : '' ?>><?= e($pieceLabel) ?></option>
                                     <?php endforeach; ?>
-                                    </optgroup>
                                 </select>
                             </td>
                         <?php endif; ?>
