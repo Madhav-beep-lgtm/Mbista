@@ -914,7 +914,18 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         // anything it could not stand behind.
         $fromStock = (string) ($lineRow['source'] ?? 'workshop') === 'stock';
         $lineSources[$index] = $fromStock ? 'stock' : 'workshop';
-        $lineStockReceipts[$index] = $fromStock ? (int) $lineRow['stock_receipt_id'] : null;
+        if ($fromStock) {
+            $receiptId = (int) ($lineRow['stock_receipt_id'] ?? 0);
+            if ($receiptId > 0) {
+                $receiptStmt = db()->prepare('SELECT id FROM jewellery_order_receipts WHERE id = :id AND company_id = :cid LIMIT 1');
+                $receiptStmt->execute(['id' => $receiptId, 'cid' => $companyId]);
+                $lineStockReceipts[$index] = $receiptStmt->fetchColumn() ? $receiptId : null;
+            } else {
+                $lineStockReceipts[$index] = null;
+            }
+        } else {
+            $lineStockReceipts[$index] = null;
+        }
         $lineStockUnits[$index] = (int) ($lines[$index]['stock_unit_id'] ?? 0) ?: null;
 
         $lineKarigarId = (int) ($lineRow['karigar_id'] ?? 0);
