@@ -416,8 +416,9 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                       // engine reads them off the piece again on save, so
                                       // what is shown and what is stored cannot drift. ?>
                                 <select name="<?= $prefix ?>_stock_unit_id[]" class="jw-stock-pick"
-                                        title="Choose an exact finished piece from showroom stock">
-                                    <option value="0">&mdash; to be made &mdash;</option>
+                                        title="Choose: Showroom stock (ready items) or New assignment (for kaligadh)">
+                                    <option value="0">— New assignment —</option>
+                                    <optgroup label="Showroom stock (exact weight available)">
                                     <?php foreach ($stockPieces as $piece): ?>
                                         <?php
                                             $pieceId = (int) ($piece['id'] ?? 0);
@@ -444,6 +445,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                                 title="<?= e($pieceLabel) ?>"
                                                 <?= (int) ($row['stock_unit_id'] ?? 0) === $pieceId ? 'selected' : '' ?>><?= e($pieceLabel) ?></option>
                                     <?php endforeach; ?>
+                                    </optgroup>
                                 </select>
                             </td>
                         <?php endif; ?>
