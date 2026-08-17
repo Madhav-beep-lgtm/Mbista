@@ -895,7 +895,7 @@ function jewellery_ready_to_sale(int $companyId, array $filters = []): array
             k.code AS karigar_code, k.name AS karigar_name,
             r.id AS receipt_id, r.receipt_no, r.receive_date, r.received_gross_weight,
             r.stone_weight, r.net_gold_weight, r.received_fine_weight, r.making_amount,
-            r.net_payable, r.status AS receipt_status, r.qty_pieces,
+            r.net_payable, r.status AS receipt_status, r.qty_pieces, r.trace_code,
             r.received_item_id, r.received_purity_id, r.unit_id,
             i.sku AS item_code, i.name AS item_name,
             p.code AS purity_code, p.fineness, u.code AS unit_code,
