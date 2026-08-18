@@ -2663,6 +2663,18 @@ function accounting_module_repair_database(): array
                 '`sales_person` VARCHAR(120) DEFAULT NULL AFTER `customer_name`');
         }
 
+        // Who took the order across the counter. Two columns on purpose: the
+        // id when the person is on the payroll, and the plain name when they
+        // are not — a shop that has not filled in its employee list yet still
+        // needs to record who served the customer, and a name typed before an
+        // employee record existed must not be lost when one is created later.
+        if (accounting_repair_table_exists('jewellery_orders')) {
+            accounting_repair_add_column('jewellery_orders', 'sales_employee_id',
+                '`sales_employee_id` INT UNSIGNED DEFAULT NULL AFTER `customer_phone`');
+            accounting_repair_add_column('jewellery_orders', 'sales_person',
+                '`sales_person` VARCHAR(120) DEFAULT NULL AFTER `sales_employee_id`');
+        }
+
         // Diamonds and stones are taxed alike, so they need one base to be
         // charged on. Widening an ENUM keeps every existing value.
         if (accounting_repair_table_exists('jewellery_taxes')) {

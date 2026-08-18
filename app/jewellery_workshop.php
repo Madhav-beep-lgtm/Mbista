@@ -989,6 +989,21 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
             ? $latestLineDate : $headerDelivery;
     }
 
+    // An employee chosen from the list wins the name; anything typed is kept
+    // only when no employee was picked, so the two can never disagree.
+    $salesEmployeeId = (int) ($input['sales_employee_id'] ?? 0);
+    $salesPersonName = mb_substr(trim((string) ($input['sales_person'] ?? '')), 0, 120);
+    if ($salesEmployeeId > 0) {
+        $employeeStmt = db()->prepare('SELECT full_name, employee_code FROM payroll_employees
+            WHERE id = :id AND company_id = :cid LIMIT 1');
+        $employeeStmt->execute(['id' => $salesEmployeeId, 'cid' => $companyId]);
+        $employee = $employeeStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        if (!$employee) {
+            throw new RuntimeException('The employee who took this order is not on this company\'s employee list.');
+        }
+        $salesPersonName = mb_substr(trim((string) ($employee['full_name'] ?? '')) ?: (string) $employee['employee_code'], 0, 120);
+    }
+
     $totals = $computed['totals'];
     // The full vocabulary, or a re-save of a partially_received order would
     // fall off the end of the whitelist and quietly become a draft again.
@@ -1006,6 +1021,12 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
         'delivery' => $headerDelivery,
         'party' => $partyId, 'cname' => $customerName ?: null,
         'cphone' => trim((string) ($input['customer_phone'] ?? '')) ?: null,
+        // Who took the order. The id when the person is on the payroll, the
+        // typed name when they are not — and when an employee IS chosen their
+        // name is stored alongside, so the order still reads correctly on a
+        // slip printed after that employee record is renamed or removed.
+        'semp' => $salesEmployeeId ?: null,
+        'sperson' => $salesPersonName ?: null,
         'item' => $firstItemId ?: null, 'metal' => $metalId, 'purity' => $purityId, 'unit' => $unitId,
         'gross' => jw_round_weight($grossTotal), 'fine' => jw_round_weight($fineTotal),
         'design' => trim((string) ($input['design_no'] ?? '')) ?: null,
@@ -1074,7 +1095,9 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                 }
             }
             db()->prepare('UPDATE jewellery_orders SET order_no = :no, order_date = :date, delivery_date = :delivery, party_id = :party,
-                    customer_name = :cname, customer_phone = :cphone, item_id = :item, metal_id = :metal, purity_id = :purity,
+                    customer_name = :cname, customer_phone = :cphone,
+                    sales_employee_id = :semp, sales_person = :sperson,
+                    item_id = :item, metal_id = :metal, purity_id = :purity,
                     unit_id = :unit, expected_gross_weight = :gross, expected_fine_weight = :fine, design_no = :design,
                     expected_item = :expected,
                     description = :description, making_basis = :basis, making_rate = :rate, advance_amount = :advance,
@@ -1155,12 +1178,14 @@ function jewellery_save_order(int $companyId, int $fiscalYearId, array $input, a
                 throw new RuntimeException('Order number ' . $no . ' is already taken — leave the field blank to number it automatically.');
             }
             db()->prepare('INSERT INTO jewellery_orders (company_id, fiscal_year_id, order_no, order_date, delivery_date, party_id,
-                    customer_name, customer_phone, item_id, metal_id, purity_id, unit_id, expected_gross_weight, expected_fine_weight,
+                    customer_name, customer_phone, sales_employee_id, sales_person,
+                    item_id, metal_id, purity_id, unit_id, expected_gross_weight, expected_fine_weight,
                     design_no, expected_item, description, making_basis, making_rate, advance_amount, status, notes,
                     metal_amount, wastage_amount, making_amount, stone_amount, diamond_amount, other_charges, discount,
                     taxable_amount, non_taxable_amount, sd_taxable_amount, vatable_amount, vat_amount, tax_amount,
                     manual_tax_amount, total_amount, created_by)
-                VALUES (:cid, :fy, :no, :date, :delivery, :party, :cname, :cphone, :item, :metal, :purity, :unit, :gross, :fine,
+                VALUES (:cid, :fy, :no, :date, :delivery, :party, :cname, :cphone, :semp, :sperson,
+                    :item, :metal, :purity, :unit, :gross, :fine,
                     :design, :expected, :description, :basis, :rate, :advance, :status, :notes,
                     :metalamt, :wastageamt, :makingamt, :stoneamt, :diamondamt, :other, :discount,
                     :taxable, :nontax, :sdtaxable, :vatable, :vat, :tax, :mtax, :total, :by)')

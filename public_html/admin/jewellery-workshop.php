@@ -168,6 +168,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'party_id' => (int) ($_POST['party_id'] ?? 0),
                 'customer_name' => (string) ($_POST['customer_name'] ?? ''),
                 'customer_phone' => (string) ($_POST['customer_phone'] ?? ''),
+                'sales_employee_id' => (int) ($_POST['sales_employee_id'] ?? 0),
+                'sales_person' => (string) ($_POST['sales_person'] ?? ''),
                 'item_id' => (int) ($_POST['item_id'] ?? 0),
                 'metal_id' => (int) ($_POST['metal_id'] ?? 0),
                 'purity_id' => (int) ($_POST['purity_id'] ?? 0),
@@ -414,6 +416,16 @@ $units = jewellery_units_list($companyId);
 $metals = jewellery_metals_list($companyId);
 $purities = jewellery_purities_list($companyId);
 $baseUnit = jewellery_base_unit($companyId);
+// Who is on the counter. Employees come from Payroll, which a shop may not
+// have filled in yet — hence the typed fallback beside the list on the form.
+$orderEmployees = [];
+if (table_exists('payroll_employees')) {
+    $employeeStmt = db()->prepare("SELECT id, employee_code, full_name FROM payroll_employees
+        WHERE company_id = :cid AND status = 'active'
+        ORDER BY COALESCE(NULLIF(full_name, ''), employee_code) ASC");
+    $employeeStmt->execute(['cid' => $companyId]);
+    $orderEmployees = $employeeStmt->fetchAll(PDO::FETCH_ASSOC);
+}
 $karigars = jewellery_karigars_list($companyId);
 $activeKarigars = array_values(array_filter($karigars, static fn (array $k): bool => (string) $k['status'] === 'active'));
 
@@ -756,6 +768,49 @@ jw_filter_bar_styles();
                 </label>
                 <label hidden style="display:none !important">Customer name<input type="text" name="customer_name" data-jw-customer-name maxlength="190" value="<?= e((string) $orderField('customer_name')) ?>" placeholder="Creates the customer and their ledger"></label>
                 <label>Phone<input type="text" name="customer_phone" maxlength="60" value="<?= e((string) $orderField('customer_phone')) ?>"></label>
+                <?php // Order taken by. The list is the payroll employees; the box
+                      // beside it is for whoever is not on that list yet, so the
+                      // counter is never stopped by an employee record that has
+                      // not been created. Choosing from the list wins.
+                      $takenById = (int) $orderField('sales_employee_id', 0);
+                      $takenByName = (string) $orderField('sales_person', ''); ?>
+                <label>Order taken by
+                    <select name="sales_employee_id" id="jw-order-taker">
+                        <option value="0"><?= $orderEmployees ? '— not on the list —' : '— no employees on file —' ?></option>
+                        <?php foreach ($orderEmployees as $employeeRow): ?>
+                            <?php $employeeLabel = trim((string) ($employeeRow['full_name'] ?? '')) ?: (string) $employeeRow['employee_code']; ?>
+                            <option value="<?= (int) $employeeRow['id'] ?>" <?= $takenById === (int) $employeeRow['id'] ? 'selected' : '' ?>><?= e($employeeLabel) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>… or type the name
+                    <input type="text" name="sales_person" id="jw-order-taker-name" maxlength="120"
+                            placeholder="who served the customer"
+                            value="<?= e($takenById > 0 ? '' : $takenByName) ?>"
+                            <?= $takenById > 0 ? 'disabled' : '' ?>>
+                </label>
+                <script>
+                (function () {
+                    // One answer, not two. Picking an employee greys the typed box
+                    // out so an order cannot carry a name that disagrees with the
+                    // employee it is filed against.
+                    var picker = document.getElementById('jw-order-taker');
+                    var typed = document.getElementById('jw-order-taker-name');
+                    if (!picker || !typed) { return; }
+                    function sync() {
+                        var chosen = parseInt(picker.value, 10) > 0;
+                        typed.disabled = chosen;
+                        if (chosen) {
+                            typed.value = '';
+                            typed.placeholder = picker.options[picker.selectedIndex].textContent.trim();
+                        } else {
+                            typed.placeholder = 'who served the customer';
+                        }
+                    }
+                    picker.addEventListener('change', sync);
+                    sync();
+                })();
+                </script>
                 <label>Address<input type="text" name="customer_address" maxlength="255"></label>
                 <?php // The reference is usually minted by the engine (JO-2083-000001);
                       // typing one keeps a shop's own numbering. Uniqueness is enforced
