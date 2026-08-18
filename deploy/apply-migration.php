@@ -217,17 +217,49 @@ if (!is_file($path)) {
     $fail('no such migration: ' . $name . ' (run with --list to see what is available)', 2);
 }
 
-fwrite(STDOUT, 'apply-migration: applying ' . $name . " ... ");
+fwrite(STDOUT, 'apply-migration: applying ' . $name . ": ");
 
-try {
-    $pdo->exec((string) file_get_contents($path));
-    $pdo->prepare('INSERT IGNORE INTO migrations (migration_file) VALUES (?)')->execute([$name]);
-    fwrite(STDOUT, "OK\n");
-    if (isset($recorded[$name])) {
-        fwrite(STDOUT, "(already recorded; re-running was harmless because this migration is written to be)\n");
+// One statement at a time, NOT one exec() of the whole file. PDO::exec() with
+// several statements in it can run the first and quietly drop the rest depending
+// on the driver and server, which leaves a migration half applied and a schema
+// that looks fine in the ledger while the application falls over on the columns
+// that never arrived. Statement by statement, a failure names the statement that
+// failed and everything before it stands.
+$sql = (string) file_get_contents($path);
+// Strip comments before splitting, so a semicolon inside one cannot cut a
+// statement in half.
+$sql = preg_replace('/^\s*--.*$/m', '', $sql) ?? $sql;
+$statements = [];
+foreach (explode(';', $sql) as $fragment) {
+    $fragment = trim($fragment);
+    if ($fragment !== '') {
+        $statements[] = $fragment;
     }
-    exit(0);
-} catch (Throwable $e) {
-    fwrite(STDOUT, "FAILED\n");
-    $fail('nothing was recorded: ' . $e->getMessage(), 1);
 }
+if ($statements === []) {
+    fwrite(STDOUT, "SKIPPED\n");
+    $fail('that file contains no SQL statement.', 2);
+}
+
+fwrite(STDOUT, count($statements) . " statement(s)\n");
+$done = 0;
+foreach ($statements as $index => $statement) {
+    $label = '  [' . ($index + 1) . '/' . count($statements) . '] ' . preg_replace('/\s+/', ' ', substr($statement, 0, 68));
+    try {
+        $pdo->exec($statement);
+        fwrite(STDOUT, $label . " ... ok\n");
+        $done++;
+    } catch (Throwable $e) {
+        fwrite(STDOUT, $label . " ... FAILED\n");
+        fwrite(STDERR, 'apply-migration: statement ' . ($index + 1) . ' failed: ' . $e->getMessage() . "\n");
+        fwrite(STDERR, 'apply-migration: ' . $done . ' statement(s) before it did apply; nothing was recorded.' . "\n");
+        exit(1);
+    }
+}
+
+$pdo->prepare('INSERT IGNORE INTO migrations (migration_file) VALUES (?)')->execute([$name]);
+fwrite(STDOUT, 'apply-migration: all ' . $done . " statement(s) applied and recorded.\n");
+if (isset($recorded[$name])) {
+    fwrite(STDOUT, "(it was already recorded; re-running was harmless because this migration is written to be)\n");
+}
+exit(0);
