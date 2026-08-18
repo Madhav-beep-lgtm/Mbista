@@ -389,7 +389,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                             </select>
                         </td>
                     <?php endif; ?>
-                    <td data-label="Item">
+                    <td data-label="Item" style="display:flex;gap:4px;align-items:center">
                         <?php
                             // Which stored line this row IS. Position is not
                             // identity — two rows can hold the same item, and
@@ -399,7 +399,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                             // table by every browser, and would then post out of
                             // step with the rest of the row.
                         ?>
-                        <select name="<?= $prefix ?>_item_id[]" class="c-item">
+                        <select name="<?= $prefix ?>_item_id[]" class="c-item" style="flex:1;min-width:0">
                             <option value="0">—</option>
                             <?php foreach ($items as $it): ?>
                                 <?php
@@ -417,6 +417,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                 <option value="<?= (int) $it['id'] ?>" data-type="<?= e((string) ($it['item_type'] ?? '')) ?>" title="<?= e($it['code'] . ' — ' . $it['name'] . $left) ?>" <?= (int) ($row['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name'] . $left) ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <button type="button" class="jw-add-item-btn" data-row-index="<?= $i ?>" style="padding:4px 8px;background:#0066cc;color:white;border:none;border-radius:3px;cursor:pointer;font-size:12px;white-space:nowrap;flex-shrink:0">+ Add</button>
                     </td>
                     <td data-label="Purity">
                         <?php // data-fineness lets the summary rail turn net weight into the
@@ -876,35 +877,21 @@ function jw_line_grid_scripts(): void
         if (e.target === itemModal) { closeModal(); }
     });
 
-    // Handle ITEM field in kaligadh mode - use mousedown to intercept before native dropdown opens
-    document.addEventListener("mousedown", function(event) {
-        var itemSelect = event.target.closest("select[name$='_item_id[]']");
-        if (!itemSelect) {
-            console.log("[Modal] Click not on ITEM field");
-            return;
-        }
-        console.log("[Modal] Clicked ITEM field");
+    // Handle "+ Add item" button click
+    document.addEventListener("click", function(event) {
+        var addBtn = event.target.closest(".jw-add-item-btn");
+        if (!addBtn) { return; }
 
-        var row = itemSelect.closest("tr");
-        if (!row) {
-            console.log("[Modal] No row found");
-            return;
-        }
-
-        // Only open modal if in kaligadh mode (stock picker is empty/0)
-        var stockPicker = row.querySelector("select[name$='_stock_unit_id[]']");
-        console.log("[Modal] Stock picker value:", stockPicker ? stockPicker.value : "not found");
-
-        if (stockPicker && parseInt(stockPicker.value || "0", 10) > 0) {
-            // Showroom stock mode - allow normal dropdown
-            console.log("[Modal] Showroom mode - allowing normal dropdown");
-            return;
-        }
-
-        // In kaligadh mode - prevent default dropdown and open modal instead
-        console.log("[Modal] Opening modal for kaligadh");
         event.preventDefault();
         event.stopPropagation();
+
+        var row = addBtn.closest("tr");
+        if (!row) { return; }
+
+        var itemSelect = row.querySelector("select[name$='_item_id[]']");
+        if (!itemSelect) { return; }
+
+        console.log("[Modal] Add item button clicked");
         openModal(itemSelect);
     });
 
