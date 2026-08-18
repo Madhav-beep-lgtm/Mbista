@@ -117,6 +117,20 @@ table.jw-lines td.c-del button:hover { background: var(--mbw-red-soft, #fdeaea);
    hint shoved its input up a few pixels, and a plain field sat flush on the
    floor — three different heights across one row. Top-aligned, the hint has
    nothing to shove: it simply occupies the spare depth of the row. */
+/* A shelf piece that does not weigh what the line asked for says so under the
+   Gross box. Warning colours, not error colours: selling a heavier piece than
+   the customer first described is ordinary, and the counter is being told, not
+   stopped. */
+.jw-weight-gap {
+    margin-top: 3px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--mbw-warn-ink, #8a5a00);
+    background: var(--mbw-warn-soft, #fff6e0);
+    border-left: 2px solid var(--mbw-warn, #d79a00);
+    padding: 2px 5px;
+    border-radius: 3px;
+}
 .workspace-form-grid > label {
     display: flex;
     flex-direction: column;
@@ -804,6 +818,7 @@ function jw_line_grid_scripts(array $ctx = []): void
             field.value = field.type === "number" ? "0" : "";
         });
         setFieldShown(row.querySelector(".jw-stock-pick"), false);
+        clearWeightGap(row);
         // A blanked row is a kaligad row again, so the item box comes back.
         var manualItem = row.querySelector(".jw-item-manual");
         if (manualItem) { manualItem.style.display = "flex"; }
@@ -855,6 +870,9 @@ function jw_line_grid_scripts(array $ctx = []): void
             var field = rowField(row, suffix);
             if (field) { field.value = "0"; }
         });
+        // The piece has been handed back, so there is no longer a gap between
+        // it and anything.
+        clearWeightGap(row);
     }
 
     // Every field in a row is named <prefix>_<what>[], so the prefix is read off
@@ -882,6 +900,39 @@ function jw_line_grid_scripts(array $ctx = []): void
         return prefix
             ? row.querySelector('[name="' + prefix + suffix + '"]')
             : row.querySelector('[name$="' + suffix + '"]');
+    }
+
+    // How far a shelf piece may sit from the weight that was asked for before
+    // it is worth mentioning: half a percent, and never under 0.01 of the
+    // line's unit, so the fourth decimal place cannot raise a warning about
+    // nothing.
+    function weightGapTolerance(asked) {
+        return Math.max(asked * 0.005, 0.01);
+    }
+
+    function clearWeightGap(row) {
+        var shown = row.querySelector(".jw-weight-gap");
+        if (shown) { shown.parentNode.removeChild(shown); }
+    }
+
+    // Advisory, never a block. A counter may sell a heavier piece than the one
+    // the customer first described, and often does; what it must not do is
+    // happen silently, because the asked-for figure is overwritten and locked
+    // the moment the piece is chosen.
+    function noteWeightGap(row, asked, actual) {
+        clearWeightGap(row);
+        if (!(asked > 0) || !(actual > 0)) { return; }
+        var gap = actual - asked;
+        if (Math.abs(gap) <= weightGapTolerance(asked)) { return; }
+        var field = rowField(row, "_gross_weight[]");
+        var cell = field && field.parentNode;
+        if (!cell) { return; }
+        var note = document.createElement("div");
+        note.className = "jw-weight-gap";
+        note.textContent = "Asked " + asked.toFixed(4) + " — this piece is " +
+            actual.toFixed(4) + " (" + (gap > 0 ? "+" : "") + gap.toFixed(4) + ")";
+        note.title = "The piece coming off the shelf does not weigh what this line asked for.";
+        cell.appendChild(note);
     }
 
     function claimRow(row, option) {
@@ -931,11 +982,19 @@ function jw_line_grid_scripts(array $ctx = []): void
         // NOTE: PCS is always editable (customer may order different quantity)
         put("_qty_pieces[]", read("pcs")); // Auto-fill but NOT read-only
 
+        // Read before the piece's own measurements land on top of it: the
+        // field is filled and then locked, so the weight the order was written
+        // for leaves no trace once a piece is picked. A 10 gm ring quietly
+        // becoming the 45 gm bracelet that happened to be on the shelf is the
+        // mismatch this catches.
+        var askedGross = parseFloat((rowField(row, "_gross_weight[]") || {}).value || "0") || 0;
+
         ["_gross_weight[]:gross", "_stone_weight[]:stone"].forEach(function (pair) {
             var parts = pair.split(":");
             var field = put(parts[0], read(parts[1]));
             if (field) { field.readOnly = true; field.title = "The piece's own weight, measured when it came back"; }
         });
+        noteWeightGap(row, askedGross, parseFloat(read("gross")) || 0);
         var making = row.querySelector('input[name$="_making_amount[]"]');
         if (making && parseFloat(making.value || "0") === 0) { making.value = read("making"); }
         var size = row.querySelector('input[name$="_size[]"]');
