@@ -123,6 +123,32 @@ rsync -a "${NEVER_PUBLISH[@]}" app/ "$APP_BASE/app/" \
 rsync -a "${NEVER_PUBLISH[@]}" database/ "$APP_BASE/database/" \
     || die "could not copy database/ into $APP_BASE/database/"
 
+# ---------------------------------------------------------------------------
+# Make PHP notice.
+# ---------------------------------------------------------------------------
+# rsync -a preserves each file's modification time, so a file can land with a
+# timestamp OLDER than the copy PHP already has compiled in its opcode cache.
+# OPcache decides whether to recompile by comparing exactly that timestamp, so
+# the new file sits on disk and the old bytecode keeps being served — the
+# repository is current, the files are current, and the site is not. It is the
+# same shape of failure the sentinel below was written for, one layer further
+# in, and it is invisible to every check that reads the files rather than
+# asking PHP what it is running.
+#
+# Restamping the deployed PHP to deploy time removes the ambiguity: every file
+# PHP is asked to compile is newer than anything it can have cached. Cheap, and
+# it cannot make anything worse — a timestamp is not content, and the sentinel
+# check still compares the bytes.
+#
+# It does NOT help a host running opcache.validate_timestamps=0, where PHP is
+# told never to look. That needs a PHP-FPM reload, which a shared account
+# cannot always do. The build stamp in the page head is how to tell the two
+# apart: served pages carrying the OLD build after a successful deploy mean
+# PHP is not re-reading the files at all.
+find "$DOCROOT" "$APP_BASE/app" "$APP_BASE/database" -name '*.php' -type f -exec touch {} + 2>/dev/null \
+    && echo "deploy: restamped deployed PHP so OPcache recompiles it" \
+    || echo "deploy: could not restamp PHP timestamps (continuing)"
+
 # Apply idempotent schema upgrades once per deployment. The repair function
 # deliberately does no work during web requests, so ordinary page loads never
 # pay for hundreds of information_schema checks. A failed upgrade stops the
