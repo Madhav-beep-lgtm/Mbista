@@ -573,7 +573,10 @@ function jw_line_grid_scripts(): void
         // The piece's own measurements, shown rather than asked for. The engine
         // reads them off the piece again on save, so a browser that got this
         // wrong cannot put one ring's weight on another ring's bill.
-        ["_qty_pieces[]:pcs", "_gross_weight[]:gross", "_stone_weight[]:stone"].forEach(function (pair) {
+        // NOTE: PCS is always editable (customer may order different quantity)
+        put("_qty_pieces[]:pcs", read("pcs")); // Auto-fill but NOT read-only
+
+        ["_gross_weight[]:gross", "_stone_weight[]:stone"].forEach(function (pair) {
             var parts = pair.split(":");
             var field = put(parts[0], read(parts[1]));
             if (field) { field.readOnly = true; field.title = "The piece's own weight, measured when it came back"; }
