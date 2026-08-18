@@ -2470,7 +2470,21 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                         <tbody>
                             <?php for ($i = 0; $i < 4; $i++): ?>
                                 <tr>
-                                    <td><select name="input_item_id[]"><option value="">Select input</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name'] . ' (on hand ' . number_format((float) $item['on_hand'], 3) . ')') ?></option><?php endforeach; ?></select></td>
+                                    <?php // Four rows once meant four copies of the whole item master.
+                                          // One list now, shared. See shared_options(). ?>
+<?php $invItemOptions = static function () use ($items): string {
+    $html = '';
+    foreach ($items as $item) {
+        if ($item['status'] !== 'active') { continue; }
+        $html .= '<option value="' . (int) $item['id'] . '">'
+            . e($item['sku'] . ' - ' . $item['name'] . ' (on hand ' . number_format((float) $item['on_hand'], 3) . ')')
+            . '</option>';
+    }
+
+    return $html;
+}; ?>
+                                    <?php $inputOpts = shared_options('inv-input-items', $invItemOptions); ?>
+                                    <td><select name="input_item_id[]"<?= $inputOpts['fill'] ? ' data-fill-from="inv-input-items"' : '' ?>><option value="">Select input</option><?= $inputOpts['html'] ?></select></td>
                                     <td class="is-numeric"><input type="number" step="0.001" min="0" name="input_quantity[]"></td>
                                     <td class="is-numeric"><input type="number" step="0.01" min="0" name="input_rate[]" placeholder="Auto: purchase rate"></td>
                                     <td><button type="button" class="button secondary" style="min-height:32px;padding:3px 10px;color:var(--mbw-red, #a33)" title="Remove this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value='';});this.closest('tr').querySelector('select').selectedIndex=0;}"><?= icon('close') ?></button></td>
@@ -2505,7 +2519,8 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                         <tbody>
                             <?php for ($i = 0; $i < 4; $i++): ?>
                                 <tr>
-                                    <td><select name="bom_item_id[]"><option value="">Select component</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></td>
+                                    <?php $bomOpts = shared_options('inv-bom-items', $invItemOptions); ?>
+                                    <td><select name="bom_item_id[]"<?= $bomOpts['fill'] ? ' data-fill-from="inv-bom-items"' : '' ?>><option value="">Select component</option><?= $bomOpts['html'] ?></select></td>
                                     <td class="is-numeric"><input type="number" step="0.0001" min="0" name="bom_qty[]"></td>
                                     <td class="is-numeric"><input type="number" step="0.001" min="0" name="bom_waste[]" value="0"></td>
                                     <td class="is-numeric"><input type="number" step="0.000001" min="0" name="bom_rate[]" placeholder="Auto: purchase rate"></td>
@@ -2774,4 +2789,14 @@ document.addEventListener('DOMContentLoaded', function () {
     activateWorkspace(initialTarget, false);
 });
 </script>
+<?php // Before the footer on purpose: the footer loads searchable-select.js,
+      // which decides whether to take a dropdown over by counting its options.
+      // It has to find the real list here, not the stub. ?>
+<?php // Guarded: these grids are only drawn on the views that build recipes,
+      // and the builder is defined with them. ?>
+<?php if (isset($invItemOptions)): ?>
+<?= shared_options_template('inv-input-items', $invItemOptions) ?>
+<?= shared_options_template('inv-bom-items', $invItemOptions) ?>
+<?= shared_options_script() ?>
+<?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

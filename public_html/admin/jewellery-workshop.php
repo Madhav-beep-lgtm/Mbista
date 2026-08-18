@@ -666,7 +666,17 @@ jw_filter_bar_styles();
         // Defined HERE, above the form, because the same grid now serves the
         // NEW order form (the advance is taken while the order is written,
         // not on a second visit) and the edit page's take/refund forms.
-        $tenderGrid = static function (string $goldWord) use ($cashBankLedgers, $items, $purities, $units, $editOrder, $sym): void { ?>
+        // Built at most once, however many times the grid below is drawn.
+        $tenderItemOptions = static function () use ($items): string {
+            $html = '';
+            foreach ($items as $it) {
+                $html .= '<option value="' . (int) $it['id'] . '" data-metal="' . (int) $it['metal_id'] . '">'
+                    . e($it['code'] . ' — ' . $it['name'] . ' · ' . $it['metal_name']) . '</option>';
+            }
+
+            return $html;
+        };
+        $tenderGrid = static function (string $goldWord) use ($cashBankLedgers, $items, $purities, $units, $editOrder, $sym, $tenderItemOptions): void { ?>
             <fieldset class="jw-lines-box" style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:10px;margin:6px 0;min-width:0;grid-column:1/-1">
                 <legend style="padding:0 6px;font-weight:600">How it is paid — several ways at once is fine</legend>
                 <div class="jw-lines-scroll"><table class="jw-lines">
@@ -706,11 +716,12 @@ jw_filter_bar_styles();
                             </td>
                             <td><input type="text" name="tender_reference[]" placeholder="chq / txn no." maxlength="60"></td>
                             <td>
-                                <select name="tender_item_id[]" class="jw-tender-item">
+                                <?php // This grid is drawn three times on the page. One list,
+                                      // shared between them. See shared_options(). ?>
+                                <?php $tenderOpts = shared_options('jw-tender-items', $tenderItemOptions); ?>
+                                <select name="tender_item_id[]" class="jw-tender-item"<?= $tenderOpts['fill'] ? ' data-fill-from="jw-tender-items"' : '' ?>>
                                     <option value="0" data-metal="0">— money, not metal —</option>
-                                    <?php foreach ($items as $it): ?>
-                                        <option value="<?= (int) $it['id'] ?>" data-metal="<?= (int) $it['metal_id'] ?>"><?= e($it['code'] . ' — ' . $it['name'] . ' · ' . $it['metal_name']) ?></option>
-                                    <?php endforeach; ?>
+                                    <?= $tenderOpts['html'] ?>
                                 </select>
                             </td>
                             <td>
@@ -1861,5 +1872,14 @@ jw_filter_bar_styles();
 // The grid buttons: add a row, remove a row.
 jw_line_grid_scripts(['metals' => $metals, 'purities' => $purities,
     'units' => $units, 'base_unit' => $baseUnit]);
-include __DIR__ . '/../../app/views/partials/admin_footer.php';
+?>
+<?php // Before the footer: it loads searchable-select.js, which counts a
+      // dropdown's options to decide whether to take it over, so it must find
+      // the real list rather than the stub. Guarded because the tender grid is
+      // only drawn on the views that take money. ?>
+<?php if (isset($tenderItemOptions)): ?>
+<?= shared_options_template('jw-tender-items', $tenderItemOptions) ?>
+<?= shared_options_script() ?>
+<?php endif; ?>
+<?php include __DIR__ . '/../../app/views/partials/admin_footer.php';
 ?>

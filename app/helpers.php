@@ -169,6 +169,121 @@ function e(mixed $value): string
  * Cheap enough to run on every request: four stat calls and four small hashes,
  * memoised for the process.
  */
+/**
+ * A long <option> list written once per page and shared by every select using it.
+ *
+ * A select carries its own options, and HTML gives no way to point two of them
+ * at one list. So a form with four component rows shipped the whole item master
+ * four times, and a page with two such grids shipped it eight. On a few hundred
+ * items nobody notices; on a few thousand it is most of the page.
+ *
+ * The first select using a list gets it inline, so the form still works when no
+ * script runs. Every later one is sent holding just the option it already has
+ * selected, marked with data-fill-from; shared_options_script() copies the list
+ * into them from a <template>.
+ *
+ * $build is called at most once per list id per request.
+ */
+function shared_options(string $listId, callable $build, string $selectedValue = ''): array
+{
+    static $lists = [];
+    static $inlineUsed = [];
+
+    if (!array_key_exists($listId, $lists)) {
+        $lists[$listId] = (string) $build();
+    }
+    $options = $lists[$listId];
+
+    if (empty($inlineUsed[$listId])) {
+        $inlineUsed[$listId] = true;
+        if ($selectedValue !== '') {
+            $options = preg_replace(
+                '/<option value="' . preg_quote($selectedValue, '/') . '"/',
+                '<option selected value="' . $selectedValue . '"',
+                $options,
+                1
+            ) ?? $options;
+        }
+
+        return ['html' => $options, 'fill' => false];
+    }
+
+    // A stub: only what this select already holds, so the page reads correctly
+    // before the script runs.
+    shared_options_stub_issued($listId, true);
+    $stub = '';
+    if ($selectedValue !== '' && preg_match(
+        '/<option value="' . preg_quote($selectedValue, '/') . '".*?<\/option>/s',
+        $options,
+        $match
+    ) === 1) {
+        $stub = str_replace('<option ', '<option selected ', $match[0]);
+    }
+
+    return ['html' => $stub, 'fill' => true];
+}
+
+/** Whether any select asked to be filled from this list. */
+function shared_options_stub_issued(string $listId, bool $mark = false): bool
+{
+    static $issued = [];
+    if ($mark) {
+        $issued[$listId] = true;
+    }
+
+    return !empty($issued[$listId]);
+}
+
+/**
+ * The hidden copy the stubs are filled from. Emits once per list id, and only
+ * when something actually needs it — a page that uses a list once already has
+ * it inline, and a template there would put a second copy on the page to save
+ * nothing.
+ */
+function shared_options_template(string $listId, callable $build): string
+{
+    static $emitted = [];
+    if (isset($emitted[$listId]) || !shared_options_stub_issued($listId)) {
+        return '';
+    }
+    $emitted[$listId] = true;
+    $list = shared_options($listId . '__template__', $build);
+
+    return '<template id="' . e('opts-' . $listId) . '">' . $list['html'] . '</template>';
+}
+
+/** The one script that fills every stub on the page. Emits once. */
+function shared_options_script(): string
+{
+    static $emitted = false;
+    if ($emitted) {
+        return '';
+    }
+    $emitted = true;
+
+    return <<<'HTML'
+<script>
+(function () {
+    // Runs at parse time rather than on DOMContentLoaded: the searchable-select
+    // enhancer decides whether to take a dropdown over by counting its options,
+    // so it has to find the real list here and not the stub.
+    Array.prototype.forEach.call(document.querySelectorAll('select[data-fill-from]'), function (select) {
+        var template = document.getElementById('opts-' + select.getAttribute('data-fill-from'));
+        if (!template) { return; }
+        var chosen = select.value;
+        select.innerHTML = template.innerHTML;
+        // Only restore a value the list still offers, or a stale one would
+        // silently become whichever option happens to be first.
+        if (chosen && select.querySelector('option[value="' + chosen + '"]')) {
+            select.value = chosen;
+        }
+        select.removeAttribute('data-fill-from');
+    });
+})();
+</script>
+HTML;
+}
+
 function app_build_stamp(): string
 {
     static $stamp = null;
