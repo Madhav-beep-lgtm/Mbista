@@ -179,12 +179,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lifeMonths = max(0, (int) ($_POST['useful_life_months'] ?? 0));
         $availableDate = trim((string) ($_POST['available_for_use_date'] ?? '')) ?: null;
         // Three dates that are not the same fact: bought, entered, in use.
-        $faDate = static fn (string $key): ?string => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($_POST[$key] ?? ''))
-            ? (string) $_POST[$key]
-            : null;
+        $faDate = static function (string $key): ?string {
+            $raw = (string) ($_POST[$key] ?? '');
+            $parsed = DateTime::createFromFormat('!Y-m-d', $raw);
+
+            // Right shape, impossible day: 2026-02-31 would otherwise be stored
+            // and then read back by MySQL as a zero date.
+            return ($parsed && $parsed->format('Y-m-d') === $raw) ? $raw : null;
+        };
         $purchaseDate = $faDate('purchase_date');
         $postingDate = $faDate('posting_date') ?? date('Y-m-d');
         $purchaseRef = trim((string) ($_POST['purchase_ref'] ?? ''));
+        // Left null when nobody chose: an unassigned asset must not be quietly
+        // dropped into Pool A, where it would be written down at the wrong rate.
+        $taxPool = (string) ($_POST['tax_pool'] ?? '');
+        $taxPool = isset(fa_tax_pools()[$taxPool]) ? $taxPool : null;
         // VAT is entered as money and TDS as a rate, because that is how each
         // arrives: the VAT is printed on the supplier's bill, the TDS is a rate
         // the law sets. The rate is recomputed here rather than trusting a
@@ -207,13 +216,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->prepare('
                 INSERT INTO fixed_assets
                     (company_id, category_id, asset_code, name, asset_class, cost, residual_value, useful_life_months,
-                     depreciation_method, purchase_date, purchase_ref, available_for_use_date, depreciation_start_date,
+                     depreciation_method, tax_pool, purchase_date, purchase_ref, available_for_use_date, depreciation_start_date,
                      carrying_amount, status, created_by)
-                VALUES (:cid, :category_id, :code, :name, :class, :cost, :residual, :life, :method, :purchased, :ref, :avail, :dep_start, :cost2, :status, :uid)
+                VALUES (:cid, :category_id, :code, :name, :class, :cost, :residual, :life, :method, :tax_pool, :purchased, :ref, :avail, :dep_start, :cost2, :status, :uid)
             ')->execute([
                 'cid' => $companyId, 'category_id' => $categoryId > 0 ? $categoryId : null, 'code' => $code, 'name' => $name, 'class' => $class,
                 'cost' => $cost, 'residual' => $residual, 'life' => $lifeMonths, 'method' => $method,
-                'purchased' => $purchaseDate, 'ref' => $purchaseRef !== '' ? $purchaseRef : null,
+                'tax_pool' => $taxPool, 'purchased' => $purchaseDate, 'ref' => $purchaseRef !== '' ? $purchaseRef : null,
                 'avail' => $availableDate, 'dep_start' => $availableDate, 'cost2' => $cost,
                 'status' => $availableDate ? 'active' : 'draft', 'uid' => $userId,
             ]);
@@ -947,8 +956,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($vid <= 0) {
                 throw new RuntimeException('The disposal voucher could not be posted — the asset was NOT derecognized.');
             }
-            db()->prepare('UPDATE fixed_assets SET status = \'disposed\', disposed_on = :d, carrying_amount = 0 WHERE id = :id AND company_id = :cid')
-                ->execute(['d' => date('Y-m-d'), 'id' => (int) $asset['id'], 'cid' => $companyId]);
+            // What the sale fetched, and what it gained or lost, were worked out
+            // above and then thrown away: only the voucher kept them, spread over
+            // legs whose ledgers differ per company. The register has to state the
+            // gain on a disposal without re-deriving it from entries it cannot
+            // reliably identify, so both are kept on the asset itself.
+            db()->prepare('UPDATE fixed_assets SET status = \'disposed\', disposed_on = :d, carrying_amount = 0, disposal_proceeds = :proceeds, disposal_gain_loss = :gain WHERE id = :id AND company_id = :cid')
+                ->execute(['d' => date('Y-m-d'), 'proceeds' => $proceeds, 'gain' => $gainLoss, 'id' => (int) $asset['id'], 'cid' => $companyId]);
             db()->commit();
             security_event('asset_disposed', 'success', 'Asset #' . (int) $asset['id'] . ' disposed.', $companyId, $userId);
             log_activity('fixed_asset', (int) $asset['id'], 'disposed', 'Asset disposed (' . ($gainLoss >= 0 ? 'gain' : 'loss') . ' ' . number_format(abs($gainLoss), 2) . ').', $userId);
@@ -2998,6 +3012,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <option value="<?= e((int) $c['id']) ?>"><?= e($c['name']) ?></option>
                 <?php endforeach; ?>
             </select></label>
+            <?php // Tax pools the asset; accounting depreciates the asset itself.
+                  // The gap between the two is what deferred tax is computed on,
+                  // and nothing can be reported by pool unless it is recorded here. ?>
+            <label>Tax pool (Income Tax Act)<select name="tax_pool">
+                <option value="">— not assigned —</option>
+                <?php foreach (fa_tax_pools() as $poolKey => $poolLabel): ?>
+                    <option value="<?= e($poolKey) ?>"><?= e($poolLabel) ?></option>
+                <?php endforeach; ?>
+            </select></label>
             <label>Depreciation method<select name="depreciation_method"><?php foreach ($methods as $k => $v): ?><option value="<?= e($k) ?>"><?= e($v) ?></option><?php endforeach; ?></select></label>
             <label>Cost<input type="number" step="0.01" name="cost" value="0.00" required></label>
             <label>Residual value<input type="number" step="0.01" name="residual_value" value="0.00"></label>
@@ -3148,47 +3171,182 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
     </section>
 
+    <?php
+    // The register as a movement schedule: what was held at the start of the
+    // window, what came in, what went out, and what is left - for cost, for
+    // accumulated depreciation, for accumulated impairment, and for the
+    // carrying amount that falls out of them. A balance as it stands today
+    // cannot answer "what did we buy this year", which is the question the
+    // register is actually asked.
+    // The shape of a date is not the same as being one: 2027-99-99 matches
+    // any \d{4}-\d{2}-\d{2} pattern and would silently return an empty
+    // register instead of saying the date was wrong.
+    $regDate = static function (mixed $raw, string $fallback): string {
+        $raw = (string) $raw;
+        $parsed = DateTime::createFromFormat('!Y-m-d', $raw);
+
+        return ($parsed && $parsed->format('Y-m-d') === $raw) ? $raw : $fallback;
+    };
+    $regFrom = $regDate($_GET['from'] ?? '', (string) ($fiscalYear['start_date'] ?? date('Y-01-01')));
+    $regTo = $regDate($_GET['to'] ?? '', (string) ($fiscalYear['end_date'] ?? date('Y-12-31')));
+    if ($regTo < $regFrom) {
+        [$regFrom, $regTo] = [$regTo, $regFrom];
+    }
+    $reportTypes = ['classwise' => 'Class wise', 'categorywise' => 'Category wise', 'namewise' => 'Name wise'];
+    $reportType = isset($reportTypes[(string) ($_GET['report_type'] ?? '')]) ? (string) $_GET['report_type'] : 'classwise';
+    $poolFilter = isset(fa_tax_pools()[(string) ($_GET['pool'] ?? '')]) ? (string) $_GET['pool'] : '';
+    $categoryFilter = (int) ($_GET['category'] ?? 0);
+
+    $registerRows = fa_register_schedule($companyId, $regFrom, $regTo, [
+        'status' => $statusFilter,
+        'class' => $classFilter,
+        'tax_pool' => $poolFilter,
+        'category_id' => $categoryFilter,
+    ]);
+    $registerGroups = fa_register_group($registerRows, $reportType, $assetClasses);
+    $registerTotals = fa_register_totals($registerRows);
+    $poolLabels = fa_tax_pools();
+    // 20 money columns plus 8 identity columns; the money is what needs the
+    // width, so the table scrolls sideways rather than crushing every figure.
+    $regColspan = 28;
+    $money = static fn (float $n): string => $n == 0.0 ? '—' : number_format($n, 2);
+    ?>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Asset Register</h2>
-            <div class="mbw-card-tools">
-                <form method="get" style="display:flex;gap:8px;align-items:center">
-                    <input type="hidden" name="view" value="register">
-                    <select name="status" onchange="this.form.submit()">
-                        <option value="">All statuses</option>
-                        <?php foreach ($assetStatuses as $k => $v): ?>
-                            <option value="<?= e($k) ?>" <?= $statusFilter === $k ? 'selected' : '' ?>><?= e($v) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <select name="class" onchange="this.form.submit()">
-                        <option value="">All classes</option>
-                        <?php foreach ($assetClasses as $k => $v): ?>
-                            <option value="<?= e($k) ?>" <?= $classFilter === $k ? 'selected' : '' ?>><?= e($v) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </form>
-            </div>
+            <span class="frm-optional">Movement schedule for <?= e($regFrom) ?> to <?= e($regTo) ?> — opening is the position the instant before the start</span>
         </div>
-        <div class="rc-table-scroll"><table class="rc-table">
-            <thead><tr><th>Code</th><th>Name</th><th>Class</th><th>Model</th><th>Method</th><th class="align-right">Cost</th><th class="align-right">Accum. dep.</th><th class="align-right">Carrying</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-                <?php foreach ($assets as $a): ?>
-                    <tr>
-                        <td><?= e($a['asset_code']) ?></td>
-                        <td><?= e($a['name']) ?></td>
-                        <td><?= e($assetClasses[$a['asset_class']] ?? $a['asset_class']) ?></td>
-                        <?php $assetModel = $classMeasurementModels[(string) $a['asset_class']] ?? fa_class_measurement_model($companyId, (string) $a['asset_class']); ?>
-                        <td><span class="mbw-pill <?= (string) $assetModel['measurement_model'] === 'revaluation' ? 'tone-blue' : 'tone-gray' ?>"><?= e(fa_measurement_model_label($assetModel)) ?></span></td>
-                        <td><span class="mbw-pill tone-gray"><?= e(str_replace('_', ' ', (string) $a['depreciation_method'])) ?></span></td>
-                        <td class="align-right"><?= e(number_format((float) $a['cost'], 2)) ?></td>
-                        <td class="align-right"><?= e(number_format((float) $a['accumulated_depreciation'], 2)) ?></td>
-                        <td class="align-right"><?= e(number_format((float) $a['carrying_amount'], 2)) ?></td>
-                        <td><span class="mbw-pill <?= (string) $a['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', (string) $a['status'])) ?></span><?php if (in_array((int) $a['id'], $unpostedAcquisitionIds, true)): ?> <span class="mbw-pill tone-red" title="The acquisition voucher was never posted — open the asset and use Post acquisition to ledger">GL not posted</span><?php endif; ?></td>
-                        <td><div class="fa-row-actions"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=' . (int) $a['id'])) ?>">Open</a><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $a['id'])) ?>">Revalue</a><?php if (user_can('delete') && user_can_do('accounting', 'edit')): ?><form method="post" style="display:inline" onsubmit="return confirm('Permanently delete asset <?= e($a['asset_code']) ?> and every voucher it posted (acquisition, depreciation, impairment, disposal, lease)? Use Dispose for a real asset leaving the business — Delete is only for wrong entries and cannot be undone.')"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="delete_asset"><input type="hidden" name="asset_id" value="<?= (int) $a['id'] ?>"><button type="submit" class="button danger">Delete</button></form><?php endif; ?></div></td>
-                    </tr>
+        <form method="get" class="workspace-form-grid" style="padding:12px 0">
+            <input type="hidden" name="view" value="register">
+            <label>From<input type="date" name="from" value="<?= e($regFrom) ?>"></label>
+            <label>To<input type="date" name="to" value="<?= e($regTo) ?>"></label>
+            <label>Report type<select name="report_type">
+                <?php foreach ($reportTypes as $rtKey => $rtLabel): ?>
+                    <option value="<?= e($rtKey) ?>" <?= $reportType === $rtKey ? 'selected' : '' ?>><?= e($rtLabel) ?></option>
                 <?php endforeach; ?>
-                <?php if ($assets === []): ?><tr><td colspan="10" style="text-align:center;color:var(--mbw-muted)">No assets registered yet — add one above.</td></tr><?php endif; ?>
+            </select></label>
+            <label>Status<select name="status">
+                <option value="">All statuses</option>
+                <?php foreach ($assetStatuses as $k => $v): ?>
+                    <option value="<?= e($k) ?>" <?= $statusFilter === $k ? 'selected' : '' ?>><?= e($v) ?></option>
+                <?php endforeach; ?>
+            </select></label>
+            <label>Class<select name="class">
+                <option value="">All classes</option>
+                <?php foreach ($assetClasses as $k => $v): ?>
+                    <option value="<?= e($k) ?>" <?= $classFilter === $k ? 'selected' : '' ?>><?= e($v) ?></option>
+                <?php endforeach; ?>
+            </select></label>
+            <label>Category<select name="category">
+                <option value="0">All categories</option>
+                <?php foreach ($activeCategories as $c): ?>
+                    <option value="<?= e((int) $c['id']) ?>" <?= $categoryFilter === (int) $c['id'] ? 'selected' : '' ?>><?= e($c['name']) ?></option>
+                <?php endforeach; ?>
+            </select></label>
+            <label>Tax pool<select name="pool">
+                <option value="">All pools</option>
+                <?php foreach ($poolLabels as $k => $v): ?>
+                    <option value="<?= e($k) ?>" <?= $poolFilter === $k ? 'selected' : '' ?>><?= e($v) ?></option>
+                <?php endforeach; ?>
+            </select></label>
+            <div class="workspace-span-2"><button type="submit">Apply filters</button>
+                <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=register')) ?>">Reset</a></div>
+        </form>
+        <div class="rc-table-scroll"><table class="rc-table">
+            <thead>
+                <tr>
+                    <th rowspan="2">Code</th><th rowspan="2">Name</th><th rowspan="2">Category</th><th rowspan="2">Class</th>
+                    <th rowspan="2">Tax pool</th><th rowspan="2">Model</th><th rowspan="2">Method</th>
+                    <th colspan="4" class="align-right">Cost</th>
+                    <th colspan="4" class="align-right">Accumulated depreciation</th>
+                    <th colspan="4" class="align-right">Accumulated impairment</th>
+                    <th rowspan="2" class="align-right">Gain/(loss) on disposal</th>
+                    <th colspan="4" class="align-right">Carrying amount</th>
+                    <th rowspan="2">Status</th><th rowspan="2"></th>
+                </tr>
+                <tr>
+                    <th class="align-right">Opening</th><th class="align-right">Addition</th><th class="align-right">Disposal</th><th class="align-right">Closing</th>
+                    <th class="align-right">Opening</th><th class="align-right">Current</th><th class="align-right">Reversal</th><th class="align-right">Closing</th>
+                    <th class="align-right">Opening</th><th class="align-right">Current</th><th class="align-right">Reversal</th><th class="align-right">Closing</th>
+                    <th class="align-right">Opening</th><th class="align-right">Addition</th><th class="align-right">Disposal</th><th class="align-right">Closing</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if ($registerRows === []): ?>
+                    <tr><td colspan="<?= (int) $regColspan ?>" style="text-align:center;color:var(--mbw-muted)">Nothing in this window — no asset was held, bought or sold between <?= e($regFrom) ?> and <?= e($regTo) ?>.</td></tr>
+                <?php endif; ?>
+                <?php foreach ($registerGroups as $groupLabel => $groupRows): ?>
+                    <?php if ($groupLabel !== ''): ?>
+                        <tr><td colspan="<?= (int) $regColspan ?>" style="background:var(--mbw-soft,#eef5f0);font-weight:600"><?= e($groupLabel) ?> <span style="font-weight:400;color:var(--mbw-muted)">(<?= count($groupRows) ?>)</span></td></tr>
+                    <?php endif; ?>
+                    <?php foreach ($groupRows as $r): ?>
+                        <tr>
+                            <td><?= e($r['code']) ?></td>
+                            <td><?= e($r['name']) ?></td>
+                            <td><?= e($r['category'] !== '' ? $r['category'] : '—') ?></td>
+                            <td><?= e($assetClasses[$r['class']] ?? $r['class']) ?></td>
+                            <td><?php if ($r['tax_pool'] !== ''): ?><span class="mbw-pill tone-gray">Pool <?= e(strtoupper($r['tax_pool'])) ?></span><?php else: ?><span style="color:var(--mbw-muted)">not set</span><?php endif; ?></td>
+                            <?php $rowModel = $classMeasurementModels[$r['class']] ?? fa_class_measurement_model($companyId, $r['class']); ?>
+                            <td><span class="mbw-pill <?= (string) $rowModel['measurement_model'] === 'revaluation' ? 'tone-blue' : 'tone-gray' ?>"><?= e(fa_measurement_model_label($rowModel)) ?></span></td>
+                            <td><span class="mbw-pill tone-gray"><?= e(str_replace('_', ' ', $r['method'])) ?></span></td>
+                            <td class="align-right"><?= e($money($r['cost_opening'])) ?></td>
+                            <td class="align-right"><?= e($money($r['cost_addition'])) ?></td>
+                            <td class="align-right"><?= e($money($r['cost_disposal'])) ?></td>
+                            <td class="align-right"><strong><?= e($money($r['cost_closing'])) ?></strong></td>
+                            <td class="align-right"><?= e($money($r['dep_opening'])) ?></td>
+                            <td class="align-right"><?= e($money($r['dep_current'])) ?></td>
+                            <td class="align-right"><?= e($money($r['dep_reversal'])) ?></td>
+                            <td class="align-right"><strong><?= e($money($r['dep_closing'])) ?></strong></td>
+                            <td class="align-right"><?= e($money($r['imp_opening'])) ?></td>
+                            <td class="align-right"><?= e($money($r['imp_current'])) ?></td>
+                            <td class="align-right"><?= e($money($r['imp_reversal'])) ?></td>
+                            <td class="align-right"><strong><?= e($money($r['imp_closing'])) ?></strong></td>
+                            <td class="align-right">
+                                <?php if ($r['gain_loss'] === null): ?>
+                                    <span style="color:var(--mbw-muted)"><?= $r['sold_in_window'] ? 'not recorded' : '—' ?></span>
+                                <?php else: ?>
+                                    <span style="color:<?= $r['gain_loss'] >= 0 ? 'var(--mbw-green,#15803d)' : 'var(--mbw-red,#b91c1c)' ?>"><?= e(number_format($r['gain_loss'], 2)) ?></span>
+                                <?php endif; ?>
+                            </td>
+                            <td class="align-right"><?= e($money($r['carry_opening'])) ?></td>
+                            <td class="align-right"><?= e($money($r['carry_addition'])) ?></td>
+                            <td class="align-right"><?= e($money($r['carry_disposal'])) ?></td>
+                            <td class="align-right"><strong><?= e($money($r['carry_closing'])) ?></strong></td>
+                            <td><span class="mbw-pill <?= $r['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', $r['status'])) ?></span><?php if (in_array((int) $r['id'], $unpostedAcquisitionIds, true)): ?> <span class="mbw-pill tone-red" title="The acquisition voucher was never posted">GL not posted</span><?php endif; ?></td>
+                            <td><div class="fa-row-actions"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=' . (int) $r['id'])) ?>">Open</a><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $r['id'])) ?>">Revalue</a><?php if (user_can('delete') && user_can_do('accounting', 'edit')): ?><form method="post" style="display:inline" onsubmit="return confirm('Permanently delete asset <?= e($r['code']) ?> and every voucher it posted? Use Dispose for a real asset leaving the business — Delete is only for wrong entries and cannot be undone.')"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="delete_asset"><input type="hidden" name="asset_id" value="<?= (int) $r['id'] ?>"><button type="submit" class="button danger">Delete</button></form><?php endif; ?></div></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if ($groupLabel !== '' && count($registerGroups) > 1): ?>
+                        <?php $gt = fa_register_totals($groupRows); ?>
+                        <tr style="font-weight:600">
+                            <td colspan="7" class="align-right"><?= e($groupLabel) ?> subtotal</td>
+                            <td class="align-right"><?= e($money($gt['cost_opening'])) ?></td><td class="align-right"><?= e($money($gt['cost_addition'])) ?></td><td class="align-right"><?= e($money($gt['cost_disposal'])) ?></td><td class="align-right"><?= e($money($gt['cost_closing'])) ?></td>
+                            <td class="align-right"><?= e($money($gt['dep_opening'])) ?></td><td class="align-right"><?= e($money($gt['dep_current'])) ?></td><td class="align-right"><?= e($money($gt['dep_reversal'])) ?></td><td class="align-right"><?= e($money($gt['dep_closing'])) ?></td>
+                            <td class="align-right"><?= e($money($gt['imp_opening'])) ?></td><td class="align-right"><?= e($money($gt['imp_current'])) ?></td><td class="align-right"><?= e($money($gt['imp_reversal'])) ?></td><td class="align-right"><?= e($money($gt['imp_closing'])) ?></td>
+                            <td class="align-right"><?= e($money($gt['gain_loss'])) ?></td>
+                            <td class="align-right"><?= e($money($gt['carry_opening'])) ?></td><td class="align-right"><?= e($money($gt['carry_addition'])) ?></td><td class="align-right"><?= e($money($gt['carry_disposal'])) ?></td><td class="align-right"><?= e($money($gt['carry_closing'])) ?></td>
+                            <td colspan="2"></td>
+                        </tr>
+                    <?php endif; ?>
+                <?php endforeach; ?>
             </tbody>
+            <?php if ($registerRows !== []): ?>
+            <tfoot>
+                <tr style="font-weight:700">
+                    <td colspan="7" class="align-right">Total (<?= count($registerRows) ?> assets)</td>
+                    <td class="align-right"><?= e($money($registerTotals['cost_opening'])) ?></td><td class="align-right"><?= e($money($registerTotals['cost_addition'])) ?></td><td class="align-right"><?= e($money($registerTotals['cost_disposal'])) ?></td><td class="align-right"><?= e($money($registerTotals['cost_closing'])) ?></td>
+                    <td class="align-right"><?= e($money($registerTotals['dep_opening'])) ?></td><td class="align-right"><?= e($money($registerTotals['dep_current'])) ?></td><td class="align-right"><?= e($money($registerTotals['dep_reversal'])) ?></td><td class="align-right"><?= e($money($registerTotals['dep_closing'])) ?></td>
+                    <td class="align-right"><?= e($money($registerTotals['imp_opening'])) ?></td><td class="align-right"><?= e($money($registerTotals['imp_current'])) ?></td><td class="align-right"><?= e($money($registerTotals['imp_reversal'])) ?></td><td class="align-right"><?= e($money($registerTotals['imp_closing'])) ?></td>
+                    <td class="align-right"><?= e($money($registerTotals['gain_loss'])) ?></td>
+                    <td class="align-right"><?= e($money($registerTotals['carry_opening'])) ?></td><td class="align-right"><?= e($money($registerTotals['carry_addition'])) ?></td><td class="align-right"><?= e($money($registerTotals['carry_disposal'])) ?></td><td class="align-right"><?= e($money($registerTotals['carry_closing'])) ?></td>
+                    <td colspan="2"></td>
+                </tr>
+            </tfoot>
+            <?php endif; ?>
         </table></div>
+        <p class="frm-optional" style="padding:8px 12px">
+            Opening carrying amount is cost less accumulated depreciation; closing also carries accumulated impairment off, as specified.
+            Depreciation counts only where it has been posted — a computed but unposted schedule row is a plan, not a charge.
+        </p>
     </section>
 <?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

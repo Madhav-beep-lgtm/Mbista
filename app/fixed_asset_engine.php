@@ -454,3 +454,233 @@ function fa_event_purposes(string $event): array
     };
 }
 
+
+/**
+ * The five Income Tax Act pools, with the rate each is written down at.
+ *
+ * Tax depreciates the POOL, accounting depreciates the ASSET over its useful
+ * life, so the two figures never agree - and the difference between them is
+ * exactly what deferred tax is computed on. Nothing can be reported by pool
+ * until each asset says which pool it is in, which is why the register form
+ * asks for one.
+ */
+function fa_tax_pools(): array
+{
+    return [
+        'a' => 'Pool A - buildings and structures (5%)',
+        'b' => 'Pool B - computers, fixtures, office equipment (25%)',
+        'c' => 'Pool C - automobiles, buses, minibuses (20%)',
+        'd' => 'Pool D - construction and earth-moving plant, and anything not in another pool (15%)',
+        'e' => 'Pool E - intangibles other than depreciable assets (over useful life)',
+    ];
+}
+
+/**
+ * The asset register as a movement schedule for one window of time.
+ *
+ * Every figure is a movement between two dates rather than a balance as it
+ * stands today, because "what did this cost" is a different question from
+ * "what came in this year". Each block reads opening, what moved, and closing:
+ *
+ *   Cost                 opening | addition | disposal | closing
+ *   Accumulated dep.     opening | current  | reversal | closing
+ *   Accumulated imp.     opening | current  | reversal | closing
+ *   Carrying amount      opening | addition | disposal | closing
+ *
+ * Opening is the position the instant before $from - the previous year's
+ * closing, in other words - and current/addition/disposal are what happened
+ * inside the window. Reversal is what left with a disposed asset: everything
+ * accumulated against it is derecognised, so its closing falls to zero.
+ *
+ * Three queries whatever the company holds - the assets, their depreciation
+ * bucketed by date, and their impairments bucketed by date. Nothing runs per
+ * asset, so the register does not slow down as the register grows.
+ *
+ * An asset disposed before $from is not in the window at all, and one bought
+ * after $to has not happened yet; both are left out rather than shown as
+ * empty rows.
+ */
+function fa_register_schedule(int $companyId, string $from, string $to, array $filters = []): array
+{
+    // Acquisition date, in the order the facts are trustworthy: what the bill
+    // says, else when it was ready to use, else when somebody typed it in.
+    $acquired = 'COALESCE(a.purchase_date, a.available_for_use_date, DATE(a.created_at))';
+
+    $where = ['a.company_id = :cid', $acquired . ' <= :to_a', '(a.disposed_on IS NULL OR a.disposed_on >= :from_a)'];
+    $params = ['cid' => $companyId, 'to_a' => $to, 'from_a' => $from];
+    foreach (['status' => 'a.status', 'class' => 'a.asset_class', 'tax_pool' => 'a.tax_pool'] as $key => $column) {
+        if ((string) ($filters[$key] ?? '') !== '') {
+            $where[] = $column . ' = :f_' . $key;
+            $params['f_' . $key] = (string) $filters[$key];
+        }
+    }
+    if ((int) ($filters['category_id'] ?? 0) > 0) {
+        $where[] = 'a.category_id = :f_category';
+        $params['f_category'] = (int) $filters['category_id'];
+    }
+
+    $stmt = db()->prepare(
+        'SELECT a.id, a.asset_code, a.name, a.asset_class, a.tax_pool, a.depreciation_method, a.status,
+                a.cost, a.disposed_on, a.disposal_proceeds, a.disposal_gain_loss, a.category_id,
+                ' . $acquired . ' AS acquired_on, c.name AS category_name
+         FROM fixed_assets a
+         LEFT JOIN asset_categories c ON c.id = a.category_id
+         WHERE ' . implode(' AND ', $where) . '
+         ORDER BY a.asset_code ASC'
+    );
+    $stmt->execute($params);
+    $assets = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($assets === []) {
+        return [];
+    }
+
+    $ids = array_map(static fn (array $a): int => (int) $a['id'], $assets);
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+
+    // Only POSTED depreciation counts. A schedule row that was computed but
+    // never posted is a plan, not a charge, and must not show up in a register
+    // that is meant to agree with the ledger.
+    $depStmt = db()->prepare(
+        'SELECT asset_id,
+                SUM(CASE WHEN period_date < ? THEN depreciation ELSE 0 END) AS opening,
+                SUM(CASE WHEN period_date >= ? AND period_date <= ? THEN depreciation ELSE 0 END) AS current
+         FROM asset_depreciation_schedule
+         WHERE company_id = ? AND posted = 1 AND period_date <= ? AND asset_id IN (' . $ph . ')
+         GROUP BY asset_id'
+    );
+    $depStmt->execute(array_merge([$from, $from, $to, $companyId, $to], $ids));
+    $dep = [];
+    foreach ($depStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $dep[(int) $row['asset_id']] = $row;
+    }
+
+    // held_for_sale and revaluation rows share this table but are not
+    // impairment: only a loss and its reversal move accumulated impairment.
+    $impStmt = db()->prepare(
+        'SELECT asset_id,
+                SUM(CASE WHEN test_date < ? THEN impairment_loss - reversal ELSE 0 END) AS opening,
+                SUM(CASE WHEN test_date >= ? AND test_date <= ? THEN impairment_loss ELSE 0 END) AS current,
+                SUM(CASE WHEN test_date >= ? AND test_date <= ? THEN reversal ELSE 0 END) AS reversed
+         FROM asset_impairments
+         WHERE company_id = ? AND test_date <= ? AND kind IN (?, ?) AND asset_id IN (' . $ph . ')
+         GROUP BY asset_id'
+    );
+    $impStmt->execute(array_merge([$from, $from, $to, $from, $to, $companyId, $to, 'impairment', 'reversal'], $ids));
+    $imp = [];
+    foreach ($impStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $imp[(int) $row['asset_id']] = $row;
+    }
+
+    $rows = [];
+    foreach ($assets as $a) {
+        $id = (int) $a['id'];
+        $cost = (float) $a['cost'];
+        $acquiredOn = (string) $a['acquired_on'];
+        $disposedOn = (string) ($a['disposed_on'] ?? '');
+        $boughtInWindow = $acquiredOn >= $from && $acquiredOn <= $to;
+        $soldInWindow = $disposedOn !== '' && $disposedOn >= $from && $disposedOn <= $to;
+
+        $costOpening = $boughtInWindow ? 0.0 : $cost;
+        $costAddition = $boughtInWindow ? $cost : 0.0;
+        $costDisposal = $soldInWindow ? $cost : 0.0;
+
+        $depOpening = (float) ($dep[$id]['opening'] ?? 0);
+        $depCurrent = (float) ($dep[$id]['current'] ?? 0);
+        // Everything accumulated against a sold asset goes out with it.
+        $depReversal = $soldInWindow ? $depOpening + $depCurrent : 0.0;
+
+        $impOpening = (float) ($imp[$id]['opening'] ?? 0);
+        $impCurrent = (float) ($imp[$id]['current'] ?? 0);
+        $impReversal = (float) ($imp[$id]['reversed'] ?? 0);
+        if ($soldInWindow) {
+            $impReversal = $impOpening + $impCurrent;
+        }
+
+        $costClosing = $costOpening + $costAddition - $costDisposal;
+        $depClosing = $depOpening + $depCurrent - $depReversal;
+        $impClosing = $impOpening + $impCurrent - $impReversal;
+
+        $rows[] = [
+            'id' => $id,
+            'code' => (string) $a['asset_code'],
+            'name' => (string) $a['name'],
+            'category_id' => (int) ($a['category_id'] ?? 0),
+            'category' => (string) ($a['category_name'] ?? ''),
+            'class' => (string) $a['asset_class'],
+            'tax_pool' => (string) ($a['tax_pool'] ?? ''),
+            'method' => (string) $a['depreciation_method'],
+            'status' => (string) $a['status'],
+            'acquired_on' => $acquiredOn,
+            'disposed_on' => $disposedOn,
+            'sold_in_window' => $soldInWindow,
+            'cost_opening' => fa_round($costOpening),
+            'cost_addition' => fa_round($costAddition),
+            'cost_disposal' => fa_round($costDisposal),
+            'cost_closing' => fa_round($costClosing),
+            'dep_opening' => fa_round($depOpening),
+            'dep_current' => fa_round($depCurrent),
+            'dep_reversal' => fa_round($depReversal),
+            'dep_closing' => fa_round($depClosing),
+            'imp_opening' => fa_round($impOpening),
+            'imp_current' => fa_round($impCurrent),
+            'imp_reversal' => fa_round($impReversal),
+            'imp_closing' => fa_round($impClosing),
+            'proceeds' => $a['disposal_proceeds'] === null ? null : (float) $a['disposal_proceeds'],
+            'gain_loss' => $a['disposal_gain_loss'] === null ? null : (float) $a['disposal_gain_loss'],
+            // Opening and addition carrying amounts are cost less accumulated
+            // depreciation; closing also carries impairment off. That is the
+            // register exactly as it was specified - see the note in the
+            // register view about opening excluding impairment.
+            'carry_opening' => fa_round($costOpening - $depOpening),
+            'carry_addition' => fa_round($costAddition),
+            'carry_disposal' => fa_round($costDisposal - $depReversal - $impReversal),
+            'carry_closing' => fa_round($costClosing - $depClosing - $impClosing),
+        ];
+    }
+
+    return $rows;
+}
+
+/**
+ * Adds a set of register rows together, for a group subtotal or a grand total.
+ */
+function fa_register_totals(array $rows): array
+{
+    $keys = [
+        'cost_opening', 'cost_addition', 'cost_disposal', 'cost_closing',
+        'dep_opening', 'dep_current', 'dep_reversal', 'dep_closing',
+        'imp_opening', 'imp_current', 'imp_reversal', 'imp_closing',
+        'carry_opening', 'carry_addition', 'carry_disposal', 'carry_closing',
+    ];
+    $totals = array_fill_keys($keys, 0.0);
+    $totals['gain_loss'] = 0.0;
+    foreach ($rows as $row) {
+        foreach ($keys as $key) {
+            $totals[$key] += (float) ($row[$key] ?? 0);
+        }
+        $totals['gain_loss'] += (float) ($row['gain_loss'] ?? 0);
+    }
+
+    return array_map(static fn (float $n): float => fa_round($n), $totals);
+}
+
+/**
+ * Groups register rows for the chosen report type, keeping a stable order.
+ * "namewise" is the flat register: one line per asset, grouped by nothing.
+ */
+function fa_register_group(array $rows, string $reportType, array $classLabels = []): array
+{
+    if ($reportType === 'namewise') {
+        return ['' => $rows];
+    }
+    $grouped = [];
+    foreach ($rows as $row) {
+        $key = $reportType === 'categorywise'
+            ? ((string) $row['category'] !== '' ? (string) $row['category'] : 'Uncategorised')
+            : ($classLabels[(string) $row['class']] ?? (string) $row['class']);
+        $grouped[$key][] = $row;
+    }
+    ksort($grouped);
+
+    return $grouped;
+}
