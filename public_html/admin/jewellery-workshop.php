@@ -453,6 +453,14 @@ if ($filterFrom !== '' && $filterTo !== '') {
 }
 $advancedInUse = $filterStatus !== '' || $filterParty > 0 || $filterKarigar > 0 || $filterOverdue;
 
+// Add sorting support
+$sortParam = (string) ($_GET['sort'] ?? 'order_date_desc'); // Default sort by date descending
+$allowedSorts = ['order_no_asc', 'order_no_desc', 'order_date_asc', 'order_date_desc', 'party_asc', 'party_desc', 'metal_asc', 'metal_desc', 'weight_asc', 'weight_desc', 'delivery_asc', 'delivery_desc', 'status_asc', 'status_desc'];
+if (!in_array($sortParam, $allowedSorts, true)) {
+    $sortParam = 'order_date_desc';
+}
+$listFilters['sort'] = $sortParam;
+
 $orders = $view === 'orders' ? jewellery_orders_list($companyId, $listFilters) : [];
 $editKarigar = $view === 'karigars' ? jewellery_karigar($companyId, (int) ($_GET['edit'] ?? 0)) : null;
 $editOrder = $view === 'orders' ? jewellery_order($companyId, (int) ($_GET['edit'] ?? 0)) : null;
@@ -1043,7 +1051,16 @@ jw_filter_bar_styles();
             ],
         ]); ?>
         <div class="mbw-tablewrap"><table>
-            <thead><tr><th>No.</th><th>Date</th><th>Customer</th><th>Metal</th><th class="is-numeric">Expected wt</th><th>Delivery</th><th>Status</th><th></th></tr></thead>
+            <thead><tr>
+                <th><a href="<?= e(url('admin/jewellery-workshop.php?' . http_build_query(array_merge($_GET, ['sort' => $_GET['sort'] === 'order_no_asc' ? 'order_no_desc' : 'order_no_asc', 'view' => 'orders'])))) ?>" style="cursor:pointer;text-decoration:none;color:inherit">No. <?= ($_GET['sort'] ?? '') === 'order_no_asc' ? '↑' : (($_GET['sort'] ?? '') === 'order_no_desc' ? '↓' : '') ?></a></th>
+                <th><a href="<?= e(url('admin/jewellery-workshop.php?' . http_build_query(array_merge($_GET, ['sort' => $_GET['sort'] === 'order_date_asc' ? 'order_date_desc' : 'order_date_asc', 'view' => 'orders'])))) ?>" style="cursor:pointer;text-decoration:none;color:inherit">Date <?= ($_GET['sort'] ?? '') === 'order_date_asc' ? '↑' : (($_GET['sort'] ?? '') === 'order_date_desc' ? '↓' : '') ?></a></th>
+                <th><a href="<?= e(url('admin/jewellery-workshop.php?' . http_build_query(array_merge($_GET, ['sort' => $_GET['sort'] === 'party_asc' ? 'party_desc' : 'party_asc', 'view' => 'orders'])))) ?>" style="cursor:pointer;text-decoration:none;color:inherit">Customer <?= ($_GET['sort'] ?? '') === 'party_asc' ? '↑' : (($_GET['sort'] ?? '') === 'party_desc' ? '↓' : '') ?></a></th>
+                <th><a href="<?= e(url('admin/jewellery-workshop.php?' . http_build_query(array_merge($_GET, ['sort' => $_GET['sort'] === 'metal_asc' ? 'metal_desc' : 'metal_asc', 'view' => 'orders'])))) ?>" style="cursor:pointer;text-decoration:none;color:inherit">Metal <?= ($_GET['sort'] ?? '') === 'metal_asc' ? '↑' : (($_GET['sort'] ?? '') === 'metal_desc' ? '↓' : '') ?></a></th>
+                <th class="is-numeric"><a href="<?= e(url('admin/jewellery-workshop.php?' . http_build_query(array_merge($_GET, ['sort' => $_GET['sort'] === 'weight_asc' ? 'weight_desc' : 'weight_asc', 'view' => 'orders'])))) ?>" style="cursor:pointer;text-decoration:none;color:inherit">Expected wt <?= ($_GET['sort'] ?? '') === 'weight_asc' ? '↑' : (($_GET['sort'] ?? '') === 'weight_desc' ? '↓' : '') ?></a></th>
+                <th><a href="<?= e(url('admin/jewellery-workshop.php?' . http_build_query(array_merge($_GET, ['sort' => $_GET['sort'] === 'delivery_asc' ? 'delivery_desc' : 'delivery_asc', 'view' => 'orders'])))) ?>" style="cursor:pointer;text-decoration:none;color:inherit">Delivery <?= ($_GET['sort'] ?? '') === 'delivery_asc' ? '↑' : (($_GET['sort'] ?? '') === 'delivery_desc' ? '↓' : '') ?></a></th>
+                <th><a href="<?= e(url('admin/jewellery-workshop.php?' . http_build_query(array_merge($_GET, ['sort' => $_GET['sort'] === 'status_asc' ? 'status_desc' : 'status_asc', 'view' => 'orders'])))) ?>" style="cursor:pointer;text-decoration:none;color:inherit">Status <?= ($_GET['sort'] ?? '') === 'status_asc' ? '↑' : (($_GET['sort'] ?? '') === 'status_desc' ? '↓' : '') ?></a></th>
+                <th></th>
+            </tr></thead>
             <tbody>
                 <?php if ($orders === []): ?><tr><td colspan="8">No orders yet.</td></tr><?php endif; ?>
                 <?php foreach ($orders as $row): ?>

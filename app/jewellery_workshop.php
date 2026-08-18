@@ -544,7 +544,25 @@ function jewellery_orders_list(int $companyId, array $filters = []): array
             $params[$key] = $needle;
         }
     }
-    $sql .= ' ORDER BY o.order_date DESC, o.id DESC LIMIT ' . max(1, min(1000, (int) ($filters['limit'] ?? 300)));
+    // Handle sorting
+    $sortMap = [
+        'order_no_asc' => 'o.order_no ASC',
+        'order_no_desc' => 'o.order_no DESC',
+        'order_date_asc' => 'o.order_date ASC',
+        'order_date_desc' => 'o.order_date DESC',
+        'party_asc' => 'COALESCE(ap.name, o.customer_name) ASC',
+        'party_desc' => 'COALESCE(ap.name, o.customer_name) DESC',
+        'metal_asc' => 'm.name ASC',
+        'metal_desc' => 'm.name DESC',
+        'weight_asc' => 'o.expected_gross_weight ASC',
+        'weight_desc' => 'o.expected_gross_weight DESC',
+        'delivery_asc' => 'COALESCE(o.delivery_date, "9999-12-31") ASC',
+        'delivery_desc' => 'COALESCE(o.delivery_date, "9999-12-31") DESC',
+        'status_asc' => 'o.status ASC',
+        'status_desc' => 'o.status DESC',
+    ];
+    $sort = $sortMap[(string) ($filters['sort'] ?? 'order_date_desc')] ?? 'o.order_date DESC';
+    $sql .= ' ORDER BY ' . $sort . ', o.id DESC LIMIT ' . max(1, min(1000, (int) ($filters['limit'] ?? 300)));
 
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
