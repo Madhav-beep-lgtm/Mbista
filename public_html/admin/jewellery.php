@@ -1248,13 +1248,58 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 $balanceFine = static function (int $itemId) use ($itemBalances): float {
                     return (float) ($itemBalances[$itemId]['fine_weight'] ?? 0);
                 };
-                $grouped = [];
+
+                // Each group's count and fine weight are worked out over EVERY item
+                // the filter matched, not just the ones on this page, or a subtotal
+                // would change meaning as you paged and answer a question nobody
+                // asked. The balances above are already one query for the whole set,
+                // so this costs nothing extra.
+                $groupTotals = [];
                 foreach ($items as $groupRow) {
+                    $groupKey = trim((string) ($groupRow['category'] ?? ''));
+                    $groupKey = $groupKey === '' ? '\u{2014} Ungrouped' : $groupKey;
+                    if (!isset($groupTotals[$groupKey])) {
+                        $groupTotals[$groupKey] = ['count' => 0, 'fine' => 0.0];
+                    }
+                    $groupTotals[$groupKey]['count']++;
+                    $groupTotals[$groupKey]['fine'] += $balanceFine((int) $groupRow['id']);
+                }
+
+                // A shop with a few thousand styles was being sent every one of them
+                // in a single document — megabytes of table for a screen that shows
+                // fifty rows. The page is the unit of work now; the filters and the
+                // totals above still speak for the whole list.
+                $itemPerPage = (int) ($_GET['per_page'] ?? 50);
+                if (!in_array($itemPerPage, [25, 50, 100, 200], true)) {
+                    $itemPerPage = 50;
+                }
+                $itemPageCount = max(1, (int) ceil(count($items) / $itemPerPage));
+                $itemPage = max(1, min($itemPageCount, (int) ($_GET['page'] ?? 1)));
+                $pageItems = array_slice($items, ($itemPage - 1) * $itemPerPage, $itemPerPage);
+
+                $grouped = [];
+                foreach ($pageItems as $groupRow) {
                     $groupName = trim((string) ($groupRow['category'] ?? ''));
                     $grouped[$groupName === '' ? '\u{2014} Ungrouped' : $groupName][] = $groupRow;
                 }
                 ksort($grouped, SORT_NATURAL | SORT_FLAG_CASE);
-                $serial = 0;
+                $serial = ($itemPage - 1) * $itemPerPage;
+                $itemPageQuery = static function (array $overrides) use ($itemFilters, $itemPerPage): string {
+                    $query = array_filter([
+                        'view' => 'items',
+                        'q' => $itemFilters['search'],
+                        'f_code' => $itemFilters['code'],
+                        'f_name' => $itemFilters['name'],
+                        'f_group' => $itemFilters['group'],
+                        'f_kind' => $itemFilters['stock_kind'],
+                        'f_type' => $itemFilters['item_type'],
+                        'f_purity' => $itemFilters['purity_id'] > 0 ? (string) $itemFilters['purity_id'] : '',
+                        'f_status' => $itemFilters['status'],
+                        'per_page' => (string) $itemPerPage,
+                    ] + $overrides, static fn ($value): bool => (string) $value !== '');
+
+                    return url('admin/jewellery.php?' . http_build_query(array_merge($query, $overrides)));
+                };
             ?>
             <?php
                 // One filter under each heading it filters, and blank under the ones
@@ -1270,6 +1315,32 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     }
 
                     return $html . '</select>';
+                };
+                // A <select> is the right control for a handful of choices and the
+                // wrong one for a few thousand: every option is a DOM node, and a
+                // shop with 2,279 styles was being sent two lists of them. Past a
+                // few hundred this becomes a text box with the same values behind it
+                // as a datalist — the browser handles the long list natively, and
+                // typing narrows it without shipping a second copy to JavaScript.
+                $filterPicker = static function (string $name, string $current, array $values, string $allLabel) use ($filterSelect): string {
+                    if (count($values) <= 300) {
+                        $options = ['' => $allLabel];
+                        foreach ($values as $value) {
+                            $options[(string) $value] = (string) $value;
+                        }
+
+                        return $filterSelect($name, $current, $options);
+                    }
+                    $listId = 'jw-list-' . $name;
+                    $html = '<input form="jw-item-filter" type="text" list="' . e($listId) . '" name="' . e($name)
+                        . '" value="' . e($current) . '" placeholder="' . e($allLabel)
+                        . '" style="width:100%;min-width:70px;font-size:12px;padding:3px 6px">';
+                    $html .= '<datalist id="' . e($listId) . '">';
+                    foreach ($values as $value) {
+                        $html .= '<option value="' . e((string) $value) . '">';
+                    }
+
+                    return $html . '</datalist>';
                 };
                 $purityOptions = ['' => 'All'];
                 foreach ($purities as $purityRow) {
@@ -1297,8 +1368,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         }
                     ?>
                     <td><?= $filterSelect('f_group', $itemFilters['group'], $groupOptions) ?></td>
-                    <td><?= $filterSelect('f_name', $itemFilters['name'], $listOptions($itemFilterOptions['names'], 'All names')) ?></td>
-                    <td><?= $filterSelect('f_code', $itemFilters['code'], $listOptions($itemFilterOptions['codes'], 'All codes')) ?></td>
+                    <td><?= $filterPicker('f_name', $itemFilters['name'], $itemFilterOptions['names'], 'All names') ?></td>
+                    <td><?= $filterPicker('f_code', $itemFilters['code'], $itemFilterOptions['codes'], 'All codes') ?></td>
                     <td><?= $filterSelect('f_kind', $itemFilters['stock_kind'], ['' => 'All', 'showroom' => 'Showroom', 'customer_ordered' => 'Customer Ordered']) ?></td>
                     <td><?= $filterSelect('f_type', $itemFilters['item_type'], ['' => 'All', 'ornament' => 'Ornament', 'bullion' => 'Bullion', 'stone' => 'Stone', 'other' => 'Other']) ?></td>
                     <td><?= $filterSelect('f_purity', $itemFilters['purity_id'] > 0 ? (string) $itemFilters['purity_id'] : '', $purityOptions) ?></td>
@@ -1311,22 +1382,22 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </tr>
             </thead>
             <tbody>
-                <?php if ($items === []): ?><tr><td colspan="<?= $canEdit ? 13 : 12 ?>">No items yet.</td></tr><?php endif; ?>
+                <?php if ($items === []): ?><tr><td colspan="<?= $canEdit ? 13 : 12 ?>"><?= $itemFilterOn
+                    ? 'No item matches these filters.' : 'No items yet.' ?></td></tr><?php endif; ?>
                 <?php foreach ($grouped as $groupName => $groupRows): ?>
                     <?php
                         // The group's own line: how many items it holds and what
                         // they come to in fine weight. A group is a thing a shop
                         // asks about — "how much chain have I got?" — and the
                         // answer is the sum of the items traced under it.
-                        $groupFine = 0.0;
-                        foreach ($groupRows as $groupItem) {
-                            $groupFine += $balanceFine((int) $groupItem['id']);
-                        }
+                        $groupFine = (float) ($groupTotals[$groupName]['fine'] ?? 0);
+                        $groupCount = (int) ($groupTotals[$groupName]['count'] ?? count($groupRows));
                     ?>
                     <tr style="background:var(--mbw-accent-soft,#eef7f1)">
                         <td></td>
                         <td colspan="<?= $canEdit ? 9 : 8 ?>"><strong><?= e((string) $groupName) ?></strong>
-                            <small style="color:var(--mbw-muted,#64748b)">— <?= count($groupRows) ?> item<?= count($groupRows) > 1 ? 's' : '' ?></small></td>
+                            <small style="color:var(--mbw-muted,#64748b)">— <?= $groupCount ?> item<?= $groupCount > 1 ? 's' : '' ?><?php
+                                if ($groupCount !== count($groupRows)): ?>, <?= count($groupRows) ?> on this page<?php endif; ?></small></td>
                         <td class="is-numeric"><strong><?= $fmt($groupFine, 4) ?></strong></td>
                         <td colspan="2"></td>
                     </tr>
@@ -1368,6 +1439,19 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <?php if ($itemPageCount > 1): ?>
+            <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="Item pages">
+                <?php if ($itemPage > 1): ?><a class="button secondary" href="<?= e($itemPageQuery(['page' => $itemPage - 1])) ?>">Previous</a><?php endif; ?>
+                <span>Page <?= (int) $itemPage ?> of <?= (int) $itemPageCount ?> · <?= count($items) ?> items</span>
+                <?php if ($itemPage < $itemPageCount): ?><a class="button secondary" href="<?= e($itemPageQuery(['page' => $itemPage + 1])) ?>">Next</a><?php endif; ?>
+                <span style="margin-left:auto;display:flex;gap:6px;align-items:center">Rows
+                    <?php foreach ([25, 50, 100, 200] as $size): ?>
+                        <a class="button soft" style="<?= $size === $itemPerPage ? 'font-weight:700' : '' ?>"
+                           href="<?= e($itemPageQuery(['per_page' => (string) $size, 'page' => 1])) ?>"><?= $size ?></a>
+                    <?php endforeach; ?>
+                </span>
+            </nav>
+        <?php endif; ?>
     </section>
     <?php if ($canEdit): ?>
     <script>
