@@ -507,39 +507,26 @@ foreach ($items as $itemRow) {
     $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
 }
 
-// Load showroom stock pieces (from receipts, with or without karigad assignment)
+// Load showroom stock items (from inventory - opening stock or receipts marked as showroom)
 $orderStockPieces = [];
 try {
-    // First check if receipts exist for this company
-    $checkStmt = db()->prepare("SELECT COUNT(*) as cnt FROM jewellery_order_receipts WHERE company_id = :cid");
-    $checkStmt->execute(['cid' => $companyId]);
-    $checkResult = $checkStmt->fetch(PDO::FETCH_ASSOC);
-    error_log("[DEBUG] Total receipts for company_id=" . $companyId . ": " . $checkResult['cnt']);
-
     $stockStmt = db()->prepare(
-        "SELECT r.id, COALESCE(a.assignment_no, '') AS assignment_no, r.receipt_no,
-                r.received_gross_weight AS gross_weight, r.stone_weight,
-                r.received_item_id AS item_id, r.received_purity_id AS purity_id,
-                r.unit_id, r.qty_pieces, r.making_amount,
-                i.sku AS item_code, i.name AS item_name, i.metal_id,
-                p.code AS purity_code, p.metal_id AS purity_metal_id, u.code AS unit_code,
-                COALESCE(r.size_design, '') AS size_design, COALESCE(r.design_no, '') AS design_no,
-                COALESCE(r.trace_code, '') AS trace_code
-        FROM jewellery_order_receipts r
-        LEFT JOIN jewellery_order_assignments a ON a.id = r.assignment_id
-        LEFT JOIN inventory_items i ON i.id = r.received_item_id
-        LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
-        LEFT JOIN jewellery_units u ON u.id = r.unit_id
-        WHERE r.company_id = :cid AND r.status <> 'cancelled'
-          AND r.id NOT IN (SELECT COALESCE(stock_receipt_id, 0) FROM jewellery_order_lines WHERE source = 'stock' AND stock_receipt_id IS NOT NULL AND order_id != :keep_id)
-        ORDER BY r.receive_date DESC"
+        "SELECT DISTINCT i.id, i.sku AS item_code, i.name AS item_name,
+                i.metal_id, i.unit, '0' AS purity_id, '0' AS unit_id,
+                0 AS qty_pieces, 0 AS making_amount, '' AS size_design,
+                '' AS design_no, '' AS trace_code, '' AS assignment_no, '' AS receipt_no,
+                0 AS gross_weight, 0 AS stone_weight
+        FROM inventory_items i
+        WHERE i.company_id = :cid
+          AND i.item_type != 'service'
+          AND i.name LIKE '%Showroom%'
+          AND i.id NOT IN (SELECT DISTINCT item_id FROM inventory_transactions t
+                          WHERE t.company_id = :cid AND t.transaction_type IN ('customer_order', 'customer_receipt'))
+        ORDER BY i.sku ASC"
     );
-    $stockStmt->execute(['cid' => $companyId, 'keep_id' => (int) ($editOrder['id'] ?? 0)]);
+    $stockStmt->execute(['cid' => $companyId]);
     $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
-    error_log("[DEBUG] Stock pieces after filter: " . count($orderStockPieces) . " items");
-    if (count($orderStockPieces) > 0) {
-        error_log("[DEBUG] First item: " . json_encode($orderStockPieces[0]));
-    }
+    error_log("[DEBUG] Showroom stock items loaded: " . count($orderStockPieces));
 } catch (Exception $e) {
     error_log("[ERROR] Failed to load showroom stock: " . $e->getMessage());
 }
