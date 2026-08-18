@@ -507,7 +507,7 @@ foreach ($items as $itemRow) {
     $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
 }
 
-// Load showroom stock from inventory_items (items marked as showroom)
+// Load all inventory items as showroom stock options
 $orderStockPieces = [];
 try {
     $stockStmt = db()->prepare(
@@ -518,10 +518,8 @@ try {
                 '' AS purity_code, 0 AS purity_metal_id, i.unit AS unit_code,
                 '' AS size_design, '' AS design_no, '' AS trace_code
         FROM inventory_items i
-        WHERE i.company_id = :cid
-          AND i.item_type != 'service'
-          AND (i.name LIKE '%Showroom%' OR i.sku LIKE '%SHOWROOM%')
-        ORDER BY i.sku ASC LIMIT 100"
+        WHERE i.company_id = :cid AND i.item_type != 'service'
+        ORDER BY i.sku ASC"
     );
     $stockStmt->execute(['cid' => $companyId]);
     $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
