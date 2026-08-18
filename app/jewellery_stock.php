@@ -52,6 +52,45 @@ const JW_ITEM_FROM = ' FROM inventory_items i
         INNER JOIN jewellery_units u ON u.id = j.unit_id';
 
 /** Item rows joined to their metal/purity/unit. */
+/** The "no group" choice in the item-group filter, which no real name can collide with. */
+const JW_ITEM_GROUP_NONE = '__ungrouped__';
+
+/**
+ * The distinct values each item filter can offer.
+ *
+ * Taken from every item the company has, never from the filtered result, or
+ * choosing one value would empty the lists beside it and there would be no way
+ * back except clearing everything.
+ */
+function jewellery_item_filter_options(int $companyId): array
+{
+    $stmt = db()->prepare('SELECT i.sku, i.name, i.category
+        FROM inventory_items i
+        INNER JOIN jewellery_item_profiles j ON j.inventory_item_id = i.id AND j.company_id = i.company_id
+        WHERE i.company_id = :cid ORDER BY i.sku ASC');
+    $stmt->execute(['cid' => $companyId]);
+    $codes = [];
+    $names = [];
+    $groups = [];
+    $hasUngrouped = false;
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $code = trim((string) $row['sku']);
+        $name = trim((string) $row['name']);
+        $group = trim((string) ($row['category'] ?? ''));
+        if ($code !== '') { $codes[$code] = true; }
+        if ($name !== '') { $names[$name] = true; }
+        if ($group !== '') { $groups[$group] = true; } else { $hasUngrouped = true; }
+    }
+    $codes = array_keys($codes);
+    $names = array_keys($names);
+    $groups = array_keys($groups);
+    sort($codes, SORT_NATURAL | SORT_FLAG_CASE);
+    sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+    sort($groups, SORT_NATURAL | SORT_FLAG_CASE);
+
+    return ['codes' => $codes, 'names' => $names, 'groups' => $groups, 'has_ungrouped' => $hasUngrouped];
+}
+
 function jewellery_items_list(int $companyId, array $filters = []): array
 {
     $sql = 'SELECT ' . JW_ITEM_SELECT . ', m.code AS metal_code, m.name AS metal_name, m.metal_kind,
@@ -89,17 +128,26 @@ function jewellery_items_list(int $companyId, array $filters = []): array
     //
     // Every value is bound, and the two that are not free text are checked
     // against their own vocabulary before they reach the query.
+    // Exact, not partial: these are chosen from a list of the values that
+    // actually exist, so a partial match would be wrong — picking the group
+    // "Bangles" would drag in "Gold Bangles" as well.
     if (($filters['code'] ?? '') !== '') {
-        $sql .= ' AND i.sku LIKE :f_code';
-        $params['f_code'] = '%' . (string) $filters['code'] . '%';
+        $sql .= ' AND i.sku = :f_code';
+        $params['f_code'] = (string) $filters['code'];
     }
     if (($filters['name'] ?? '') !== '') {
-        $sql .= ' AND i.name LIKE :f_name';
-        $params['f_name'] = '%' . (string) $filters['name'] . '%';
+        $sql .= ' AND i.name = :f_name';
+        $params['f_name'] = (string) $filters['name'];
     }
     if (($filters['group'] ?? '') !== '') {
-        $sql .= ' AND i.category LIKE :f_group';
-        $params['f_group'] = '%' . (string) $filters['group'] . '%';
+        // Items filed under no group at all are a real answer to "which group?",
+        // and there is no string that selects them, so they get their own token.
+        if ((string) $filters['group'] === JW_ITEM_GROUP_NONE) {
+            $sql .= " AND (i.category IS NULL OR i.category = '')";
+        } else {
+            $sql .= ' AND i.category = :f_group';
+            $params['f_group'] = (string) $filters['group'];
+        }
     }
     if (in_array((string) ($filters['stock_kind'] ?? ''), ['showroom', 'customer_ordered'], true)) {
         $sql .= ' AND j.stock_kind = :f_kind';

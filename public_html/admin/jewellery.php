@@ -689,6 +689,11 @@ $itemFilterOn = $itemFilters !== array_merge($itemFilters, ['search' => '', 'cod
 if (in_array($view, ['items', 'opening', 'stock'], true)) {
     $items = jewellery_items_list($companyId, $itemFilters);
 }
+// What the group/name/code filters may offer — every value the company has,
+// not just the ones surviving the current filter.
+$itemFilterOptions = $view === 'items'
+    ? jewellery_item_filter_options($companyId)
+    : ['codes' => [], 'names' => [], 'groups' => [], 'has_ungrouped' => false];
 if ($view === 'items') {
     $editItem = jewellery_item($companyId, (int) ($_GET['edit'] ?? 0));
 }
@@ -1257,10 +1262,6 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 // and an empty cell says so more honestly than a box that does
                 // nothing. They combine, so "22K bangles that are off" is one
                 // question rather than a search and then reading down the page.
-                $filterInput = static function (string $name, string $value, string $placeholder): string {
-                    return '<input form="jw-item-filter" type="text" name="' . e($name) . '" value="' . e($value)
-                        . '" placeholder="' . e($placeholder) . '" style="width:100%;min-width:70px;font-size:12px;padding:3px 6px">';
-                };
                 $filterSelect = static function (string $name, string $current, array $options): string {
                     $html = '<select form="jw-item-filter" name="' . e($name) . '" style="width:100%;min-width:70px;font-size:12px;padding:3px 4px">';
                     foreach ($options as $optValue => $label) {
@@ -1276,11 +1277,28 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 }
             ?>
             <thead><tr><th class="is-numeric" style="width:44px">SN</th><th>Item group</th><th>Item name</th><th>Item code</th><th>Stock type</th><th>Type</th><th>Metal / Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Net</th><th>VAT</th><th class="is-numeric">In stock (fine)</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr>
-                <tr class="jw-filter-row no-search" style="background:var(--mbw-soft,#f4f8f5)">
+                <?php // Not .no-search: a hundred item names is exactly the list worth
+                      // being able to type into, and searchable-select.js turns any
+                      // dropdown of twelve or more into a type-to-filter box. ?>
+                <tr class="jw-filter-row" style="background:var(--mbw-soft,#f4f8f5)">
                     <td></td>
-                    <td><?= $filterInput('f_group', $itemFilters['group'], 'Group') ?></td>
-                    <td><?= $filterInput('f_name', $itemFilters['name'], 'Name') ?></td>
-                    <td><?= $filterInput('f_code', $itemFilters['code'], 'Code') ?></td>
+                    <?php
+                        $listOptions = static function (array $values, string $allLabel): array {
+                            $out = ['' => $allLabel];
+                            foreach ($values as $value) {
+                                $out[(string) $value] = (string) $value;
+                            }
+
+                            return $out;
+                        };
+                        $groupOptions = $listOptions($itemFilterOptions['groups'], 'All groups');
+                        if ($itemFilterOptions['has_ungrouped']) {
+                            $groupOptions[JW_ITEM_GROUP_NONE] = '— Ungrouped';
+                        }
+                    ?>
+                    <td><?= $filterSelect('f_group', $itemFilters['group'], $groupOptions) ?></td>
+                    <td><?= $filterSelect('f_name', $itemFilters['name'], $listOptions($itemFilterOptions['names'], 'All names')) ?></td>
+                    <td><?= $filterSelect('f_code', $itemFilters['code'], $listOptions($itemFilterOptions['codes'], 'All codes')) ?></td>
                     <td><?= $filterSelect('f_kind', $itemFilters['stock_kind'], ['' => 'All', 'showroom' => 'Showroom', 'customer_ordered' => 'Customer Ordered']) ?></td>
                     <td><?= $filterSelect('f_type', $itemFilters['item_type'], ['' => 'All', 'ornament' => 'Ornament', 'bullion' => 'Bullion', 'stone' => 'Stone', 'other' => 'Other']) ?></td>
                     <td><?= $filterSelect('f_purity', $itemFilters['purity_id'] > 0 ? (string) $itemFilters['purity_id'] : '', $purityOptions) ?></td>
