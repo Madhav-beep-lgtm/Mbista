@@ -506,91 +506,6 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
             <button type="button" class="button secondary jw-line-add" style="min-height:30px;padding:4px 12px">+ Add item</button>
         </div>
     </fieldset>
-
-    <!-- Modal for Creating New Items in Kaligadh Orders -->
-    <div id="jw-item-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;overflow:auto">
-        <div style="background:white;margin:40px auto;width:90%;max-width:600px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15)">
-            <div style="padding:20px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center">
-                <h2 style="margin:0;font-size:18px">Create New Item</h2>
-                <button type="button" id="jw-modal-close" style="background:none;border:none;font-size:24px;cursor:pointer;color:#999">&times;</button>
-            </div>
-            <form id="jw-item-create-form" style="padding:20px">
-                <input type="hidden" name="action" value="create_item_ajax">
-                <input type="hidden" name="csrf_token" id="jw-csrf-token" value="">
-
-                <div style="margin-bottom:15px">
-                    <label style="display:block;margin-bottom:5px;font-weight:500">Code<span style="color:red">*</span></label>
-                    <input type="text" name="code" maxlength="60" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                </div>
-
-                <div style="margin-bottom:15px">
-                    <label style="display:block;margin-bottom:5px;font-weight:500">Name<span style="color:red">*</span></label>
-                    <input type="text" name="name" maxlength="190" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                </div>
-
-                <div style="margin-bottom:15px">
-                    <label style="display:block;margin-bottom:5px;font-weight:500">Category</label>
-                    <input type="text" name="category" maxlength="60" placeholder="e.g., Ring, Necklace" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                </div>
-
-                <div style="margin-bottom:15px">
-                    <label style="display:block;margin-bottom:5px;font-weight:500">Type</label>
-                    <select name="item_type" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                        <option value="ornament" selected>Ornament</option>
-                        <option value="bullion">Bullion / raw metal</option>
-                        <option value="stone">Stone</option>
-                        <option value="other">Other</option>
-                    </select>
-                </div>
-
-                <div style="margin-bottom:15px">
-                    <label style="display:block;margin-bottom:5px;font-weight:500">Default Stock Type<span style="color:red">*</span></label>
-                    <select name="stock_kind" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                        <option value="customer_ordered" selected>Customer Ordered Stock</option>
-                        <option value="showroom">Showroom Stock</option>
-                    </select>
-                    <small style="color:#666;display:block;margin-top:4px">For kaligadh orders, this should be "Customer Ordered Stock"</small>
-                </div>
-
-                <div style="margin-bottom:15px">
-                    <label style="display:block;margin-bottom:5px;font-weight:500">Metal<span style="color:red">*</span></label>
-                    <select name="metal_id" id="jw-modal-metal" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                        <option value="">— Select metal —</option>
-                    </select>
-                </div>
-
-                <div style="margin-bottom:15px">
-                    <label style="display:block;margin-bottom:5px;font-weight:500">Purity<span style="color:red">*</span></label>
-                    <select name="purity_id" id="jw-modal-purity" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                        <option value="">— Select purity —</option>
-                    </select>
-                </div>
-
-                <div style="margin-bottom:15px">
-                    <label style="display:block;margin-bottom:5px;font-weight:500">Weight Unit<span style="color:red">*</span></label>
-                    <select name="unit_id" id="jw-modal-unit" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                        <option value="">— Select unit —</option>
-                    </select>
-                </div>
-
-                <div style="margin-bottom:15px">
-                    <label style="display:block;margin-bottom:5px;font-weight:500">Track by</label>
-                    <select name="track_mode" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                        <option value="weight" selected>Weight</option>
-                        <option value="piece">Piece</option>
-                    </select>
-                </div>
-
-                <div style="display:flex;gap:10px;margin-top:25px">
-                    <button type="button" id="jw-modal-cancel" style="flex:1;padding:10px;border:1px solid #ddd;background:white;border-radius:4px;cursor:pointer">Cancel</button>
-                    <button type="submit" id="jw-modal-submit" style="flex:1;padding:10px;border:none;background:#0066cc;color:white;border-radius:4px;cursor:pointer;font-weight:500">Create Item</button>
-                </div>
-
-                <div id="jw-modal-error" style="margin-top:15px;padding:10px;background:#f8d7da;color:#721c24;border:1px solid #f5c6cb;border-radius:4px;display:none"></div>
-                <div id="jw-modal-success" style="margin-top:15px;padding:10px;background:#d4edda;color:#155724;border:1px solid #c3e6cb;border-radius:4px;display:none"></div>
-            </form>
-        </div>
-    </div>
 <?php
 }
 
@@ -616,6 +531,90 @@ function jw_line_grid_scripts(): void
     }
     $done = true;
     ?>
+<!-- Modal for Creating New Items in Kaligadh Orders -->
+<div id="jw-item-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;overflow:auto">
+    <div style="background:white;margin:40px auto;width:90%;max-width:600px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15)">
+        <div style="padding:20px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center">
+            <h2 style="margin:0;font-size:18px">Create New Item</h2>
+            <button type="button" id="jw-modal-close" style="background:none;border:none;font-size:24px;cursor:pointer;color:#999">&times;</button>
+        </div>
+        <form id="jw-item-create-form" style="padding:20px">
+            <input type="hidden" name="action" value="create_item_ajax">
+            <input type="hidden" name="csrf_token" id="jw-csrf-token" value="">
+
+            <div style="margin-bottom:15px">
+                <label style="display:block;margin-bottom:5px;font-weight:500">Code<span style="color:red">*</span></label>
+                <input type="text" name="code" maxlength="60" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+            </div>
+
+            <div style="margin-bottom:15px">
+                <label style="display:block;margin-bottom:5px;font-weight:500">Name<span style="color:red">*</span></label>
+                <input type="text" name="name" maxlength="190" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+            </div>
+
+            <div style="margin-bottom:15px">
+                <label style="display:block;margin-bottom:5px;font-weight:500">Category</label>
+                <input type="text" name="category" maxlength="60" placeholder="e.g., Ring, Necklace" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+            </div>
+
+            <div style="margin-bottom:15px">
+                <label style="display:block;margin-bottom:5px;font-weight:500">Type</label>
+                <select name="item_type" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                    <option value="ornament" selected>Ornament</option>
+                    <option value="bullion">Bullion / raw metal</option>
+                    <option value="stone">Stone</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom:15px">
+                <label style="display:block;margin-bottom:5px;font-weight:500">Default Stock Type<span style="color:red">*</span></label>
+                <select name="stock_kind" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                    <option value="customer_ordered" selected>Customer Ordered Stock</option>
+                    <option value="showroom">Showroom Stock</option>
+                </select>
+                <small style="color:#666;display:block;margin-top:4px">For kaligadh orders, this should be "Customer Ordered Stock"</small>
+            </div>
+
+            <div style="margin-bottom:15px">
+                <label style="display:block;margin-bottom:5px;font-weight:500">Metal<span style="color:red">*</span></label>
+                <select name="metal_id" id="jw-modal-metal" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                    <option value="">— Select metal —</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom:15px">
+                <label style="display:block;margin-bottom:5px;font-weight:500">Purity<span style="color:red">*</span></label>
+                <select name="purity_id" id="jw-modal-purity" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                    <option value="">— Select purity —</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom:15px">
+                <label style="display:block;margin-bottom:5px;font-weight:500">Weight Unit<span style="color:red">*</span></label>
+                <select name="unit_id" id="jw-modal-unit" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                    <option value="">— Select unit —</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom:15px">
+                <label style="display:block;margin-bottom:5px;font-weight:500">Track by</label>
+                <select name="track_mode" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                    <option value="weight" selected>Weight</option>
+                    <option value="piece">Piece</option>
+                </select>
+            </div>
+
+            <div style="display:flex;gap:10px;margin-top:25px">
+                <button type="button" id="jw-modal-cancel" style="flex:1;padding:10px;border:1px solid #ddd;background:white;border-radius:4px;cursor:pointer">Cancel</button>
+                <button type="submit" id="jw-modal-submit" style="flex:1;padding:10px;border:none;background:#0066cc;color:white;border-radius:4px;cursor:pointer;font-weight:500">Create Item</button>
+            </div>
+
+            <div id="jw-modal-error" style="margin-top:15px;padding:10px;background:#f8d7da;color:#721c24;border:1px solid #f5c6cb;border-radius:4px;display:none"></div>
+            <div id="jw-modal-success" style="margin-top:15px;padding:10px;background:#d4edda;color:#155724;border:1px solid #c3e6cb;border-radius:4px;display:none"></div>
+        </form>
+    </div>
+</div>
 <script>
 (function () {
     function resetRow(row) {
