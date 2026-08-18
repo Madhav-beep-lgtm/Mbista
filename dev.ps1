@@ -7,7 +7,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$ProjectRoot = "C:\M.Bista New"
+$ProjectRoot = "C:\Mbista"
 $LaragonRoot = "C:\laragon"
 $PhpRoot = "$LaragonRoot\bin\php\php-8.3.30-Win32-vs16-x64"
 $MysqlRoot = "$LaragonRoot\bin\mysql\mariadb-10.11.18-winx64"
