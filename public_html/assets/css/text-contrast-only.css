@@ -171,6 +171,26 @@ body:not(.theme-dark):not(.admin-dark) :is(.admin-topbar,.portal-topbar,.site-he
   color: #0f5a30 !important; -webkit-text-fill-color: #0f5a30 !important;
 }
 
+/* An ACTIVE tab is dark-green chrome sitting inside content, so its label has to
+   be white. The "links inside content" rule near the top of this file paints
+   every <a> in a card #0a6b48, and because it also sets -webkit-text-fill-color
+   it beat the theme's own white — leaving green text on the active tab's green
+   pill, i.e. a tab with no readable label at all. Only the active state was hit:
+   an inactive tab is green on a pale background and reads fine.
+
+   The list mirrors exactly the selectors mbworld-2026.css paints solid dark
+   green. .fa-side-nav a.is-active is deliberately NOT here: nothing repaints it,
+   so it keeps its pale fill and needs its dark ink. */
+body:not(.theme-dark):not(.admin-dark) :is(.mbw-tab.is-active,.accounting-tabs a.is-active,.reference-tabs a.is-active,.party-panel-tabs a.is-active,.workspace-module-bar a.is-active),
+body:not(.theme-dark):not(.admin-dark) :is(.mbw-tab.is-active,.accounting-tabs a.is-active,.reference-tabs a.is-active,.party-panel-tabs a.is-active,.workspace-module-bar a.is-active) :is(span,strong,small,b,em,i,.ui-icon,svg,path),
+body:is(.theme-dark,.admin-dark) :is(.mbw-tab.is-active,.accounting-tabs a.is-active,.reference-tabs a.is-active,.party-panel-tabs a.is-active,.workspace-module-bar a.is-active),
+body:is(.theme-dark,.admin-dark) :is(.mbw-tab.is-active,.accounting-tabs a.is-active,.reference-tabs a.is-active,.party-panel-tabs a.is-active,.workspace-module-bar a.is-active) :is(span,strong,small,b,em,i,.ui-icon,svg,path) {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  stroke: currentColor !important;
+  opacity: 1 !important;
+}
+
 @media print {
   body, body * { color: #000 !important; -webkit-text-fill-color: #000 !important; }
 }
