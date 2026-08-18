@@ -796,8 +796,10 @@ function jewellery_trace_backfill_legacy_balance(int $companyId, int $userId = 0
     }
     $done[$companyId] = true;
     $fy = current_fiscal_year();
-    foreach (jewellery_items_list($companyId, ['active_only' => true]) as $item) {
-        $balance = jw_item_balance($companyId, (int) $item['id'], null, 'stock');
+    $backfillItems = jewellery_items_list($companyId, ['active_only' => true]);
+    $backfillBalances = jw_item_balances($companyId, array_column($backfillItems, 'id'), null, 'stock');
+    foreach ($backfillItems as $item) {
+        $balance = $backfillBalances[(int) $item['id']] ?? jw_item_balance($companyId, (int) $item['id'], null, 'stock');
         if ((float) $balance['fine_weight'] <= 0.00005 && (float) $balance['qty_pieces'] <= 0.0005) {
             continue;
         }

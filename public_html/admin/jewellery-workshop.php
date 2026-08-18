@@ -503,10 +503,9 @@ $orderOnHand = [];
 // order would strike out its own items.
 $orderStockPieces = [];
 
-// Load stock pieces for orders (both new and edit)
-foreach ($items as $itemRow) {
-    $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
-}
+// Asked for the whole item list at once. One aggregate per item meant a
+// hundred round trips to caption a dropdown.
+$orderOnHand = jw_item_balances($companyId, array_column($items, 'id'), date('Y-m-d'), 'stock');
 
 // The Ready to Sale shelf itself — jewellery_stock_units, not the product
 // master. A piece the customer points at in the case is one traced unit with
@@ -1805,6 +1804,7 @@ jw_filter_bar_styles();
 </script>
 <?php
 // The grid buttons: add a row, remove a row.
-jw_line_grid_scripts();
+jw_line_grid_scripts(['metals' => $metals, 'purities' => $purities,
+    'units' => $units, 'base_unit' => $baseUnit]);
 include __DIR__ . '/../../app/views/partials/admin_footer.php';
 ?>

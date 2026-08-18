@@ -339,14 +339,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $items = jewellery_items_list($companyId, ['active_only' => true]);
 $units = jewellery_units_list($companyId);
 $purities = jewellery_purities_list($companyId);
+// The Create New Item dialog on the line grid is the item form in a box and
+// needs the metal list the item form has.
+$metals = jewellery_metals_list($companyId);
 $baseUnit = jewellery_base_unit($companyId);
 
 // What is left of each item, so the line grid can say so BEFORE the row is
 // committed rather than refusing it afterwards with a negative-stock error.
-$onHand = [];
-foreach ($items as $itemRow) {
-    $onHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
-}
+$onHand = jw_item_balances($companyId, array_column($items, 'id'), date('Y-m-d'), 'stock');
 $componentStmt = db()->prepare("SELECT item_id,
         COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_weight ELSE -stone_weight END), 0) AS stone_weight,
         COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_carat ELSE -stone_carat END), 0) AS stone_carat,
@@ -1374,7 +1374,8 @@ document.addEventListener("change", function (event) {
 
 <?php
 // The grid buttons, and the live totals in the summary rail.
-jw_line_grid_scripts();
+jw_line_grid_scripts(['metals' => $metals, 'purities' => $purities,
+    'units' => $units, 'base_unit' => $baseUnit]);
 jw_summary_rail_script();
 include __DIR__ . '/../../app/views/partials/admin_footer.php';
 ?>

@@ -1170,6 +1170,95 @@ function jw_item_balance(int $companyId, int $itemId, ?string $asOf = null, stri
     ];
 }
 
+/**
+ * The same balance as jw_item_balance(), for a whole list of items at once.
+ *
+ * The order form labels every item in its dropdown with what is on the shelf,
+ * which meant one aggregate query per item — a hundred items, a hundred round
+ * trips, for a caption. This asks the same question once and groups it, and
+ * returns the identical shape keyed by item id so callers are interchangeable.
+ *
+ * Items with no movements are still returned, at zero, so a caller can index
+ * the result without checking whether the key is there.
+ */
+function jw_item_balances(int $companyId, array $itemIds, ?string $asOf = null, string $holderType = 'stock'): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $itemIds), static fn (int $id): bool => $id > 0)));
+    if (!$ids) {
+        return [];
+    }
+    $in = implode(',', $ids);
+
+    // One trip for the per-item unit, so the grams SQL returns can be shown in
+    // the unit the item is actually kept in.
+    $perUnit = [];
+    $unitStmt = db()->prepare("SELECT i.id, u.grams FROM inventory_items i
+        INNER JOIN jewellery_item_profiles j ON j.inventory_item_id = i.id
+        INNER JOIN jewellery_units u ON u.id = j.unit_id
+        WHERE i.company_id = :cid AND i.id IN ($in)");
+    $unitStmt->execute(['cid' => $companyId]);
+    foreach ($unitStmt->fetchAll(PDO::FETCH_ASSOC) as $unitRow) {
+        $grams = (float) $unitRow['grams'];
+        $perUnit[(int) $unitRow['id']] = $grams > 0 ? $grams : 1.0;
+    }
+
+    $sql = "SELECT item_id,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN qty_pieces ELSE -qty_pieces END), 0) AS pieces,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN gross_grams ELSE -gross_grams END), 0) AS gross_g,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_grams ELSE -fine_grams END), 0) AS fine_g,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END), 0) AS value,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_grams ELSE 0 END), 0) AS fine_in_g,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE 0 END), 0) AS value_in,
+            COUNT(*) AS movements
+        FROM jewellery_stock_txns
+        WHERE company_id = :cid AND item_id IN ($in)";
+    $params = ['cid' => $companyId];
+    if ($holderType !== '') {
+        $sql .= ' AND holder_type = :ht';
+        $params['ht'] = $holderType;
+    }
+    if ($asOf !== null && $asOf !== '') {
+        $sql .= ' AND txn_date <= :asof';
+        $params['asof'] = $asOf;
+    }
+    $sql .= ' GROUP BY item_id';
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+
+    $rows = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $rows[(int) $row['item_id']] = $row;
+    }
+
+    $out = [];
+    foreach ($ids as $itemId) {
+        $row = $rows[$itemId] ?? [];
+        $per = $perUnit[$itemId] ?? 1.0;
+        $fineIn = (float) ($row['fine_in_g'] ?? 0) / $per;
+        $valueIn = (float) ($row['value_in'] ?? 0);
+        $fine = jw_round_weight((float) ($row['fine_g'] ?? 0) / $per);
+        $value = jw_round_money((float) ($row['value'] ?? 0));
+        // Moving weighted average, on the same terms as jw_item_balance(): the
+        // value still on hand over the fine weight still on hand, falling back
+        // to the all-inflow average only when there is nothing left to divide.
+        $avgFineRate = 0.0;
+        if ($fine > 0.00005) {
+            $avgFineRate = jw_round_rate($value / $fine);
+        } elseif ($fineIn > 0.00005) {
+            $avgFineRate = jw_round_rate($valueIn / $fineIn);
+        }
+        $out[$itemId] = [
+            'qty_pieces' => round((float) ($row['pieces'] ?? 0), 3),
+            'gross_weight' => jw_round_weight((float) ($row['gross_g'] ?? 0) / $per),
+            'fine_weight' => $fine,
+            'value' => $value,
+            'avg_fine_rate' => $avgFineRate,
+            'movements' => (int) ($row['movements'] ?? 0),
+        ];
+    }
+
+    return $out;
+}
 /** Grams per one unit of an item's own weight unit. Cached: this is a hot path. */
 function jw_item_unit_grams(int $companyId, int $itemId): float
 {
@@ -1309,12 +1398,17 @@ function jewellery_stock_ledger(int $companyId, int $itemId, string $from, strin
 function jewellery_stock_valuation(int $companyId, ?string $asOf = null): array
 {
     $out = [];
-    foreach (jewellery_items_list($companyId) as $item) {
-        $balance = jw_item_balance($companyId, (int) $item['id'], $asOf, '');
+    // Both balances for every item in two queries rather than two per item.
+    $valuationItems = jewellery_items_list($companyId);
+    $valuationIds = array_column($valuationItems, 'id');
+    $allHolders = jw_item_balances($companyId, $valuationIds, $asOf, '');
+    $ownHolder = jw_item_balances($companyId, $valuationIds, $asOf, 'stock');
+    foreach ($valuationItems as $item) {
+        $balance = $allHolders[(int) $item['id']] ?? jw_item_balance($companyId, (int) $item['id'], $asOf, '');
         if (abs($balance['fine_weight']) < 0.00005 && abs($balance['qty_pieces']) < 0.0005) {
             continue;
         }
-        $own = jw_item_balance($companyId, (int) $item['id'], $asOf, 'stock');
+        $own = $ownHolder[(int) $item['id']] ?? jw_item_balance($companyId, (int) $item['id'], $asOf, 'stock');
         $componentSql = "SELECT
             COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_carat ELSE -stone_carat END), 0) AS stone_carat,
             COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_carat ELSE -diamond_carat END), 0) AS diamond_carat,

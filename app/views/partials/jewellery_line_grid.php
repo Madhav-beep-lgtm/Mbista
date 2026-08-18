@@ -531,13 +531,23 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
  * at all — its issue points back at it — and the last row is emptied rather
  * than removed, because a grid with no rows cannot be typed into.
  */
-function jw_line_grid_scripts(): void
+function jw_line_grid_scripts(array $ctx = []): void
 {
     static $done = false;
     if ($done) {
         return;
     }
     $done = true;
+    // The Create New Item dialog is the item master's own form in a box, so it
+    // is handed the same lists that form is built from. It used to copy its
+    // options out of the line grid instead, which is why Metal came up empty —
+    // the grid has no metal column to copy — and why Weight Unit offered
+    // "Select stock": that copy searched by name tail and found the stock
+    // picker, whose name ends in _stock_unit_id[].
+    $metals = $ctx['metals'] ?? [];
+    $purities = $ctx['purities'] ?? [];
+    $units = $ctx['units'] ?? [];
+    $baseUnit = $ctx['base_unit'] ?? null;
     ?>
 <!-- Modal for Creating New Items in Kaligadh Orders -->
 <div id="jw-item-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;overflow:auto">
@@ -585,19 +595,30 @@ function jw_line_grid_scripts(): void
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Metal<span style="color:red;margin-left:2px">*</span></label>
                     <select name="metal_id" id="jw-modal-metal" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
-                        <option value="">— Select metal —</option>
+                        <?php foreach ($metals as $m): ?>
+                            <?php if ((int) ($m['active'] ?? 1) !== 1) { continue; } ?>
+                            <option value="<?= (int) $m['id'] ?>"><?= e((string) $m['name']) ?></option>
+                        <?php endforeach; ?>
                     </select>
                 </div>
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Purity<span style="color:red;margin-left:2px">*</span></label>
                     <select name="purity_id" id="jw-modal-purity" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
-                        <option value="">— Select purity —</option>
+                        <?php // data-metal is what the script below filters on, so the list only
+                              // ever offers purities that belong to the metal chosen. ?>
+                        <?php foreach ($purities as $p): ?>
+                            <?php if ((int) ($p['active'] ?? 1) !== 1) { continue; } ?>
+                            <option value="<?= (int) $p['id'] ?>" data-metal="<?= (int) $p['metal_id'] ?>"><?= e(((string) ($p['metal_code'] ?? '')) . ' · ' . (string) $p['code']) ?></option>
+                        <?php endforeach; ?>
                     </select>
                 </div>
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Weight Unit<span style="color:red;margin-left:2px">*</span></label>
                     <select name="unit_id" id="jw-modal-unit" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
-                        <option value="">— Select unit —</option>
+                        <?php foreach ($units as $u): ?>
+                            <?php if ((int) ($u['active'] ?? 1) !== 1) { continue; } ?>
+                            <option value="<?= (int) $u['id'] ?>" <?= (int) ($baseUnit['id'] ?? 0) === (int) $u['id'] ? 'selected' : '' ?>><?= e((string) $u['name']) ?></option>
+                        <?php endforeach; ?>
                     </select>
                 </div>
 
@@ -977,8 +998,12 @@ function jw_line_grid_scripts(): void
         // Every kind of set stone is rock: stones, diamonds and other
         // diamonds sum into the one Less figure, exactly as the engine does.
         var carats = 0;
-        ["_stone_carat", "_diamond_carat", "_other_diamond_carat"].forEach(function (suffix) {
-            var caratField = row.querySelector('input[name$="' + suffix + '[]"]');
+        // By whole name. "l_other_diamond_carat[]" also ends with "_diamond_carat[]",
+        // so a tail search finds the right box here only because of the order the
+        // columns happen to sit in — move them and the other-diamond carats get
+        // counted twice while the diamond ones are never counted at all.
+        ["_stone_carat[]", "_diamond_carat[]", "_other_diamond_carat[]"].forEach(function (suffix) {
+            var caratField = rowField(row, suffix);
             var v = caratField ? parseFloat(caratField.value) : 0;
             if (isFinite(v) && v > 0) { carats += v; }
         });
@@ -1011,33 +1036,38 @@ function jw_line_grid_scripts(): void
         currentItemSelect = null;
     }
 
+    // Purity follows metal, exactly as it does on the item master's own form:
+    // a 22K gold purity has no business on a silver item, and offering it is
+    // how an item ends up saved against a purity of the wrong metal.
+    var allPurityOptions = puritySelect ? Array.prototype.slice.call(puritySelect.options) : [];
+
+    function syncModalPurities() {
+        if (!metalSelect || !puritySelect) { return; }
+        var keep = puritySelect.value;
+        puritySelect.innerHTML = "";
+        allPurityOptions.forEach(function (opt) {
+            if (opt.getAttribute("data-metal") === metalSelect.value) { puritySelect.appendChild(opt); }
+        });
+        if (keep) { puritySelect.value = keep; }
+        // Nothing survived the filter, so the metal has none defined yet. Say so
+        // rather than showing an empty box the user cannot act on.
+        if (!puritySelect.options.length) {
+            var none = document.createElement("option");
+            none.value = "";
+            none.textContent = "— no purity set for this metal —";
+            puritySelect.appendChild(none);
+        }
+    }
+
     function populateModalDropdowns() {
-        if (modalDropdownsPopulated) return;
-
-        // Find a metal dropdown from the page and copy its options
-        var pageMetalSelect = document.querySelector("select[name$='_metal_id[]']");
-        if (pageMetalSelect) {
-            metalSelect.innerHTML = pageMetalSelect.innerHTML;
-        }
-
-        // Find a purity dropdown from the page and copy its options
-        var pagePuritySelect = document.querySelector("select[name$='_purity_id[]']");
-        if (pagePuritySelect) {
-            puritySelect.innerHTML = pagePuritySelect.innerHTML;
-        }
-
-        // Find a unit dropdown from the page and copy its options
-        var pageUnitSelect = document.querySelector("select[name$='_unit_id[]']");
-        if (pageUnitSelect && unitSelect) {
-            unitSelect.innerHTML = pageUnitSelect.innerHTML;
-        }
-
+        if (modalDropdownsPopulated) { return; }
+        syncModalPurities();
         modalDropdownsPopulated = true;
     }
 
+    if (metalSelect) { metalSelect.addEventListener("change", syncModalPurities); }
+
     function openModal(itemSelect) {
-        console.log("[Modal] openModal called");
-        console.log("[Modal] itemModal element:", itemModal);
 
         currentItemSelect = itemSelect;
         populateModalDropdowns();
@@ -1048,17 +1078,14 @@ function jw_line_grid_scripts(): void
             var pageCSRFToken = document.querySelector("input[name='csrf_token']");
             if (pageCSRFToken) {
                 csrfInput.value = pageCSRFToken.value;
-                console.log("[Modal] CSRF token set");
             }
         }
 
         itemModal.style.display = "block";
-        console.log("[Modal] Modal display set to block");
         errorDiv.style.display = "none";
         successDiv.style.display = "none";
         // Focus on first input
         itemForm.querySelector('input[name="code"]').focus();
-        console.log("[Modal] Modal opened successfully");
     }
 
     closeBtn.addEventListener("click", closeModal);
@@ -1083,7 +1110,6 @@ function jw_line_grid_scripts(): void
         var itemSelect = row.querySelector("select[name$='_item_id[]']");
         if (!itemSelect) { return; }
 
-        console.log("[Modal] Add item button clicked");
         openModal(itemSelect);
     });
 
