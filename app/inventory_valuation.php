@@ -775,17 +775,186 @@ function inv_item_valuation(int $companyId, array $item): array
  * Company-wide valuation totals across all active items (drives the KPI cards).
  * @return array{cost: float, lower: float, write_down: float}
  */
+/**
+ * Open cost layers for many items at once, summed per item.
+ *
+ * The same arithmetic inv_layer_balance() does one item at a time, and the same
+ * "open" test (qty_remaining > 0.00005). Summed in SQL because the per-item
+ * version reads every layer row into PHP only to add two columns up.
+ *
+ * @return array<int, array{qty: float, value: float}>
+ */
+function inv_layer_balances(int $companyId, array $itemIds): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $itemIds), static fn (int $id): bool => $id > 0)));
+    if ($ids === [] || !table_exists('inventory_cost_layers')) {
+        return [];
+    }
+    $stmt = db()->prepare(
+        'SELECT item_id, SUM(qty_remaining) AS qty, SUM(qty_remaining * unit_cost) AS value
+         FROM inventory_cost_layers
+         WHERE company_id = :cid AND qty_remaining > 0.00005
+           AND item_id IN (' . implode(',', $ids) . ')
+         GROUP BY item_id'
+    );
+    $stmt->execute(['cid' => $companyId]);
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $out[(int) $row['item_id']] = [
+            'qty' => inv_round_qty((float) $row['qty']),
+            'value' => inv_round_money((float) $row['value']),
+        ];
+    }
+
+    return $out;
+}
+
+/**
+ * The NRV assessment that stands for each of many items.
+ *
+ * Same rule as inv_item_valuation(): the newest by date then id, and only a
+ * real assessment — an allowance RELEASE row carries no selling price, and a
+ * reversed one no longer holds. Ordered so the first row seen per item is the
+ * one that wins, which avoids a correlated subquery per item.
+ *
+ * @return array<int, array{selling_price: float, completion_cost: float, selling_cost: float}>
+ */
+function inv_nrv_latest(int $companyId, array $itemIds): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $itemIds), static fn (int $id): bool => $id > 0)));
+    if ($ids === [] || !table_exists('inventory_nrv_assessments')) {
+        return [];
+    }
+    $where = inv_nrv_assessment_columns_ready() ? " AND status = 'active' AND release_amount = 0" : '';
+    $stmt = db()->prepare(
+        'SELECT item_id, selling_price, completion_cost, selling_cost
+         FROM inventory_nrv_assessments
+         WHERE company_id = :cid AND item_id IN (' . implode(',', $ids) . ')' . $where . '
+         ORDER BY item_id ASC, assessment_date DESC, id DESC'
+    );
+    $stmt->execute(['cid' => $companyId]);
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $itemId = (int) $row['item_id'];
+        if (isset($out[$itemId])) {
+            continue; // the first row for an item is the newest
+        }
+        $out[$itemId] = [
+            'selling_price' => (float) $row['selling_price'],
+            'completion_cost' => (float) $row['completion_cost'],
+            'selling_cost' => (float) $row['selling_cost'],
+        ];
+    }
+
+    return $out;
+}
+
+/**
+ * Build the cost layers of any item that has never had them, for a whole list.
+ *
+ * inv_ensure_layers() spends two queries per item establishing that there is
+ * nothing to do, which for a settled book is every item every time. Both
+ * questions are asked once here for the whole list, and the rebuild itself —
+ * which really is per item, and really does write — runs only for the few that
+ * need it, once in their life.
+ */
+function inv_ensure_layers_bulk(int $companyId, array $items): void
+{
+    if ($items === [] || !table_exists('inventory_cost_layers')) {
+        return;
+    }
+    $byId = [];
+    foreach ($items as $item) {
+        $id = (int) ($item['id'] ?? 0);
+        if ($id > 0) {
+            $byId[$id] = $item;
+        }
+    }
+    if ($byId === []) {
+        return;
+    }
+    $in = implode(',', array_keys($byId));
+
+    $have = db()->prepare('SELECT DISTINCT item_id FROM inventory_cost_layers
+        WHERE company_id = :cid AND item_id IN (' . $in . ')');
+    $have->execute(['cid' => $companyId]);
+    foreach ($have->fetchAll(PDO::FETCH_COLUMN) as $id) {
+        unset($byId[(int) $id]);
+    }
+    if ($byId === []) {
+        return;
+    }
+
+    $moved = [];
+    $txn = db()->prepare('SELECT DISTINCT item_id FROM inventory_transactions
+        WHERE company_id = :cid AND item_id IN (' . implode(',', array_keys($byId)) . ')');
+    $txn->execute(['cid' => $companyId]);
+    foreach ($txn->fetchAll(PDO::FETCH_COLUMN) as $id) {
+        $moved[(int) $id] = true;
+    }
+
+    foreach ($byId as $id => $item) {
+        $hasOpening = (float) ($item['opening_qty'] ?? 0) > INV_EPSILON;
+        if (!$hasOpening && !isset($moved[$id])) {
+            continue;
+        }
+        inv_rebuild_layers(
+            $companyId,
+            $id,
+            (string) ($item['valuation_method'] ?? 'weighted_average'),
+            (float) ($item['opening_qty'] ?? 0),
+            inv_item_opening_unit_cost($item)
+        );
+    }
+}
+
 function inv_company_valuation(int $companyId, array $items): array
 {
+    // Three numbers for a card, and it used to cost four queries per item to
+    // get them: two proving there was no backfill to do, one reading the cost
+    // layers, one fetching the NRV assessment. A few thousand items is tens of
+    // thousands of round trips before the page draws anything.
+    //
+    // Same arithmetic as inv_item_valuation(), item for item — including the
+    // legacy fallback to purchase_rate when an item has no layers — read in
+    // three sweeps instead of four per item.
+    if ($items === []) {
+        return ['cost' => 0.0, 'lower' => 0.0, 'write_down' => 0.0];
+    }
+    inv_ensure_layers_bulk($companyId, $items);
+    $ids = array_map(static fn (array $item): int => (int) $item['id'], $items);
+    $balances = inv_layer_balances($companyId, $ids);
+    $assessments = inv_nrv_latest($companyId, $ids);
+
     $cost = 0.0;
     $lower = 0.0;
     $writeDown = 0.0;
     foreach ($items as $item) {
-        $v = inv_item_valuation($companyId, $item);
-        $cost += $v['cost_value'];
-        $lower += $v['lower_value'];
-        $writeDown += $v['write_down'];
+        $itemId = (int) $item['id'];
+        $qty = $balances[$itemId]['qty'] ?? 0.0;
+        $costValue = $balances[$itemId]['value'] ?? 0.0;
+        if ($qty <= INV_EPSILON && isset($item['on_hand'])) {
+            $qty = inv_round_qty((float) $item['on_hand']);
+            $costValue = inv_round_money($qty * (float) ($item['purchase_rate'] ?? 0));
+        }
+        $unitCost = $qty > INV_EPSILON ? $costValue / $qty : 0.0;
+
+        $sellingPrice = (float) ($item['sales_rate'] ?? 0);
+        $completion = 0.0;
+        $selling = 0.0;
+        if (isset($assessments[$itemId])) {
+            $sellingPrice = $assessments[$itemId]['selling_price'];
+            $completion = $assessments[$itemId]['completion_cost'];
+            $selling = $assessments[$itemId]['selling_cost'];
+        }
+        $nrvPerUnit = $sellingPrice > 0 ? ($sellingPrice - $completion - $selling) : $unitCost;
+        $lowerValue = inv_round_money($qty * min($unitCost, $nrvPerUnit));
+
+        $cost += inv_round_money($costValue);
+        $lower += $lowerValue;
+        $writeDown += inv_round_money(max(0.0, inv_round_money($costValue) - $lowerValue));
     }
+
     return ['cost' => inv_round_money($cost), 'lower' => inv_round_money($lower), 'write_down' => inv_round_money($writeDown)];
 }
 
