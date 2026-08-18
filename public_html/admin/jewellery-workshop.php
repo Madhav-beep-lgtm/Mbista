@@ -501,13 +501,14 @@ foreach ($items as $itemRow) {
 
 try {
     $stockStmt = db()->prepare(
-        "SELECT a.id, a.assignment_no, r.receipt_no, r.received_gross_weight,
-                r.stone_weight, r.received_item_id, r.received_purity_id, r.unit_id, r.qty_pieces, r.making_amount,
+        "SELECT r.id, r.receipt_no, r.received_gross_weight AS gross_weight,
+                r.stone_weight, r.received_item_id AS item_id, r.received_purity_id AS purity_id,
+                r.unit_id, r.qty_pieces, r.making_amount,
                 i.sku AS item_code, i.name AS item_name,
-                p.code AS purity_code, u.code AS unit_code
-        FROM jewellery_order_assignments a
-        INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
-        INNER JOIN jewellery_order_receipts r ON r.assignment_id = a.id
+                p.code AS purity_code, u.code AS unit_code,
+                a.assignment_no AS trace_code
+        FROM jewellery_order_receipts r
+        INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id
         LEFT JOIN inventory_items i ON i.id = r.received_item_id
         LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
         LEFT JOIN jewellery_units u ON u.id = r.unit_id
@@ -517,9 +518,8 @@ try {
     );
     $stockStmt->execute(['cid' => $companyId]);
     $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
-    error_log("[DEBUG] Loaded " . count($orderStockPieces) . " stock pieces for company " . $companyId);
 } catch (Exception $e) {
-    error_log("[ERROR] Failed to load showroom stock: " . $e->getMessage());
+    error_log("[ERROR] Showroom stock query failed: " . $e->getMessage());
     $orderStockPieces = [];
 }
 $cashBankLedgers = [];
