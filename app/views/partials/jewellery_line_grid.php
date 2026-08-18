@@ -253,7 +253,17 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                 // Diamond, Workshop — so the widths written on the SECOND row
                 // were being ignored and those columns collapsed to whatever
                 // was left. A colgroup addresses the real columns directly.
-                $cols = ['c-item', 'c-sel', 'c-unit', 'c-pcs', 'c-wt', 'c-wt'];
+                // Column order: FROM STOCK first, then ITEM, then rest
+                $cols = [];
+                if ($withWorkshop && $withStock) {
+                    $cols[] = 'c-src';
+                }
+                $cols[] = 'c-item';
+                $cols[] = 'c-sel';
+                $cols[] = 'c-unit';
+                $cols[] = 'c-pcs';
+                $cols[] = 'c-wt';
+                $cols[] = 'c-wt';
                 if ($prefix !== 'x') {
                     $cols[] = 'c-wt';
                     $cols[] = 'c-wt';
@@ -267,9 +277,6 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                     }
                 }
                 if ($withWorkshop) {
-                    if ($withStock) {
-                        $cols[] = 'c-src';
-                    }
                     $cols[] = 'c-krg';
                     $cols[] = 'c-date';
                     $cols[] = 'c-size';
@@ -282,6 +289,9 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
             </colgroup>
             <thead>
                 <tr>
+                    <?php if ($withWorkshop && $withStock): ?>
+                        <th rowspan="2" class="c-src">From stock</th>
+                    <?php endif; ?>
                     <th rowspan="2" class="c-item">Item</th>
                     <th rowspan="2" class="c-sel">Purity</th>
                     <th rowspan="2" class="c-unit">Unit</th>
@@ -294,8 +304,10 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         <th colspan="2">Other diamond</th>
                         <th colspan="2">Stone</th>
                     <?php endif; ?>
-                    <?php if ($withWorkshop): ?>
-                        <th colspan="<?= $withStock ? 5 : 4 ?>">Workshop</th>
+                    <?php if ($withWorkshop && !$withStock): ?>
+                        <th colspan="4">Workshop</th>
+                    <?php elseif ($withWorkshop && $withStock): ?>
+                        <th colspan="4">Workshop</th>
                     <?php endif; ?>
                     <th rowspan="2" class="c-del"></th>
                 </tr>
@@ -309,7 +321,6 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         <th class="c-crt">Crt</th><th class="c-amt">Amt</th>
                     <?php endif; ?>
                     <?php if ($withWorkshop): ?>
-                        <?php if ($withStock): ?><th class="c-src">From stock</th><?php endif; ?>
                         <th class="c-krg">Kaligad</th><th class="c-date">Promised</th>
                         <th class="c-size">Size</th><th class="c-note">Item note</th>
                     <?php endif; ?>
