@@ -358,11 +358,14 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                             if ($pieceId <= 0) continue;
                                             $pieceName = trim((string) ($piece['item_name'] ?? ''));
                                             $traceCode = trim((string) ($piece['trace_code'] ?? ''));
-                                            $qtyAvailable = (int) ($piece['qty_pieces'] ?? 1);
+                                            // Pieces tracked by weight carry no piece count — an
+                                            // opening balance of 4.36gm is one object, not zero of
+                                            // them, so "Qty: 0" is only shown when it is a real count.
+                                            $qtyAvailable = (float) ($piece['qty_pieces'] ?? 0);
                                             $pieceLabel = ($traceCode !== '' ? $traceCode : 'Stock #' . $pieceId)
                                                 . ' | ' . ($pieceName !== '' ? $pieceName : (string) ($piece['item_code'] ?? 'Item'))
                                                 . ' | ' . $fmt((float) ($piece['gross_weight'] ?? 0), 4) . ' ' . (string) ($piece['unit_code'] ?? '')
-                                                . ' | Qty: ' . $qtyAvailable;
+                                                . ($qtyAvailable > 0 ? ' | Qty: ' . $fmt($qtyAvailable, 0) : '');
                                         ?>
                                         <option value="<?= $pieceId ?>"
                                                 data-item="<?= (int) ($piece['item_id'] ?? 0) ?>"

@@ -354,8 +354,12 @@ function jewellery_trace_ready_to_sale_options(int $companyId, int $forOrderId =
         return [];
     }
     jewellery_trace_backfill_legacy_balance($companyId);
+    // metal_id and purity_metal_id ride along because the order form validates a
+    // chosen purity against the item's metal before it will accept the line —
+    // without them every pick off the shelf failed that check.
     $sql = "SELECT su.*, i.sku AS item_code, i.name AS item_name, i.category,
-            p.code AS purity_code, u.code AS unit_code,
+            jp.metal_id, jp.design_no,
+            p.code AS purity_code, p.metal_id AS purity_metal_id, u.code AS unit_code,
             o.order_no AS reserved_order_no, COALESCE(ap.name, o.customer_name, su.customer_name) AS reserved_for
         FROM jewellery_stock_units su
         INNER JOIN inventory_items i ON i.id = su.item_id AND i.company_id = su.company_id

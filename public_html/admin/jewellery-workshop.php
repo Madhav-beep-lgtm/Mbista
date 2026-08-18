@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../app/jewellery_reports.php';
 // Ready to Sale and the output register both read the assignment kind, which
 // the assign engine owns.
 require_once __DIR__ . '/../../app/jewellery_assign.php';
+require_once __DIR__ . '/../../app/jewellery_stock.php';
 // The order form punches items on the SAME grid the sale does, so a quote and
 // the bill it becomes can never carry different columns.
 require_once __DIR__ . '/../../app/views/partials/jewellery_line_grid.php';
@@ -507,49 +508,17 @@ foreach ($items as $itemRow) {
     $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
 }
 
-// Load all inventory items as showroom stock options
-$orderStockPieces = [];
-try {
-    $stockStmt = db()->prepare(
-        "SELECT i.id, '' AS assignment_no, '' AS receipt_no,
-                0 AS gross_weight, 0 AS stone_weight,
-                i.id AS item_id, 0 AS purity_id, 0 AS unit_id, 1 AS qty_pieces, 0 AS making_amount,
-                i.sku AS item_code, i.name AS item_name, i.metal_id,
-                '' AS purity_code, 0 AS purity_metal_id, i.unit AS unit_code,
-                '' AS size_design, '' AS design_no, '' AS trace_code
-        FROM inventory_items i
-        WHERE i.company_id = :cid AND i.item_type != 'service'
-        ORDER BY i.sku ASC"
-    );
-    $stockStmt->execute(['cid' => $companyId]);
-    $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
-    error_log("[DEBUG] Stock items for company $companyId: " . count($orderStockPieces));
-
-    // Add test items if no items found (for debugging)
-    if (empty($orderStockPieces)) {
-        $orderStockPieces = [
-            [
-                'id' => 1, 'assignment_no' => '', 'receipt_no' => '',
-                'gross_weight' => 10.5, 'stone_weight' => 0,
-                'item_id' => 1, 'purity_id' => 0, 'unit_id' => 0, 'qty_pieces' => 1, 'making_amount' => 0,
-                'item_code' => 'TEST-001', 'item_name' => 'Test Bracelet', 'metal_id' => 0,
-                'purity_code' => '', 'purity_metal_id' => 0, 'unit_code' => 'gm',
-                'size_design' => '', 'design_no' => '', 'trace_code' => 'TEST'
-            ],
-            [
-                'id' => 2, 'assignment_no' => '', 'receipt_no' => '',
-                'gross_weight' => 5.2, 'stone_weight' => 0,
-                'item_id' => 2, 'purity_id' => 0, 'unit_id' => 0, 'qty_pieces' => 1, 'making_amount' => 0,
-                'item_code' => 'TEST-002', 'item_name' => 'Test Ring', 'metal_id' => 0,
-                'purity_code' => '', 'purity_metal_id' => 0, 'unit_code' => 'gm',
-                'size_design' => '', 'design_no' => '', 'trace_code' => 'TEST'
-            ]
-        ];
-        error_log("[DEBUG] No real items found, using test items");
-    }
-} catch (Exception $e) {
-    error_log("[ERROR] Failed to load stock: " . $e->getMessage());
-}
+// The Ready to Sale shelf itself — jewellery_stock_units, not the product
+// master. A piece the customer points at in the case is one traced unit with
+// its own weight and trace code, and that unit's id is what the line stores in
+// stock_unit_id. Showroom pieces only: anything already spoken for by a
+// customer order is another customer's, so the engine's own list is used, which
+// also keeps back pieces a different live order is holding while leaving this
+// order's own holds on the list.
+$orderStockPieces = jewellery_trace_ready_to_sale_options(
+    $companyId,
+    $editOrder ? (int) $editOrder['id'] : 0
+);
 $cashBankLedgers = [];
 if ($view === 'orders' && table_exists('ledgers')) {
     $cashStmt = db()->prepare('SELECT l.id, l.code, l.name FROM ledgers l
