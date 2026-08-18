@@ -417,7 +417,10 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                       // what is shown and what is stored cannot drift. ?>
                                 <select name="<?= $prefix ?>_stock_unit_id[]" class="jw-stock-pick"
                                         title="Choose an exact finished piece from showroom stock">
-                                    <option value="0">&mdash; to be made &mdash;</option>
+                                    <option value="0">— New assignment —</option>
+                                    <?php if (!empty($stockPieces)): ?>
+                                        <option value="0" disabled>─ Showroom stock (exact weight available) ─</option>
+                                    <?php endif; ?>
                                     <?php foreach ($stockPieces as $piece): ?>
                                         <?php
                                             $pieceId = (int) ($piece['id'] ?? 0);
@@ -426,10 +429,12 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                             }
                                             $pieceName = trim((string) ($piece['item_name'] ?? ''));
                                             $traceCode = trim((string) ($piece['trace_code'] ?? ''));
-                                            $pieceLabel = ($traceCode !== '' ? $traceCode : 'Stock #' . $pieceId)
+                                            $qtyAvailable = (int) ($piece['qty_pieces'] ?? 1);
+                                            $pieceLabel = '  ' . ($traceCode !== '' ? $traceCode : 'Stock #' . $pieceId)
                                                 . ' | ' . ($pieceName !== '' ? $pieceName : (string) ($piece['item_code'] ?? 'Item'))
                                                 . ' | ' . $fmt((float) ($piece['gross_weight'] ?? 0), 4)
                                                 . ' ' . (string) ($piece['unit_code'] ?? '')
+                                                . ' | Qty: ' . $qtyAvailable
                                                 . ' | ' . (string) ($piece['purity_code'] ?? '');
                                         ?>
                                         <option value="<?= $pieceId ?>"
