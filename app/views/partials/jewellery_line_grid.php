@@ -326,6 +326,39 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                     <?php endif; ?>
                 </tr>
             </thead>
+            <?php
+                // ONE copy of the item list per page, not one per line.
+                //
+                // Every line row used to render the whole item master. A sale form
+                // has seven of these selects, so a shop with a few thousand styles
+                // was sent the entire list seven times — most of a megabyte of
+                // <option> for a form showing a dozen rows. The list is built once
+                // here, parked in a <template>, and the script at the foot of the
+                // page copies it into the rows left empty.
+                //
+                // The FIRST select on the page keeps its options inline, so the
+                // form is still usable if that script never runs.
+                static $sharedItemOptions = null;
+                static $itemTemplateEmitted = false;
+                static $inlineListUsed = false;
+                if ($sharedItemOptions === null) {
+                    $sharedItemOptions = '<option value="0">—</option>';
+                    foreach ($items as $it) {
+                        $stock = $onHand[(int) $it['id']] ?? null;
+                        $left = $stock
+                            ? ' · ' . $fmt((float) $stock['qty_pieces'], 0) . 'pc '
+                                . $fmt((float) $stock['fine_weight'], 3) . ' fine'
+                            : '';
+                        $label = $it['code'] . ' — ' . $it['name'] . $left;
+                        $sharedItemOptions .= '<option value="' . (int) $it['id'] . '" data-type="'
+                            . e((string) ($it['item_type'] ?? '')) . '" title="' . e($label) . '">'
+                            . e($label) . '</option>';
+                    }
+                }
+            ?>
+            <?php if (!$itemTemplateEmitted): $itemTemplateEmitted = true; ?>
+                <template id="jw-item-options"><?= $sharedItemOptions ?></template>
+            <?php endif; ?>
             <tbody>
             <?php for ($i = 0; $i < $slots; $i++): $row = $existing[$i] ?? null; ?>
                 <?php
@@ -414,18 +447,26 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                               // the row then hid that instead — leaving the item box and + Add on
                               // screen for a piece coming off the shelf. ?>
                         <div class="jw-item-manual" style="display:<?= ((int) ($row['stock_unit_id'] ?? 0) === 0) ? 'flex' : 'none' ?>;gap:4px;align-items:center;width:100%">
-                            <select name="<?= $prefix ?>_item_id[]" class="c-item" style="flex:1;min-width:0">
-                                <option value="0">—</option>
-                                <?php foreach ($items as $it): ?>
-                                    <?php
-                                        $stock = $onHand[(int) $it['id']] ?? null;
-                                        $left = $stock
-                                            ? ' · ' . $fmt((float) $stock['qty_pieces'], 0) . 'pc '
-                                                . $fmt((float) $stock['fine_weight'], 3) . ' fine'
-                                            : '';
-                                    ?>
-                                    <option value="<?= (int) $it['id'] ?>" data-type="<?= e((string) ($it['item_type'] ?? '')) ?>" title="<?= e($it['code'] . ' — ' . $it['name'] . $left) ?>" <?= (int) ($row['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name'] . $left) ?></option>
-                                <?php endforeach; ?>
+                            <?php
+                                // The first is written out in full; the rest carry only
+                                // the value they already hold, so the form shows the right
+                                // item before any script runs, and are marked for filling
+                                // from the template above.
+                                $rowItemId = (int) ($row['item_id'] ?? 0);
+                                $fillFromTemplate = $inlineListUsed;
+                                $inlineListUsed = true;
+                            ?>
+                            <select name="<?= $prefix ?>_item_id[]" class="c-item" style="flex:1;min-width:0"<?= $fillFromTemplate ? ' data-jw-item-fill="1"' : '' ?>>
+                                <?php if (!$fillFromTemplate): ?>
+                                    <?= $rowItemId > 0
+                                        ? str_replace('<option value="' . $rowItemId . '"', '<option selected value="' . $rowItemId . '"', $sharedItemOptions)
+                                        : $sharedItemOptions ?>
+                                <?php else: ?>
+                                    <option value="0">—</option>
+                                    <?php foreach ($items as $it): if ((int) $it['id'] !== $rowItemId) { continue; } ?>
+                                        <option value="<?= (int) $it['id'] ?>" data-type="<?= e((string) ($it['item_type'] ?? '')) ?>" selected><?= e($it['code'] . ' — ' . $it['name']) ?></option>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
                             </select>
                             <button type="button" class="jw-add-item-btn" data-row-index="<?= $i ?>" style="padding:4px 8px;background:#0066cc;color:white;border:none;border-radius:3px;cursor:pointer;font-size:12px;white-space:nowrap;flex-shrink:0">+ Add</button>
                         </div>
@@ -720,6 +761,31 @@ function jw_line_grid_scripts(array $ctx = []): void
 </div>
 <script>
 (function () {
+    // Give every line its item list back.
+    //
+    // Only the first select on the page was written out in full; the rest
+    // arrived holding just the value they already had, marked for filling.
+    // Runs before anything below touches a row, and before the searchable
+    // dropdown script loads at the foot of the page — that one decides whether
+    // to enhance a select by counting its options, so it has to see the real
+    // list, not the stub.
+    function fillItemSelects(scope) {
+        var template = document.getElementById('jw-item-options');
+        if (!template) { return; }
+        var pending = (scope || document).querySelectorAll('select.c-item[data-jw-item-fill]');
+        Array.prototype.forEach.call(pending, function (select) {
+            var chosen = select.value;
+            select.innerHTML = template.innerHTML;
+            // A value the list no longer offers must not silently become the
+            // first item, so it is only restored when it is really there.
+            if (chosen && select.querySelector('option[value="' + chosen + '"]')) {
+                select.value = chosen;
+            }
+            select.removeAttribute('data-jw-item-fill');
+        });
+    }
+    fillItemSelects(document);
+
     function resetRow(row) {
         Array.prototype.forEach.call(row.querySelectorAll("input, select"), function (field) {
             if (field.disabled) { return; }
@@ -1149,6 +1215,15 @@ function jw_line_grid_scripts(array $ctx = []): void
                     newOption.value = data.item_id;
                     newOption.textContent = data.item_code + " — " + data.item_name;
                     currentItemSelect.appendChild(newOption);
+                    // And into the shared list, so every other row — and any row
+                    // added after this — offers the item that was just created.
+                    var sharedTemplate = document.getElementById("jw-item-options");
+                    if (sharedTemplate) { sharedTemplate.appendChild(newOption.cloneNode(true)); }
+                    Array.prototype.forEach.call(document.querySelectorAll("select.c-item"), function (other) {
+                        if (other !== currentItemSelect && !other.querySelector('option[value="' + data.item_id + '"]')) {
+                            other.appendChild(newOption.cloneNode(true));
+                        }
+                    });
 
                     // Explicitly set the select value to display the newly created item
                     currentItemSelect.value = data.item_id;
