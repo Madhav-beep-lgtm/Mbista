@@ -251,7 +251,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $tdsLedgerId = (int) ($_POST['tds_ledger_id'] ?? 0);
             fa_set_asset_ledger($companyId, $assetId, 'vat_input', $vatLedgerId, $userId);
             fa_set_asset_ledger($companyId, $assetId, 'tds_payable', $tdsLedgerId, $userId);
-            $tdsAmount = fa_tds_from_rate($cost, $tdsRatePct);
+            $tdsAmount = tds_from_rate($cost, $tdsRatePct);
 
             if ($cost > 0 && $costLedger && $creditLedger) {
                 $narrationBy = $voucherPartyId !== null
@@ -262,7 +262,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // the FA-ACQ series yet — that is handed out by posting, so a
                 // draft that is never posted cannot leave a gap in the series.
                 try {
-                    $acq = fa_acquisition_entries(
+                    $acq = purchase_entry_lines(
                         $cost, $vatAmount, $tdsAmount,
                         (int) $costLedger['id'], (int) $creditLedger['id'], $vatLedgerId, $tdsLedgerId
                     );
@@ -540,7 +540,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $posted = false;
         $taken = false;
         for ($attempt = 0; $attempt < 5 && !$posted; $attempt++) {
-            $voucherNo = fa_next_voucher_no($companyId, 'FA-ACQ-');
+            $voucherNo = next_voucher_no($companyId, 'FA-ACQ-');
             try {
                 $upd = db()->prepare("UPDATE vouchers SET voucher_no = :no, status = 'posted', approval_state = 'approved', posted_by = :uid, posted_at = NOW() WHERE id = :id AND status = 'draft'");
                 $upd->execute(['no' => $voucherNo, 'uid' => $userId, 'id' => (int) $draft['id']]);

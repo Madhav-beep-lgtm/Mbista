@@ -1419,8 +1419,13 @@ function inv_movement_posting_plan(string $type, string $direction): ?array
  *
  * @throws RuntimeException listing the missing purposes.
  */
-function inv_post_movement_voucher(int $companyId, ?int $fiscalYearId, int $txnId, string $type, array $item, string $direction, float $value, string $date, int $userId, ?int $partyId = null): int
+function inv_post_movement_voucher(int $companyId, ?int $fiscalYearId, int $txnId, string $type, array $item, string $direction, float $value, string $date, int $userId, ?int $partyId = null, array $extra = []): int
 {
+    // $extra carries what only a taxed purchase needs — vat, tds, the two
+    // ledgers they post to, whether to prepare the voucher as a draft, and the
+    // date it is meant to be posted on. Every existing caller passes nothing
+    // and gets exactly the two-line posted voucher it always got.
+
     $plan = inv_movement_posting_plan($type, $direction);
     if ($plan === null) {
         return 0; // departmental/warehouse transfer — stock only
@@ -1466,24 +1471,59 @@ function inv_post_movement_voucher(int $companyId, ?int $fiscalYearId, int $txnI
         throw new RuntimeException('MAP_MISSING:' . implode(',', $missing));
     }
 
-    $voucherNo = 'INV-' . strtoupper($type) . '-' . str_pad((string) $txnId, 6, '0', STR_PAD_LEFT);
-    return (int) create_voucher_with_entries([
+    $vat = round(max(0.0, (float) ($extra['vat'] ?? 0)), 2);
+    $tds = round(max(0.0, (float) ($extra['tds'] ?? 0)), 2);
+    $isDraft = !empty($extra['draft']);
+
+    // The stock leg is always the value put in, never the value plus tax: VAT
+    // is recoverable, so capitalising it into stock would overstate the balance
+    // sheet and every cost of sale struck off it afterwards.
+    if ($vat > 0 || $tds > 0) {
+        $built = purchase_entry_lines(
+            $value, $vat, $tds,
+            (int) $debit['id'], (int) $credit['id'],
+            (int) ($extra['vat_ledger_id'] ?? 0), (int) ($extra['tds_ledger_id'] ?? 0)
+        );
+        $lines = $built['lines'];
+        $total = $built['total'];
+    } else {
+        $lines = [
+            ['ledger_id' => (int) $debit['id'], 'entry_type' => 'debit', 'amount' => $value],
+            ['ledger_id' => (int) $credit['id'], 'entry_type' => 'credit', 'amount' => $value],
+        ];
+        $total = $value;
+    }
+
+    // A draft holds no number from the INV series — posting hands that out, so
+    // a draft that is never posted leaves no gap in it.
+    $voucherNo = $isDraft
+        ? 'INV-DRAFT-' . str_pad((string) $txnId, 6, '0', STR_PAD_LEFT)
+        : 'INV-' . strtoupper($type) . '-' . str_pad((string) $txnId, 6, '0', STR_PAD_LEFT);
+
+    $voucherId = (int) create_voucher_with_entries([
         'company_id' => $companyId,
         'fiscal_year_id' => $fiscalYearId ?: null,
         'voucher_no' => $voucherNo,
-        'voucher_type' => 'journal',
+        'voucher_type' => $isDraft ? 'purchase' : 'journal',
         'voucher_date' => $date,
+        'reference_no' => ($extra['reference_no'] ?? '') !== '' ? (string) $extra['reference_no'] : null,
         'source_type' => 'inventory_movement',
         'source_id' => $txnId,
         'party_id' => $partyId,
-        'total_amount' => $value,
+        'total_amount' => $total,
         'narration' => ucfirst(str_replace('_', ' ', $type)) . ' — ' . ($item['sku'] ?? '') . ' ' . ($item['name'] ?? ''),
-        'status' => 'posted',
-        'posted_by' => $userId,
-    ], [
-        ['ledger_id' => (int) $debit['id'], 'entry_type' => 'debit', 'amount' => $value],
-        ['ledger_id' => (int) $credit['id'], 'entry_type' => 'credit', 'amount' => $value],
-    ]);
+        'status' => $isDraft ? 'draft' : 'posted',
+        'posted_by' => $isDraft ? null : $userId,
+    ], $lines);
+
+    // posting_date is not one of the columns the shared writer knows, and a
+    // draft has not been posted by anybody yet.
+    if ($voucherId > 0 && (($extra['posting_date'] ?? '') !== '' || $isDraft)) {
+        db()->prepare('UPDATE vouchers SET posting_date = :d' . ($isDraft ? ', posted_by = NULL, posted_at = NULL' : '') . ' WHERE id = :id')
+            ->execute(['d' => ($extra['posting_date'] ?? '') !== '' ? (string) $extra['posting_date'] : $date, 'id' => $voucherId]);
+    }
+
+    return $voucherId;
 }
 
 /**

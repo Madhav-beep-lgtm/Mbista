@@ -8706,3 +8706,111 @@ function apply_ticket_request_decision(array $request, int $companyId, ?float $a
 
     return ['error' => null, 'invoice_id' => $appliedInvoiceId];
 }
+
+/**
+ * The lines a purchase makes when VAT is recoverable and TDS is withheld.
+ *
+ *   Dr  what was bought       net          stock value, or an asset's cost
+ *   Dr  VAT on purchase       vat          recoverable, so never part of the net
+ *       Cr  counterparty      net+vat-tds  supplier, clearing, or opening equity
+ *       Cr  TDS payable       tds          withheld, so not paid to the supplier
+ *
+ * VAT is a receivable from the tax office rather than part of what the thing
+ * cost, so folding it into the net would overstate stock on the balance sheet
+ * and every cost of sale struck off it afterwards — and, for an asset, every
+ * depreciation charge for the rest of its life. TDS is money withheld from the
+ * supplier and owed to the tax office instead, so the supplier's credit falls
+ * by exactly what is withheld and the two credits together still equal the
+ * bill.
+ *
+ * Shared by fixed-asset acquisitions and inventory purchases so the shape of a
+ * taxed purchase is defined once. Throws rather than posting a half-entry when
+ * a leg is missing the ledger it needs.
+ */
+function purchase_entry_lines(
+    float $net,
+    float $vat,
+    float $tds,
+    int $netLedgerId,
+    int $creditLedgerId,
+    int $vatLedgerId,
+    int $tdsLedgerId,
+    string $netMemo = ''
+): array {
+    $net = round(max(0.0, $net), 2);
+    $vat = round(max(0.0, $vat), 2);
+    $tds = round(max(0.0, $tds), 2);
+
+    if ($netLedgerId <= 0 || $creditLedgerId <= 0) {
+        throw new RuntimeException('A purchase needs both the ledger it is charged to and the ledger it is funded from.');
+    }
+    if ($vat > 0 && $vatLedgerId <= 0) {
+        throw new RuntimeException('Choose the VAT on purchase ledger, or clear the VAT amount.');
+    }
+    if ($tds > 0 && $tdsLedgerId <= 0) {
+        throw new RuntimeException('Choose the TDS deducted ledger, or clear the TDS amount.');
+    }
+    // Withholding more than the whole bill would leave the supplier owing money
+    // on a purchase, which is never what was meant.
+    if ($tds > round($net + $vat, 2)) {
+        throw new RuntimeException('TDS cannot exceed the amount plus VAT.');
+    }
+
+    $lines = [['ledger_id' => $netLedgerId, 'entry_type' => 'debit', 'amount' => $net]];
+    if ($netMemo !== '') {
+        $lines[0]['memo'] = $netMemo;
+    }
+    if ($vat > 0) {
+        $lines[] = ['ledger_id' => $vatLedgerId, 'entry_type' => 'debit', 'amount' => $vat, 'memo' => 'VAT on purchase — recoverable, not part of cost'];
+    }
+    $lines[] = ['ledger_id' => $creditLedgerId, 'entry_type' => 'credit', 'amount' => round($net + $vat - $tds, 2)];
+    if ($tds > 0) {
+        $lines[] = ['ledger_id' => $tdsLedgerId, 'entry_type' => 'credit', 'amount' => $tds, 'memo' => 'TDS withheld on purchase'];
+    }
+
+    return ['lines' => $lines, 'total' => round($net + $vat, 2)];
+}
+
+/**
+ * TDS from a rate: applied to the amount alone, never to the VAT.
+ *
+ * Tax is not withheld on tax — VAT is collected for the tax office and passed
+ * straight through, so a percentage of it would withhold against money the
+ * supplier never earned.
+ */
+function tds_from_rate(float $net, float $ratePct): float
+{
+    if ($ratePct <= 0 || $net <= 0) {
+        return 0.0;
+    }
+
+    return round($net * $ratePct / 100, 2);
+}
+
+/**
+ * The next number in a prefixed voucher series, for one company.
+ *
+ * Modules used to name vouchers after whatever they were about - FA-ACQ-<asset
+ * code>, INV-PURCHASE-<txn id> - which is not a number in a series: it cannot
+ * be read in order, it says nothing about when the voucher was posted, and it
+ * forced the thing being posted to already have a code. A draft waiting to be
+ * posted has no business holding a number from the series either, so the
+ * number is handed out by posting and a draft that is never posted leaves no
+ * gap behind it.
+ *
+ * Per company, because vouchers are unique on (company_id, voucher_no) - two
+ * companies may each hold FA-ACQ-0001. The caller retries on a duplicate key,
+ * which is what actually settles a race between two people posting at once;
+ * this only has to produce a sensible candidate.
+ */
+function next_voucher_no(int $companyId, string $prefix, int $pad = 4): string
+{
+    $skip = strlen($prefix) + 1;
+    $stmt = db()->prepare(
+        'SELECT COALESCE(MAX(CAST(SUBSTRING(voucher_no, ' . (int) $skip . ') AS UNSIGNED)), 0)
+         FROM vouchers WHERE company_id = :cid AND voucher_no LIKE :pattern'
+    );
+    $stmt->execute(['cid' => $companyId, 'pattern' => $prefix . '%']);
+
+    return $prefix . str_pad((string) ((int) $stmt->fetchColumn() + 1), $pad, '0', STR_PAD_LEFT);
+}

@@ -474,6 +474,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/accounting-inventory.php');
     }
 
+    if ($action === 'post_movement_draft') {
+        // Stock moved when the movement was recorded; this is the accounting
+        // entry catching up. Posting is what hands out the voucher number, so a
+        // draft that is never posted leaves no gap in the series.
+        require_permission('inventory', 'create');
+        $draftId = (int) ($_POST['voucher_id'] ?? 0);
+        $draftStmt = db()->prepare("SELECT id, voucher_no, status, voucher_date, fiscal_year_id, total_amount FROM vouchers WHERE id = :id AND company_id = :cid AND source_type = 'inventory_movement' LIMIT 1");
+        $draftStmt->execute(['id' => $draftId, 'cid' => $companyId]);
+        $draft = $draftStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$draft) {
+            flash('error', 'That entry was not found for this company.');
+            redirect('admin/accounting-inventory.php');
+        }
+        if ((string) $draft['status'] !== 'draft') {
+            flash('error', 'This entry is already posted as ' . (string) $draft['voucher_no'] . '.');
+            redirect('admin/accounting-inventory.php');
+        }
+        $draftDate = (string) ($draft['voucher_date'] ?? date('Y-m-d'));
+        if (is_period_locked($companyId, (int) $draft['fiscal_year_id'], $draftDate)) {
+            flash('error', 'The entry is dated ' . $draftDate . ', which is inside a locked accounting period.');
+            redirect('admin/accounting-inventory.php');
+        }
+        // A draft may be saved unbalanced; the books may not. The shared writer
+        // only checks this when a voucher is CREATED as posted, and posting
+        // here is an update, so the guard has to be applied again.
+        $lineStmt = db()->prepare('SELECT entry_type, amount FROM voucher_entries WHERE voucher_id = :v');
+        $lineStmt->execute(['v' => (int) $draft['id']]);
+        $balance = 0.0;
+        foreach ($lineStmt->fetchAll(PDO::FETCH_ASSOC) as $line) {
+            $balance += (string) $line['entry_type'] === 'debit' ? (float) $line['amount'] : -(float) $line['amount'];
+        }
+        if (abs(round($balance, 2)) > 0.005) {
+            flash('error', 'Refusing to post: this entry is out by ' . number_format(abs($balance), 2) . '.');
+            redirect('admin/accounting-inventory.php');
+        }
+        $voucherNo = '';
+        $posted = false;
+        $taken = false;
+        for ($attempt = 0; $attempt < 5 && !$posted; $attempt++) {
+            $voucherNo = next_voucher_no($companyId, 'INV-PUR-');
+            try {
+                $upd = db()->prepare("UPDATE vouchers SET voucher_no = :no, status = 'posted', approval_state = 'approved', posted_by = :uid, posted_at = NOW() WHERE id = :id AND status = 'draft'");
+                $upd->execute(['no' => $voucherNo, 'uid' => $userId, 'id' => (int) $draft['id']]);
+                if ($upd->rowCount() > 0) {
+                    $posted = true;
+                } else {
+                    $taken = true;
+                    break;
+                }
+            } catch (PDOException $e) {
+                if ((string) $e->getCode() !== '23000') {
+                    throw $e;
+                }
+            }
+        }
+        if ($taken) {
+            flash('error', 'Somebody else posted this entry a moment ago.');
+        } elseif (!$posted) {
+            flash('error', 'Could not allocate a voucher number for this entry. Try again.');
+        } else {
+            security_event('inventory_movement_posted', 'success', 'Purchase voucher ' . $voucherNo . ' posted.', $companyId, $userId);
+            flash('success', 'Posted as voucher ' . $voucherNo . ' — ' . site_currency_symbol() . number_format((float) $draft['total_amount'], 2) . ' now in the ledger.');
+        }
+        redirect('admin/accounting-inventory.php');
+    }
+
     if ($action === 'record_movement') {
         require_permission('inventory', 'create');
         $itemId = (int) ($_POST['item_id'] ?? 0);
@@ -485,6 +551,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $toWarehouseId = inventory_company_warehouse_id((int) ($_POST['to_warehouse_id'] ?? 0), $companyId);
         $refNo = trim((string) ($_POST['ref_no'] ?? '')) ?: null;
         $notes = trim((string) ($_POST['notes'] ?? '')) ?: null;
+        // A bought-in movement is somebody's bill: it carries VAT, it may have
+        // tax withheld from it, and the day it is entered is not the day it was
+        // bought. None of that applies to a sale, an issue or a transfer, so
+        // these are read here but only used for the inward purchase types.
+        $movePostingDate = inventory_valid_date((string) ($_POST['posting_date'] ?? '')) ?? $date;
+        $moveVat = max(0.0, round((float) ($_POST['vat_amount'] ?? 0), 2));
+        $moveTdsRate = max(0.0, min(100.0, (float) ($_POST['tds_rate_pct'] ?? 0)));
+        $moveVatLedgerId = (int) ($_POST['vat_ledger_id'] ?? 0);
+        $moveTdsLedgerId = (int) ($_POST['tds_ledger_id'] ?? 0);
         if ($qty <= 0 || !in_array($type, $movementTypes, true)) {
             flash('error', 'Select an item, movement type, and positive quantity.');
             redirect('admin/accounting-inventory.php');
@@ -676,7 +751,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $movementVoucherId = 0;
             $mapMissing = [];
             try {
-                $movementVoucherId = inv_post_movement_voucher($companyId, $fiscalYearId, $txnId, $type, $item, $direction, $postingValue, $date, $userId, $movementPartyId ?: null);
+                // Bought-in stock is prepared as a draft so the entry can be
+                // read before it counts, and so the VAT and the withholding on
+                // the supplier's bill are visible next to the stock value they
+                // are deliberately kept out of. Every other movement type posts
+                // exactly as it did before.
+                $movementExtra = [];
+                if (in_array($type, ['purchase', 'opening'], true) && $direction === 'in') {
+                    $movementExtra = [
+                        'draft' => true,
+                        'vat' => $moveVat,
+                        'tds' => tds_from_rate($postingValue, $moveTdsRate),
+                        'vat_ledger_id' => $moveVatLedgerId,
+                        'tds_ledger_id' => $moveTdsLedgerId,
+                        'posting_date' => $movePostingDate,
+                        'reference_no' => (string) ($refNo ?? ''),
+                    ];
+                }
+                $movementVoucherId = inv_post_movement_voucher($companyId, $fiscalYearId, $txnId, $type, $item, $direction, $postingValue, $date, $userId, $movementPartyId ?: null, $movementExtra);
             } catch (RuntimeException $mapEx) {
                 if (str_starts_with($mapEx->getMessage(), 'MAP_MISSING:')) {
                     $mapMissing = explode(',', substr($mapEx->getMessage(), 12));
@@ -2362,9 +2454,37 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             <label>Date<input type="date" name="transaction_date" value="<?= e(date('Y-m-d')) ?>" required></label>
             <label>Reference<input type="text" name="ref_no" maxlength="120"></label>
             <label>Quantity<input type="number" step="0.001" min="0.001" name="quantity" required></label>
-            <label>Rate<input type="number" step="0.01" min="0" name="rate" id="purMovRate" placeholder="Auto from item"></label>
+            <label>Rate<input type="number" step="0.01" min="0" name="rate" id="purMovRate" placeholder="Auto from item">
+                <span class="frm-optional">Excluding VAT — this is what the stock is worth</span>
+            </label>
+            <?php // The date on the bill and the date it is entered are two
+                  // different facts; the books date the purchase to the first. ?>
+            <label>Voucher posting date<input type="date" name="posting_date" value="<?= e(date('Y-m-d')) ?>"></label>
+            <label>VAT on purchase<input type="number" step="0.01" min="0" name="vat_amount" value="0.00" id="purMovVat">
+                <span class="frm-optional">Recoverable — never added to the stock value</span>
+            </label>
+            <label>VAT on purchase ledger (debit)
+                <select name="vat_ledger_id">
+                    <option value="0">— none —</option>
+                    <?php foreach ($ledgers as $ledger): ?>
+                        <option value="<?= (int) $ledger['id'] ?>"><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label>TDS rate %<input type="number" step="0.01" min="0" max="100" name="tds_rate_pct" value="0" id="purMovTdsRate">
+                <span class="frm-optional" id="purMovTdsOut">No TDS withheld</span>
+            </label>
+            <label>TDS deducted ledger (credit)
+                <select name="tds_ledger_id">
+                    <option value="0">— none —</option>
+                    <?php foreach ($ledgers as $ledger): ?>
+                        <option value="<?= (int) $ledger['id'] ?>"><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
-            <button type="submit"><?= icon('tasks') ?>Record</button>
+            <div class="workspace-span-2"><small style="color:var(--mbw-muted)">Stock moves straight away; the accounting entry is prepared as a DRAFT and takes its voucher number when you post it under "Purchase entries" below.</small></div>
+            <button type="submit"><?= icon('tasks') ?>Record (draft entry)</button>
         </form>
         <script>
         (function () {
@@ -2374,8 +2494,109 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                 var opt = item.options[item.selectedIndex];
                 if (opt && opt.value) { rate.value = opt.getAttribute('data-purchase-rate'); }
             });
+            // The rate is typed; the rupees withheld are worked out, so they are
+            // seen before saving rather than for the first time on a voucher.
+            // The server recomputes from the same rate and value, so a browser
+            // that gets this wrong cannot change what is actually withheld.
+            var qty = document.querySelector('#movement-purchase input[name="quantity"]');
+            var tdsRate = document.getElementById('purMovTdsRate');
+            var tdsOut = document.getElementById('purMovTdsOut');
+            function showTds() {
+                if (!qty || !tdsRate || !tdsOut) { return; }
+                var value = (parseFloat(qty.value) || 0) * (parseFloat(rate.value) || 0);
+                var pct = parseFloat(tdsRate.value) || 0;
+                if (value <= 0 || pct <= 0) { tdsOut.textContent = 'No TDS withheld'; return; }
+                tdsOut.textContent = 'Withholds ' + (Math.round(value * pct) / 100).toFixed(2) +
+                    ' — the supplier is credited that much less';
+            }
+            [qty, rate, tdsRate].forEach(function (el) { if (el) { el.addEventListener('input', showTds); } });
+            showTds();
         })();
         </script>
+    </details>
+
+    <?php
+    // Purchase and opening entries this company has prepared or posted, drafts
+    // first because they are the ones still waiting on somebody. The lines are
+    // shown in full so the VAT sitting outside the stock value, and the
+    // withholding taken off the supplier, can be read before any of it counts.
+    $purEntries = [];
+    $purLines = [];
+    $purStmt = db()->prepare("
+        SELECT v.id, v.voucher_no, v.status, v.voucher_date, v.posting_date, v.total_amount, v.reference_no,
+               t.transaction_type, t.qty_in, t.rate, i.sku, i.name AS item_name
+        FROM vouchers v
+        INNER JOIN inventory_transactions t ON t.id = v.source_id AND t.company_id = v.company_id
+        INNER JOIN inventory_items i ON i.id = t.item_id
+        WHERE v.company_id = :cid AND v.source_type = 'inventory_movement'
+          AND t.transaction_type IN ('purchase', 'opening')
+        ORDER BY (v.status = 'draft') DESC, v.id DESC
+        LIMIT 25
+    ");
+    $purStmt->execute(['cid' => $companyId]);
+    $purEntries = $purStmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($purEntries !== []) {
+        $purIds = array_map('intval', array_column($purEntries, 'id'));
+        $purPh = implode(',', array_fill(0, count($purIds), '?'));
+        $purLineStmt = db()->prepare(
+            'SELECT e.voucher_id, e.entry_type, e.amount, e.memo, l.code AS ledger_code, l.name AS ledger_name
+             FROM voucher_entries e INNER JOIN ledgers l ON l.id = e.ledger_id
+             WHERE e.voucher_id IN (' . $purPh . ') ORDER BY e.id ASC'
+        );
+        $purLineStmt->execute($purIds);
+        foreach ($purLineStmt->fetchAll(PDO::FETCH_ASSOC) as $purLine) {
+            $purLines[(int) $purLine['voucher_id']][] = $purLine;
+        }
+    }
+    ?>
+    <details class="feature-disclosure" id="movement-purchase-entries" <?= array_filter($purEntries, static fn (array $r): bool => (string) $r['status'] === 'draft') !== [] ? 'open' : '' ?>>
+        <summary><span><strong><?= icon('tasks') ?>Purchase entries</strong><small>A draft is not in the books yet — posting puts it there and gives it its voucher number.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+        <?php if ($purEntries === []): ?>
+            <p style="color:var(--mbw-muted);padding:12px">No purchase or opening entries yet. Record one above and it appears here.</p>
+        <?php else: ?>
+        <div class="rc-table-scroll"><table class="rc-table">
+            <thead><tr><th>Voucher</th><th>Item</th><th>Dates</th><th>Entry</th><th class="align-right">Amount</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+                <?php foreach ($purEntries as $pe): ?>
+                    <?php $peDraft = (string) $pe['status'] === 'draft'; ?>
+                    <tr>
+                        <td><?= $peDraft ? '<span style="color:var(--mbw-muted)">not numbered yet</span>' : e((string) $pe['voucher_no']) ?>
+                            <?php if (($pe['reference_no'] ?? '') !== ''): ?><br><span style="color:var(--mbw-muted)">Bill <?= e((string) $pe['reference_no']) ?></span><?php endif; ?>
+                        </td>
+                        <td><?= e((string) $pe['sku']) ?><br><span style="color:var(--mbw-muted)"><?= e((string) $pe['item_name']) ?></span><br>
+                            <span style="color:var(--mbw-muted)"><?= e(number_format((float) $pe['qty_in'], 3)) ?> @ <?= e(number_format((float) $pe['rate'], 2)) ?> (<?= e((string) $pe['transaction_type']) ?>)</span>
+                        </td>
+                        <td><span style="color:var(--mbw-muted)">Bought</span> <?= e((string) ($pe['voucher_date'] ?? '—')) ?><br>
+                            <span style="color:var(--mbw-muted)">Posting</span> <?= e((string) ($pe['posting_date'] ?? '—')) ?>
+                        </td>
+                        <td>
+                            <?php foreach (($purLines[(int) $pe['id']] ?? []) as $pl): ?>
+                                <div><?= (string) $pl['entry_type'] === 'debit' ? 'Dr' : '&nbsp;&nbsp;&nbsp;Cr' ?>
+                                    <?= e((string) $pl['ledger_name']) ?>
+                                    <strong><?= e(number_format((float) $pl['amount'], 2)) ?></strong>
+                                    <?php if (($pl['memo'] ?? '') !== ''): ?><br><span style="color:var(--mbw-muted);margin-left:18px"><?= e((string) $pl['memo']) ?></span><?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </td>
+                        <td class="align-right"><?= e(number_format((float) $pe['total_amount'], 2)) ?></td>
+                        <td><span class="mbw-pill <?= $peDraft ? 'tone-gray' : 'tone-blue' ?>"><?= $peDraft ? 'draft' : 'posted' ?></span></td>
+                        <td>
+                            <?php if ($peDraft): ?>
+                                <form method="post" onsubmit="return confirm('Post this entry to the ledger? It will be given a voucher number.');">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="post_movement_draft">
+                                    <input type="hidden" name="voucher_id" value="<?= e((int) $pe['id']) ?>">
+                                    <button type="submit">Post it</button>
+                                </form>
+                            <?php else: ?>
+                                <span style="color:var(--mbw-muted)">in the books</span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+        <?php endif; ?>
     </details>
 
     <details class="feature-disclosure" id="movement-sale">
