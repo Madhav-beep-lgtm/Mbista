@@ -493,11 +493,33 @@ $orderOnHand = [];
 // are not on the list; the ones this order holds stay on it, or revising the
 // order would strike out its own items.
 $orderStockPieces = [];
-if ($view === 'orders') {
-    foreach ($items as $itemRow) {
-        $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
-    }
-    $orderStockPieces = jewellery_ready_to_sale_options($companyId, (int) ($editOrder['id'] ?? 0));
+
+// Load showroom stock pieces
+foreach ($items as $itemRow) {
+    $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
+}
+
+try {
+    $stockStmt = db()->prepare(
+        "SELECT a.id, a.assignment_no, r.receipt_no, r.received_gross_weight,
+                r.stone_weight, r.received_item_id, r.received_purity_id, r.unit_id, r.qty_pieces, r.making_amount,
+                i.sku AS item_code, i.name AS item_name,
+                p.code AS purity_code, u.code AS unit_code
+        FROM jewellery_order_assignments a
+        INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
+        INNER JOIN jewellery_order_receipts r ON r.assignment_id = a.id
+        LEFT JOIN inventory_items i ON i.id = r.received_item_id
+        LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
+        LEFT JOIN jewellery_units u ON u.id = r.unit_id
+        WHERE a.company_id = :cid AND a.assign_kind = 'self'
+          AND a.status = 'received' AND r.status <> 'cancelled'
+          AND r.id NOT IN (SELECT COALESCE(stock_receipt_id, 0) FROM jewellery_order_lines WHERE source = 'stock' AND stock_receipt_id IS NOT NULL AND order_id != :keep_id)
+        ORDER BY r.receive_date DESC"
+    );
+    $stockStmt->execute(['cid' => $companyId, 'keep_id' => (int) ($editOrder['id'] ?? 0)]);
+    $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    error_log("[ERROR] Failed to load showroom stock: " . $e->getMessage());
 }
 $cashBankLedgers = [];
 if ($view === 'orders' && table_exists('ledgers')) {
