@@ -453,3 +453,104 @@ function fa_event_purposes(string $event): array
         default              => [],
     };
 }
+
+/**
+ * The next number in a prefixed voucher series, for one company.
+ *
+ * Acquisition vouchers used to be numbered FA-ACQ-<asset code>, which is not a
+ * number at all: it cannot be read in sequence, it says nothing about when the
+ * voucher was posted, and it forced the asset code to be known before the
+ * ledger would accept the entry. A draft that is waiting to be posted has no
+ * business holding a number from that series either — the number belongs to
+ * the act of posting, not to the act of typing.
+ *
+ * The series is per company because vouchers are unique on (company_id,
+ * voucher_no), so two companies may each hold FA-ACQ-0001 without colliding.
+ * The caller posts inside a transaction and retries on a duplicate key, which
+ * is what actually settles a race between two people posting at once — this
+ * only has to produce a sensible candidate.
+ */
+function fa_next_voucher_no(int $companyId, string $prefix, int $pad = 4): string
+{
+    $skip = strlen($prefix) + 1;
+    $stmt = db()->prepare(
+        'SELECT COALESCE(MAX(CAST(SUBSTRING(voucher_no, ' . (int) $skip . ') AS UNSIGNED)), 0)
+         FROM vouchers WHERE company_id = :cid AND voucher_no LIKE :pattern'
+    );
+    $stmt->execute(['cid' => $companyId, 'pattern' => $prefix . '%']);
+
+    return $prefix . str_pad((string) ((int) $stmt->fetchColumn() + 1), $pad, '0', STR_PAD_LEFT);
+}
+
+/**
+ * The double entry an acquisition makes, with VAT and TDS kept out of the cost.
+ *
+ *   Dr  asset cost            cost
+ *   Dr  VAT on purchase       vat            (recoverable, so never capitalised)
+ *       Cr  funded from       cost + vat - tds
+ *       Cr  TDS payable       tds            (withheld, so never paid to the supplier)
+ *
+ * VAT is a receivable from the tax office, not part of what the asset cost, so
+ * capitalising it would overstate the asset and every depreciation charge taken
+ * off it for the rest of its life. TDS is money withheld from the supplier and
+ * owed to the tax office instead: the supplier's credit is reduced by exactly
+ * what is withheld, so the two credits together still equal what was bought.
+ *
+ * Returns the lines and the debit total. Throws when a leg is missing the
+ * ledger it needs, rather than posting a half-entry.
+ */
+function fa_acquisition_entries(
+    float $cost,
+    float $vat,
+    float $tds,
+    int $costLedgerId,
+    int $creditLedgerId,
+    int $vatLedgerId,
+    int $tdsLedgerId
+): array {
+    $cost = fa_round(max(0.0, $cost));
+    $vat = fa_round(max(0.0, $vat));
+    $tds = fa_round(max(0.0, $tds));
+
+    if ($costLedgerId <= 0 || $creditLedgerId <= 0) {
+        throw new RuntimeException('An acquisition needs both the asset cost ledger and the "Funded from" ledger.');
+    }
+    if ($vat > 0 && $vatLedgerId <= 0) {
+        throw new RuntimeException('Choose the VAT on purchase ledger, or clear the VAT amount.');
+    }
+    if ($tds > 0 && $tdsLedgerId <= 0) {
+        throw new RuntimeException('Choose the TDS deducted ledger, or clear the TDS amount.');
+    }
+    // Withholding more than the whole bill would leave the supplier owing money
+    // on a purchase, which is never what was meant.
+    if ($tds > fa_round($cost + $vat)) {
+        throw new RuntimeException('TDS cannot exceed the cost plus VAT.');
+    }
+
+    $lines = [['ledger_id' => $costLedgerId, 'entry_type' => 'debit', 'amount' => $cost]];
+    if ($vat > 0) {
+        $lines[] = ['ledger_id' => $vatLedgerId, 'entry_type' => 'debit', 'amount' => $vat, 'memo' => 'VAT on purchase — recoverable, not capitalised'];
+    }
+    $lines[] = ['ledger_id' => $creditLedgerId, 'entry_type' => 'credit', 'amount' => fa_round($cost + $vat - $tds)];
+    if ($tds > 0) {
+        $lines[] = ['ledger_id' => $tdsLedgerId, 'entry_type' => 'credit', 'amount' => $tds, 'memo' => 'TDS withheld on purchase'];
+    }
+
+    return ['lines' => $lines, 'total' => fa_round($cost + $vat)];
+}
+
+/**
+ * TDS from a rate: the rate is applied to the cost alone, never to the VAT.
+ *
+ * Tax is not withheld on tax — VAT is collected on behalf of the tax office and
+ * passed straight through, so taking a percentage of it would withhold against
+ * money the supplier never earned.
+ */
+function fa_tds_from_rate(float $cost, float $ratePct): float
+{
+    if ($ratePct <= 0 || $cost <= 0) {
+        return 0.0;
+    }
+
+    return fa_round($cost * $ratePct / 100);
+}

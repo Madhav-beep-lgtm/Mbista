@@ -178,6 +178,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $residual = max(0.0, round((float) ($_POST['residual_value'] ?? 0), 2));
         $lifeMonths = max(0, (int) ($_POST['useful_life_months'] ?? 0));
         $availableDate = trim((string) ($_POST['available_for_use_date'] ?? '')) ?: null;
+        // Three dates that are not the same fact: bought, entered, in use.
+        $faDate = static fn (string $key): ?string => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($_POST[$key] ?? ''))
+            ? (string) $_POST[$key]
+            : null;
+        $purchaseDate = $faDate('purchase_date');
+        $postingDate = $faDate('posting_date') ?? date('Y-m-d');
+        $purchaseRef = trim((string) ($_POST['purchase_ref'] ?? ''));
+        // VAT is entered as money and TDS as a rate, because that is how each
+        // arrives: the VAT is printed on the supplier's bill, the TDS is a rate
+        // the law sets. The rate is recomputed here rather than trusting a
+        // figure the browser worked out.
+        $vatAmount = max(0.0, round((float) ($_POST['vat_amount'] ?? 0), 2));
+        $tdsRatePct = max(0.0, min(100.0, (float) ($_POST['tds_rate_pct'] ?? 0)));
         $categoryId = (int) ($_POST['category_id'] ?? 0);
         if ($categoryId > 0) {
             $catCheck = db()->prepare('SELECT COUNT(*) FROM asset_categories WHERE id = :id AND company_id = :cid');
@@ -194,11 +207,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->prepare('
                 INSERT INTO fixed_assets
                     (company_id, category_id, asset_code, name, asset_class, cost, residual_value, useful_life_months,
-                     depreciation_method, available_for_use_date, depreciation_start_date, carrying_amount, status, created_by)
-                VALUES (:cid, :category_id, :code, :name, :class, :cost, :residual, :life, :method, :avail, :dep_start, :cost2, :status, :uid)
+                     depreciation_method, purchase_date, purchase_ref, available_for_use_date, depreciation_start_date,
+                     carrying_amount, status, created_by)
+                VALUES (:cid, :category_id, :code, :name, :class, :cost, :residual, :life, :method, :purchased, :ref, :avail, :dep_start, :cost2, :status, :uid)
             ')->execute([
                 'cid' => $companyId, 'category_id' => $categoryId > 0 ? $categoryId : null, 'code' => $code, 'name' => $name, 'class' => $class,
                 'cost' => $cost, 'residual' => $residual, 'life' => $lifeMonths, 'method' => $method,
+                'purchased' => $purchaseDate, 'ref' => $purchaseRef !== '' ? $purchaseRef : null,
                 'avail' => $availableDate, 'dep_start' => $availableDate, 'cost2' => $cost,
                 'status' => $availableDate ? 'active' : 'draft', 'uid' => $userId,
             ]);
@@ -230,23 +245,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 fa_set_asset_ledger($companyId, $assetId, 'acquisition_clearing', (int) $creditLedger['id'], $userId);
             }
 
+            // The VAT and TDS ledgers belong to this asset like the others do,
+            // so a retro-post or a later addition reaches the same places.
+            $vatLedgerId = (int) ($_POST['vat_ledger_id'] ?? 0);
+            $tdsLedgerId = (int) ($_POST['tds_ledger_id'] ?? 0);
+            fa_set_asset_ledger($companyId, $assetId, 'vat_input', $vatLedgerId, $userId);
+            fa_set_asset_ledger($companyId, $assetId, 'tds_payable', $tdsLedgerId, $userId);
+            $tdsAmount = fa_tds_from_rate($cost, $tdsRatePct);
+
             if ($cost > 0 && $costLedger && $creditLedger) {
                 $narrationBy = $voucherPartyId !== null
                     ? ' (on credit — ' . ($creditLedger['name'] ?? 'supplier') . ')'
                     : ' (funded from ' . ($creditLedger['name'] ?? 'ledger') . ')';
-                create_voucher_with_entries([
-                    'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
-                    'voucher_no' => 'FA-ACQ-' . $code, 'voucher_type' => 'journal',
-                    'voucher_date' => $availableDate ?: date('Y-m-d'),
-                    'source_type' => 'fixed_asset_acquisition', 'source_id' => $assetId,
-                    'party_id' => $voucherPartyId,
-                    'total_amount' => $cost, 'narration' => 'Acquisition of ' . $name . ' (' . $code . ')' . $narrationBy . '.',
-                    'status' => 'posted', 'posted_by' => $userId,
-                ], [
-                    ['ledger_id' => (int) $costLedger['id'], 'entry_type' => 'debit', 'amount' => $cost],
-                    ['ledger_id' => (int) $creditLedger['id'], 'entry_type' => 'credit', 'amount' => $cost],
-                ]);
-                flash('success', 'Asset ' . $code . ' registered and acquisition voucher FA-ACQ-' . $code . ' posted: Dr ' . ($costLedger['name'] ?? 'asset cost') . ' / Cr ' . ($creditLedger['name'] ?? 'funding') . '.');
+                // Prepared, not posted. The entry is written down in full so it
+                // can be read before it counts, and it carries no number from
+                // the FA-ACQ series yet — that is handed out by posting, so a
+                // draft that is never posted cannot leave a gap in the series.
+                try {
+                    $acq = fa_acquisition_entries(
+                        $cost, $vatAmount, $tdsAmount,
+                        (int) $costLedger['id'], (int) $creditLedger['id'], $vatLedgerId, $tdsLedgerId
+                    );
+                    $voucherId = create_voucher_with_entries([
+                        'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
+                        'voucher_no' => 'FA-ACQ-DRAFT-' . $assetId, 'voucher_type' => 'purchase',
+                        // What the books date the purchase to, which is when it
+                        // was bought — not when somebody got round to typing it.
+                        'voucher_date' => $purchaseDate ?: ($availableDate ?: $postingDate),
+                        'reference_no' => $purchaseRef !== '' ? $purchaseRef : null,
+                        'source_type' => 'fixed_asset_acquisition', 'source_id' => $assetId,
+                        'party_id' => $voucherPartyId,
+                        'total_amount' => $acq['total'],
+                        'narration' => 'Acquisition of ' . $name . ' (' . $code . ')' . $narrationBy . '.',
+                        'status' => 'draft',
+                    ], $acq['lines']);
+                    // posting_date is not one of the columns the shared writer
+                    // knows, and a draft has not been posted by anybody yet.
+                    if ($voucherId > 0) {
+                        db()->prepare('UPDATE vouchers SET posting_date = :d, posted_by = NULL, posted_at = NULL WHERE id = :id')
+                            ->execute(['d' => $postingDate, 'id' => $voucherId]);
+                    }
+                    log_activity('fixed_asset', $assetId, 'acquisition_drafted', 'Acquisition entry prepared as a draft.', $userId);
+                    flash('success', 'Asset ' . $code . ' registered. Its acquisition entry is prepared as a DRAFT — check it under "Acquisition entries" below, then post it to give it a voucher number.');
+                } catch (Throwable $e) {
+                    flash('error', 'Asset ' . $code . ' was registered, but its acquisition entry could not be prepared: ' . $e->getMessage());
+                }
             } elseif ($cost > 0) {
                 // A skipped acquisition voucher must be loud: the register and
                 // the ledger disagree until it is posted (see post_acquisition).
@@ -446,6 +489,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', 'Acquisition voucher FA-ACQ-' . $asset['asset_code'] . ' posted: Dr ' . ($costLedger['name'] ?? 'Asset cost') . ' / Cr ' . ($creditLedger['name'] ?? 'funding') . ' ' . site_currency_symbol() . number_format($amount, 2) . '.');
         } catch (Throwable $e) {
             flash('error', 'Could not post the acquisition: ' . $e->getMessage());
+        }
+        redirect('admin/fixed-assets.php?view=' . $assetId);
+    }
+
+    if ($action === 'post_acquisition_draft') {
+        // Posting is what turns a prepared entry into part of the books, so it
+        // is also what hands out the voucher number. A draft that is deleted or
+        // never posted therefore leaves no hole in the FA-ACQ series.
+        require_permission('accounting', 'post');
+        $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
+        if (!$asset) {
+            flash('error', 'Asset not found for this company.');
+            redirect('admin/fixed-assets.php');
+        }
+        $assetId = (int) $asset['id'];
+        $draftStmt = db()->prepare("SELECT id, voucher_no, status, voucher_date, fiscal_year_id, total_amount FROM vouchers WHERE source_type = 'fixed_asset_acquisition' AND source_id = :aid AND company_id = :cid LIMIT 1");
+        $draftStmt->execute(['aid' => $assetId, 'cid' => $companyId]);
+        $draft = $draftStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$draft) {
+            flash('error', 'There is no acquisition entry for this asset yet.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        if ((string) $draft['status'] !== 'draft') {
+            flash('error', 'This acquisition is already posted as ' . (string) $draft['voucher_no'] . '.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        $voucherDate = (string) ($draft['voucher_date'] ?? date('Y-m-d'));
+        if (is_period_locked($companyId, (int) $draft['fiscal_year_id'], $voucherDate)) {
+            flash('error', 'The entry is dated ' . $voucherDate . ', which is inside a locked accounting period.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        // A draft is allowed to be unbalanced; the books are not. The shared
+        // writer checks this when a voucher is CREATED as posted, and posting
+        // here is an update, so the same guard has to be applied again.
+        $lineStmt = db()->prepare('SELECT entry_type, amount FROM voucher_entries WHERE voucher_id = :v');
+        $lineStmt->execute(['v' => (int) $draft['id']]);
+        $balance = 0.0;
+        foreach ($lineStmt->fetchAll(PDO::FETCH_ASSOC) as $line) {
+            $balance += (string) $line['entry_type'] === 'debit' ? (float) $line['amount'] : -(float) $line['amount'];
+        }
+        if (abs(round($balance, 2)) > 0.005) {
+            flash('error', 'Refusing to post: this entry is out by ' . number_format(abs($balance), 2) . '. Delete it and register the asset again.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        // Two people posting at the same moment would compute the same next
+        // number; the unique key on (company_id, voucher_no) is what actually
+        // decides it, so a clash is retried rather than reported as a failure.
+        $voucherNo = '';
+        $posted = false;
+        $taken = false;
+        for ($attempt = 0; $attempt < 5 && !$posted; $attempt++) {
+            $voucherNo = fa_next_voucher_no($companyId, 'FA-ACQ-');
+            try {
+                $upd = db()->prepare("UPDATE vouchers SET voucher_no = :no, status = 'posted', approval_state = 'approved', posted_by = :uid, posted_at = NOW() WHERE id = :id AND status = 'draft'");
+                $upd->execute(['no' => $voucherNo, 'uid' => $userId, 'id' => (int) $draft['id']]);
+                if ($upd->rowCount() > 0) {
+                    $posted = true;
+                } else {
+                    $taken = true;
+                    break;
+                }
+            } catch (PDOException $e) {
+                if ((string) $e->getCode() !== '23000') {
+                    throw $e;
+                }
+            }
+        }
+        if ($taken) {
+            flash('error', 'Somebody else posted this acquisition a moment ago.');
+        } elseif (!$posted) {
+            flash('error', 'Could not allocate a voucher number for this acquisition. Try again.');
+        } else {
+            security_event('asset_acquisition_posted', 'success', 'Acquisition voucher ' . $voucherNo . ' posted for asset #' . $assetId . '.', $companyId, $userId);
+            log_activity('fixed_asset', $assetId, 'acquisition_posted', 'Acquisition voucher ' . $voucherNo . ' (' . number_format((float) $draft['total_amount'], 2) . ') posted.', $userId);
+            flash('success', 'Posted as voucher ' . $voucherNo . ' — ' . site_currency_symbol() . number_format((float) $draft['total_amount'], 2) . ' now in the ledger.');
         }
         redirect('admin/fixed-assets.php?view=' . $assetId);
     }
@@ -2857,12 +2975,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php else: ?>
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Register a fixed asset</h2><span class="frm-optional">The ledgers you choose here belong to THIS asset only — registration posts Dr asset cost / Cr funded-from immediately</span></div>
+        <div class="mbw-card-head"><h2>Register a fixed asset</h2><span class="frm-optional">The ledgers you choose here belong to THIS asset only — registration prepares the entry as a DRAFT; it reaches the ledger, and takes its voucher number, when you post it below</span></div>
         <?php
         $regDefCost = fa_resolve_mapping($companyId, 'ppe_cost');
         $regDefFunding = fa_resolve_mapping($companyId, 'acquisition_clearing');
         $regDefDepExp = fa_resolve_mapping($companyId, 'depreciation_expense');
         $regDefAccum = fa_resolve_mapping($companyId, 'accumulated_depreciation');
+        // Neither purpose is part of fa_mapping_purposes(), so these resolve to
+        // nothing until a company maps them; the picker simply opens unset.
+        $regDefVat = fa_resolve_mapping($companyId, 'vat_input');
+        $regDefTds = fa_resolve_mapping($companyId, 'tds_payable');
         ?>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -2881,6 +3003,27 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Residual value<input type="number" step="0.01" name="residual_value" value="0.00"></label>
             <label>Useful life (months)<input type="number" step="1" name="useful_life_months" value="60"></label>
             <label>Available for use date<input type="date" name="available_for_use_date"></label>
+            <?php // Three dates, because they are three different facts and the
+                  // books need each of them. The purchase date is when the thing
+                  // was bought, the posting date is when the entry belongs in the
+                  // ledger (and decides the fiscal year), and available-for-use is
+                  // when depreciation starts — an asset bought in Asar and
+                  // installed in Shrawan depreciates from Shrawan, not from Asar. ?>
+            <label>Purchase date<input type="date" name="purchase_date"></label>
+            <label>Voucher posting date<input type="date" name="posting_date" value="<?= e(date('Y-m-d')) ?>"></label>
+            <label>Supplier bill / reference<input type="text" name="purchase_ref" maxlength="120" placeholder="supplier invoice no"></label>
+            <label>VAT on purchase<input type="number" step="0.01" min="0" name="vat_amount" value="0.00" data-fa-vat>
+                <span class="frm-optional">Recoverable — debited to VAT, never added to the asset cost</span>
+            </label>
+            <label>VAT on purchase ledger (debit)
+                <?= fa_ledger_select('vat_ledger_id', $ledgers, (int) ($regDefVat['id'] ?? 0)) ?>
+            </label>
+            <label>TDS rate %<input type="number" step="0.01" min="0" max="100" name="tds_rate_pct" value="0" data-fa-tds-rate>
+                <span class="frm-optional" data-fa-tds-out>No TDS withheld</span>
+            </label>
+            <label>TDS deducted ledger (credit)
+                <?= fa_ledger_select('tds_ledger_id', $ledgers, (int) ($regDefTds['id'] ?? 0)) ?>
+            </label>
             <label>Asset cost ledger (debit)
                 <?= fa_ledger_select('cost_ledger_id', $ledgers, (int) ($regDefCost['id'] ?? 0)) ?>
             </label>
@@ -2893,8 +3036,116 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Accumulated depreciation ledger
                 <?= fa_ledger_select('accum_dep_ledger_id', $ledgers, (int) ($regDefAccum['id'] ?? 0)) ?>
             </label>
-            <div class="workspace-span-2"><button type="submit"><?= icon('companies') ?>Register asset</button></div>
+            <div class="workspace-span-2"><button type="submit"><?= icon('companies') ?>Register asset (draft)</button></div>
         </form>
+        <?php // The rate is what gets typed; the rupees are what gets withheld,
+              // so the amount is shown before saving rather than appearing for
+              // the first time on a posted voucher. The server recomputes it
+              // from the same rate and cost, so a browser that gets this wrong
+              // cannot change what is actually withheld. ?>
+        <script>
+        (function () {
+            var form = document.currentScript.closest('section').querySelector('form');
+            if (!form) { return; }
+            var costBox = form.querySelector('input[name="cost"]');
+            var rateBox = form.querySelector('[data-fa-tds-rate]');
+            var out = form.querySelector('[data-fa-tds-out]');
+            if (!costBox || !rateBox || !out) { return; }
+            function show() {
+                var cost = parseFloat(costBox.value) || 0;
+                var rate = parseFloat(rateBox.value) || 0;
+                if (cost <= 0 || rate <= 0) { out.textContent = 'No TDS withheld'; return; }
+                // On the cost alone: tax is not withheld on tax.
+                var tds = Math.round(cost * rate) / 100;
+                out.textContent = 'Withholds ' + tds.toFixed(2) + ' — the supplier is credited that much less';
+            }
+            costBox.addEventListener('input', show);
+            rateBox.addEventListener('input', show);
+            show();
+        })();
+        </script>
+    </section>
+
+    <?php
+    // Every acquisition entry this company has prepared or posted, drafts at
+    // the top because they are the ones still waiting on somebody. The lines
+    // are shown in full: an entry that is about to become part of the books
+    // should be readable before it counts, not after.
+    $acqStmt = db()->prepare("
+        SELECT v.id, v.voucher_no, v.status, v.voucher_date, v.posting_date, v.total_amount, v.reference_no,
+               a.id AS asset_id, a.asset_code, a.name AS asset_name, a.available_for_use_date
+        FROM vouchers v
+        INNER JOIN fixed_assets a ON a.id = v.source_id AND a.company_id = v.company_id
+        WHERE v.company_id = :cid AND v.source_type = 'fixed_asset_acquisition'
+        ORDER BY (v.status = 'draft') DESC, v.id DESC
+        LIMIT 25
+    ");
+    $acqStmt->execute(['cid' => $companyId]);
+    $acqRows = $acqStmt->fetchAll(PDO::FETCH_ASSOC);
+    $acqLines = [];
+    if ($acqRows !== []) {
+        $acqIds = array_map('intval', array_column($acqRows, 'id'));
+        $acqPh = implode(',', array_fill(0, count($acqIds), '?'));
+        $acqLineStmt = db()->prepare(
+            'SELECT e.voucher_id, e.entry_type, e.amount, e.memo, l.code AS ledger_code, l.name AS ledger_name
+             FROM voucher_entries e INNER JOIN ledgers l ON l.id = e.ledger_id
+             WHERE e.voucher_id IN (' . $acqPh . ') ORDER BY e.id ASC'
+        );
+        $acqLineStmt->execute($acqIds);
+        foreach ($acqLineStmt->fetchAll(PDO::FETCH_ASSOC) as $acqLine) {
+            $acqLines[(int) $acqLine['voucher_id']][] = $acqLine;
+        }
+    }
+    ?>
+    <section class="mbw-card" data-collapsible>
+        <div class="mbw-card-head"><h2>Acquisition entries</h2><span class="frm-optional">A draft is not in the books yet — posting puts it there and gives it its voucher number</span></div>
+        <?php if ($acqRows === []): ?>
+            <p class="frm-optional" style="padding:12px">No acquisition entries yet. Register an asset above and its entry appears here.</p>
+        <?php else: ?>
+        <div class="rc-table-scroll"><table class="rc-table">
+            <thead><tr><th>Voucher</th><th>Asset</th><th>Dates</th><th>Entry</th><th class="align-right">Amount</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+                <?php foreach ($acqRows as $acq): ?>
+                    <?php $isDraft = (string) $acq['status'] === 'draft'; ?>
+                    <tr>
+                        <td><?= $isDraft ? '<span class="frm-optional">not numbered yet</span>' : e((string) $acq['voucher_no']) ?>
+                            <?php if (($acq['reference_no'] ?? '') !== ''): ?><br><span class="frm-optional">Bill <?= e((string) $acq['reference_no']) ?></span><?php endif; ?>
+                        </td>
+                        <td><?= e((string) $acq['asset_code']) ?><br><span class="frm-optional"><?= e((string) $acq['asset_name']) ?></span></td>
+                        <td>
+                            <span class="frm-optional">Purchased</span> <?= e((string) ($acq['voucher_date'] ?? '—')) ?><br>
+                            <span class="frm-optional">Posting</span> <?= e((string) ($acq['posting_date'] ?? '—')) ?><br>
+                            <span class="frm-optional">In use</span> <?= e((string) ($acq['available_for_use_date'] ?? '—')) ?>
+                        </td>
+                        <td>
+                            <?php foreach (($acqLines[(int) $acq['id']] ?? []) as $line): ?>
+                                <?php $isDr = (string) $line['entry_type'] === 'debit'; ?>
+                                <div><?= $isDr ? 'Dr' : '&nbsp;&nbsp;&nbsp;Cr' ?>
+                                    <?= e((string) $line['ledger_name']) ?>
+                                    <strong><?= e(number_format((float) $line['amount'], 2)) ?></strong>
+                                    <?php if (($line['memo'] ?? '') !== ''): ?><br><span class="frm-optional" style="margin-left:18px"><?= e((string) $line['memo']) ?></span><?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </td>
+                        <td class="align-right"><?= e(number_format((float) $acq['total_amount'], 2)) ?></td>
+                        <td><span class="mbw-pill <?= $isDraft ? 'tone-gray' : 'tone-blue' ?>"><?= $isDraft ? 'draft' : 'posted' ?></span></td>
+                        <td>
+                            <?php if ($isDraft): ?>
+                                <form method="post" onsubmit="return confirm('Post this acquisition to the ledger? It will be given a voucher number and cannot be un-posted from here.');">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="post_acquisition_draft">
+                                    <input type="hidden" name="asset_id" value="<?= e((int) $acq['asset_id']) ?>">
+                                    <button type="submit">Post it</button>
+                                </form>
+                            <?php else: ?>
+                                <span class="frm-optional">in the books</span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+        <?php endif; ?>
     </section>
 
     <section class="mbw-card" data-collapsible>
