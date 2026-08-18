@@ -871,8 +871,8 @@ function jw_line_grid_scripts(): void
         if (e.target === itemModal) { closeModal(); }
     });
 
-    // Handle ITEM field click in kaligadh mode
-    document.addEventListener("click", function(event) {
+    // Handle ITEM field in kaligadh mode - use mousedown to intercept before native dropdown opens
+    document.addEventListener("mousedown", function(event) {
         var itemSelect = event.target.closest("select[name$='_item_id[]']");
         if (!itemSelect) { return; }
 
@@ -882,11 +882,13 @@ function jw_line_grid_scripts(): void
         // Only open modal if in kaligadh mode (stock picker is empty/0)
         var stockPicker = row.querySelector("select[name$='_stock_unit_id[]']");
         if (stockPicker && parseInt(stockPicker.value || "0", 10) > 0) {
-            // Showroom stock mode - don't open modal
+            // Showroom stock mode - allow normal dropdown
             return;
         }
 
-        // In kaligadh mode - open the modal
+        // In kaligadh mode - prevent default dropdown and open modal instead
+        event.preventDefault();
+        event.stopPropagation();
         openModal(itemSelect);
     });
 
