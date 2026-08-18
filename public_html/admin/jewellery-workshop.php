@@ -546,7 +546,7 @@ try {
                 r.unit_id, r.qty_pieces, r.making_amount,
                 i.sku AS item_code, i.name AS item_name,
                 p.code AS purity_code, u.code AS unit_code,
-                a.assignment_no AS trace_code
+                a.assignment_no AS trace_code, a.size_design, a.expected_ornament
         FROM jewellery_order_receipts r
         INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id
         LEFT JOIN inventory_items i ON i.id = r.received_item_id
