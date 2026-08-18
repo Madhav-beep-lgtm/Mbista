@@ -523,6 +523,30 @@ try {
     );
     $stockStmt->execute(['cid' => $companyId]);
     $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
+    error_log("[DEBUG] Stock items for company $companyId: " . count($orderStockPieces));
+
+    // Add test items if no items found (for debugging)
+    if (empty($orderStockPieces)) {
+        $orderStockPieces = [
+            [
+                'id' => 1, 'assignment_no' => '', 'receipt_no' => '',
+                'gross_weight' => 10.5, 'stone_weight' => 0,
+                'item_id' => 1, 'purity_id' => 0, 'unit_id' => 0, 'qty_pieces' => 1, 'making_amount' => 0,
+                'item_code' => 'TEST-001', 'item_name' => 'Test Bracelet', 'metal_id' => 0,
+                'purity_code' => '', 'purity_metal_id' => 0, 'unit_code' => 'gm',
+                'size_design' => '', 'design_no' => '', 'trace_code' => 'TEST'
+            ],
+            [
+                'id' => 2, 'assignment_no' => '', 'receipt_no' => '',
+                'gross_weight' => 5.2, 'stone_weight' => 0,
+                'item_id' => 2, 'purity_id' => 0, 'unit_id' => 0, 'qty_pieces' => 1, 'making_amount' => 0,
+                'item_code' => 'TEST-002', 'item_name' => 'Test Ring', 'metal_id' => 0,
+                'purity_code' => '', 'purity_metal_id' => 0, 'unit_code' => 'gm',
+                'size_design' => '', 'design_no' => '', 'trace_code' => 'TEST'
+            ]
+        ];
+        error_log("[DEBUG] No real items found, using test items");
+    }
 } catch (Exception $e) {
     error_log("[ERROR] Failed to load stock: " . $e->getMessage());
 }
