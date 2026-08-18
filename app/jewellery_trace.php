@@ -509,6 +509,21 @@ function jewellery_trace_release_sale(int $companyId, int $saleId, int $userId =
             'sold_sale_id' => null, 'sold_sale_line_id' => null,
         ], ['source_type' => 'jewellery_sale', 'source_id' => $saleId], $userId);
     }
+
+    // Old jewellery taken in against this sale came into the shop BECAUSE of
+    // it, so reversing the sale takes it back out. Cancelled rather than
+    // deleted: the piece was on the shelf for a while and its history says so,
+    // and posting the sale again reactivates this same trace rather than
+    // minting a second one for one physical object.
+    $incoming = db()->prepare("SELECT id FROM jewellery_stock_units
+        WHERE company_id = :cid AND origin_type = 'sale_exchange' AND origin_id = :sid
+          AND status <> 'cancelled'");
+    $incoming->execute(['cid' => $companyId, 'sid' => $saleId]);
+    foreach ($incoming->fetchAll(PDO::FETCH_COLUMN) as $unitId) {
+        jewellery_trace_transition($companyId, (int) $unitId, 'sale_exchange_reversed', [
+            'status' => 'cancelled', 'current_holder_type' => 'stock', 'current_holder_id' => null,
+        ], ['source_type' => 'jewellery_sale_exchange', 'source_id' => $saleId], $userId);
+    }
 }
 
 /** Planned piece begins at assignment/stock order, before metal moves. */

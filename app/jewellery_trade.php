@@ -27,6 +27,9 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/jewellery_stock.php';
+// Posting refreshes the AML candidates for the date it lands on, so the rules
+// that read those postings have to be loaded alongside them.
+require_once __DIR__ . '/jewellery_aml.php';
 
 // ---------------------------------------------------------------------------
 // Shared posting helpers
@@ -1397,6 +1400,15 @@ function jewellery_post_purchase(int $companyId, int $purchaseId, int $userId = 
             db()->commit();
         }
 
+        // Compliance sees the day a document lands on, as it lands. The
+        // register used to rebuild every candidate from scratch on each GET,
+        // which is why that was taken off the page — but nothing was put in
+        // its place, so a reportable transaction raised no candidate until
+        // somebody remembered to press Scan. This refreshes just the date
+        // affected, and only after the commit: a compliance rebuild must never
+        // be able to roll the books back.
+        jw_aml_scan_posted_date($companyId, (string) $purchase['purchase_date'], $userId);
+
         return ['ok' => true, 'error' => '', 'voucher_id' => $voucherId];
     } catch (Throwable $postingException) {
         if ($ownsTransaction && db()->inTransaction()) {
@@ -2279,6 +2291,12 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
             ]);
             db()->prepare('UPDATE jewellery_sale_exchanges SET stock_txn_id = :t WHERE id = :id')
                 ->execute(['t' => $txnId, 'id' => (int) $exchange['id']]);
+            // The old chain the customer handed over the counter is a physical
+            // object like any other on the shelf, so it gets its own trace the
+            // moment it is taken in. Without this the metal was in the stock
+            // ledger by weight but the piece itself existed nowhere, and could
+            // not be picked, reserved or sold as an object.
+            jewellery_trace_create_sale_exchange($companyId, $sale, $exchange, $userId);
         }
 
         if ((float) $sale['balance_amount'] > 0 && (int) ($sale['party_id'] ?? 0) > 0) {
@@ -2319,6 +2337,8 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
         if ($ownsTransaction) {
             db()->commit();
         }
+
+        jw_aml_scan_posted_date($companyId, $saleDate, $userId);
 
         return ['ok' => true, 'error' => '', 'voucher_id' => $voucherId, 'cogs' => $cogsTotal];
     } catch (Throwable $postingException) {
@@ -3294,6 +3314,8 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
         if ($ownsTransaction) {
             db()->commit();
         }
+
+        jw_aml_scan_posted_date($companyId, (string) $settlement['settlement_date'], $userId);
 
         return ['ok' => true, 'error' => '', 'voucher_id' => $voucherId];
     } catch (Throwable $postingException) {
