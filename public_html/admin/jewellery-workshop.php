@@ -513,13 +513,14 @@ try {
         LEFT JOIN jewellery_units u ON u.id = r.unit_id
         WHERE a.company_id = :cid AND a.assign_kind = 'self'
           AND a.status = 'received' AND r.status <> 'cancelled'
-          AND r.id NOT IN (SELECT COALESCE(stock_receipt_id, 0) FROM jewellery_order_lines WHERE source = 'stock' AND stock_receipt_id IS NOT NULL AND order_id != :keep_id)
         ORDER BY r.receive_date DESC"
     );
-    $stockStmt->execute(['cid' => $companyId, 'keep_id' => (int) ($editOrder['id'] ?? 0)]);
+    $stockStmt->execute(['cid' => $companyId]);
     $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
+    error_log("[DEBUG] Loaded " . count($orderStockPieces) . " stock pieces for company " . $companyId);
 } catch (Exception $e) {
     error_log("[ERROR] Failed to load showroom stock: " . $e->getMessage());
+    $orderStockPieces = [];
 }
 $cashBankLedgers = [];
 if ($view === 'orders' && table_exists('ledgers')) {
