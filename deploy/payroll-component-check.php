@@ -85,7 +85,29 @@ foreach (array_slice($argv, 1) as $argument) {
     }
 }
 if ($companyId <= 0) {
-    $fail('give the company id, e.g. php deploy/payroll-component-check.php 6', 2);
+    // Nobody knows their company id by heart, and guessing it edits the wrong
+    // company's pay. Listing them is the answer to "what do I put here".
+    try {
+        $tmp = new PDO(sprintf('mysql:host=%s;dbname=%s;charset=%s', DB_HOST, DB_NAME, DB_CHARSET), DB_USER, DB_PASS, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+    } catch (Throwable $e) {
+        $fail('could not connect: ' . $e->getMessage(), 3);
+    }
+    fwrite(STDOUT, "Companies that have pay components:\n\n");
+    $listed = 0;
+    foreach ($tmp->query('SELECT c.id, c.name, COUNT(pc.id) AS components
+                          FROM companies c INNER JOIN payroll_components pc ON pc.company_id = c.id
+                          GROUP BY c.id, c.name ORDER BY c.id') as $companyRow) {
+        printf("  id %-6s %-46s %s component(s)\n", $companyRow['id'], substr((string) $companyRow['name'], 0, 46), $companyRow['components']);
+        $listed++;
+    }
+    if ($listed === 0) {
+        fwrite(STDOUT, "  (none)\n");
+    }
+    fwrite(STDOUT, "\nThen run:  php deploy/payroll-component-check.php <id from above>\n");
+    exit(0);
 }
 
 try {

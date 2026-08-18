@@ -137,19 +137,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'That employee is not part of this run.');
             redirect('admin/payroll.php?run=' . $runId);
         }
-        if ($workedDays === null && $overtimeHours === null) {
-            db()->prepare('DELETE FROM payroll_run_inputs WHERE run_id = :run AND payroll_employee_id = :pe')
-                ->execute(['run' => $runId, 'pe' => $employeeId]);
-        } else {
-            db()->prepare('INSERT INTO payroll_run_inputs (run_id, payroll_employee_id, worked_days, overtime_hours, created_by, updated_by)
-                    VALUES (:run, :pe, :days, :hours, :uid, :uid)
-                ON DUPLICATE KEY UPDATE worked_days = VALUES(worked_days), overtime_hours = VALUES(overtime_hours), updated_by = VALUES(updated_by)')
-                ->execute(['run' => $runId, 'pe' => $employeeId, 'days' => $workedDays, 'hours' => $overtimeHours, 'uid' => (int) (current_user()['id'] ?? 0)]);
+        // Whatever goes wrong here has to arrive as a sentence on the screen. An
+        // uncaught exception becomes a bare HTTP 500, which says nothing about
+        // whether the table is missing, the run is locked, or the recalculation
+        // itself failed - and a payroll clerk cannot act on a blank page.
+        try {
+            if (!table_exists('payroll_run_inputs')) {
+                throw new RuntimeException('The payroll_run_inputs table is missing on this server. Apply database/migrations/119_payroll_worked_days_and_overtime_hours.sql.');
+            }
+            if ($workedDays === null && $overtimeHours === null) {
+                db()->prepare('DELETE FROM payroll_run_inputs WHERE run_id = :run AND payroll_employee_id = :pe')
+                    ->execute(['run' => $runId, 'pe' => $employeeId]);
+            } else {
+                db()->prepare('INSERT INTO payroll_run_inputs (run_id, payroll_employee_id, worked_days, overtime_hours, created_by, updated_by)
+                        VALUES (:run, :pe, :days, :hours, :uid, :uid)
+                    ON DUPLICATE KEY UPDATE worked_days = VALUES(worked_days), overtime_hours = VALUES(overtime_hours), updated_by = VALUES(updated_by)')
+                    ->execute(['run' => $runId, 'pe' => $employeeId, 'days' => $workedDays, 'hours' => $overtimeHours, 'uid' => $userId]);
+            }
+            $calc = payroll_calculate_run($runId);
+            flash($calc['ok'] ? 'success' : 'error', $calc['ok']
+                ? 'Days and hours saved - the run recalculated.'
+                : (string) ($calc['error'] ?? 'Saved, but the run could not be recalculated.'));
+        } catch (Throwable $e) {
+            flash('error', 'Could not save days and hours: ' . $e->getMessage());
         }
-        $calc = payroll_calculate_run($runId);
-        flash($calc['ok'] ? 'success' : 'error', $calc['ok']
-            ? 'Days and hours saved — the run recalculated.'
-            : (string) ($calc['error'] ?? 'Saved, but the run could not be recalculated.'));
         redirect('admin/payroll.php?run=' . $runId);
     }
 
