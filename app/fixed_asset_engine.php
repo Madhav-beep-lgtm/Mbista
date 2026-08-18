@@ -554,21 +554,43 @@ function fa_register_schedule(int $companyId, string $from, string $to, array $f
         $dep[(int) $row['asset_id']] = $row;
     }
 
-    // held_for_sale and revaluation rows share this table but are not
-    // impairment: only a loss and its reversal move accumulated impairment.
+    // A held-for-sale write-down is carried in accumulated_impairment just as a
+    // plain impairment is - excluding it left this column disagreeing with the
+    // figure stored on the asset. Only a revaluation is genuinely something
+    // else, and it is picked up separately below.
     $impStmt = db()->prepare(
         'SELECT asset_id,
                 SUM(CASE WHEN test_date < ? THEN impairment_loss - reversal ELSE 0 END) AS opening,
                 SUM(CASE WHEN test_date >= ? AND test_date <= ? THEN impairment_loss ELSE 0 END) AS current,
                 SUM(CASE WHEN test_date >= ? AND test_date <= ? THEN reversal ELSE 0 END) AS reversed
          FROM asset_impairments
-         WHERE company_id = ? AND test_date <= ? AND kind IN (?, ?) AND asset_id IN (' . $ph . ')
+         WHERE company_id = ? AND test_date <= ? AND kind IN (?, ?, ?) AND asset_id IN (' . $ph . ')
          GROUP BY asset_id'
     );
-    $impStmt->execute(array_merge([$from, $from, $to, $from, $to, $companyId, $to, 'impairment', 'reversal'], $ids));
+    $impStmt->execute(array_merge([$from, $from, $to, $from, $to, $companyId, $to, 'impairment', 'reversal', 'held_for_sale'], $ids));
     $imp = [];
     foreach ($impStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $imp[(int) $row['asset_id']] = $row;
+    }
+
+    // A revalued asset is carried at fair value, not at cost less depreciation.
+    // Leaving the revaluation out understated SMP-BLDG's carrying amount by the
+    // whole 318,750 sitting in its revaluation reserve, so the register's
+    // carrying total could not tie to the balance sheet. Only posted lines
+    // count; increase_decrease is the change to CARRYING value, which is what
+    // this column needs - the split between OCI and P&L belongs elsewhere.
+    $revStmt = db()->prepare(
+        'SELECT asset_id,
+                SUM(CASE WHEN DATE(posted_at) < ? THEN increase_decrease ELSE 0 END) AS opening,
+                SUM(CASE WHEN DATE(posted_at) >= ? AND DATE(posted_at) <= ? THEN increase_decrease ELSE 0 END) AS current
+         FROM asset_revaluation_lines
+         WHERE company_id = ? AND posted_at IS NOT NULL AND DATE(posted_at) <= ? AND asset_id IN (' . $ph . ')
+         GROUP BY asset_id'
+    );
+    $revStmt->execute(array_merge([$from, $from, $to, $companyId, $to], $ids));
+    $rev = [];
+    foreach ($revStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $rev[(int) $row['asset_id']] = $row;
     }
 
     $rows = [];
@@ -595,6 +617,10 @@ function fa_register_schedule(int $companyId, string $from, string $to, array $f
         if ($soldInWindow) {
             $impReversal = $impOpening + $impCurrent;
         }
+
+        $revOpening = (float) ($rev[$id]['opening'] ?? 0);
+        $revCurrent = (float) ($rev[$id]['current'] ?? 0);
+        $revClosing = $soldInWindow ? 0.0 : $revOpening + $revCurrent;
 
         $costClosing = $costOpening + $costAddition - $costDisposal;
         $depClosing = $depOpening + $depCurrent - $depReversal;
@@ -627,14 +653,20 @@ function fa_register_schedule(int $companyId, string $from, string $to, array $f
             'imp_closing' => fa_round($impClosing),
             'proceeds' => $a['disposal_proceeds'] === null ? null : (float) $a['disposal_proceeds'],
             'gain_loss' => $a['disposal_gain_loss'] === null ? null : (float) $a['disposal_gain_loss'],
-            // Opening and addition carrying amounts are cost less accumulated
-            // depreciation; closing also carries impairment off. That is the
-            // register exactly as it was specified - see the note in the
-            // register view about opening excluding impairment.
-            'carry_opening' => fa_round($costOpening - $depOpening),
+            // Carrying amount is cost less BOTH accumulated depreciation and
+            // accumulated impairment, at every point in the schedule. An
+            // opening figure measured without impairment would be a different
+            // quantity from the closing figure beside it, and the two would not
+            // be comparable - which is the one thing a movement schedule has to
+            // get right. An addition carries nothing accumulated yet, so its
+            // carrying amount is simply what it cost.
+            'reval_opening' => fa_round($revOpening),
+            'reval_current' => fa_round($revCurrent),
+            'reval_closing' => fa_round($revClosing),
+            'carry_opening' => fa_round($costOpening + $revOpening - $depOpening - $impOpening),
             'carry_addition' => fa_round($costAddition),
-            'carry_disposal' => fa_round($costDisposal - $depReversal - $impReversal),
-            'carry_closing' => fa_round($costClosing - $depClosing - $impClosing),
+            'carry_disposal' => fa_round($costDisposal + $revOpening + $revCurrent - $depReversal - $impReversal),
+            'carry_closing' => fa_round($costClosing + $revClosing - $depClosing - $impClosing),
         ];
     }
 
@@ -650,6 +682,7 @@ function fa_register_totals(array $rows): array
         'cost_opening', 'cost_addition', 'cost_disposal', 'cost_closing',
         'dep_opening', 'dep_current', 'dep_reversal', 'dep_closing',
         'imp_opening', 'imp_current', 'imp_reversal', 'imp_closing',
+        'reval_opening', 'reval_current', 'reval_closing',
         'carry_opening', 'carry_addition', 'carry_disposal', 'carry_closing',
     ];
     $totals = array_fill_keys($keys, 0.0);
@@ -683,4 +716,248 @@ function fa_register_group(array $rows, string $reportType, array $classLabels =
     ksort($grouped);
 
     return $grouped;
+}
+
+/**
+ * The depreciation a window owes, month by month, without posting any of it.
+ *
+ * Depreciation could only be charged one asset and one month at a time, and
+ * every charge was dated the day the button was pressed. Preparing a year's
+ * accounts that way means pressing it once per asset per month and still
+ * ending up with twelve charges all dated today, which no financial statement
+ * can be drawn from: the year's expense has to fall in the year, and each
+ * month's charge has to sit in its own month.
+ *
+ * This works out what the window owes and hands it back to be looked at first.
+ * Nothing is written. A month that has already been charged is left alone and
+ * reported as such, so running this twice over the same year does not charge
+ * it twice - which is the property that makes it safe to re-run after adding
+ * one late asset.
+ *
+ * The first month is pro-rated by the days the asset was actually available
+ * (IAS 16.55: depreciation runs from the date an asset is ready for use, not
+ * from the first of the month somebody registered it). Nothing is charged
+ * below residual value, and an asset held for sale is not charged at all
+ * (IFRS 5.25).
+ *
+ * Each month is computed from the position the month before left behind, so a
+ * charge that runs into residual value stops there rather than being worked
+ * out twelve times from a starting figure that has since moved.
+ */
+function fa_depreciation_plan(int $companyId, string $from, string $to, array $filters = []): array
+{
+    $where = ['a.company_id = :cid', "a.asset_class <> 'cwip'"];
+    $params = ['cid' => $companyId];
+    if ((string) ($filters['class'] ?? '') !== '') {
+        $where[] = 'a.asset_class = :f_class';
+        $params['f_class'] = (string) $filters['class'];
+    }
+    if ((int) ($filters['asset_id'] ?? 0) > 0) {
+        $where[] = 'a.id = :f_asset';
+        $params['f_asset'] = (int) $filters['asset_id'];
+    }
+
+    $stmt = db()->prepare(
+        'SELECT a.*, c.name AS category_name
+         FROM fixed_assets a
+         LEFT JOIN asset_categories c ON c.id = a.category_id
+         WHERE ' . implode(' AND ', $where) . '
+         ORDER BY a.asset_code ASC'
+    );
+    $stmt->execute($params);
+    $assets = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($assets === []) {
+        return [];
+    }
+
+    // Which months already carry a charge, read once for every asset rather
+    // than once per asset per month.
+    $ids = array_map(static fn (array $a): int => (int) $a['id'], $assets);
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    // Two figures per month, because they answer different questions. "charged"
+    // is whether the month has been touched at all, which is what decides
+    // whether to charge it again - by MONTH, since a monthly charge covers its
+    // whole month wherever in it the entry happens to be dated. "in_window" is
+    // only the part dated inside the window, which is what the register counts
+    // as the period's expense; a charge dated 13 Shrawan belongs to the year
+    // that ended on the 15th, not to the one starting on the 16th.
+    $doneStmt = db()->prepare(
+        "SELECT asset_id, DATE_FORMAT(period_date, '%Y-%m') AS ym, SUM(depreciation) AS charged,
+                SUM(CASE WHEN period_date >= ? AND period_date <= ? THEN depreciation ELSE 0 END) AS in_window
+         FROM asset_depreciation_schedule
+         WHERE company_id = ? AND asset_id IN (" . $ph . ')
+         GROUP BY asset_id, ym'
+    );
+    $doneStmt->execute(array_merge([$from, $to, $companyId], $ids));
+    $already = [];
+    foreach ($doneStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $already[(int) $row['asset_id']][(string) $row['ym']] = [
+            'charged' => (float) $row['charged'],
+            'in_window' => (float) $row['in_window'],
+        ];
+    }
+
+    $plans = [];
+    foreach ($assets as $asset) {
+        $assetId = (int) $asset['id'];
+        $readyRaw = (string) ($asset['depreciation_start_date'] ?? '') ?: (string) ($asset['available_for_use_date'] ?? '');
+        $residual = (float) $asset['residual_value'];
+
+        $plan = [
+            'asset_id' => $assetId,
+            'code' => (string) $asset['asset_code'],
+            'name' => (string) $asset['name'],
+            'class' => (string) $asset['asset_class'],
+            'category' => (string) ($asset['category_name'] ?? ''),
+            'method' => (string) $asset['depreciation_method'],
+            'opening_accumulated' => fa_round((float) $asset['accumulated_depreciation']),
+            'opening_carrying' => fa_round((float) $asset['carrying_amount']),
+            'months' => [],
+            'already_charged' => 0.0,
+            'prior_period_months' => 0,
+            'total' => 0.0,
+            'skipped' => '',
+        ];
+
+        if ((string) $asset['status'] === 'held_for_sale') {
+            $plan['skipped'] = 'Held for sale — depreciation stops (IFRS 5.25)';
+            $plans[] = $plan;
+            continue;
+        }
+        if ((string) $asset['status'] === 'disposed') {
+            $plan['skipped'] = 'Disposed';
+            $plans[] = $plan;
+            continue;
+        }
+        if ($readyRaw === '') {
+            $plan['skipped'] = 'No available-for-use date — depreciation has no date to start from';
+            $plans[] = $plan;
+            continue;
+        }
+        if ((int) $asset['useful_life_months'] <= 0) {
+            $plan['skipped'] = 'No useful life set';
+            $plans[] = $plan;
+            continue;
+        }
+
+        // The running position: each month is worked out from what the month
+        // before it left, not from the figure the asset started the window on.
+        $running = $asset;
+        $accumulated = (float) $asset['accumulated_depreciation'];
+        $carrying = (float) $asset['carrying_amount'];
+
+        $windowFrom = new DateTimeImmutable($from);
+        $stop = new DateTimeImmutable($to);
+        $ready = new DateTimeImmutable($readyRaw);
+        $cursor = ($ready > $windowFrom ? $ready : $windowFrom)->modify('first day of this month');
+
+        while ($cursor <= $stop) {
+            $monthEnd = $cursor->modify('last day of this month');
+            $daysInMonth = (int) $monthEnd->format('j');
+
+            // The slice of this calendar month that belongs to BOTH the window
+            // and the asset's life. Pro-rating only the first month was wrong
+            // at both ends: a fiscal year running 16 Shrawan to 15 Shrawan
+            // touches THIRTEEN calendar months, so charging a whole month at
+            // each end put thirteen months of depreciation into a twelve-month
+            // year and overstated the expense. Charging 16/31 and 15/31 of the
+            // two half months adds back to exactly one.
+            $effFrom = $ready > $cursor ? $ready : $cursor;
+            if ($windowFrom > $effFrom) {
+                $effFrom = $windowFrom;
+            }
+            $effTo = $monthEnd > $stop ? $stop : $monthEnd;
+            if ($effTo < $effFrom) {
+                $cursor = $cursor->modify('first day of next month');
+                continue;
+            }
+            $periodDate = $effTo;
+            $ym = $cursor->format('Y-m');
+
+            if (isset($already[$assetId][$ym])) {
+                $plan['already_charged'] += (float) $already[$assetId][$ym]['in_window'];
+                // A month whose charge sits outside the window is still not
+                // charged again, but it is not this period's expense either -
+                // counted separately so the panel can say so instead of
+                // quietly disagreeing with the register.
+                if ((float) $already[$assetId][$ym]['in_window'] <= 0) {
+                    $plan['prior_period_months']++;
+                }
+                $cursor = $cursor->modify('first day of next month');
+                continue;
+            }
+
+            $running['accumulated_depreciation'] = $accumulated;
+            $running['carrying_amount'] = $carrying;
+            $charge = fa_asset_monthly_charge($running);
+
+            $daysCharged = (int) $effFrom->diff($effTo)->days + 1;
+            if ($daysCharged < $daysInMonth) {
+                $charge = fa_round($charge * $daysCharged / $daysInMonth);
+            }
+            $charge = min($charge, max(0.0, fa_round($carrying - $residual)));
+
+            if ($charge <= 0) {
+                break;
+            }
+
+            $accumulated = fa_round($accumulated + $charge);
+            $carrying = fa_round($carrying - $charge);
+            $plan['months'][] = [
+                'period_date' => $periodDate->format('Y-m-d'),
+                'charge' => $charge,
+                'accumulated' => $accumulated,
+                'carrying' => $carrying,
+            ];
+            $plan['total'] = fa_round($plan['total'] + $charge);
+
+            $cursor = $cursor->modify('first day of next month');
+        }
+
+        $plan['closing_accumulated'] = fa_round($accumulated);
+        $plan['closing_carrying'] = fa_round($carrying);
+        $plan['already_charged'] = fa_round($plan['already_charged']);
+        $plans[] = $plan;
+    }
+
+    return $plans;
+}
+
+/**
+ * What a depreciation plan adds up to, for the panel's totals row.
+ */
+function fa_depreciation_plan_totals(array $plans): array
+{
+    $totals = ['months' => 0, 'to_post' => 0.0, 'already_charged' => 0.0, 'assets' => 0, 'skipped' => 0, 'prior_period_months' => 0];
+    foreach ($plans as $plan) {
+        if ((string) $plan['skipped'] !== '') {
+            $totals['skipped']++;
+            continue;
+        }
+        $totals['assets']++;
+        $totals['months'] += count($plan['months']);
+        $totals['prior_period_months'] += (int) ($plan['prior_period_months'] ?? 0);
+        $totals['to_post'] += (float) $plan['total'];
+        $totals['already_charged'] += (float) $plan['already_charged'];
+    }
+    $totals['to_post'] = fa_round($totals['to_post']);
+    $totals['already_charged'] = fa_round($totals['already_charged']);
+    $totals['charge_for_period'] = fa_round($totals['to_post'] + $totals['already_charged']);
+
+    return $totals;
+}
+
+/**
+ * A date, or null - the shape of one is not the same as being one.
+ *
+ * 2027-99-99 and 2026-02-31 both match \d{4}-\d{2}-\d{2}, and a register
+ * filtered on either used to come back empty rather than saying the date was
+ * wrong; stored on an asset, MySQL reads them back as a zero date.
+ */
+function fa_valid_date(mixed $raw): ?string
+{
+    $raw = (string) $raw;
+    $parsed = DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
+
+    return ($parsed && $parsed->format('Y-m-d') === $raw) ? $raw : null;
 }

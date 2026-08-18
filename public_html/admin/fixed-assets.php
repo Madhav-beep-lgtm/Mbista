@@ -179,14 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lifeMonths = max(0, (int) ($_POST['useful_life_months'] ?? 0));
         $availableDate = trim((string) ($_POST['available_for_use_date'] ?? '')) ?: null;
         // Three dates that are not the same fact: bought, entered, in use.
-        $faDate = static function (string $key): ?string {
-            $raw = (string) ($_POST[$key] ?? '');
-            $parsed = DateTime::createFromFormat('!Y-m-d', $raw);
-
-            // Right shape, impossible day: 2026-02-31 would otherwise be stored
-            // and then read back by MySQL as a zero date.
-            return ($parsed && $parsed->format('Y-m-d') === $raw) ? $raw : null;
-        };
+        $faDate = static fn (string $key): ?string => fa_valid_date($_POST[$key] ?? '');
         $purchaseDate = $faDate('purchase_date');
         $postingDate = $faDate('posting_date') ?? date('Y-m-d');
         $purchaseRef = trim((string) ($_POST['purchase_ref'] ?? ''));
@@ -633,6 +626,108 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', 'Additional cost ' . site_currency_symbol() . number_format($amount, 2) . ' capitalized onto ' . $asset['asset_code'] . '.');
         } catch (Throwable $e) { if (db()->inTransaction()) { db()->rollBack(); } flash('error', 'Could not add cost: ' . $e->getMessage()); }
         redirect('admin/fixed-assets.php?view=' . (int) $asset['id']);
+    }
+
+    if ($action === 'run_depreciation') {
+        // Charges a whole window in one go, each month dated to its own month
+        // end. Posting a year one asset and one month at a time was not merely
+        // tedious: every charge came out dated the day the button was pressed,
+        // so a year's expense could not be split across the months it belonged
+        // to and no financial statement could be drawn from it.
+        require_permission('accounting', 'post');
+        $runFrom = fa_valid_date((string) ($_POST['from'] ?? '')) ?? (string) ($fiscalYear['start_date'] ?? date('Y-01-01'));
+        $runTo = fa_valid_date((string) ($_POST['to'] ?? '')) ?? (string) ($fiscalYear['end_date'] ?? date('Y-12-31'));
+        if ($runTo < $runFrom) {
+            [$runFrom, $runTo] = [$runTo, $runFrom];
+        }
+        $plans = fa_depreciation_plan($companyId, $runFrom, $runTo);
+        $postedCount = 0;
+        $postedValue = 0.0;
+        $blocked = [];
+        try {
+            db()->beginTransaction();
+            foreach ($plans as $plan) {
+                if ((string) $plan['skipped'] !== '' || $plan['months'] === []) {
+                    continue;
+                }
+                $assetId = (int) $plan['asset_id'];
+                $asset = fa_company_asset($assetId, $companyId);
+                if (!$asset) {
+                    continue;
+                }
+                // Mapping before posting, exactly as the single-month charge
+                // demands it: an asset whose ledgers are unset is reported and
+                // left alone rather than silently skipped.
+                $expLedger = fa_resolve_mapping($companyId, 'depreciation_expense', $assetId);
+                $accLedger = fa_resolve_mapping($companyId, 'accumulated_depreciation', $assetId);
+                if (!$expLedger || !$accLedger) {
+                    $blocked[] = $plan['code'] . ' (ledgers not set)';
+                    continue;
+                }
+
+                $periodStmt = db()->prepare('SELECT COALESCE(MAX(period_no), 0) FROM asset_depreciation_schedule WHERE asset_id = :aid');
+                $periodStmt->execute(['aid' => $assetId]);
+                $periodNo = (int) $periodStmt->fetchColumn();
+
+                $accumulated = (float) $asset['accumulated_depreciation'];
+                $carrying = (float) $asset['carrying_amount'];
+                $lockHit = false;
+
+                foreach ($plan['months'] as $month) {
+                    $periodDate = (string) $month['period_date'];
+                    if (is_period_locked($companyId, $fiscalYearId, $periodDate)) {
+                        $blocked[] = $plan['code'] . ' (' . $periodDate . ' is in a locked period)';
+                        $lockHit = true;
+                        break;
+                    }
+                    $charge = (float) $month['charge'];
+                    $periodNo++;
+                    $accumulated = round($accumulated + $charge, 2);
+                    $carrying = round($carrying - $charge, 2);
+
+                    $voucherId = create_voucher_with_entries([
+                        'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId ?: null,
+                        'voucher_no' => 'FA-DEP-' . $asset['asset_code'] . '-' . str_pad((string) $periodNo, 3, '0', STR_PAD_LEFT),
+                        'voucher_type' => 'journal',
+                        // The month it belongs to, not the day it was run.
+                        'voucher_date' => $periodDate,
+                        'source_type' => 'asset_depreciation', 'source_id' => null,
+                        'total_amount' => $charge,
+                        'narration' => 'Depreciation ' . $periodDate . ' — ' . $asset['name'] . ' (' . $asset['asset_code'] . ').',
+                        'status' => 'posted', 'posted_by' => $userId,
+                    ], [
+                        ['ledger_id' => (int) $expLedger['id'], 'entry_type' => 'debit', 'amount' => $charge],
+                        ['ledger_id' => (int) $accLedger['id'], 'entry_type' => 'credit', 'amount' => $charge],
+                    ]);
+                    if ($voucherId <= 0) {
+                        throw new RuntimeException('A depreciation voucher could not be posted for ' . $asset['asset_code'] . ' — nothing has been charged.');
+                    }
+                    db()->prepare('INSERT INTO asset_depreciation_schedule (company_id, asset_id, period_no, period_date, depreciation, accumulated, carrying, voucher_id, posted)
+                        VALUES (:cid, :aid, :pno, :pdate, :dep, :acc, :carry, :vid, 1)')
+                        ->execute(['cid' => $companyId, 'aid' => $assetId, 'pno' => $periodNo, 'pdate' => $periodDate, 'dep' => $charge, 'acc' => $accumulated, 'carry' => $carrying, 'vid' => $voucherId]);
+                    $postedCount++;
+                    $postedValue += $charge;
+                }
+
+                $status = $carrying <= (float) $asset['residual_value'] + 0.005 ? 'fully_depreciated' : (string) $asset['status'];
+                db()->prepare('UPDATE fixed_assets SET accumulated_depreciation = :acc, carrying_amount = :carry, status = :st WHERE id = :id AND company_id = :cid')
+                    ->execute(['acc' => $accumulated, 'carry' => $carrying, 'st' => $status, 'id' => $assetId, 'cid' => $companyId]);
+                if ($lockHit) {
+                    continue;
+                }
+            }
+            db()->commit();
+            security_event('asset_depreciation_posted', 'success', 'Depreciation run ' . $runFrom . '..' . $runTo . ': ' . $postedCount . ' charge(s).', $companyId, $userId);
+            if ($postedCount === 0) {
+                flash('error', 'Nothing was charged for ' . $runFrom . ' to ' . $runTo . '.' . ($blocked !== [] ? ' Held up: ' . implode('; ', array_unique($blocked)) . '.' : ' Every month in the window is already charged.'));
+            } else {
+                flash('success', $postedCount . ' monthly charge(s) posted for ' . $runFrom . ' to ' . $runTo . ', totalling ' . site_currency_symbol() . number_format($postedValue, 2) . '.' . ($blocked !== [] ? ' Held up: ' . implode('; ', array_unique($blocked)) . '.' : ''));
+            }
+        } catch (Throwable $e) {
+            if (db()->inTransaction()) { db()->rollBack(); }
+            flash('error', 'Nothing was charged — the run was rolled back: ' . $e->getMessage());
+        }
+        redirect('admin/fixed-assets.php?view=register');
     }
 
     if ($action === 'post_depreciation') {
@@ -3172,23 +3267,110 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 
     <?php
+    // The year's depreciation, worked out but not yet charged. Financial
+    // statements need the whole year split across the months it belongs to, and
+    // that could only be done one asset and one month at a time with every
+    // charge dated the day the button was pressed. This shows what the window
+    // owes before anything is written, so the figures can be read first and
+    // posted once.
+    $depFrom = fa_valid_date($_GET['from'] ?? '') ?? (string) ($fiscalYear['start_date'] ?? date('Y-01-01'));
+    $depTo = fa_valid_date($_GET['to'] ?? '') ?? (string) ($fiscalYear['end_date'] ?? date('Y-12-31'));
+    if ($depTo < $depFrom) {
+        [$depFrom, $depTo] = [$depTo, $depFrom];
+    }
+    $depPlans = fa_depreciation_plan($companyId, $depFrom, $depTo);
+    $depTotals = fa_depreciation_plan_totals($depPlans);
+    ?>
+    <section class="mbw-card" data-collapsible>
+        <div class="mbw-card-head"><h2>Depreciation schedule</h2>
+            <span class="frm-optional"><?= e($depFrom) ?> to <?= e($depTo) ?> — each month charged into its own month, so the year's expense falls in the year</span>
+        </div>
+        <?php if ($depPlans === []): ?>
+            <p class="frm-optional" style="padding:12px">No depreciable assets for this company yet.</p>
+        <?php else: ?>
+        <div class="rc-table-scroll"><table class="rc-table">
+            <thead><tr>
+                <th>Code</th><th>Name</th><th>Method</th>
+                <th class="align-right">Accumulated so far</th>
+                <th class="align-right">Already charged in window</th>
+                <th class="align-right">Months to charge</th>
+                <th class="align-right">Still to charge</th>
+                <th class="align-right">Charge for the window</th>
+                <th class="align-right">Carrying after</th>
+            </tr></thead>
+            <tbody>
+                <?php foreach ($depPlans as $plan): ?>
+                    <tr>
+                        <td><?= e($plan['code']) ?></td>
+                        <td><?= e($plan['name']) ?></td>
+                        <td><span class="mbw-pill tone-gray"><?= e(str_replace('_', ' ', $plan['method'])) ?></span></td>
+                        <?php if ((string) $plan['skipped'] !== ''): ?>
+                            <td colspan="6" style="color:var(--mbw-muted)"><?= e($plan['skipped']) ?></td>
+                        <?php else: ?>
+                            <td class="align-right"><?= e(number_format((float) $plan['opening_accumulated'], 2)) ?></td>
+                            <td class="align-right"><?= e(number_format((float) $plan['already_charged'], 2)) ?></td>
+                            <td class="align-right">
+                                <?php if ($plan['months'] === []): ?>
+                                    <span style="color:var(--mbw-muted)">none</span>
+                                <?php else: ?>
+                                    <details>
+                                        <summary><?= count($plan['months']) ?></summary>
+                                        <div style="font-size:11px;text-align:left;padding-top:4px">
+                                            <?php foreach ($plan['months'] as $month): ?>
+                                                <div><?= e($month['period_date']) ?> — <?= e(number_format((float) $month['charge'], 2)) ?></div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </details>
+                                <?php endif; ?>
+                            </td>
+                            <td class="align-right"><strong><?= e(number_format((float) $plan['total'], 2)) ?></strong></td>
+                            <td class="align-right"><?= e(number_format((float) $plan['already_charged'] + (float) $plan['total'], 2)) ?></td>
+                            <td class="align-right"><?= e(number_format((float) ($plan['closing_carrying'] ?? 0), 2)) ?></td>
+                        <?php endif; ?>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+            <tfoot><tr style="font-weight:700">
+                <td colspan="4" class="align-right">Total — <?= (int) $depTotals['assets'] ?> asset(s)<?= $depTotals['skipped'] > 0 ? ', ' . (int) $depTotals['skipped'] . ' not depreciating' : '' ?></td>
+                <td class="align-right"><?= e(number_format((float) $depTotals['already_charged'], 2)) ?></td>
+                <td class="align-right"><?= (int) $depTotals['months'] ?></td>
+                <td class="align-right"><?= e(number_format((float) $depTotals['to_post'], 2)) ?></td>
+                <td class="align-right"><?= e(number_format((float) $depTotals['charge_for_period'], 2)) ?></td>
+                <td></td>
+            </tr></tfoot>
+        </table></div>
+        <?php if ((int) $depTotals['months'] > 0): ?>
+            <form method="post" style="padding:12px" onsubmit="return confirm('Charge <?= (int) $depTotals['months'] ?> month(s) of depreciation totalling <?= e(number_format((float) $depTotals['to_post'], 2)) ?>? Each month posts its own voucher dated to that month. This cannot be undone from here.');">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="run_depreciation">
+                <input type="hidden" name="from" value="<?= e($depFrom) ?>">
+                <input type="hidden" name="to" value="<?= e($depTo) ?>">
+                <button type="submit"><?= icon('tasks') ?>Post this schedule (<?= (int) $depTotals['months'] ?> months, <?= e(number_format((float) $depTotals['to_post'], 2)) ?>)</button>
+            </form>
+        <?php else: ?>
+            <p class="frm-optional" style="padding:12px">Every month in this window is already charged — nothing left to post.</p>
+        <?php endif; ?>
+        <p class="frm-optional" style="padding:0 12px 12px">
+            The first and last months are pro-rated by the days that fall inside the window, so a fiscal year running mid-month to mid-month
+            still charges twelve months and not thirteen. A month already charged is left alone, which makes this safe to re-run after adding
+            a late asset. Nothing is charged below residual value, and an asset held for sale is not charged at all (IFRS 5.25).
+            &ldquo;Charge for the window&rdquo; is what the register shows as this period&rsquo;s depreciation &mdash; the two always agree.
+            <?php if ((int) $depTotals['prior_period_months'] > 0): ?>
+                <br><strong><?= (int) $depTotals['prior_period_months'] ?> month(s)</strong> are not charged again because they already carry a charge dated before this window &mdash; that charge belongs to the earlier period, so it is counted in opening rather than here.
+            <?php endif; ?>
+        </p>
+        <?php endif; ?>
+    </section>
+
+    <?php
     // The register as a movement schedule: what was held at the start of the
     // window, what came in, what went out, and what is left - for cost, for
     // accumulated depreciation, for accumulated impairment, and for the
     // carrying amount that falls out of them. A balance as it stands today
     // cannot answer "what did we buy this year", which is the question the
     // register is actually asked.
-    // The shape of a date is not the same as being one: 2027-99-99 matches
-    // any \d{4}-\d{2}-\d{2} pattern and would silently return an empty
-    // register instead of saying the date was wrong.
-    $regDate = static function (mixed $raw, string $fallback): string {
-        $raw = (string) $raw;
-        $parsed = DateTime::createFromFormat('!Y-m-d', $raw);
-
-        return ($parsed && $parsed->format('Y-m-d') === $raw) ? $raw : $fallback;
-    };
-    $regFrom = $regDate($_GET['from'] ?? '', (string) ($fiscalYear['start_date'] ?? date('Y-01-01')));
-    $regTo = $regDate($_GET['to'] ?? '', (string) ($fiscalYear['end_date'] ?? date('Y-12-31')));
+    $regFrom = fa_valid_date($_GET['from'] ?? '') ?? (string) ($fiscalYear['start_date'] ?? date('Y-01-01'));
+    $regTo = fa_valid_date($_GET['to'] ?? '') ?? (string) ($fiscalYear['end_date'] ?? date('Y-12-31'));
     if ($regTo < $regFrom) {
         [$regFrom, $regTo] = [$regTo, $regFrom];
     }
@@ -3208,7 +3390,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     $poolLabels = fa_tax_pools();
     // 20 money columns plus 8 identity columns; the money is what needs the
     // width, so the table scrolls sideways rather than crushing every figure.
-    $regColspan = 28;
+    $regColspan = 29;
     $money = static fn (float $n): string => $n == 0.0 ? '—' : number_format($n, 2);
     ?>
     <section class="mbw-card" data-collapsible>
@@ -3259,6 +3441,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <th colspan="4" class="align-right">Cost</th>
                     <th colspan="4" class="align-right">Accumulated depreciation</th>
                     <th colspan="4" class="align-right">Accumulated impairment</th>
+                    <th rowspan="2" class="align-right" title="Revalued assets are carried at fair value, so this is the difference between cost and what they are carried at">Revaluation</th>
                     <th rowspan="2" class="align-right">Gain/(loss) on disposal</th>
                     <th colspan="4" class="align-right">Carrying amount</th>
                     <th rowspan="2">Status</th><th rowspan="2"></th>
@@ -3300,6 +3483,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <td class="align-right"><?= e($money($r['imp_current'])) ?></td>
                             <td class="align-right"><?= e($money($r['imp_reversal'])) ?></td>
                             <td class="align-right"><strong><?= e($money($r['imp_closing'])) ?></strong></td>
+                            <td class="align-right"><?= e($money($r['reval_closing'])) ?></td>
                             <td class="align-right">
                                 <?php if ($r['gain_loss'] === null): ?>
                                     <span style="color:var(--mbw-muted)"><?= $r['sold_in_window'] ? 'not recorded' : '—' ?></span>
@@ -3322,6 +3506,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <td class="align-right"><?= e($money($gt['cost_opening'])) ?></td><td class="align-right"><?= e($money($gt['cost_addition'])) ?></td><td class="align-right"><?= e($money($gt['cost_disposal'])) ?></td><td class="align-right"><?= e($money($gt['cost_closing'])) ?></td>
                             <td class="align-right"><?= e($money($gt['dep_opening'])) ?></td><td class="align-right"><?= e($money($gt['dep_current'])) ?></td><td class="align-right"><?= e($money($gt['dep_reversal'])) ?></td><td class="align-right"><?= e($money($gt['dep_closing'])) ?></td>
                             <td class="align-right"><?= e($money($gt['imp_opening'])) ?></td><td class="align-right"><?= e($money($gt['imp_current'])) ?></td><td class="align-right"><?= e($money($gt['imp_reversal'])) ?></td><td class="align-right"><?= e($money($gt['imp_closing'])) ?></td>
+                            <td class="align-right"><?= e($money($gt['reval_closing'])) ?></td>
                             <td class="align-right"><?= e($money($gt['gain_loss'])) ?></td>
                             <td class="align-right"><?= e($money($gt['carry_opening'])) ?></td><td class="align-right"><?= e($money($gt['carry_addition'])) ?></td><td class="align-right"><?= e($money($gt['carry_disposal'])) ?></td><td class="align-right"><?= e($money($gt['carry_closing'])) ?></td>
                             <td colspan="2"></td>
@@ -3336,6 +3521,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td class="align-right"><?= e($money($registerTotals['cost_opening'])) ?></td><td class="align-right"><?= e($money($registerTotals['cost_addition'])) ?></td><td class="align-right"><?= e($money($registerTotals['cost_disposal'])) ?></td><td class="align-right"><?= e($money($registerTotals['cost_closing'])) ?></td>
                     <td class="align-right"><?= e($money($registerTotals['dep_opening'])) ?></td><td class="align-right"><?= e($money($registerTotals['dep_current'])) ?></td><td class="align-right"><?= e($money($registerTotals['dep_reversal'])) ?></td><td class="align-right"><?= e($money($registerTotals['dep_closing'])) ?></td>
                     <td class="align-right"><?= e($money($registerTotals['imp_opening'])) ?></td><td class="align-right"><?= e($money($registerTotals['imp_current'])) ?></td><td class="align-right"><?= e($money($registerTotals['imp_reversal'])) ?></td><td class="align-right"><?= e($money($registerTotals['imp_closing'])) ?></td>
+                    <td class="align-right"><?= e($money($registerTotals['reval_closing'])) ?></td>
                     <td class="align-right"><?= e($money($registerTotals['gain_loss'])) ?></td>
                     <td class="align-right"><?= e($money($registerTotals['carry_opening'])) ?></td><td class="align-right"><?= e($money($registerTotals['carry_addition'])) ?></td><td class="align-right"><?= e($money($registerTotals['carry_disposal'])) ?></td><td class="align-right"><?= e($money($registerTotals['carry_closing'])) ?></td>
                     <td colspan="2"></td>
@@ -3344,7 +3530,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endif; ?>
         </table></div>
         <p class="frm-optional" style="padding:8px 12px">
-            Opening carrying amount is cost less accumulated depreciation; closing also carries accumulated impairment off, as specified.
+            Carrying amount is cost, plus any revaluation, less accumulated depreciation and accumulated impairment — at opening and at closing alike, so the two are comparable. It ties to the carrying amount held against each asset. Closing also reflects the depreciation and impairment charged inside the window, which is why the four carrying columns do not foot on their own — the charge for the period is in the two blocks to the left.
             Depreciation counts only where it has been posted — a computed but unposted schedule row is a plan, not a charge.
         </p>
     </section>
