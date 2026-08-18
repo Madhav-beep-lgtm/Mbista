@@ -1050,27 +1050,15 @@ jw_filter_bar_styles();
                     $filterOverdue ? '1' : '', ['1' => 'Only these'], '— all —')],
             ],
         ]); ?>
-        <?php
-            $makeSortUrl = function($newSort) {
-                $params = $_GET;
-                $params['sort'] = $newSort;
-                $params['view'] = 'orders';
-                return url('admin/jewellery-workshop.php?' . http_build_query($params));
-            };
-            $getSortIcon = function($col) {
-                $sort = (string) ($_GET['sort'] ?? '');
-                return $sort === $col . '_asc' ? ' ↑' : ($sort === $col . '_desc' ? ' ↓' : '');
-            };
-        ?>
         <div class="mbw-tablewrap"><table>
             <thead><tr>
-                <th><a href="<?= e($makeSortUrl($_GET['sort'] === 'order_no_asc' ? 'order_no_desc' : 'order_no_asc')) ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">No.<?= $getSortIcon('order_no') ?></a></th>
-                <th><a href="<?= e($makeSortUrl($_GET['sort'] === 'order_date_asc' ? 'order_date_desc' : 'order_date_asc')) ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Date<?= $getSortIcon('order_date') ?></a></th>
-                <th><a href="<?= e($makeSortUrl($_GET['sort'] === 'party_asc' ? 'party_desc' : 'party_asc')) ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Customer<?= $getSortIcon('party') ?></a></th>
-                <th><a href="<?= e($makeSortUrl($_GET['sort'] === 'metal_asc' ? 'metal_desc' : 'metal_asc')) ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Metal<?= $getSortIcon('metal') ?></a></th>
-                <th class="is-numeric"><a href="<?= e($makeSortUrl($_GET['sort'] === 'weight_asc' ? 'weight_desc' : 'weight_asc')) ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Expected wt<?= $getSortIcon('weight') ?></a></th>
-                <th><a href="<?= e($makeSortUrl($_GET['sort'] === 'delivery_asc' ? 'delivery_desc' : 'delivery_asc')) ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Delivery<?= $getSortIcon('delivery') ?></a></th>
-                <th><a href="<?= e($makeSortUrl($_GET['sort'] === 'status_asc' ? 'status_desc' : 'status_asc')) ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Status<?= $getSortIcon('status') ?></a></th>
+                <th><a href="?view=orders&sort=<?= $_GET['sort'] === 'order_no_asc' ? 'order_no_desc' : 'order_no_asc' ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">No. <?= ($_GET['sort'] ?? '') === 'order_no_asc' ? '↑' : (($_GET['sort'] ?? '') === 'order_no_desc' ? '↓' : '') ?></a></th>
+                <th><a href="?view=orders&sort=<?= $_GET['sort'] === 'order_date_asc' ? 'order_date_desc' : 'order_date_asc' ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Date <?= ($_GET['sort'] ?? '') === 'order_date_asc' ? '↑' : (($_GET['sort'] ?? '') === 'order_date_desc' ? '↓' : '') ?></a></th>
+                <th><a href="?view=orders&sort=<?= $_GET['sort'] === 'party_asc' ? 'party_desc' : 'party_asc' ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Customer <?= ($_GET['sort'] ?? '') === 'party_asc' ? '↑' : (($_GET['sort'] ?? '') === 'party_desc' ? '↓' : '') ?></a></th>
+                <th><a href="?view=orders&sort=<?= $_GET['sort'] === 'metal_asc' ? 'metal_desc' : 'metal_asc' ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Metal <?= ($_GET['sort'] ?? '') === 'metal_asc' ? '↑' : (($_GET['sort'] ?? '') === 'metal_desc' ? '↓' : '') ?></a></th>
+                <th class="is-numeric"><a href="?view=orders&sort=<?= $_GET['sort'] === 'weight_asc' ? 'weight_desc' : 'weight_asc' ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Expected wt <?= ($_GET['sort'] ?? '') === 'weight_asc' ? '↑' : (($_GET['sort'] ?? '') === 'weight_desc' ? '↓' : '') ?></a></th>
+                <th><a href="?view=orders&sort=<?= $_GET['sort'] === 'delivery_asc' ? 'delivery_desc' : 'delivery_asc' ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Delivery <?= ($_GET['sort'] ?? '') === 'delivery_asc' ? '↑' : (($_GET['sort'] ?? '') === 'delivery_desc' ? '↓' : '') ?></a></th>
+                <th><a href="?view=orders&sort=<?= $_GET['sort'] === 'status_asc' ? 'status_desc' : 'status_asc' ?>" style="cursor:pointer;text-decoration:none;color:inherit;user-select:none">Status <?= ($_GET['sort'] ?? '') === 'status_asc' ? '↑' : (($_GET['sort'] ?? '') === 'status_desc' ? '↓' : '') ?></a></th>
                 <th></th>
             </tr></thead>
             <tbody>
