@@ -339,85 +339,64 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                 <tr>
                     <input type="hidden" name="<?= $prefix ?>_line_id[]" value="<?= (int) ($row['id'] ?? 0) ?>">
                     <?php if ($withWorkshop && $withStock): ?>
-                        <td data-label="From stock">
-                            <?php // One control, not two: naming a piece IS saying the
-                                  // line comes off the shelf, so there is no second
-                                  // field that can disagree with it. Every option
-                                  // carries the piece's own measurements, and the
-                                  // script below writes them across the row — the
-                                  // engine reads them off the piece again on save, so
-                                  // what is shown and what is stored cannot drift. ?>
-                            <select name="<?= $prefix ?>_stock_unit_id[]" class="jw-stock-pick"
-                                    title="Select order type: Showroom stock (existing pieces) or New assignment (for kaligadh)">
-                                <optgroup label="Showroom stock (exact weight available)">
-                                    <?php if (!empty($stockPieces)): ?>
-                                        <?php foreach ($stockPieces as $piece): ?>
-                                            <?php
-                                                $pieceId = (int) ($piece['id'] ?? 0);
-                                                if ($pieceId <= 0) {
-                                                    continue;
-                                                }
-                                                $pieceName = trim((string) ($piece['item_name'] ?? ''));
-                                                $traceCode = trim((string) ($piece['trace_code'] ?? ''));
-                                                $qtyAvailable = (int) ($piece['qty_pieces'] ?? 1);
-                                                $pieceLabel = '  ' . ($traceCode !== '' ? $traceCode : 'Stock #' . $pieceId)
-                                                    . ' | ' . ($pieceName !== '' ? $pieceName : (string) ($piece['item_code'] ?? 'Item'))
-                                                    . ' | ' . $fmt((float) ($piece['gross_weight'] ?? 0), 4)
-                                                    . ' ' . (string) ($piece['unit_code'] ?? '')
-                                                    . ' | Qty: ' . $qtyAvailable
-                                                    . ' | ' . (string) ($piece['purity_code'] ?? '');
-                                            ?>
-                                            <option value="<?= $pieceId ?>"
-                                                    data-item="<?= (int) ($piece['item_id'] ?? 0) ?>"
-                                                    data-purity="<?= (int) ($piece['purity_id'] ?? 0) ?>"
-                                                    data-unit="<?= (int) ($piece['unit_id'] ?? 0) ?>"
-                                                    data-pcs="<?= e((string) ((float) ($piece['qty_pieces'] ?? 0) ?: 1)) ?>"
-                                                    data-gross="<?= e((string) (float) ($piece['gross_weight'] ?? 0)) ?>"
-                                                    data-stone="<?= e((string) (float) ($piece['stone_weight'] ?? 0)) ?>"
-                                                    data-making="<?= e((string) (float) ($piece['making_amount'] ?? 0)) ?>"
-                                                    data-size="<?= e((string) ($piece['size_design'] ?? $piece['design_no'] ?? '')) ?>"
-                                                    title="<?= e($pieceLabel) ?>"
-                                                    <?= (int) ($row['stock_unit_id'] ?? 0) === $pieceId ? 'selected' : '' ?>><?= e($pieceLabel) ?></option>
-                                        <?php endforeach; ?>
-                                    <?php else: ?>
-                                        <option value="0" disabled>— No stock available —</option>
-                                    <?php endif; ?>
-                                </optgroup>
-                                <optgroup label="New assignment (for kaligadh/custom making)">
-                                    <option value="0" <?= (int) ($row['stock_unit_id'] ?? 0) === 0 && (int) ($row['assignment_id'] ?? 0) === 0 ? 'selected' : '' ?>>— Assign to kaligadh —</option>
-                                </optgroup>
+                        <td data-label="Order type">
+                            <select name="<?= $prefix ?>_order_type[]" class="jw-order-type" style="width:100%">
+                                <option value="showroom" <?= ((int) ($row['stock_unit_id'] ?? 0) > 0) ? 'selected' : '' ?>>Showroom Stock</option>
+                                <option value="kaligadh" <?= ((int) ($row['stock_unit_id'] ?? 0) === 0) ? 'selected' : '' ?>>New Assignment</option>
                             </select>
                         </td>
                     <?php endif; ?>
                     <td data-label="Item" style="display:flex;gap:4px;align-items:center">
-                        <?php
-                            // Which stored line this row IS. Position is not
-                            // identity — two rows can hold the same item, and
-                            // rows get reordered — so a revision says so
-                            // explicitly. It sits INSIDE the cell because a bare
-                            // input between <tr> and <td> is hoisted out of the
-                            // table by every browser, and would then post out of
-                            // step with the rest of the row.
-                        ?>
-                        <select name="<?= $prefix ?>_item_id[]" class="c-item" style="flex:1;min-width:0">
-                            <option value="0">—</option>
-                            <?php foreach ($items as $it): ?>
-                                <?php
-                                    // What is actually left, shown on the option itself: the
-                                    // shop needs to know before it commits the line, not after
-                                    // the negative-stock guard refuses it. It rides in the
-                                    // title too, because the closed select is narrow now and
-                                    // the tail of a long option would be cut off.
-                                    $stock = $onHand[(int) $it['id']] ?? null;
-                                    $left = $stock
-                                        ? ' · ' . $fmt((float) $stock['qty_pieces'], 0) . 'pc '
-                                            . $fmt((float) $stock['fine_weight'], 3) . ' fine'
-                                        : '';
-                                ?>
-                                <option value="<?= (int) $it['id'] ?>" data-type="<?= e((string) ($it['item_type'] ?? '')) ?>" title="<?= e($it['code'] . ' — ' . $it['name'] . $left) ?>" <?= (int) ($row['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name'] . $left) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <button type="button" class="jw-add-item-btn" data-row-index="<?= $i ?>" style="padding:4px 8px;background:#0066cc;color:white;border:none;border-radius:3px;cursor:pointer;font-size:12px;white-space:nowrap;flex-shrink:0">+ Add</button>
+                        <?php if ($withWorkshop && $withStock): ?>
+                            <!-- Stock picker for Showroom Stock -->
+                            <select name="<?= $prefix ?>_stock_unit_id[]" class="jw-stock-pick" style="flex:1;min-width:0;display:<?= ((int) ($row['stock_unit_id'] ?? 0) > 0) ? 'block' : 'none' ?>">
+                                <option value="0">— Select stock —</option>
+                                <?php if (!empty($stockPieces)): ?>
+                                    <?php foreach ($stockPieces as $piece): ?>
+                                        <?php
+                                            $pieceId = (int) ($piece['id'] ?? 0);
+                                            if ($pieceId <= 0) continue;
+                                            $pieceName = trim((string) ($piece['item_name'] ?? ''));
+                                            $traceCode = trim((string) ($piece['trace_code'] ?? ''));
+                                            $qtyAvailable = (int) ($piece['qty_pieces'] ?? 1);
+                                            $pieceLabel = ($traceCode !== '' ? $traceCode : 'Stock #' . $pieceId)
+                                                . ' | ' . ($pieceName !== '' ? $pieceName : (string) ($piece['item_code'] ?? 'Item'))
+                                                . ' | ' . $fmt((float) ($piece['gross_weight'] ?? 0), 4) . ' ' . (string) ($piece['unit_code'] ?? '')
+                                                . ' | Qty: ' . $qtyAvailable;
+                                        ?>
+                                        <option value="<?= $pieceId ?>"
+                                                data-item="<?= (int) ($piece['item_id'] ?? 0) ?>"
+                                                data-purity="<?= (int) ($piece['purity_id'] ?? 0) ?>"
+                                                data-unit="<?= (int) ($piece['unit_id'] ?? 0) ?>"
+                                                data-pcs="<?= e((string) ((float) ($piece['qty_pieces'] ?? 0) ?: 1)) ?>"
+                                                data-gross="<?= e((string) (float) ($piece['gross_weight'] ?? 0)) ?>"
+                                                data-stone="<?= e((string) (float) ($piece['stone_weight'] ?? 0)) ?>"
+                                                data-making="<?= e((string) (float) ($piece['making_amount'] ?? 0)) ?>"
+                                                data-size="<?= e((string) ($piece['size_design'] ?? $piece['design_no'] ?? '')) ?>"
+                                                title="<?= e($pieceLabel) ?>"
+                                                <?= (int) ($row['stock_unit_id'] ?? 0) === $pieceId ? 'selected' : '' ?>><?= e($pieceLabel) ?></option>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </select>
+                        <?php endif; ?>
+
+                        <!-- Manual item selection for New Assignment -->
+                        <div style="display:<?= ((int) ($row['stock_unit_id'] ?? 0) === 0) ? 'flex' : 'none' ?>;gap:4px;align-items:center;width:100%">
+                            <select name="<?= $prefix ?>_item_id[]" class="c-item" style="flex:1;min-width:0">
+                                <option value="0">—</option>
+                                <?php foreach ($items as $it): ?>
+                                    <?php
+                                        $stock = $onHand[(int) $it['id']] ?? null;
+                                        $left = $stock
+                                            ? ' · ' . $fmt((float) $stock['qty_pieces'], 0) . 'pc '
+                                                . $fmt((float) $stock['fine_weight'], 3) . ' fine'
+                                            : '';
+                                    ?>
+                                    <option value="<?= (int) $it['id'] ?>" data-type="<?= e((string) ($it['item_type'] ?? '')) ?>" title="<?= e($it['code'] . ' — ' . $it['name'] . $left) ?>" <?= (int) ($row['item_id'] ?? 0) === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name'] . $left) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" class="jw-add-item-btn" data-row-index="<?= $i ?>" style="padding:4px 8px;background:#0066cc;color:white;border:none;border-radius:3px;cursor:pointer;font-size:12px;white-space:nowrap;flex-shrink:0">+ Add</button>
+                        </div>
                     </td>
                     <td data-label="Purity">
                         <?php // data-fineness lets the summary rail turn net weight into the
@@ -543,76 +522,78 @@ function jw_line_grid_scripts(): void
             <input type="hidden" name="action" value="create_item_ajax">
             <input type="hidden" name="csrf_token" id="jw-csrf-token" value="">
 
-            <div style="margin-bottom:15px">
-                <label style="display:block;margin-bottom:5px;font-weight:500">Code<span style="color:red">*</span></label>
-                <input type="text" name="code" maxlength="60" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:20px">
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Code<span style="color:red;margin-left:2px">*</span></label>
+                    <input type="text" name="code" maxlength="60" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
 
-            <div style="margin-bottom:15px">
-                <label style="display:block;margin-bottom:5px;font-weight:500">Name<span style="color:red">*</span></label>
-                <input type="text" name="name" maxlength="190" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-            </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Name<span style="color:red;margin-left:2px">*</span></label>
+                    <input type="text" name="name" maxlength="190" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
 
-            <div style="margin-bottom:15px">
-                <label style="display:block;margin-bottom:5px;font-weight:500">Category</label>
-                <input type="text" name="category" maxlength="60" placeholder="e.g., Ring, Necklace" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-            </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Category</label>
+                    <input type="text" name="category" maxlength="60" placeholder="Ring, Necklace, etc." style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
 
-            <div style="margin-bottom:15px">
-                <label style="display:block;margin-bottom:5px;font-weight:500">Type</label>
-                <select name="item_type" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                    <option value="ornament" selected>Ornament</option>
-                    <option value="bullion">Bullion / raw metal</option>
-                    <option value="stone">Stone</option>
-                    <option value="other">Other</option>
-                </select>
-            </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Type</label>
+                    <select name="item_type" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                        <option value="ornament" selected>Ornament</option>
+                        <option value="bullion">Bullion / Raw metal</option>
+                        <option value="stone">Stone</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
 
-            <div style="margin-bottom:15px">
-                <label style="display:block;margin-bottom:5px;font-weight:500">Default Stock Type<span style="color:red">*</span></label>
-                <select name="stock_kind" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                    <option value="customer_ordered" selected>Customer Ordered Stock</option>
-                    <option value="showroom">Showroom Stock</option>
-                </select>
-                <small style="color:#666;display:block;margin-top:4px">For kaligadh orders, this should be "Customer Ordered Stock"</small>
-            </div>
+                <div style="grid-column:1/-1">
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Default Stock Type<span style="color:red;margin-left:2px">*</span></label>
+                    <select name="stock_kind" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                        <option value="customer_ordered" selected>Customer Ordered Stock</option>
+                        <option value="showroom">Showroom Stock</option>
+                    </select>
+                    <small style="color:#666;display:block;margin-top:4px;font-size:12px">For kaligadh orders, this should be "Customer Ordered Stock"</small>
+                </div>
 
-            <div style="margin-bottom:15px">
-                <label style="display:block;margin-bottom:5px;font-weight:500">Metal<span style="color:red">*</span></label>
-                <select name="metal_id" id="jw-modal-metal" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                    <option value="">— Select metal —</option>
-                </select>
-            </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Metal<span style="color:red;margin-left:2px">*</span></label>
+                    <select name="metal_id" id="jw-modal-metal" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                        <option value="">— Select metal —</option>
+                    </select>
+                </div>
 
-            <div style="margin-bottom:15px">
-                <label style="display:block;margin-bottom:5px;font-weight:500">Purity<span style="color:red">*</span></label>
-                <select name="purity_id" id="jw-modal-purity" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                    <option value="">— Select purity —</option>
-                </select>
-            </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Purity<span style="color:red;margin-left:2px">*</span></label>
+                    <select name="purity_id" id="jw-modal-purity" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                        <option value="">— Select purity —</option>
+                    </select>
+                </div>
 
-            <div style="margin-bottom:15px">
-                <label style="display:block;margin-bottom:5px;font-weight:500">Weight Unit<span style="color:red">*</span></label>
-                <select name="unit_id" id="jw-modal-unit" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                    <option value="">— Select unit —</option>
-                </select>
-            </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Weight Unit<span style="color:red;margin-left:2px">*</span></label>
+                    <select name="unit_id" id="jw-modal-unit" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                        <option value="">— Select unit —</option>
+                    </select>
+                </div>
 
-            <div style="margin-bottom:15px">
-                <label style="display:block;margin-bottom:5px;font-weight:500">Track by</label>
-                <select name="track_mode" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
-                    <option value="weight" selected>Weight</option>
-                    <option value="piece">Piece</option>
-                </select>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Track by</label>
+                    <select name="track_mode" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                        <option value="weight" selected>Weight</option>
+                        <option value="piece">Piece</option>
+                    </select>
+                </div>
             </div>
 
             <div style="display:flex;gap:10px;margin-top:25px">
-                <button type="button" id="jw-modal-cancel" style="flex:1;padding:10px;border:1px solid #ddd;background:white;border-radius:4px;cursor:pointer">Cancel</button>
+                <button type="button" id="jw-modal-cancel" style="flex:1;padding:10px;border:1px solid #ddd;background:white;border-radius:4px;cursor:pointer;font-weight:500">Cancel</button>
                 <button type="submit" id="jw-modal-submit" style="flex:1;padding:10px;border:none;background:#0066cc;color:white;border-radius:4px;cursor:pointer;font-weight:500">Create Item</button>
             </div>
 
-            <div id="jw-modal-error" style="margin-top:15px;padding:10px;background:#f8d7da;color:#721c24;border:1px solid #f5c6cb;border-radius:4px;display:none"></div>
-            <div id="jw-modal-success" style="margin-top:15px;padding:10px;background:#d4edda;color:#155724;border:1px solid #c3e6cb;border-radius:4px;display:none"></div>
+            <div id="jw-modal-error" style="margin-top:15px;padding:10px;background:#f8d7da;color:#721c24;border:1px solid #f5c6cb;border-radius:4px;display:none;font-size:13px"></div>
+            <div id="jw-modal-success" style="margin-top:15px;padding:10px;background:#d4edda;color:#155724;border:1px solid #c3e6cb;border-radius:4px;display:none;font-size:13px"></div>
         </form>
     </div>
 </div>
@@ -625,16 +606,40 @@ function jw_line_grid_scripts(): void
             if (field.tagName === "SELECT") { field.selectedIndex = 0; return; }
             field.value = field.type === "number" ? "0" : "";
         });
+        var stockPicker = row.querySelector(".jw-stock-pick");
+        if (stockPicker) { stockPicker.style.display = "none"; }
+        // Show manual item div for reset rows
+        var itemCells = row.querySelectorAll('td[data-label="Item"]');
+        itemCells.forEach(function(cell) {
+            var div = cell.querySelector("div");
+            if (div) { div.style.display = "flex"; }
+        });
     }
     // A row is off the shelf, or it is work for a kaligad. Never both, and the
     // two halves below are exact opposites so a row can be switched back.
     function releaseRow(row) {
         // Re-enable ITEM and PURITY when switching back to custom order
         var itemField = row.querySelector('select[name$="_item_id[]"]');
-        if (itemField) { itemField.disabled = false; itemField.removeAttribute("title"); itemField.selectedIndex = 0; }
+        if (itemField) {
+            itemField.disabled = false;
+            itemField.removeAttribute("title");
+            itemField.selectedIndex = 0;
+            // Remove the hidden lock input
+            Array.prototype.forEach.call(row.querySelectorAll(".jw-item-lock:not([data-issued])"), function (lock) {
+                lock.parentNode.removeChild(lock);
+            });
+        }
 
         var purityField = row.querySelector('select[name$="_purity_id[]"]');
-        if (purityField) { purityField.disabled = false; purityField.removeAttribute("title"); purityField.selectedIndex = 0; }
+        if (purityField) {
+            purityField.disabled = false;
+            purityField.removeAttribute("title");
+            purityField.selectedIndex = 0;
+            // Remove the hidden lock input
+            Array.prototype.forEach.call(row.querySelectorAll(".jw-purity-lock:not([data-issued])"), function (lock) {
+                lock.parentNode.removeChild(lock);
+            });
+        }
 
         var karigar = row.querySelector('select[name$="_karigar_id[]"]');
         if (karigar) {
@@ -661,10 +666,36 @@ function jw_line_grid_scripts(): void
         };
         // Auto-fill item and purity, then DISABLE them
         var itemField = put("_item_id[]", read("item"));
-        if (itemField) { itemField.disabled = true; itemField.title = "Locked - from showroom stock"; }
+        if (itemField) {
+            itemField.disabled = true;
+            itemField.title = "Locked - from showroom stock";
+            // Add hidden input so disabled field value posts to server
+            Array.prototype.forEach.call(row.querySelectorAll(".jw-item-lock:not([data-issued])"), function (lock) {
+                lock.parentNode.removeChild(lock);
+            });
+            var itemLock = document.createElement("input");
+            itemLock.type = "hidden";
+            itemLock.className = "jw-item-lock";
+            itemLock.name = itemField.name;
+            itemLock.value = itemField.value;
+            itemField.parentNode.appendChild(itemLock);
+        }
 
         var purityField = put("_purity_id[]", read("purity"));
-        if (purityField) { purityField.disabled = true; purityField.title = "Locked - from showroom stock"; }
+        if (purityField) {
+            purityField.disabled = true;
+            purityField.title = "Locked - from showroom stock";
+            // Add hidden input so disabled field value posts to server
+            Array.prototype.forEach.call(row.querySelectorAll(".jw-purity-lock:not([data-issued])"), function (lock) {
+                lock.parentNode.removeChild(lock);
+            });
+            var purityLock = document.createElement("input");
+            purityLock.type = "hidden";
+            purityLock.className = "jw-purity-lock";
+            purityLock.name = purityField.name;
+            purityLock.value = purityField.value;
+            purityField.parentNode.appendChild(purityLock);
+        }
 
         put("_unit_id[]", read("unit"));
         // The piece's own measurements, shown rather than asked for. The engine
@@ -703,6 +734,44 @@ function jw_line_grid_scripts(): void
             promised.title = "Already made — there is nothing to wait for";
         }
     }
+
+    document.addEventListener("change", function (event) {
+        var orderTypeSelect = event.target.closest(".jw-order-type");
+        if (!orderTypeSelect) { return; }
+        var row = orderTypeSelect.closest("tr");
+        if (!row) { return; }
+        var stockPicker = row.querySelector(".jw-stock-pick");
+        var manualItemDiv = row.querySelector("div[style*='display']");
+        var isShowroom = orderTypeSelect.value === "showroom";
+
+        // Toggle stock picker vs manual item selection
+        if (stockPicker) { stockPicker.style.display = isShowroom ? "block" : "none"; }
+
+        // Find the div containing manual item selection (look for the one with flex layout)
+        var itemCells = row.querySelectorAll('td[data-label="Item"]');
+        itemCells.forEach(function(cell) {
+            var div = cell.querySelector("div");
+            if (div) {
+                div.style.display = isShowroom ? "none" : "flex";
+            }
+        });
+
+        // Lock/unlock GROSS and LESS fields based on order type
+        var grossField = row.querySelector('input[name$="_gross_weight[]"]');
+        var lessField = row.querySelector('input[name$="_stone_weight[]"]');
+
+        if (isShowroom) {
+            // Showroom stock: lock these fields (they come from stock piece)
+            if (grossField) { grossField.readOnly = true; grossField.title = "Auto-filled from stock piece"; }
+            if (lessField) { lessField.readOnly = true; lessField.title = "Auto-filled from stock piece"; }
+        } else {
+            // New assignment: unlock these fields (user enters custom values)
+            if (grossField) { grossField.readOnly = false; grossField.removeAttribute("title"); }
+            if (lessField) { lessField.readOnly = false; lessField.removeAttribute("title"); }
+            releaseRow(row);
+            if (stockPicker) { stockPicker.value = "0"; }
+        }
+    });
 
     document.addEventListener("change", function (event) {
         var picker = event.target.closest(".jw-stock-pick");

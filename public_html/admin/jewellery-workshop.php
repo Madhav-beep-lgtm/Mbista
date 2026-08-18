@@ -511,8 +511,8 @@ foreach ($items as $itemRow) {
 $orderStockPieces = [];
 try {
     $stockStmt = db()->prepare(
-        "SELECT a.id, a.assignment_no, r.receipt_no, r.received_gross_weight,
-                r.stone_weight, r.received_item_id, r.received_purity_id, r.unit_id, r.qty_pieces, r.making_amount,
+        "SELECT a.id, a.assignment_no, r.receipt_no, r.received_gross_weight AS gross_weight,
+                r.stone_weight, r.received_item_id AS item_id, r.received_purity_id AS purity_id, r.unit_id, r.qty_pieces, r.making_amount,
                 i.sku AS item_code, i.name AS item_name,
                 p.code AS purity_code, u.code AS unit_code
         FROM jewellery_order_assignments a
@@ -1052,13 +1052,13 @@ jw_filter_bar_styles();
         ]); ?>
         <div class="mbw-tablewrap"><table>
             <thead><tr>
-                <th><a href="?view=orders&sort=order_no_asc" style="cursor:pointer;text-decoration:none">No.</a></th>
-                <th><a href="?view=orders&sort=order_date_asc" style="cursor:pointer;text-decoration:none">Date</a></th>
-                <th><a href="?view=orders&sort=party_asc" style="cursor:pointer;text-decoration:none">Customer</a></th>
-                <th><a href="?view=orders&sort=metal_asc" style="cursor:pointer;text-decoration:none">Metal</a></th>
-                <th class="is-numeric"><a href="?view=orders&sort=weight_asc" style="cursor:pointer;text-decoration:none">Expected wt</a></th>
-                <th><a href="?view=orders&sort=delivery_asc" style="cursor:pointer;text-decoration:none">Delivery</a></th>
-                <th><a href="?view=orders&sort=status_asc" style="cursor:pointer;text-decoration:none">Status</a></th>
+                <th><a href="?view=orders&sort=<?= strpos($sortParam, 'order_no') === 0 && strpos($sortParam, '_asc') ? 'order_no_desc' : 'order_no_asc' ?>" style="cursor:pointer;text-decoration:none">No. <?= strpos($sortParam, 'order_no') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
+                <th><a href="?view=orders&sort=<?= strpos($sortParam, 'order_date') === 0 && strpos($sortParam, '_asc') ? 'order_date_desc' : 'order_date_asc' ?>" style="cursor:pointer;text-decoration:none">Date <?= strpos($sortParam, 'order_date') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
+                <th><a href="?view=orders&sort=<?= strpos($sortParam, 'party') === 0 && strpos($sortParam, '_asc') ? 'party_desc' : 'party_asc' ?>" style="cursor:pointer;text-decoration:none">Customer <?= strpos($sortParam, 'party') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
+                <th><a href="?view=orders&sort=<?= strpos($sortParam, 'metal') === 0 && strpos($sortParam, '_asc') ? 'metal_desc' : 'metal_asc' ?>" style="cursor:pointer;text-decoration:none">Metal <?= strpos($sortParam, 'metal') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
+                <th class="is-numeric"><a href="?view=orders&sort=<?= strpos($sortParam, 'weight') === 0 && strpos($sortParam, '_asc') ? 'weight_desc' : 'weight_asc' ?>" style="cursor:pointer;text-decoration:none">Expected wt <?= strpos($sortParam, 'weight') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
+                <th><a href="?view=orders&sort=<?= strpos($sortParam, 'delivery') === 0 && strpos($sortParam, '_asc') ? 'delivery_desc' : 'delivery_asc' ?>" style="cursor:pointer;text-decoration:none">Delivery <?= strpos($sortParam, 'delivery') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
+                <th><a href="?view=orders&sort=<?= strpos($sortParam, 'status') === 0 && strpos($sortParam, '_asc') ? 'status_desc' : 'status_asc' ?>" style="cursor:pointer;text-decoration:none">Status <?= strpos($sortParam, 'status') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
                 <th></th>
             </tr></thead>
             <tbody>
