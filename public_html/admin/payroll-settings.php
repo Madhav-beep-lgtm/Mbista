@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 tds_payable_ledger_id = :tds, sst_payable_ledger_id = :sst, retirement_payable_ledger_id = :rp,
                 salary_payable_ledger_id = :sp, advance_ledger_id = :adv, bank_ledger_id = :bank,
                 enforce_sod = :sod, auto_post = :ap,
-                standard_working_days = :wd, deduct_unpaid_leave = :dul,
+                standard_working_days = :wd, prorate_basic_worked_days = :pbwd, deduct_unpaid_leave = :dul,
                 excess_tax_treatment = :ext
             WHERE company_id = :cid')
             ->execute([
@@ -52,6 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'sod' => isset($_POST['enforce_sod']) ? 1 : 0,
                 'ap' => isset($_POST['auto_post']) ? 1 : 0,
                 'wd' => max(1, min(31, (int) ($_POST['standard_working_days'] ?? 30))),
+                'pbwd' => isset($_POST['prorate_basic_worked_days']) ? 1 : 0,
                 'dul' => isset($_POST['deduct_unpaid_leave']) ? 1 : 0,
                 'cid' => $companyId,
             ]);
@@ -103,6 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'default_value' => max(0.0, round((float) ($_POST['default_value'] ?? 0), 2)),
             'percentage' => (float) ($_POST['percentage'] ?? 0) > 0 ? round((float) $_POST['percentage'], 4) : null,
             'calc_basis' => trim((string) ($_POST['calc_basis'] ?? '')) ?: null,
+            'prorate_worked_days' => isset($_POST['prorate_worked_days']) ? 1 : 0,
             'debit_ledger_id' => $debitLedgerId,
             'credit_ledger_id' => $creditLedgerId,
             'employer_expense_ledger_id' => $erExpenseLedgerId,
@@ -130,6 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         description = :description, category = :category, posting_behaviour = :posting_behaviour,
                         calc_type = :calc_type, tax_projection_method = :tax_projection_method,
                         default_value = :default_value, percentage = :percentage, calc_basis = :calc_basis,
+                        prorate_worked_days = :prorate_worked_days,
                         debit_ledger_id = :debit_ledger_id, credit_ledger_id = :credit_ledger_id,
                         employer_expense_ledger_id = :employer_expense_ledger_id, contribution_payable_ledger_id = :contribution_payable_ledger_id,
                         taxable = :taxable, include_in_gross = :include_in_gross, include_in_net = :include_in_net,
@@ -142,12 +145,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $params['created_by'] = $userId;
                 db()->prepare('INSERT INTO payroll_components (company_id, code, name, name_np, description, category, posting_behaviour,
-                        calc_type, tax_projection_method, default_value, percentage, calc_basis, debit_ledger_id, credit_ledger_id,
+                        calc_type, tax_projection_method, default_value, percentage, calc_basis, prorate_worked_days, debit_ledger_id, credit_ledger_id,
                         employer_expense_ledger_id, contribution_payable_ledger_id, taxable, include_in_gross, include_in_net,
                         retirement_basis, overtime_basis, service_charge_basis, allow_employee_override, allow_period_override, allow_zero,
                         effective_from, effective_to, employer_paid, active, sort_order, created_by)
                     VALUES (:company_id, :code, :name, :name_np, :description, :category, :posting_behaviour,
-                        :calc_type, :tax_projection_method, :default_value, :percentage, :calc_basis, :debit_ledger_id, :credit_ledger_id,
+                        :calc_type, :tax_projection_method, :default_value, :percentage, :calc_basis, :prorate_worked_days, :debit_ledger_id, :credit_ledger_id,
                         :employer_expense_ledger_id, :contribution_payable_ledger_id, :taxable, :include_in_gross, :include_in_net,
                         :retirement_basis, :overtime_basis, :service_charge_basis, :allow_employee_override, :allow_period_override, :allow_zero,
                         :effective_from, :effective_to, :employer_paid, :active, :sort_order, :created_by)')->execute($params);
@@ -371,6 +374,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="enforce_sod" <?= (int) ($settings['enforce_sod'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Segregation of duties (preparer cannot approve)</label>
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="deduct_unpaid_leave" <?= (int) ($settings['deduct_unpaid_leave'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Deduct salary for approved unpaid leave (from Attendance/HR)</label>
         <label>Working days per month (for the leave day-rate)<input type="number" step="0.5" min="1" max="31" name="standard_working_days" value="<?= e((string) ($settings['standard_working_days'] ?? '30')) ?>"></label>
+        <?php // Basic has no component row of its own, so pro-rating it is a
+              // company decision rather than a per-component one. ?>
+        <label style="display:flex;gap:8px;align-items:flex-start">
+            <input type="checkbox" name="prorate_basic_worked_days" value="1" <?= (int) ($settings['prorate_basic_worked_days'] ?? 0) === 1 ? 'checked' : '' ?>>
+            <span>Pro-rate basic salary by worked days
+                <small style="display:block;color:var(--mbw-muted)">Basic becomes basic &times; worked &divide; standard. When this is on, the unpaid-leave cut is not applied on top &mdash; both measure days not worked, and taking each would halve the same absence twice.</small>
+            </span>
+        </label>
         <label>Excess tax withheld — treatment
             <select name="excess_tax_treatment" title="What happens when the revised annual tax estimate is below the tax already deducted">
                 <?php foreach (['offset' => 'Offset against future payroll tax', 'refund' => 'Refund through payroll (approved)', 'carry_forward' => 'Carry forward to final settlement', 'manual' => 'Manual settlement after approval'] as $extValue => $extLabel): ?>
@@ -446,6 +457,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="service_charge_basis" <?= (int) ($editComponent['service_charge_basis'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Service-charge basis</label>
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="allow_employee_override" <?= (int) ($editComponent['allow_employee_override'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Employee override</label>
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="allow_period_override" <?= (int) ($editComponent['allow_period_override'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Period override</label>
+            <?php // Pay for days actually worked, for THIS component. Off by default on
+                  // every component, which is what lets worked days be recorded on a run
+                  // without changing a single figure until somebody asks it to. ?>
+            <label style="display:flex;gap:8px;align-items:flex-start">
+                <input type="checkbox" name="prorate_worked_days" value="1" <?= (int) ($editComponent['prorate_worked_days'] ?? 0) === 1 ? 'checked' : '' ?>>
+                <span>Pro-rate by worked days
+                    <small style="display:block;color:var(--mbw-muted)">Pays this component &times; worked days &divide; standard days.
+                    <?php if ((int) ($settings['deduct_unpaid_leave'] ?? 1) === 1): ?>
+                        <strong>This company also deducts unpaid leave</strong> &mdash; switching this on for a component that unpaid leave already reduces would cut the same absence twice.
+                    <?php endif; ?>
+                    </small>
+                </span>
+            </label>
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="allow_zero" <?= (int) ($editComponent['allow_zero'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Zero allowed</label>
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="employer_paid" <?= (int) ($editComponent['employer_paid'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Employer-paid (legacy)</label>
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="active" <?= (int) ($editComponent['active'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Active</label>

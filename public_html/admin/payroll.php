@@ -117,6 +117,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/payroll.php?run=' . $runId);
     }
 
+    if ($action === 'save_days_hours') {
+        // Worked days and overtime hours for one employee on this run. Stored in
+        // payroll_run_inputs rather than on the line, because recalculating a run
+        // deletes and rebuilds every line - a figure typed onto a line would not
+        // survive the next press of Recalculate.
+        //
+        // An empty box means "not recorded", which is different from a zero: zero
+        // overtime hours deliberately suppresses whatever weekly attendance
+        // worked out, while an empty box lets attendance stand.
+        $employeeId = (int) ($_POST['employee_id'] ?? 0);
+        $daysRaw = trim((string) ($_POST['worked_days'] ?? ''));
+        $hoursRaw = trim((string) ($_POST['overtime_hours'] ?? ''));
+        $workedDays = $daysRaw === '' ? null : max(0.0, min(31.0, round((float) $daysRaw, 2)));
+        $overtimeHours = $hoursRaw === '' ? null : max(0.0, min(744.0, round((float) $hoursRaw, 2)));
+        $inRun = db()->prepare('SELECT COUNT(*) FROM payroll_run_lines WHERE run_id = :run AND payroll_employee_id = :pe');
+        $inRun->execute(['run' => $runId, 'pe' => $employeeId]);
+        if ((int) $inRun->fetchColumn() === 0) {
+            flash('error', 'That employee is not part of this run.');
+            redirect('admin/payroll.php?run=' . $runId);
+        }
+        if ($workedDays === null && $overtimeHours === null) {
+            db()->prepare('DELETE FROM payroll_run_inputs WHERE run_id = :run AND payroll_employee_id = :pe')
+                ->execute(['run' => $runId, 'pe' => $employeeId]);
+        } else {
+            db()->prepare('INSERT INTO payroll_run_inputs (run_id, payroll_employee_id, worked_days, overtime_hours, created_by, updated_by)
+                    VALUES (:run, :pe, :days, :hours, :uid, :uid)
+                ON DUPLICATE KEY UPDATE worked_days = VALUES(worked_days), overtime_hours = VALUES(overtime_hours), updated_by = VALUES(updated_by)')
+                ->execute(['run' => $runId, 'pe' => $employeeId, 'days' => $workedDays, 'hours' => $overtimeHours, 'uid' => (int) (current_user()['id'] ?? 0)]);
+        }
+        $calc = payroll_calculate_run($runId);
+        flash($calc['ok'] ? 'success' : 'error', $calc['ok']
+            ? 'Days and hours saved — the run recalculated.'
+            : (string) ($calc['error'] ?? 'Saved, but the run could not be recalculated.'));
+        redirect('admin/payroll.php?run=' . $runId);
+    }
+
     if ($action === 'edit_line') {
         $lineId = (int) ($_POST['line_id'] ?? 0);
         $adjEarning = (float) ($_POST['adj_earning'] ?? 0);
@@ -306,7 +342,44 @@ if ($run && table_exists('payroll_run_components')) {
     }
     ksort($matrixCodes);
 }
+// The columns this sheet shows are the components this run actually pays, not a
+// fixed set of buckets. A company that creates "Field Allowance" sees a Field
+// Allowance column; one that creates none sees none. Ordered by the catalogue's
+// own sort order so the sheet reads the way the components were set up.
+//
+// Overtime components are left out on purpose: overtime has its own hours and
+// amount columns, and showing it twice would read as two payments.
+$sheetComponents = [];
+foreach ($runComponentsByEmployee as $employeeComponentRows) {
+    foreach ($employeeComponentRows as $componentRow) {
+        $code = (string) $componentRow['component_code'];
+        if ((string) $componentRow['category'] === 'overtime' || isset($sheetComponents[$code])) {
+            continue;
+        }
+        $sheetComponents[$code] = [
+            'code' => $code,
+            'name' => (string) $componentRow['component_name'],
+            'category' => (string) $componentRow['category'],
+            'behaviour' => (string) $componentRow['posting_behaviour'],
+            'prorates' => (int) ($componentRow['prorate_worked_days'] ?? 0) === 1,
+        ];
+    }
+}
 $componentCatalog = payroll_component_catalog($companyId);
+$sheetOrder = [];
+foreach ($componentCatalog as $catalogIndex => $catalogRow) {
+    $sheetOrder[(string) $catalogRow['code']] = $catalogIndex;
+}
+uasort($sheetComponents, static fn (array $a, array $b): int
+    => ($sheetOrder[$a['code']] ?? PHP_INT_MAX) <=> ($sheetOrder[$b['code']] ?? PHP_INT_MAX));
+
+// Amount per employee per component code, so a row can be laid out by column.
+$sheetAmounts = [];
+foreach ($runComponentsByEmployee as $sheetEmployeeId => $employeeComponentRows) {
+    foreach ($employeeComponentRows as $componentRow) {
+        $sheetAmounts[(int) $sheetEmployeeId][(string) $componentRow['component_code']] = (float) $componentRow['amount'];
+    }
+}
 $componentIdByCode = [];
 foreach ($componentCatalog as $catalogRow) {
     $componentIdByCode[(string) $catalogRow['code']] = (int) $catalogRow['id'];
@@ -541,26 +614,79 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </style>
     <div style="overflow-x:auto">
     <table class="pr-table">
+        <?php
+        // Allowances / Benefits / Other Ded. are gone as columns: every one of
+        // them is now shown as the component it actually is, so nothing hides
+        // inside a bucket and nothing is counted twice.
+        $sheetEditable = in_array((string) $run['status'], ['draft', 'calculated'], true);
+        $sheetColumns = 15 + count($sheetComponents);
+        $sheetNum = static fn ($v): string => rtrim(rtrim(number_format((float) $v, 2, '.', ''), '0'), '.');
+        ?>
         <thead><tr>
-            <th>Employee</th><th class="is-numeric">Basic</th><th class="is-numeric">Allowances</th><th class="is-numeric">Overtime</th>
-            <th class="is-numeric">Benefits</th><th class="is-numeric">Gross</th><th class="is-numeric">Assessable (yr)</th>
+            <th>Employee</th>
+            <th class="is-numeric" title="Days worked in this period. Recorded on every run; it changes pay only for components set to pro-rate by worked days.">Worked days</th>
+            <th class="is-numeric">Basic</th>
+            <?php foreach ($sheetComponents as $sheetComponent): ?>
+                <th class="is-numeric" title="<?= e(str_replace('_', ' ', $sheetComponent['category']) . ($sheetComponent['prorates'] ? ' - pro-rates by worked days' : '')) ?>">
+                    <?= e($sheetComponent['name']) ?><?= $sheetComponent['prorates'] ? ' *' : '' ?>
+                </th>
+            <?php endforeach; ?>
+            <th class="is-numeric" title="Hours entered here replace whatever weekly attendance calculated for this employee.">OT hours</th>
+            <th class="is-numeric">Overtime</th>
+            <th class="is-numeric">Gross</th><th class="is-numeric">Assessable (yr)</th>
             <th class="is-numeric">Retirement Ded. (yr)</th><th class="is-numeric">Taxable (yr)</th><th class="is-numeric">Tax (month)</th>
-            <th class="is-numeric">Retirement (emp)</th><th class="is-numeric">Advance</th><th class="is-numeric">Other Ded.</th>
+            <th class="is-numeric">Retirement (emp)</th><th class="is-numeric">Advance</th>
             <th class="is-numeric">Adjustment</th>
             <th class="is-numeric">Net Payable</th><th></th>
         </tr></thead>
         <tbody>
-            <?php if ($lines === []): ?><tr><td colspan="16">No calculated lines. Enrol employees, then create or recalculate a run.</td></tr><?php endif; ?>
+            <?php if ($lines === []): ?><tr><td colspan="<?= (int) $sheetColumns ?>">No calculated lines. Enrol employees, then create or recalculate a run.</td></tr><?php endif; ?>
             <?php foreach ($lines as $line): ?>
                 <tr class="pr-line<?= $line['line_status'] !== 'ok' ? ' pr-line-' . e($line['line_status']) : '' ?>" data-line-trace="<?= e((string) $line['trace']) ?>" data-line-name="<?= e($line['employee_code'] . ' — ' . $line['person_name']) ?>">
                     <td class="pr-emp"><strong><?= e($line['employee_code']) ?></strong> <?= e($line['person_name']) ?>
                         <?php if ((string) $line['department'] !== ''): ?><small><?= e($line['department']) ?></small><?php endif; ?>
                         <?php if ($line['line_status'] === 'warning'): ?><span class="mbw-pill tone-amber">Check</span><?php elseif ($line['line_status'] === 'error'): ?><span class="mbw-pill tone-red">Error</span><?php endif; ?>
                     </td>
+                    <?php $sheetLineId = (int) $line['id']; $sheetEmpId = (int) $line['payroll_employee_id']; ?>
+                    <td class="is-numeric" onclick="event.stopPropagation()">
+                        <?php if ($sheetEditable): ?>
+                            <?php // One form for both boxes. The hours input lives in another cell,
+                                  // which no table can put inside the same <form>, so it is tied to it
+                                  // by id instead - valid HTML, and it keeps days and hours saving
+                                  // together as the single fact about the period that they are. ?>
+                            <form method="post" id="dh-<?= $sheetLineId ?>" style="display:none">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                <input type="hidden" name="action" value="save_days_hours">
+                                <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
+                                <input type="hidden" name="employee_id" value="<?= e($sheetEmpId) ?>">
+                            </form>
+                            <input form="dh-<?= $sheetLineId ?>" type="number" name="worked_days" step="0.5" min="0" max="31"
+                                   style="width:70px;text-align:right" placeholder="<?= e(number_format((float) ($line['period_days'] ?? 30), 0)) ?>"
+                                   value="<?= $line['worked_days'] === null ? '' : e($sheetNum($line['worked_days'])) ?>">
+                            <?php if ($line['period_days'] !== null): ?><small style="display:block;color:var(--mbw-muted)">of <?= e($sheetNum($line['period_days'])) ?></small><?php endif; ?>
+                        <?php else: ?>
+                            <?= $line['worked_days'] === null ? '&ndash;' : e(number_format((float) $line['worked_days'], 2)) ?>
+                        <?php endif; ?>
+                    </td>
                     <td class="is-numeric"><?= e(number_format((float) $line['basic'], 2)) ?></td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['allowances'], 2)) ?></td>
+                    <?php foreach ($sheetComponents as $sheetComponent): ?>
+                        <?php $sheetValue = $sheetAmounts[$sheetEmpId][$sheetComponent['code']] ?? null; ?>
+                        <td class="is-numeric"><?= $sheetValue === null ? '&ndash;' : e(number_format((float) $sheetValue, 2)) ?></td>
+                    <?php endforeach; ?>
+                    <td class="is-numeric" onclick="event.stopPropagation()">
+                        <?php if ($sheetEditable): ?>
+                            <input form="dh-<?= $sheetLineId ?>" type="number" name="overtime_hours" step="0.25" min="0"
+                                   style="width:70px;text-align:right" placeholder="&ndash;"
+                                   value="<?= $line['overtime_hours'] === null ? '' : e($sheetNum($line['overtime_hours'])) ?>">
+                            <button form="dh-<?= $sheetLineId ?>" type="submit" class="button secondary" style="min-height:26px;padding:2px 8px;margin-top:3px">Save</button>
+                            <?php if ($line['overtime_rate'] !== null && (float) $line['overtime_rate'] > 0): ?>
+                                <small style="display:block;color:var(--mbw-muted)">@<?= e(number_format((float) $line['overtime_rate'], 2)) ?></small>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <?= $line['overtime_hours'] === null ? '&ndash;' : e(number_format((float) $line['overtime_hours'], 2)) ?>
+                        <?php endif; ?>
+                    </td>
                     <td class="is-numeric"><?= e(number_format((float) $line['overtime'], 2)) ?></td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['benefits'], 2)) ?></td>
                     <td class="is-numeric"><strong><?= e(number_format((float) $line['gross'], 2)) ?></strong></td>
                     <td class="is-numeric"><?= e(number_format((float) $line['assessable_annual'], 2)) ?></td>
                     <td class="is-numeric"><?= e(number_format((float) $line['retirement_deduction_annual'], 2)) ?></td>
@@ -568,7 +694,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td class="is-numeric"><?= e(number_format((float) $line['tax_month'], 2)) ?></td>
                     <td class="is-numeric"><?= e(number_format((float) $line['retirement_employee_month'], 2)) ?></td>
                     <td class="is-numeric"><?= e(number_format((float) $line['advance_deduction'], 2)) ?></td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['other_deduction'], 2)) ?></td>
                     <?php $adjE = (float) ($line['adj_earning'] ?? 0); $adjD = (float) ($line['adj_deduction'] ?? 0); ?>
                     <td class="is-numeric">
                         <?php if ($adjE > 0 || $adjD > 0): ?>

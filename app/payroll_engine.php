@@ -384,11 +384,13 @@ function payroll_sync_run_components(array $run, array $employee, array $compone
     $upsert = $pdo->prepare('INSERT INTO payroll_run_components (
             run_id, payroll_employee_id, component_id, component_code, component_name, category,
             posting_behaviour, taxable, tax_projection_method, include_in_gross, include_in_net, calc_method,
+            prorate_worked_days,
             debit_ledger_id, credit_ledger_id, employer_expense_ledger_id, contribution_payable_ledger_id,
             suggested_amount, amount, source
         ) VALUES (
             :run_id, :pe, :component_id, :code, :name, :category,
             :behaviour, :taxable, :projection, :in_gross, :in_net, :calc_method,
+            :prorate,
             :dr, :cr, :er_exp, :er_pay,
             :suggested, :amount, :source
         ) ON DUPLICATE KEY UPDATE
@@ -397,6 +399,7 @@ function payroll_sync_run_components(array $run, array $employee, array $compone
             taxable = VALUES(taxable), tax_projection_method = VALUES(tax_projection_method),
             include_in_gross = VALUES(include_in_gross),
             include_in_net = VALUES(include_in_net), calc_method = VALUES(calc_method),
+            prorate_worked_days = VALUES(prorate_worked_days),
             debit_ledger_id = VALUES(debit_ledger_id), credit_ledger_id = VALUES(credit_ledger_id),
             employer_expense_ledger_id = VALUES(employer_expense_ledger_id),
             contribution_payable_ledger_id = VALUES(contribution_payable_ledger_id),
@@ -417,6 +420,7 @@ function payroll_sync_run_components(array $run, array $employee, array $compone
             'code' => $code, 'name' => (string) $component['name'],
             'category' => (string) $component['category'],
             'behaviour' => payroll_component_behaviour($component),
+            'prorate' => (int) ($component['prorate_worked_days'] ?? 0) === 1 ? 1 : 0,
             'taxable' => $line['taxable'] ? 1 : 0,
             'projection' => payroll_tax_treatment($component),
             'in_gross' => (int) ($component['include_in_gross'] ?? 1),
@@ -461,6 +465,9 @@ function payroll_component_snapshot_row(array $component, array $values): array
         'include_in_gross' => (int) ($component['include_in_gross'] ?? 1),
         'include_in_net' => (int) ($component['include_in_net'] ?? 1),
         'calc_method' => (string) ($component['calc_type'] ?? 'manual'),
+        // Snapshotted like taxable and the ledgers: a line recalculated later
+        // must pro-rate the way this component was set when the run was made.
+        'prorate_worked_days' => (int) ($component['prorate_worked_days'] ?? 0) === 1 ? 1 : 0,
         'debit_ledger_id' => (int) ($component['debit_ledger_id'] ?? 0) ?: null,
         'credit_ledger_id' => (int) ($component['credit_ledger_id'] ?? 0) ?: null,
         'employer_expense_ledger_id' => (int) ($component['employer_expense_ledger_id'] ?? 0) ?: null,
@@ -570,7 +577,23 @@ function payroll_period_range(int $fiscalYearId, int $periodNo): array
     return [$periodStart, $periodEnd];
 }
 
-function payroll_calculate_line(array $employee, array $run, array $taxVersion, array $adjustments = [], ?array $runComponents = null): array
+/**
+ * The worked days and overtime hours typed for one employee on one run, if any.
+ * Empty when nothing has been entered, which is what makes the whole feature
+ * inert until somebody uses it.
+ */
+function payroll_run_inputs_for(int $runId, int $employeeId): array
+{
+    if ($runId <= 0 || $employeeId <= 0 || !table_exists('payroll_run_inputs')) {
+        return [];
+    }
+    $stmt = db()->prepare('SELECT worked_days, overtime_hours FROM payroll_run_inputs WHERE run_id = :run AND payroll_employee_id = :pe LIMIT 1');
+    $stmt->execute(['run' => $runId, 'pe' => $employeeId]);
+
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+}
+
+function payroll_calculate_line(array $employee, array $run, array $taxVersion, array $adjustments = [], ?array $runComponents = null, array $inputs = []): array
 {
     $basic = round((float) $employee['basic_salary'], 2);
     $originalBasic = $basic;
@@ -605,6 +628,37 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         }
     }
 
+    // Worked days: a typed fact about the period, kept beside the result so a
+    // payslip can still say "26 of 30" after the settings that produced it have
+    // moved on. On its own it changes NOTHING - it pro-rates only what has been
+    // asked to pro-rate, per component, and basic only when the company setting
+    // says so. That is why switching this feature on cannot alter a figure
+    // anybody has already approved.
+    $periodDays = max(1.0, (float) ($payrollSettings['standard_working_days'] ?? 30));
+    $workedDays = isset($inputs['worked_days']) && $inputs['worked_days'] !== null && $inputs['worked_days'] !== ''
+        ? max(0.0, min($periodDays, round((float) $inputs['worked_days'], 2)))
+        : null;
+    $prorateFactor = ($workedDays !== null && $periodDays > 0) ? min(1.0, $workedDays / $periodDays) : 1.0;
+    $proratesBasic = (int) ($payrollSettings['prorate_basic_worked_days'] ?? 0) === 1;
+
+    if ($proratesBasic && $workedDays !== null && $prorateFactor < 1.0) {
+        // Pro-rating basic and ALSO deducting unpaid leave would cut the same
+        // absence twice - both measure days not worked. The days typed win, and
+        // the leave cut is released rather than compounded on top of them.
+        $basic = round($originalBasic * $prorateFactor, 2);
+        $unpaidLeaveDeduction = round($originalBasic - $basic, 2);
+    }
+
+    // Overtime hours typed for this run replace whatever weekly attendance worked
+    // out for the same employee: two sources for one set of hours is how people
+    // get paid twice for one evening. The rate is the one the overtime workflow
+    // already uses, never a second formula invented here.
+    $typedOtHours = isset($inputs['overtime_hours']) && $inputs['overtime_hours'] !== null && $inputs['overtime_hours'] !== ''
+        ? max(0.0, round((float) $inputs['overtime_hours'], 2))
+        : null;
+    $otRate = $typedOtHours !== null ? payroll_ot_employee_rate($employee, $payrollSettings) : 0.0;
+    $typedOtAmount = $typedOtHours !== null ? round($typedOtHours * $otRate, 2) : 0.0;
+
     // The ACTUAL component amounts for this line. A persisted run keeps them in
     // payroll_run_components (suggestions synced, period overrides preserved);
     // an ad-hoc calculation (run id 0) falls back to pure suggestions.
@@ -634,7 +688,15 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     $traceComponents = [['label' => 'Basic Salary', 'category' => 'basic', 'amount' => $basic, 'taxable' => true, 'projection' => 'regular']];
 
     foreach ($runComponents as $row) {
+        // Typed hours are the whole overtime answer for this employee, so the
+        // attendance-derived row is dropped rather than added to.
+        if ($typedOtHours !== null && (string) ($row['source'] ?? '') === 'overtime') {
+            continue;
+        }
         $amount = round((float) ($row['amount'] ?? 0), 2);
+        if ($prorateFactor < 1.0 && (int) ($row['prorate_worked_days'] ?? 0) === 1) {
+            $amount = round($amount * $prorateFactor, 2);
+        }
         $category = (string) ($row['category'] ?? 'allowance');
         $behaviour = (string) ($row['posting_behaviour'] ?? 'category_default');
         $rowTaxable = (int) ($row['taxable'] ?? 1) === 1;
@@ -691,6 +753,26 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     // projected into future months.
     $taxableMonthly += $adjEarning;
     $irregularTaxable += $adjEarning;
+
+    // Overtime is earned, never predictable, so it is assessable in the month it
+    // happened and never projected into future months.
+    if ($typedOtAmount > 0) {
+        $overtime += $typedOtAmount;
+        $taxableMonthly += $typedOtAmount;
+        $irregularTaxable += $typedOtAmount;
+        $traceComponents[] = [
+            'label' => 'Overtime (' . number_format((float) $typedOtHours, 2) . ' h x ' . number_format($otRate, 4) . ')',
+            'code' => 'OT_HOURS',
+            'category' => 'overtime',
+            'amount' => $typedOtAmount,
+            'suggested' => null,
+            'taxable' => true,
+            'source' => 'overtime_hours',
+            'override_reason' => 'Hours entered on the payroll sheet',
+            'behaviour' => 'earning_expense',
+            'projection' => 'actual_only',
+        ];
+    }
     $gross = round($basic + $allowances + $overtime + $benefits + $adjEarning, 2);
 
     // Retirement contributions (monthly, % of basic per employee profile).
@@ -822,6 +904,10 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
 
     return [
         'basic' => $basic,
+        'worked_days' => $workedDays,
+        'period_days' => $periodDays,
+        'overtime_hours' => $typedOtHours,
+        'overtime_rate' => $typedOtHours !== null ? round($otRate, 4) : null,
         'allowances' => round($allowances, 2),
         'overtime' => round($overtime, 2),
         'benefits' => round($benefits, 2),
@@ -973,6 +1059,21 @@ function payroll_calculate_run(int $runId): array
         ];
     }
 
+    // Worked days and overtime hours are typed facts that must survive the
+    // DELETE-and-rebuild below, so they live in payroll_run_inputs and are read
+    // back here rather than off the lines being replaced.
+    $runInputs = [];
+    if (table_exists('payroll_run_inputs')) {
+        $inputStmt = $pdo->prepare('SELECT payroll_employee_id, worked_days, overtime_hours FROM payroll_run_inputs WHERE run_id = :run');
+        $inputStmt->execute(['run' => $runId]);
+        foreach ($inputStmt->fetchAll(PDO::FETCH_ASSOC) as $inputRow) {
+            $runInputs[(int) $inputRow['payroll_employee_id']] = [
+                'worked_days' => $inputRow['worked_days'],
+                'overtime_hours' => $inputRow['overtime_hours'],
+            ];
+        }
+    }
+
     $pdo->beginTransaction();
     try {
         // Refresh this run's weekly-overtime claim before the lines calculate,
@@ -988,22 +1089,37 @@ function payroll_calculate_run(int $runId): array
                 assessable_annual, retirement_deduction_annual, taxable_annual, annual_tax,
                 tax_ytd_before, tax_month, tax_override, tax_override_reason, tax_override_by,
                 sst_month, retirement_employee_month, retirement_employer_month,
-                advance_deduction, other_deduction, unpaid_leave_days, unpaid_leave_deduction, adj_earning, adj_deduction, adj_remark, net_pay, trace, line_status, warnings
+                advance_deduction, other_deduction, unpaid_leave_days, unpaid_leave_deduction,
+                worked_days, period_days, overtime_hours, overtime_rate,
+                adj_earning, adj_deduction, adj_remark, net_pay, trace, line_status, warnings
             ) VALUES (
                 :run_id, :pe, :basic, :allowances, :overtime, :benefits, :gross,
                 :assess_m, :reg_m, :irr_m,
                 :assessable, :ret_ded, :taxable, :annual_tax,
                 :ytd, :tax_month, :tax_ovr, :tax_ovr_reason, :tax_ovr_by,
                 :sst_month, :ret_emp, :ret_er,
-                :advance, :other_ded, :leave_days, :leave_ded, :adj_earning, :adj_deduction, :adj_remark, :net, :trace, :line_status, :warnings
+                :advance, :other_ded, :leave_days, :leave_ded,
+                :worked_days, :period_days, :ot_hours, :ot_rate,
+                :adj_earning, :adj_deduction, :adj_remark, :net, :trace, :line_status, :warnings
             )');
         $totals = ['gross' => 0.0, 'tax' => 0.0, 'deductions' => 0.0, 'employer' => 0.0, 'net' => 0.0];
         foreach ($employees as $employee) {
-            $calc = payroll_calculate_line($employee, $run, $taxVersion, $existingAdj[(int) $employee['id']] ?? []);
+            $calc = payroll_calculate_line(
+                $employee,
+                $run,
+                $taxVersion,
+                $existingAdj[(int) $employee['id']] ?? [],
+                null,
+                $runInputs[(int) $employee['id']] ?? []
+            );
             $insert->execute([
                 'run_id' => $runId,
                 'pe' => (int) $employee['id'],
                 'basic' => $calc['basic'],
+                'worked_days' => $calc['worked_days'],
+                'period_days' => $calc['period_days'],
+                'ot_hours' => $calc['overtime_hours'],
+                'ot_rate' => $calc['overtime_rate'],
                 'allowances' => $calc['allowances'],
                 'overtime' => $calc['overtime'],
                 'benefits' => $calc['benefits'],
@@ -1107,12 +1223,14 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
         'tax_override' => $lineRow['tax_override'] ?? null,
         'tax_override_reason' => (string) ($lineRow['tax_override_reason'] ?? ''),
         'tax_override_by' => (int) ($lineRow['tax_override_by'] ?? 0),
-    ]);
+    ], null, payroll_run_inputs_for($runId, $employeeId));
 
     $pdo = db();
     $pdo->beginTransaction();
     try {
         $pdo->prepare('UPDATE payroll_run_lines SET
+                worked_days = :worked_days, period_days = :period_days,
+                overtime_hours = :ot_hours, overtime_rate = :ot_rate,
                 basic = :basic, allowances = :allowances, overtime = :overtime, benefits = :benefits, gross = :gross,
                 assessable_month = :assess_m, regular_month = :reg_m, irregular_month = :irr_m,
                 assessable_annual = :assessable, retirement_deduction_annual = :ret_ded, taxable_annual = :taxable,
@@ -1125,7 +1243,9 @@ function payroll_set_line_adjustment(int $runId, int $lineId, float $adjEarning,
                 net_pay = :net, trace = :trace, line_status = :line_status, warnings = :warnings
             WHERE id = :id AND run_id = :run')
             ->execute([
-                'basic' => $calc['basic'], 'allowances' => $calc['allowances'], 'overtime' => $calc['overtime'],
+                'worked_days' => $calc['worked_days'], 'period_days' => $calc['period_days'],
+            'ot_hours' => $calc['overtime_hours'], 'ot_rate' => $calc['overtime_rate'],
+            'basic' => $calc['basic'], 'allowances' => $calc['allowances'], 'overtime' => $calc['overtime'],
                 'benefits' => $calc['benefits'], 'gross' => $calc['gross'],
                 'assess_m' => $calc['assessable_month'], 'reg_m' => $calc['regular_month'], 'irr_m' => $calc['irregular_month'],
                 'assessable' => $calc['assessable_annual'],
