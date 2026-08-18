@@ -844,6 +844,9 @@ function jw_line_grid_scripts(): void
     }
 
     function openModal(itemSelect) {
+        console.log("[Modal] openModal called");
+        console.log("[Modal] itemModal element:", itemModal);
+
         currentItemSelect = itemSelect;
         populateModalDropdowns();
 
@@ -853,14 +856,17 @@ function jw_line_grid_scripts(): void
             var pageCSRFToken = document.querySelector("input[name='csrf_token']");
             if (pageCSRFToken) {
                 csrfInput.value = pageCSRFToken.value;
+                console.log("[Modal] CSRF token set");
             }
         }
 
         itemModal.style.display = "block";
+        console.log("[Modal] Modal display set to block");
         errorDiv.style.display = "none";
         successDiv.style.display = "none";
         // Focus on first input
         itemForm.querySelector('input[name="code"]').focus();
+        console.log("[Modal] Modal opened successfully");
     }
 
     closeBtn.addEventListener("click", closeModal);
@@ -874,19 +880,30 @@ function jw_line_grid_scripts(): void
     // Handle ITEM field in kaligadh mode - use mousedown to intercept before native dropdown opens
     document.addEventListener("mousedown", function(event) {
         var itemSelect = event.target.closest("select[name$='_item_id[]']");
-        if (!itemSelect) { return; }
+        if (!itemSelect) {
+            console.log("[Modal] Click not on ITEM field");
+            return;
+        }
+        console.log("[Modal] Clicked ITEM field");
 
         var row = itemSelect.closest("tr");
-        if (!row) { return; }
+        if (!row) {
+            console.log("[Modal] No row found");
+            return;
+        }
 
         // Only open modal if in kaligadh mode (stock picker is empty/0)
         var stockPicker = row.querySelector("select[name$='_stock_unit_id[]']");
+        console.log("[Modal] Stock picker value:", stockPicker ? stockPicker.value : "not found");
+
         if (stockPicker && parseInt(stockPicker.value || "0", 10) > 0) {
             // Showroom stock mode - allow normal dropdown
+            console.log("[Modal] Showroom mode - allowing normal dropdown");
             return;
         }
 
         // In kaligadh mode - prevent default dropdown and open modal instead
+        console.log("[Modal] Opening modal for kaligadh");
         event.preventDefault();
         event.stopPropagation();
         openModal(itemSelect);
