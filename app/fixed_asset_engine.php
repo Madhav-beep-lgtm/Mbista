@@ -506,9 +506,26 @@ function fa_register_schedule(int $companyId, string $from, string $to, array $f
     // says, else when it was ready to use, else when somebody typed it in.
     $acquired = 'COALESCE(a.purchase_date, a.available_for_use_date, DATE(a.created_at))';
 
+    // Columns added by migration 118. A server that has taken the code but not
+    // the migration must still be able to open the register: asking for a column
+    // that is not there kills the page at the point the query runs, which is
+    // exactly how the register appeared to have vanished on a live site that was
+    // in fact deployed and working. Missing columns come back as null and the
+    // view says the migration is outstanding.
+    $has = [
+        'tax_pool' => column_exists('fixed_assets', 'tax_pool'),
+        'disposal_proceeds' => column_exists('fixed_assets', 'disposal_proceeds'),
+        'disposal_gain_loss' => column_exists('fixed_assets', 'disposal_gain_loss'),
+    ];
+    $pick = static fn (string $column, bool $present): string => $present ? 'a.' . $column : 'NULL AS ' . $column;
+
     $where = ['a.company_id = :cid', $acquired . ' <= :to_a', '(a.disposed_on IS NULL OR a.disposed_on >= :from_a)'];
     $params = ['cid' => $companyId, 'to_a' => $to, 'from_a' => $from];
-    foreach (['status' => 'a.status', 'class' => 'a.asset_class', 'tax_pool' => 'a.tax_pool'] as $key => $column) {
+    $filterable = ['status' => 'a.status', 'class' => 'a.asset_class'];
+    if ($has['tax_pool']) {
+        $filterable['tax_pool'] = 'a.tax_pool';
+    }
+    foreach ($filterable as $key => $column) {
         if ((string) ($filters[$key] ?? '') !== '') {
             $where[] = $column . ' = :f_' . $key;
             $params['f_' . $key] = (string) $filters[$key];
@@ -520,8 +537,11 @@ function fa_register_schedule(int $companyId, string $from, string $to, array $f
     }
 
     $stmt = db()->prepare(
-        'SELECT a.id, a.asset_code, a.name, a.asset_class, a.tax_pool, a.depreciation_method, a.status,
-                a.cost, a.disposed_on, a.disposal_proceeds, a.disposal_gain_loss, a.category_id,
+        'SELECT a.id, a.asset_code, a.name, a.asset_class, a.depreciation_method, a.status,
+                a.cost, a.disposed_on, a.category_id,
+                ' . $pick('tax_pool', $has['tax_pool']) . ',
+                ' . $pick('disposal_proceeds', $has['disposal_proceeds']) . ',
+                ' . $pick('disposal_gain_loss', $has['disposal_gain_loss']) . ',
                 ' . $acquired . ' AS acquired_on, c.name AS category_name
          FROM fixed_assets a
          LEFT JOIN asset_categories c ON c.id = a.category_id
@@ -984,4 +1004,23 @@ function fa_valid_date(mixed $raw): ?string
     $parsed = DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
 
     return ($parsed && $parsed->format('Y-m-d') === $raw) ? $raw : null;
+}
+
+/**
+ * Which columns migration 118 adds are actually present.
+ *
+ * The register works without them - tax pool reads "not set", a disposal's gain
+ * reads "not recorded" - but it cannot report what is not stored, so the screen
+ * says the migration is outstanding rather than leaving blanks unexplained.
+ */
+function fa_missing_register_columns(): array
+{
+    $missing = [];
+    foreach (['tax_pool', 'disposal_proceeds', 'disposal_gain_loss'] as $column) {
+        if (!column_exists('fixed_assets', $column)) {
+            $missing[] = $column;
+        }
+    }
+
+    return $missing;
 }

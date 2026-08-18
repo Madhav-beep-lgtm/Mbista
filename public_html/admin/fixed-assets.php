@@ -206,19 +206,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/fixed-assets.php');
         }
         try {
+            // tax_pool arrives with migration 118; a server that has the code but
+            // not the migration still registers assets, just without a pool.
+            $hasTaxPool = column_exists('fixed_assets', 'tax_pool');
             db()->prepare('
                 INSERT INTO fixed_assets
                     (company_id, category_id, asset_code, name, asset_class, cost, residual_value, useful_life_months,
-                     depreciation_method, tax_pool, purchase_date, purchase_ref, available_for_use_date, depreciation_start_date,
+                     depreciation_method, ' . ($hasTaxPool ? 'tax_pool, ' : '') . 'purchase_date, purchase_ref, available_for_use_date, depreciation_start_date,
                      carrying_amount, status, created_by)
-                VALUES (:cid, :category_id, :code, :name, :class, :cost, :residual, :life, :method, :tax_pool, :purchased, :ref, :avail, :dep_start, :cost2, :status, :uid)
-            ')->execute([
+                VALUES (:cid, :category_id, :code, :name, :class, :cost, :residual, :life, :method, ' . ($hasTaxPool ? ':tax_pool, ' : '') . ':purchased, :ref, :avail, :dep_start, :cost2, :status, :uid)
+            ')->execute(array_filter([
                 'cid' => $companyId, 'category_id' => $categoryId > 0 ? $categoryId : null, 'code' => $code, 'name' => $name, 'class' => $class,
                 'cost' => $cost, 'residual' => $residual, 'life' => $lifeMonths, 'method' => $method,
-                'tax_pool' => $taxPool, 'purchased' => $purchaseDate, 'ref' => $purchaseRef !== '' ? $purchaseRef : null,
+                'tax_pool' => $hasTaxPool ? $taxPool : '__drop__',
+                'purchased' => $purchaseDate, 'ref' => $purchaseRef !== '' ? $purchaseRef : null,
                 'avail' => $availableDate, 'dep_start' => $availableDate, 'cost2' => $cost,
                 'status' => $availableDate ? 'active' : 'draft', 'uid' => $userId,
-            ]);
+            ], static fn ($value): bool => $value !== '__drop__'));
             $assetId = (int) db()->lastInsertId();
             log_activity('fixed_asset', $assetId, 'created', 'Fixed asset registered.', $userId);
 
@@ -365,19 +369,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             && $editAvailable !== (string) $asset['available_for_use_date'];
 
         try {
+            $hasTaxPool = column_exists('fixed_assets', 'tax_pool');
             db()->prepare('
                 UPDATE fixed_assets
-                   SET name = :name, category_id = :cat, tax_pool = :pool, depreciation_method = :method,
+                   SET name = :name, category_id = :cat, ' . ($hasTaxPool ? 'tax_pool = :pool, ' : '') . 'depreciation_method = :method,
                        useful_life_months = :life, residual_value = :residual,
                        purchase_date = :purchased, purchase_ref = :ref, supplier = :supplier,
                        available_for_use_date = :avail,
                        depreciation_start_date = COALESCE(:avail2, depreciation_start_date),
                        location = :location, custodian = :custodian
                  WHERE id = :id AND company_id = :cid
-            ')->execute([
+            ')->execute(array_filter([
                 'name' => $name,
                 'cat' => $editCategoryId > 0 ? $editCategoryId : null,
-                'pool' => $editPool,
+                'pool' => $hasTaxPool ? $editPool : '__drop__',
                 'method' => $editMethod,
                 'life' => $editLife,
                 'residual' => $editResidual,
@@ -390,7 +395,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'custodian' => $editCustodian !== '' ? $editCustodian : null,
                 'id' => $assetId,
                 'cid' => $companyId,
-            ]);
+            ], static fn ($value): bool => $value !== '__drop__'));
             log_activity('fixed_asset', $assetId, 'edited', 'Asset details edited.', $userId);
             $note = $movedStart && $alreadyCharged > 0
                 ? ' The available-for-use date moved while ' . $alreadyCharged . ' charge(s) are already posted — check the depreciation schedule.'
@@ -1153,8 +1158,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // legs whose ledgers differ per company. The register has to state the
             // gain on a disposal without re-deriving it from entries it cannot
             // reliably identify, so both are kept on the asset itself.
-            db()->prepare('UPDATE fixed_assets SET status = \'disposed\', disposed_on = :d, carrying_amount = 0, disposal_proceeds = :proceeds, disposal_gain_loss = :gain WHERE id = :id AND company_id = :cid')
-                ->execute(['d' => date('Y-m-d'), 'proceeds' => $proceeds, 'gain' => $gainLoss, 'id' => (int) $asset['id'], 'cid' => $companyId]);
+            $hasDisposalCols = column_exists('fixed_assets', 'disposal_proceeds') && column_exists('fixed_assets', 'disposal_gain_loss');
+            db()->prepare('UPDATE fixed_assets SET status = \'disposed\', disposed_on = :d, carrying_amount = 0' . ($hasDisposalCols ? ', disposal_proceeds = :proceeds, disposal_gain_loss = :gain' : '') . ' WHERE id = :id AND company_id = :cid')
+                ->execute(array_filter(['d' => date('Y-m-d'), 'proceeds' => $hasDisposalCols ? $proceeds : '__drop__', 'gain' => $hasDisposalCols ? $gainLoss : '__drop__', 'id' => (int) $asset['id'], 'cid' => $companyId], static fn ($value): bool => $value !== '__drop__'));
             db()->commit();
             security_event('asset_disposed', 'success', 'Asset #' . (int) $asset['id'] . ' disposed.', $companyId, $userId);
             log_activity('fixed_asset', (int) $asset['id'], 'disposed', 'Asset disposed (' . ($gainLoss >= 0 ? 'gain' : 'loss') . ' ' . number_format(abs($gainLoss), 2) . ').', $userId);
@@ -3689,6 +3695,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?' . $regExportQs . '&export=csv')) ?>">CSV</a>
             </div>
         </div>
+        <?php $regMissingCols = fa_missing_register_columns(); ?>
+        <?php if ($regMissingCols !== []): ?>
+            <p style="margin:12px;padding:10px 12px;border-left:3px solid var(--mbw-warn,#d79a00);background:var(--mbw-warn-soft,#fff6e0);color:var(--mbw-warn-ink,#8a5a00);font-size:12px">
+                <strong>Database update outstanding.</strong>
+                This server is missing <?= e(implode(', ', $regMissingCols)) ?> on <code>fixed_assets</code>, so tax pools and the gain on a
+                disposal cannot be stored or reported. Everything else below is accurate. Apply
+                <code>database/migrations/118_fixed_asset_tax_pool_and_disposal.sql</code> to finish the update — it is safe to run twice.
+            </p>
+        <?php endif; ?>
         <form method="get" class="workspace-form-grid" style="padding:12px 0">
             <input type="hidden" name="view" value="register">
             <label>From<input type="date" name="from" value="<?= e($regFrom) ?>"></label>
