@@ -915,10 +915,15 @@ function jewellery_assign_rows(int $companyId, string $kind, array $filters = []
 
     $search = trim((string) ($filters['q'] ?? ''));
     if ($search !== '') {
-        $sql .= ' AND (a.assignment_no LIKE :q OR a.issue_no LIKE :q OR k.name LIKE :q
-                       OR o.order_no LIKE :q OR a.expected_ornament LIKE :q
-                       OR ap.name LIKE :q OR o.customer_name LIKE :q)';
-        $params['q'] = '%' . $search . '%';
+        // One placeholder per occurrence — see jewellery_items_list(). PDO runs
+        // with emulation off, so a name bound once cannot stand in seven places.
+        $sql .= ' AND (a.assignment_no LIKE :q1 OR a.issue_no LIKE :q2 OR k.name LIKE :q3
+                       OR o.order_no LIKE :q4 OR a.expected_ornament LIKE :q5
+                       OR ap.name LIKE :q6 OR o.customer_name LIKE :q7)';
+        $like = '%' . $search . '%';
+        foreach (['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7'] as $slot) {
+            $params[$slot] = $like;
+        }
     }
     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($filters['from'] ?? '')) === 1) {
         $sql .= ' AND a.issue_date >= :from';

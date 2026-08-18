@@ -311,9 +311,14 @@ function jewellery_trace_units_list(int $companyId, array $filters = []): array
     $params = ['cid' => $companyId];
     $q = trim((string) ($filters['q'] ?? ''));
     if ($q !== '') {
-        $sql .= ' AND (su.trace_code LIKE :q OR i.sku LIKE :q OR i.name LIKE :q OR su.stock_order_no LIKE :q
-                       OR su.customer_order_no LIKE :q OR su.customer_name LIKE :q)';
-        $params['q'] = '%' . $q . '%';
+        // One placeholder per occurrence — see jewellery_items_list(). PDO runs
+        // with emulation off, so a name bound once cannot stand in six places.
+        $sql .= ' AND (su.trace_code LIKE :q1 OR i.sku LIKE :q2 OR i.name LIKE :q3 OR su.stock_order_no LIKE :q4
+                       OR su.customer_order_no LIKE :q5 OR su.customer_name LIKE :q6)';
+        $like = '%' . $q . '%';
+        foreach (['q1', 'q2', 'q3', 'q4', 'q5', 'q6'] as $slot) {
+            $params[$slot] = $like;
+        }
     }
     $status = (string) ($filters['status'] ?? '');
     if (in_array($status, jewellery_trace_statuses(), true)) {

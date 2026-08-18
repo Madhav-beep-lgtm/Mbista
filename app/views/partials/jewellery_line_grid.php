@@ -409,7 +409,11 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                         <?php endif; ?>
 
                         <!-- Manual item selection for New Assignment -->
-                        <div style="display:<?= ((int) ($row['stock_unit_id'] ?? 0) === 0) ? 'flex' : 'none' ?>;gap:4px;align-items:center;width:100%">
+                        <?php // Classed, not just "the first div in this cell": searchable-select.js
+                              // inserts its own div for the dropdown panel ahead of this one, and
+                              // the row then hid that instead — leaving the item box and + Add on
+                              // screen for a piece coming off the shelf. ?>
+                        <div class="jw-item-manual" style="display:<?= ((int) ($row['stock_unit_id'] ?? 0) === 0) ? 'flex' : 'none' ?>;gap:4px;align-items:center;width:100%">
                             <select name="<?= $prefix ?>_item_id[]" class="c-item" style="flex:1;min-width:0">
                                 <option value="0">—</option>
                                 <?php foreach ($items as $it): ?>
@@ -724,12 +728,9 @@ function jw_line_grid_scripts(array $ctx = []): void
             field.value = field.type === "number" ? "0" : "";
         });
         setFieldShown(row.querySelector(".jw-stock-pick"), false);
-        // Show manual item div for reset rows
-        var itemCells = row.querySelectorAll('td[data-label="Item"]');
-        itemCells.forEach(function(cell) {
-            var div = cell.querySelector("div");
-            if (div) { div.style.display = "flex"; }
-        });
+        // A blanked row is a kaligad row again, so the item box comes back.
+        var manualItem = row.querySelector(".jw-item-manual");
+        if (manualItem) { manualItem.style.display = "flex"; }
     }
     // A row is off the shelf, or it is work for a kaligad. Never both, and the
     // two halves below are exact opposites so a row can be switched back.
@@ -897,14 +898,11 @@ function jw_line_grid_scripts(array $ctx = []): void
         // Toggle stock picker vs manual item selection
         setFieldShown(stockPicker, isShowroom);
 
-        // Find the div containing manual item selection (look for the one with flex layout)
-        var itemCells = row.querySelectorAll('td[data-label="Item"]');
-        itemCells.forEach(function(cell) {
-            var div = cell.querySelector("div");
-            if (div) {
-                div.style.display = isShowroom ? "none" : "flex";
-            }
-        });
+        // The item box and its + Add button belong to work a kaligad will make.
+        // A piece chosen off the shelf already exists, so there is nothing to
+        // pick and nothing to create.
+        var manualItem = row.querySelector(".jw-item-manual");
+        if (manualItem) { manualItem.style.display = isShowroom ? "none" : "flex"; }
 
         // Lock/unlock GROSS and LESS fields based on order type
         var grossField = row.querySelector('input[name$="_gross_weight[]"]');

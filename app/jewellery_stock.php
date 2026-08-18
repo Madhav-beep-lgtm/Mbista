@@ -71,8 +71,14 @@ function jewellery_items_list(int $companyId, array $filters = []): array
         $params['cat'] = (string) $filters['category'];
     }
     if (($filters['search'] ?? '') !== '') {
-        $sql .= ' AND (i.sku LIKE :q OR i.name LIKE :q OR j.design_no LIKE :q)';
-        $params['q'] = '%' . (string) $filters['search'] . '%';
+        // One placeholder per occurrence. PDO runs with emulation off, where a
+        // named placeholder stands for exactly one bound value — reusing :q for
+        // all three columns is what made searching the item list fatal.
+        $sql .= ' AND (i.sku LIKE :q1 OR i.name LIKE :q2 OR j.design_no LIKE :q3)';
+        $like = '%' . (string) $filters['search'] . '%';
+        $params['q1'] = $like;
+        $params['q2'] = $like;
+        $params['q3'] = $like;
     }
     $sql .= ' ORDER BY i.sku ASC';
 
