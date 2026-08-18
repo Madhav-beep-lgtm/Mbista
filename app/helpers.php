@@ -229,6 +229,7 @@ function shared_options_stub_issued(string $listId, bool $mark = false): bool
     static $issued = [];
     if ($mark) {
         $issued[$listId] = true;
+        $issued['*'] = true;
     }
 
     return !empty($issued[$listId]);
@@ -256,7 +257,10 @@ function shared_options_template(string $listId, callable $build): string
 function shared_options_script(): string
 {
     static $emitted = false;
-    if ($emitted) {
+    // Self-guarding on purpose. It used to be the caller's job to decide, and on
+    // a view whose grids were not drawn the guard hid the script while stubs
+    // elsewhere on the page still needed it — they stayed empty.
+    if ($emitted || !shared_options_stub_issued('*')) {
         return '';
     }
     $emitted = true;

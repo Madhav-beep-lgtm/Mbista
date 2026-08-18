@@ -2300,7 +2300,19 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         <form method="post" class="workspace-form-grid" id="purchaseMovementForm">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="record_movement">
-            <label>Item<select name="item_id" id="purMovItem" required><option value="">Select item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>" data-purchase-rate="<?= e(number_format((float) $item['purchase_rate'], 2, '.', '')) ?>" <?= $moveItemId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+<?php $invMoveItemOptions = static function () use ($items): string {
+    $html = '<option value="">Select item</option>';
+    foreach ($items as $item) {
+        $html .= '<option value="' . (int) $item['id'] . '"'
+            . ' data-purchase-rate="' . e(number_format((float) $item['purchase_rate'], 2, '.', '')) . '"'
+            . ' data-sales-rate="' . e(number_format((float) $item['sales_rate'], 2, '.', '')) . '">'
+            . e($item['sku'] . ' - ' . $item['name']) . '</option>';
+    }
+
+    return $html;
+}; ?>
+            <?php $moveOpts = shared_options('inv-move-items', $invMoveItemOptions, (string) ($moveItemId ?: '')); ?>
+            <label>Item<select name="item_id" id="purMovItem" required<?= $moveOpts['fill'] ? ' data-fill-from="inv-move-items"' : '' ?>><?= $moveOpts['html'] ?></select></label>
             <label>Movement<select name="transaction_type">
                 <option value="opening">Opening</option>
                 <option value="purchase">Purchase</option>
@@ -2347,7 +2359,8 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         <form method="post" class="workspace-form-grid" id="saleMovementForm">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="record_movement">
-            <label>Item<select name="item_id" id="saleMovItem" required><option value="">Select item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>" data-sales-rate="<?= e(number_format((float) $item['sales_rate'], 2, '.', '')) ?>" <?= $moveItemId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+            <?php $moveOpts = shared_options('inv-move-items', $invMoveItemOptions, (string) ($moveItemId ?: '')); ?>
+            <label>Item<select name="item_id" id="saleMovItem" required<?= $moveOpts['fill'] ? ' data-fill-from="inv-move-items"' : '' ?>><?= $moveOpts['html'] ?></select></label>
             <label>Movement<select name="transaction_type">
                 <option value="sale">Sale</option>
                 <option value="sales_return">Sales return</option>
@@ -2377,7 +2390,8 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         <form method="post" class="workspace-form-grid" id="adjustForm">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="record_movement">
-            <label>Item<select name="item_id" id="adjItem" required><option value="">Select item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>" data-purchase-rate="<?= e(number_format((float) $item['purchase_rate'], 2, '.', '')) ?>" <?= $moveItemId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+            <?php $moveOpts = shared_options('inv-move-items', $invMoveItemOptions, (string) ($moveItemId ?: '')); ?>
+            <label>Item<select name="item_id" id="adjItem" required<?= $moveOpts['fill'] ? ' data-fill-from="inv-move-items"' : '' ?>><?= $moveOpts['html'] ?></select></label>
             <label>Movement<select name="transaction_type" id="adjType">
                 <option value="adjustment">Adjustment</option>
                 <option value="write_off">Write-off</option>
@@ -2419,7 +2433,8 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="record_movement">
-            <label>Item<select name="item_id" required><option value="">Select item</option><?php foreach ($items as $item): ?><option value="<?= e((int) $item['id']) ?>" <?= $moveItemId === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+            <?php $moveOpts = shared_options('inv-move-items', $invMoveItemOptions, (string) ($moveItemId ?: '')); ?>
+            <label>Item<select name="item_id" required<?= $moveOpts['fill'] ? ' data-fill-from="inv-move-items"' : '' ?>><?= $moveOpts['html'] ?></select></label>
             <label>Movement<select name="transaction_type">
                 <option value="warehouse_transfer">Warehouse transfer</option>
                 <option value="departmental_transfer">Departmental transfer</option>
@@ -2473,7 +2488,10 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                                     <?php // Four rows once meant four copies of the whole item master.
                                           // One list now, shared. See shared_options(). ?>
 <?php $invItemOptions = static function () use ($items): string {
-    $html = '';
+    // The placeholder belongs in the list, not beside it: filling a select
+    // replaces everything inside it, so anything left outside disappears the
+    // moment the script runs.
+    $html = '<option value="">Select item</option>';
     foreach ($items as $item) {
         if ($item['status'] !== 'active') { continue; }
         $html .= '<option value="' . (int) $item['id'] . '">'
@@ -2484,7 +2502,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     return $html;
 }; ?>
                                     <?php $inputOpts = shared_options('inv-input-items', $invItemOptions); ?>
-                                    <td><select name="input_item_id[]"<?= $inputOpts['fill'] ? ' data-fill-from="inv-input-items"' : '' ?>><option value="">Select input</option><?= $inputOpts['html'] ?></select></td>
+                                    <td><select name="input_item_id[]"<?= $inputOpts['fill'] ? ' data-fill-from="inv-input-items"' : '' ?>><?= $inputOpts['html'] ?></select></td>
                                     <td class="is-numeric"><input type="number" step="0.001" min="0" name="input_quantity[]"></td>
                                     <td class="is-numeric"><input type="number" step="0.01" min="0" name="input_rate[]" placeholder="Auto: purchase rate"></td>
                                     <td><button type="button" class="button secondary" style="min-height:32px;padding:3px 10px;color:var(--mbw-red, #a33)" title="Remove this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value='';});this.closest('tr').querySelector('select').selectedIndex=0;}"><?= icon('close') ?></button></td>
@@ -2520,7 +2538,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                             <?php for ($i = 0; $i < 4; $i++): ?>
                                 <tr>
                                     <?php $bomOpts = shared_options('inv-bom-items', $invItemOptions); ?>
-                                    <td><select name="bom_item_id[]"<?= $bomOpts['fill'] ? ' data-fill-from="inv-bom-items"' : '' ?>><option value="">Select component</option><?= $bomOpts['html'] ?></select></td>
+                                    <td><select name="bom_item_id[]"<?= $bomOpts['fill'] ? ' data-fill-from="inv-bom-items"' : '' ?>><?= $bomOpts['html'] ?></select></td>
                                     <td class="is-numeric"><input type="number" step="0.0001" min="0" name="bom_qty[]"></td>
                                     <td class="is-numeric"><input type="number" step="0.001" min="0" name="bom_waste[]" value="0"></td>
                                     <td class="is-numeric"><input type="number" step="0.000001" min="0" name="bom_rate[]" placeholder="Auto: purchase rate"></td>
@@ -2797,6 +2815,8 @@ document.addEventListener('DOMContentLoaded', function () {
 <?php if (isset($invItemOptions)): ?>
 <?= shared_options_template('inv-input-items', $invItemOptions) ?>
 <?= shared_options_template('inv-bom-items', $invItemOptions) ?>
-<?= shared_options_script() ?>
 <?php endif; ?>
+<?php if (isset($invMoveItemOptions)): ?><?= shared_options_template('inv-move-items', $invMoveItemOptions) ?><?php endif; ?>
+<?php // Unguarded: it emits itself only when a stub on this page needs it. ?>
+<?= shared_options_script() ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

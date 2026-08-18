@@ -1879,7 +1879,7 @@ jw_line_grid_scripts(['metals' => $metals, 'purities' => $purities,
       // only drawn on the views that take money. ?>
 <?php if (isset($tenderItemOptions)): ?>
 <?= shared_options_template('jw-tender-items', $tenderItemOptions) ?>
-<?= shared_options_script() ?>
 <?php endif; ?>
+<?= shared_options_script() ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php';
 ?>
