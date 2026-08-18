@@ -69,6 +69,35 @@ function payroll_ot_employee_rate(array $employee, array $settings): float
 }
 
 /**
+ * Hourly overtime rate for hours TYPED on the salary sheet.
+ *
+ * Basic salary over the company's working days per month, times the overtime
+ * multiplier: 18,000 / 30 x 1.5 = 900 an hour at the default settings. This is
+ * the rate this business pays, and it is deliberately its own function -
+ * payroll_ot_employee_rate() divides by ot_monthly_hours (208 by default) and
+ * drives the weekly ATTENDANCE workflow, so changing that one would silently
+ * repay every attendance-derived hour already approved.
+ *
+ * An employee carrying an explicit ot_hourly_rate still wins: that is a rate
+ * somebody set for that person on purpose, and it is multiplied the same way.
+ *
+ * $contractBasic must be the basic BEFORE unpaid leave or worked-day pro-rating.
+ * Being absent reduces how much salary is earned, not the price of an overtime
+ * hour.
+ */
+function payroll_ot_sheet_rate(float $contractBasic, array $employee, array $settings): float
+{
+    $multiplier = max(0.0, (float) ($settings['ot_multiplier'] ?? 1.5));
+    $fixed = (float) ($employee['ot_hourly_rate'] ?? 0);
+    if ($fixed > 0) {
+        return round($fixed * $multiplier, 4);
+    }
+    $workingDays = max(1.0, (float) ($settings['standard_working_days'] ?? 30));
+
+    return round(($contractBasic / $workingDays) * $multiplier, 4);
+}
+
+/**
  * Split one week's daily hours into regular and overtime, chronologically.
  * Returns ['days' => [date => ['hours','regular','overtime']], 'total','regular','overtime'].
  */

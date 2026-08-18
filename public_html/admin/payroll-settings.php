@@ -373,15 +373,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="auto_post" <?= (int) ($settings['auto_post'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Auto-post accrual voucher on approval</label>
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="enforce_sod" <?= (int) ($settings['enforce_sod'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Segregation of duties (preparer cannot approve)</label>
         <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" name="deduct_unpaid_leave" <?= (int) ($settings['deduct_unpaid_leave'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Deduct salary for approved unpaid leave (from Attendance/HR)</label>
-        <label>Working days per month (for the leave day-rate)<input type="number" step="0.5" min="1" max="31" name="standard_working_days" value="<?= e((string) ($settings['standard_working_days'] ?? '30')) ?>"></label>
-        <?php // Basic has no component row of its own, so pro-rating it is a
-              // company decision rather than a per-component one. ?>
-        <label style="display:flex;gap:8px;align-items:flex-start">
-            <input type="checkbox" name="prorate_basic_worked_days" value="1" <?= (int) ($settings['prorate_basic_worked_days'] ?? 0) === 1 ? 'checked' : '' ?>>
-            <span>Pro-rate basic salary by worked days
-                <small style="display:block;color:var(--mbw-muted)">Basic becomes basic &times; worked &divide; standard. When this is on, the unpaid-leave cut is not applied on top &mdash; both measure days not worked, and taking each would halve the same absence twice.</small>
-            </span>
+        <?php // This number is the denominator for three separate things now, so it
+              // says all three rather than only the one it was introduced for. ?>
+        <label>Working days per month
+            <input type="number" step="0.5" min="1" max="31" name="standard_working_days" value="<?= e((string) ($settings['standard_working_days'] ?? '30')) ?>">
+            <small style="display:block;color:var(--mbw-muted)">The days a full month is paid for. Worked days typed on the salary sheet are measured against this, the unpaid-leave day-rate divides by it, and overtime hours are paid at basic &divide; this &times; the overtime multiplier.</small>
         </label>
+        <div style="grid-column:1/-1;padding:10px 12px;border-radius:8px;background:var(--mbw-surface-2,rgba(0,0,0,.03));font-size:12px;color:var(--mbw-muted)">
+            <strong>Worked days pay regular pay.</strong> Typing worked days on the salary sheet pays basic and every standing allowance for those days, and gross follows. Overtime, service charge and one-time additions are not touched &mdash; they are earned by what happened, not by attendance. Where worked days are typed, the unpaid-leave cut is released rather than applied on top: both measure days not worked, and taking each would cut the same absence twice.
+        </div>
         <label>Excess tax withheld — treatment
             <select name="excess_tax_treatment" title="What happens when the revised annual tax estimate is below the tax already deducted">
                 <?php foreach (['offset' => 'Offset against future payroll tax', 'refund' => 'Refund through payroll (approved)', 'carry_forward' => 'Carry forward to final settlement', 'manual' => 'Manual settlement after approval'] as $extValue => $extLabel): ?>
@@ -457,17 +457,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="service_charge_basis" <?= (int) ($editComponent['service_charge_basis'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Service-charge basis</label>
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="allow_employee_override" <?= (int) ($editComponent['allow_employee_override'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Employee override</label>
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="allow_period_override" <?= (int) ($editComponent['allow_period_override'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Period override</label>
-            <?php // Pay for days actually worked, for THIS component. Off by default on
-                  // every component, which is what lets worked days be recorded on a run
-                  // without changing a single figure until somebody asks it to. ?>
+            <?php // Regular pay pro-rates on its own now, so this switch is only for the
+                  // things that do NOT - a deduction, or an item kept out of gross - that
+                  // somebody nevertheless wants to scale with attendance. ?>
             <label style="display:flex;gap:8px;align-items:flex-start">
                 <input type="checkbox" name="prorate_worked_days" value="1" <?= (int) ($editComponent['prorate_worked_days'] ?? 0) === 1 ? 'checked' : '' ?>>
-                <span>Pro-rate by worked days
-                    <small style="display:block;color:var(--mbw-muted)">Pays this component &times; worked days &divide; standard days.
-                    <?php if ((int) ($settings['deduct_unpaid_leave'] ?? 1) === 1): ?>
-                        <strong>This company also deducts unpaid leave</strong> &mdash; switching this on for a component that unpaid leave already reduces would cut the same absence twice.
-                    <?php endif; ?>
-                    </small>
+                <span>Also pro-rate this one by worked days
+                    <small style="display:block;color:var(--mbw-muted)">An allowance or benefit inside gross pay <strong>already</strong> pro-rates whenever worked days are typed on the salary sheet &mdash; leave this alone for those. Tick it only for something that would not otherwise scale: a deduction, or an item paid outside gross.</small>
                 </span>
             </label>
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="allow_zero" <?= (int) ($editComponent['allow_zero'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Zero allowed</label>

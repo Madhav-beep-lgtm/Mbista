@@ -131,11 +131,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $hoursRaw = trim((string) ($_POST['overtime_hours'] ?? ''));
         $workedDays = $daysRaw === '' ? null : max(0.0, min(31.0, round((float) $daysRaw, 2)));
         $overtimeHours = $hoursRaw === '' ? null : max(0.0, min(744.0, round((float) $hoursRaw, 2)));
+
+        // The boxes save themselves the moment they change - there is no Save
+        // button - so the reply has to be numbers the row repaints itself from.
+        // Reloading the whole page per box would throw away the clerk's place in
+        // a sheet of forty employees. Without JavaScript the same POST arrives
+        // without ajax=1 and is answered the old way, by flash and redirect.
+        $isAjax = (string) ($_POST['ajax'] ?? '') === '1';
+        $respond = static function (bool $ok, string $message) use ($isAjax, $runId): void {
+            if ($isAjax) {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode([
+                    'ok' => $ok,
+                    'message' => $message,
+                    'lines' => $ok ? payroll_sheet_payload($runId) : new stdClass(),
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            flash($ok ? 'success' : 'error', $message);
+            redirect('admin/payroll.php?run=' . $runId);
+        };
+
         $inRun = db()->prepare('SELECT COUNT(*) FROM payroll_run_lines WHERE run_id = :run AND payroll_employee_id = :pe');
         $inRun->execute(['run' => $runId, 'pe' => $employeeId]);
         if ((int) $inRun->fetchColumn() === 0) {
-            flash('error', 'That employee is not part of this run.');
-            redirect('admin/payroll.php?run=' . $runId);
+            $respond(false, 'That employee is not part of this run.');
         }
         // Whatever goes wrong here has to arrive as a sentence on the screen. An
         // uncaught exception becomes a bare HTTP 500, which says nothing about
@@ -155,11 +175,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ->execute(['run' => $runId, 'pe' => $employeeId, 'days' => $workedDays, 'hours' => $overtimeHours, 'uid' => $userId]);
             }
             $calc = payroll_calculate_run($runId);
-            flash($calc['ok'] ? 'success' : 'error', $calc['ok']
+            $respond((bool) $calc['ok'], $calc['ok']
                 ? 'Days and hours saved - the run recalculated.'
                 : (string) ($calc['error'] ?? 'Saved, but the run could not be recalculated.'));
         } catch (Throwable $e) {
-            flash('error', 'Could not save days and hours: ' . $e->getMessage());
+            $respond(false, 'Could not save days and hours: ' . $e->getMessage());
         }
         redirect('admin/payroll.php?run=' . $runId);
     }
@@ -367,12 +387,25 @@ foreach ($runComponentsByEmployee as $employeeComponentRows) {
         if ((string) $componentRow['category'] === 'overtime' || isset($sheetComponents[$code])) {
             continue;
         }
+        $isRegularColumn = payroll_component_is_regular_pay($componentRow);
+        $columnInGross = (int) ($componentRow['include_in_gross'] ?? 1) === 1;
+        $isDeductionColumn = in_array((string) $componentRow['posting_behaviour'], ['deduction_liability', 'advance_recovery'], true)
+            || in_array((string) $componentRow['category'], ['deduction', 'tax', 'advance_recovery'], true);
         $sheetComponents[$code] = [
             'code' => $code,
             'name' => (string) $componentRow['component_name'],
             'category' => (string) $componentRow['category'],
             'behaviour' => (string) $componentRow['posting_behaviour'],
-            'prorates' => (int) ($componentRow['prorate_worked_days'] ?? 0) === 1,
+            'prorates' => $isRegularColumn || (int) ($componentRow['prorate_worked_days'] ?? 0) === 1,
+            'in_gross' => $columnInGross,
+            // Where the column sits, decided by what the component IS - the same
+            // answer the engine used to build gross, so a column can never end up
+            // in a subtotal the calculation disagrees with:
+            //   regular - standing pay, before the Regular pay total
+            //   earned  - service charge and one-offs, between Overtime and Gross
+            //   other   - deductions and anything outside gross, with the
+            //             deduction columns after tax
+            'group' => $isRegularColumn ? 'regular' : (($columnInGross && !$isDeductionColumn) ? 'earned' : 'other'),
         ];
     }
 }
@@ -383,12 +416,34 @@ foreach ($componentCatalog as $catalogIndex => $catalogRow) {
 }
 uasort($sheetComponents, static fn (array $a, array $b): int
     => ($sheetOrder[$a['code']] ?? PHP_INT_MAX) <=> ($sheetOrder[$b['code']] ?? PHP_INT_MAX));
+$regularColumns = array_filter($sheetComponents, static fn (array $c): bool => $c['group'] === 'regular');
+$earnedColumns = array_filter($sheetComponents, static fn (array $c): bool => $c['group'] === 'earned');
+$otherColumns = array_filter($sheetComponents, static fn (array $c): bool => $c['group'] === 'other');
+// A component shown on the sheet but kept out of gross pay does not add up with
+// the rest of the row, and silence about that is how a sheet stops footing.
+$outOfGrossColumns = array_values(array_map(
+    static fn (array $c): string => $c['name'],
+    array_filter($sheetComponents, static fn (array $c): bool => !$c['in_gross'])
+));
 
 // Amount per employee per component code, so a row can be laid out by column.
+// The figure is the EFFECTIVE one - cut to the days actually worked where that
+// applies - from the same function the calculation used. Printing the configured
+// amount instead would show 18,000 of Dearness Allowance in a row whose gross was
+// built from 9,000.
+$sheetDays = [];
+foreach ($lines as $daysLine) {
+    $sheetDays[(int) $daysLine['payroll_employee_id']] = [
+        isset($daysLine['worked_days']) && $daysLine['worked_days'] !== null ? (float) $daysLine['worked_days'] : null,
+        isset($daysLine['period_days']) && $daysLine['period_days'] !== null ? (float) $daysLine['period_days'] : null,
+    ];
+}
 $sheetAmounts = [];
 foreach ($runComponentsByEmployee as $sheetEmployeeId => $employeeComponentRows) {
+    [$sheetWorked, $sheetPeriod] = $sheetDays[(int) $sheetEmployeeId] ?? [null, null];
     foreach ($employeeComponentRows as $componentRow) {
-        $sheetAmounts[(int) $sheetEmployeeId][(string) $componentRow['component_code']] = (float) $componentRow['amount'];
+        $sheetAmounts[(int) $sheetEmployeeId][(string) $componentRow['component_code']]
+            = payroll_component_effective_amount($componentRow, $sheetWorked, $sheetPeriod);
     }
 }
 $componentIdByCode = [];
@@ -630,22 +685,34 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         // them is now shown as the component it actually is, so nothing hides
         // inside a bucket and nothing is counted twice.
         $sheetEditable = in_array((string) $run['status'], ['draft', 'calculated'], true);
-        $sheetColumns = 15 + count($sheetComponents);
+        $sheetColumns = 16 + count($sheetComponents);
         $sheetNum = static fn ($v): string => rtrim(rtrim(number_format((float) $v, 2, '.', ''), '0'), '.');
+        ?>
+        <?php
+        $sheetHead = static function (array $column): string {
+            $note = str_replace('_', ' ', $column['category']);
+            if ($column['prorates']) {
+                $note .= ' - pro-rates by worked days';
+            }
+            if (!$column['in_gross']) {
+                $note .= ' - paid OUTSIDE gross pay, so it is not part of the gross figure';
+            }
+            return '<th class="is-numeric" title="' . e($note) . '">' . e($column['name'])
+                . ($column['prorates'] ? ' *' : '') . ($column['in_gross'] ? '' : ' &dagger;') . '</th>';
+        };
         ?>
         <thead><tr>
             <th>Employee</th>
-            <th class="is-numeric" title="Days worked in this period. Recorded on every run; it changes pay only for components set to pro-rate by worked days.">Worked days</th>
+            <th class="is-numeric" title="Days actually worked in this period, out of the company's standard days. Type a number and basic and every standing allowance are paid for those days; leave it empty and the month is paid in full.">Worked days</th>
             <th class="is-numeric">Basic</th>
-            <?php foreach ($sheetComponents as $sheetComponent): ?>
-                <th class="is-numeric" title="<?= e(str_replace('_', ' ', $sheetComponent['category']) . ($sheetComponent['prorates'] ? ' - pro-rates by worked days' : '')) ?>">
-                    <?= e($sheetComponent['name']) ?><?= $sheetComponent['prorates'] ? ' *' : '' ?>
-                </th>
-            <?php endforeach; ?>
-            <th class="is-numeric" title="Hours entered here replace whatever weekly attendance calculated for this employee.">OT hours</th>
+            <?php foreach ($regularColumns as $sheetComponent): ?><?= $sheetHead($sheetComponent) ?><?php endforeach; ?>
+            <th class="is-numeric" title="Basic plus every standing allowance - the part of pay that worked days pro-rate.">Regular pay</th>
+            <th class="is-numeric" title="Hours typed here are paid at basic / standard days x the overtime multiplier, and they replace whatever weekly attendance calculated for this employee.">OT hours</th>
             <th class="is-numeric">Overtime</th>
-            <th class="is-numeric">Gross</th><th class="is-numeric">Assessable (yr)</th>
+            <?php foreach ($earnedColumns as $sheetComponent): ?><?= $sheetHead($sheetComponent) ?><?php endforeach; ?>
+            <th class="is-numeric" title="Regular pay + overtime + everything else earned in this period.">Gross</th><th class="is-numeric">Assessable (yr)</th>
             <th class="is-numeric">Retirement Ded. (yr)</th><th class="is-numeric">Taxable (yr)</th><th class="is-numeric">Tax (month)</th>
+            <?php foreach ($otherColumns as $sheetComponent): ?><?= $sheetHead($sheetComponent) ?><?php endforeach; ?>
             <th class="is-numeric">Retirement (emp)</th><th class="is-numeric">Advance</th>
             <th class="is-numeric">Adjustment</th>
             <th class="is-numeric">Net Payable</th><th></th>
@@ -653,12 +720,22 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <tbody>
             <?php if ($lines === []): ?><tr><td colspan="<?= (int) $sheetColumns ?>">No calculated lines. Enrol employees, then create or recalculate a run.</td></tr><?php endif; ?>
             <?php foreach ($lines as $line): ?>
-                <tr class="pr-line<?= $line['line_status'] !== 'ok' ? ' pr-line-' . e($line['line_status']) : '' ?>" data-line-trace="<?= e((string) $line['trace']) ?>" data-line-name="<?= e($line['employee_code'] . ' — ' . $line['person_name']) ?>">
+                <?php
+                $sheetLineId = (int) $line['id'];
+                $sheetEmpId = (int) $line['payroll_employee_id'];
+                // Footed on the row itself, from the same amounts the columns
+                // print, so "Regular pay + Overtime + earned = Gross" can be read
+                // straight across instead of taken on trust.
+                $rowRegular = round((float) $line['basic'], 2);
+                foreach ($regularColumns as $regularColumn) {
+                    $rowRegular = round($rowRegular + (float) ($sheetAmounts[$sheetEmpId][$regularColumn['code']] ?? 0), 2);
+                }
+                ?>
+                <tr class="pr-line<?= $line['line_status'] !== 'ok' ? ' pr-line-' . e($line['line_status']) : '' ?>" data-emp="<?= e($sheetEmpId) ?>" data-line-trace="<?= e((string) $line['trace']) ?>" data-line-name="<?= e($line['employee_code'] . ' — ' . $line['person_name']) ?>">
                     <td class="pr-emp"><strong><?= e($line['employee_code']) ?></strong> <?= e($line['person_name']) ?>
                         <?php if ((string) $line['department'] !== ''): ?><small><?= e($line['department']) ?></small><?php endif; ?>
-                        <?php if ($line['line_status'] === 'warning'): ?><span class="mbw-pill tone-amber">Check</span><?php elseif ($line['line_status'] === 'error'): ?><span class="mbw-pill tone-red">Error</span><?php endif; ?>
+                        <span data-status-pill><?php if ($line['line_status'] === 'warning'): ?><span class="mbw-pill tone-amber">Check</span><?php elseif ($line['line_status'] === 'error'): ?><span class="mbw-pill tone-red">Error</span><?php endif; ?></span>
                     </td>
-                    <?php $sheetLineId = (int) $line['id']; $sheetEmpId = (int) $line['payroll_employee_id']; ?>
                     <td class="is-numeric" onclick="event.stopPropagation()">
                         <?php if ($sheetEditable): ?>
                             <?php // One form for both boxes. The hours input lives in another cell,
@@ -671,7 +748,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <input type="hidden" name="run_id" value="<?= e((int) $run['id']) ?>">
                                 <input type="hidden" name="employee_id" value="<?= e($sheetEmpId) ?>">
                             </form>
-                            <input form="dh-<?= $sheetLineId ?>" type="number" name="worked_days" step="0.5" min="0" max="31"
+                            <input form="dh-<?= $sheetLineId ?>" data-dh="days" type="number" name="worked_days" step="0.5" min="0" max="31"
                                    style="width:70px;text-align:right" placeholder="<?= e(number_format((float) ($line['period_days'] ?? 30), 0)) ?>"
                                    value="<?= $line['worked_days'] === null ? '' : e($sheetNum($line['worked_days'])) ?>">
                             <?php if ($line['period_days'] !== null): ?><small style="display:block;color:var(--mbw-muted)">of <?= e($sheetNum($line['period_days'])) ?></small><?php endif; ?>
@@ -679,32 +756,38 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <?= $line['worked_days'] === null ? '&ndash;' : e(number_format((float) $line['worked_days'], 2)) ?>
                         <?php endif; ?>
                     </td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['basic'], 2)) ?></td>
-                    <?php foreach ($sheetComponents as $sheetComponent): ?>
+                    <td class="is-numeric" data-cell="basic"><?= e(number_format((float) $line['basic'], 2)) ?></td>
+                    <?php foreach ($regularColumns as $sheetComponent): ?>
                         <?php $sheetValue = $sheetAmounts[$sheetEmpId][$sheetComponent['code']] ?? null; ?>
-                        <td class="is-numeric"><?= $sheetValue === null ? '&ndash;' : e(number_format((float) $sheetValue, 2)) ?></td>
+                        <td class="is-numeric" data-comp="<?= e($sheetComponent['code']) ?>"><?= $sheetValue === null ? '&ndash;' : e(number_format((float) $sheetValue, 2)) ?></td>
                     <?php endforeach; ?>
+                    <td class="is-numeric" data-cell="regular_pay"><strong><?= e(number_format($rowRegular, 2)) ?></strong></td>
                     <td class="is-numeric" onclick="event.stopPropagation()">
                         <?php if ($sheetEditable): ?>
-                            <input form="dh-<?= $sheetLineId ?>" type="number" name="overtime_hours" step="0.25" min="0"
+                            <input form="dh-<?= $sheetLineId ?>" data-dh="hours" type="number" name="overtime_hours" step="0.25" min="0"
                                    style="width:70px;text-align:right" placeholder="&ndash;"
                                    value="<?= $line['overtime_hours'] === null ? '' : e($sheetNum($line['overtime_hours'])) ?>">
-                            <button form="dh-<?= $sheetLineId ?>" type="submit" class="button secondary" style="min-height:26px;padding:2px 8px;margin-top:3px">Save</button>
-                            <?php if ($line['overtime_rate'] !== null && (float) $line['overtime_rate'] > 0): ?>
-                                <small style="display:block;color:var(--mbw-muted)">@<?= e(number_format((float) $line['overtime_rate'], 2)) ?></small>
-                            <?php endif; ?>
                         <?php else: ?>
                             <?= $line['overtime_hours'] === null ? '&ndash;' : e(number_format((float) $line['overtime_hours'], 2)) ?>
                         <?php endif; ?>
+                        <small data-cell="ot_rate" style="display:block;color:var(--mbw-muted)"><?= ($line['overtime_rate'] !== null && (float) $line['overtime_rate'] > 0) ? '@' . e(number_format((float) $line['overtime_rate'], 2)) . '/hr' : '' ?></small>
                     </td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['overtime'], 2)) ?></td>
-                    <td class="is-numeric"><strong><?= e(number_format((float) $line['gross'], 2)) ?></strong></td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['assessable_annual'], 2)) ?></td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['retirement_deduction_annual'], 2)) ?></td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['taxable_annual'], 2)) ?></td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['tax_month'], 2)) ?></td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['retirement_employee_month'], 2)) ?></td>
-                    <td class="is-numeric"><?= e(number_format((float) $line['advance_deduction'], 2)) ?></td>
+                    <td class="is-numeric" data-cell="overtime"><?= e(number_format((float) $line['overtime'], 2)) ?></td>
+                    <?php foreach ($earnedColumns as $sheetComponent): ?>
+                        <?php $sheetValue = $sheetAmounts[$sheetEmpId][$sheetComponent['code']] ?? null; ?>
+                        <td class="is-numeric" data-comp="<?= e($sheetComponent['code']) ?>"><?= $sheetValue === null ? '&ndash;' : e(number_format((float) $sheetValue, 2)) ?></td>
+                    <?php endforeach; ?>
+                    <td class="is-numeric" data-cell="gross"><strong><?= e(number_format((float) $line['gross'], 2)) ?></strong></td>
+                    <td class="is-numeric" data-cell="assessable_annual"><?= e(number_format((float) $line['assessable_annual'], 2)) ?></td>
+                    <td class="is-numeric" data-cell="retirement_deduction_annual"><?= e(number_format((float) $line['retirement_deduction_annual'], 2)) ?></td>
+                    <td class="is-numeric" data-cell="taxable_annual"><?= e(number_format((float) $line['taxable_annual'], 2)) ?></td>
+                    <td class="is-numeric" data-cell="tax_month"><?= e(number_format((float) $line['tax_month'], 2)) ?></td>
+                    <?php foreach ($otherColumns as $sheetComponent): ?>
+                        <?php $sheetValue = $sheetAmounts[$sheetEmpId][$sheetComponent['code']] ?? null; ?>
+                        <td class="is-numeric" data-comp="<?= e($sheetComponent['code']) ?>"><?= $sheetValue === null ? '&ndash;' : e(number_format((float) $sheetValue, 2)) ?></td>
+                    <?php endforeach; ?>
+                    <td class="is-numeric" data-cell="retirement_employee_month"><?= e(number_format((float) $line['retirement_employee_month'], 2)) ?></td>
+                    <td class="is-numeric" data-cell="advance_deduction"><?= e(number_format((float) $line['advance_deduction'], 2)) ?></td>
                     <?php $adjE = (float) ($line['adj_earning'] ?? 0); $adjD = (float) ($line['adj_deduction'] ?? 0); ?>
                     <td class="is-numeric">
                         <?php if ($adjE > 0 || $adjD > 0): ?>
@@ -713,7 +796,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <?php if ((string) ($line['adj_remark'] ?? '') !== ''): ?><small style="display:block"><?= e((string) $line['adj_remark']) ?></small><?php endif; ?>
                         <?php else: ?>&ndash;<?php endif; ?>
                     </td>
-                    <td class="is-numeric"><strong><?= e(number_format((float) $line['net_pay'], 2)) ?></strong></td>
+                    <td class="is-numeric" data-cell="net_pay"><strong><?= e(number_format((float) $line['net_pay'], 2)) ?></strong></td>
                     <td class="pr-actions" onclick="event.stopPropagation()">
                         <a class="button secondary" target="_blank" href="<?= e(url('admin/payroll-payslip.php?line=' . (int) $line['id'])) ?>" title="Open payslip">Payslip</a>
                         <?php $lineComponents = $runComponentsByEmployee[(int) $line['payroll_employee_id']] ?? []; ?>
@@ -809,7 +892,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </tbody>
     </table>
     </div>
-    <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">Click a row to open its full calculation trace in the inspector. Amounts are monthly unless marked (yr).</p>
+    <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
+        Click a row to open its full calculation trace in the inspector. Amounts are monthly unless marked (yr).
+        Worked days and OT hours save and recalculate on their own &mdash; type and press Tab, there is nothing to click.
+        <?php if ($sheetComponents !== []): ?><br>* pro-rates by worked days.<?php endif; ?>
+        <?php if ($outOfGrossColumns !== []): ?>
+            &dagger; <?= e(implode(', ', $outOfGrossColumns)) ?>
+            <?= count($outOfGrossColumns) === 1 ? 'is' : 'are' ?> set to be paid OUTSIDE gross pay, so
+            <?= count($outOfGrossColumns) === 1 ? 'its column is' : 'those columns are' ?>
+            not part of the Gross figure. Change that on the component in
+            <a href="<?= e(url('admin/payroll-settings.php#components')) ?>">Payroll settings</a> if it should be.
+        <?php endif; ?>
+    </p>
 </section>
 
 <aside class="mbw-card pr-inspector" aria-label="Calculation inspector" id="prInspector">
@@ -984,6 +1078,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             });
             if (trace.withholding) {
                 html += '<div class="pr-ins-sub">Withholding</div>';
+                // The one number a payslip conversation is actually about. Older
+                // traces predate the field, so fall back to the override-or-system
+                // pair they do carry rather than printing nothing.
+                var taxThisMonth = trace.withholding.tax_month;
+                if (taxThisMonth === undefined || taxThisMonth === null) {
+                    taxThisMonth = (trace.withholding.tax_override !== null && trace.withholding.tax_override !== undefined)
+                        ? trace.withholding.tax_override : trace.withholding.system_tax;
+                }
+                html += '<div class="pr-ins-row" style="font-size:13.5px"><span>Tax deducted THIS month</span><b>' + fmt(taxThisMonth) + '</b></div>';
                 html += '<div class="pr-ins-row"><span>Method</span><b>' + trace.withholding.method + '</b></div>';
                 html += '<div class="pr-ins-row"><span>Period / months left</span><b>' + trace.withholding.period_no + ' / ' + trace.withholding.months_remaining + '</b></div>';
                 html += '<div class="pr-ins-row"><span>Tax withheld YTD</span><b>' + fmt(trace.withholding.ytd_withheld) + '</b></div>';
@@ -993,6 +1096,128 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             });
             html += '<div class="pr-ins-note">Rule version: ' + (trace.tax_version_label || '-') + ' (#' + (trace.tax_version_id || '-') + ')</div>';
             body.innerHTML = html;
+        });
+    });
+})();
+</script>
+
+<script>
+(function () {
+    // Worked days and OT hours save themselves. There is no button: the figure a
+    // clerk types IS the instruction, and a sheet where half the rows are typed
+    // but unsaved is a payroll waiting to go out wrong.
+    //
+    // The row repaints from what the server actually calculated - never from a
+    // sum worked out here - so the screen can only ever show figures the engine
+    // produced. Without JavaScript the same form still posts and reloads the
+    // page, so the boxes keep working with scripting off.
+    var table = document.querySelector('.pr-table');
+    if (!table) { return; }
+    var boxes = table.querySelectorAll('input[data-dh]');
+    if (!boxes.length) { return; }
+
+    // Matches PHP's number_format: plain thousands, two decimals. (The inspector
+    // uses en-IN grouping; mixing the two inside one row would look like a bug.)
+    var fmt = function (n) {
+        return Number(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    };
+
+    var toast = null;
+    var say = function (message) {
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9999;'
+                + 'max-width:min(560px,90vw);padding:10px 16px;border-radius:10px;font-size:13px;line-height:1.4;'
+                + 'background:#7b241c;color:#fff;box-shadow:0 12px 30px rgba(0,0,0,.28);display:none';
+            document.body.appendChild(toast);
+        }
+        toast.textContent = message;
+        toast.style.display = 'block';
+        window.clearTimeout(toast._timer);
+        toast._timer = window.setTimeout(function () { toast.style.display = 'none'; }, 7000);
+    };
+
+    var repaint = function (lines) {
+        Object.keys(lines || {}).forEach(function (employeeId) {
+            var row = table.querySelector('.pr-line[data-emp="' + employeeId + '"]');
+            if (!row) { return; }
+            var data = lines[employeeId];
+            row.querySelectorAll('[data-cell]').forEach(function (cell) {
+                var key = cell.getAttribute('data-cell');
+                if (key === 'ot_rate') {
+                    cell.textContent = (data.overtime_rate && data.overtime_rate > 0)
+                        ? '@' + fmt(data.overtime_rate) + '/hr' : '';
+                    return;
+                }
+                if (data[key] === undefined || data[key] === null) { return; }
+                (cell.querySelector('strong') || cell).textContent = fmt(data[key]);
+            });
+            row.querySelectorAll('[data-comp]').forEach(function (cell) {
+                var amount = (data.components || {})[cell.getAttribute('data-comp')];
+                cell.textContent = (amount === undefined || amount === null) ? '\u2013' : fmt(amount);
+            });
+            // A warning that has been fixed has to stop showing, or the sheet
+            // keeps accusing a row that is now fine.
+            var pill = row.querySelector('[data-status-pill]');
+            if (pill) {
+                pill.innerHTML = data.line_status === 'warning'
+                    ? '<span class="mbw-pill tone-amber">Check</span>'
+                    : (data.line_status === 'error' ? '<span class="mbw-pill tone-red">Error</span>' : '');
+            }
+            row.classList.remove('pr-line-warning', 'pr-line-error');
+            if (data.line_status && data.line_status !== 'ok') {
+                row.classList.add('pr-line-' + data.line_status);
+            }
+            if (data.trace) { row.setAttribute('data-line-trace', data.trace); }
+            // A box left reading 40 beside a row calculated on 30 is a lie the
+            // clerk has no way to spot. Show the number that was actually used -
+            // unless they are still typing in it.
+            var daysBox = row.querySelector('input[data-dh="days"]');
+            if (daysBox && daysBox !== document.activeElement) {
+                daysBox.value = (data.worked_days === null || data.worked_days === undefined)
+                    ? '' : String(data.worked_days);
+            }
+            // Keep the inspector honest about the row it is showing.
+            if (row.classList.contains('is-selected')) { row.click(); }
+        });
+    };
+
+    var save = function (input) {
+        var form = document.getElementById(input.getAttribute('form'));
+        if (!form || form.dataset.busy === '1') { return; }
+        form.dataset.busy = '1';
+        var row = input.closest('tr');
+        if (row) { row.style.opacity = '0.55'; }
+        var payload = new FormData(form);
+        payload.append('ajax', '1');
+        window.fetch(window.location.pathname + window.location.search, {
+            method: 'POST',
+            body: payload,
+            credentials: 'same-origin',
+            headers: {'X-Requested-With': 'XMLHttpRequest'}
+        }).then(function (response) {
+            return response.json();
+        }).then(function (result) {
+            form.dataset.busy = '';
+            if (row) { row.style.opacity = ''; }
+            if (!result || !result.ok) {
+                say((result && result.message) || 'The sheet could not be recalculated.');
+                return;
+            }
+            repaint(result.lines);
+        }).catch(function () {
+            // Anything the browser could not parse - a session that expired into
+            // a login page, a server error - is answered by the plain form post,
+            // which lands on a page that can actually explain itself.
+            form.dataset.busy = '';
+            form.submit();
+        });
+    };
+
+    boxes.forEach(function (input) {
+        input.addEventListener('change', function () { save(input); });
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') { event.preventDefault(); input.blur(); }
         });
     });
 })();

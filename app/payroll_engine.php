@@ -253,6 +253,66 @@ function payroll_component_behaviour(array $component): string
 }
 
 /**
+ * Is this component part of REGULAR monthly pay - the standing salary that
+ * worked days pro-rate and that the sheet totals as "Regular pay"?
+ *
+ * Yes: an allowance or benefit that is inside gross and recurs every month.
+ * No:  overtime and service charge (earned by what happened this month, not by
+ *      turning up), one-time additions, every deduction, employer-only costs,
+ *      and anything deliberately kept out of gross.
+ *
+ * Both the engine and the salary sheet call this, so a column can never sit in a
+ * group the calculation disagrees with. It accepts a payroll_components row
+ * (calc_type) or a payroll_run_components snapshot (calc_method) alike.
+ */
+function payroll_component_is_regular_pay(array $row): bool
+{
+    if ((int) ($row['include_in_gross'] ?? 1) !== 1) {
+        return false;
+    }
+    $behaviour = (string) ($row['posting_behaviour'] ?? 'category_default');
+    if (in_array($behaviour, ['employer_contribution', 'non_posting', 'deduction_liability', 'advance_recovery'], true)) {
+        return false;
+    }
+    if (in_array((string) ($row['category'] ?? 'allowance'), ['deduction', 'tax', 'advance_recovery', 'overtime', 'info'], true)) {
+        return false;
+    }
+    if (in_array((string) ($row['calc_method'] ?? $row['calc_type'] ?? ''), ['overtime_hours', 'service_charge'], true)) {
+        return false;
+    }
+
+    return !in_array((string) ($row['source'] ?? 'standard'), ['overtime', 'service_charge', 'one_time'], true);
+}
+
+/**
+ * The component amount as PAID for a period: the configured amount cut to the
+ * days actually worked where that applies, and left alone where it does not.
+ *
+ * Regular pay pro-rates because that is what worked days mean. A component that
+ * is not regular pro-rates only when it has been explicitly flagged
+ * (prorate_worked_days) - for a deduction or an out-of-gross item that somebody
+ * decided should scale with attendance too.
+ *
+ * $workedDays NULL (nothing typed) always returns the amount untouched.
+ */
+function payroll_component_effective_amount(array $row, ?float $workedDays, ?float $periodDays): float
+{
+    $amount = round((float) ($row['amount'] ?? 0), 2);
+    if ($workedDays === null || $periodDays === null || $periodDays <= 0) {
+        return $amount;
+    }
+    $factor = min(1.0, $workedDays / $periodDays);
+    if ($factor >= 1.0) {
+        return $amount;
+    }
+    if (payroll_component_is_regular_pay($row) || (int) ($row['prorate_worked_days'] ?? 0) === 1) {
+        return round($amount * $factor, 2);
+    }
+
+    return $amount;
+}
+
+/**
  * Is the component in force for the run's period? Effective dates must COVER
  * the period end (open-ended when NULL). $refDate '' = always in force.
  */
@@ -628,20 +688,24 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         }
     }
 
-    // Worked days: a typed fact about the period, kept beside the result so a
-    // payslip can still say "26 of 30" after the settings that produced it have
-    // moved on. On its own it changes NOTHING - it pro-rates only what has been
-    // asked to pro-rate, per component, and basic only when the company setting
-    // says so. That is why switching this feature on cannot alter a figure
-    // anybody has already approved.
+    // Worked days DRIVE regular pay. Type 18 of 30 and basic, every standing
+    // allowance and therefore gross are all paid for 18 days - which is the only
+    // reading of the box that a payroll clerk expects. An EMPTY box still means
+    // "not recorded" and changes nothing, so a run nobody has typed days on is
+    // paid in full exactly as before.
+    //
+    // What it deliberately does NOT touch: overtime, service charge and one-time
+    // additions (earned by what actually happened this month, not by attendance),
+    // deductions, and anything kept out of gross. payroll_component_is_regular_pay()
+    // is the single place that decides which side a component falls on, and the
+    // salary sheet groups its columns by the same answer.
     $periodDays = max(1.0, (float) ($payrollSettings['standard_working_days'] ?? 30));
     $workedDays = isset($inputs['worked_days']) && $inputs['worked_days'] !== null && $inputs['worked_days'] !== ''
         ? max(0.0, min($periodDays, round((float) $inputs['worked_days'], 2)))
         : null;
     $prorateFactor = ($workedDays !== null && $periodDays > 0) ? min(1.0, $workedDays / $periodDays) : 1.0;
-    $proratesBasic = (int) ($payrollSettings['prorate_basic_worked_days'] ?? 0) === 1;
 
-    if ($proratesBasic && $workedDays !== null && $prorateFactor < 1.0) {
+    if ($workedDays !== null && $prorateFactor < 1.0) {
         // Pro-rating basic and ALSO deducting unpaid leave would cut the same
         // absence twice - both measure days not worked. The days typed win, and
         // the leave cut is released rather than compounded on top of them.
@@ -651,12 +715,17 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
 
     // Overtime hours typed for this run replace whatever weekly attendance worked
     // out for the same employee: two sources for one set of hours is how people
-    // get paid twice for one evening. The rate is the one the overtime workflow
-    // already uses, never a second formula invented here.
+    // get paid twice for one evening.
+    //
+    // The rate is basic over the company's working days per month, times the
+    // overtime multiplier - 18,000 / 30 x 1.5 = 900 an hour at the default
+    // settings - computed from the CONTRACT basic, before unpaid leave or
+    // worked-day pro-rating: an absence reduces how much salary is earned, not
+    // the price of an overtime hour.
     $typedOtHours = isset($inputs['overtime_hours']) && $inputs['overtime_hours'] !== null && $inputs['overtime_hours'] !== ''
         ? max(0.0, round((float) $inputs['overtime_hours'], 2))
         : null;
-    $otRate = $typedOtHours !== null ? payroll_ot_employee_rate($employee, $payrollSettings) : 0.0;
+    $otRate = $typedOtHours !== null ? payroll_ot_sheet_rate($originalBasic, $employee, $payrollSettings) : 0.0;
     $typedOtAmount = $typedOtHours !== null ? round($typedOtHours * $otRate, 2) : 0.0;
 
     // The ACTUAL component amounts for this line. A persisted run keeps them in
@@ -679,13 +748,21 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     $allowances = 0.0;
     $overtime = 0.0;
     $benefits = 0.0;
+    $regularEarnings = 0.0;  // standing components: the ones worked days pro-rate
+    $variableEarnings = 0.0; // service charge / one-time: earned this period only
     $otherDeduction = 0.0;
     $reimbursementNet = 0.0;        // paid with salary but kept out of gross
     $componentEmployerContrib = 0.0; // employer cost only — never employee pay
     $taxableMonthly = $basic; // basic salary is always assessable
     $regularTaxable = $basic;   // predictable recurring income (projectable)
     $irregularTaxable = 0.0;    // earned-only income: OT, service charge, one-time
-    $traceComponents = [['label' => 'Basic Salary', 'category' => 'basic', 'amount' => $basic, 'taxable' => true, 'projection' => 'regular']];
+    // A pro-rated basic on a payslip with no explanation reads as an underpayment,
+    // so the label carries the days it was paid for wherever they were typed.
+    $basicLabel = ($workedDays !== null && $prorateFactor < 1.0)
+        ? 'Basic Salary (' . rtrim(rtrim(number_format($workedDays, 2, '.', ''), '0'), '.')
+            . ' of ' . rtrim(rtrim(number_format($periodDays, 2, '.', ''), '0'), '.') . ' days)'
+        : 'Basic Salary';
+    $traceComponents = [['label' => $basicLabel, 'category' => 'basic', 'amount' => $basic, 'taxable' => true, 'projection' => 'regular']];
 
     foreach ($runComponents as $row) {
         // Typed hours are the whole overtime answer for this employee, so the
@@ -693,10 +770,12 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         if ($typedOtHours !== null && (string) ($row['source'] ?? '') === 'overtime') {
             continue;
         }
-        $amount = round((float) ($row['amount'] ?? 0), 2);
-        if ($prorateFactor < 1.0 && (int) ($row['prorate_worked_days'] ?? 0) === 1) {
-            $amount = round($amount * $prorateFactor, 2);
-        }
+        // The amount as PAID, which is the configured amount cut down to the days
+        // actually worked where that applies. The salary sheet asks the very same
+        // function for the very same figure, so the column shows what gross was
+        // built from rather than the untouched setting.
+        $amount = payroll_component_effective_amount($row, $workedDays, $periodDays);
+        $isRegularPay = payroll_component_is_regular_pay($row);
         $category = (string) ($row['category'] ?? 'allowance');
         $behaviour = (string) ($row['posting_behaviour'] ?? 'category_default');
         $rowTaxable = (int) ($row['taxable'] ?? 1) === 1;
@@ -723,8 +802,18 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
                 }
             } elseif ($category === 'benefit' || $category === 'reimbursement') {
                 $benefits += $amount;
+                if ($isRegularPay) {
+                    $regularEarnings += $amount;
+                } else {
+                    $variableEarnings += $amount;
+                }
             } else {
                 $allowances += $amount;
+                if ($isRegularPay) {
+                    $regularEarnings += $amount;
+                } else {
+                    $variableEarnings += $amount;
+                }
             }
             if ($rowTaxable && !$isDeductionFamily && $behaviour !== 'employer_contribution') {
                 $taxableMonthly += $amount;
@@ -773,7 +862,13 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
             'projection' => 'actual_only',
         ];
     }
-    $gross = round($basic + $allowances + $overtime + $benefits + $adjEarning, 2);
+    // Two halves, and gross is their sum. Regular pay is what recurs every month
+    // and what worked days pro-rate; the earned half is what this period alone
+    // produced - overtime, service charge, one-time additions. The salary sheet
+    // prints both subtotals, so a reader can see gross foot rather than trust it.
+    $regularPay = round($basic + $regularEarnings, 2);
+    $earnedPay = round($overtime + $variableEarnings + $adjEarning, 2);
+    $gross = round($regularPay + $earnedPay, 2);
 
     // Retirement contributions (monthly, % of basic per employee profile).
     $retEmployeeMonth = round($basic * (float) $employee['retirement_employee_rate'] / 100, 2);
@@ -911,6 +1006,8 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
         'allowances' => round($allowances, 2),
         'overtime' => round($overtime, 2),
         'benefits' => round($benefits, 2),
+        'regular_pay' => $regularPay,
+        'earned_pay' => $earnedPay,
         'gross' => $gross,
         'assessable_month' => $currentAssessable,
         'regular_month' => round($regularTaxable + $retEmployerMonth, 2),
@@ -988,6 +1085,10 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
                 'period_no' => $periodNo,
                 'months_remaining' => $remainingPeriods,
                 'ytd_withheld' => round($taxYtdBefore, 2),
+                // The figure actually deducted from THIS month's pay. It was only
+                // ever derivable from the override-or-system pair below, which is
+                // not something a reader of a payslip should have to work out.
+                'tax_month' => $taxMonth,
                 'system_tax' => $systemTax,
                 'tax_override' => $taxOverride,
             ],
@@ -1409,6 +1510,64 @@ function payroll_run(int $runId): ?array
     $stmt = db()->prepare('SELECT * FROM payroll_runs WHERE id = :id LIMIT 1');
     $stmt->execute(['id' => $runId]);
     return $stmt->fetch() ?: null;
+}
+
+/**
+ * Every figure the salary sheet prints, per employee, as plain data.
+ *
+ * The days and hours boxes save themselves the moment they change - there is no
+ * Save button to press - so the answer has to come back as numbers the row can
+ * repaint itself from. Reloading the page for each box would throw away the
+ * clerk's place in a sheet of forty employees.
+ *
+ * Component amounts are the effective ones (pro-rated where worked days apply),
+ * computed by the same function the calculation used, and the regular/earned
+ * split is the same one payroll_component_is_regular_pay() gives the engine - so
+ * what the browser draws cannot drift from what was actually calculated.
+ */
+function payroll_sheet_payload(int $runId): array
+{
+    $componentsByEmployee = [];
+    foreach (payroll_run_component_rows($runId) as $row) {
+        $componentsByEmployee[(int) $row['payroll_employee_id']][] = $row;
+    }
+    $payload = [];
+    foreach (payroll_run_lines($runId) as $line) {
+        $employeeId = (int) $line['payroll_employee_id'];
+        $workedDays = isset($line['worked_days']) && $line['worked_days'] !== null ? (float) $line['worked_days'] : null;
+        $periodDays = isset($line['period_days']) && $line['period_days'] !== null ? (float) $line['period_days'] : null;
+        $amounts = [];
+        $regular = round((float) $line['basic'], 2);
+        foreach ($componentsByEmployee[$employeeId] ?? [] as $row) {
+            $effective = payroll_component_effective_amount($row, $workedDays, $periodDays);
+            $amounts[(string) $row['component_code']] = $effective;
+            if (payroll_component_is_regular_pay($row)) {
+                $regular = round($regular + $effective, 2);
+            }
+        }
+        $payload[$employeeId] = [
+            'basic' => round((float) $line['basic'], 2),
+            'worked_days' => $workedDays,
+            'period_days' => $periodDays,
+            'overtime_hours' => isset($line['overtime_hours']) && $line['overtime_hours'] !== null ? (float) $line['overtime_hours'] : null,
+            'overtime_rate' => isset($line['overtime_rate']) && $line['overtime_rate'] !== null ? (float) $line['overtime_rate'] : null,
+            'overtime' => round((float) $line['overtime'], 2),
+            'regular_pay' => $regular,
+            'gross' => round((float) $line['gross'], 2),
+            'assessable_annual' => round((float) $line['assessable_annual'], 2),
+            'retirement_deduction_annual' => round((float) $line['retirement_deduction_annual'], 2),
+            'taxable_annual' => round((float) $line['taxable_annual'], 2),
+            'tax_month' => round((float) $line['tax_month'], 2),
+            'retirement_employee_month' => round((float) $line['retirement_employee_month'], 2),
+            'advance_deduction' => round((float) $line['advance_deduction'], 2),
+            'net_pay' => round((float) $line['net_pay'], 2),
+            'line_status' => (string) $line['line_status'],
+            'components' => $amounts,
+            'trace' => (string) ($line['trace'] ?? ''),
+        ];
+    }
+
+    return $payload;
 }
 
 function payroll_run_lines(int $runId): array
