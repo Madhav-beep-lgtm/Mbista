@@ -494,11 +494,48 @@ $orderOnHand = [];
 // order would strike out its own items.
 $orderStockPieces = [];
 
-// Load stock balances (only for jewellery items; regular inventory items don't have jewellery_stock_txns)
+// Load stock balances for all items
+// For jewellery items: use jewellery_stock_txns
+// For regular inventory items: use sr_stock_summary()
+require_once __DIR__ . '/../../app/stock_report_engine.php';
 foreach ($items as $itemRow) {
+    $itemId = (int) $itemRow['id'];
     $itemType = (string) ($itemRow['item_type'] ?? '');
+
     if ($itemType === 'jewellery' || $itemType === '') {
-        $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
+        // Jewellery item: use jewellery stock transactions
+        $orderOnHand[$itemId] = jw_item_balance($companyId, $itemId, date('Y-m-d'), 'stock');
+    } else {
+        // Regular inventory item: use stock summary for current balance
+        $summary = sr_stock_summary($companyId, [
+            'from' => date('Y-m-d'),
+            'to' => date('Y-m-d'),
+            'warehouse_ids' => [],
+            'types' => [],
+            'valuation' => '',
+            'search' => '',
+            'stock_status' => '',
+            'jewellery_stock_kind' => '',
+            'zero_movement' => false,
+            'zero_closing' => false,
+            'group_by' => ''
+        ]);
+        $found = false;
+        foreach ($summary['rows'] as $row) {
+            if ((int) $row['item_id'] === $itemId) {
+                $orderOnHand[$itemId] = [
+                    'qty_pieces' => (float) $row['closing_qty'],
+                    'fine_weight' => (float) $row['closing_qty'], // No fine/gross distinction for regular inventory
+                    'value' => (float) $row['closing_amount'],
+                    'avg_fine_rate' => (float) $row['closing_rate']
+                ];
+                $found = true;
+                break;
+            }
+        }
+        if (!$found) {
+            $orderOnHand[$itemId] = null; // Item not in stock
+        }
     }
 }
 
