@@ -920,8 +920,10 @@ function jw_line_grid_scripts(): void
                     var newOption = document.createElement("option");
                     newOption.value = data.item_id;
                     newOption.textContent = data.item_code + " — " + data.item_name;
-                    newOption.selected = true;
                     currentItemSelect.appendChild(newOption);
+
+                    // Explicitly set the select value to display the newly created item
+                    currentItemSelect.value = data.item_id;
 
                     // Trigger change event to notify any listeners
                     currentItemSelect.dispatchEvent(new Event("change", { bubbles: true }));
