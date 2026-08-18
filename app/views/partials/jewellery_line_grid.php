@@ -506,6 +506,91 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
             <button type="button" class="button secondary jw-line-add" style="min-height:30px;padding:4px 12px">+ Add item</button>
         </div>
     </fieldset>
+
+    <!-- Modal for Creating New Items in Kaligadh Orders -->
+    <div id="jw-item-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;overflow:auto">
+        <div style="background:white;margin:40px auto;width:90%;max-width:600px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15)">
+            <div style="padding:20px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center">
+                <h2 style="margin:0;font-size:18px">Create New Item</h2>
+                <button type="button" id="jw-modal-close" style="background:none;border:none;font-size:24px;cursor:pointer;color:#999">&times;</button>
+            </div>
+            <form id="jw-item-create-form" style="padding:20px">
+                <input type="hidden" name="action" value="create_item_ajax">
+                <input type="hidden" name="csrf_token" id="jw-csrf-token" value="">
+
+                <div style="margin-bottom:15px">
+                    <label style="display:block;margin-bottom:5px;font-weight:500">Code<span style="color:red">*</span></label>
+                    <input type="text" name="code" maxlength="60" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                </div>
+
+                <div style="margin-bottom:15px">
+                    <label style="display:block;margin-bottom:5px;font-weight:500">Name<span style="color:red">*</span></label>
+                    <input type="text" name="name" maxlength="190" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                </div>
+
+                <div style="margin-bottom:15px">
+                    <label style="display:block;margin-bottom:5px;font-weight:500">Category</label>
+                    <input type="text" name="category" maxlength="60" placeholder="e.g., Ring, Necklace" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                </div>
+
+                <div style="margin-bottom:15px">
+                    <label style="display:block;margin-bottom:5px;font-weight:500">Type</label>
+                    <select name="item_type" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                        <option value="ornament" selected>Ornament</option>
+                        <option value="bullion">Bullion / raw metal</option>
+                        <option value="stone">Stone</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom:15px">
+                    <label style="display:block;margin-bottom:5px;font-weight:500">Default Stock Type<span style="color:red">*</span></label>
+                    <select name="stock_kind" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                        <option value="customer_ordered" selected>Customer Ordered Stock</option>
+                        <option value="showroom">Showroom Stock</option>
+                    </select>
+                    <small style="color:#666;display:block;margin-top:4px">For kaligadh orders, this should be "Customer Ordered Stock"</small>
+                </div>
+
+                <div style="margin-bottom:15px">
+                    <label style="display:block;margin-bottom:5px;font-weight:500">Metal<span style="color:red">*</span></label>
+                    <select name="metal_id" id="jw-modal-metal" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                        <option value="">— Select metal —</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom:15px">
+                    <label style="display:block;margin-bottom:5px;font-weight:500">Purity<span style="color:red">*</span></label>
+                    <select name="purity_id" id="jw-modal-purity" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                        <option value="">— Select purity —</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom:15px">
+                    <label style="display:block;margin-bottom:5px;font-weight:500">Weight Unit<span style="color:red">*</span></label>
+                    <select name="unit_id" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                        <option value="">— Select unit —</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom:15px">
+                    <label style="display:block;margin-bottom:5px;font-weight:500">Track by</label>
+                    <select name="track_mode" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                        <option value="weight" selected>Weight</option>
+                        <option value="piece">Piece</option>
+                    </select>
+                </div>
+
+                <div style="display:flex;gap:10px;margin-top:25px">
+                    <button type="button" id="jw-modal-cancel" style="flex:1;padding:10px;border:1px solid #ddd;background:white;border-radius:4px;cursor:pointer">Cancel</button>
+                    <button type="submit" id="jw-modal-submit" style="flex:1;padding:10px;border:none;background:#0066cc;color:white;border-radius:4px;cursor:pointer;font-weight:500">Create Item</button>
+                </div>
+
+                <div id="jw-modal-error" style="margin-top:15px;padding:10px;background:#f8d7da;color:#721c24;border:1px solid #f5c6cb;border-radius:4px;display:none"></div>
+                <div id="jw-modal-success" style="margin-top:15px;padding:10px;background:#d4edda;color:#155724;border:1px solid #c3e6cb;border-radius:4px;display:none"></div>
+            </form>
+        </div>
+    </div>
 <?php
 }
 
@@ -710,6 +795,157 @@ function jw_line_grid_scripts(): void
         less.value = carats > 0 ? (carats * 0.2 / grams).toFixed(4) : "0";
         less.dispatchEvent(new Event("input", { bubbles: true }));
         delete less.dataset.jwAuto;
+    });
+
+    // Modal for creating new items during kaligadh assignment
+    var itemModal = document.getElementById("jw-item-modal");
+    var itemForm = document.getElementById("jw-item-create-form");
+    var closeBtn = document.getElementById("jw-modal-close");
+    var cancelBtn = document.getElementById("jw-modal-cancel");
+    var submitBtn = document.getElementById("jw-modal-submit");
+    var errorDiv = document.getElementById("jw-modal-error");
+    var successDiv = document.getElementById("jw-modal-success");
+    var metalSelect = document.getElementById("jw-modal-metal");
+    var puritySelect = document.getElementById("jw-modal-purity");
+    var unitSelect = document.querySelector("[name='unit_id']");
+    var currentItemSelect = null;
+    var modalDropdownsPopulated = false;
+
+    function closeModal() {
+        itemModal.style.display = "none";
+        itemForm.reset();
+        errorDiv.style.display = "none";
+        successDiv.style.display = "none";
+        currentItemSelect = null;
+    }
+
+    function populateModalDropdowns() {
+        if (modalDropdownsPopulated) return;
+
+        // Find a metal dropdown from the page and copy its options
+        var pageMetalSelect = document.querySelector("select[name$='_metal_id[]']");
+        if (pageMetalSelect) {
+            metalSelect.innerHTML = pageMetalSelect.innerHTML;
+        }
+
+        // Find a purity dropdown from the page and copy its options
+        var pagePuritySelect = document.querySelector("select[name$='_purity_id[]']");
+        if (pagePuritySelect) {
+            puritySelect.innerHTML = pagePuritySelect.innerHTML;
+        }
+
+        // Find a unit dropdown from the page and copy its options
+        var pageUnitSelect = document.querySelector("select[name$='_unit_id[]']");
+        if (pageUnitSelect && unitSelect) {
+            unitSelect.innerHTML = pageUnitSelect.innerHTML;
+        }
+
+        modalDropdownsPopulated = true;
+    }
+
+    function openModal(itemSelect) {
+        currentItemSelect = itemSelect;
+        populateModalDropdowns();
+
+        // Get CSRF token from page if not already set
+        var csrfInput = document.getElementById("jw-csrf-token");
+        if (!csrfInput.value) {
+            var pageCSRFToken = document.querySelector("input[name='csrf_token']");
+            if (pageCSRFToken) {
+                csrfInput.value = pageCSRFToken.value;
+            }
+        }
+
+        itemModal.style.display = "block";
+        errorDiv.style.display = "none";
+        successDiv.style.display = "none";
+        // Focus on first input
+        itemForm.querySelector('input[name="code"]').focus();
+    }
+
+    closeBtn.addEventListener("click", closeModal);
+    cancelBtn.addEventListener("click", closeModal);
+
+    // Close modal when clicking outside the dialog
+    itemModal.addEventListener("click", function(e) {
+        if (e.target === itemModal) { closeModal(); }
+    });
+
+    // Handle ITEM field click in kaligadh mode
+    document.addEventListener("click", function(event) {
+        var itemSelect = event.target.closest("select[name$='_item_id[]']");
+        if (!itemSelect) { return; }
+
+        var row = itemSelect.closest("tr");
+        if (!row) { return; }
+
+        // Only open modal if in kaligadh mode (stock picker is empty/0)
+        var stockPicker = row.querySelector("select[name$='_stock_unit_id[]']");
+        if (stockPicker && parseInt(stockPicker.value || "0", 10) > 0) {
+            // Showroom stock mode - don't open modal
+            return;
+        }
+
+        // In kaligadh mode - open the modal
+        openModal(itemSelect);
+    });
+
+    // Handle form submission via AJAX
+    itemForm.addEventListener("submit", function(e) {
+        e.preventDefault();
+        errorDiv.style.display = "none";
+        successDiv.style.display = "none";
+
+        var formData = new FormData(itemForm);
+        var submitOriginalText = submitBtn.textContent;
+        submitBtn.textContent = "Creating...";
+        submitBtn.disabled = true;
+
+        fetch(window.location.pathname, {
+            method: "POST",
+            body: formData
+        })
+        .then(function(response) {
+            if (!response.ok) {
+                throw new Error("Network response was not ok");
+            }
+            return response.json();
+        })
+        .then(function(data) {
+            if (data.success) {
+                // Add new item to the ITEM dropdown
+                if (currentItemSelect && data.item_id && data.item_name && data.item_code) {
+                    var newOption = document.createElement("option");
+                    newOption.value = data.item_id;
+                    newOption.textContent = data.item_code + " — " + data.item_name;
+                    newOption.selected = true;
+                    currentItemSelect.appendChild(newOption);
+
+                    // Trigger change event to notify any listeners
+                    currentItemSelect.dispatchEvent(new Event("change", { bubbles: true }));
+
+                    successDiv.textContent = "Item created successfully!";
+                    successDiv.style.display = "block";
+
+                    // Close modal after 1 second
+                    setTimeout(closeModal, 1000);
+                } else {
+                    throw new Error("Invalid response data");
+                }
+            } else {
+                errorDiv.textContent = data.message || "An error occurred";
+                errorDiv.style.display = "block";
+            }
+        })
+        .catch(function(error) {
+            console.error("Error:", error);
+            errorDiv.textContent = "Failed to create item: " + error.message;
+            errorDiv.style.display = "block";
+        })
+        .finally(function() {
+            submitBtn.textContent = submitOriginalText;
+            submitBtn.disabled = false;
+        });
     });
 })();
 </script>

@@ -320,6 +320,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    // AJAX endpoint for creating new items during kaligadh order assignment
+    if ($action === 'create_item_ajax') {
+        require_permission('jewellery', 'edit');
+        header('Content-Type: application/json');
+        try {
+            $newItemId = jewellery_save_item($companyId, [
+                'id' => 0,
+                'code' => (string) ($_POST['code'] ?? ''),
+                'name' => (string) ($_POST['name'] ?? ''),
+                'category' => (string) ($_POST['category'] ?? ''),
+                'item_type' => (string) ($_POST['item_type'] ?? 'ornament'),
+                'metal_id' => (int) ($_POST['metal_id'] ?? 0),
+                'purity_id' => (int) ($_POST['purity_id'] ?? 0),
+                'unit_id' => (int) ($_POST['unit_id'] ?? 0),
+                'track_mode' => (string) ($_POST['track_mode'] ?? 'weight'),
+                'stock_kind' => (string) ($_POST['stock_kind'] ?? 'customer_ordered'),
+                'design_no' => '',
+                'hallmark' => '',
+                'gross_weight' => 0,
+                'stone_weight' => 0,
+                'wastage_pct' => 0,
+                'making_charge_basis' => 'default',
+                'making_charge_rate' => 0,
+                'stone_value' => 0,
+                'reorder_weight' => 0,
+                'vat_applicable' => 0,
+                'vat_base' => 'default',
+                'hs_code' => '',
+                'status' => 'active',
+                'notes' => '',
+            ], $userId);
+
+            echo json_encode([
+                'success' => true,
+                'item_id' => $newItemId,
+                'item_name' => (string) ($_POST['name'] ?? ''),
+                'item_code' => (string) ($_POST['code'] ?? ''),
+                'message' => 'Item created successfully'
+            ]);
+            exit;
+        } catch (Throwable $e) {
+            http_response_code(400);
+            echo json_encode([
+                'success' => false,
+                'message' => $e->getMessage()
+            ]);
+            exit;
+        }
+    }
+
     // Saving an opening posts it: it now writes the item's own opening_qty /
     // opening_amount and goes through the SHARED opening poster, which replaces
     // any prior voucher rather than adding one. There is no separate draft step
