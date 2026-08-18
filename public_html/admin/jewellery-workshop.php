@@ -507,25 +507,21 @@ foreach ($items as $itemRow) {
     $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
 }
 
-// Load all showroom stock pieces from jewellery receipts
+// Load showroom stock from inventory_items (items marked as showroom)
 $orderStockPieces = [];
 try {
     $stockStmt = db()->prepare(
-        "SELECT r.id, COALESCE(a.assignment_no, '') AS assignment_no, r.receipt_no,
-                r.received_gross_weight AS gross_weight, r.stone_weight,
-                r.received_item_id AS item_id, r.received_purity_id AS purity_id,
-                r.unit_id, r.qty_pieces, r.making_amount,
+        "SELECT i.id, '' AS assignment_no, '' AS receipt_no,
+                0 AS gross_weight, 0 AS stone_weight,
+                i.id AS item_id, 0 AS purity_id, 0 AS unit_id, 1 AS qty_pieces, 0 AS making_amount,
                 i.sku AS item_code, i.name AS item_name, i.metal_id,
-                p.code AS purity_code, p.metal_id AS purity_metal_id, u.code AS unit_code,
-                COALESCE(r.size_design, '') AS size_design, COALESCE(r.design_no, '') AS design_no,
-                COALESCE(r.trace_code, '') AS trace_code
-        FROM jewellery_order_receipts r
-        LEFT JOIN jewellery_order_assignments a ON a.id = r.assignment_id
-        LEFT JOIN inventory_items i ON i.id = r.received_item_id
-        LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
-        LEFT JOIN jewellery_units u ON u.id = r.unit_id
-        WHERE r.company_id = :cid AND r.status <> 'cancelled'
-        ORDER BY r.receive_date DESC LIMIT 100"
+                '' AS purity_code, 0 AS purity_metal_id, i.unit AS unit_code,
+                '' AS size_design, '' AS design_no, '' AS trace_code
+        FROM inventory_items i
+        WHERE i.company_id = :cid
+          AND i.item_type != 'service'
+          AND (i.name LIKE '%Showroom%' OR i.sku LIKE '%SHOWROOM%')
+        ORDER BY i.sku ASC LIMIT 100"
     );
     $stockStmt->execute(['cid' => $companyId]);
     $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
