@@ -553,6 +553,306 @@ function jewellery_save_assignments(int $companyId, int $fiscalYearId, string $k
  * The same lookups the save does, so what passes here passes there — the point
  * of checking first is that the answer must not change between the two.
  */
+/**
+ * How much of an assignment may still be changed, and why not more.
+ *
+ * An assignment hardens in two steps rather than one. Before any metal moves it
+ * is only a piece of paper: the kaligad, the item it is against, the rate and
+ * the dates are all still a decision, and every one of them can be corrected.
+ * Once metal has been issued the assignment is the record of a physical
+ * handover — moving it to another kaligad or another item would leave that gold
+ * on nobody's account — so only the promised date and the note stay open. Once
+ * the piece has come back, nothing is open at all.
+ *
+ * Returned as one shape so the page and the engine cannot drift apart: the page
+ * disables the fields this says are shut, and the engine below refuses them.
+ *
+ *   found      the assignment exists and belongs to this company
+ *   assignment the row itself, for the form to fill from
+ *   level      'full' | 'limited' | 'readonly'
+ *   fields     the input names still open at that level
+ *   reason     what to tell the user about the fields that are shut
+ */
+function jewellery_assignment_edit_state(int $companyId, int $assignmentId): array
+{
+    $shut = ['found' => false, 'assignment' => null, 'level' => 'readonly', 'fields' => [], 'reason' => ''];
+    if ($assignmentId <= 0) {
+        return $shut;
+    }
+    $assignment = jewellery_assignment($companyId, $assignmentId);
+    if (!$assignment) {
+        return $shut;
+    }
+
+    $status = (string) ($assignment['status'] ?? '');
+    $issued = (float) ($assignment['issued_gross_weight'] ?? 0) > 0.00005
+        || (float) ($assignment['issued_fine_weight'] ?? 0) > 0.00005
+        || (int) ($assignment['issue_stock_txn_out'] ?? 0) > 0;
+
+    if (in_array($status, ['received', 'cancelled'], true)) {
+        return ['found' => true, 'assignment' => $assignment, 'level' => 'readonly', 'fields' => [],
+            'reason' => $status === 'cancelled'
+                ? 'This assignment was cancelled.'
+                : 'The piece has come back, so the assignment it came back against is settled.'];
+    }
+    if ($issued) {
+        return ['found' => true, 'assignment' => $assignment, 'level' => 'limited',
+            'fields' => ['expected_delivery', 'description'],
+            'reason' => 'Metal has already gone out on this assignment, so the kaligad and the item are '
+                . 'fixed. The promised date and the note can still be changed.'];
+    }
+
+    return ['found' => true, 'assignment' => $assignment, 'level' => 'full',
+        'fields' => ['karigar_id', 'order_line_id', 'category', 'making_basis', 'making_rate',
+            'assigned_date', 'expected_delivery', 'description'],
+        'reason' => ''];
+}
+
+/**
+ * Change an assignment that has not hardened yet.
+ *
+ * Only the fields jewellery_assignment_edit_state() calls open are read; the
+ * rest are ignored rather than refused, so a form posted whole — which is what
+ * a browser sends — does not fail merely for echoing back the locked values it
+ * was displaying. Sending a genuinely impossible change is a different thing
+ * and IS an error: an item on another order, an item already out with somebody,
+ * a kaligad belonging to another company. Those are decisions the user made,
+ * not fields they happened to submit.
+ *
+ * Moving to another item releases the old order line and claims the new one in
+ * the same transaction, so an assignment is never attached to two.
+ */
+function jewellery_update_assignment(int $companyId, int $assignmentId, array $input, int $userId = 0): array
+{
+    $fail = static fn (string $message): array => ['ok' => false, 'error' => $message, 'changed' => []];
+
+    $state = jewellery_assignment_edit_state($companyId, $assignmentId);
+    if (!$state['found']) {
+        return $fail('That assignment does not belong to this company.');
+    }
+    if ($state['level'] === 'readonly') {
+        return $fail($state['reason'] !== '' ? $state['reason'] : 'This assignment can no longer be changed.');
+    }
+    $assignment = $state['assignment'];
+    $open = $state['fields'];
+    $isCustomerWork = (string) ($assignment['assign_kind'] ?? 'customer') === 'customer';
+
+    $sets = [];
+    $params = ['id' => $assignmentId, 'cid' => $companyId];
+    $changed = [];
+    $newLineId = 0;
+    $oldLineId = (int) ($assignment['order_line_id'] ?? 0);
+
+    // The kaligad. Checked against this company before anything is written: an
+    // assignment pointing at another company's craftsman is a hole in the
+    // tenant wall, not a typo.
+    if (in_array('karigar_id', $open, true) && array_key_exists('karigar_id', $input)) {
+        $karigarId = (int) $input['karigar_id'];
+        if ($karigarId > 0 && $karigarId !== (int) $assignment['karigar_id']) {
+            if (!jewellery_karigar($companyId, $karigarId)) {
+                return $fail('That kaligad does not belong to this company.');
+            }
+            $sets[] = 'karigar_id = :karigar';
+            $params['karigar'] = $karigarId;
+            $changed[] = 'kaligad';
+        }
+    }
+
+    // Which item of the order this work is against.
+    if ($isCustomerWork && in_array('order_line_id', $open, true) && array_key_exists('order_line_id', $input)) {
+        $lineId = (int) $input['order_line_id'];
+        if ($lineId > 0 && $lineId !== $oldLineId) {
+            $lineStmt = db()->prepare('SELECT * FROM jewellery_order_lines WHERE id = :id AND company_id = :cid LIMIT 1');
+            $lineStmt->execute(['id' => $lineId, 'cid' => $companyId]);
+            $line = $lineStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            if (!$line) {
+                return $fail('That item does not belong to this company.');
+            }
+            if ((int) $line['order_id'] !== (int) ($assignment['order_id'] ?? 0)) {
+                return $fail('That item belongs to a different order. Cancel this assignment and write a new '
+                    . 'one against the other order instead.');
+            }
+            if ((int) ($line['assignment_id'] ?? 0) > 0 && (int) $line['assignment_id'] !== $assignmentId) {
+                return $fail('That item is already out with a kaligad.');
+            }
+            if ((string) ($line['source'] ?? 'workshop') === 'stock') {
+                return $fail('That item was ordered from Ready to Sale stock — the piece is already made, '
+                    . 'so no kaligad is assigned to it.');
+            }
+            $newLineId = $lineId;
+            $sets[] = 'order_line_id = :line';
+            $params['line'] = $lineId;
+            // The assignment describes the piece it is against, so the piece's
+            // own item, purity and unit travel with the move.
+            foreach (['item_id', 'purity_id', 'unit_id'] as $column) {
+                if ((int) ($line[$column] ?? 0) > 0) {
+                    $sets[] = $column . ' = :' . $column;
+                    $params[$column] = (int) $line[$column];
+                }
+            }
+            $changed[] = 'item';
+        }
+    }
+
+    if (in_array('category', $open, true) && array_key_exists('category', $input)) {
+        $category = (string) $input['category'];
+        if (isset(jewellery_assign_categories()[$category]) && $category !== (string) $assignment['category']) {
+            $sets[] = 'category = :category';
+            $params['category'] = $category;
+            $changed[] = 'category';
+        }
+    }
+    if (in_array('making_basis', $open, true) && array_key_exists('making_basis', $input)) {
+        $basis = (string) $input['making_basis'];
+        if (isset(jewellery_assign_making_bases()[$basis]) && $basis !== (string) $assignment['making_basis']) {
+            $sets[] = 'making_basis = :basis';
+            $params['basis'] = $basis;
+            $changed[] = 'making basis';
+        }
+    }
+    if (in_array('making_rate', $open, true) && array_key_exists('making_rate', $input)) {
+        $rate = jw_round_money((float) $input['making_rate']);
+        if (abs($rate - (float) $assignment['making_rate']) > 0.004) {
+            $sets[] = 'making_rate = :rate';
+            $params['rate'] = $rate;
+            $changed[] = 'making rate';
+        }
+    }
+    if (in_array('assigned_date', $open, true) && array_key_exists('assigned_date', $input)) {
+        $assignedDate = (string) $input['assigned_date'];
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $assignedDate) === 1
+            && $assignedDate !== (string) $assignment['issue_date']) {
+            $sets[] = 'issue_date = :assigned';
+            $params['assigned'] = $assignedDate;
+            $changed[] = 'assigned date';
+        }
+    }
+    if (in_array('expected_delivery', $open, true) && array_key_exists('expected_delivery', $input)) {
+        $expected = (string) $input['expected_delivery'];
+        $expected = preg_match('/^\d{4}-\d{2}-\d{2}$/', $expected) === 1 ? $expected : '';
+        if ($expected !== (string) ($assignment['expected_return_date'] ?? '')) {
+            $sets[] = 'expected_return_date = :expected';
+            $params['expected'] = $expected !== '' ? $expected : null;
+            $changed[] = 'promised date';
+        }
+    }
+    if (in_array('description', $open, true) && array_key_exists('description', $input)) {
+        $notes = mb_substr(trim((string) $input['description']), 0, 255);
+        if ($notes !== (string) ($assignment['notes'] ?? '')) {
+            $sets[] = 'notes = :notes';
+            $params['notes'] = $notes !== '' ? $notes : null;
+            $changed[] = 'description';
+        }
+    }
+
+    if ($sets === []) {
+        return ['ok' => true, 'error' => '', 'changed' => []];
+    }
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        db()->prepare('UPDATE jewellery_order_assignments SET ' . implode(', ', $sets)
+            . ' WHERE id = :id AND company_id = :cid')->execute($params);
+
+        // Order lines carry their own copy of who is making the piece, so the
+        // board reads right without joining back. Both ends move together.
+        $karigarNow = (int) ($params['karigar'] ?? $assignment['karigar_id']);
+        if ($newLineId > 0 && $oldLineId > 0) {
+            db()->prepare('UPDATE jewellery_order_lines SET assignment_id = NULL, karigar_id = NULL
+                WHERE id = :id AND company_id = :cid AND assignment_id = :aid')
+                ->execute(['id' => $oldLineId, 'cid' => $companyId, 'aid' => $assignmentId]);
+        }
+        $linkLineId = $newLineId > 0 ? $newLineId : $oldLineId;
+        if ($linkLineId > 0) {
+            db()->prepare('UPDATE jewellery_order_lines SET assignment_id = :aid, karigar_id = :kid
+                WHERE id = :id AND company_id = :cid')
+                ->execute(['aid' => $assignmentId, 'kid' => $karigarNow, 'id' => $linkLineId, 'cid' => $companyId]);
+        }
+
+        log_activity('jewellery_assignment', $assignmentId, 'updated',
+            'Changed: ' . implode(', ', $changed), $userId ?: null);
+
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+
+        return $fail($exception->getMessage());
+    }
+
+    if ((int) ($assignment['order_id'] ?? 0) > 0) {
+        jewellery_sync_order_status($companyId, (int) $assignment['order_id']);
+    }
+
+    return ['ok' => true, 'error' => '', 'changed' => $changed];
+}
+
+/**
+ * Take back an assignment that never went anywhere.
+ *
+ * Cancelled, not deleted: the assignment number was quoted to a kaligad and may
+ * be written in a book somewhere, so the row stays with its reason on it while
+ * the order item it was holding is released for someone else. Once metal has
+ * been issued there is nothing to take back — the gold is out — so the answer
+ * is no, and the way home is to receive it.
+ */
+function jewellery_unassign_assignment(int $companyId, int $assignmentId, string $reason = '', int $userId = 0): array
+{
+    $state = jewellery_assignment_edit_state($companyId, $assignmentId);
+    if (!$state['found']) {
+        return ['ok' => false, 'error' => 'That assignment does not belong to this company.'];
+    }
+    if ($state['level'] !== 'full') {
+        return ['ok' => false, 'error' => $state['level'] === 'limited'
+            ? 'Metal has already gone out on this assignment, so it cannot simply be removed. Receive the '
+                . 'piece back, or reverse the issue first.'
+            : ($state['reason'] !== '' ? $state['reason'] : 'This assignment can no longer be removed.')];
+    }
+    $assignment = $state['assignment'];
+    $lineId = (int) ($assignment['order_line_id'] ?? 0);
+    $orderId = (int) ($assignment['order_id'] ?? 0);
+    $note = mb_substr(trim($reason), 0, 255);
+
+    $ownsTransaction = !db()->inTransaction();
+    if ($ownsTransaction) {
+        db()->beginTransaction();
+    }
+    try {
+        db()->prepare("UPDATE jewellery_order_assignments SET status = 'cancelled', notes = :notes
+            WHERE id = :id AND company_id = :cid")
+            ->execute(['notes' => $note !== '' ? $note : ($assignment['notes'] ?? null),
+                'id' => $assignmentId, 'cid' => $companyId]);
+        if ($lineId > 0) {
+            db()->prepare('UPDATE jewellery_order_lines SET assignment_id = NULL, karigar_id = NULL
+                WHERE id = :id AND company_id = :cid AND assignment_id = :aid')
+                ->execute(['id' => $lineId, 'cid' => $companyId, 'aid' => $assignmentId]);
+        }
+        log_activity('jewellery_assignment', $assignmentId, 'cancelled',
+            $note !== '' ? $note : 'Assignment withdrawn before any metal went out.', $userId ?: null);
+        if ($ownsTransaction) {
+            db()->commit();
+        }
+    } catch (Throwable $exception) {
+        if ($ownsTransaction && db()->inTransaction()) {
+            db()->rollBack();
+        }
+
+        return ['ok' => false, 'error' => $exception->getMessage()];
+    }
+
+    if ($orderId > 0) {
+        jewellery_sync_order_status($companyId, $orderId);
+    }
+
+    return ['ok' => true, 'error' => ''];
+}
+
 function jewellery_assign_dry_run(int $companyId, string $kind, array $row): array
 {
     $order = null;

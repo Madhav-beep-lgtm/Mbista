@@ -1457,10 +1457,13 @@ function jewellery_delete_order(int $companyId, int $orderId): bool
 function jewellery_assignment(int $companyId, int $assignmentId): ?array
 {
     $stmt = db()->prepare('SELECT a.*, k.name AS karigar_name, k.code AS karigar_code, k.engagement_type, k.party_id,
-            o.order_no, o.order_date, i.sku AS item_code, i.name AS item_name, p.code AS purity_code, p.fineness, u.code AS unit_code
+            o.order_no, o.order_date,
+            COALESCE(ap.name, o.customer_name) AS customer_name,
+            i.sku AS item_code, i.name AS item_name, p.code AS purity_code, p.fineness, u.code AS unit_code
         FROM jewellery_order_assignments a
         INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
         LEFT JOIN jewellery_orders o ON o.id = a.order_id
+        LEFT JOIN accounting_parties ap ON ap.id = o.party_id
         INNER JOIN inventory_items i ON i.id = a.item_id
             INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
         INNER JOIN jewellery_purities p ON p.id = a.purity_id

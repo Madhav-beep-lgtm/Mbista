@@ -2589,6 +2589,13 @@ function jewellery_bills_list(int $companyId, array $filters = []): array
         $sql .= " AND b.status IN ('open', 'part_settled')";
     }
     $sql .= ' ORDER BY ap.name ASC, b.bill_date ASC, b.id ASC';
+    // The bills report asks for a page at a time. It was passing limit and
+    // offset into this function, which ignored them and returned everything —
+    // so its pager moved but the rows never did.
+    $limit = (int) ($filters['limit'] ?? 0);
+    if ($limit > 0) {
+        $sql .= ' LIMIT ' . $limit . ' OFFSET ' . max(0, (int) ($filters['offset'] ?? 0));
+    }
 
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
@@ -2596,6 +2603,37 @@ function jewellery_bills_list(int $companyId, array $filters = []): array
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+/**
+ * What the open bills come to, without listing them.
+ *
+ * The dashboard and the bills page wanted three numbers — money owed to the
+ * shop, money the shop owes, and how many bills that is — and were getting
+ * them by fetching every open bill and adding the column up in PHP. On a shop
+ * with a long ledger that is a large result set read to produce three
+ * integers. The sums are the database's job.
+ *
+ * Kept deliberately identical to the loop it replaced: the same
+ * 'open' + 'part_settled' statuses, the same outstanding expression, and sale
+ * bills counted as receivable with everything else as payable.
+ */
+function jewellery_open_bill_totals(int $companyId): array
+{
+    $stmt = db()->prepare("SELECT
+            COALESCE(SUM(CASE WHEN b.bill_type = 'sale' THEN b.bill_amount - b.settled_amount ELSE 0 END), 0) AS receivable,
+            COALESCE(SUM(CASE WHEN b.bill_type <> 'sale' THEN b.bill_amount - b.settled_amount ELSE 0 END), 0) AS payable,
+            COUNT(*) AS bill_count
+        FROM jewellery_bills b
+        INNER JOIN accounting_parties ap ON ap.id = b.party_id
+        WHERE b.company_id = :cid AND b.status IN ('open', 'part_settled')");
+    $stmt->execute(['cid' => $companyId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    return [
+        'receivable' => jw_round_money((float) ($row['receivable'] ?? 0)),
+        'payable' => jw_round_money((float) ($row['payable'] ?? 0)),
+        'bill_count' => (int) ($row['bill_count'] ?? 0),
+    ];
+}
 function jewellery_settlement(int $companyId, int $settlementId): ?array
 {
     $stmt = db()->prepare('SELECT s.*, ap.name AS party_name FROM jewellery_settlements s
