@@ -87,6 +87,17 @@ $isMoneyIn = $bankSide === 'debit';
             </select>
         </label>
         <label>Party type<input type="text" id="vch-party-type" value="" placeholder="—" disabled></label>
+        <?php // Which bill this settles. A payment recorded against the party
+              // alone can be traced no further than the party: telling which
+              // invoice it cleared means reading narrations and guessing. The
+              // list is whatever bills that party has on record, and it narrows
+              // as soon as a party is chosen. ?>
+        <label>Against bill
+            <select name="reference_no" id="vch-bill" data-selected="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
+                <option value="">Not against a specific bill</option>
+            </select>
+            <span class="frm-optional" id="vch-bill-note">Choose a party to see their bills</span>
+        </label>
         <label>Instrument date<input type="date" name="instrument_date" value="<?= e((string) ($prefill['instrument_date'] ?? '')) ?>"></label>
     </div>
 </section>
@@ -203,8 +214,48 @@ document.addEventListener('DOMContentLoaded', function () {
                 recalc();
             }
         };
-        partySelect.addEventListener('change', function () { applyParty(true); });
+        // The bill list is rebuilt for the chosen party rather than rendered
+        // once and filtered: a company with hundreds of bills would otherwise
+        // ship every one of them into every payment screen.
+        var billsByParty = <?= json_encode($partyBills ?? [], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+        var billSelect = document.getElementById('vch-bill');
+        var billNote = document.getElementById('vch-bill-note');
+        var applyBills = function () {
+            if (!billSelect) { return; }
+            var keep = billSelect.value || billSelect.getAttribute('data-selected') || '';
+            var bills = billsByParty[partySelect.value] || [];
+            billSelect.innerHTML = '';
+            var none = document.createElement('option');
+            none.value = '';
+            none.textContent = 'Not against a specific bill';
+            billSelect.appendChild(none);
+            bills.forEach(function (bill) {
+                var option = document.createElement('option');
+                option.value = bill.ref;
+                option.textContent = bill.label;
+                if (bill.ref === keep) { option.selected = true; }
+                billSelect.appendChild(option);
+            });
+            // A bill already on this voucher stays on it even when it is not in
+            // the list any more, so editing an old payment never drops the
+            // reference somebody recorded.
+            if (keep !== '' && billSelect.value !== keep) {
+                var kept = document.createElement('option');
+                kept.value = keep;
+                kept.textContent = keep + ' (on this voucher)';
+                kept.selected = true;
+                billSelect.appendChild(kept);
+            }
+            if (billNote) {
+                billNote.textContent = partySelect.value === '0' || partySelect.value === ''
+                    ? 'Choose a party to see their bills'
+                    : (bills.length === 0 ? 'No bills on record for this party' : bills.length + ' bill(s) on record');
+            }
+        };
+
+        partySelect.addEventListener('change', function () { applyParty(true); applyBills(); });
         applyParty(false);
+        applyBills();
     }
 });
 </script>

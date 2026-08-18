@@ -305,6 +305,103 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/fixed-assets.php');
     }
 
+    if ($action === 'edit_asset') {
+        // Corrects what an asset SAYS about itself. Deliberately not its cost,
+        // its code, or its class: cost has already been posted to the ledger and
+        // is changed by an addition, the code is embedded in every voucher
+        // number the asset has produced, and the class decides which ledgers it
+        // posts to. Letting any of those be retyped here would leave the
+        // register and the books describing different things.
+        require_permission('accounting', 'edit');
+        $asset = fa_company_asset((int) ($_POST['asset_id'] ?? 0), $companyId);
+        if (!$asset) {
+            flash('error', 'Asset not found for this company.');
+            redirect('admin/fixed-assets.php');
+        }
+        $assetId = (int) $asset['id'];
+        $name = trim((string) ($_POST['name'] ?? ''));
+        if ($name === '') {
+            flash('error', 'An asset needs a name.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        $editCategoryId = (int) ($_POST['category_id'] ?? 0);
+        if ($editCategoryId > 0) {
+            $catChk = db()->prepare('SELECT COUNT(*) FROM asset_categories WHERE id = :id AND company_id = :cid');
+            $catChk->execute(['id' => $editCategoryId, 'cid' => $companyId]);
+            if ((int) $catChk->fetchColumn() === 0) {
+                $editCategoryId = 0;
+            }
+        }
+        $editPool = (string) ($_POST['tax_pool'] ?? '');
+        $editPool = isset(fa_tax_pools()[$editPool]) ? $editPool : null;
+        $editMethod = (string) ($_POST['depreciation_method'] ?? '');
+        if (!isset($methods[$editMethod])) {
+            $editMethod = (string) $asset['depreciation_method'];
+        }
+        $editLife = max(0, (int) ($_POST['useful_life_months'] ?? 0));
+        $editResidual = max(0.0, round((float) ($_POST['residual_value'] ?? 0), 2));
+        // Residual above cost would make the asset depreciable by a negative
+        // amount, and every later charge would compute against nonsense.
+        if ($editResidual > (float) $asset['cost']) {
+            flash('error', 'Residual value cannot exceed the asset cost of ' . number_format((float) $asset['cost'], 2) . '.');
+            redirect('admin/fixed-assets.php?view=' . $assetId);
+        }
+        $editPurchase = fa_valid_date($_POST['purchase_date'] ?? '');
+        $editAvailable = fa_valid_date($_POST['available_for_use_date'] ?? '');
+        $editRef = trim((string) ($_POST['purchase_ref'] ?? ''));
+        $editSupplier = trim((string) ($_POST['supplier'] ?? ''));
+        $editLocation = trim((string) ($_POST['location'] ?? ''));
+        $editCustodian = trim((string) ($_POST['custodian'] ?? ''));
+
+        // Moving the available-for-use date moves where depreciation starts, and
+        // charges already posted were computed from the old one. The change is
+        // allowed - fixing a wrong date is a real need - but it is said out loud
+        // rather than quietly changing what past charges were based on.
+        $chargedStmt = db()->prepare('SELECT COUNT(*) FROM asset_depreciation_schedule WHERE asset_id = :aid AND company_id = :cid');
+        $chargedStmt->execute(['aid' => $assetId, 'cid' => $companyId]);
+        $alreadyCharged = (int) $chargedStmt->fetchColumn();
+        $movedStart = $editAvailable !== null
+            && (string) ($asset['available_for_use_date'] ?? '') !== ''
+            && $editAvailable !== (string) $asset['available_for_use_date'];
+
+        try {
+            db()->prepare('
+                UPDATE fixed_assets
+                   SET name = :name, category_id = :cat, tax_pool = :pool, depreciation_method = :method,
+                       useful_life_months = :life, residual_value = :residual,
+                       purchase_date = :purchased, purchase_ref = :ref, supplier = :supplier,
+                       available_for_use_date = :avail,
+                       depreciation_start_date = COALESCE(:avail2, depreciation_start_date),
+                       location = :location, custodian = :custodian
+                 WHERE id = :id AND company_id = :cid
+            ')->execute([
+                'name' => $name,
+                'cat' => $editCategoryId > 0 ? $editCategoryId : null,
+                'pool' => $editPool,
+                'method' => $editMethod,
+                'life' => $editLife,
+                'residual' => $editResidual,
+                'purchased' => $editPurchase,
+                'ref' => $editRef !== '' ? $editRef : null,
+                'supplier' => $editSupplier !== '' ? $editSupplier : null,
+                'avail' => $editAvailable,
+                'avail2' => $editAvailable,
+                'location' => $editLocation !== '' ? $editLocation : null,
+                'custodian' => $editCustodian !== '' ? $editCustodian : null,
+                'id' => $assetId,
+                'cid' => $companyId,
+            ]);
+            log_activity('fixed_asset', $assetId, 'edited', 'Asset details edited.', $userId);
+            $note = $movedStart && $alreadyCharged > 0
+                ? ' The available-for-use date moved while ' . $alreadyCharged . ' charge(s) are already posted — check the depreciation schedule.'
+                : '';
+            flash('success', 'Asset ' . $asset['asset_code'] . ' updated.' . $note);
+        } catch (Throwable $e) {
+            flash('error', 'Could not update the asset: ' . $e->getMessage());
+        }
+        redirect('admin/fixed-assets.php?view=' . $assetId);
+    }
+
     if ($action === 'delete_asset') {
         // Permanently removes a mistakenly registered asset together with
         // every voucher it generated (acquisition, additions, depreciation,
@@ -2051,6 +2148,109 @@ if ($detailAsset) {
     $faView = 'register';
 }
 
+// Reconciliation Sheet for Fixed Assets: the register exactly as the screen
+// shows it, as a spreadsheet or a print-ready page to save as PDF. Built here,
+// before a byte of the page is sent, because both write their own headers.
+if (($_GET['export'] ?? '') !== '' && $faView === 'register') {
+    require_permission('accounting', 'view');
+    require_once __DIR__ . '/../../app/export_engine.php';
+
+    $expFrom = fa_valid_date($_GET['from'] ?? '') ?? (string) ($fiscalYear['start_date'] ?? date('Y-01-01'));
+    $expTo = fa_valid_date($_GET['to'] ?? '') ?? (string) ($fiscalYear['end_date'] ?? date('Y-12-31'));
+    if ($expTo < $expFrom) {
+        [$expFrom, $expTo] = [$expTo, $expFrom];
+    }
+    $expTypes = ['classwise' => 'Class wise', 'categorywise' => 'Category wise', 'namewise' => 'Name wise'];
+    $expType = isset($expTypes[(string) ($_GET['report_type'] ?? '')]) ? (string) $_GET['report_type'] : 'classwise';
+    $expPool = isset(fa_tax_pools()[(string) ($_GET['pool'] ?? '')]) ? (string) $_GET['pool'] : '';
+
+    $expRows = fa_register_schedule($companyId, $expFrom, $expTo, [
+        'status' => $statusFilter,
+        'class' => $classFilter,
+        'tax_pool' => $expPool,
+        'category_id' => (int) ($_GET['category'] ?? 0),
+    ]);
+    $expGroups = fa_register_group($expRows, $expType, $assetClasses);
+
+    // Two header rows, because the blocks only make sense with their block name
+    // above them: four columns reading Opening/Addition/Disposal/Closing mean
+    // nothing without "Cost" over the top of them.
+    $out = [[
+        'Code', 'Name', 'Category', 'Class', 'Tax pool', 'Model', 'Method',
+        'Cost — opening', 'Cost — addition', 'Cost — disposal', 'Cost — closing',
+        'Acc. dep. — opening', 'Acc. dep. — current', 'Acc. dep. — reversal', 'Acc. dep. — closing',
+        'Acc. imp. — opening', 'Acc. imp. — current', 'Acc. imp. — reversal', 'Acc. imp. — closing',
+        'Revaluation', 'Gain/(loss) on disposal',
+        'Carrying — opening', 'Carrying — addition', 'Carrying — disposal', 'Carrying — closing',
+        'Status',
+    ]];
+    $expLine = static function (array $r) use ($assetClasses): array {
+        $n = static fn (float $v): string => number_format($v, 2, '.', '');
+
+        return [
+            $r['code'], $r['name'], $r['category'] !== '' ? $r['category'] : '—',
+            $assetClasses[$r['class']] ?? $r['class'],
+            $r['tax_pool'] !== '' ? 'Pool ' . strtoupper($r['tax_pool']) : '',
+            '', str_replace('_', ' ', $r['method']),
+            $n($r['cost_opening']), $n($r['cost_addition']), $n($r['cost_disposal']), $n($r['cost_closing']),
+            $n($r['dep_opening']), $n($r['dep_current']), $n($r['dep_reversal']), $n($r['dep_closing']),
+            $n($r['imp_opening']), $n($r['imp_current']), $n($r['imp_reversal']), $n($r['imp_closing']),
+            $n($r['reval_closing']),
+            $r['gain_loss'] === null ? ($r['sold_in_window'] ? 'not recorded' : '') : $n((float) $r['gain_loss']),
+            $n($r['carry_opening']), $n($r['carry_addition']), $n($r['carry_disposal']), $n($r['carry_closing']),
+            str_replace('_', ' ', $r['status']),
+        ];
+    };
+    $expTotalLine = static function (string $label, array $t): array {
+        $n = static fn (float $v): string => number_format($v, 2, '.', '');
+
+        return [
+            $label, '', '', '', '', '', '',
+            $n($t['cost_opening']), $n($t['cost_addition']), $n($t['cost_disposal']), $n($t['cost_closing']),
+            $n($t['dep_opening']), $n($t['dep_current']), $n($t['dep_reversal']), $n($t['dep_closing']),
+            $n($t['imp_opening']), $n($t['imp_current']), $n($t['imp_reversal']), $n($t['imp_closing']),
+            $n($t['reval_closing']), $n($t['gain_loss']),
+            $n($t['carry_opening']), $n($t['carry_addition']), $n($t['carry_disposal']), $n($t['carry_closing']),
+            '',
+        ];
+    };
+    foreach ($expGroups as $groupLabel => $groupRows) {
+        if ($groupLabel !== '') {
+            $out[] = array_merge([$groupLabel . ' (' . count($groupRows) . ')'], array_fill(0, 25, ''));
+        }
+        foreach ($groupRows as $r) {
+            $out[] = $expLine($r);
+        }
+        if ($groupLabel !== '' && count($expGroups) > 1) {
+            $out[] = $expTotalLine($groupLabel . ' subtotal', fa_register_totals($groupRows));
+        }
+    }
+    if ($expRows !== []) {
+        $out[] = $expTotalLine('Total (' . count($expRows) . ' assets)', fa_register_totals($expRows));
+    }
+
+    $expCompany = current_company();
+    export_dispatch(
+        (string) $_GET['export'],
+        'reconciliation-sheet-fixed-assets-' . $expFrom . '-to-' . $expTo,
+        $out,
+        'Reconciliation Sheet for Fixed Assets',
+        [
+            'Company' => (string) ($expCompany['name'] ?? ''),
+            'Period' => $expFrom . ' to ' . $expTo,
+            'Report type' => $expTypes[$expType],
+            'Assets' => (string) count($expRows),
+        ],
+        [
+            // 26 columns of figures need the long edge of the paper.
+            'landscape' => true,
+            'compact' => true,
+            'footnote' => 'Opening is the position immediately before ' . $expFrom . '. Carrying amount is cost, plus any revaluation, '
+                . 'less accumulated depreciation and accumulated impairment. Only posted depreciation is included.',
+        ]
+    );
+}
+
 $pageTitle = 'Fixed Assets';
 $pageSubtitle = 'Asset register, depreciation, and IFRS accounting integration';
 $bodyClass = 'admin-layout accounting-module-page fixed-assets-page';
@@ -2822,6 +3022,49 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </form>
         </section>
     <?php endif; ?>
+    <?php if (user_can_do('accounting', 'edit')): ?>
+    <section class="mbw-card" data-collapsible id="edit-asset">
+        <div class="mbw-card-head"><h2>Edit asset details</h2>
+            <span class="frm-optional">Cost, code and class are not editable here — cost is already in the ledger and is changed by an addition, the code is inside every voucher number this asset has produced, and the class decides which ledgers it posts to</span>
+        </div>
+        <form method="post" class="workspace-form-grid">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="edit_asset">
+            <input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
+            <label>Name<input type="text" name="name" maxlength="190" required value="<?= e((string) $detailAsset['name']) ?>"></label>
+            <label>Category<select name="category_id">
+                <option value="0">— none —</option>
+                <?php foreach ($activeCategories as $c): ?>
+                    <option value="<?= e((int) $c['id']) ?>" <?= (int) ($detailAsset['category_id'] ?? 0) === (int) $c['id'] ? 'selected' : '' ?>><?= e($c['name']) ?></option>
+                <?php endforeach; ?>
+            </select></label>
+            <label>Tax pool (Income Tax Act)<select name="tax_pool">
+                <option value="">— not assigned —</option>
+                <?php foreach (fa_tax_pools() as $poolKey => $poolLabel): ?>
+                    <option value="<?= e($poolKey) ?>" <?= (string) ($detailAsset['tax_pool'] ?? '') === $poolKey ? 'selected' : '' ?>><?= e($poolLabel) ?></option>
+                <?php endforeach; ?>
+            </select></label>
+            <label>Depreciation method<select name="depreciation_method">
+                <?php foreach ($methods as $mKey => $mLabel): ?>
+                    <option value="<?= e($mKey) ?>" <?= (string) $detailAsset['depreciation_method'] === $mKey ? 'selected' : '' ?>><?= e($mLabel) ?></option>
+                <?php endforeach; ?>
+            </select></label>
+            <label>Useful life (months)<input type="number" step="1" min="0" name="useful_life_months" value="<?= e((int) $detailAsset['useful_life_months']) ?>"></label>
+            <label>Residual value<input type="number" step="0.01" min="0" name="residual_value" value="<?= e(number_format((float) $detailAsset['residual_value'], 2, '.', '')) ?>">
+                <span class="frm-optional">Cannot exceed the cost of <?= e(number_format((float) $detailAsset['cost'], 2)) ?></span>
+            </label>
+            <label>Purchase date<input type="date" name="purchase_date" value="<?= e((string) ($detailAsset['purchase_date'] ?? '')) ?>"></label>
+            <label>Available for use date<input type="date" name="available_for_use_date" value="<?= e((string) ($detailAsset['available_for_use_date'] ?? '')) ?>">
+                <span class="frm-optional">Moving this moves where depreciation starts</span>
+            </label>
+            <label>Supplier bill / reference<input type="text" name="purchase_ref" maxlength="120" value="<?= e((string) ($detailAsset['purchase_ref'] ?? '')) ?>"></label>
+            <label>Supplier name<input type="text" name="supplier" maxlength="190" value="<?= e((string) ($detailAsset['supplier'] ?? '')) ?>"></label>
+            <label>Location<input type="text" name="location" maxlength="150" value="<?= e((string) ($detailAsset['location'] ?? '')) ?>"></label>
+            <label>Custodian<input type="text" name="custodian" maxlength="150" value="<?= e((string) ($detailAsset['custodian'] ?? '')) ?>"></label>
+            <div class="workspace-span-2"><button type="submit"><?= icon('companies') ?>Save changes</button></div>
+        </form>
+    </section>
+    <?php endif; ?>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2><?= e($detailAsset['name']) ?> <span class="mbw-pill tone-gray"><?= e($detailAsset['asset_code']) ?></span><?php if ($detailAcquisitionUnposted): ?> <span class="mbw-pill tone-red">GL not posted</span><?php endif; ?></h2>
             <div class="mbw-card-tools"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php')) ?>">Back to register</a></div></div>
@@ -3393,9 +3636,54 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     $regColspan = 29;
     $money = static fn (float $n): string => $n == 0.0 ? '—' : number_format($n, 2);
     ?>
+    <style>
+    /* The row menu. Kept in flow on purpose - see the note on the markup. */
+    details.fa-actions { display: inline-block; }
+    details.fa-actions > summary {
+        cursor: pointer; list-style: none; white-space: nowrap;
+        padding: 4px 10px; border: 1px solid var(--mbw-line, rgba(0,0,0,.2));
+        border-radius: 6px; background: var(--mbw-card, #fff); font-size: 12px;
+    }
+    details.fa-actions > summary::-webkit-details-marker { display: none; }
+    details.fa-actions > summary::after { content: ' BE'; }
+    details.fa-actions[open] > summary { background: var(--mbw-soft, #eef5f0); }
+    .fa-actions-menu {
+        display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+        margin-top: 4px; padding: 4px;
+        border: 1px solid var(--mbw-line, rgba(0,0,0,.16)); border-radius: 8px;
+        background: var(--mbw-card, #fff);
+    }
+    .fa-actions-menu a, .fa-actions-menu button {
+        display: block; width: 100%; text-align: left; font: inherit; font-size: 12px;
+        padding: 5px 8px; border: 0; border-radius: 5px; background: none;
+        color: var(--mbw-ink, #12261f); cursor: pointer; text-decoration: none;
+    }
+    .fa-actions-menu a:hover, .fa-actions-menu button:hover { background: var(--mbw-soft, #eef5f0); }
+    .fa-actions-menu .fa-actions-danger { color: var(--mbw-red, #b91c1c); }
+    .fa-actions-menu .fa-actions-danger:hover { background: var(--mbw-red-soft, #fdeaea); }
+    </style>
+    <?php
+    // The export carries whatever the screen is currently showing, so the sheet
+    // and the screen can never disagree about which period or filter produced it.
+    $regExportQs = http_build_query([
+        'view' => 'register',
+        'from' => $regFrom,
+        'to' => $regTo,
+        'report_type' => $reportType,
+        'status' => $statusFilter,
+        'class' => $classFilter,
+        'category' => $categoryFilter ?: '',
+        'pool' => $poolFilter,
+    ]);
+    ?>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Asset Register</h2>
             <span class="frm-optional">Movement schedule for <?= e($regFrom) ?> to <?= e($regTo) ?> — opening is the position the instant before the start</span>
+            <div class="mbw-card-tools">
+                <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?' . $regExportQs . '&export=xlsx')) ?>">Excel</a>
+                <a class="button secondary" target="_blank" rel="noopener" href="<?= e(url('admin/fixed-assets.php?' . $regExportQs . '&export=pdf')) ?>">PDF</a>
+                <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?' . $regExportQs . '&export=csv')) ?>">CSV</a>
+            </div>
         </div>
         <form method="get" class="workspace-form-grid" style="padding:12px 0">
             <input type="hidden" name="view" value="register">
@@ -3496,7 +3784,30 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <td class="align-right"><?= e($money($r['carry_disposal'])) ?></td>
                             <td class="align-right"><strong><?= e($money($r['carry_closing'])) ?></strong></td>
                             <td><span class="mbw-pill <?= $r['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', $r['status'])) ?></span><?php if (in_array((int) $r['id'], $unpostedAcquisitionIds, true)): ?> <span class="mbw-pill tone-red" title="The acquisition voucher was never posted">GL not posted</span><?php endif; ?></td>
-                            <td><div class="fa-row-actions"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=' . (int) $r['id'])) ?>">Open</a><a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $r['id'])) ?>">Revalue</a><?php if (user_can('delete') && user_can_do('accounting', 'edit')): ?><form method="post" style="display:inline" onsubmit="return confirm('Permanently delete asset <?= e($r['code']) ?> and every voucher it posted? Use Dispose for a real asset leaving the business — Delete is only for wrong entries and cannot be undone.')"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="delete_asset"><input type="hidden" name="asset_id" value="<?= (int) $r['id'] ?>"><button type="submit" class="button danger">Delete</button></form><?php endif; ?></div></td>
+                            <td>
+                                <?php // One menu instead of three buttons repeated across every row.
+                                      // It opens in place rather than floating: the register scrolls
+                                      // sideways, and anything absolutely positioned inside that
+                                      // scroller gets clipped at the edge of the visible area. ?>
+                                <details class="fa-actions">
+                                    <summary>Actions</summary>
+                                    <div class="fa-actions-menu">
+                                        <a href="<?= e(url('admin/fixed-assets.php?view=' . (int) $r['id'])) ?>">Open</a>
+                                        <?php if (user_can_do('accounting', 'edit')): ?>
+                                            <a href="<?= e(url('admin/fixed-assets.php?view=' . (int) $r['id'] . '#edit-asset')) ?>">Edit</a>
+                                        <?php endif; ?>
+                                        <a href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $r['id'])) ?>">Revalue</a>
+                                        <?php if (user_can('delete') && user_can_do('accounting', 'edit')): ?>
+                                            <form method="post" onsubmit="return confirm('Permanently delete asset <?= e($r['code']) ?> and every voucher it posted? Use Dispose for a real asset leaving the business — Delete is only for wrong entries and cannot be undone.')">
+                                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                                <input type="hidden" name="action" value="delete_asset">
+                                                <input type="hidden" name="asset_id" value="<?= (int) $r['id'] ?>">
+                                                <button type="submit" class="fa-actions-danger">Delete</button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </div>
+                                </details>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     <?php if ($groupLabel !== '' && count($registerGroups) > 1): ?>

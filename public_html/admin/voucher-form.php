@@ -554,6 +554,70 @@ if (table_exists('accounting_parties')) {
     }
 }
 
+// The bills each party has on record, so a payment can say WHICH bill it
+// settles. Without it a payment lands against the party as a whole and the
+// only way to tell which invoice was paid is to read narrations and guess -
+// bill-wise tracing is impossible after the fact.
+//
+// A bill is any voucher that is against a party and carries a supplier's
+// reference: a fixed-asset acquisition quoting its purchase_ref, an inventory
+// purchase quoting the supplier's invoice number, a purchase voucher typed by
+// hand. Payments, receipts and contras are excluded - they settle bills, they
+// are not bills.
+$partyBills = [];
+if (table_exists('vouchers') && column_exists('vouchers', 'reference_no') && column_exists('vouchers', 'party_id')) {
+    $billStmt = db()->prepare(
+        "SELECT party_id, reference_no, voucher_no, voucher_date, total_amount, status, voucher_type
+         FROM vouchers
+         WHERE company_id = :cid
+           AND party_id IS NOT NULL
+           AND reference_no IS NOT NULL AND reference_no <> ''
+           AND voucher_type NOT IN ('payment', 'receipt', 'contra')
+           AND status <> 'cancelled'
+         ORDER BY voucher_date DESC, id DESC
+         LIMIT 400"
+    );
+    $billStmt->execute(['cid' => $companyId]);
+    $billRows = $billStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // How often each bill has already been named on a payment or receipt. Not a
+    // settled/outstanding figure - that needs allocation this form does not do -
+    // but enough to stop the same bill being paid twice by accident.
+    $settled = [];
+    if ($billRows !== []) {
+        $paidStmt = db()->prepare(
+            "SELECT party_id, reference_no, COUNT(*) AS times, COALESCE(SUM(total_amount), 0) AS paid
+             FROM vouchers
+             WHERE company_id = :cid AND party_id IS NOT NULL
+               AND reference_no IS NOT NULL AND reference_no <> ''
+               AND voucher_type IN ('payment', 'receipt')
+               AND status = 'posted'
+             GROUP BY party_id, reference_no"
+        );
+        $paidStmt->execute(['cid' => $companyId]);
+        foreach ($paidStmt->fetchAll(PDO::FETCH_ASSOC) as $paid) {
+            $settled[(int) $paid['party_id'] . '|' . (string) $paid['reference_no']] = $paid;
+        }
+    }
+    foreach ($billRows as $bill) {
+        $key = (int) $bill['party_id'] . '|' . (string) $bill['reference_no'];
+        $against = $settled[$key] ?? null;
+        // The type is on the label because a party marked "both" has bills on
+        // each side, and a sales invoice must not be mistaken for something to
+        // pay.
+        $label = (string) $bill['reference_no']
+            . ' — ' . (string) ($bill['voucher_date'] ?? '')
+            . ' — ' . number_format((float) $bill['total_amount'], 2)
+            . ' ' . str_replace('_', ' ', (string) $bill['voucher_type'])
+            . ((string) $bill['status'] !== 'posted' ? ' (' . (string) $bill['status'] . ')' : '')
+            . ($against ? ' — already paid against ' . (int) $against['times'] . 'x (' . number_format((float) $against['paid'], 2) . ')' : '');
+        $partyBills[(int) $bill['party_id']][] = [
+            'ref' => (string) $bill['reference_no'],
+            'label' => $label,
+        ];
+    }
+}
+
 // ---------------------------------------------------------------------------
 // What the screen opens with: a rejected submission, an existing voucher, or
 // this type's own sensible defaults.
