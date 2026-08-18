@@ -544,6 +544,13 @@ function jw_line_grid_scripts(): void
     // A row is off the shelf, or it is work for a kaligad. Never both, and the
     // two halves below are exact opposites so a row can be switched back.
     function releaseRow(row) {
+        // Re-enable ITEM and PURITY when switching back to custom order
+        var itemField = row.querySelector('select[name$="_item_id[]"]');
+        if (itemField) { itemField.disabled = false; itemField.removeAttribute("title"); itemField.selectedIndex = 0; }
+
+        var purityField = row.querySelector('select[name$="_purity_id[]"]');
+        if (purityField) { purityField.disabled = false; purityField.removeAttribute("title"); purityField.selectedIndex = 0; }
+
         var karigar = row.querySelector('select[name$="_karigar_id[]"]');
         if (karigar) {
             karigar.disabled = false;
@@ -567,8 +574,13 @@ function jw_line_grid_scripts(): void
             if (field && value !== "") { field.value = value; }
             return field;
         };
-        put("_item_id[]", read("item"));
-        put("_purity_id[]", read("purity"));
+        // Auto-fill item and purity, then DISABLE them
+        var itemField = put("_item_id[]", read("item"));
+        if (itemField) { itemField.disabled = true; itemField.title = "Locked - from showroom stock"; }
+
+        var purityField = put("_purity_id[]", read("purity"));
+        if (purityField) { purityField.disabled = true; purityField.title = "Locked - from showroom stock"; }
+
         put("_unit_id[]", read("unit"));
         // The piece's own measurements, shown rather than asked for. The engine
         // reads them off the piece again on save, so a browser that got this
