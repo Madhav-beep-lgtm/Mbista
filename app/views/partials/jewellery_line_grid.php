@@ -366,6 +366,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                         ?>
                                         <option value="<?= $pieceId ?>"
                                                 data-item="<?= (int) ($piece['item_id'] ?? 0) ?>"
+                                                data-metal="<?= (int) ($piece['metal_id'] ?? 0) ?>"
                                                 data-purity="<?= (int) ($piece['purity_id'] ?? 0) ?>"
                                                 data-unit="<?= (int) ($piece['unit_id'] ?? 0) ?>"
                                                 data-pcs="<?= e((string) ((float) ($piece['qty_pieces'] ?? 0) ?: 1)) ?>"

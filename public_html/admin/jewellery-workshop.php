@@ -513,8 +513,8 @@ try {
     $stockStmt = db()->prepare(
         "SELECT a.id, a.assignment_no, r.receipt_no, r.received_gross_weight AS gross_weight,
                 r.stone_weight, r.received_item_id AS item_id, r.received_purity_id AS purity_id, r.unit_id, r.qty_pieces, r.making_amount,
-                i.sku AS item_code, i.name AS item_name,
-                p.code AS purity_code, u.code AS unit_code
+                i.sku AS item_code, i.name AS item_name, i.metal_id,
+                p.code AS purity_code, p.metal_id AS purity_metal_id, u.code AS unit_code
         FROM jewellery_order_assignments a
         INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
         INNER JOIN jewellery_order_receipts r ON r.assignment_id = a.id
