@@ -253,9 +253,73 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         };
 
-        partySelect.addEventListener('change', function () { applyParty(true); applyBills(); });
+        // With a party chosen, the line ledgers narrow to that party's own
+        // ledgers plus the cash and bank accounts money actually moves through -
+        // a payment settles a party from a bank, and nothing else belongs on it.
+        // With no party chosen the full chart is offered, exactly as before.
+        //
+        // The list is rebuilt rather than having options hidden: hiding an
+        // <option> is honoured by some browsers and quietly ignored by others,
+        // which would leave a "filtered" list that could still be used to pick a
+        // ledger that was supposed to be out of scope.
+        var ledgerCatalog = <?= json_encode($vchLedgerCatalog ?? [], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+        var partyLedgers = <?= json_encode($vchPartyLedgers ?? [], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+
+        var applyLedgerScope = function () {
+            var own = partyLedgers[partySelect.value] || null;
+            var narrowed = partySelect.value !== '' && partySelect.value !== '0';
+            document.querySelectorAll('.vch-line-ledger').forEach(function (select) {
+                var keep = select.value;
+                var group = null;
+                var frag = document.createDocumentFragment();
+                var blank = document.createElement('option');
+                blank.value = '';
+                blank.textContent = 'Select ledger';
+                frag.appendChild(blank);
+                var shown = 0;
+                ledgerCatalog.forEach(function (ledger) {
+                    if (narrowed) {
+                        var isOwn = own && own.indexOf(ledger.id) !== -1;
+                        if (!isOwn && ledger.cash_bank !== 1) { return; }
+                    }
+                    if (group === null || group.label !== ledger.group) {
+                        group = document.createElement('optgroup');
+                        group.label = ledger.group;
+                        frag.appendChild(group);
+                    }
+                    var option = document.createElement('option');
+                    option.value = String(ledger.id);
+                    option.textContent = ledger.label;
+                    if (String(ledger.id) === keep) { option.selected = true; }
+                    group.appendChild(option);
+                    shown++;
+                });
+                // A ledger already on the line stays on it even when the narrowed
+                // list would not offer it, so switching party on a part-typed
+                // voucher never silently discards a line somebody entered.
+                select.innerHTML = '';
+                select.appendChild(frag);
+                if (keep !== '' && select.value !== keep) {
+                    var kept = document.createElement('option');
+                    kept.value = keep;
+                    kept.textContent = 'Already on this line';
+                    kept.selected = true;
+                    select.appendChild(kept);
+                }
+                // searchable-select reads the options each time it opens, but its
+                // visible box is only re-synced on change.
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+        };
+
+        partySelect.addEventListener('change', function () {
+            applyLedgerScope();
+            applyParty(true);
+            applyBills();
+        });
         applyParty(false);
         applyBills();
+        applyLedgerScope();
     }
 });
 </script>

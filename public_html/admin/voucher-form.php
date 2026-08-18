@@ -508,6 +508,49 @@ if ($optionsTax === []) {
     $optionsTax = array_values(array_filter($optionsAll, static fn (array $ledger): bool => !empty($ledger['roles']['liability']) || !empty($ledger['roles']['tax'])));
 }
 
+// The line ledger list, and which of them belong to a party, so that choosing a
+// party on a payment or receipt narrows the lines to that party's own ledgers
+// plus the cash and bank accounts the money moves through. Only those two
+// groups: a payment settles a party from a bank, and nothing else belongs on it.
+//
+// Deliberately NOT applied to purchase and sales vouchers, which need a third
+// and fourth ledger on the same voucher - VAT recoverable, TDS withheld - and
+// would become impossible to enter if the list were cut to two groups.
+$vchLedgerCatalog = [];
+foreach ($optionsAll as $catalogLedger) {
+    $vchLedgerCatalog[] = [
+        'id' => (int) $catalogLedger['id'],
+        'label' => (string) $catalogLedger['name'] . ' (' . (string) $catalogLedger['code'] . ')',
+        'group' => (string) ($catalogLedger['group_name'] ?? '') !== '' ? (string) $catalogLedger['group_name'] : 'Ungrouped',
+        'cash_bank' => (int) ($catalogLedger['is_cash_or_bank'] ?? 0) === 1 ? 1 : 0,
+    ];
+}
+// A party's own ledgers: what they owe or are owed, and any advance held either
+// way. All four are read because a party set up as "both" has a receivable and a
+// payable, and paying an advance is not the same ledger as settling a bill.
+$vchPartyLedgers = [];
+if (table_exists('accounting_parties')) {
+    $partyLedgerCols = ['ledger_id', 'payable_ledger_id'];
+    foreach (['advance_ledger_id', 'supplier_advance_ledger_id'] as $optionalCol) {
+        if (column_exists('accounting_parties', $optionalCol)) {
+            $partyLedgerCols[] = $optionalCol;
+        }
+    }
+    $plStmt = db()->prepare('SELECT id, ' . implode(', ', $partyLedgerCols) . " FROM accounting_parties WHERE company_id = :cid AND status = 'active'");
+    $plStmt->execute(['cid' => $companyId]);
+    foreach ($plStmt->fetchAll(PDO::FETCH_ASSOC) as $plRow) {
+        $ownIds = [];
+        foreach ($partyLedgerCols as $col) {
+            if ((int) ($plRow[$col] ?? 0) > 0) {
+                $ownIds[] = (int) $plRow[$col];
+            }
+        }
+        if ($ownIds !== []) {
+            $vchPartyLedgers[(int) $plRow['id']] = array_values(array_unique($ownIds));
+        }
+    }
+}
+
 // Stock items, offered only on the four types that can actually move goods and
 // only when this company keeps any. Each carries the ledger its value belongs
 // in, so choosing an item on a purchase fills the line's ledger too.
