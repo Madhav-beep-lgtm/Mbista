@@ -672,8 +672,22 @@ $stockRows = [];
 $position = [];
 $itemLedger = null;
 $ledgerItem = null;
+// The item list is filtered heading by heading. Held in the URL so a filtered
+// list survives a reload, can be bookmarked, and can be sent to somebody.
+$itemFilters = [
+    'search' => trim((string) ($_GET['q'] ?? '')),
+    'code' => trim((string) ($_GET['f_code'] ?? '')),
+    'name' => trim((string) ($_GET['f_name'] ?? '')),
+    'group' => trim((string) ($_GET['f_group'] ?? '')),
+    'stock_kind' => (string) ($_GET['f_kind'] ?? ''),
+    'item_type' => (string) ($_GET['f_type'] ?? ''),
+    'purity_id' => (int) ($_GET['f_purity'] ?? 0),
+    'status' => (string) ($_GET['f_status'] ?? ''),
+];
+$itemFilterOn = $itemFilters !== array_merge($itemFilters, ['search' => '', 'code' => '', 'name' => '',
+    'group' => '', 'stock_kind' => '', 'item_type' => '', 'purity_id' => 0, 'status' => '']);
 if (in_array($view, ['items', 'opening', 'stock'], true)) {
-    $items = jewellery_items_list($companyId, ['search' => (string) ($_GET['q'] ?? '')]);
+    $items = jewellery_items_list($companyId, $itemFilters);
 }
 if ($view === 'items') {
     $editItem = jewellery_item($companyId, (int) ($_GET['edit'] ?? 0));
@@ -1191,10 +1205,17 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Items (<?= count($items) ?>)</h2>
-            <form method="get" style="display:flex;gap:6px;align-items:center">
+            <?php // Declared here, used from inside the table head below: an input may
+                  // belong to a form it does not sit inside, and a <form> cannot wrap a
+                  // <tr>. So the filter row lives under the headings where it belongs
+                  // and still submits as one. ?>
+            <form method="get" id="jw-item-filter" style="display:flex;gap:6px;align-items:center">
                 <input type="hidden" name="view" value="items">
-                <input type="search" name="q" value="<?= e((string) ($_GET['q'] ?? '')) ?>" placeholder="Code, name or design no.">
+                <input type="search" name="q" value="<?= e($itemFilters['search']) ?>" placeholder="Code, name or design no.">
                 <button type="submit" class="button secondary" style="min-height:32px;padding:4px 10px">Search</button>
+                <?php if ($itemFilterOn): ?>
+                    <a class="button soft" style="min-height:32px;padding:4px 10px" href="<?= e(url('admin/jewellery.php?view=items')) ?>">Clear filters</a>
+                <?php endif; ?>
             </form>
         </div>
         <div style="overflow-x:auto"><table>
@@ -1211,6 +1232,17 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 // Sorted here rather than in SQL: the list arrives filtered and
                 // searched, and re-sorting it in PHP keeps every one of those
                 // paths working without a second query.
+                // Every balance on this page in one query. It used to be two
+                // jw_item_balance() calls per item — one for the group subtotal and
+                // one for the row — so a hundred items meant two hundred round
+                // trips to draw one screen.
+                $itemBalances = jw_item_balances($companyId, array_map(
+                    static fn (array $balanceRow): int => (int) $balanceRow['id'],
+                    $items
+                ), null, '');
+                $balanceFine = static function (int $itemId) use ($itemBalances): float {
+                    return (float) ($itemBalances[$itemId]['fine_weight'] ?? 0);
+                };
                 $grouped = [];
                 foreach ($items as $groupRow) {
                     $groupName = trim((string) ($groupRow['category'] ?? ''));
@@ -1219,7 +1251,47 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 ksort($grouped, SORT_NATURAL | SORT_FLAG_CASE);
                 $serial = 0;
             ?>
-            <thead><tr><th class="is-numeric" style="width:44px">SN</th><th>Item group</th><th>Item name</th><th>Item code</th><th>Stock type</th><th>Type</th><th>Metal / Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Net</th><th>VAT</th><th class="is-numeric">In stock (fine)</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr></thead>
+            <?php
+                // One filter under each heading it filters, and blank under the ones
+                // it cannot: a weight column has no useful single value to match on,
+                // and an empty cell says so more honestly than a box that does
+                // nothing. They combine, so "22K bangles that are off" is one
+                // question rather than a search and then reading down the page.
+                $filterInput = static function (string $name, string $value, string $placeholder): string {
+                    return '<input form="jw-item-filter" type="text" name="' . e($name) . '" value="' . e($value)
+                        . '" placeholder="' . e($placeholder) . '" style="width:100%;min-width:70px;font-size:12px;padding:3px 6px">';
+                };
+                $filterSelect = static function (string $name, string $current, array $options): string {
+                    $html = '<select form="jw-item-filter" name="' . e($name) . '" style="width:100%;min-width:70px;font-size:12px;padding:3px 4px">';
+                    foreach ($options as $optValue => $label) {
+                        $html .= '<option value="' . e((string) $optValue) . '"'
+                            . ((string) $optValue === $current ? ' selected' : '') . '>' . e($label) . '</option>';
+                    }
+
+                    return $html . '</select>';
+                };
+                $purityOptions = ['' => 'All'];
+                foreach ($purities as $purityRow) {
+                    $purityOptions[(string) (int) $purityRow['id']] = (string) ($purityRow['metal_code'] ?? '') . ' · ' . (string) $purityRow['code'];
+                }
+            ?>
+            <thead><tr><th class="is-numeric" style="width:44px">SN</th><th>Item group</th><th>Item name</th><th>Item code</th><th>Stock type</th><th>Type</th><th>Metal / Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Net</th><th>VAT</th><th class="is-numeric">In stock (fine)</th><th>Status</th><?php if ($canEdit): ?><th></th><?php endif; ?></tr>
+                <tr class="jw-filter-row no-search" style="background:var(--mbw-soft,#f4f8f5)">
+                    <td></td>
+                    <td><?= $filterInput('f_group', $itemFilters['group'], 'Group') ?></td>
+                    <td><?= $filterInput('f_name', $itemFilters['name'], 'Name') ?></td>
+                    <td><?= $filterInput('f_code', $itemFilters['code'], 'Code') ?></td>
+                    <td><?= $filterSelect('f_kind', $itemFilters['stock_kind'], ['' => 'All', 'showroom' => 'Showroom', 'customer_ordered' => 'Customer Ordered']) ?></td>
+                    <td><?= $filterSelect('f_type', $itemFilters['item_type'], ['' => 'All', 'ornament' => 'Ornament', 'bullion' => 'Bullion', 'stone' => 'Stone', 'other' => 'Other']) ?></td>
+                    <td><?= $filterSelect('f_purity', $itemFilters['purity_id'] > 0 ? (string) $itemFilters['purity_id'] : '', $purityOptions) ?></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td><?= $filterSelect('f_status', $itemFilters['status'], ['' => 'All', 'active' => 'Active', 'inactive' => 'Off']) ?></td>
+                    <?php if ($canEdit): ?><td style="white-space:nowrap"><button form="jw-item-filter" type="submit" class="button secondary" style="min-height:26px;padding:2px 10px;font-size:12px">Apply</button></td><?php endif; ?>
+                </tr>
+            </thead>
             <tbody>
                 <?php if ($items === []): ?><tr><td colspan="<?= $canEdit ? 13 : 12 ?>">No items yet.</td></tr><?php endif; ?>
                 <?php foreach ($grouped as $groupName => $groupRows): ?>
@@ -1230,7 +1302,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         // answer is the sum of the items traced under it.
                         $groupFine = 0.0;
                         foreach ($groupRows as $groupItem) {
-                            $groupFine += (float) jw_item_balance($companyId, (int) $groupItem['id'], null, '')['fine_weight'];
+                            $groupFine += $balanceFine((int) $groupItem['id']);
                         }
                     ?>
                     <tr style="background:var(--mbw-accent-soft,#eef7f1)">
@@ -1241,7 +1313,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         <td colspan="2"></td>
                     </tr>
                 <?php foreach ($groupRows as $row): ?>
-                    <?php $rowBalance = jw_item_balance($companyId, (int) $row['id'], null, ''); ?>
+                    <?php $rowFine = $balanceFine((int) $row['id']); ?>
                     <tr>
                         <td class="is-numeric"><?= ++$serial ?></td>
                         <td style="color:var(--mbw-muted,#64748b)"><?= e((string) $groupName) ?></td>
@@ -1253,7 +1325,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         <td class="is-numeric"><?= $fmt((float) $row['gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small></td>
                         <td class="is-numeric"><?= $fmt((float) $row['net_weight'], 4) ?></td>
                         <td><?= (int) $row['vat_applicable'] === 1 ? '<span class="mbw-pill tone-amber">' . e(str_replace('_', ' ', jw_item_vat_base($row, $settings))) . '</span>' : '<span class="mbw-pill tone-gray">Exempt</span>' ?></td>
-                        <td class="is-numeric"><?= $fmt($rowBalance['fine_weight'], 4) ?></td>
+                        <td class="is-numeric"><?= $fmt($rowFine, 4) ?></td>
                         <td><span class="mbw-pill <?= (string) $row['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= (string) $row['status'] === 'active' ? 'Active' : 'Off' ?></span></td>
                         <?php if ($canEdit): ?><td style="white-space:nowrap">
                             <a class="mbw-view-all" href="<?= e(url('admin/jewellery.php?view=items&edit=' . (int) $row['id'])) ?>">Edit</a>

@@ -80,6 +80,43 @@ function jewellery_items_list(int $companyId, array $filters = []): array
         $params['q2'] = $like;
         $params['q3'] = $like;
     }
+
+    // Column filters. Each narrows one heading, and they combine, so "22K gold
+    // bangles that are off" is one question rather than a search followed by
+    // reading down the page. Kept beside the free-text search rather than
+    // replacing it: the search spans code, name and design number at once,
+    // which no single column filter can do.
+    //
+    // Every value is bound, and the two that are not free text are checked
+    // against their own vocabulary before they reach the query.
+    if (($filters['code'] ?? '') !== '') {
+        $sql .= ' AND i.sku LIKE :f_code';
+        $params['f_code'] = '%' . (string) $filters['code'] . '%';
+    }
+    if (($filters['name'] ?? '') !== '') {
+        $sql .= ' AND i.name LIKE :f_name';
+        $params['f_name'] = '%' . (string) $filters['name'] . '%';
+    }
+    if (($filters['group'] ?? '') !== '') {
+        $sql .= ' AND i.category LIKE :f_group';
+        $params['f_group'] = '%' . (string) $filters['group'] . '%';
+    }
+    if (in_array((string) ($filters['stock_kind'] ?? ''), ['showroom', 'customer_ordered'], true)) {
+        $sql .= ' AND j.stock_kind = :f_kind';
+        $params['f_kind'] = (string) $filters['stock_kind'];
+    }
+    if (($filters['item_type'] ?? '') !== '') {
+        $sql .= ' AND j.jewellery_type = :f_type';
+        $params['f_type'] = (string) $filters['item_type'];
+    }
+    if ((int) ($filters['purity_id'] ?? 0) > 0) {
+        $sql .= ' AND j.purity_id = :f_purity';
+        $params['f_purity'] = (int) $filters['purity_id'];
+    }
+    if (in_array((string) ($filters['status'] ?? ''), ['active', 'inactive'], true)) {
+        $sql .= ' AND i.status = :f_status';
+        $params['f_status'] = (string) $filters['status'];
+    }
     $sql .= ' ORDER BY i.sku ASC';
 
     $stmt = db()->prepare($sql);
