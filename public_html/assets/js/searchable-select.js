@@ -18,6 +18,8 @@
         'background:var(--mbw-card,#fff);color:var(--mbw-ink,#12261f);border:1px solid var(--mbw-line,rgba(0,0,0,.16));' +
         'border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.22)}' +
         '.ss-item{padding:8px 12px;cursor:pointer;font-size:13px}' +
+        '.ss-group{position:sticky;top:0;padding:6px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;' +
+        'text-transform:uppercase;color:var(--mbw-muted,#5b6b64);background:var(--mbw-soft,#eef5f0)}' +
         '.ss-item.is-active,.ss-item:hover{background:var(--mbw-soft,#eef5f0)}' +
         '.ss-empty{padding:10px 12px;font-size:12px;color:var(--mbw-muted,#5b6b64)}';
 
@@ -93,8 +95,28 @@
             var q = (filter || '').toLowerCase();
             list.innerHTML = '';
             visible = [];
+            var lastGroup = null;
             Array.prototype.forEach.call(sel.options, function (opt) {
                 if (q !== '' && opt.text.toLowerCase().indexOf(q) === -1) { return; }
+                // The browser draws <optgroup> headings itself, but this list is
+                // built from the options alone, so a grouped select would come
+                // back flat. The heading is re-emitted when the group changes,
+                // and only ahead of an option that survived the filter — a search
+                // that removes a whole group must not leave its heading standing
+                // over the next group's names. Headings are .ss-group, never
+                // .ss-item, so keyboard navigation still walks options only.
+                var group = opt.parentNode && opt.parentNode.tagName === 'OPTGROUP'
+                    ? (opt.parentNode.label || '')
+                    : null;
+                if (group !== lastGroup) {
+                    lastGroup = group;
+                    if (group) {
+                        var head = document.createElement('div');
+                        head.className = 'ss-group';
+                        head.textContent = group;
+                        list.appendChild(head);
+                    }
+                }
                 visible.push(opt);
                 var item = document.createElement('div');
                 item.className = 'ss-item' + (opt.value === sel.value ? ' is-active' : '');

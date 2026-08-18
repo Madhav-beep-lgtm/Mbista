@@ -429,9 +429,45 @@ if (table_exists('payroll_employees')) {
 $karigars = jewellery_karigars_list($companyId);
 $activeKarigars = array_values(array_filter($karigars, static fn (array $k): bool => (string) $k['status'] === 'active'));
 
-$partyStmt = db()->prepare("SELECT id, code, name FROM accounting_parties WHERE company_id = :cid AND status = 'active' ORDER BY name ASC");
+$partyStmt = db()->prepare("SELECT id, code, name, party_type FROM accounting_parties WHERE company_id = :cid AND status = 'active' ORDER BY name ASC");
 $partyStmt->execute(['cid' => $companyId]);
 $parties = $partyStmt->fetchAll(PDO::FETCH_ASSOC);
+// The counter is looking for a person, but this one list also carries the
+// suppliers and refiners the shop deals with. party_type already records which
+// is which, so the names are gathered under it instead of running together in
+// one alphabetical column — customers first, because that is who an order is
+// normally written for. $parties itself stays flat: two other dropdowns and an
+// array_column() read it as it was.
+$partyGroupLabels = [
+    'customer' => 'Customers',
+    'both'     => 'Customer and supplier',
+    'supplier' => 'Suppliers',
+    'other'    => 'Other',
+];
+$partyGroups = [];
+foreach ($partyGroupLabels as $partyGroupType => $partyGroupLabel) {
+    $inGroup = array_values(array_filter(
+        $parties,
+        static fn (array $p): bool => (string) ($p['party_type'] ?? 'other') === $partyGroupType
+    ));
+    if ($inGroup !== []) {
+        $partyGroups[$partyGroupLabel] = $inGroup;
+    }
+}
+// A value the enum gains later still has to reach the dropdown, so anything
+// that matched no heading above is swept into Other rather than disappearing.
+$partyGroupStrays = array_values(array_filter(
+    $parties,
+    static fn (array $p): bool => !isset($partyGroupLabels[(string) ($p['party_type'] ?? 'other')])
+));
+if ($partyGroupStrays !== []) {
+    $partyGroups['Other'] = array_merge($partyGroups['Other'] ?? [], $partyGroupStrays);
+}
+// One heading over the whole list says nothing, so a shop whose parties are
+// all of one kind gets the plain list it had before.
+if (count($partyGroups) < 2) {
+    $partyGroups = ['' => $parties];
+}
 $ledgerStmt = db()->prepare('SELECT id, code, name FROM ledgers WHERE company_id = :cid ORDER BY code ASC');
 $ledgerStmt->execute(['cid' => $companyId]);
 $ledgers = $ledgerStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -772,8 +808,12 @@ jw_filter_bar_styles();
                 <label>Existing customer
                     <select name="party_id" data-jw-customer-select>
                         <option value="0">— new customer →</option>
-                        <?php foreach ($parties as $p): ?>
-                            <option value="<?= (int) $p['id'] ?>" <?= (int) $orderField('party_id', 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
+                        <?php foreach ($partyGroups as $partyGroupLabel => $groupedParties): ?>
+                            <?php if ($partyGroupLabel !== ''): ?><optgroup label="<?= e($partyGroupLabel) ?>"><?php endif; ?>
+                            <?php foreach ($groupedParties as $p): ?>
+                                <option value="<?= (int) $p['id'] ?>" <?= (int) $orderField('party_id', 0) === (int) $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
+                            <?php endforeach; ?>
+                            <?php if ($partyGroupLabel !== ''): ?></optgroup><?php endif; ?>
                         <?php endforeach; ?>
                     </select>
                 </label>
