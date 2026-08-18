@@ -46,6 +46,103 @@ $fail = static function (string $message, int $code = 1): never {
     exit($code);
 };
 
+// Find the .env this SERVER actually uses.
+//
+// .env is gitignored, so the repository checkout has none: app/config.php looks
+// for one beside itself, finds nothing, and falls back to its development
+// defaults - root, no password, the developer's database name. On a live server
+// that produced "Access denied for user 'root'@'localhost'", which is a true
+// message about entirely the wrong credentials.
+//
+// The deploy puts the real .env one level ABOVE the document root, alongside the
+// app/ it copies there, so that is where to look. The candidates mirror
+// deploy/tasks.sh exactly, including the two ways an account can name its own
+// docroot, so the two can never disagree about which install is being touched.
+$envArgument = '';
+$positional = [];
+foreach (array_slice($argv, 1) as $rawArgument) {
+    if (str_starts_with($rawArgument, '--env=')) {
+        $envArgument = substr($rawArgument, 6);
+        continue;
+    }
+    $positional[] = $rawArgument;
+}
+
+$home = (string) (getenv('HOME') ?: '');
+$docroots = [];
+if ((string) getenv('DEPLOY_DOCROOT') !== '') {
+    $docroots[] = (string) getenv('DEPLOY_DOCROOT');
+}
+if ($home !== '' && is_file($home . '/.deploy-docroot')) {
+    $named = trim((string) @file_get_contents($home . '/.deploy-docroot'));
+    if ($named !== '') {
+        $docroots[] = strtok($named, "\r\n");
+    }
+}
+if ($home !== '') {
+    $docroots[] = $home . '/public_html';
+    $docroots[] = $home . '/mbca.com.np';
+    $docroots[] = $home . '/public_html/mbca.com.np';
+}
+
+// An explicitly named file is authoritative. Searching on after a typo in it
+// would connect to a DIFFERENT database than the operator named, which is the
+// same class of mistake as silently falling back to the dev defaults.
+if ($envArgument !== '') {
+    if (!is_file($envArgument) || !is_readable($envArgument)) {
+        $fail('--env=' . $envArgument . ' is not a readable file.', 2);
+    }
+    if (!str_contains((string) @file_get_contents($envArgument), 'DB_NAME')) {
+        $fail('--env=' . $envArgument . ' does not name a DB_NAME.', 2);
+    }
+}
+
+$envCandidates = [];
+if ($envArgument !== '') {
+    $envCandidates[] = $envArgument;
+}
+foreach ($docroots as $docroot) {
+    $envCandidates[] = dirname($docroot) . '/.env';
+}
+$envCandidates[] = __DIR__ . '/../.env';
+
+$envPath = '';
+foreach ($envCandidates as $candidate) {
+    if (is_file($candidate) && is_readable($candidate) && str_contains((string) @file_get_contents($candidate), 'DB_NAME')) {
+        $envPath = $candidate;
+        break;
+    }
+}
+if ($envPath === '') {
+    fwrite(STDERR, "apply-migration: no .env naming a DB_NAME was found. Looked in:\n");
+    foreach (array_unique($envCandidates) as $candidate) {
+        fwrite(STDERR, '  - ' . $candidate . "\n");
+    }
+    $fail('point at it explicitly with --env=/full/path/to/.env rather than let the dev defaults be used.', 2);
+}
+fwrite(STDOUT, 'apply-migration: using ' . $envPath . "\n");
+
+// Put them in the environment BEFORE config.php runs. load_env_file() skips any
+// key already set, so these win over the repository's absent-or-example file
+// instead of racing it.
+foreach (file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+    $line = trim($line);
+    if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+        continue;
+    }
+    [$key, $value] = explode('=', $line, 2);
+    $key = trim($key);
+    $value = trim($value);
+    if (strlen($value) > 1 && (($value[0] === '"' && str_ends_with($value, '"')) || ($value[0] === "'" && str_ends_with($value, "'")))) {
+        $value = substr($value, 1, -1);
+    }
+    if ($key !== '') {
+        putenv($key . '=' . $value);
+        $_ENV[$key] = $value;
+        $_SERVER[$key] = $value;
+    }
+}
+
 $configPath = __DIR__ . '/../app/config.php';
 if (!is_file($configPath)) {
     $fail('cannot find app/config.php next to this script - is the repository complete?', 2);
@@ -94,7 +191,7 @@ try {
     $fail('could not read the migrations ledger: ' . $e->getMessage(), 3);
 }
 
-$argument = $argv[1] ?? '';
+$argument = $positional[0] ?? '';
 
 if ($argument === '' || $argument === '--list' || $argument === '-l') {
     $files = glob($dir . '/*.sql') ?: [];
