@@ -494,9 +494,12 @@ $orderOnHand = [];
 // order would strike out its own items.
 $orderStockPieces = [];
 
-// Load showroom stock pieces
+// Load stock balances (only for jewellery items; regular inventory items don't have jewellery_stock_txns)
 foreach ($items as $itemRow) {
-    $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
+    $itemType = (string) ($itemRow['item_type'] ?? '');
+    if ($itemType === 'jewellery' || $itemType === '') {
+        $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
+    }
 }
 
 try {
