@@ -1731,6 +1731,30 @@ if (!in_array($invView, $allowedViews, true)) {
 $lowOnly = (string) ($_GET['low'] ?? '') === '1';
 $isLowStock = static fn (array $item): bool => (float) $item['reorder_level'] > 0 && (float) $item['on_hand'] <= (float) $item['reorder_level'];
 $visibleItems = $lowOnly ? array_values(array_filter($items, $isLowStock)) : $items;
+// A page at a time, for two reasons rather than one. The obvious one is the
+// markup: a few thousand items is megabytes of table. The costly one is that
+// each row asks inv_item_valuation() what it is worth, and that reads the cost
+// layers and the latest NRV assessment for the item — several queries apiece,
+// thousands of times, to draw a screen showing fifty.
+$invPerPage = (int) ($_GET['per_page'] ?? 50);
+if (!in_array($invPerPage, [25, 50, 100, 200], true)) {
+    $invPerPage = 50;
+}
+$invTotalItems = count($visibleItems);
+$invPageCount = max(1, (int) ceil($invTotalItems / $invPerPage));
+$invPage = max(1, min($invPageCount, (int) ($_GET['page'] ?? 1)));
+$pagedItems = array_slice($visibleItems, ($invPage - 1) * $invPerPage, $invPerPage);
+// Whatever else is in the URL travels with the pager, so paging a low-stock
+// list does not quietly show everything again.
+$invPageUrl = static function (array $overrides) use ($lowOnly, $invPerPage): string {
+    $query = array_filter([
+        'low' => $lowOnly ? '1' : '',
+        'per_page' => (string) $invPerPage,
+    ], static fn ($v): bool => (string) $v !== '');
+
+    return url('admin/accounting-inventory.php?' . http_build_query(array_merge($query, $overrides)))
+        . '#item-stock-summary';
+};
 $moveItemId = (int) ($_GET['move_item'] ?? 0);
 $pageTitle = $invView === 'manufacturing' ? 'Manufacturing' : 'Inventory';
 $pageSubtitle = $inventoryProfile['show_manufacturing']
@@ -2580,7 +2604,8 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 <?php if ($invView === 'inventory'): ?>
 <section class="mbw-card" data-collapsible id="item-stock-summary">
     <div class="mbw-card-head">
-        <h2>Item Stock Summary<?= $lowOnly ? ' — low stock only' : '' ?></h2>
+        <h2>Item Stock Summary<?= $lowOnly ? ' — low stock only' : '' ?>
+            <small style="font-weight:400;color:var(--mbw-muted,#64748b)">(<?= (int) $invTotalItems ?> item<?= $invTotalItems === 1 ? '' : 's' ?>)</small></h2>
         <div class="mbw-card-tools">
             <?php if ($lowOnly): ?><a class="mbw-view-all" href="<?= e(url('admin/accounting-inventory.php#item-stock-summary')) ?>">Show all items</a><?php endif; ?>
             <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=stock-valuation')) ?>">Valuation report &#8594;</a>
@@ -2591,7 +2616,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         <thead><tr><th>SKU</th><th>Name</th><th>Type</th><th>Method</th><th>Unit</th><th class="is-numeric">On hand</th><th class="is-numeric">Unit cost</th><th class="is-numeric">Value at cost</th><th class="is-numeric">Reorder</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
             <?php if ($visibleItems === []): ?><tr><td colspan="11"><?= $lowOnly ? 'No items are at or below their reorder level.' : 'No items yet.' ?></td></tr><?php endif; ?>
-            <?php foreach ($visibleItems as $item): ?>
+            <?php foreach ($pagedItems as $item): ?>
                 <?php $low = $isLowStock($item); $iv = inv_item_valuation($companyId, $item); ?>
                 <tr>
                     <td><?= e($item['sku']) ?></td><td><?= e($item['name']) ?></td><td><?= e(str_replace('_', ' ', $item['item_type'])) ?></td>
@@ -2612,6 +2637,19 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         </tbody>
     </table>
     </div>
+    <?php if ($invPageCount > 1): ?>
+        <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="Stock summary pages">
+            <?php if ($invPage > 1): ?><a class="button secondary" href="<?= e($invPageUrl(['page' => $invPage - 1])) ?>">Previous</a><?php endif; ?>
+            <span>Page <?= (int) $invPage ?> of <?= (int) $invPageCount ?> · <?= (int) $invTotalItems ?> items</span>
+            <?php if ($invPage < $invPageCount): ?><a class="button secondary" href="<?= e($invPageUrl(['page' => $invPage + 1])) ?>">Next</a><?php endif; ?>
+            <span style="margin-left:auto;display:flex;gap:6px;align-items:center">Rows
+                <?php foreach ([25, 50, 100, 200] as $size): ?>
+                    <a class="button soft" style="<?= $size === $invPerPage ? 'font-weight:700' : '' ?>"
+                       href="<?= e($invPageUrl(['per_page' => (string) $size, 'page' => 1])) ?>"><?= $size ?></a>
+                <?php endforeach; ?>
+            </span>
+        </nav>
+    <?php endif; ?>
 </section>
 
 <?php if ($showWarehouseStockCard): ?>
