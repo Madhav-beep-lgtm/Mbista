@@ -748,15 +748,39 @@ function jw_line_grid_scripts(): void
             lock.parentNode.removeChild(lock);
         });
         ["_delivery_date[]", "_qty_pieces[]", "_gross_weight[]", "_stone_weight[]"].forEach(function (suffix) {
-            var field = row.querySelector('input[name$="' + suffix + '"]');
+            var field = rowField(row, suffix);
             if (field) { field.readOnly = false; field.removeAttribute("title"); }
         });
+        // The weights belonged to the piece that was on this row, not to the
+        // order. Leaving them behind would price a kaligad's new work at the
+        // measurements of a bracelet the customer is no longer buying.
+        ["_gross_weight[]", "_stone_weight[]"].forEach(function (suffix) {
+            var field = rowField(row, suffix);
+            if (field) { field.value = "0"; }
+        });
+    }
+
+    // Every field in a row is named <prefix>_<what>[], so the prefix is read off
+    // the line's own hidden id and the fields are then addressed by their whole
+    // name. Matching on the tail alone is what put the unit id into the stock
+    // picker and blanked it: "l_stock_unit_id[]" ends with "_unit_id[]".
+    function rowPrefix(row) {
+        var lineId = row.querySelector('input[name$="_line_id[]"]');
+        var name = lineId ? lineId.name : "";
+        return name ? name.slice(0, name.length - "_line_id[]".length) : "";
+    }
+
+    function rowField(row, suffix) {
+        var prefix = rowPrefix(row);
+        return prefix
+            ? row.querySelector('[name="' + prefix + suffix + '"]')
+            : row.querySelector('[name$="' + suffix + '"]');
     }
 
     function claimRow(row, option) {
         var read = function (key) { return option.getAttribute("data-" + key) || ""; };
         var put = function (suffix, value) {
-            var field = row.querySelector('[name$="' + suffix + '"]');
+            var field = rowField(row, suffix);
             if (field && value !== "") { field.value = value; }
             return field;
         };
@@ -798,7 +822,7 @@ function jw_line_grid_scripts(): void
         // reads them off the piece again on save, so a browser that got this
         // wrong cannot put one ring's weight on another ring's bill.
         // NOTE: PCS is always editable (customer may order different quantity)
-        put("_qty_pieces[]:pcs", read("pcs")); // Auto-fill but NOT read-only
+        put("_qty_pieces[]", read("pcs")); // Auto-fill but NOT read-only
 
         ["_gross_weight[]:gross", "_stone_weight[]:stone"].forEach(function (pair) {
             var parts = pair.split(":");
@@ -943,7 +967,10 @@ function jw_line_grid_scripts(): void
         if (!less) { return; }
         var current = parseFloat(less.value) || 0;
         if (current > 0 && !less.dataset.jwDerived) { return; }
-        var unitSelect = row.querySelector('select[name$="_unit_id[]"]');
+        // By whole name, not by tail: the stock picker is "<prefix>_stock_unit_id[]"
+        // and would match a tail search for the unit, costing this sum the row's
+        // real gram factor.
+        var unitSelect = rowField(row, "_unit_id[]");
         var chosenUnit = unitSelect && unitSelect.options[unitSelect.selectedIndex];
         var grams = chosenUnit ? parseFloat(chosenUnit.getAttribute("data-grams")) : 1;
         if (!isFinite(grams) || grams <= 0) { grams = 1; }
