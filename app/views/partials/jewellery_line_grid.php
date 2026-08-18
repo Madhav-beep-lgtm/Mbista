@@ -123,6 +123,16 @@ table.jw-lines td.c-del button:hover { background: var(--mbw-red-soft, #fdeaea);
     justify-content: flex-start;
     gap: 5px;
     min-width: 0;
+    /* portal.css lays this label out as a GRID, at a specificity this rule
+       cannot beat, so display:flex above never takes effect and
+       justify-content:flex-start stops meaning "pack to the top" and starts
+       meaning "do not stretch the column". The track then shrank to the
+       browser default width of an input, every field came out 206px wide
+       inside a 295px cell, and width:100% resolved against the shrunken
+       track rather than the cell — so nothing lined up and no width rule
+       could fix it. One full-width track leaves no free space for either
+       meaning to act on. */
+    grid-template-columns: minmax(0, 1fr);
 }
 .workspace-form-grid > label > input,
 .workspace-form-grid > label > select,
