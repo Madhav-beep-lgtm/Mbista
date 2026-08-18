@@ -568,7 +568,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
 
                 <div style="margin-bottom:15px">
                     <label style="display:block;margin-bottom:5px;font-weight:500">Weight Unit<span style="color:red">*</span></label>
-                    <select name="unit_id" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
+                    <select name="unit_id" id="jw-modal-unit" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box">
                         <option value="">— Select unit —</option>
                     </select>
                 </div>
@@ -807,7 +807,7 @@ function jw_line_grid_scripts(): void
     var successDiv = document.getElementById("jw-modal-success");
     var metalSelect = document.getElementById("jw-modal-metal");
     var puritySelect = document.getElementById("jw-modal-purity");
-    var unitSelect = document.querySelector("[name='unit_id']");
+    var unitSelect = document.getElementById("jw-modal-unit");
     var currentItemSelect = null;
     var modalDropdownsPopulated = false;
 
