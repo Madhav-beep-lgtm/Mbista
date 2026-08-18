@@ -507,7 +507,7 @@ foreach ($items as $itemRow) {
     $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
 }
 
-// Load showroom stock pieces from jewellery receipts (marked as showroom)
+// Load all showroom stock pieces from jewellery receipts
 $orderStockPieces = [];
 try {
     $stockStmt = db()->prepare(
@@ -524,17 +524,13 @@ try {
         LEFT JOIN inventory_items i ON i.id = r.received_item_id
         LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
         LEFT JOIN jewellery_units u ON u.id = r.unit_id
-        WHERE r.company_id = :cid
-          AND r.status <> 'cancelled'
-          AND (COALESCE(a.assignment_no, '') LIKE '%SHOWROOM%' OR COALESCE(a.notes, '') LIKE '%showroom%' OR COALESCE(r.remarks, '') LIKE '%showroom%')
-          AND r.id NOT IN (SELECT COALESCE(stock_receipt_id, 0) FROM jewellery_order_lines WHERE source = 'stock' AND stock_receipt_id IS NOT NULL AND order_id != :keep_id)
-        ORDER BY r.receive_date DESC"
+        WHERE r.company_id = :cid AND r.status <> 'cancelled'
+        ORDER BY r.receive_date DESC LIMIT 100"
     );
-    $stockStmt->execute(['cid' => $companyId, 'keep_id' => (int) ($editOrder['id'] ?? 0)]);
+    $stockStmt->execute(['cid' => $companyId]);
     $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
-    error_log("[DEBUG] Showroom receipts loaded: " . count($orderStockPieces));
 } catch (Exception $e) {
-    error_log("[ERROR] Failed to load showroom stock: " . $e->getMessage());
+    error_log("[ERROR] Failed to load stock: " . $e->getMessage());
 }
 $cashBankLedgers = [];
 if ($view === 'orders' && table_exists('ledgers')) {
