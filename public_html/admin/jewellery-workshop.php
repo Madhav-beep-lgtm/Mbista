@@ -510,6 +510,12 @@ foreach ($items as $itemRow) {
 // Load showroom stock pieces (from receipts, with or without karigad assignment)
 $orderStockPieces = [];
 try {
+    // First check if receipts exist for this company
+    $checkStmt = db()->prepare("SELECT COUNT(*) as cnt FROM jewellery_order_receipts WHERE company_id = :cid");
+    $checkStmt->execute(['cid' => $companyId]);
+    $checkResult = $checkStmt->fetch(PDO::FETCH_ASSOC);
+    error_log("[DEBUG] Total receipts for company_id=" . $companyId . ": " . $checkResult['cnt']);
+
     $stockStmt = db()->prepare(
         "SELECT r.id, COALESCE(a.assignment_no, '') AS assignment_no, r.receipt_no,
                 r.received_gross_weight AS gross_weight, r.stone_weight,
@@ -530,6 +536,10 @@ try {
     );
     $stockStmt->execute(['cid' => $companyId, 'keep_id' => (int) ($editOrder['id'] ?? 0)]);
     $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
+    error_log("[DEBUG] Stock pieces after filter: " . count($orderStockPieces) . " items");
+    if (count($orderStockPieces) > 0) {
+        error_log("[DEBUG] First item: " . json_encode($orderStockPieces[0]));
+    }
 } catch (Exception $e) {
     error_log("[ERROR] Failed to load showroom stock: " . $e->getMessage());
 }
