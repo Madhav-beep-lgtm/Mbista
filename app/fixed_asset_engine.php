@@ -774,28 +774,38 @@ function fa_depreciation_plan(int $companyId, string $from, string $to, array $f
     // than once per asset per month.
     $ids = array_map(static fn (array $a): int => (int) $a['id'], $assets);
     $ph = implode(',', array_fill(0, count($ids), '?'));
-    // Two figures per month, because they answer different questions. "charged"
-    // is whether the month has been touched at all, which is what decides
-    // whether to charge it again - by MONTH, since a monthly charge covers its
-    // whole month wherever in it the entry happens to be dated. "in_window" is
-    // only the part dated inside the window, which is what the register counts
-    // as the period's expense; a charge dated 13 Shrawan belongs to the year
-    // that ended on the 15th, not to the one starting on the 16th.
+    // Every charge already on record, with its date. A period now runs from the
+    // year's own start day rather than a calendar month end, so it straddles two
+    // calendar months and cannot be keyed by year-month any more: whether a
+    // period has been charged is answered by asking which charges fall between
+    // its two dates.
     $doneStmt = db()->prepare(
-        "SELECT asset_id, DATE_FORMAT(period_date, '%Y-%m') AS ym, SUM(depreciation) AS charged,
-                SUM(CASE WHEN period_date >= ? AND period_date <= ? THEN depreciation ELSE 0 END) AS in_window
+        'SELECT asset_id, period_date, depreciation
          FROM asset_depreciation_schedule
-         WHERE company_id = ? AND asset_id IN (" . $ph . ')
-         GROUP BY asset_id, ym'
+         WHERE company_id = ? AND period_date <= ? AND asset_id IN (' . $ph . ')'
     );
-    $doneStmt->execute(array_merge([$from, $to, $companyId], $ids));
+    $doneStmt->execute(array_merge([$companyId, $to], $ids));
     $already = [];
     foreach ($doneStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $already[(int) $row['asset_id']][(string) $row['ym']] = [
-            'charged' => (float) $row['charged'],
-            'in_window' => (float) $row['in_window'],
+        $already[(int) $row['asset_id']][] = [
+            'date' => (string) $row['period_date'],
+            'dep' => (float) $row['depreciation'],
         ];
     }
+
+    // Months are added by clamping the day rather than letting PHP roll over:
+    // 31 January plus one month is 3 March to DateTime, which would shunt every
+    // later period of a year that began on a 31st.
+    $addMonths = static function (DateTimeImmutable $base, int $count): DateTimeImmutable {
+        $day = (int) $base->format('j');
+        $firstOfTarget = $base->modify('first day of this month')->modify('+' . $count . ' month');
+
+        return $firstOfTarget->setDate(
+            (int) $firstOfTarget->format('Y'),
+            (int) $firstOfTarget->format('n'),
+            min($day, (int) $firstOfTarget->format('t'))
+        );
+    };
 
     $plans = [];
     foreach ($assets as $asset) {
@@ -814,7 +824,6 @@ function fa_depreciation_plan(int $companyId, string $from, string $to, array $f
             'opening_carrying' => fa_round((float) $asset['carrying_amount']),
             'months' => [],
             'already_charged' => 0.0,
-            'prior_period_months' => 0,
             'total' => 0.0,
             'skipped' => '',
         ];
@@ -849,41 +858,42 @@ function fa_depreciation_plan(int $companyId, string $from, string $to, array $f
         $windowFrom = new DateTimeImmutable($from);
         $stop = new DateTimeImmutable($to);
         $ready = new DateTimeImmutable($readyRaw);
-        $cursor = ($ready > $windowFrom ? $ready : $windowFrom)->modify('first day of this month');
 
-        while ($cursor <= $stop) {
-            $monthEnd = $cursor->modify('last day of this month');
-            $daysInMonth = (int) $monthEnd->format('j');
-
-            // The slice of this calendar month that belongs to BOTH the window
-            // and the asset's life. Pro-rating only the first month was wrong
-            // at both ends: a fiscal year running 16 Shrawan to 15 Shrawan
-            // touches THIRTEEN calendar months, so charging a whole month at
-            // each end put thirteen months of depreciation into a twelve-month
-            // year and overstated the expense. Charging 16/31 and 15/31 of the
-            // two half months adds back to exactly one.
-            $effFrom = $ready > $cursor ? $ready : $cursor;
-            if ($windowFrom > $effFrom) {
-                $effFrom = $windowFrom;
+        // Periods run from the FINANCIAL YEAR's own start day, not from calendar
+        // month ends. A year beginning 16 Shrawan has twelve periods of 16th to
+        // 15th, the last ending on the year's final day - so the schedule reads
+        // as twelve whole months instead of two stub months bracketing eleven
+        // full ones, and the year's charge needs no pro-rating at its edges at
+        // all. Only an asset that came into use part-way through a period is
+        // pro-rated, which is the only case where a part period is real.
+        $index = 0;
+        while (true) {
+            $periodStart = $addMonths($windowFrom, $index);
+            if ($periodStart > $stop) {
+                break;
             }
-            $effTo = $monthEnd > $stop ? $stop : $monthEnd;
-            if ($effTo < $effFrom) {
-                $cursor = $cursor->modify('first day of next month');
+            $nextStart = $addMonths($windowFrom, $index + 1);
+            $fullEnd = $nextStart->modify('-1 day');
+            $periodEnd = $fullEnd > $stop ? $stop : $fullEnd;
+            $index++;
+
+            // The slice of this period the asset was actually in use for.
+            $effFrom = $ready > $periodStart ? $ready : $periodStart;
+            if ($effFrom > $periodEnd) {
                 continue;
             }
-            $periodDate = $effTo;
-            $ym = $cursor->format('Y-m');
+            $periodDate = $periodEnd;
 
-            if (isset($already[$assetId][$ym])) {
-                $plan['already_charged'] += (float) $already[$assetId][$ym]['in_window'];
-                // A month whose charge sits outside the window is still not
-                // charged again, but it is not this period's expense either -
-                // counted separately so the panel can say so instead of
-                // quietly disagreeing with the register.
-                if ((float) $already[$assetId][$ym]['in_window'] <= 0) {
-                    $plan['prior_period_months']++;
+            // Already charged? Anything dated inside this period counts, whatever
+            // day of it the entry happens to carry.
+            $chargedHere = 0.0;
+            foreach ($already[$assetId] ?? [] as $priorCharge) {
+                if ($priorCharge['date'] >= $periodStart->format('Y-m-d') && $priorCharge['date'] <= $periodEnd->format('Y-m-d')) {
+                    $chargedHere += $priorCharge['dep'];
                 }
-                $cursor = $cursor->modify('first day of next month');
+            }
+            if ($chargedHere > 0) {
+                $plan['already_charged'] += $chargedHere;
                 continue;
             }
 
@@ -891,9 +901,10 @@ function fa_depreciation_plan(int $companyId, string $from, string $to, array $f
             $running['carrying_amount'] = $carrying;
             $charge = fa_asset_monthly_charge($running);
 
-            $daysCharged = (int) $effFrom->diff($effTo)->days + 1;
-            if ($daysCharged < $daysInMonth) {
-                $charge = fa_round($charge * $daysCharged / $daysInMonth);
+            $fullDays = (int) $periodStart->diff($fullEnd)->days + 1;
+            $usedDays = (int) $effFrom->diff($periodEnd)->days + 1;
+            if ($usedDays < $fullDays) {
+                $charge = fa_round($charge * $usedDays / $fullDays);
             }
             $charge = min($charge, max(0.0, fa_round($carrying - $residual)));
 
@@ -910,8 +921,6 @@ function fa_depreciation_plan(int $companyId, string $from, string $to, array $f
                 'carrying' => $carrying,
             ];
             $plan['total'] = fa_round($plan['total'] + $charge);
-
-            $cursor = $cursor->modify('first day of next month');
         }
 
         $plan['closing_accumulated'] = fa_round($accumulated);
@@ -928,7 +937,7 @@ function fa_depreciation_plan(int $companyId, string $from, string $to, array $f
  */
 function fa_depreciation_plan_totals(array $plans): array
 {
-    $totals = ['months' => 0, 'to_post' => 0.0, 'already_charged' => 0.0, 'assets' => 0, 'skipped' => 0, 'prior_period_months' => 0];
+    $totals = ['months' => 0, 'to_post' => 0.0, 'already_charged' => 0.0, 'assets' => 0, 'skipped' => 0];
     foreach ($plans as $plan) {
         if ((string) $plan['skipped'] !== '') {
             $totals['skipped']++;
@@ -936,7 +945,6 @@ function fa_depreciation_plan_totals(array $plans): array
         }
         $totals['assets']++;
         $totals['months'] += count($plan['months']);
-        $totals['prior_period_months'] += (int) ($plan['prior_period_months'] ?? 0);
         $totals['to_post'] += (float) $plan['total'];
         $totals['already_charged'] += (float) $plan['already_charged'];
     }

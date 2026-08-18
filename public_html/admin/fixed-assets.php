@@ -3594,13 +3594,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <p class="frm-optional" style="padding:12px">Every month in this window is already charged — nothing left to post.</p>
         <?php endif; ?>
         <p class="frm-optional" style="padding:0 12px 12px">
-            The first and last months are pro-rated by the days that fall inside the window, so a fiscal year running mid-month to mid-month
-            still charges twelve months and not thirteen. A month already charged is left alone, which makes this safe to re-run after adding
+            Periods run from the financial year&rsquo;s own start day, not from calendar month ends: a year beginning 16 Shrawan charges
+            twelve periods of 16th&nbsp;to&nbsp;15th, the last ending on the year&rsquo;s final day. Only an asset that came into use part-way
+            through a period is pro-rated, since that is the only part period that is real. A month already charged is left alone, which makes this safe to re-run after adding
             a late asset. Nothing is charged below residual value, and an asset held for sale is not charged at all (IFRS 5.25).
             &ldquo;Charge for the window&rdquo; is what the register shows as this period&rsquo;s depreciation &mdash; the two always agree.
-            <?php if ((int) $depTotals['prior_period_months'] > 0): ?>
-                <br><strong><?= (int) $depTotals['prior_period_months'] ?> month(s)</strong> are not charged again because they already carry a charge dated before this window &mdash; that charge belongs to the earlier period, so it is counted in opening rather than here.
-            <?php endif; ?>
+
         </p>
         <?php endif; ?>
     </section>
