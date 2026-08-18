@@ -38,6 +38,15 @@
 
         var wrap = document.createElement('span');
         wrap.className = 'ss-wrap';
+        // A select the page has deliberately hidden must not reappear as a
+        // visible search box. The wrapper inherits the select's own display
+        // state, because from here on the wrapper IS the field as far as the
+        // page is concerned — the select itself is always display:none.
+        // Without this, the jewellery order form's stock picker — hidden on
+        // rows that are not off-the-shelf — came back as a search box on every
+        // row, but only for companies holding twelve or more pieces, which is
+        // where this enhancer switches itself on.
+        if (sel.style.display === 'none') { wrap.style.display = 'none'; }
         sel.parentNode.insertBefore(wrap, sel);
         wrap.appendChild(sel);
         sel.style.display = 'none';

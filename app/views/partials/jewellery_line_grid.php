@@ -723,8 +723,7 @@ function jw_line_grid_scripts(array $ctx = []): void
             if (field.tagName === "SELECT") { field.selectedIndex = 0; return; }
             field.value = field.type === "number" ? "0" : "";
         });
-        var stockPicker = row.querySelector(".jw-stock-pick");
-        if (stockPicker) { stockPicker.style.display = "none"; }
+        setFieldShown(row.querySelector(".jw-stock-pick"), false);
         // Show manual item div for reset rows
         var itemCells = row.querySelectorAll('td[data-label="Item"]');
         itemCells.forEach(function(cell) {
@@ -789,6 +788,16 @@ function jw_line_grid_scripts(array $ctx = []): void
         var lineId = row.querySelector('input[name$="_line_id[]"]');
         var name = lineId ? lineId.name : "";
         return name ? name.slice(0, name.length - "_line_id[]".length) : "";
+    }
+
+    // A long dropdown is replaced on screen by searchable-select.js, which
+    // wraps it and hides the original. Toggling the select then changes
+    // nothing a user can see, so the wrapper is what has to be shown or
+    // hidden once it exists.
+    function setFieldShown(field, shown) {
+        if (!field) { return; }
+        var onScreen = field.closest('.ss-wrap') || field;
+        onScreen.style.display = shown ? 'block' : 'none';
     }
 
     function rowField(row, suffix) {
@@ -886,7 +895,7 @@ function jw_line_grid_scripts(array $ctx = []): void
         var isShowroom = orderTypeSelect.value === "showroom";
 
         // Toggle stock picker vs manual item selection
-        if (stockPicker) { stockPicker.style.display = isShowroom ? "block" : "none"; }
+        setFieldShown(stockPicker, isShowroom);
 
         // Find the div containing manual item selection (look for the one with flex layout)
         var itemCells = row.querySelectorAll('td[data-label="Item"]');
