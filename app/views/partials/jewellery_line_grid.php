@@ -354,18 +354,42 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                 <?php if (!empty($stockPieces)): ?>
                                     <?php foreach ($stockPieces as $piece): ?>
                                         <?php
+                                            // The counter reads this list looking for a ring, not for
+                                            // a barcode, so the piece is named first and identified
+                                            // after: name, its own code, what it is made of, what it
+                                            // weighs, and only then the trace that tells two
+                                            // identical bracelets apart.
                                             $pieceId = (int) ($piece['id'] ?? 0);
                                             if ($pieceId <= 0) continue;
                                             $pieceName = trim((string) ($piece['item_name'] ?? ''));
-                                            $traceCode = trim((string) ($piece['trace_code'] ?? ''));
+                                            $pieceCode = trim((string) ($piece['item_code'] ?? ''));
+                                            $purityCode = trim((string) ($piece['purity_code'] ?? ''));
+                                            // The shop's own tag, when the piece carries one, is what
+                                            // the person at the counter is holding — the trace code is
+                                            // the fallback for stock that was never tagged.
+                                            $pieceTag = trim((string) ($piece['tag_no'] ?? ''));
+                                            $traceCode = $pieceTag !== ''
+                                                ? $pieceTag
+                                                : trim((string) ($piece['trace_code'] ?? ''));
                                             // Pieces tracked by weight carry no piece count — an
                                             // opening balance of 4.36gm is one object, not zero of
                                             // them, so "Qty: 0" is only shown when it is a real count.
                                             $qtyAvailable = (float) ($piece['qty_pieces'] ?? 0);
-                                            $pieceLabel = ($traceCode !== '' ? $traceCode : 'Stock #' . $pieceId)
-                                                . ' | ' . ($pieceName !== '' ? $pieceName : (string) ($piece['item_code'] ?? 'Item'))
-                                                . ' | ' . $fmt((float) ($piece['gross_weight'] ?? 0), 4) . ' ' . (string) ($piece['unit_code'] ?? '')
-                                                . ($qtyAvailable > 0 ? ' | Qty: ' . $fmt($qtyAvailable, 0) : '');
+                                            $labelParts = [$pieceName !== '' ? $pieceName : ($pieceCode !== '' ? $pieceCode : 'Stock #' . $pieceId)];
+                                            if ($pieceCode !== '' && $pieceName !== '') {
+                                                $labelParts[0] .= ' (' . $pieceCode . ')';
+                                            }
+                                            if ($purityCode !== '') {
+                                                $labelParts[] = $purityCode;
+                                            }
+                                            $labelParts[] = $fmt((float) ($piece['gross_weight'] ?? 0), 4) . ' ' . (string) ($piece['unit_code'] ?? '');
+                                            if ($qtyAvailable > 0) {
+                                                $labelParts[] = $fmt($qtyAvailable, 0) . ' pc';
+                                            }
+                                            if ($traceCode !== '') {
+                                                $labelParts[] = $traceCode;
+                                            }
+                                            $pieceLabel = implode(' | ', $labelParts);
                                         ?>
                                         <option value="<?= $pieceId ?>"
                                                 data-item="<?= (int) ($piece['item_id'] ?? 0) ?>"
