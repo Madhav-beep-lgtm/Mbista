@@ -522,22 +522,20 @@ function jw_line_grid_scripts(): void
             <input type="hidden" name="action" value="create_item_ajax">
             <input type="hidden" name="csrf_token" id="jw-csrf-token" value="">
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:20px">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:15px;margin-bottom:20px">
+                <!-- Row 1: Code, Name, Category, Type -->
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Code<span style="color:red;margin-left:2px">*</span></label>
                     <input type="text" name="code" maxlength="60" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
                 </div>
-
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Name<span style="color:red;margin-left:2px">*</span></label>
                     <input type="text" name="name" maxlength="190" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
                 </div>
-
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Category</label>
                     <input type="text" name="category" maxlength="60" placeholder="Ring, Necklace, etc." style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
                 </div>
-
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Type</label>
                     <select name="item_type" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
@@ -548,29 +546,26 @@ function jw_line_grid_scripts(): void
                     </select>
                 </div>
 
-                <div style="grid-column:1/-1">
+                <!-- Row 2: Default Stock Type, Metal, Purity, Weight Unit -->
+                <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Default Stock Type<span style="color:red;margin-left:2px">*</span></label>
                     <select name="stock_kind" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
                         <option value="customer_ordered" selected>Customer Ordered Stock</option>
                         <option value="showroom">Showroom Stock</option>
                     </select>
-                    <small style="color:#666;display:block;margin-top:4px;font-size:12px">For kaligadh orders, this should be "Customer Ordered Stock"</small>
                 </div>
-
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Metal<span style="color:red;margin-left:2px">*</span></label>
                     <select name="metal_id" id="jw-modal-metal" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
                         <option value="">— Select metal —</option>
                     </select>
                 </div>
-
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Purity<span style="color:red;margin-left:2px">*</span></label>
                     <select name="purity_id" id="jw-modal-purity" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
                         <option value="">— Select purity —</option>
                     </select>
                 </div>
-
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Weight Unit<span style="color:red;margin-left:2px">*</span></label>
                     <select name="unit_id" id="jw-modal-unit" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
@@ -578,12 +573,85 @@ function jw_line_grid_scripts(): void
                     </select>
                 </div>
 
+                <!-- Row 3: Track by, Design/ref no., Hallmark, Reference gross weight -->
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Track by</label>
                     <select name="track_mode" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
                         <option value="weight" selected>Weight</option>
                         <option value="piece">Piece</option>
                     </select>
+                </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Design / Ref No.</label>
+                    <input type="text" name="design_no" maxlength="60" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Hallmark</label>
+                    <input type="text" name="hallmark" maxlength="60" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Ref Gross Weight</label>
+                    <input type="number" name="reference_gross_weight" step="0.0001" min="0" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
+
+                <!-- Row 4: Reference stone weight, Default wastage %, Making basis, Default making rate -->
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Ref Stone Weight</label>
+                    <input type="number" name="reference_stone_weight" step="0.0001" min="0" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Default Wastage %</label>
+                    <input type="number" name="default_wastage_pct" step="0.001" min="0" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Making Basis</label>
+                    <select name="making_basis" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                        <option value="">Company default</option>
+                        <option value="weight">Weight</option>
+                        <option value="piece">Piece</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Default Making Rate</label>
+                    <input type="number" name="default_making_rate" step="0.01" min="0" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
+
+                <!-- Row 5: Default stone value, Reorder weight, VAT base, HS code -->
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Default Stone Value</label>
+                    <input type="number" name="default_stone_value" step="0.01" min="0" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Reorder Weight</label>
+                    <input type="number" name="reorder_weight" step="0.0001" min="0" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">VAT Base</label>
+                    <select name="vat_base" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                        <option value="">Use company default</option>
+                        <option value="weight">Weight</option>
+                        <option value="value">Value</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">HS Code</label>
+                    <input type="text" name="hs_code" maxlength="20" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px">
+                </div>
+
+                <!-- Row 6: Checkboxes and Notes -->
+                <div>
+                    <label style="display:flex;align-items:center;margin-bottom:6px;font-weight:600;font-size:13px">
+                        <input type="checkbox" name="vat_applicable" style="margin-right:8px">VAT Applicable
+                    </label>
+                </div>
+                <div>
+                    <label style="display:flex;align-items:center;margin-bottom:6px;font-weight:600;font-size:13px">
+                        <input type="checkbox" name="is_active" checked style="margin-right:8px">Active
+                    </label>
+                </div>
+                <div style="grid-column:3/-1">
+                    <label style="display:block;margin-bottom:6px;font-weight:600;font-size:13px">Notes</label>
+                    <textarea name="notes" maxlength="500" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:13px;resize:vertical;min-height:32px"></textarea>
                 </div>
             </div>
 
