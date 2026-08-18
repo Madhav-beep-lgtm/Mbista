@@ -526,7 +526,7 @@ try {
         LEFT JOIN jewellery_units u ON u.id = r.unit_id
         WHERE r.company_id = :cid
           AND r.status <> 'cancelled'
-          AND (a.assignment_no LIKE '%SHOWROOM%' OR a.notes LIKE '%showroom%' OR r.remarks LIKE '%showroom%')
+          AND (COALESCE(a.assignment_no, '') LIKE '%SHOWROOM%' OR COALESCE(a.notes, '') LIKE '%showroom%' OR COALESCE(r.remarks, '') LIKE '%showroom%')
           AND r.id NOT IN (SELECT COALESCE(stock_receipt_id, 0) FROM jewellery_order_lines WHERE source = 'stock' AND stock_receipt_id IS NOT NULL AND order_id != :keep_id)
         ORDER BY r.receive_date DESC"
     );
