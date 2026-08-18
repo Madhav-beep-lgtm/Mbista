@@ -239,6 +239,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
     <meta name="theme-color" content="#064e3b">
+    <?php // Readable on any host without a login: view source and search for
+          // mbw-build. Two hosts with the same value are running the same code. ?>
+    <meta name="mbw-build" content="<?= e(app_build_stamp()) ?>">
     <?php require __DIR__ . '/pwa_head.php'; ?>
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">

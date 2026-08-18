@@ -157,6 +157,57 @@ function e(mixed $value): string
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
 
+/**
+ * Which build this host is serving, as a string you can read off the page.
+ *
+ * "Is this a deployment lag or a code bug?" is otherwise unanswerable from the
+ * outside: two hosts render the same page from different files and nothing in
+ * the output says so. The commit answers it when .git is deployed; the digest
+ * answers it always, because it is taken from the files themselves — two hosts
+ * showing the same digest ARE running the same code, whatever git says.
+ *
+ * Cheap enough to run on every request: four stat calls and four small hashes,
+ * memoised for the process.
+ */
+function app_build_stamp(): string
+{
+    static $stamp = null;
+    if ($stamp !== null) {
+        return $stamp;
+    }
+    $root = dirname(__DIR__);
+
+    $commit = '';
+    $head = $root . '/.git/HEAD';
+    if (is_readable($head)) {
+        $ref = trim((string) file_get_contents($head));
+        if (str_starts_with($ref, 'ref: ')) {
+            $refFile = $root . '/.git/' . trim(substr($ref, 5));
+            if (is_readable($refFile)) {
+                $commit = substr(trim((string) file_get_contents($refFile)), 0, 7);
+            }
+        } elseif ($ref !== '') {
+            $commit = substr($ref, 0, 7);
+        }
+    }
+
+    // The files a stale deploy actually shows up in. Content, not mtime: a
+    // checkout or an rsync rewrites timestamps without changing the code.
+    $watched = [
+        '/app/views/partials/jewellery_line_grid.php',
+        '/app/jewellery_trace.php',
+        '/app/helpers.php',
+        '/public_html/admin/jewellery-workshop.php',
+    ];
+    $parts = [];
+    foreach ($watched as $relative) {
+        $path = $root . $relative;
+        $parts[] = is_readable($path) ? (string) md5_file($path) : 'missing';
+    }
+    $digest = substr(md5(implode('|', $parts)), 0, 8);
+
+    return $stamp = ($commit !== '' ? $commit . '-' : '') . $digest;
+}
 function icon(string $name): string
 {
     $icons = [

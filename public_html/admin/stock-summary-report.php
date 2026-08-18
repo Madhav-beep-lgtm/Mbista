@@ -110,6 +110,10 @@ $filters = [
         ? (string) $_GET['jewellery_stock_kind'] : '',
     'zero_movement' => !isset($_GET['applied']) || isset($_GET['zero_movement']),
     'zero_closing' => !isset($_GET['applied']) || isset($_GET['zero_closing']),
+    // Off by default and on first load both, which is the opposite of the two
+    // above: they widen an already-meaningful list, this one un-hides rows that
+    // have nothing to say.
+    'dormant' => isset($_GET['dormant']),
     'group_by' => in_array((string) ($_GET['group_by'] ?? ''), ['type', 'valuation', 'ledger', 'stock_kind'], true) ? (string) $_GET['group_by'] : '',
     'ledger_id' => (int) ($_GET['ledger'] ?? 0),
 ];
@@ -145,6 +149,7 @@ $qs = http_build_query(array_filter([
     'jewellery_stock_kind' => $filters['jewellery_stock_kind'] ?: null,
     'zero_movement' => $filters['zero_movement'] ? 1 : null,
     'zero_closing' => $filters['zero_closing'] ? 1 : null,
+    'dormant' => $filters['dormant'] ? 1 : null,
     'group_by' => $filters['group_by'] ?: null,
     'ledger' => $filters['ledger_id'] ?: null,
     'applied' => 1,
@@ -323,6 +328,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
         <label style="flex-direction:row;display:flex;align-items:center;gap:8px"><input type="checkbox" name="zero_movement" <?= $filters['zero_movement'] ? 'checked' : '' ?> style="width:auto;min-height:auto"> Include zero-movement items</label>
         <label style="flex-direction:row;display:flex;align-items:center;gap:8px"><input type="checkbox" name="zero_closing" <?= $filters['zero_closing'] ? 'checked' : '' ?> style="width:auto;min-height:auto"> Include zero closing balance</label>
+        <label style="flex-direction:row;display:flex;align-items:center;gap:8px" title="Items with no opening balance, no movement in this period and no closing balance are hidden. Tick to list them too."><input type="checkbox" name="dormant" <?= $filters['dormant'] ? 'checked' : '' ?> style="width:auto;min-height:auto"> Show items with no balance or movement</label>
         <label>Rows per page
             <select name="per_page">
                 <?php foreach ([25, 50, 100, 200] as $pp): ?><option value="<?= $pp ?>" <?= $perPage === $pp ? 'selected' : '' ?>><?= $pp ?></option><?php endforeach; ?>
@@ -510,7 +516,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     'jewellery_stock_kind' => $filters['jewellery_stock_kind'],
                     'group_by' => $filters['group_by'], 'ledger' => $filters['ledger_id'] ?: null,
                     'zero_movement' => $filters['zero_movement'] ? 1 : null,
-                    'zero_closing' => $filters['zero_closing'] ? 1 : null, 'applied' => 1,
+                    'zero_closing' => $filters['zero_closing'] ? 1 : null,
+                    'dormant' => $filters['dormant'] ? 1 : null, 'applied' => 1,
                 ], static fn ($value): bool => $value !== null && $value !== '') as $name => $value): ?>
                     <input type="hidden" name="<?= e((string) $name) ?>" value="<?= e((string) $value) ?>">
                 <?php endforeach; ?>

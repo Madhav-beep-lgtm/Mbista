@@ -151,6 +151,8 @@ function sr_replay_balance(array $state): array
  * (string[] master/location types), valuation (''|fifo|weighted_average|
  * specific), search (code/name), stock_status (''|positive|zero|negative),
  * zero_movement (bool include), zero_closing (bool include),
+ * dormant (bool include — an item with no opening, no movement and no
+ * closing is off by default; it is a catalogue entry, not stock),
  * group_by (''|type|location|valuation|ledger|stock_kind).
  *
  * Returns ['rows' => [...], 'totals' => [...], 'generated' => meta].
@@ -167,6 +169,11 @@ function sr_stock_summary(int $companyId, array $f): array
     $status = (string) ($f['stock_status'] ?? '');
     $includeZeroMovement = (bool) ($f['zero_movement'] ?? true);
     $includeZeroClosing = (bool) ($f['zero_closing'] ?? true);
+    // An item with nothing in any column is a name in the catalogue, not
+    // stock, and a hundred of them bury the dozen lines that matter. Off
+    // unless asked for, because the question this report answers is what
+    // the shop HAS and what MOVED.
+    $includeDormant = (bool) ($f['dormant'] ?? false);
 
     $itemSql = "SELECT i.id, i.sku, i.name, i.item_type, i.valuation_method, i.unit, i.purchase_rate,
             i.opening_qty, i.opening_amount, i.default_warehouse_id, i.category,
@@ -307,6 +314,16 @@ function sr_stock_summary(int $companyId, array $f): array
         $closing = sr_snapshot($state, $warehouseFilterOn, $scopedQty, $avgUnitAt($state));
 
         $hasMovement = $in['qty'] > INV_EPSILON || $out['qty'] > INV_EPSILON || $damage['qty'] > INV_EPSILON;
+        // Quantity AND value both, so a row carrying a balance worth money at
+        // zero quantity — a rounding remnant, a write-down — is still shown.
+        $isDormant = !$hasMovement
+            && abs($opening['qty']) <= INV_EPSILON && abs($closing['qty']) <= INV_EPSILON
+            && abs((float) $opening['amount']) < 0.005 && abs((float) $closing['amount']) < 0.005
+            && abs((float) $in['amount']) < 0.005 && abs((float) $out['amount']) < 0.005
+            && abs((float) $damage['amount']) < 0.005;
+        if (!$includeDormant && $isDormant) {
+            continue;
+        }
         if (!$includeZeroMovement && !$hasMovement) {
             continue;
         }
