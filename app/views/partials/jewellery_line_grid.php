@@ -290,7 +290,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
             <thead>
                 <tr>
                     <?php if ($withWorkshop && $withStock): ?>
-                        <th rowspan="2" class="c-src">From stock</th>
+                        <th rowspan="2" class="c-src">Order type</th>
                     <?php endif; ?>
                     <th rowspan="2" class="c-item">Item</th>
                     <th rowspan="2" class="c-sel">Purity</th>
@@ -348,39 +348,44 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                   // engine reads them off the piece again on save, so
                                   // what is shown and what is stored cannot drift. ?>
                             <select name="<?= $prefix ?>_stock_unit_id[]" class="jw-stock-pick"
-                                    title="Choose an exact finished piece from showroom stock or select New assignment for custom kaligadh work">
-                                <option value="0">— New assignment —</option>
-                                <?php if (!empty($stockPieces)): ?>
-                                    <option value="0" disabled>─ Showroom stock (exact weight available) ─</option>
-                                <?php endif; ?>
-                                <?php foreach ($stockPieces as $piece): ?>
-                                    <?php
-                                        $pieceId = (int) ($piece['id'] ?? 0);
-                                        if ($pieceId <= 0) {
-                                            continue;
-                                        }
-                                        $pieceName = trim((string) ($piece['item_name'] ?? ''));
-                                        $traceCode = trim((string) ($piece['trace_code'] ?? ''));
-                                        $qtyAvailable = (int) ($piece['qty_pieces'] ?? 1);
-                                        $pieceLabel = '  ' . ($traceCode !== '' ? $traceCode : 'Stock #' . $pieceId)
-                                            . ' | ' . ($pieceName !== '' ? $pieceName : (string) ($piece['item_code'] ?? 'Item'))
-                                            . ' | ' . $fmt((float) ($piece['gross_weight'] ?? 0), 4)
-                                            . ' ' . (string) ($piece['unit_code'] ?? '')
-                                            . ' | Qty: ' . $qtyAvailable
-                                            . ' | ' . (string) ($piece['purity_code'] ?? '');
-                                    ?>
-                                    <option value="<?= $pieceId ?>"
-                                            data-item="<?= (int) ($piece['item_id'] ?? 0) ?>"
-                                            data-purity="<?= (int) ($piece['purity_id'] ?? 0) ?>"
-                                            data-unit="<?= (int) ($piece['unit_id'] ?? 0) ?>"
-                                            data-pcs="<?= e((string) ((float) ($piece['qty_pieces'] ?? 0) ?: 1)) ?>"
-                                            data-gross="<?= e((string) (float) ($piece['gross_weight'] ?? 0)) ?>"
-                                            data-stone="<?= e((string) (float) ($piece['stone_weight'] ?? 0)) ?>"
-                                            data-making="<?= e((string) (float) ($piece['making_amount'] ?? 0)) ?>"
-                                            data-size="<?= e((string) ($piece['size_design'] ?? $piece['design_no'] ?? '')) ?>"
-                                            title="<?= e($pieceLabel) ?>"
-                                            <?= (int) ($row['stock_unit_id'] ?? 0) === $pieceId ? 'selected' : '' ?>><?= e($pieceLabel) ?></option>
-                                <?php endforeach; ?>
+                                    title="Select order type: Showroom stock (existing pieces) or New assignment (for kaligadh)">
+                                <optgroup label="Showroom stock (exact weight available)">
+                                    <?php if (!empty($stockPieces)): ?>
+                                        <?php foreach ($stockPieces as $piece): ?>
+                                            <?php
+                                                $pieceId = (int) ($piece['id'] ?? 0);
+                                                if ($pieceId <= 0) {
+                                                    continue;
+                                                }
+                                                $pieceName = trim((string) ($piece['item_name'] ?? ''));
+                                                $traceCode = trim((string) ($piece['trace_code'] ?? ''));
+                                                $qtyAvailable = (int) ($piece['qty_pieces'] ?? 1);
+                                                $pieceLabel = '  ' . ($traceCode !== '' ? $traceCode : 'Stock #' . $pieceId)
+                                                    . ' | ' . ($pieceName !== '' ? $pieceName : (string) ($piece['item_code'] ?? 'Item'))
+                                                    . ' | ' . $fmt((float) ($piece['gross_weight'] ?? 0), 4)
+                                                    . ' ' . (string) ($piece['unit_code'] ?? '')
+                                                    . ' | Qty: ' . $qtyAvailable
+                                                    . ' | ' . (string) ($piece['purity_code'] ?? '');
+                                            ?>
+                                            <option value="<?= $pieceId ?>"
+                                                    data-item="<?= (int) ($piece['item_id'] ?? 0) ?>"
+                                                    data-purity="<?= (int) ($piece['purity_id'] ?? 0) ?>"
+                                                    data-unit="<?= (int) ($piece['unit_id'] ?? 0) ?>"
+                                                    data-pcs="<?= e((string) ((float) ($piece['qty_pieces'] ?? 0) ?: 1)) ?>"
+                                                    data-gross="<?= e((string) (float) ($piece['gross_weight'] ?? 0)) ?>"
+                                                    data-stone="<?= e((string) (float) ($piece['stone_weight'] ?? 0)) ?>"
+                                                    data-making="<?= e((string) (float) ($piece['making_amount'] ?? 0)) ?>"
+                                                    data-size="<?= e((string) ($piece['size_design'] ?? $piece['design_no'] ?? '')) ?>"
+                                                    title="<?= e($pieceLabel) ?>"
+                                                    <?= (int) ($row['stock_unit_id'] ?? 0) === $pieceId ? 'selected' : '' ?>><?= e($pieceLabel) ?></option>
+                                        <?php endforeach; ?>
+                                    <?php else: ?>
+                                        <option value="0" disabled>— No stock available —</option>
+                                    <?php endif; ?>
+                                </optgroup>
+                                <optgroup label="New assignment (for kaligadh/custom making)">
+                                    <option value="0" <?= (int) ($row['stock_unit_id'] ?? 0) === 0 && (int) ($row['assignment_id'] ?? 0) === 0 ? 'selected' : '' ?>>— Assign to kaligadh —</option>
+                                </optgroup>
                             </select>
                         </td>
                     <?php endif; ?>
