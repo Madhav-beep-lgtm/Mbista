@@ -3526,7 +3526,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     ?>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Depreciation schedule</h2>
-            <span class="frm-optional"><?= e($depFrom) ?> to <?= e($depTo) ?> — each month charged into its own month, so the year's expense falls in the year</span>
+            <span class="frm-optional"><?= e($depFrom) ?> to <?= e($depTo) ?> — each period charged into its own period, up to <?= e(date('Y-m-d')) ?>; periods that have not ended are not charged</span>
         </div>
         <?php if ($depPlans === []): ?>
             <p class="frm-optional" style="padding:12px">No depreciable assets for this company yet.</p>
@@ -3594,7 +3594,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <p class="frm-optional" style="padding:12px">Every month in this window is already charged — nothing left to post.</p>
         <?php endif; ?>
         <p class="frm-optional" style="padding:0 12px 12px">
-            Periods run from the financial year&rsquo;s own start day, not from calendar month ends: a year beginning 16 Shrawan charges
+            Only periods that have <strong>ended</strong> are charged &mdash; depreciation is a charge for time that has passed, and a voucher
+            cannot be dated in the future.
+            <?php if ((int) $depTotals['future_periods'] > 0): ?>
+                <strong><?= (int) $depTotals['future_periods'] ?> period(s)</strong> of this window are still to come; they appear here once they end.
+            <?php endif; ?>
+            <br>Periods run from the financial year&rsquo;s own start day, not from calendar month ends: a year beginning 16 Shrawan charges
             twelve periods of 16th&nbsp;to&nbsp;15th, the last ending on the year&rsquo;s final day. Only an asset that came into use part-way
             through a period is pro-rated, since that is the only part period that is real. A month already charged is left alone, which makes this safe to re-run after adding
             a late asset. Nothing is charged below residual value, and an asset held for sale is not charged at all (IFRS 5.25).

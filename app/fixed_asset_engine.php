@@ -824,6 +824,7 @@ function fa_depreciation_plan(int $companyId, string $from, string $to, array $f
             'opening_carrying' => fa_round((float) $asset['carrying_amount']),
             'months' => [],
             'already_charged' => 0.0,
+            'future_periods' => 0,
             'total' => 0.0,
             'skipped' => '',
         ];
@@ -858,6 +859,12 @@ function fa_depreciation_plan(int $companyId, string $from, string $to, array $f
         $windowFrom = new DateTimeImmutable($from);
         $stop = new DateTimeImmutable($to);
         $ready = new DateTimeImmutable($readyRaw);
+        // Depreciation is a charge for time that has passed. A period that has
+        // not ended yet cannot be charged - asking for a year on 18 Bhadra was
+        // producing eleven months of expense for months nobody has lived
+        // through, which would overstate the year and, once posted, put vouchers
+        // in the ledger dated in the future.
+        $today = new DateTimeImmutable(date('Y-m-d'));
 
         // Periods run from the FINANCIAL YEAR's own start day, not from calendar
         // month ends. A year beginning 16 Shrawan has twelve periods of 16th to
@@ -894,6 +901,14 @@ function fa_depreciation_plan(int $companyId, string $from, string $to, array $f
             }
             if ($chargedHere > 0) {
                 $plan['already_charged'] += $chargedHere;
+                continue;
+            }
+            // Counted, not charged: the panel says how many periods are still to
+            // come rather than quietly stopping early, and anything already on
+            // record for them is still added above so the panel keeps agreeing
+            // with the register.
+            if ($periodEnd > $today) {
+                $plan['future_periods']++;
                 continue;
             }
 
@@ -937,7 +952,7 @@ function fa_depreciation_plan(int $companyId, string $from, string $to, array $f
  */
 function fa_depreciation_plan_totals(array $plans): array
 {
-    $totals = ['months' => 0, 'to_post' => 0.0, 'already_charged' => 0.0, 'assets' => 0, 'skipped' => 0];
+    $totals = ['months' => 0, 'to_post' => 0.0, 'already_charged' => 0.0, 'assets' => 0, 'skipped' => 0, 'future_periods' => 0];
     foreach ($plans as $plan) {
         if ((string) $plan['skipped'] !== '') {
             $totals['skipped']++;
@@ -945,6 +960,7 @@ function fa_depreciation_plan_totals(array $plans): array
         }
         $totals['assets']++;
         $totals['months'] += count($plan['months']);
+        $totals['future_periods'] = max($totals['future_periods'], (int) ($plan['future_periods'] ?? 0));
         $totals['to_post'] += (float) $plan['total'];
         $totals['already_charged'] += (float) $plan['already_charged'];
     }
