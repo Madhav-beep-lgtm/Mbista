@@ -493,12 +493,12 @@ $orderOnHand = [];
 // are not on the list; the ones this order holds stay on it, or revising the
 // order would strike out its own items.
 $orderStockPieces = [];
-if ($view === 'orders') {
-    foreach ($items as $itemRow) {
-        $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
-    }
-    $orderStockPieces = jewellery_ready_to_sale_options($companyId, (int) ($editOrder['id'] ?? 0));
+
+// Load stock pieces for orders (both new and edit)
+foreach ($items as $itemRow) {
+    $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
 }
+$orderStockPieces = jewellery_ready_to_sale_options($companyId, (int) ($editOrder['id'] ?? 0));
 $cashBankLedgers = [];
 if ($view === 'orders' && table_exists('ledgers')) {
     $cashStmt = db()->prepare('SELECT l.id, l.code, l.name FROM ledgers l
