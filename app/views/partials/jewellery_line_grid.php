@@ -903,7 +903,7 @@ function jw_line_grid_scripts(): void
         submitBtn.textContent = "Creating...";
         submitBtn.disabled = true;
 
-        fetch(window.location.pathname, {
+        fetch('/admin/jewellery.php', {
             method: "POST",
             body: formData
         })
