@@ -494,73 +494,34 @@ $orderOnHand = [];
 // order would strike out its own items.
 $orderStockPieces = [];
 
-// Load stock balances for all items
-// For jewellery items: use jewellery_stock_txns
-// For regular inventory items: use sr_stock_summary()
-require_once __DIR__ . '/../../app/stock_report_engine.php';
+// Load stock pieces for orders (both new and edit)
 foreach ($items as $itemRow) {
-    $itemId = (int) $itemRow['id'];
-    $itemType = (string) ($itemRow['item_type'] ?? '');
-
-    if ($itemType === 'jewellery' || $itemType === '') {
-        // Jewellery item: use jewellery stock transactions
-        $orderOnHand[$itemId] = jw_item_balance($companyId, $itemId, date('Y-m-d'), 'stock');
-    } else {
-        // Regular inventory item: use stock summary for current balance
-        $summary = sr_stock_summary($companyId, [
-            'from' => date('Y-m-d'),
-            'to' => date('Y-m-d'),
-            'warehouse_ids' => [],
-            'types' => [],
-            'valuation' => '',
-            'search' => '',
-            'stock_status' => '',
-            'jewellery_stock_kind' => '',
-            'zero_movement' => false,
-            'zero_closing' => false,
-            'group_by' => ''
-        ]);
-        $found = false;
-        foreach ($summary['rows'] as $row) {
-            if ((int) $row['item_id'] === $itemId) {
-                $orderOnHand[$itemId] = [
-                    'qty_pieces' => (float) $row['closing_qty'],
-                    'fine_weight' => (float) $row['closing_qty'], // No fine/gross distinction for regular inventory
-                    'value' => (float) $row['closing_amount'],
-                    'avg_fine_rate' => (float) $row['closing_rate']
-                ];
-                $found = true;
-                break;
-            }
-        }
-        if (!$found) {
-            $orderOnHand[$itemId] = null; // Item not in stock
-        }
-    }
+    $orderOnHand[(int) $itemRow['id']] = jw_item_balance($companyId, (int) $itemRow['id'], date('Y-m-d'), 'stock');
 }
 
+// Load showroom stock pieces
+$orderStockPieces = [];
 try {
     $stockStmt = db()->prepare(
-        "SELECT r.id, r.receipt_no, r.received_gross_weight AS gross_weight,
-                r.stone_weight, r.received_item_id AS item_id, r.received_purity_id AS purity_id,
-                r.unit_id, r.qty_pieces, r.making_amount,
+        "SELECT a.id, a.assignment_no, r.receipt_no, r.received_gross_weight,
+                r.stone_weight, r.received_item_id, r.received_purity_id, r.unit_id, r.qty_pieces, r.making_amount,
                 i.sku AS item_code, i.name AS item_name,
-                p.code AS purity_code, u.code AS unit_code,
-                a.assignment_no AS trace_code, a.size_design, a.expected_ornament
-        FROM jewellery_order_receipts r
-        INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id
+                p.code AS purity_code, u.code AS unit_code
+        FROM jewellery_order_assignments a
+        INNER JOIN jewellery_karigars k ON k.id = a.karigar_id
+        INNER JOIN jewellery_order_receipts r ON r.assignment_id = a.id
         LEFT JOIN inventory_items i ON i.id = r.received_item_id
         LEFT JOIN jewellery_purities p ON p.id = r.received_purity_id
         LEFT JOIN jewellery_units u ON u.id = r.unit_id
         WHERE a.company_id = :cid AND a.assign_kind = 'self'
           AND a.status = 'received' AND r.status <> 'cancelled'
+          AND r.id NOT IN (SELECT COALESCE(stock_receipt_id, 0) FROM jewellery_order_lines WHERE source = 'stock' AND stock_receipt_id IS NOT NULL AND order_id != :keep_id)
         ORDER BY r.receive_date DESC"
     );
-    $stockStmt->execute(['cid' => $companyId]);
+    $stockStmt->execute(['cid' => $companyId, 'keep_id' => (int) ($editOrder['id'] ?? 0)]);
     $orderStockPieces = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Exception $e) {
-    error_log("[ERROR] Showroom stock query failed: " . $e->getMessage());
-    $orderStockPieces = [];
+    error_log("[ERROR] Failed to load showroom stock: " . $e->getMessage());
 }
 $cashBankLedgers = [];
 if ($view === 'orders' && table_exists('ledgers')) {
