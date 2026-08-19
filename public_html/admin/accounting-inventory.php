@@ -76,9 +76,13 @@ function inventory_set_item_ledger(int $companyId, int $itemId, string $purpose,
     }
     db()->prepare("DELETE FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = 'item' AND item_id = :iid AND purpose = :p AND category IS NULL")
         ->execute(['cid' => $companyId, 'iid' => $itemId, 'p' => $purpose]);
+    // These mappings just changed; forget what was read of them.
+    inv_mapping_forget();
     if ($ledgerId > 0) {
         db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, category, item_id, purpose, ledger_id, created_by) VALUES (:cid, 'item', NULL, :iid, :p, :lid, :uid)")
             ->execute(['cid' => $companyId, 'iid' => $itemId, 'p' => $purpose, 'lid' => $ledgerId, 'uid' => $userId ?: null]);
+        // These mappings just changed; forget what was read of them.
+        inv_mapping_forget();
     }
 }
 
@@ -1163,6 +1167,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Delete-then-insert: the unique key treats NULL scope columns as
             // distinct, so ON DUPLICATE KEY cannot dedupe override rows.
             db()->prepare('DELETE FROM inventory_ledger_mappings WHERE ' . $scopeWhere)->execute($deleteParams);
+            // These mappings just changed; forget what was read of them.
+            inv_mapping_forget();
             if ($ledgerId <= 0) {
                 continue;
             }
@@ -1183,6 +1189,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'lid' => $ledgerId,
                 'uid' => $userId,
             ]);
+                // These mappings just changed; forget what was read of them.
+                inv_mapping_forget();
             $saved++;
         }
         log_activity('inventory_mapping', $companyId, 'updated', ucfirst($mapScope) . ' inventory ledger mappings updated (' . $saved . ' set).', $userId);

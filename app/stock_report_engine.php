@@ -160,6 +160,22 @@ function sr_replay_balance(array $state): array
  */
 function sr_stock_summary(int $companyId, array $f): array
 {
+    // This prices every item the company has, and asks the same handful of
+    // ledger mappings about each one — thirteen thousand statements on a
+    // two-thousand-item shop, reading the same few rows over and over. The
+    // mappings are held still for the length of the report, which writes none
+    // of them, and released on the way out however that happens.
+    inv_mapping_hold(true);
+    try {
+        return sr_stock_summary_build($companyId, $f);
+    } finally {
+        inv_mapping_hold(false);
+    }
+}
+
+/** The report itself; sr_stock_summary() wraps it to hold the mappings still. */
+function sr_stock_summary_build(int $companyId, array $f): array
+{
     $from = (string) $f['from'];
     $to = (string) $f['to'];
     $warehouseIds = array_values(array_filter(array_map('intval', (array) ($f['warehouse_ids'] ?? []))));
@@ -1666,6 +1682,8 @@ function sr_purge_sample_inventory(int $companyId, int $userId, string $skuPrefi
         }
         if (table_exists('inventory_ledger_mappings')) {
             $pdo->prepare("DELETE FROM inventory_ledger_mappings WHERE company_id = ? AND scope = 'item' AND item_id IN ($ph)")->execute(array_merge([$companyId], $itemIds));
+            // These mappings just changed; forget what was read of them.
+            inv_mapping_forget();
         }
         $itemDel = $pdo->prepare("DELETE FROM inventory_items WHERE company_id = ? AND id IN ($ph)");
         $itemDel->execute(array_merge([$companyId], $itemIds));

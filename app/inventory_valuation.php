@@ -425,48 +425,159 @@ function inv_consume_layers(int $companyId, int $itemId, float $qty, string $met
  * item-level, then its category, then the company global default. Returns the
  * ledgers row or null when unmapped (posting must then be blocked).
  */
+/**
+ * Every ledger mapping a company has, read once per request.
+ *
+ * A company holds a few dozen of these at most, and inv_resolve_mapping() is
+ * asked about them once per item per purpose — so reading them per question
+ * meant thousands of round trips on a page that priced a whole shop. The Stock
+ * Summary report alone was spending 13,200 statements here, three for every
+ * one of 4,400 questions, to read the same handful of rows over and over.
+ *
+ * Keyed by scope so the resolution order below is a lookup rather than a query.
+ */
+function inv_mapping_table(int $companyId): array
+{
+    static $cache = [];
+    // -1 means no hold is open, so nothing is remembered and every read is
+    // fresh — the behaviour this function had before the cache existed.
+    $generation = inv_mapping_generation();
+    $key = $generation . ':' . $companyId;
+    if ($generation >= 0 && isset($cache[$key])) {
+        return $cache[$key];
+    }
+    $table = ['item' => [], 'category' => [], 'global' => []];
+    if (!table_exists('inventory_ledger_mappings')) {
+        $cache[$key] = $table;
+
+        return $table;
+    }
+    $stmt = db()->prepare('SELECT scope, purpose, item_id, category, ledger_id
+        FROM inventory_ledger_mappings WHERE company_id = :cid');
+    $stmt->execute(['cid' => $companyId]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $ledgerId = (int) $row['ledger_id'];
+        $purpose = (string) $row['purpose'];
+        switch ((string) $row['scope']) {
+            case 'item':
+                $table['item'][(int) $row['item_id'] . '|' . $purpose] = $ledgerId;
+                break;
+            case 'category':
+                $table['category'][(string) $row['category'] . '|' . $purpose] = $ledgerId;
+                break;
+            default:
+                $table['global'][$purpose] = $ledgerId;
+        }
+    }
+    $cache[$key] = $table;
+
+    return $table;
+}
+
+/**
+ * One of this company's ledgers by id, or null when it is not this company's.
+ *
+ * Cached for the same reason as the mappings above: the resolver checks that
+ * the mapped ledger really exists before it will hand it back, and that check
+ * was another query per question.
+ */
+function inv_mapping_ledger(int $companyId, int $ledgerId): ?array
+{
+    static $cache = [];
+    if ($ledgerId <= 0) {
+        return null;
+    }
+    $generation = inv_mapping_generation();
+    $key = $generation . ':' . $companyId . ':' . $ledgerId;
+    if ($generation >= 0 && array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    $stmt = db()->prepare('SELECT * FROM ledgers WHERE id = :id AND company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $ledgerId, 'cid' => $companyId]);
+    $cache[$key] = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+    return $cache[$key];
+}
+
+/**
+ * Hold the mappings still for the length of one bulk read.
+ *
+ * Caching these for a whole request would be quietly dangerous: this resolves
+ * the ledger money posts to, and a remembered answer that outlived the mapping
+ * it describes would post to an account somebody had just stopped using. The
+ * table is written from a dozen places, several of them raw SQL, and a cache
+ * that depends on every one of them remembering to invalidate it is a trap
+ * waiting for the next writer.
+ *
+ * So the cache is OPT-IN and bounded. A caller that is about to resolve the
+ * same handful of mappings thousands of times — pricing a whole shop, say —
+ * opens a window it promises not to write inside, and closes it after. Outside
+ * that window every resolution reads the database exactly as it always did.
+ *
+ *     inv_mapping_hold(true);
+ *     try { ...thousands of resolutions... } finally { inv_mapping_hold(false); }
+ */
+function inv_mapping_hold(bool $open): void
+{
+    inv_mapping_generation($open ? 'open' : 'close');
+}
+
+/** Whether a hold is open, and the generation the caches key on. */
+function inv_mapping_generation(string $action = 'read'): int
+{
+    static $generation = 0;
+    static $held = false;
+    if ($action === 'open') {
+        $held = true;
+    } elseif ($action === 'bump') {
+        $generation++;
+    } elseif ($action === 'close') {
+        $held = false;
+        // Bumped on the way out, so nothing survives the window it was read in.
+        $generation++;
+    }
+
+    return $held ? $generation : -1;
+}
+
+/**
+ * Invalidate immediately, for a writer that runs inside a hold.
+ *
+ * Bumps the generation WITHOUT touching whether a hold is open — a writer must
+ * never accidentally open one, or the rest of the request would start caching
+ * something nobody asked it to.
+ */
+function inv_mapping_forget(): void
+{
+    inv_mapping_generation('bump');
+}
+
 function inv_resolve_mapping(int $companyId, string $purpose, ?int $itemId = null, ?string $category = null): ?array
 {
     if (!table_exists('inventory_ledger_mappings')) {
         return null;
     }
+    $table = inv_mapping_table($companyId);
 
-    $tryLedger = static function (?int $ledgerId) use ($companyId): ?array {
-        if (!$ledgerId) {
-            return null;
-        }
-        $stmt = db()->prepare('SELECT * FROM ledgers WHERE id = :id AND company_id = :cid LIMIT 1');
-        $stmt->execute(['id' => $ledgerId, 'cid' => $companyId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
-    };
-
-    // Item-level
+    // Item, then category, then global — and a scope whose mapped ledger has
+    // since been deleted falls THROUGH to the next one rather than resolving to
+    // nothing, exactly as it did when each scope was its own query.
+    $candidates = [];
     if ($itemId) {
-        $stmt = db()->prepare('SELECT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = \'item\' AND item_id = :iid AND purpose = :p LIMIT 1');
-        $stmt->execute(['cid' => $companyId, 'iid' => $itemId, 'p' => $purpose]);
-        $row = $tryLedger((int) ($stmt->fetchColumn() ?: 0));
-        if ($row) {
-            $row['mapping_source'] = 'item';
-            return $row;
-        }
+        $candidates[] = ['item', $table['item'][$itemId . '|' . $purpose] ?? 0];
     }
-    // Category-level
     if ($category !== null && $category !== '') {
-        $stmt = db()->prepare('SELECT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = \'category\' AND category = :cat AND purpose = :p LIMIT 1');
-        $stmt->execute(['cid' => $companyId, 'cat' => $category, 'p' => $purpose]);
-        $row = $tryLedger((int) ($stmt->fetchColumn() ?: 0));
+        $candidates[] = ['category', $table['category'][$category . '|' . $purpose] ?? 0];
+    }
+    $candidates[] = ['global', $table['global'][$purpose] ?? 0];
+
+    foreach ($candidates as [$source, $ledgerId]) {
+        $row = inv_mapping_ledger($companyId, (int) $ledgerId);
         if ($row) {
-            $row['mapping_source'] = 'category';
+            $row['mapping_source'] = $source;
+
             return $row;
         }
-    }
-    // Global default
-    $stmt = db()->prepare('SELECT ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = \'global\' AND purpose = :p LIMIT 1');
-    $stmt->execute(['cid' => $companyId, 'p' => $purpose]);
-    $row = $tryLedger((int) ($stmt->fetchColumn() ?: 0));
-    if ($row) {
-        $row['mapping_source'] = 'global';
-        return $row;
     }
 
     return null;

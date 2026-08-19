@@ -923,6 +923,8 @@ function jewellery_save_mapping(int $companyId, string $purpose, int $ledgerId, 
     if ($ledgerId <= 0) {
         db()->prepare("DELETE FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = 'global' AND purpose = :p AND item_id IS NULL AND category IS NULL")
             ->execute(['cid' => $companyId, 'p' => $canonical]);
+        // These mappings just changed; forget what was read of them.
+        inv_mapping_forget();
         return;
     }
 
@@ -940,11 +942,15 @@ function jewellery_save_mapping(int $companyId, string $purpose, int $ledgerId, 
     if ($id > 0) {
         db()->prepare('UPDATE inventory_ledger_mappings SET ledger_id = :lid WHERE id = :id')
             ->execute(['lid' => $ledgerId, 'id' => $id]);
+        // These mappings just changed; forget what was read of them.
+        inv_mapping_forget();
         return;
     }
 
     db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, purpose, ledger_id, created_by) VALUES (:cid, 'global', :p, :lid, :by)")
         ->execute(['cid' => $companyId, 'p' => $canonical, 'lid' => $ledgerId, 'by' => $userId ?: null]);
+    // These mappings just changed; forget what was read of them.
+    inv_mapping_forget();
 }
 
 /**

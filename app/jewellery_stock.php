@@ -542,6 +542,8 @@ function jewellery_delete_item(int $companyId, int $itemId): array
             ->execute(['id' => $itemId, 'cid' => $companyId]);
         db()->prepare('DELETE FROM inventory_ledger_mappings WHERE item_id = :id AND company_id = :cid')
             ->execute(['id' => $itemId, 'cid' => $companyId]);
+        // These mappings just changed; forget what was read of them.
+        inv_mapping_forget();
         db()->prepare('DELETE FROM jewellery_item_profiles WHERE inventory_item_id = :id AND company_id = :cid')
             ->execute(['id' => $itemId, 'cid' => $companyId]);
         db()->prepare('DELETE FROM inventory_items WHERE id = :id AND company_id = :cid')

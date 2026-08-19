@@ -20,6 +20,10 @@ declare(strict_types=1);
  */
 
 require __DIR__ . '/../app/bootstrap.php';
+// The impairment maths lives in the fixed-asset engine, which bootstrap does
+// not pull in. Without this the suite died on its first call to it and every
+// assertion below never ran.
+require_once __DIR__ . '/../app/fixed_asset_engine.php';
 
 $pass = 0; $fail = 0;
 function ok(string $id, string $label, bool $cond, string $detail = ''): void
