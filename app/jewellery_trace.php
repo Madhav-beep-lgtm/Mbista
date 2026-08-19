@@ -822,16 +822,32 @@ function jewellery_trace_backfill_legacy_balance(int $companyId, int $userId = 0
     $fy = current_fiscal_year();
     $backfillItems = jewellery_items_list($companyId, ['active_only' => true]);
     $backfillBalances = jw_item_balances($companyId, array_column($backfillItems, 'id'), null, 'stock');
+
+    // What the trace layer already holds, for the WHOLE shop, in one query.
+    //
+    // Asked once per item this was a round trip per item on every page that
+    // builds a sale line — two thousand of them on a two-thousand-item shop,
+    // paid again on every single page load, almost always to discover that
+    // there was no gap and nothing to do. It is a one-time upgrade, so the
+    // steady state is "no gaps", and the steady state is the one that has to
+    // be cheap.
+    $tracedStmt = db()->prepare("SELECT item_id,
+            COALESCE(SUM(fine_weight), 0) AS fine, COALESCE(SUM(qty_pieces), 0) AS pieces
+        FROM jewellery_stock_units
+        WHERE company_id = :cid AND status IN ('in_stock','reserved')
+        GROUP BY item_id");
+    $tracedStmt->execute(['cid' => $companyId]);
+    $tracedByItem = [];
+    foreach ($tracedStmt->fetchAll(PDO::FETCH_ASSOC) as $tracedRow) {
+        $tracedByItem[(int) $tracedRow['item_id']] = $tracedRow;
+    }
+
     foreach ($backfillItems as $item) {
         $balance = $backfillBalances[(int) $item['id']] ?? jw_item_balance($companyId, (int) $item['id'], null, 'stock');
         if ((float) $balance['fine_weight'] <= 0.00005 && (float) $balance['qty_pieces'] <= 0.0005) {
             continue;
         }
-        $sum = db()->prepare("SELECT COALESCE(SUM(fine_weight),0) AS fine, COALESCE(SUM(qty_pieces),0) AS pieces
-            FROM jewellery_stock_units WHERE company_id = :cid AND item_id = :iid
-              AND status IN ('in_stock','reserved')");
-        $sum->execute(['cid' => $companyId, 'iid' => (int) $item['id']]);
-        $traced = $sum->fetch(PDO::FETCH_ASSOC) ?: ['fine' => 0, 'pieces' => 0];
+        $traced = $tracedByItem[(int) $item['id']] ?? ['fine' => 0, 'pieces' => 0];
         $fineGap = jw_round_weight((float) $balance['fine_weight'] - (float) $traced['fine']);
         $pieceGap = round((float) $balance['qty_pieces'] - (float) $traced['pieces'], 3);
         if ($fineGap <= 0.00005 && $pieceGap <= 0.0005) {

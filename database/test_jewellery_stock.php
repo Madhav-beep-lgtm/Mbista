@@ -25,7 +25,7 @@ function threw(callable $fn): bool { try { $fn(); return false; } catch (Throwab
 
 function jws_cleanup(): void
 {
-    foreach (db()->query("SELECT id FROM companies WHERE code IN ('JWSA','JWSB')")->fetchAll(PDO::FETCH_COLUMN) as $s) {
+    foreach (db()->query("SELECT id FROM companies WHERE code IN ('JWSA','JWSB','JWSTRACE')")->fetchAll(PDO::FETCH_COLUMN) as $s) {
         $s = (int) $s;
         db()->exec("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE company_id=$s)");
         db()->exec("DELETE FROM vouchers WHERE company_id=$s");
@@ -673,6 +673,71 @@ $jwsUnit = db()->query("SELECT customer_party_id, customer_name FROM jewellery_s
     WHERE company_id=$cidA AND item_id=$chainId AND status <> 'cancelled' ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 ok($jwsUnit['customer_party_id'] === null && (string) $jwsUnit['customer_name'] === 'Walk-in Ram',
     'And is stored as a name against no party, exactly as before');
+
+// ---------------------------------------------------------------------------
+echo "\n18. Adopting legacy stock costs the same whatever the shop holds\n";
+// ---------------------------------------------------------------------------
+// jewellery_trace_backfill_legacy_balance() gives a shop that predates piece
+// tracing one honest starting point. It runs from the SALES screen, on every
+// load, and it used to ask the database for one item's traced total at a time
+// — two thousand round trips on a two-thousand-item shop, paid again on every
+// page view, almost always to find no gap at all. Its own company is built
+// here because the function remembers which companies it has already done, so
+// it can only be measured once per shop per process.
+db()->prepare('INSERT INTO companies (name, code, is_active, is_client_company) VALUES (:n,:c,1,1)')
+    ->execute(['n' => 'Trace Cost Jewellers (Books)', 'c' => 'JWSTRACE']);
+$jwtCid = (int) db()->lastInsertId();
+$jwtFy = create_fiscal_year($jwtCid, 'JWSTRACE 2026/27', '2026-07-16', '2027-07-15', true);
+db()->prepare("UPDATE fiscal_years SET status='open' WHERE id=?")->execute([$jwtFy['id']]);
+jewellery_settings($jwtCid);
+$jwtOne = static function (string $sql) use ($jwtCid): int {
+    return (int) db()->query("SELECT id FROM $sql AND company_id=$jwtCid LIMIT 1")->fetchColumn();
+};
+$jwtGold = $jwtOne("jewellery_metals WHERE code='GOLD'");
+$jwtPurity = (int) db()->query("SELECT id FROM jewellery_purities WHERE company_id=$jwtCid AND metal_id=$jwtGold AND code='22K' LIMIT 1")->fetchColumn();
+$jwtUnit = (int) db()->query("SELECT id FROM jewellery_units WHERE company_id=$jwtCid AND code='GM' LIMIT 1")->fetchColumn();
+
+$jwtItem = db()->prepare("INSERT INTO inventory_items (company_id, sku, name, unit, status) VALUES (:cid,:sku,:n,'GM','active')");
+$jwtProfile = db()->prepare("INSERT INTO jewellery_item_profiles (company_id, inventory_item_id, jewellery_type, metal_id, purity_id, unit_id, stock_kind, gross_weight)
+    VALUES (:cid,:iid,'ornament',:m,:p,:u,'showroom',0)");
+$jwtTxn = db()->prepare("INSERT INTO jewellery_stock_txns (company_id, fiscal_year_id, item_id, txn_type, direction, txn_date, metal_id, purity_id, unit_id,
+        qty_pieces, gross_weight, gross_grams, fine_weight, fine_grams, rate, amount)
+    VALUES (:cid,:fy,:iid,'opening','in','2026-07-16',:m,:p,:u,1,10,10,9.16,9.16,10000,100000)");
+for ($jwtN = 1; $jwtN <= 60; $jwtN++) {
+    $jwtItem->execute(['cid' => $jwtCid, 'sku' => 'TRC-' . $jwtN, 'n' => 'Traced ' . $jwtN]);
+    $jwtIid = (int) db()->lastInsertId();
+    $jwtProfile->execute(['cid' => $jwtCid, 'iid' => $jwtIid, 'm' => $jwtGold, 'p' => $jwtPurity, 'u' => $jwtUnit]);
+    $jwtTxn->execute(['cid' => $jwtCid, 'fy' => (int) $jwtFy['id'], 'iid' => $jwtIid, 'm' => $jwtGold, 'p' => $jwtPurity, 'u' => $jwtUnit]);
+}
+
+$jwtQueries = static function (): int {
+    return (int) (db()->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch(PDO::FETCH_ASSOC)['Value'] ?? 0);
+};
+// Every item is traced ALREADY, which is the state a shop is in on the second
+// and every later page load. That is the case that was costing a query per
+// item to discover — creating the pieces is real work and only happens once.
+$jwtUnitIns = db()->prepare("INSERT INTO jewellery_stock_units
+        (company_id, fiscal_year_id, trace_code, item_id, purity_id, unit_id, stock_kind, status,
+         current_holder_type, qty_pieces, gross_weight, stone_weight, net_weight, fine_weight, cost_amount, origin_type)
+    VALUES (:cid,:fy,:trace,:iid,:p,:u,'showroom','in_stock','stock',1,10,0,10,9.16,100000,'legacy_balance')");
+$jwtItems = db()->query("SELECT id FROM inventory_items WHERE company_id=$jwtCid ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
+foreach ($jwtItems as $jwtIndex => $jwtItemId) {
+    $jwtUnitIns->execute(['cid' => $jwtCid, 'fy' => (int) $jwtFy['id'], 'trace' => 'TRC-SEED-' . $jwtIndex,
+        'iid' => (int) $jwtItemId, 'p' => $jwtPurity, 'u' => $jwtUnit]);
+}
+
+$jwtBefore = $jwtQueries();
+jewellery_trace_backfill_legacy_balance($jwtCid, 0);
+$jwtCost = $jwtQueries() - $jwtBefore - 2;
+$jwtCreated = (int) db()->query("SELECT COUNT(*) FROM jewellery_stock_units WHERE company_id=$jwtCid AND trace_code NOT LIKE 'TRC-SEED-%'")->fetchColumn();
+
+ok($jwtCreated === 0, 'A shop already traced in full has no gap to adopt, got ' . $jwtCreated);
+ok($jwtCost <= 6, 'And finding that out costs a handful of queries, not one per item (' . $jwtCost . ' for 60 items)');
+
+$jwtSecond = $jwtQueries();
+jewellery_trace_backfill_legacy_balance($jwtCid, 0);
+ok($jwtQueries() - $jwtSecond - 2 <= 1, 'A second call in the same request costs nothing — it remembers');
+
 
 jws_cleanup();
 echo "\n==================================================\n";

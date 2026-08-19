@@ -31,6 +31,10 @@ $sym = site_currency_symbol();
 
 $settings = jewellery_settings($companyId);
 $canEdit = user_can_do('jewellery', 'edit');
+// Used by the Excel button on both document lists. Without it those buttons
+// resolved an undefined variable to null on every row — so the export silently
+// never appeared, and PHP 8 wrote a warning per row while it did not.
+$canExport = user_can_do('jewellery', 'export');
 $canPost = user_can_do('jewellery', 'post');
 
 $allowedViews = ['purchases', 'sales', 'bills'];
