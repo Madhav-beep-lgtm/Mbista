@@ -11,6 +11,10 @@
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# The repository root, captured once. Steps that run a script OUT of the repo
+# need an unambiguous path to it rather than a relative one that depends on
+# nothing above having changed directory.
+REPO_DIR="$(pwd)"
 
 # A step that fails must stop the deploy and say so.
 #
@@ -154,15 +158,14 @@ find "$DOCROOT" "$APP_BASE/app" "$APP_BASE/database" -name '*.php' -type f -exec
 # pay for hundreds of information_schema checks. A failed upgrade stops the
 # deployment before its commit is recorded as live, allowing the next cron run
 # to retry safely.
-if ! php -r '
-    require $argv[1] . "/app/bootstrap.php";
-    require $argv[1] . "/app/accounting_module_repair.php";
-    $errors = accounting_module_repair_database();
-    if ($errors !== []) {
-        fwrite(STDERR, implode(PHP_EOL, $errors) . PHP_EOL);
-        exit(1);
-    }
-' "$APP_BASE"; then
+#
+# Called as a SCRIPT FILE, never as php -r '<several lines>'. cPanel runs php
+# through a Perl wrapper that mis-handles a newline inside argv: it tries to stat
+# one as a filename, hands PHP something unparseable, and PHP prints its usage
+# text and exits non-zero. The deploy then correctly refuses to record a commit
+# over a failure that never happened - intermittently, which is worse than
+# always. A script file puts no newline in argv at all.
+if ! php "$REPO_DIR/deploy/repair-schema.php" "$APP_BASE"; then
     die "database schema repair failed"
 fi
 echo "deploy: database schema is current"
