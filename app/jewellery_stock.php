@@ -1613,25 +1613,44 @@ function jewellery_stock_valuation(int $companyId, ?string $asOf = null): array
     $valuationIds = array_column($valuationItems, 'id');
     $allHolders = jw_item_balances($companyId, $valuationIds, $asOf, '');
     $ownHolder = jw_item_balances($companyId, $valuationIds, $asOf, 'stock');
+    // The stone, diamond and making components for the WHOLE shop, grouped in
+    // one query. This was the last per-item read left in this loop — the two
+    // balances above it had already been batched — and on a two-thousand-item
+    // shop it was two thousand round trips to draw one page.
+    $componentSql = "SELECT item_id,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_carat ELSE -stone_carat END), 0) AS stone_carat,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_carat ELSE -diamond_carat END), 0) AS diamond_carat,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_weight ELSE -stone_weight END), 0) AS stone_weight,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_amount ELSE -stone_amount END), 0) AS stone_amount,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_amount ELSE -diamond_amount END), 0) AS diamond_amount,
+        COALESCE(SUM(CASE WHEN direction = 'in' THEN making_amount ELSE -making_amount END), 0) AS making_amount
+        FROM jewellery_stock_txns WHERE company_id = :cid";
+    $componentParams = ['cid' => $companyId];
+    if ($asOf !== null) {
+        $componentSql .= ' AND txn_date <= :asof';
+        $componentParams['asof'] = $asOf;
+    }
+    $componentSql .= ' GROUP BY item_id';
+    $componentStmt = db()->prepare($componentSql);
+    $componentStmt->execute($componentParams);
+    $componentsByItem = [];
+    foreach ($componentStmt->fetchAll(PDO::FETCH_ASSOC) as $componentRow) {
+        $componentItemId = (int) $componentRow['item_id'];
+        unset($componentRow['item_id']);
+        $componentsByItem[$componentItemId] = $componentRow;
+    }
+    // An item with no movement at all got a row of zeros from the per-item
+    // query; a GROUP BY returns nothing for it, so the zeros are supplied here.
+    $noComponents = ['stone_carat' => 0, 'diamond_carat' => 0, 'stone_weight' => 0,
+        'stone_amount' => 0, 'diamond_amount' => 0, 'making_amount' => 0];
+
     foreach ($valuationItems as $item) {
         $balance = $allHolders[(int) $item['id']] ?? jw_item_balance($companyId, (int) $item['id'], $asOf, '');
         if (abs($balance['fine_weight']) < 0.00005 && abs($balance['qty_pieces']) < 0.0005) {
             continue;
         }
         $own = $ownHolder[(int) $item['id']] ?? jw_item_balance($companyId, (int) $item['id'], $asOf, 'stock');
-        $componentSql = "SELECT
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_carat ELSE -stone_carat END), 0) AS stone_carat,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_carat ELSE -diamond_carat END), 0) AS diamond_carat,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_weight ELSE -stone_weight END), 0) AS stone_weight,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_amount ELSE -stone_amount END), 0) AS stone_amount,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN diamond_amount ELSE -diamond_amount END), 0) AS diamond_amount,
-            COALESCE(SUM(CASE WHEN direction = 'in' THEN making_amount ELSE -making_amount END), 0) AS making_amount
-            FROM jewellery_stock_txns WHERE company_id = :cid AND item_id = :iid";
-        $componentParams = ['cid' => $companyId, 'iid' => (int) $item['id']];
-        if ($asOf !== null) { $componentSql .= ' AND txn_date <= :asof'; $componentParams['asof'] = $asOf; }
-        $componentStmt = db()->prepare($componentSql);
-        $componentStmt->execute($componentParams);
-        $components = $componentStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $components = $componentsByItem[(int) $item['id']] ?? $noComponents;
         $out[] = $item + [
             'balance' => $balance,
             'own_stock' => $own,

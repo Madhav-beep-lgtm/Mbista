@@ -827,6 +827,22 @@ if ($view === 'opening') {
 if ($view === 'stock') {
     $position = jewellery_metal_position($companyId, $todayInFy);
     $stockRows = jewellery_stock_valuation($companyId, $todayInFy);
+    // A page at a time. Every item holding stock in one document was 2.4 MB on
+    // a two-thousand-item shop, for a screen read fifty lines at a time. The
+    // summary tiles above the table still count the whole shop.
+    $stockPerPage = (int) ($_GET['s_per'] ?? 50);
+    if (!in_array($stockPerPage, [25, 50, 100, 200], true)) {
+        $stockPerPage = 50;
+    }
+    $stockPageCount = max(1, (int) ceil(count($stockRows) / $stockPerPage));
+    $stockPage = max(1, min($stockPageCount, (int) ($_GET['s_page'] ?? 1)));
+    $stockPageRows = array_slice($stockRows, ($stockPage - 1) * $stockPerPage, $stockPerPage);
+    $stockPageUrl = static function (array $overrides) use ($stockPerPage): string {
+        return url('admin/jewellery.php?' . http_build_query(array_merge([
+            'view' => 'stock',
+            's_per' => (string) $stockPerPage,
+        ], $overrides)));
+    };
     $ledgerItem = jewellery_item($companyId, (int) ($_GET['item'] ?? 0));
     if ($ledgerItem) {
         $itemLedger = jewellery_stock_ledger($companyId, (int) $ledgerItem['id'], $fyStart, $todayInFy);
@@ -2533,8 +2549,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Item</th><th>Purity</th><th class="is-numeric">Pieces</th><th class="is-numeric">Gross</th><th class="is-numeric">Stone (ct)</th><th class="is-numeric">Diamond (ct)</th><th class="is-numeric">Net</th><th class="is-numeric">Stone amt</th><th class="is-numeric">Diamond amt</th><th class="is-numeric">Making</th><th class="is-numeric">Fine (total)</th><th class="is-numeric">Fine (own)</th><th class="is-numeric">With others</th><th class="is-numeric">Value</th><th class="is-numeric">Avg cost / fine</th><th></th></tr></thead>
             <tbody>
-                <?php if ($stockRows === []): ?><tr><td colspan="16">No item holds stock yet.</td></tr><?php endif; ?>
-                <?php foreach ($stockRows as $row): ?>
+                <?php if ($stockPageRows === []): ?><tr><td colspan="16">No item holds stock yet.</td></tr><?php endif; ?>
+                <?php foreach ($stockPageRows as $row): ?>
                     <tr>
                         <td><?= e($row['code']) ?><br><small><?= e($row['name']) ?></small></td>
                         <td><?= e($row['purity_code']) ?></td>
@@ -2555,7 +2571,20 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     </tr>
                 <?php endforeach; ?>
             </tbody>
-        </table></div>
+        </table>
+        <?php if ($stockPageCount > 1): ?>
+            <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="Stock pages">
+                <?php if ($stockPage > 1): ?><a class="button secondary" href="<?= e($stockPageUrl(['s_page' => $stockPage - 1])) ?>">Previous</a><?php endif; ?>
+                <span>Page <?= (int) $stockPage ?> of <?= (int) $stockPageCount ?> · <?= count($stockRows) ?> item(s)</span>
+                <?php if ($stockPage < $stockPageCount): ?><a class="button secondary" href="<?= e($stockPageUrl(['s_page' => $stockPage + 1])) ?>">Next</a><?php endif; ?>
+                <span style="margin-left:auto;display:flex;gap:6px;align-items:center">Rows
+                    <?php foreach ([25, 50, 100, 200] as $size): ?>
+                        <a class="button soft" style="<?= $size === $stockPerPage ? 'font-weight:700' : '' ?>"
+                           href="<?= e($stockPageUrl(['s_per' => (string) $size, 's_page' => 1])) ?>"><?= $size ?></a>
+                    <?php endforeach; ?>
+                </span>
+            </nav>
+        <?php endif; ?></div>
     </section>
 
     <?php if ($ledgerItem && $itemLedger): ?>

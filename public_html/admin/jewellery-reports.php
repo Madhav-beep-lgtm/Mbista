@@ -360,7 +360,50 @@ $reportUrl = static fn (string $v): string => url('admin/jewellery-reports.php?v
         <input type="hidden" name="view" value="<?= e($view) ?>">
         <label>From<input type="date" name="from" value="<?= e($from) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
         <label>To<input type="date" name="to" value="<?= e($to) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
-        <?php if ($view === 'sales'): ?>
+        <?php
+// The long report tables are shown A PAGE AT A TIME. The Inventory Detailed
+// list was 1.7 MB of table on a two-thousand-item shop and the sales detail
+// 660 KB — sizes nobody reads down, and the browser pays for all of it.
+//
+// The EXPORT is untouched: it runs off the same query further up this file and
+// returns before any of this, so a downloaded report still carries every row.
+$reportPerPage = (int) ($_GET['r_per'] ?? 100);
+if (!in_array($reportPerPage, [50, 100, 250, 500], true)) {
+    $reportPerPage = 100;
+}
+$reportPageNo = max(1, (int) ($_GET['r_page'] ?? 1));
+/** @return array{0: array, 1: int, 2: int} rows for this page, page, page count */
+$reportSlice = static function (array $rows) use ($reportPerPage, $reportPageNo): array {
+    $count = max(1, (int) ceil(count($rows) / $reportPerPage));
+    $page = max(1, min($count, $reportPageNo));
+
+    return [array_slice($rows, ($page - 1) * $reportPerPage, $reportPerPage), $page, $count];
+};
+$reportPageUrl = static function (array $overrides) use ($view, $from, $to, $reportPerPage): string {
+    return url('admin/jewellery-reports.php?' . http_build_query(array_merge([
+        'view' => $view, 'from' => $from, 'to' => $to, 'r_per' => (string) $reportPerPage,
+    ], $overrides)));
+};
+$reportPager = static function (int $page, int $count, int $total) use ($reportPageUrl, $reportPerPage): void {
+    if ($count <= 1) {
+        return;
+    }
+    ?>
+    <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="Report pages">
+        <?php if ($page > 1): ?><a class="button secondary" href="<?= e($reportPageUrl(['r_page' => $page - 1])) ?>">Previous</a><?php endif; ?>
+        <span>Page <?= $page ?> of <?= $count ?> · <?= $total ?> rows · export gives them all</span>
+        <?php if ($page < $count): ?><a class="button secondary" href="<?= e($reportPageUrl(['r_page' => $page + 1])) ?>">Next</a><?php endif; ?>
+        <span style="margin-left:auto;display:flex;gap:6px;align-items:center">Rows
+            <?php foreach ([50, 100, 250, 500] as $size): ?>
+                <a class="button soft" style="<?= $size === $reportPerPage ? 'font-weight:700' : '' ?>"
+                   href="<?= e($reportPageUrl(['r_per' => (string) $size, 'r_page' => 1])) ?>"><?= $size ?></a>
+            <?php endforeach; ?>
+        </span>
+    </nav>
+    <?php
+};
+?>
+<?php if ($view === 'sales'): ?>
             <label>Group by
                 <select name="group">
                     <?php foreach (['item' => 'Item', 'category' => 'Category', 'metal' => 'Metal', 'party' => 'Party', 'day' => 'Day'] as $k => $v): ?>
@@ -485,8 +528,9 @@ $reportUrl = static fn (string $v): string => url('admin/jewellery-reports.php?v
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th>Sale</th><th>Customer</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone / diamond</th><th class="is-numeric">VAT</th><th class="is-numeric">COGS</th><th class="is-numeric">GP</th></tr></thead>
             <tbody>
-                <?php if ($report['rows'] === []): ?><tr><td colspan="14">No posted sales in this period.</td></tr><?php endif; ?>
-                <?php foreach ($report['rows'] as $r): ?>
+                <?php [$salesPageRows, $salesRptPage, $salesRptCount] = $reportSlice($report['rows']); ?>
+                <?php if ($salesPageRows === []): ?><tr><td colspan="14">No posted sales in this period.</td></tr><?php endif; ?>
+                <?php foreach ($salesPageRows as $r): ?>
                     <tr>
                         <td><?= e(app_date((string) $r['sale_date'])) ?></td>
                         <td><?= e($r['sale_no']) ?></td>
@@ -516,7 +560,8 @@ $reportUrl = static fn (string $v): string => url('admin/jewellery-reports.php?v
                 <th class="is-numeric"><?= $fmt($report['totals']['cogs_amount']) ?></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['gross_profit']) ?></th>
             </tr></tfoot>
-        </table></div>
+        </table>
+        <?php $reportPager($salesRptPage, $salesRptCount, count($report['rows'])); ?></div>
     </section>
 
 <?php elseif ($view === 'purchases'): ?>
@@ -526,8 +571,9 @@ $reportUrl = static fn (string $v): string => url('admin/jewellery-reports.php?v
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th>Purchase</th><th>Party</th><th>Source</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone / diamond</th><th class="is-numeric">VAT</th><th class="is-numeric">Landed cost</th></tr></thead>
             <tbody>
-                <?php if ($report['rows'] === []): ?><tr><td colspan="14">No posted purchases in this period.</td></tr><?php endif; ?>
-                <?php foreach ($report['rows'] as $r): ?>
+                <?php [$purchasePageRows, $purchaseRptPage, $purchaseRptCount] = $reportSlice($report['rows']); ?>
+                <?php if ($purchasePageRows === []): ?><tr><td colspan="14">No posted purchases in this period.</td></tr><?php endif; ?>
+                <?php foreach ($purchasePageRows as $r): ?>
                     <tr>
                         <td><?= e(app_date((string) $r['purchase_date'])) ?></td>
                         <td><?= e($r['purchase_no']) ?></td>
@@ -556,7 +602,8 @@ $reportUrl = static fn (string $v): string => url('admin/jewellery-reports.php?v
                 <th class="is-numeric"><?= $fmt($report['totals']['vat_amount']) ?></th>
                 <th class="is-numeric"><?= $fmt($report['totals']['stock_amount']) ?></th>
             </tr></tfoot>
-        </table></div>
+        </table>
+        <?php $reportPager($purchaseRptPage, $purchaseRptCount, count($report['rows'])); ?></div>
     </section>
 
 <?php elseif ($view === 'inventory'): ?>
@@ -566,8 +613,9 @@ $reportUrl = static fn (string $v): string => url('admin/jewellery-reports.php?v
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Item</th><th>Metal / Purity</th><th class="is-numeric">Opening fine</th><th class="is-numeric">Opening value</th><th class="is-numeric">In fine</th><th class="is-numeric">Out fine</th><th class="is-numeric">Closing fine</th><th class="is-numeric">Closing value</th><th class="is-numeric">Own</th><th class="is-numeric">With others</th><th class="is-numeric">Avg cost/fine</th></tr></thead>
             <tbody>
-                <?php if ($report['rows'] === []): ?><tr><td colspan="11">No stock movement in this period.</td></tr><?php endif; ?>
-                <?php foreach ($report['rows'] as $r): ?>
+                <?php [$invPageRows, $invRptPage, $invRptCount] = $reportSlice($report['rows']); ?>
+                <?php if ($invPageRows === []): ?><tr><td colspan="11">No stock movement in this period.</td></tr><?php endif; ?>
+                <?php foreach ($invPageRows as $r): ?>
                     <tr>
                         <td><?= e($r['code']) ?><br><small><?= e($r['name']) ?></small></td>
                         <td><?= e($r['metal_name'] . ' · ' . $r['purity_code']) ?></td>
@@ -595,7 +643,8 @@ $reportUrl = static fn (string $v): string => url('admin/jewellery-reports.php?v
                 <th class="is-numeric"><?= $fmt($report['totals']['with_others_fine'], 4) ?></th>
                 <th></th>
             </tr></tfoot>
-        </table></div>
+        </table>
+        <?php $reportPager($invRptPage, $invRptCount, count($report['rows'])); ?></div>
     </section>
 
 <?php elseif ($view === 'vat'): ?>
