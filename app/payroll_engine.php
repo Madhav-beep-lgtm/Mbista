@@ -1548,6 +1548,30 @@ function payroll_run(int $runId): ?array
 }
 
 /**
+ * The expense ledger a company's OVERTIME component is mapped to, or 0.
+ *
+ * Hours typed on the salary sheet never create a payroll_run_components row -
+ * they are a fact about the line, not a component assignment - so the posting
+ * plan has no snapshot to read a mapping from, and the amount would sit in the
+ * generic salary-expense debit while the ledger somebody deliberately mapped for
+ * overtime went unused. This reads the master component instead, which is the
+ * only place the mapping exists for typed hours.
+ */
+function payroll_overtime_expense_ledger(int $companyId): int
+{
+    if (!table_exists('payroll_components')) {
+        return 0;
+    }
+    $stmt = db()->prepare("SELECT debit_ledger_id FROM payroll_components
+        WHERE company_id = :cid AND active = 1 AND debit_ledger_id > 0
+          AND (category = 'overtime' OR calc_type = 'overtime_hours')
+        ORDER BY sort_order ASC, id ASC LIMIT 1");
+    $stmt->execute(['cid' => $companyId]);
+
+    return (int) $stmt->fetchColumn();
+}
+
+/**
  * The paid amount for a component row that has been JOINED to its payroll line,
  * so it carries worked_days and period_days beside the component's own columns.
  *
@@ -1777,8 +1801,20 @@ function payroll_component_posting_plan(array $run, array $settings): array
     // balancing - a voucher that cannot post, from a salary sheet that looked
     // right. Same function the calculation and the sheet use.
     $lineDays = payroll_run_line_days((int) $run['id']);
+    $planLines = [];
+    foreach (payroll_run_lines((int) $run['id']) as $planLine) {
+        $planLines[(int) $planLine['payroll_employee_id']] = $planLine;
+    }
     foreach (payroll_run_component_rows((int) $run['id']) as $row) {
-        [$rowWorkedDays, $rowPeriodDays] = $lineDays[(int) $row['payroll_employee_id']] ?? [null, null];
+        $rowEmployeeId = (int) $row['payroll_employee_id'];
+        // Hours typed on the sheet REPLACE what weekly attendance worked out, and
+        // the calculation drops the attendance row for that employee. Posting it
+        // anyway would debit an amount gross never contained.
+        if ((string) ($row['source'] ?? '') === 'overtime'
+            && ($planLines[$rowEmployeeId]['overtime_hours'] ?? null) !== null) {
+            continue;
+        }
+        [$rowWorkedDays, $rowPeriodDays] = $lineDays[$rowEmployeeId] ?? [null, null];
         $amount = payroll_component_effective_amount($row, $rowWorkedDays, $rowPeriodDays);
         if ($amount <= 0.004) {
             continue; // zero amounts never create accounting lines
@@ -1871,6 +1907,25 @@ function payroll_component_posting_plan(array $run, array $settings): array
                 break;
         }
     }
+    // Overtime typed on the salary sheet, routed to the overtime component's own
+    // expense ledger. Only the TYPED amount: an attendance-derived overtime row
+    // is a component like any other and was handled in the loop above.
+    $overtimeLedger = payroll_overtime_expense_ledger((int) $run['company_id']);
+    if ($overtimeLedger > 0 && $overtimeLedger !== $salaryExpense) {
+        foreach ($planLines as $planLine) {
+            if (($planLine['overtime_hours'] ?? null) === null) {
+                continue;
+            }
+            $typedOvertime = round((float) ($planLine['overtime'] ?? 0), 2);
+            if ($typedOvertime <= 0.004) {
+                continue;
+            }
+            $add($plan['earning_moves'], $overtimeLedger, $typedOvertime);
+            $plan['earning_reallocated'] = round($plan['earning_reallocated'] + $typedOvertime, 2);
+            $name($plan['names'], $overtimeLedger, 'Overtime');
+        }
+    }
+
     return $plan;
 }
 

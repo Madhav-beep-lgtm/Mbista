@@ -1574,6 +1574,12 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                     if ($behaviour === 'non_posting' || $category === 'info') {
                         continue;
                     }
+                    // Overtime gets ONE column of its own, taken from the line, because
+                    // hours typed on the salary sheet never create a component row. A
+                    // component column here as well would show the same rupees twice.
+                    if ($category === 'overtime') {
+                        continue;
+                    }
                     $componentCodes[(string) $prcRow['component_code']] = (string) $prcRow['component_name'];
                     $componentDeducts[(string) $prcRow['component_code']] =
                         in_array($behaviour, ['deduction_liability', 'advance_recovery'], true)
@@ -1595,7 +1601,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 $dedCodes = array_values(array_filter(array_keys($componentCodes),
                     static fn (string $c): bool => (bool) ($componentDeducts[$c] ?? false)));
                 $codeList = array_merge($earnCodes, $dedCodes);
-                $fixedTail = 7; // gross, taxable, ret emp, ret er, tax, advance, net
+                $fixedTail = 8; // overtime, gross, taxable, ret emp, ret er, tax, advance, net
                 $totals = array_fill(0, 1 + count($codeList) + $fixedTail, 0.0);
                 foreach ($payLines as $payLine) {
                     $employeeComponents = $componentByEmployee[(int) $payLine['payroll_employee_id']] ?? [];
@@ -1603,6 +1609,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                     foreach ($earnCodes as $code) {
                         $values[] = (float) ($employeeComponents[$code] ?? 0);
                     }
+                    $values[] = (float) $payLine['overtime'];
                     $values[] = (float) $payLine['gross'];
                     foreach ($dedCodes as $code) {
                         $values[] = (float) ($employeeComponents[$code] ?? 0);
@@ -1625,6 +1632,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 foreach ($earnCodes as $code) {
                     $columns[] = [$componentCodes[$code] . ' (' . $sym . ')', 'right', ''];
                 }
+                $columns[] = ['Overtime (' . $sym . ')', 'right', ''];
                 $columns[] = ['Gross (' . $sym . ')', 'right', ''];
                 foreach ($dedCodes as $code) {
                     $columns[] = [$componentCodes[$code] . ' — less (' . $sym . ')', 'right', ''];
@@ -1928,8 +1936,9 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                         FROM payroll_run_components c
                         LEFT JOIN payroll_run_lines l ON l.run_id = c.run_id AND l.payroll_employee_id = c.payroll_employee_id
                         WHERE c.run_id IN ($idList)")->fetchAll() as $prc) {
-                    if ((string) $prc['posting_behaviour'] === 'non_posting' || (string) $prc['category'] === 'info') {
-                        continue;
+                    if ((string) $prc['posting_behaviour'] === 'non_posting' || (string) $prc['category'] === 'info'
+                        || (string) $prc['category'] === 'overtime') {
+                        continue; // overtime has its own column, off the line - see the salary sheet
                     }
                     $componentCodes[(string) $prc['component_code']] = (string) $prc['component_name'];
                     $componentDeducts[(string) $prc['component_code']] =
@@ -1954,6 +1963,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             foreach ($earnCodes as $code) {
                 $columns[] = [$code . ' (' . $sym . ')', 'right', ''];
             }
+            $columns[] = ['Overtime (' . $sym . ')', 'right', ''];
             $columns[] = ['Gross (' . $sym . ')', 'right', ''];
             foreach ($dedCodes as $code) {
                 $columns[] = [$code . ' — less (' . $sym . ')', 'right', ''];
@@ -1962,7 +1972,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 $columns[] = [$tailLabel . ' (' . $sym . ')', 'right', ''];
             }
             $width = count($columns);
-            $emptyVector = static fn (): array => array_fill(0, 1 + count($codeList) + 6, 0.0);
+            $emptyVector = static fn (): array => array_fill(0, 1 + count($codeList) + 7, 0.0);
             $lineVector = static function (array $line, array $cells) use ($earnCodes, $dedCodes): array {
                 $v = [(float) $line['basic']];
                 foreach ($earnCodes as $code) {
@@ -1970,6 +1980,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 }
                 $ded = (float) $line['tax_month'] + (float) $line['retirement_employee_month'] + (float) $line['advance_deduction']
                     + (float) $line['other_deduction'] + (float) ($line['adj_deduction'] ?? 0);
+                $v[] = (float) $line['overtime'];
                 $v[] = (float) $line['gross'];
                 foreach ($dedCodes as $code) {
                     $v[] = (float) ($cells[$code] ?? 0);
