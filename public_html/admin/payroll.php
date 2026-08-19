@@ -682,6 +682,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     .pr-adjust-form textarea { width: 100%; min-height: 60px; font: inherit; padding: 6px 8px;
         border: 1px solid var(--mbw-line, rgba(0,0,0,.16)); border-radius: 8px; color: var(--mbw-ink, #12261f); resize: vertical; }
     .pr-adjust-form small { color: var(--mbw-muted, #5b6b64); font-weight: 400; font-size: 11px; }
+    .pr-total td { border-top: 2px solid var(--mbw-line, rgba(0,0,0,.28)); background: var(--mbw-surface-2, rgba(0,0,0,.03)); }
+    .pr-total td small { display: block; font-weight: 400; color: var(--mbw-muted, #5b6b64); }
     .pr-reopen { margin-left: 4px; }
     .pr-reopen > summary { color: var(--mbw-ink, #12261f); }
     .pr-reopen .pr-adjust-form { width: 288px; }
@@ -695,6 +697,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         $sheetEditable = in_array((string) $run['status'], ['draft', 'calculated'], true);
         $sheetColumns = 16 + count($sheetComponents);
         $sheetNum = static fn ($v): string => rtrim(rtrim(number_format((float) $v, 2, '.', ''), '0'), '.');
+        // A payroll is signed off on its totals, not row by row. They are summed
+        // over the rows ACTUALLY SHOWN, so a department filter totals that
+        // department rather than quietly reporting the whole company.
+        $sheetTotals = array_fill_keys([
+            'basic', 'regular_pay', 'overtime_hours', 'overtime', 'gross', 'assessable_annual',
+            'retirement_deduction_annual', 'taxable_annual', 'tax_month', 'retirement_employee_month',
+            'advance_deduction', 'net_pay', 'adj_earning', 'adj_deduction',
+        ], 0.0);
+        $sheetTotalComponents = [];
+        $sheetTotalRows = 0;
         ?>
         <?php
         $sheetHead = static function (array $column): string {
@@ -743,6 +755,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 $rowRegular = round((float) $line['basic'], 2);
                 foreach ($regularColumns as $regularColumn) {
                     $rowRegular = round($rowRegular + (float) ($sheetAmounts[$sheetEmpId][$regularColumn['code']] ?? 0), 2);
+                }
+                $sheetTotalRows++;
+                $sheetTotals['regular_pay'] = round($sheetTotals['regular_pay'] + $rowRegular, 2);
+                foreach (['basic', 'overtime', 'gross', 'assessable_annual', 'retirement_deduction_annual',
+                          'taxable_annual', 'tax_month', 'retirement_employee_month', 'advance_deduction',
+                          'net_pay', 'adj_earning', 'adj_deduction'] as $totalKey) {
+                    $sheetTotals[$totalKey] = round($sheetTotals[$totalKey] + (float) ($line[$totalKey] ?? 0), 2);
+                }
+                $sheetTotals['overtime_hours'] = round($sheetTotals['overtime_hours'] + (float) ($line['overtime_hours'] ?? 0), 2);
+                foreach ($sheetComponents as $totalComponent) {
+                    $sheetTotalComponents[$totalComponent['code']] = round(
+                        ($sheetTotalComponents[$totalComponent['code']] ?? 0.0)
+                        + (float) ($sheetAmounts[$sheetEmpId][$totalComponent['code']] ?? 0), 2);
                 }
                 ?>
                 <tr class="pr-line<?= $line['line_status'] !== 'ok' ? ' pr-line-' . e($line['line_status']) : '' ?>" data-emp="<?= e($sheetEmpId) ?>" data-line-trace="<?= e((string) $line['trace']) ?>" data-line-name="<?= e($line['employee_code'] . ' — ' . $line['person_name']) ?>">
@@ -904,6 +929,48 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </tr>
             <?php endforeach; ?>
         </tbody>
+        <?php if ($lines !== []): ?>
+        <?php
+        $totalCell = static function (string $key) use ($sheetTotals): string {
+            return '<td class="is-numeric" data-total="' . e($key) . '"><strong>'
+                . e(number_format((float) $sheetTotals[$key], 2)) . '</strong></td>';
+        };
+        $totalComponentCell = static function (array $column) use ($sheetTotalComponents): string {
+            return '<td class="is-numeric" data-total-comp="' . e($column['code']) . '"><strong>'
+                . e(number_format((float) ($sheetTotalComponents[$column['code']] ?? 0), 2)) . '</strong></td>';
+        };
+        ?>
+        <tfoot>
+            <tr class="pr-total">
+                <td><strong>Total</strong> <small data-total="employees"><?= (int) $sheetTotalRows ?> employee<?= $sheetTotalRows === 1 ? '' : 's' ?></small></td>
+                <?php // Days are not a quantity that sums to anything a payroll is signed
+                      // off on - forty people each working a month is not "1,200 days" of
+                      // any use - so this cell stays empty on purpose. ?>
+                <td></td>
+                <?= $totalCell('basic') ?>
+                <?php foreach ($regularColumns as $sheetComponent): ?><?= $totalComponentCell($sheetComponent) ?><?php endforeach; ?>
+                <?= $totalCell('regular_pay') ?>
+                <?= $totalCell('overtime_hours') ?>
+                <?= $totalCell('overtime') ?>
+                <?php foreach ($earnedColumns as $sheetComponent): ?><?= $totalComponentCell($sheetComponent) ?><?php endforeach; ?>
+                <?= $totalCell('gross') ?>
+                <?= $totalCell('assessable_annual') ?>
+                <?= $totalCell('retirement_deduction_annual') ?>
+                <?= $totalCell('taxable_annual') ?>
+                <?= $totalCell('tax_month') ?>
+                <?php foreach ($otherColumns as $sheetComponent): ?><?= $totalComponentCell($sheetComponent) ?><?php endforeach; ?>
+                <?= $totalCell('retirement_employee_month') ?>
+                <?= $totalCell('advance_deduction') ?>
+                <td class="is-numeric">
+                    <?php if ($sheetTotals['adj_earning'] > 0): ?><span class="mbw-pill tone-green">+<?= e(number_format($sheetTotals['adj_earning'], 2)) ?></span><?php endif; ?>
+                    <?php if ($sheetTotals['adj_deduction'] > 0): ?><span class="mbw-pill tone-amber">&minus;<?= e(number_format($sheetTotals['adj_deduction'], 2)) ?></span><?php endif; ?>
+                    <?php if ($sheetTotals['adj_earning'] <= 0 && $sheetTotals['adj_deduction'] <= 0): ?>&ndash;<?php endif; ?>
+                </td>
+                <?= $totalCell('net_pay') ?>
+                <td></td>
+            </tr>
+        </tfoot>
+        <?php endif; ?>
     </table>
     </div>
     <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
@@ -1207,6 +1274,53 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             }
             // Keep the inspector honest about the row it is showing.
             if (row.classList.contains('is-selected')) { row.click(); }
+        });
+        retotal(lines);
+    };
+
+    // Totals are re-summed over the rows ON SCREEN, from the same server figures
+    // the rows were just painted with. A total left stale after a recalculation
+    // is worse than no total: it is the number somebody signs.
+    var TOTAL_KEYS = ['basic', 'regular_pay', 'overtime_hours', 'overtime', 'gross',
+        'assessable_annual', 'retirement_deduction_annual', 'taxable_annual', 'tax_month',
+        'retirement_employee_month', 'advance_deduction', 'net_pay'];
+    var retotal = function (lines) {
+        var foot = table.querySelector('.pr-total');
+        if (!foot) { return; }
+        var totals = {};
+        var components = {};
+        var counted = 0;
+        var complete = true;
+        table.querySelectorAll('.pr-line[data-emp]').forEach(function (row) {
+            var data = lines[row.getAttribute('data-emp')];
+            if (!data) {
+                // A row the server did not mention cannot be added up here. Rather
+                // than print a total that silently omits it, leave the totals as
+                // the server rendered them.
+                complete = false;
+                return;
+            }
+            counted++;
+            TOTAL_KEYS.forEach(function (key) {
+                if (data[key] !== null && data[key] !== undefined) {
+                    totals[key] = (totals[key] || 0) + Number(data[key]);
+                }
+            });
+            Object.keys(data.components || {}).forEach(function (code) {
+                components[code] = (components[code] || 0) + Number(data.components[code]);
+            });
+        });
+        if (!complete) { return; }
+        foot.querySelectorAll('[data-total]').forEach(function (cell) {
+            var key = cell.getAttribute('data-total');
+            if (key === 'employees') {
+                cell.textContent = counted + (counted === 1 ? ' employee' : ' employees');
+                return;
+            }
+            (cell.querySelector('strong') || cell).textContent = fmt(totals[key] || 0);
+        });
+        foot.querySelectorAll('[data-total-comp]').forEach(function (cell) {
+            (cell.querySelector('strong') || cell).textContent = fmt(components[cell.getAttribute('data-total-comp')] || 0);
         });
     };
 
