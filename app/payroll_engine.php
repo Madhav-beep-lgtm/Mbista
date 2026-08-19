@@ -559,6 +559,23 @@ function payroll_tax_withheld_ytd(int $employeeId, int $fiscalYearId, int $exclu
 }
 
 /**
+ * Social Security Tax withheld so far this fiscal year, from approved runs of
+ * EARLIER periods. Its own head, its own running balance - see the SST split in
+ * payroll_calculate_line().
+ */
+function payroll_sst_withheld_ytd(int $employeeId, int $fiscalYearId, int $excludeRunId = 0, int $beforePeriodNo = 13): float
+{
+    $stmt = db()->prepare("SELECT COALESCE(SUM(l.sst_month), 0)
+        FROM payroll_run_lines l INNER JOIN payroll_runs r ON r.id = l.run_id
+        WHERE l.payroll_employee_id = :pe AND r.fiscal_year_id = :fy
+          AND r.status IN ('approved', 'posted', 'paid') AND r.id <> :run
+          AND r.period_no < :period");
+    $stmt->execute(['pe' => $employeeId, 'fy' => $fiscalYearId, 'run' => $excludeRunId, 'period' => $beforePeriodNo]);
+
+    return (float) $stmt->fetchColumn();
+}
+
+/**
  * Calculate one employee's line for a run. Returns the values plus the full
  * trace; does not write anything.
  */
@@ -979,7 +996,20 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     }
     $advanceDeduction = round($advanceDeduction, 2);
 
-    $sstMonth = $annualTax > 0.004 ? round($taxMonth * ($sstAnnual / $annualTax), 2) : 0.0;
+    // Social Security Tax is a revenue head of its OWN, posted to its own payable
+    // ledger, so it is settled on its own remaining balance exactly the way the
+    // total is: (annual SST - SST already withheld) / remaining periods. The old
+    // line apportioned this month's total in the ANNUAL ratio instead, which
+    // agrees only while every month withholds the same mix and drifts the moment
+    // one does not - and the drift lands in a payable ledger, not in a rounding.
+    $sstYtdBefore = payroll_sst_withheld_ytd((int) $employee['id'], (int) $run['fiscal_year_id'], (int) ($run['id'] ?? 0), $periodNo);
+    $sstRemaining = round($sstAnnual - $sstYtdBefore, 2);
+    $sstMonth = $remainingPeriods <= 1
+        ? max(0.0, $sstRemaining)
+        : max(0.0, payroll_round($sstRemaining / $remainingPeriods, $rounding));
+    // Never more than the tax actually withheld this month: the remainder of the
+    // withholding is remuneration tax, and an approved override can cut the total
+    // below what the two heads would otherwise ask for.
     $sstMonth = min($sstMonth, $taxMonth);
 
     $netPay = round($gross + $reimbursementNet - $retEmployeeMonth - $taxMonth - $advanceDeduction - $otherDeduction - $adjDeduction, 2);
@@ -1089,6 +1119,11 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
                 // ever derivable from the override-or-system pair below, which is
                 // not something a reader of a payslip should have to work out.
                 'tax_month' => $taxMonth,
+                'sst_month' => $sstMonth,
+                'sst_annual' => $sstAnnual,
+                'sst_ytd_withheld' => round($sstYtdBefore, 2),
+                'remuneration_month' => round($taxMonth - $sstMonth, 2),
+                'remuneration_annual' => round($annualTax - $sstAnnual, 2),
                 'system_tax' => $systemTax,
                 'tax_override' => $taxOverride,
             ],
