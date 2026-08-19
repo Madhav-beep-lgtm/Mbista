@@ -343,6 +343,13 @@ function voucher_ledgers_for_role(array $directory, string $role): array
             // asset. Both are legitimate tax ledgers.
             'tax' => !empty($roles['tax']) || !empty($roles['liability']),
             'party' => !empty($roles['receivable']) || !empty($roles['payable']),
+            // Anywhere money can actually come to rest: the tills and banks,
+            // the party accounts a balance can be left standing on, and the
+            // clearing or advance accounts a wallet or a gateway lands in
+            // before the bank sweeps it. An income or expense head never
+            // settles anything — that is the other side of the voucher.
+            'settlement' => !empty($roles['cash_bank']) || !empty($roles['receivable']) || !empty($roles['payable'])
+                || !empty($roles['asset']) || !empty($roles['liability']),
             default => true,
         };
         if ($keep) {
@@ -635,12 +642,19 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
     $partySide = (string) $spec['party_side'];
     $valueSide = (string) $spec['value_side'];
 
-    // Settlement: against the party's own ledger, or straight to cash/bank
-    // (Tally's "party A/c name: Cash").
+    // Settlement: against the party's own ledger, straight to cash/bank
+    // (Tally's "party A/c name: Cash"), or split across however many ways the
+    // money actually arrived.
     $settlement = (string) ($input['settlement_mode'] ?? 'party');
+    if (!in_array($settlement, ['party', 'cash', 'split'], true)) {
+        $settlement = 'party';
+    }
     $settlementLedgerId = (int) ($input['settlement_ledger_id'] ?? 0);
     $settlementLedger = $ledgers[$settlementLedgerId] ?? null;
-    if (!$settlementLedger) {
+    $settlementRows = [];
+    if ($settlement === 'split') {
+        $settlementRows = voucher_settlement_rows($spec, $input, $ledgers, $result);
+    } elseif (!$settlementLedger) {
         $result['errors'][] = $settlement === 'cash'
             ? 'Choose the cash or bank account this ' . strtolower((string) $spec['short']) . ' settles through.'
             : 'Choose the ' . strtolower((string) ($spec['party_label'] ?? 'party')) . ' — their ledger is the other side of this voucher.';
@@ -744,8 +758,55 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
             (string) ($input['reference_no'] ?? '')
         );
     }
-    // A draft may not have named the party yet; the value lines still keep.
-    if ($settlementLedger !== null && $grandTotal > 0) {
+    if ($settlement === 'split') {
+        $settledTotal = 0.0;
+        foreach ($settlementRows as $settlementRow) {
+            $settledTotal += (float) $settlementRow['amount'];
+        }
+        $settledTotal = round($settledTotal, 2);
+        // The one rule a split cannot bend: what was taken equals what was
+        // billed. A rupee adrift here is a rupee the trial balance never
+        // balances by, and it surfaces months later as a suspense nobody can
+        // explain. A draft may be half-typed; a posting may not.
+        if (!$draft && $settlementRows !== [] && abs($settledTotal - $grandTotal) >= 0.005) {
+            $shortfall = round($grandTotal - $settledTotal, 2);
+            $result['errors'][] = 'The settlement lines come to ' . number_format($settledTotal, 2)
+                . ' but this ' . strtolower((string) $spec['short']) . ' is ' . number_format($grandTotal, 2) . ' — '
+                . ($shortfall > 0
+                    ? number_format($shortfall, 2) . ' is still unallocated. Put the rest on credit, or on another mode.'
+                    : number_format(-$shortfall, 2) . ' more has been allocated than was billed.');
+
+            return $result;
+        }
+        $settlementEntries = [];
+        foreach ($settlementRows as $settlementRow) {
+            // How the money came in is written onto the line itself, because
+            // the day book is where somebody looks to reconcile the drawer
+            // against the wallet statement at close of business.
+            $memoBits = [voucher_instrument_label((string) $settlementRow['mode'])];
+            if ((string) $settlementRow['instrument_no'] !== '') {
+                $memoBits[] = (string) $settlementRow['instrument_no'];
+            }
+            if ((string) ($input['reference_no'] ?? '') !== '') {
+                $memoBits[] = 'against ' . (string) $input['reference_no'];
+            }
+            $settlementEntries[] = voucher_entry(
+                (int) $settlementRow['ledger_id'],
+                $partySide,
+                (float) $settlementRow['amount'],
+                implode(' — ', $memoBits),
+                '',
+                '',
+                (string) $settlementRow['instrument_no'] !== ''
+                    ? (string) $settlementRow['instrument_no']
+                    : (string) ($input['reference_no'] ?? '')
+            );
+        }
+        $entries = $partySide === 'debit'
+            ? array_merge($settlementEntries, $entries)
+            : array_merge($entries, $settlementEntries);
+    } elseif ($settlementLedger !== null && $grandTotal > 0) {
+        // A draft may not have named the party yet; the value lines still keep.
         $partyEntry = voucher_entry(
             $settlementLedgerId,
             $partySide,
@@ -766,10 +827,85 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
         'reference_date' => voucher_date_or_null((string) ($input['reference_date'] ?? '')),
         'return_reason' => !empty($spec['needs_reason']) ? substr(trim((string) ($input['return_reason'] ?? '')), 0, 255) : null,
     ];
+    // The register has room for one instrument; a split hands it the first row
+    // that actually moved money, the way a mixed payment already does.
+    foreach ($settlementRows as $settlementRow) {
+        if (isset(voucher_instrument_modes()[(string) $settlementRow['mode']])) {
+            $result['header']['instrument_type'] = (string) $settlementRow['mode'];
+            $result['header']['instrument_no'] = (string) $settlementRow['instrument_no'] !== ''
+                ? (string) $settlementRow['instrument_no']
+                : null;
+            break;
+        }
+    }
     $result['taxable_total'] = $taxableTotal;
     $result['tax_total'] = $taxTotal;
 
     return $result;
+}
+
+/**
+ * The settlement grid of a trade voucher: one row per way the money moved.
+ *
+ * A day's takings are not one thing. Part is cash, part is Fonepay, part a
+ * card, and part is simply left on the customer's account. Posted as a single
+ * line, the day book says something that did not happen and the drawer can
+ * never be counted against it. Each row becomes its own entry on the party
+ * side, so the till, the wallet and the receivable each carry what they took.
+ *
+ * Rows that name the party rather than a ledger carry the literal 'party'; the
+ * caller resolves it to that party's own ledger, which is where the database
+ * lives, so this stays pure and testable.
+ */
+function voucher_settlement_rows(array $spec, array $input, array $ledgers, array &$result): array
+{
+    $partyLedgerId = (int) ($input['settlement_party_ledger_id'] ?? 0);
+    $partyLabel = strtolower((string) ($spec['party_label'] ?? 'party'));
+    $rows = [];
+    $rowCount = voucher_input_rows($input, 'settle_ledger');
+    for ($index = 0; $index < $rowCount; $index++) {
+        $choice = voucher_input_row($input, 'settle_ledger', $index);
+        $amount = round((float) voucher_input_row($input, 'settle_amount', $index), 2);
+        if ($choice === '' && $amount <= 0) {
+            continue;
+        }
+        $isPartyRow = $choice === 'party';
+        $ledgerId = $isPartyRow ? $partyLedgerId : (int) $choice;
+        $ledger = $ledgers[$ledgerId] ?? null;
+        if (!$ledger) {
+            $result['errors'][] = $isPartyRow
+                ? 'Line ' . ($index + 1) . ' of the settlement is on credit, so name the ' . $partyLabel . ' who owes it.'
+                : 'Line ' . ($index + 1) . ' of the settlement does not name a valid account.';
+            continue;
+        }
+        // Money settles somewhere it can sit. An income or expense head is the
+        // other side of this voucher, never this side of it.
+        if (!empty($ledger['roles']['income']) || !empty($ledger['roles']['expense'])) {
+            $result['errors'][] = '"' . $ledger['name'] . '" is an income or expense head — a settlement cannot land in it.';
+            continue;
+        }
+        if ($amount <= 0) {
+            $result['errors'][] = 'Enter how much was settled through "' . $ledger['name'] . '".';
+            continue;
+        }
+        $mode = voucher_input_row($input, 'settle_mode', $index);
+        if (!isset(voucher_settlement_modes()[$mode])) {
+            $mode = $isPartyRow || empty($ledger['roles']['cash_bank']) ? 'credit' : 'cash';
+        }
+        $rows[] = [
+            'ledger_id' => $ledgerId,
+            'amount' => $amount,
+            'mode' => $mode,
+            'instrument_no' => substr(voucher_input_row($input, 'settle_instrument_no', $index), 0, 80),
+            'is_party' => $isPartyRow,
+        ];
+    }
+    if ($rows === []) {
+        $result['errors'][] = 'Say how this ' . strtolower((string) $spec['short'])
+            . ' was settled — at least one line, whether that is cash, a wallet, or the whole of it on credit.';
+    }
+
+    return $rows;
 }
 
 /** Journal: the classic two-column grid, unchanged in spirit. */
@@ -848,7 +984,17 @@ function voucher_entry(int $ledgerId, string $side, float $amount, string $memo 
     ];
 }
 
-/** The payment modes a cash/bank line can carry. */
+/**
+ * The payment modes a cash/bank line can carry.
+ *
+ * A counter here settles half a dozen ways in one afternoon, so the list names
+ * the rails people actually use rather than filing Fonepay and a QR scan under
+ * "online" and losing the distinction the moment it is posted.
+ *
+ * The LABEL is what gets written onto the line; voucher_instrument_key_for_label()
+ * reads it back. Add keys freely — renaming one strands every voucher already
+ * posted under the old label, which is why the legacy names are kept there.
+ */
 function voucher_instrument_modes(): array
 {
     return [
@@ -856,16 +1002,53 @@ function voucher_instrument_modes(): array
         'cheque' => 'Cheque',
         'bank_transfer' => 'Bank transfer',
         'card' => 'Card',
-        'wallet' => 'Wallet / QR',
+        'fonepay' => 'Fonepay',
+        'qr' => 'QR scan',
+        'esewa' => 'eSewa',
+        'khalti' => 'Khalti',
+        'wallet' => 'Wallet (other)',
         'online' => 'Online gateway',
         'adjustment' => 'Adjustment',
     ];
 }
 
+/**
+ * The ways a trade voucher can be settled: every cash rail above, plus the one
+ * that moves no money at all — the part left standing on the party's account.
+ */
+function voucher_settlement_modes(): array
+{
+    return ['credit' => 'On credit'] + voucher_instrument_modes();
+}
+
 /** 'bank_transfer' reads as 'Bank transfer' on the voucher line. */
 function voucher_instrument_label(string $mode): string
 {
-    return voucher_instrument_modes()[$mode] ?? ucfirst(str_replace('_', ' ', $mode));
+    return voucher_settlement_modes()[$mode] ?? ucfirst(str_replace('_', ' ', $mode));
+}
+
+/**
+ * The mode key behind a label already written onto a posted line.
+ *
+ * A label this version renamed still has to lead back to its key, or an old
+ * voucher reopens with its mode reset to the first in the list and re-posting
+ * quietly rewrites how the money came in.
+ */
+function voucher_instrument_key_for_label(string $label): string
+{
+    $label = trim($label);
+    if ($label === '') {
+        return '';
+    }
+    foreach (voucher_settlement_modes() as $key => $text) {
+        if (strcasecmp($text, $label) === 0) {
+            return $key;
+        }
+    }
+    // Labels this file used to carry.
+    $legacy = ['wallet / qr' => 'wallet'];
+
+    return $legacy[strtolower($label)] ?? '';
 }
 
 /**
@@ -939,7 +1122,6 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
         // The mode of each tender row was written onto its memo when it posted;
         // the header keeps the first one. Read both back so a cheque reopens as
         // a cheque rather than resetting to cash.
-        $modeByLabel = array_flip(voucher_instrument_modes());
         $headerMode = (string) ($voucher['instrument_type'] ?? '');
         $tender = [];
         $lines = [];
@@ -950,7 +1132,7 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
                 $memo = trim((string) ($entry['memo'] ?? ''));
                 $tender[] = [
                     'ledger_id' => (int) $entry['ledger_id'],
-                    'mode' => $modeByLabel[$memo] ?? ($tender === [] ? $headerMode : ''),
+                    'mode' => voucher_instrument_key_for_label($memo) ?: ($tender === [] ? $headerMode : ''),
                     'amount' => (float) $entry['amount'],
                     'instrument_no' => (string) ($entry['line_reference'] ?? ''),
                 ];
@@ -970,13 +1152,17 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
 
     if ($layout === 'trade') {
         $partySide = (string) $spec['party_side'];
-        $settlement = null;
+        // EVERY line on the party's side is a settlement line: the value and
+        // the tax of a trade voucher always sit opposite the party, so what is
+        // left over on this side is how the document was paid for — one line
+        // when it went on account, several when the counter took it three ways.
+        $settlements = [];
         $tax = null;
         $values = [];
         foreach ($entries as $entry) {
             $ledger = $ledgers[(int) $entry['ledger_id']] ?? null;
-            if ((string) $entry['entry_type'] === $partySide && $settlement === null) {
-                $settlement = $entry;
+            if ((string) $entry['entry_type'] === $partySide) {
+                $settlements[] = $entry;
                 continue;
             }
             if ($tax === null && !empty($ledger['roles']['tax'])) {
@@ -1004,12 +1190,49 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
             $taxable += $value['amount'];
         }
         $taxAmount = (float) ($tax['amount'] ?? 0);
+        $settlement = $settlements[0] ?? null;
         $settlementLedger = $ledgers[(int) ($settlement['ledger_id'] ?? 0)] ?? null;
 
+        // How each part of the money arrived was written onto its own line
+        // when it posted; read it back so a sale taken half in cash and half on
+        // Fonepay reopens saying exactly that, rather than as one lump.
+        $settlementRows = [];
+        $settlementsFit = true;
+        foreach ($settlements as $entry) {
+            $rowLedger = $ledgers[(int) $entry['ledger_id']] ?? null;
+            // A line this screen could not offer back is a line it must not
+            // pretend to own: an auto-posted voucher carrying a discount or a
+            // write-off on the party's side belongs in the journal grid, which
+            // can express anything, rather than in a settlement row that would
+            // refuse to re-post.
+            if (!empty($rowLedger['roles']['income']) || !empty($rowLedger['roles']['expense'])) {
+                $settlementsFit = false;
+            }
+            $memo = trim((string) ($entry['memo'] ?? ''));
+            $head = $memo;
+            $splitMemoAt = strpos($memo, ' — ');
+            if ($splitMemoAt !== false) {
+                $head = substr($memo, 0, $splitMemoAt);
+            }
+            $mode = voucher_instrument_key_for_label($head);
+            if ($mode === '') {
+                $mode = !empty($rowLedger['roles']['cash_bank']) ? 'cash' : 'credit';
+            }
+            $settlementRows[] = [
+                'ledger_id' => (string) (int) $entry['ledger_id'],
+                'mode' => $mode,
+                'instrument_no' => (string) ($entry['line_reference'] ?? ''),
+                'amount' => (float) $entry['amount'],
+            ];
+        }
+
         return [
-            'ok' => $settlement !== null && $values !== [],
-            'settlement_mode' => !empty($settlementLedger['roles']['cash_bank']) ? 'cash' : 'party',
+            'ok' => $settlement !== null && $values !== [] && $settlementsFit,
+            'settlement_mode' => count($settlements) > 1
+                ? 'split'
+                : (!empty($settlementLedger['roles']['cash_bank']) ? 'cash' : 'party'),
             'settlement_ledger_id' => (int) ($settlement['ledger_id'] ?? 0),
+            'settlements' => $settlementRows,
             'values' => $values,
             'tax_ledger_id' => (int) ($tax['ledger_id'] ?? 0),
             'tax_mode' => $taxAmount > 0 ? 'exclusive' : 'none',
@@ -1104,8 +1327,19 @@ function voucher_prefill_from_input(string $type, array $input): array
     }
 
     if ($layout === 'trade') {
-        $prefill['settlement_mode'] = (string) ($input['settlement_mode'] ?? 'party') === 'cash' ? 'cash' : 'party';
+        $submittedMode = (string) ($input['settlement_mode'] ?? 'party');
+        $prefill['settlement_mode'] = in_array($submittedMode, ['cash', 'split'], true) ? $submittedMode : 'party';
         $prefill['settlement_ledger_id'] = (int) ($input['settlement_ledger_id'] ?? 0);
+        $prefill['settlements'] = [];
+        $settleRowCount = voucher_input_rows($input, 'settle_ledger');
+        for ($index = 0; $index < $settleRowCount; $index++) {
+            $prefill['settlements'][] = [
+                'ledger_id' => voucher_input_row($input, 'settle_ledger', $index),
+                'mode' => voucher_input_row($input, 'settle_mode', $index),
+                'instrument_no' => voucher_input_row($input, 'settle_instrument_no', $index),
+                'amount' => voucher_input_row($input, 'settle_amount', $index),
+            ];
+        }
         $prefill['warehouse_id'] = (int) ($input['warehouse_id'] ?? 0);
         $prefill['tax_mode'] = (string) ($input['tax_mode'] ?? 'exclusive');
         $prefill['tax_rate'] = (float) ($input['tax_rate'] ?? 13);

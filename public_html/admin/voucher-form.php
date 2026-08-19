@@ -139,16 +139,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $ledgerDirectory = voucher_ledger_directory($companyId);
 
-    // A trade voucher settles either against the party's own ledger or against
-    // cash. The party ledger is resolved here, where the database lives, so the
-    // composer stays pure.
+    // A trade voucher settles against the party's own ledger, against cash, or
+    // across several of both at once. The party ledger is resolved here, where
+    // the database lives, so the composer stays pure.
     $composeInput = $_POST;
     if ((string) $spec['layout'] === 'trade') {
-        $settlementMode = (string) ($_POST['settlement_mode'] ?? 'party') === 'cash' ? 'cash' : 'party';
+        $settlementMode = (string) ($_POST['settlement_mode'] ?? 'party');
+        if (!in_array($settlementMode, ['party', 'cash', 'split'], true)) {
+            $settlementMode = 'party';
+        }
         $composeInput['settlement_mode'] = $settlementMode;
-        if ($settlementMode === 'party') {
+        // A split may leave part of the bill standing on the party's account,
+        // so the party ledger is resolved for that case too — but only when a
+        // line actually asks for it, so a sale taken entirely in cash and QR
+        // never opens a receivable nobody wanted.
+        $splitWantsParty = $settlementMode === 'split'
+            && in_array('party', array_map('strval', (array) ($_POST['settle_ledger'] ?? [])), true);
+        if ($settlementMode === 'party' || $splitWantsParty) {
             $partyLedgerId = $resolvePartyLedger($companyId, $partyId, (string) $spec['party_ledger_side']);
             $composeInput['settlement_ledger_id'] = $partyLedgerId;
+            $composeInput['settlement_party_ledger_id'] = $partyLedgerId;
             if ($partyLedgerId > 0 && !isset($ledgerDirectory[$partyLedgerId])) {
                 // ensure_party_ledger may have just created it.
                 $ledgerDirectory = voucher_ledger_directory($companyId);
@@ -496,6 +506,13 @@ $ledgerDirectory = voucher_ledger_directory($companyId);
 $optionsAll = voucher_ledgers_for_role($ledgerDirectory, 'any');
 $optionsCashBank = voucher_ledgers_for_role($ledgerDirectory, 'cash_bank');
 $optionsTax = voucher_ledgers_for_role($ledgerDirectory, 'tax');
+// Where a trade voucher's money can actually land: tills, banks, the party
+// accounts a balance sits on, and the clearing accounts a wallet or gateway
+// pays into before the bank sweeps it.
+$optionsSettlement = voucher_ledgers_for_role($ledgerDirectory, 'settlement');
+if ($optionsSettlement === []) {
+    $optionsSettlement = $optionsAll;
+}
 $optionsValue = ($spec['layout'] ?? '') === 'trade'
     ? voucher_ledgers_for_role($ledgerDirectory, (string) $spec['value_role'])
     : $optionsAll;
@@ -725,6 +742,7 @@ if (is_array($retry) && (string) ($retry['type'] ?? '') === $type) {
         'tax_rate' => 13.0,
         'tax_ledger_id' => (int) ($optionsTax[0]['id'] ?? 0),
         'settlement_mode' => 'party',
+        'settlements' => [],
     ];
     $mappedTax = get_mapped_ledger($companyId, 'default_tax_payable');
     if ($mappedTax && isset($ledgerDirectory[(int) $mappedTax['id']])) {

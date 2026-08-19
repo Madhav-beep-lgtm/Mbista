@@ -117,8 +117,10 @@ $expectations = [
     'payment' => ['name="tender_ledger[]"', 'name="line_ledger[]"', 'Paid from', 'Paid towards'],
     'receipt' => ['name="tender_ledger[]"', 'name="line_ledger[]"', 'Received into', 'Received against'],
     'journal' => ['name="ledger_id[]"', 'vch-dr', 'vch-cr'],
-    'sales' => ['name="value_ledger[]"', 'name="tax_ledger_id"', 'name="settlement_mode"', 'Customer'],
-    'purchase' => ['name="value_ledger[]"', 'Supplier bill no.', 'name="reference_date"'],
+    'sales' => ['name="value_ledger[]"', 'name="tax_ledger_id"', 'name="settlement_mode"', 'Customer',
+        'value="split"', 'name="settle_ledger[]"', 'name="settle_mode[]"', 'name="settle_amount[]"'],
+    'purchase' => ['name="value_ledger[]"', 'Supplier bill no.', 'name="reference_date"',
+        'value="split"', 'name="settle_ledger[]"'],
     'debit_note' => ['name="return_reason"', 'Against supplier bill no.'],
     'credit_note' => ['name="return_reason"', 'Against invoice no.'],
 ];
@@ -191,6 +193,16 @@ function vsc_options(string $html, string $selectName): array
 
     return array_map('intval', $matches[1]);
 }
+
+// A settlement lands somewhere money can sit. Offering an income head here is
+// how a sale ends up crediting revenue twice and balancing anyway.
+$settleOptions = vsc_options($rendered['sales'], 'settle_ledger[]');
+ok($settleOptions !== [] && !in_array($ledgers['INC1'], $settleOptions, true) && !in_array($ledgers['EXP1'], $settleOptions, true),
+    'The settlement grid offers no income or expense head to settle into');
+ok(in_array($ledgers['CASH'], $settleOptions, true) && in_array($ledgers['BANK1'], $settleOptions, true),
+    'But it does offer the till and the bank');
+ok(str_contains($rendered['sales'], '<option value="party">'),
+    'And it offers leaving the balance on the customer\'s own account');
 
 $contraOptions = vsc_options($rendered['contra'], 'contra_from_ledger');
 ok($contraOptions !== [] && !in_array($ledgers['INC1'], $contraOptions, true) && !in_array($ledgers['EXP1'], $contraOptions, true),

@@ -261,6 +261,113 @@ $result = voucher_compose('sales', [
 ok($result['errors'] !== [], 'A cash sale cannot settle into an income ledger');
 
 // ---------------------------------------------------------------------------
+echo "\n6b. A sale settled several ways posts one line per way\n";
+// ---------------------------------------------------------------------------
+$settlementSlot = array_column(voucher_ledgers_for_role($ledgers, 'settlement'), 'id');
+ok(in_array(CASH, $settlementSlot, true) && in_array(CUSTOMER, $settlementSlot, true) && !in_array(INCOME, $settlementSlot, true),
+    'The settlement slot offers tills and party accounts, never an income head');
+ok(isset(voucher_instrument_modes()['fonepay']) && isset(voucher_instrument_modes()['qr']),
+    'Fonepay and a QR scan are modes in their own right, not "online"');
+ok(voucher_instrument_key_for_label('Wallet / QR') === 'wallet',
+    'A mode renamed since it was posted still reads back to its own key');
+ok(voucher_instrument_key_for_label('Fonepay') === 'fonepay', 'And a current one reads back too');
+
+// The counter case this whole mode exists for: one day's takings, arriving
+// three ways, none of which can be made to stand for the others.
+$result = voucher_compose('sales', [
+    'settlement_mode' => 'split',
+    'settlement_party_ledger_id' => CUSTOMER,
+    'settle_ledger' => [CASH, BANK, 'party'],
+    'settle_mode' => ['cash', 'fonepay', 'credit'],
+    'settle_instrument_no' => ['', 'FP-99120', ''],
+    'settle_amount' => ['3000', '5000', '3300'],
+    'value_ledger' => [INCOME],
+    'value_amount' => ['10000'],
+    'tax_mode' => 'exclusive', 'tax_rate' => '13', 'tax_ledger_id' => VAT,
+    'reference_no' => 'INV-0144',
+], $ledgers);
+ok($result['errors'] === [], 'A sale taken three ways composes cleanly');
+ok(near(side_of($result['entries'], INCOME, 'credit'), 10000.00), 'Income is still credited once, with the taxable value');
+ok(near(side_of($result['entries'], VAT, 'credit'), 1300.00), 'And the VAT is still one line');
+ok(near(side_of($result['entries'], CASH, 'debit'), 3000.00), 'The till takes only what went into the till');
+ok(near(side_of($result['entries'], BANK, 'debit'), 5000.00), 'The bank takes only the Fonepay part');
+ok(near(side_of($result['entries'], CUSTOMER, 'debit'), 3300.00), 'And only the rest is left owing');
+ok(balanced($result['entries']), 'A split sale balances');
+ok(near($result['total'], 11300.00), 'Its total is still the invoice total, not one of the parts');
+ok(($result['header']['instrument_type'] ?? '') === 'cash', 'The register keeps the first mode that actually moved money');
+
+$fonepayMemo = '';
+foreach ($result['entries'] as $entry) {
+    if ((int) $entry['ledger_id'] === BANK) { $fonepayMemo = (string) $entry['memo']; }
+}
+ok(strpos($fonepayMemo, 'Fonepay') === 0 && strpos($fonepayMemo, 'FP-99120') !== false,
+    'How the money came in is written onto its own line, for reconciling later');
+
+// The rule the split cannot bend.
+$result = voucher_compose('sales', [
+    'settlement_mode' => 'split', 'settlement_party_ledger_id' => CUSTOMER,
+    'settle_ledger' => [CASH], 'settle_mode' => ['cash'], 'settle_amount' => ['3000'],
+    'value_ledger' => [INCOME], 'value_amount' => ['10000'], 'tax_mode' => 'none',
+], $ledgers);
+ok($result['errors'] !== [] && $result['entries'] === [], 'A split that leaves part of the bill unaccounted for is refused');
+
+$result = voucher_compose('sales', [
+    'settlement_mode' => 'split', 'settlement_party_ledger_id' => CUSTOMER,
+    'settle_ledger' => [CASH], 'settle_mode' => ['cash'], 'settle_amount' => ['12000'],
+    'value_ledger' => [INCOME], 'value_amount' => ['10000'], 'tax_mode' => 'none',
+], $ledgers);
+ok($result['errors'] !== [], 'And so is one that takes more than was billed');
+
+$result = voucher_compose('sales', [
+    'settlement_mode' => 'split',
+    'settle_ledger' => [INCOME], 'settle_mode' => ['cash'], 'settle_amount' => ['10000'],
+    'value_ledger' => [INCOME], 'value_amount' => ['10000'], 'tax_mode' => 'none',
+], $ledgers);
+ok($result['errors'] !== [], 'Money cannot be settled into an income head');
+
+$result = voucher_compose('sales', [
+    'settlement_mode' => 'split', 'settlement_party_ledger_id' => 0,
+    'settle_ledger' => ['party'], 'settle_mode' => ['credit'], 'settle_amount' => ['10000'],
+    'value_ledger' => [INCOME], 'value_amount' => ['10000'], 'tax_mode' => 'none',
+], $ledgers);
+ok($result['errors'] !== [], 'A line left on credit has to name who owes it');
+
+// Money going the other way splits the same way.
+$result = voucher_compose('purchase', [
+    'settlement_mode' => 'split', 'settlement_party_ledger_id' => SUPPLIER,
+    'settle_ledger' => [BANK, 'party'], 'settle_mode' => ['bank_transfer', 'credit'],
+    'settle_amount' => ['1200', '800'],
+    'value_ledger' => [RENT], 'value_amount' => ['2000'], 'tax_mode' => 'none',
+], $ledgers);
+ok($result['errors'] === [] && near(side_of($result['entries'], BANK, 'credit'), 1200.00)
+    && near(side_of($result['entries'], SUPPLIER, 'credit'), 800.00),
+    'A part-paid purchase credits the bank and the supplier for their own shares');
+ok(balanced($result['entries']), 'And a part-paid purchase balances');
+
+// It has to reopen as what it was, or editing it would flatten the split.
+$composed = voucher_compose('sales', [
+    'settlement_mode' => 'split', 'settlement_party_ledger_id' => CUSTOMER,
+    'settle_ledger' => [CASH, 'party'], 'settle_mode' => ['cash', 'credit'],
+    'settle_amount' => ['4000', '6000'],
+    'value_ledger' => [INCOME], 'value_amount' => ['10000'], 'tax_mode' => 'none',
+], $ledgers);
+$back = voucher_decompose('sales', [], $composed['entries'], $ledgers);
+ok($back['ok'] === true && $back['settlement_mode'] === 'split', 'A split sale reopens as a split');
+ok(count($back['settlements']) === 2, 'With both of its settlement lines');
+ok($back['settlements'][0]['mode'] === 'cash' && $back['settlements'][1]['mode'] === 'credit',
+    'Each remembering how that part of the money came in');
+ok(near((float) $back['settlements'][1]['amount'], 6000.00), 'And how much of it did');
+ok(count($back['values']) === 1, 'The value line is not mistaken for a settlement');
+
+$prefill = voucher_prefill_from_input('sales', [
+    'settlement_mode' => 'split',
+    'settle_ledger' => [CASH, 'party'], 'settle_mode' => ['cash', 'credit'],
+    'settle_instrument_no' => ['', ''], 'settle_amount' => ['4000', '6000'],
+]);
+ok($prefill['settlement_mode'] === 'split' && count($prefill['settlements']) === 2,
+    'A rejected split comes back with its lines still typed in');
+
+// ---------------------------------------------------------------------------
 echo "\n7. Purchase is the sale seen from the other side of the counter\n";
 // ---------------------------------------------------------------------------
 $result = voucher_compose('purchase', [
