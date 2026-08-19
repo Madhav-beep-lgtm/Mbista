@@ -251,7 +251,7 @@ function recordWebhookPayment(
         "INSERT INTO invoice_payments
          (company_id, invoice_id, payment_gateway, gateway_ref_id, amount, status, raw_response)
          VALUES (1, :iid, :gw, :ref, :amt, :status, :resp)
-         ON DUPLICATE KEY UPDATE status = :status"
+         ON DUPLICATE KEY UPDATE status = VALUES(status)"
     );
 
     $stmt->execute([

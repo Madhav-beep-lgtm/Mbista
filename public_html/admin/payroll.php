@@ -169,10 +169,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 db()->prepare('DELETE FROM payroll_run_inputs WHERE run_id = :run AND payroll_employee_id = :pe')
                     ->execute(['run' => $runId, 'pe' => $employeeId]);
             } else {
+                // Two placeholders for one value, not :uid twice. This connection
+                // runs with PDO::ATTR_EMULATE_PREPARES off, where the server binds
+                // by position and a name reused across two columns is rejected
+                // outright - SQLSTATE[HY093], "Invalid parameter number".
                 db()->prepare('INSERT INTO payroll_run_inputs (run_id, payroll_employee_id, worked_days, overtime_hours, created_by, updated_by)
-                        VALUES (:run, :pe, :days, :hours, :uid, :uid)
+                        VALUES (:run, :pe, :days, :hours, :created_by, :updated_by)
                     ON DUPLICATE KEY UPDATE worked_days = VALUES(worked_days), overtime_hours = VALUES(overtime_hours), updated_by = VALUES(updated_by)')
-                    ->execute(['run' => $runId, 'pe' => $employeeId, 'days' => $workedDays, 'hours' => $overtimeHours, 'uid' => $userId]);
+                    ->execute([
+                        'run' => $runId, 'pe' => $employeeId,
+                        'days' => $workedDays, 'hours' => $overtimeHours,
+                        'created_by' => $userId, 'updated_by' => $userId,
+                    ]);
             }
             $calc = payroll_calculate_run($runId);
             $respond((bool) $calc['ok'], $calc['ok']

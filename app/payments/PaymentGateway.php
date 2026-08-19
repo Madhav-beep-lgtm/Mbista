@@ -70,7 +70,7 @@ abstract class PaymentGateway
             "INSERT INTO invoice_payments
              (company_id, invoice_id, payment_gateway, gateway_ref_id, amount, status, raw_response)
              VALUES (:cid, :iid, :gw, :ref, :amt, :status, :resp)
-             ON DUPLICATE KEY UPDATE status = :status, updated_at = NOW()"
+             ON DUPLICATE KEY UPDATE status = VALUES(status), updated_at = NOW()"
         );
 
         return $stmt->execute([
