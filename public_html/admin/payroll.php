@@ -973,8 +973,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <span style="color:var(--mbw-muted)">–</span>
                                 <?php else: ?>
                                     <?php $cellOverridden = (string) ($cell['override_reason'] ?? '') !== '' || (int) ($cell['updated_by'] ?? 0) > 0; ?>
+                                    <?php // The amount as paid, like every other screen: the matrix showing
+                                          // the configured figure beside a sheet showing the pro-rated one
+                                          // reads as two different payrolls. ?>
+                                    <?php [$cellWorked, $cellPeriod] = $sheetDays[(int) $line['payroll_employee_id']] ?? [null, null]; ?>
                                     <span<?= $cellOverridden ? ' class="mbw-pill tone-amber" title="' . e('Suggested ' . number_format((float) ($cell['suggested_amount'] ?? 0), 2) . ($cell['override_reason'] ? ' — ' . $cell['override_reason'] : '')) . '"' : '' ?>>
-                                        <?= e(number_format((float) $cell['amount'], 2)) ?>
+                                        <?= e(number_format(payroll_component_effective_amount($cell, $cellWorked, $cellPeriod), 2)) ?>
                                     </span>
                                 <?php endif; ?>
                             </td>
@@ -1021,7 +1025,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <td class="is-numeric"><?= $entry['entry_type'] === 'credit' ? e(number_format($entry['amount'], 2)) : '–' ?></td>
                     </tr>
                 <?php endforeach; ?>
-                <tr style="font-weight:700"><td colspan="2">Total (balanced)</td><td class="is-numeric"><?= e(number_format($drTotal, 2)) ?></td><td class="is-numeric"><?= e(number_format($crTotal, 2)) ?></td></tr>
+                <?php $journalOut = round($drTotal - $crTotal, 2); ?>
+                <tr style="font-weight:700"><td colspan="2">Total<?= abs($journalOut) < 0.005 ? ' (balanced)' : '' ?></td><td class="is-numeric"><?= e(number_format($drTotal, 2)) ?></td><td class="is-numeric"><?= e(number_format($crTotal, 2)) ?></td></tr>
+                <?php if (abs($journalOut) >= 0.005): ?>
+                    <?php // Never let a broken journal look like a normal one. It cannot post -
+                          // the voucher writer rejects it - so say so here rather than leaving
+                          // the reader to subtract two totals and wonder. ?>
+                    <tr><td colspan="4" style="color:var(--mbw-red,#c0392b);font-weight:600">
+                        This journal is out by <?= e(number_format(abs($journalOut), 2)) ?> and cannot be posted.
+                        Press Recalculate; if it stays out, a component is priced differently from the pay it produced.
+                    </td></tr>
+                <?php endif; ?>
             </tbody>
         </table>
         </div>

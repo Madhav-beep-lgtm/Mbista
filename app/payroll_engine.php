@@ -1548,6 +1548,28 @@ function payroll_run(int $runId): ?array
 }
 
 /**
+ * Worked days and period days per employee for a run, as the CALCULATION used
+ * them (they are written onto each line).
+ *
+ * Anything that turns a stored component amount into the amount actually paid
+ * needs these two numbers, and there must be exactly one answer to the question:
+ * a screen and a voucher that disagree about how many days were worked produce a
+ * salary sheet and a journal that do not describe the same payroll.
+ */
+function payroll_run_line_days(int $runId): array
+{
+    $days = [];
+    foreach (payroll_run_lines($runId) as $line) {
+        $days[(int) $line['payroll_employee_id']] = [
+            isset($line['worked_days']) && $line['worked_days'] !== null ? (float) $line['worked_days'] : null,
+            isset($line['period_days']) && $line['period_days'] !== null ? (float) $line['period_days'] : null,
+        ];
+    }
+
+    return $days;
+}
+
+/**
  * Every figure the salary sheet prints, per employee, as plain data.
  *
  * The days and hours boxes save themselves the moment they change - there is no
@@ -1732,8 +1754,15 @@ function payroll_component_posting_plan(array $run, array $settings): array
         $names[$ledgerId][$componentName] = true;
     };
 
+    // The amount as PAID, not as configured. Gross was built from components cut
+    // down to the days actually worked; debiting the configured amount here put
+    // MORE on the debit side than gross contained, and the accrual stopped
+    // balancing - a voucher that cannot post, from a salary sheet that looked
+    // right. Same function the calculation and the sheet use.
+    $lineDays = payroll_run_line_days((int) $run['id']);
     foreach (payroll_run_component_rows((int) $run['id']) as $row) {
-        $amount = round((float) $row['amount'], 2);
+        [$rowWorkedDays, $rowPeriodDays] = $lineDays[(int) $row['payroll_employee_id']] ?? [null, null];
+        $amount = payroll_component_effective_amount($row, $rowWorkedDays, $rowPeriodDays);
         if ($amount <= 0.004) {
             continue; // zero amounts never create accounting lines
         }
@@ -1867,6 +1896,14 @@ function payroll_accrual_entries(array $run, array $settings): array
     // Gross earnings stay one debit on the salary-expense control ledger MINUS
     // whatever moved to component-specific expense ledgers.
     $genericGross = round($gross - $plan['earning_reallocated'], 2);
+    // Components cannot debit MORE than gross contains. If they do, something
+    // upstream priced them differently from the pay - and the old code silently
+    // dropped this negative line, which is exactly how an unbalanced journal got
+    // drawn on screen instead of an error being raised.
+    if ($genericGross < -0.004) {
+        $plan['missing'][] = 'Component expense ledgers account for ' . number_format(-$genericGross, 2)
+            . ' MORE than gross pay. Recalculate the run; if it persists, a component amount and the pay it produced disagree.';
+    }
     $entries[] = ['ledger_id' => (int) $settings['salary_expense_ledger_id'], 'entry_type' => 'debit', 'amount' => $genericGross, 'memo' => 'Gross earnings'];
     foreach ($plan['earning_moves'] as $ledgerId => $amount) {
         $entries[] = ['ledger_id' => (int) $ledgerId, 'entry_type' => 'debit', 'amount' => $amount, 'memo' => $memoFor((int) $ledgerId, 'Component earnings')];
@@ -1920,8 +1957,20 @@ function payroll_accrual_entries(array $run, array $settings): array
     // Consolidate per (ledger, side) so one ledger shows one line.
     $consolidated = [];
     foreach ($entries as $entry) {
-        if ($entry['amount'] <= 0.004) {
-            continue;
+        $entry['amount'] = round((float) $entry['amount'], 2);
+        if (abs($entry['amount']) <= 0.004) {
+            continue; // a zero never creates an accounting line
+        }
+        if ($entry['amount'] < 0) {
+            // A negative debit IS a credit. The old test dropped anything not
+            // positive, which removed ONE SIDE of an entry and left the voucher
+            // out of balance - so an employee whose deductions exceed their pay,
+            // or a month with no pay at all, produced a journal that could not
+            // post and did not say why. Flipping the side records the unusual
+            // thing that happened (salary payable becomes a receivable from the
+            // employee) instead of hiding it.
+            $entry['entry_type'] = $entry['entry_type'] === 'debit' ? 'credit' : 'debit';
+            $entry['amount'] = -$entry['amount'];
         }
         $key = $entry['entry_type'] . ':' . $entry['ledger_id'];
         if (!isset($consolidated[$key])) {
