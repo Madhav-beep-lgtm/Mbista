@@ -400,6 +400,40 @@ echo "\nThe reports toolbar says what its buttons do\n";
  * that styles them, and every button carries a word as well as a glyph.
  */
 // ---------------------------------------------------------------------------
+echo "\nLong lists are sent once per page, not once per row\n";
+// ---------------------------------------------------------------------------
+// The item master and the traced shelf are each a couple of thousand entries on
+// a real shop. Drawn into every line of a grid they came to megabytes of the
+// same list over and over — the workshop order screen was seven and a half of
+// them. Each list is emitted once into a <template> and filled into the rows by
+// script; these assertions keep it that way, because the cost of getting it
+// wrong does not show at the four-item scale of this fixture.
+$gridHtml = $renderedHtml['jewellery-workshop.php?view=orders'] ?? '';
+// At most once, not exactly once: the flag that stops it repeating is a
+// function static, so across a suite that renders a dozen pages in ONE process
+// only the first page to draw a grid carries it. A browser renders one page per
+// process, where "at most once" and "exactly once" are the same statement.
+ok(substr_count($gridHtml, 'id="jw-item-options"') <= 1,
+    'The item list is never on the order screen more than once');
+ok(substr_count($gridHtml, 'id="jw-stock-options"') <= 1,
+    'And neither is the traced-shelf list');
+ok(substr_count($gridHtml, 'data-jw-item-fill') >= 1,
+    'Item pickers are filled from it rather than carrying their own copy');
+ok(substr_count($gridHtml, 'data-jw-stock-fill') >= 1,
+    'And so are the stock pickers');
+// The one that actually caused the megabytes: a row-level select holding the
+// whole list. A row should carry its placeholder and at most its own selection.
+$biggestRowSelect = 0;
+if (preg_match_all('~<select[^>]*data-jw-(?:item|stock)-fill[^>]*>~i', $gridHtml, $gridSelects, PREG_OFFSET_CAPTURE)) {
+    foreach ($gridSelects[0] as $gridTag) {
+        $gridEnd = strpos($gridHtml, '</select>', $gridTag[1]);
+        $biggestRowSelect = max($biggestRowSelect, substr_count(substr($gridHtml, $gridTag[1], $gridEnd - $gridTag[1]), '<option'));
+    }
+}
+ok($biggestRowSelect <= 2, 'No row-level picker carries the whole list (biggest holds ' . $biggestRowSelect . ' option(s))');
+
+
+// ---------------------------------------------------------------------------
 echo "\nBilling an order from the delivery list keeps its layout\n";
 // ---------------------------------------------------------------------------
 // "Bill & deliver" lands here, and this is the only path that draws the

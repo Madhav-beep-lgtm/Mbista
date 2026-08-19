@@ -362,6 +362,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                 //
                 // The FIRST select on the page keeps its options inline, so the
                 // form is still usable if that script never runs.
+                static $stockTemplateEmitted = false;
                 static $sharedItemOptions = null;
                 static $itemTemplateEmitted = false;
                 static $inlineListUsed = false;
@@ -406,61 +407,84 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                     <td data-label="Item" style="display:flex;gap:4px;align-items:center">
                         <?php if ($withWorkshop && $withStock): ?>
                             <!-- Stock picker for Showroom Stock -->
-                            <select name="<?= $prefix ?>_stock_unit_id[]" class="jw-stock-pick" style="flex:1;min-width:0;display:<?= ((int) ($row['stock_unit_id'] ?? 0) > 0) ? 'block' : 'none' ?>">
+                            <?php
+                            // Built ONCE for the page and filled into each row by
+                            // script, exactly as the item list beside it is. Drawn per
+                            // row this was the whole traced shelf — two thousand
+                            // options carrying nine data attributes each — repeated
+                            // for every line on the form. An order screen for a
+                            // two-thousand-piece shop came to seven and a half
+                            // megabytes, nearly all of it the same list over again.
+                            static $sharedStockOptions = null;
+                            static $stockOptionById = [];
+                            if ($sharedStockOptions === null) {
+                                $sharedStockOptions = '';
+                                foreach ($stockPieces ?? [] as $piece) {
+                                    $pieceId = (int) ($piece['id'] ?? 0);
+                                    if ($pieceId <= 0) {
+                                        continue;
+                                    }
+                                    // The counter reads this list looking for a ring, not for
+                                    // a barcode, so the piece is named first and identified
+                                    // after: name, its own code, what it is made of, what it
+                                    // weighs, and only then the trace that tells two
+                                    // identical bracelets apart.
+                                    $pieceName = trim((string) ($piece['item_name'] ?? ''));
+                                    $pieceCode = trim((string) ($piece['item_code'] ?? ''));
+                                    $purityCode = trim((string) ($piece['purity_code'] ?? ''));
+                                    // The shop's own tag, when the piece carries one, is what
+                                    // the person at the counter is holding — the trace code is
+                                    // the fallback for stock that was never tagged.
+                                    $pieceTag = trim((string) ($piece['tag_no'] ?? ''));
+                                    $traceCode = $pieceTag !== ''
+                                        ? $pieceTag
+                                        : trim((string) ($piece['trace_code'] ?? ''));
+                                    // Pieces tracked by weight carry no piece count — an
+                                    // opening balance of 4.36gm is one object, not zero of
+                                    // them, so "Qty: 0" is only shown when it is a real count.
+                                    $qtyAvailable = (float) ($piece['qty_pieces'] ?? 0);
+                                    $labelParts = [$pieceName !== '' ? $pieceName : ($pieceCode !== '' ? $pieceCode : 'Stock #' . $pieceId)];
+                                    if ($pieceCode !== '' && $pieceName !== '') {
+                                        $labelParts[0] .= ' (' . $pieceCode . ')';
+                                    }
+                                    if ($purityCode !== '') {
+                                        $labelParts[] = $purityCode;
+                                    }
+                                    $labelParts[] = $fmt((float) ($piece['gross_weight'] ?? 0), 4) . ' ' . (string) ($piece['unit_code'] ?? '');
+                                    if ($qtyAvailable > 0) {
+                                        $labelParts[] = $fmt($qtyAvailable, 0) . ' pc';
+                                    }
+                                    if ($traceCode !== '') {
+                                        $labelParts[] = $traceCode;
+                                    }
+                                    $pieceLabel = implode(' | ', $labelParts);
+                                    $option = '<option value="' . $pieceId . '"'
+                                        . ' data-item="' . (int) ($piece['item_id'] ?? 0) . '"'
+                                        . ' data-metal="' . (int) ($piece['metal_id'] ?? 0) . '"'
+                                        . ' data-purity="' . (int) ($piece['purity_id'] ?? 0) . '"'
+                                        . ' data-unit="' . (int) ($piece['unit_id'] ?? 0) . '"'
+                                        . ' data-pcs="' . e((string) ((float) ($piece['qty_pieces'] ?? 0) ?: 1)) . '"'
+                                        . ' data-gross="' . e((string) (float) ($piece['gross_weight'] ?? 0)) . '"'
+                                        . ' data-stone="' . e((string) (float) ($piece['stone_weight'] ?? 0)) . '"'
+                                        . ' data-making="' . e((string) (float) ($piece['making_amount'] ?? 0)) . '"'
+                                        . ' data-size="' . e((string) ($piece['size_design'] ?? $piece['design_no'] ?? '')) . '"'
+                                        . ' title="' . e($pieceLabel) . '">' . e($pieceLabel) . '</option>';
+                                    $sharedStockOptions .= $option;
+                                    $stockOptionById[$pieceId] = $option;
+                                }
+                            }
+                            $rowStockUnitId = (int) ($row['stock_unit_id'] ?? 0);
+                            ?>
+                            <?php if (!$stockTemplateEmitted): ?>
+                                <template id="jw-stock-options"><?= $sharedStockOptions ?></template>
+                                <?php $stockTemplateEmitted = true; ?>
+                            <?php endif; ?>
+                            <?php // Only the row's OWN piece is drawn; the rest arrive from
+                                  // the template above the moment somebody opens the list. ?>
+                            <select name="<?= $prefix ?>_stock_unit_id[]" class="jw-stock-pick" data-jw-stock-fill="1" style="flex:1;min-width:0;display:<?= $rowStockUnitId > 0 ? 'block' : 'none' ?>">
                                 <option value="0">— Select stock —</option>
-                                <?php if (!empty($stockPieces)): ?>
-                                    <?php foreach ($stockPieces as $piece): ?>
-                                        <?php
-                                            // The counter reads this list looking for a ring, not for
-                                            // a barcode, so the piece is named first and identified
-                                            // after: name, its own code, what it is made of, what it
-                                            // weighs, and only then the trace that tells two
-                                            // identical bracelets apart.
-                                            $pieceId = (int) ($piece['id'] ?? 0);
-                                            if ($pieceId <= 0) continue;
-                                            $pieceName = trim((string) ($piece['item_name'] ?? ''));
-                                            $pieceCode = trim((string) ($piece['item_code'] ?? ''));
-                                            $purityCode = trim((string) ($piece['purity_code'] ?? ''));
-                                            // The shop's own tag, when the piece carries one, is what
-                                            // the person at the counter is holding — the trace code is
-                                            // the fallback for stock that was never tagged.
-                                            $pieceTag = trim((string) ($piece['tag_no'] ?? ''));
-                                            $traceCode = $pieceTag !== ''
-                                                ? $pieceTag
-                                                : trim((string) ($piece['trace_code'] ?? ''));
-                                            // Pieces tracked by weight carry no piece count — an
-                                            // opening balance of 4.36gm is one object, not zero of
-                                            // them, so "Qty: 0" is only shown when it is a real count.
-                                            $qtyAvailable = (float) ($piece['qty_pieces'] ?? 0);
-                                            $labelParts = [$pieceName !== '' ? $pieceName : ($pieceCode !== '' ? $pieceCode : 'Stock #' . $pieceId)];
-                                            if ($pieceCode !== '' && $pieceName !== '') {
-                                                $labelParts[0] .= ' (' . $pieceCode . ')';
-                                            }
-                                            if ($purityCode !== '') {
-                                                $labelParts[] = $purityCode;
-                                            }
-                                            $labelParts[] = $fmt((float) ($piece['gross_weight'] ?? 0), 4) . ' ' . (string) ($piece['unit_code'] ?? '');
-                                            if ($qtyAvailable > 0) {
-                                                $labelParts[] = $fmt($qtyAvailable, 0) . ' pc';
-                                            }
-                                            if ($traceCode !== '') {
-                                                $labelParts[] = $traceCode;
-                                            }
-                                            $pieceLabel = implode(' | ', $labelParts);
-                                        ?>
-                                        <option value="<?= $pieceId ?>"
-                                                data-item="<?= (int) ($piece['item_id'] ?? 0) ?>"
-                                                data-metal="<?= (int) ($piece['metal_id'] ?? 0) ?>"
-                                                data-purity="<?= (int) ($piece['purity_id'] ?? 0) ?>"
-                                                data-unit="<?= (int) ($piece['unit_id'] ?? 0) ?>"
-                                                data-pcs="<?= e((string) ((float) ($piece['qty_pieces'] ?? 0) ?: 1)) ?>"
-                                                data-gross="<?= e((string) (float) ($piece['gross_weight'] ?? 0)) ?>"
-                                                data-stone="<?= e((string) (float) ($piece['stone_weight'] ?? 0)) ?>"
-                                                data-making="<?= e((string) (float) ($piece['making_amount'] ?? 0)) ?>"
-                                                data-size="<?= e((string) ($piece['size_design'] ?? $piece['design_no'] ?? '')) ?>"
-                                                title="<?= e($pieceLabel) ?>"
-                                                <?= (int) ($row['stock_unit_id'] ?? 0) === $pieceId ? 'selected' : '' ?>><?= e($pieceLabel) ?></option>
-                                    <?php endforeach; ?>
+                                <?php if ($rowStockUnitId > 0 && isset($stockOptionById[$rowStockUnitId])): ?>
+                                    <?= str_replace('<option ', '<option selected ', $stockOptionById[$rowStockUnitId]) ?>
                                 <?php endif; ?>
                             </select>
                         <?php endif; ?>
@@ -477,7 +501,15 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                 // item before any script runs, and are marked for filling
                                 // from the template above.
                                 $rowItemId = (int) ($row['item_id'] ?? 0);
-                                $fillFromTemplate = $inlineListUsed;
+                                // EVERY row fills from the template, including the first.
+                                // It used to carry the whole list inline so that the
+                                // searchable-dropdown script at the foot of the page would
+                                // count real options and enhance it — but the fill below
+                                // runs in this partial, which is emitted first, so by the
+                                // time that script looks every select already holds the
+                                // real list. The inline copy was a second two-thousand-item
+                                // list on the page saying exactly what the template said.
+                                $fillFromTemplate = true;
                                 $inlineListUsed = true;
                             ?>
                             <select name="<?= $prefix ?>_item_id[]" class="c-item" style="flex:1;min-width:0"<?= $fillFromTemplate ? ' data-jw-item-fill="1"' : '' ?>>
@@ -793,20 +825,28 @@ function jw_line_grid_scripts(array $ctx = []): void
     // dropdown script loads at the foot of the page — that one decides whether
     // to enhance a select by counting its options, so it has to see the real
     // list, not the stub.
-    function fillItemSelects(scope) {
-        var template = document.getElementById('jw-item-options');
+    function fillFromTemplate(scope, templateId, selector, marker, keepFirst) {
+        var template = document.getElementById(templateId);
         if (!template) { return; }
-        var pending = (scope || document).querySelectorAll('select.c-item[data-jw-item-fill]');
+        var pending = (scope || document).querySelectorAll(selector);
         Array.prototype.forEach.call(pending, function (select) {
             var chosen = select.value;
-            select.innerHTML = template.innerHTML;
+            // The stock picker keeps its "— Select stock —" line; the item list
+            // carries its own placeholder inside the template.
+            var head = keepFirst && select.options.length ? select.options[0].outerHTML : '';
+            select.innerHTML = head + template.innerHTML;
             // A value the list no longer offers must not silently become the
             // first item, so it is only restored when it is really there.
             if (chosen && select.querySelector('option[value="' + chosen + '"]')) {
                 select.value = chosen;
             }
-            select.removeAttribute('data-jw-item-fill');
+            select.removeAttribute(marker);
         });
+    }
+
+    function fillItemSelects(scope) {
+        fillFromTemplate(scope, 'jw-item-options', 'select.c-item[data-jw-item-fill]', 'data-jw-item-fill', false);
+        fillFromTemplate(scope, 'jw-stock-options', 'select.jw-stock-pick[data-jw-stock-fill]', 'data-jw-stock-fill', true);
     }
     fillItemSelects(document);
 
