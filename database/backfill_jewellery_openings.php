@@ -30,9 +30,35 @@ require_once __DIR__ . '/../app/accounting_module_repair.php';
 require_once __DIR__ . '/../app/jewellery_stock.php';
 
 $apply = in_array('--apply', $argv, true);
+$self = 'database/backfill_jewellery_openings.php' . ($apply ? ' --apply' : '');
+
+// WHICH database this is talking to has to be settled before anything is
+// reported as missing from it.
+//
+// config.php reads the .env sitting beside app/, and .env is deliberately not
+// committed. Run out of the REPOSITORY there is therefore no .env to find, and
+// the connection quietly falls back to root@localhost with no password — which
+// on a server is nobody's database. table_exists() catches the failure and
+// answers "no", so the table then looks absent when the truth is that nothing
+// was ever asked. That is a misleading thing for a script like this to say, so
+// it asks plainly first.
+try {
+    db()->query('SELECT 1');
+} catch (Throwable $exception) {
+    fwrite(STDERR, 'Cannot reach the database configured for this copy (' . DB_NAME . ' as ' . DB_USER . ").\n\n"
+        . '  ' . $exception->getMessage() . "\n\n"
+        . "This normally means the script is being run from the repository, which has no .env.\n"
+        . "Run the DEPLOYED copy instead — the one that sits beside your .env:\n\n"
+        . '  php ~/' . $self . "\n");
+    exit(2);
+}
 
 if (!jw_ob_ready()) {
-    fwrite(STDERR, "The jewellery opening store is not installed. Run:\n  php deploy/repair-schema.php " . dirname(__DIR__) . "\n");
+    fwrite(STDERR, 'The jewellery opening store does not exist in ' . DB_NAME . " yet.\n\n"
+        . "The schema is created by the DEPLOY, not by this script. Deploy first:\n\n"
+        . "  cd ~/repositories/Mbista && git pull origin main && /bin/bash deploy/tasks.sh\n\n"
+        . "then re-run:\n\n"
+        . '  php ~/' . $self . "\n");
     exit(2);
 }
 
