@@ -876,6 +876,18 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
             <div class="notice">This sale is posted and can no longer be edited. Unpost it first.</div>
         </section>
         <?php else: ?>
+        <?php // Declared HERE, outside the sale form, and empty of anything but
+              // its own parameters. A <form> inside a <form> is not nesting in
+              // HTML — the parser throws the inner start tag away and lets the
+              // inner </form> close the OUTER one, so every card after it fell
+              // out of the .jw-layout grid and the sticky summary rail, no
+              // longer a grid item, floated over the list further down the
+              // page. The tick boxes and the button below reach this form by
+              // the form= attribute instead, which is exactly what it is for. ?>
+        <form method="get" id="jw-collect-form">
+            <input type="hidden" name="view" value="sales">
+            <input type="hidden" name="for_party" value="<?= (int) $saleParty ?>">
+        </form>
         <form method="post" class="jw-layout" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_sale">
@@ -962,14 +974,13 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         <th></th>
                     </tr></tfoot>
                 </table></div>
-                <?php // Its own GET form: ticking re-fills the grid below from the
-                      // orders chosen, which is a fresh page, not a sale being saved. ?>
-                <form method="get" id="jw-collect-form" style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                    <input type="hidden" name="view" value="sales">
-                    <input type="hidden" name="for_party" value="<?= (int) $saleParty ?>">
-                    <button type="submit" class="button secondary"><?= icon('journal') ?>Bill the ticked orders</button>
+                <?php // Submits the GET form declared above the sale form: ticking
+                      // re-fills the grid below from the orders chosen, which is a
+                      // fresh page, not a sale being saved. ?>
+                <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <button type="submit" form="jw-collect-form" class="button secondary"><?= icon('journal') ?>Bill the ticked orders</button>
                     <small style="color:var(--mbw-muted,#64748b)">Anything left unticked stays waiting for its own bill.</small>
-                </form>
+                </div>
                 <?php if ($orderPrefill): ?>
                     <?php foreach ($sellingOrderIds as $sellingId): ?>
                         <input type="hidden" name="deliver_order_ids[]" value="<?= (int) $sellingId ?>">

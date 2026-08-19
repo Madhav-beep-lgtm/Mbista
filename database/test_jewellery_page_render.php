@@ -26,6 +26,37 @@ $_SERVER['HTTP_HOST'] = '127.0.0.1';
 $pass = 0; $fail = 0;
 function ok(bool $c, string $l): void { global $pass, $fail; if ($c) { $pass++; echo "  PASS  $l\n"; } else { $fail++; echo "  FAIL  $l\n"; } }
 
+/**
+ * Where a <form> opens inside another one, or -1 when none does.
+ *
+ * A form inside a form is not nesting — HTML has no such thing. The parser
+ * throws the inner START tag away and lets the inner </form> close the OUTER
+ * one, so every element after it silently leaves the form it was written in.
+ * On a two-column screen that means the cards fall out of the grid and a
+ * sticky rail, no longer a grid item, floats over whatever is below it. None
+ * of which shows up in the source, only in the browser — which is why it is
+ * checked here, against what is actually sent.
+ */
+function jwr_nested_form_at(string $html): int
+{
+    $depth = 0;
+    if (!preg_match_all('~<form\b|</form\s*>~i', $html, $matches, PREG_OFFSET_CAPTURE)) {
+        return -1;
+    }
+    foreach ($matches[0] as $tag) {
+        if (stripos($tag[0], '</form') === 0) {
+            $depth = max(0, $depth - 1);
+            continue;
+        }
+        $depth++;
+        if ($depth > 1) {
+            return (int) $tag[1];
+        }
+    }
+
+    return -1;
+}
+
 function jwr_cleanup(): void
 {
     foreach (db()->query("SELECT id FROM companies WHERE code = 'JWREN'")->fetchAll(PDO::FETCH_COLUMN) as $s) {
@@ -247,6 +278,10 @@ foreach ($pages as $script => $views) {
                 $problems[] = trim(substr($html, $pos, 200));
             }
         }
+        $nestedAt = jwr_nested_form_at($html);
+        if ($nestedAt >= 0) {
+            $problems[] = 'a <form> inside a <form>: ' . trim(substr($html, $nestedAt, 120));
+        }
         if ($len < 3000) {
             $problems[] = 'suspiciously short output (' . $len . ' bytes)';
         }
@@ -364,6 +399,42 @@ echo "\nThe reports toolbar says what its buttons do\n";
  * so what is checked here is the part that CAN be: the page pulls in the skin
  * that styles them, and every button carries a word as well as a glyph.
  */
+// ---------------------------------------------------------------------------
+echo "\nBilling an order from the delivery list keeps its layout\n";
+// ---------------------------------------------------------------------------
+// "Bill & deliver" lands here, and this is the only path that draws the
+// orders-to-collect panel — which is where a <form> had been written inside
+// the sale's own form. The browser closed the outer one on the inner one's
+// </form>, so every card below fell out of the two-column grid and the sticky
+// summary rail floated over the sales list underneath.
+$_SERVER['SCRIPT_NAME'] = '/admin/jewellery-trade.php';
+$_GET = ['view' => 'sales', 'sell_order' => $order];
+$_POST = [];
+ob_start();
+$collectError = null;
+try {
+    include $root . '/public_html/admin/jewellery-trade.php';
+} catch (Throwable $e) {
+    $collectError = get_class($e) . ': ' . $e->getMessage();
+}
+$collectHtml = (string) ob_get_clean();
+ok($collectError === null, 'Billing a collected order renders' . ($collectError === null ? '' : ' — ' . $collectError));
+ok(str_contains($collectHtml, 'Orders this customer is here to collect'),
+    'And it draws the orders-to-collect panel, which only this path reaches');
+ok(jwr_nested_form_at($collectHtml) === -1,
+    'With no <form> inside a <form> — the thing that broke the layout');
+ok(str_contains($collectHtml, 'form="jw-collect-form"'),
+    'The tick boxes and the button reach their form by the form= attribute instead');
+ok(substr_count($collectHtml, 'id="jw-collect-form"') === 1,
+    'And that form is declared exactly once, outside the sale');
+// The rail has to be a CHILD of the grid, or it is not a grid item and has
+// nothing to stick inside.
+$layoutAt = strpos($collectHtml, 'class="jw-layout"');
+$railAt = $layoutAt !== false ? strpos($collectHtml, 'jw-rail', $layoutAt) : false;
+$layoutEndsAt = $layoutAt !== false ? strpos($collectHtml, '</form>', $layoutAt) : false;
+ok($layoutAt !== false && $railAt !== false && $layoutEndsAt !== false && $railAt < $layoutEndsAt,
+    'The summary rail sits INSIDE the two-column form, where it can be a grid item');
+
 // ---------------------------------------------------------------------------
 echo "\nOpening stock asks its questions on the server\n";
 // ---------------------------------------------------------------------------
