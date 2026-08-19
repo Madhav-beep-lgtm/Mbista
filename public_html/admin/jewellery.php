@@ -389,6 +389,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'making_amount' => (float) ($_POST['making_amount'] ?? 0),
             'rate' => (float) ($_POST['rate'] ?? 0),
             'amount' => (float) ($_POST['amount'] ?? 0),
+            'customer_party_id' => (int) ($_POST['customer_party_id'] ?? 0),
             'customer_name' => (string) ($_POST['customer_name'] ?? ''),
             'customer_order_no' => (string) ($_POST['order_number'] ?? ''),
         ], $userId);
@@ -749,6 +750,18 @@ if ($view === 'opening') {
     $importBatch = opening_import_batch($companyId, (int) ($_GET['import'] ?? 0))
         ?: opening_import_latest_staged($companyId, 'jewellery');
     $importRows = $importBatch ? opening_import_rows($companyId, (int) $importBatch['id']) : [];
+    // The customers this shop has on file. An opening held for someone can then
+    // name them off the master — which ties the piece to a ledger — instead of
+    // as free text that no ledger knows about.
+    $openingCustomers = [];
+    if (table_exists('accounting_parties')) {
+        $openingCustomerStmt = db()->prepare("SELECT id, code, name FROM accounting_parties
+            WHERE company_id = :cid AND status = 'active' AND party_type IN ('customer', 'both')
+            ORDER BY name ASC");
+        $openingCustomerStmt->execute(['cid' => $companyId]);
+        $openingCustomers = $openingCustomerStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     // The master keyed by id, so a preview row can name the item it matched
     // without searching the whole list again for each of them.
     $importItemsById = [];
@@ -1947,7 +1960,19 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label>Making charge<input type="number" name="making_amount" step="0.01" min="0" value="0"></label>
             <label>Rate<input type="number" name="rate" step="0.0001" min="0" value="0"></label>
             <label>Opening value (<?= e($sym) ?>)<input type="number" name="amount" step="0.01" min="0" value="0"></label>
-            <label>Customer name<input type="text" name="customer_name" maxlength="190"></label>
+            <?php // Held for whom. Chosen off the customer master, so the piece is
+                  // tied to a ledger rather than to a name that may be typed two
+                  // ways on two days. A walk-in who is not on the master is still
+                  // nameable, in the box that appears when nobody is chosen. ?>
+            <label>Customer
+                <select name="customer_party_id" id="opening-customer">
+                    <option value="0"><?= $openingCustomers === [] ? '— no customers on file —' : '— not a registered customer —' ?></option>
+                    <?php foreach ($openingCustomers as $openingCustomer): ?>
+                        <option value="<?= (int) $openingCustomer['id'] ?>"><?= e((string) $openingCustomer['name'] . ' (' . (string) $openingCustomer['code'] . ')') ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label id="opening-customer-name">Customer name<input type="text" name="customer_name" maxlength="190" placeholder="Only if they are not on the list"></label>
             <label>Order number<input type="text" name="order_number" maxlength="120"></label>
             <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center">
                 <button id="opening-stock-submit" type="submit" class="button" <?= $items === [] ? 'disabled' : '' ?>>Save &amp; Post</button>
@@ -1967,6 +1992,23 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             }
             [gross, stone, diamond].forEach(function (field) { field.addEventListener('input', updateNet); field.addEventListener('change', updateNet); });
             updateNet();
+
+            // Naming a customer off the master and typing one in words are two
+            // answers to the same question, so only one of them is ever asked.
+            // The typed box is emptied when a registered customer is chosen —
+            // the name follows the party from there, on the server too.
+            var customer = form.querySelector('#opening-customer');
+            var nameField = form.querySelector('#opening-customer-name');
+            function updateCustomer() {
+                if (!customer || !nameField) { return; }
+                var chosen = (Number(customer.value) || 0) > 0;
+                // display, not [hidden]: the form grid sets display on its
+                // labels, and a stylesheet that says grid beats an attribute.
+                nameField.style.display = chosen ? 'none' : '';
+                if (chosen) { nameField.querySelector('input').value = ''; }
+            }
+            if (customer) { customer.addEventListener('change', updateCustomer); }
+            updateCustomer();
         })();
         </script>
         <?php if ($items === []): ?>
@@ -2092,6 +2134,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                                 data-making-amount="<?= e((string) ($row['making_amount'] ?? 0)) ?>"
                                 data-rate="<?= e((string) ($row['rate'] ?? 0)) ?>"
                                 data-amount="<?= e((string) ($row['amount'] ?? 0)) ?>"
+                                data-customer-party="<?= (int) ($row['customer_party_id'] ?? 0) ?>"
                                 data-customer-name="<?= e((string) ($row['customer_name'] ?? '')) ?>"
                                 data-order-number="<?= e((string) ($row['customer_order_no'] ?? '')) ?>"><?= icon('edit') ?></button>
                             <form method="post" data-confirm="Clear this opening stock? Its voucher and metal movement will be removed.">
@@ -2147,6 +2190,12 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     if (input) { input.dispatchEvent(new Event('input', {bubbles:true})); }
                 });
             }
+            // The form's own script owns whether the typed-name box is showing;
+            // this only tells it that the chosen customer has changed under it.
+            function syncCustomer() {
+                var select = form.querySelector('[name="customer_party_id"]');
+                if (select) { select.dispatchEvent(new Event('change', {bubbles:true})); }
+            }
             document.querySelectorAll('.jw-opening-edit').forEach(function (button) {
                 button.addEventListener('click', function () {
                     var data = button.dataset;
@@ -2162,9 +2211,11 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     setValue('making_amount', data.makingAmount);
                     setValue('rate', data.rate);
                     setValue('amount', data.amount);
+                    setValue('customer_party_id', data.customerParty);
                     setValue('customer_name', data.customerName);
                     setValue('order_number', data.orderNumber);
                     updateNet();
+                    syncCustomer();
                     if (submit) { submit.textContent = 'Update & Post'; }
                     if (cancel) { cancel.hidden = false; }
                     form.closest('section').scrollIntoView({behavior: 'smooth', block: 'start'});
@@ -2174,6 +2225,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 cancel.addEventListener('click', function () {
                     original.forEach(function (value, name) { setValue(name, value); });
                     updateNet();
+                    syncCustomer();
                     if (submit) { submit.textContent = 'Save & Post'; }
                     cancel.hidden = true;
                 });

@@ -1556,11 +1556,19 @@ function jewellery_stock_valuation(int $companyId, ?string $asOf = null): array
  */
 function jewellery_opening_txns(int $companyId): array
 {
-    $stmt = db()->prepare("SELECT item_id, id, voucher_id, qty_pieces, stone_weight, stone_carat, diamond_carat,
-            stone_amount, diamond_amount, making_amount, fine_weight
-        FROM jewellery_stock_txns
-        WHERE company_id = :cid AND txn_type = 'opening'
-        ORDER BY id ASC");
+    // Who the piece is being held for lives on the traced unit, not on the
+    // movement — joined in here so the list can show it and the edit button can
+    // put it back. Read per row it would be another query per item, which is
+    // the thing this function exists to avoid.
+    $traced = jewellery_trace_ready();
+    $stmt = db()->prepare("SELECT t.item_id, t.id, t.voucher_id, t.qty_pieces, t.stone_weight, t.stone_carat,
+            t.diamond_carat, t.stone_amount, t.diamond_amount, t.making_amount, t.fine_weight"
+        . ($traced ? ",
+            u.customer_party_id, u.customer_name, u.customer_order_no" : '') . "
+        FROM jewellery_stock_txns t"
+        . ($traced ? ' LEFT JOIN jewellery_stock_units u ON u.id = t.stock_unit_id' : '') . "
+        WHERE t.company_id = :cid AND t.txn_type = 'opening'
+        ORDER BY t.id ASC");
     $stmt->execute(['cid' => $companyId]);
 
     $byItem = [];
@@ -1619,6 +1627,12 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId, ?array $items
             'stock_txn_id' => (int) ($txnRow['id'] ?? 0),
             'voucher_id' => (int) ($txnRow['voucher_id'] ?? 0),
             'posted' => (int) ($txnRow['id'] ?? 0) > 0,
+            // Carried so the row reopens holding what it was saved with. These
+            // were always shown as blank before, which quietly wiped the
+            // customer off any opening that was edited.
+            'customer_party_id' => (int) ($txnRow['customer_party_id'] ?? 0),
+            'customer_name' => (string) ($txnRow['customer_name'] ?? ''),
+            'customer_order_no' => (string) ($txnRow['customer_order_no'] ?? ''),
         ] + $item;
     }
 
@@ -1739,6 +1753,25 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
         return ['ok' => false, 'error' => 'Converted stone and diamond weight cannot exceed gross weight.', 'note' => '', 'voucher_id' => 0, 'item_id' => $itemId];
     }
 
+    // Who the piece is being held for. Chosen off the party master when they
+    // are on it, which is what ties the stock to a ledger rather than to a name
+    // somebody may type two ways on two days. A walk-in who is not on the
+    // master can still be named in words, as before.
+    $customerPartyId = (int) ($input['customer_party_id'] ?? 0);
+    $customerName = trim((string) ($input['customer_name'] ?? ''));
+    if ($customerPartyId > 0) {
+        $partyStmt = db()->prepare('SELECT id, name FROM accounting_parties WHERE id = :id AND company_id = :cid LIMIT 1');
+        $partyStmt->execute(['id' => $customerPartyId, 'cid' => $companyId]);
+        $customerParty = $partyStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        if (!$customerParty) {
+            return ['ok' => false, 'error' => 'Choose a customer that belongs to this company.',
+                'note' => '', 'voucher_id' => 0, 'item_id' => $itemId];
+        }
+        // The name follows the party, so the reports that fall back to the
+        // typed name read the same thing as the ones that join the master.
+        $customerName = (string) $customerParty['name'];
+    }
+
     $ownsTransaction = !db()->inTransaction();
     if ($ownsTransaction) {
         db()->beginTransaction();
@@ -1789,7 +1822,8 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
             'origin_type' => (string) ($input['origin_type'] ?? 'manual_opening'),
             'origin_id' => (int) ($input['origin_id'] ?? $itemId),
             'origin_line_id' => (int) ($input['origin_line_id'] ?? 0),
-            'customer_name' => (string) ($input['customer_name'] ?? ''),
+            'customer_party_id' => $customerPartyId,
+            'customer_name' => $customerName,
             'customer_order_no' => (string) ($input['customer_order_no'] ?? ''),
             'event_date' => $asOn,
             'reference_no' => (string) ($input['reference_no'] ?? 'OPENING'),

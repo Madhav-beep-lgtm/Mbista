@@ -380,6 +380,12 @@ ok(!str_contains($openingHtml, 'jw-filter-apply') && !str_contains($openingHtml,
     'And the old hide-rows-in-the-browser filter is gone with it');
 ok(str_contains($openingHtml, 'o_per'), 'The rows-per-page choice is on the page');
 
+// Held for whom, chosen off the master rather than typed. The name box stays
+// for a walk-in, so losing either control is a regression.
+ok(str_contains($openingHtml, 'name="customer_party_id"'), 'Opening stock picks its customer off the master');
+ok(str_contains($openingHtml, 'name="customer_name"'), 'And still lets a walk-in be named in words');
+ok(str_contains($openingHtml, 'data-customer-party'), 'The edit button carries the chosen customer back into the form');
+
 $reportHtml = $renderedHtml['jewellery-reports.php?view=inventory'] ?? '';
 ok($reportHtml !== '', 'The reports page rendered');
 

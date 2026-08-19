@@ -798,6 +798,10 @@ function jewellery_trace_replace_opening(int $companyId, int $fiscalYearId, arra
         'cost_amount' => (float) ($input['cost_amount'] ?? 0),
         'origin_type' => (string) ($input['origin_type'] ?? 'manual_opening'),
         'origin_id' => (int) ($input['origin_id'] ?? $itemId), 'origin_line_id' => (int) ($input['origin_line_id'] ?? 0),
+        // The customer as a party, not only as a name: an opening held against
+        // someone on the master has to point at their ledger, or the piece can
+        // be traced to a word and no further.
+        'customer_party_id' => (int) ($input['customer_party_id'] ?? 0),
         'customer_name' => (string) ($input['customer_name'] ?? ''), 'customer_order_no' => (string) ($input['customer_order_no'] ?? ''),
         'event_type' => 'opening_recorded', 'event_date' => (string) ($input['event_date'] ?? date('Y-m-d')),
         'reference_no' => (string) ($input['reference_no'] ?? 'OPENING'),

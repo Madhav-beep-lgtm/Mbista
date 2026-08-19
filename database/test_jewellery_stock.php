@@ -34,6 +34,7 @@ function jws_cleanup(): void
                   'jewellery_purities', 'jewellery_metals', 'jewellery_units'] as $t) {
             db()->exec("DELETE FROM `$t` WHERE company_id=$s");
         }
+        db()->exec("DELETE FROM accounting_parties WHERE company_id=$s");
         db()->exec("DELETE FROM ledgers WHERE company_id=$s");
         db()->exec("DELETE FROM ledger_groups WHERE company_id=$s");
         db()->exec("DELETE FROM client_profiles WHERE books_company_id=$s");
@@ -630,6 +631,48 @@ ok($jwsCodes(jewellery_opening_filter($jwsSample, ['status' => 'weight'])) === '
 ok($jwsCodes(jewellery_opening_filter($jwsSample, ['group' => 'Bangles', 'status' => 'none'])) === 'BG-2',
     'Filters combine rather than replacing one another');
 ok(jewellery_opening_filter($jwsSample, ['group' => 'Chains']) === [], 'A filter that matches nothing returns nothing');
+
+echo "\n18. An opening held for a customer names them off the master\n";
+// Customer-ordered stock used to record whoever it was for as free text. Two
+// spellings of one person were two customers, and neither of them was a ledger.
+db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type, status)
+    VALUES (:c,'CUS-JWS','Sita Shrestha','customer','active')")->execute(['c' => $cidA]);
+$jwsCustomer = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type, status)
+    VALUES (:c,'CUS-OTHER','Another Firm Customer','customer','active')")->execute(['c' => $cidB]);
+$jwsForeignCustomer = (int) db()->lastInsertId();
+
+$jwsHeld = jewellery_save_opening($cidA, $fyA, ['item_id' => $chainId, 'stock_kind' => 'customer_ordered',
+    'gross_weight' => 20.0, 'qty_pieces' => 4, 'amount' => 3000000,
+    'customer_party_id' => $jwsCustomer, 'customer_name' => 'sita s.', 'customer_order_no' => 'ORD-7'], $userA);
+ok($jwsHeld['ok'], 'An opening held for a customer saves' . ($jwsHeld['ok'] ? '' : ' — ' . $jwsHeld['error']));
+$jwsUnit = db()->query("SELECT customer_party_id, customer_name, customer_order_no FROM jewellery_stock_units
+    WHERE company_id=$cidA AND item_id=$chainId AND status <> 'cancelled' ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+ok((int) $jwsUnit['customer_party_id'] === $jwsCustomer, 'The traced piece points at the customer on the master');
+ok((string) $jwsUnit['customer_name'] === 'Sita Shrestha',
+    'And carries the name the master holds, not the one that was typed over it');
+ok((string) $jwsUnit['customer_order_no'] === 'ORD-7', 'The order number is kept beside it');
+
+$jwsReopened = null;
+foreach (jewellery_opening_rows($cidA, $fyA) as $jwsRow) {
+    if ((int) $jwsRow['id'] === $chainId) { $jwsReopened = $jwsRow; }
+}
+ok($jwsReopened !== null && (int) $jwsReopened['customer_party_id'] === $jwsCustomer,
+    'The opening list hands the customer back, so editing a row does not wipe them');
+ok($jwsReopened !== null && (string) $jwsReopened['customer_order_no'] === 'ORD-7',
+    'Along with the order number, which the list used to show as blank');
+
+$jwsForeign = jewellery_save_opening($cidA, $fyA, ['item_id' => $chainId, 'gross_weight' => 20.0,
+    'amount' => 3000000, 'customer_party_id' => $jwsForeignCustomer], $userA);
+ok(!$jwsForeign['ok'], "Another company's customer cannot be named on this company's opening");
+
+$jwsWalkIn = jewellery_save_opening($cidA, $fyA, ['item_id' => $chainId, 'stock_kind' => 'customer_ordered',
+    'gross_weight' => 20.0, 'qty_pieces' => 4, 'amount' => 3000000, 'customer_name' => 'Walk-in Ram'], $userA);
+ok($jwsWalkIn['ok'], 'A walk-in who is not on the master can still be named in words');
+$jwsUnit = db()->query("SELECT customer_party_id, customer_name FROM jewellery_stock_units
+    WHERE company_id=$cidA AND item_id=$chainId AND status <> 'cancelled' ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+ok($jwsUnit['customer_party_id'] === null && (string) $jwsUnit['customer_name'] === 'Walk-in Ram',
+    'And is stored as a name against no party, exactly as before');
 
 jws_cleanup();
 echo "\n==================================================\n";
