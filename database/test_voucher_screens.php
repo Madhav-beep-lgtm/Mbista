@@ -113,7 +113,8 @@ echo "1. Every type renders its own screen\n";
 // ---------------------------------------------------------------------------
 /** What each screen must have on it for it to be that screen and not another. */
 $expectations = [
-    'contra' => ['name="contra_from_ledger"', 'name="contra_to_ledger"', 'name="contra_amount"'],
+    'contra' => ['name="contra_out_ledger[]"', 'name="contra_in_ledger[]"',
+        'name="contra_out_amount[]"', 'name="contra_in_amount[]"', 'Money out of', 'Money into'],
     'payment' => ['name="tender_ledger[]"', 'name="line_ledger[]"', 'Paid from', 'Paid towards'],
     'receipt' => ['name="tender_ledger[]"', 'name="line_ledger[]"', 'Received into', 'Received against'],
     'journal' => ['name="ledger_id[]"', 'vch-dr', 'vch-cr'],
@@ -128,8 +129,8 @@ $expectations = [
 $forbidden = [
     'contra' => ['name="value_ledger[]"', 'name="tax_ledger_id"', 'name="party_id"'],
     'journal' => ['name="tender_ledger[]"', 'name="value_ledger[]"'],
-    'payment' => ['name="value_ledger[]"', 'name="contra_amount"'],
-    'sales' => ['name="tender_ledger[]"', 'name="contra_amount"'],
+    'payment' => ['name="value_ledger[]"', 'name="contra_out_amount[]"'],
+    'sales' => ['name="tender_ledger[]"', 'name="contra_out_amount[]"'],
 ];
 
 // The page is included into this scope, so it owns names like $type, $spec and
@@ -204,7 +205,7 @@ ok(in_array($ledgers['CASH'], $settleOptions, true) && in_array($ledgers['BANK1'
 ok(str_contains($rendered['sales'], '<option value="party">'),
     'And it offers leaving the balance on the customer\'s own account');
 
-$contraOptions = vsc_options($rendered['contra'], 'contra_from_ledger');
+$contraOptions = vsc_options($rendered['contra'], 'contra_out_ledger[]');
 ok($contraOptions !== [] && !in_array($ledgers['INC1'], $contraOptions, true) && !in_array($ledgers['EXP1'], $contraOptions, true),
     'A contra offers no income or expense ledger to move money out of');
 ok(in_array($ledgers['CASH'], $contraOptions, true) && in_array($ledgers['BANK1'], $contraOptions, true),

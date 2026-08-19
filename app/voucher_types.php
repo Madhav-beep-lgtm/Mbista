@@ -469,40 +469,129 @@ function voucher_compose(string $type, array $input, array $ledgers, bool $draft
     return voucher_compose_journal($spec, $input, $ledgers, $result, $draft);
 }
 
-/** Contra: one amount, out of one cash/bank account and into another. */
+/**
+ * One side of a contra: the accounts money leaves, or the ones it lands in.
+ *
+ * $side is 'out' or 'in'. Falls back to the single-account shape the screen
+ * submitted before it had grids, so a voucher half-typed on a page loaded
+ * before this change still composes into the same entries.
+ */
+function voucher_transfer_legs(array $input, array $ledgers, string $side, array &$result): array
+{
+    $side = $side === 'out' ? 'out' : 'in';
+    $field = 'contra_' . $side;
+    $rows = [];
+    $rowCount = voucher_input_rows($input, $field . '_ledger');
+    if ($rowCount === 0) {
+        $legacyId = (int) ($input[$side === 'out' ? 'contra_from_ledger' : 'contra_to_ledger'] ?? 0);
+        $legacyAmount = round((float) ($input['contra_amount'] ?? 0), 2);
+        if ($legacyId > 0 || $legacyAmount > 0) {
+            $rows[] = ['ledger' => $legacyId, 'amount' => $legacyAmount];
+        }
+    }
+    for ($index = 0; $index < $rowCount; $index++) {
+        $rows[] = [
+            'ledger' => (int) voucher_input_row($input, $field . '_ledger', $index),
+            'amount' => round((float) voucher_input_row($input, $field . '_amount', $index), 2),
+        ];
+    }
+
+    $legs = [];
+    foreach ($rows as $index => $row) {
+        $ledgerId = (int) $row['ledger'];
+        $amount = (float) $row['amount'];
+        if ($ledgerId <= 0 && $amount <= 0) {
+            continue;
+        }
+        $ledger = $ledgers[$ledgerId] ?? null;
+        if (!$ledger) {
+            $result['errors'][] = 'Line ' . ($index + 1) . ' of the money '
+                . ($side === 'out' ? 'going out' : 'coming in') . ' names no account.';
+            continue;
+        }
+        // The whole point of a contra is that nothing enters or leaves the
+        // business: both ends have to be somewhere the firm already keeps money.
+        if (empty($ledger['roles']['cash_bank'])) {
+            $result['errors'][] = 'A contra voucher only moves money between cash and bank accounts — "' . $ledger['name'] . '" is not one.';
+            continue;
+        }
+        if ($amount <= 0) {
+            $result['errors'][] = 'Enter how much ' . ($side === 'out' ? 'leaves' : 'arrives in') . ' "' . $ledger['name'] . '".';
+            continue;
+        }
+        $legs[] = ['ledger_id' => $ledgerId, 'amount' => $amount];
+    }
+    if ($legs === []) {
+        $result['errors'][] = $side === 'out'
+            ? 'Choose the account the money moves out of.'
+            : 'Choose the account the money moves into.';
+    }
+
+    return $legs;
+}
+
+/**
+ * Contra: money out of the firm's own pockets and into others of its own.
+ *
+ * One account each side is the common case but not the only one. A day's
+ * takings swept from the till into three bank accounts, or two accounts
+ * emptied into one before a payment goes out, are single movements of money
+ * and belong on a single voucher — split across several, the day book stops
+ * showing the sweep as the one thing it was.
+ *
+ * So each side is a list, and the rule that makes it a transfer rather than a
+ * receipt is that the two lists foot to the same figure.
+ */
 function voucher_compose_transfer(array $spec, array $input, array $ledgers, array $result, bool $draft = false): array
 {
-    $fromId = (int) ($input['contra_from_ledger'] ?? 0);
-    $toId = (int) ($input['contra_to_ledger'] ?? 0);
-    $amount = round((float) ($input['contra_amount'] ?? 0), 2);
-    $from = $ledgers[$fromId] ?? null;
-    $to = $ledgers[$toId] ?? null;
+    $outLegs = voucher_transfer_legs($input, $ledgers, 'out', $result);
+    $inLegs = voucher_transfer_legs($input, $ledgers, 'in', $result);
 
-    if (!$from) {
-        $result['errors'][] = 'Choose the account the money moves out of.';
-    } elseif (empty($from['roles']['cash_bank'])) {
-        $result['errors'][] = 'A contra voucher only moves money between cash and bank accounts — "' . $from['name'] . '" is not one.';
+    $outTotal = 0.0;
+    foreach ($outLegs as $leg) {
+        $outTotal += (float) $leg['amount'];
     }
-    if (!$to) {
-        $result['errors'][] = 'Choose the account the money moves into.';
-    } elseif (empty($to['roles']['cash_bank'])) {
-        $result['errors'][] = 'A contra voucher only moves money between cash and bank accounts — "' . $to['name'] . '" is not one.';
+    $inTotal = 0.0;
+    foreach ($inLegs as $leg) {
+        $inTotal += (float) $leg['amount'];
     }
-    if ($fromId > 0 && $fromId === $toId) {
-        $result['errors'][] = 'The money has to move between two different accounts.';
+    $outTotal = round($outTotal, 2);
+    $inTotal = round($inTotal, 2);
+
+    // An account on both sides nets to nothing while the day book claims the
+    // money moved. Money does not move to where it already is.
+    $outIds = array_column($outLegs, 'ledger_id');
+    foreach ($inLegs as $leg) {
+        if (in_array((int) $leg['ledger_id'], $outIds, true)) {
+            $result['errors'][] = '"' . (string) ($ledgers[(int) $leg['ledger_id']]['name'] ?? 'That account')
+                . '" is on both sides of this transfer — the money has to move between different accounts.';
+        }
     }
-    if ($amount <= 0) {
-        $result['errors'][] = 'Enter the amount being transferred.';
+    if ($outLegs !== [] && $inLegs !== [] && abs($outTotal - $inTotal) >= 0.005) {
+        $result['errors'][] = 'What leaves has to equal what arrives: ' . number_format($outTotal, 2)
+            . ' is going out but ' . number_format($inTotal, 2) . ' is coming in.';
     }
 
+    // The counterparty is named on the line when there is only one of it. A
+    // sweep into three banks says so rather than naming one and implying the
+    // other two had nothing to do with it.
+    $sideName = static function (array $legs) use ($ledgers): string {
+        if (count($legs) === 1) {
+            return (string) ($ledgers[(int) $legs[0]['ledger_id']]['name'] ?? 'another account');
+        }
+
+        return $legs === [] ? 'another account' : count($legs) . ' accounts';
+    };
     // Built before the gate so a draft keeps the side that is already named.
     $instrumentNo = trim((string) ($input['instrument_no'] ?? ''));
     $entries = [];
-    if ($amount > 0 && $to && !empty($to['roles']['cash_bank'])) {
-        $entries[] = voucher_entry($toId, 'debit', $amount, 'Transferred in from ' . (string) ($from['name'] ?? 'another account'), '', '', $instrumentNo);
+    foreach ($inLegs as $leg) {
+        $entries[] = voucher_entry((int) $leg['ledger_id'], 'debit', (float) $leg['amount'],
+            'Transferred in from ' . $sideName($outLegs), '', '', $instrumentNo);
     }
-    if ($amount > 0 && $from && !empty($from['roles']['cash_bank']) && $fromId !== $toId) {
-        $entries[] = voucher_entry($fromId, 'credit', $amount, 'Transferred out to ' . (string) ($to['name'] ?? 'another account'), '', '', $instrumentNo);
+    foreach ($outLegs as $leg) {
+        $entries[] = voucher_entry((int) $leg['ledger_id'], 'credit', (float) $leg['amount'],
+            'Transferred out to ' . $sideName($inLegs), '', '', $instrumentNo);
     }
 
     if ($draft) {
@@ -513,7 +602,7 @@ function voucher_compose_transfer(array $spec, array $input, array $ledgers, arr
     }
 
     $result['entries'] = $entries;
-    $result['total'] = $amount;
+    $result['total'] = max($outTotal, $inTotal);
     $result['header'] = voucher_instrument_header($input);
 
     return $result;
@@ -1099,21 +1188,42 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
     $layout = (string) $spec['layout'];
 
     if ($layout === 'transfer') {
-        $from = null;
-        $to = null;
+        $outLegs = [];
+        $inLegs = [];
+        // A contra whose ends are not both cash or bank was posted by
+        // something other than this screen. It opens in the journal grid,
+        // which can express anything, rather than in two lists that would
+        // refuse to re-post it.
+        $legsFit = $entries !== [];
         foreach ($entries as $entry) {
-            if ((string) $entry['entry_type'] === 'credit') {
-                $from = $entry;
-            } else {
-                $to = $entry;
+            $ledger = $ledgers[(int) $entry['ledger_id']] ?? null;
+            if (empty($ledger['roles']['cash_bank'])) {
+                $legsFit = false;
             }
+            $leg = [
+                'ledger_id' => (string) (int) $entry['ledger_id'],
+                'amount' => (float) $entry['amount'],
+            ];
+            if ((string) $entry['entry_type'] === 'credit') {
+                $outLegs[] = $leg;
+            } else {
+                $inLegs[] = $leg;
+            }
+        }
+        $outTotal = 0.0;
+        foreach ($outLegs as $leg) {
+            $outTotal += (float) $leg['amount'];
         }
 
         return [
-            'ok' => $from !== null && $to !== null && count($entries) === 2,
-            'contra_from_ledger' => (int) ($from['ledger_id'] ?? 0),
-            'contra_to_ledger' => (int) ($to['ledger_id'] ?? 0),
-            'contra_amount' => (float) ($to['amount'] ?? 0),
+            'ok' => $outLegs !== [] && $inLegs !== [] && $legsFit,
+            'contra_out' => $outLegs,
+            'contra_in' => $inLegs,
+            // The single-account shape this screen used before it had grids,
+            // kept so anything still reading it sees the leading account.
+            'contra_from_ledger' => (int) ($outLegs[0]['ledger_id'] ?? 0),
+            'contra_to_ledger' => (int) ($inLegs[0]['ledger_id'] ?? 0),
+            'contra_amount' => round($outTotal, 2),
         ];
     }
 
@@ -1296,6 +1406,16 @@ function voucher_prefill_from_input(string $type, array $input): array
         $prefill['contra_from_ledger'] = (int) ($input['contra_from_ledger'] ?? 0);
         $prefill['contra_to_ledger'] = (int) ($input['contra_to_ledger'] ?? 0);
         $prefill['contra_amount'] = (float) ($input['contra_amount'] ?? 0);
+        foreach (['out', 'in'] as $legSide) {
+            $prefill['contra_' . $legSide] = [];
+            $legRowCount = voucher_input_rows($input, 'contra_' . $legSide . '_ledger');
+            for ($index = 0; $index < $legRowCount; $index++) {
+                $prefill['contra_' . $legSide][] = [
+                    'ledger_id' => voucher_input_row($input, 'contra_' . $legSide . '_ledger', $index),
+                    'amount' => voucher_input_row($input, 'contra_' . $legSide . '_amount', $index),
+                ];
+            }
+        }
 
         return $prefill;
     }

@@ -65,6 +65,8 @@ $rawLedgers = [
     7 => ['name' => 'VAT payable', 'code' => 'VAT', 'group_id' => 16, 'group_code' => 'DUTIES_TAXES', 'group_name' => 'Duties and Taxes', 'master_key' => 'current_liability', 'is_cash_or_bank' => 0],
     8 => ['name' => 'Depreciation', 'code' => 'EXP-2', 'group_id' => 15, 'group_code' => 'ADMIN_EXP', 'group_name' => 'Administrative Expenses', 'master_key' => 'indirect_expense', 'is_cash_or_bank' => 0],
     9 => ['name' => 'Accumulated depreciation', 'code' => 'AD', 'group_id' => 17, 'group_code' => 'FIXED', 'group_name' => 'Fixed Assets', 'master_key' => 'non_current_asset', 'is_cash_or_bank' => 0],
+    // A third pocket, so a transfer can be one-to-many and many-to-one.
+    10 => ['name' => 'Petty cash', 'code' => 'PETTY', 'group_id' => 10, 'group_code' => 'CASH_GRP', 'group_name' => 'Cash in Hand', 'master_key' => 'current_asset', 'is_cash_or_bank' => 1],
 ];
 $ledgers = [];
 foreach ($rawLedgers as $id => $row) {
@@ -82,6 +84,7 @@ const RENT = 6;
 const VAT = 7;
 const DEPRECIATION = 8;
 const ACC_DEPRECIATION = 9;
+const PETTY = 10;
 
 // ---------------------------------------------------------------------------
 echo "1. The catalogue covers every type the vouchers table can hold\n";
@@ -107,7 +110,7 @@ ok($ledgers[CASH]['roles']['cash_bank'] && $ledgers[BANK]['roles']['cash_bank'],
 ok(!$ledgers[INCOME]['roles']['cash_bank'], 'An income ledger does not');
 ok($ledgers[CUSTOMER]['roles']['receivable'] && $ledgers[SUPPLIER]['roles']['payable'], 'Party ledgers are tagged by their group');
 ok($ledgers[VAT]['roles']['tax'], 'Duties and Taxes is recognised as the tax group');
-ok(count(voucher_ledgers_for_role($ledgers, 'cash_bank')) === 2, 'The cash/bank slot offers exactly the two bank accounts');
+ok(count(voucher_ledgers_for_role($ledgers, 'cash_bank')) === 3, 'The cash/bank slot offers exactly the three cash and bank accounts');
 ok(count(voucher_ledgers_for_role($ledgers, 'income')) === 1, 'A sales voucher offers only income ledgers');
 $expenseSlot = array_column(voucher_ledgers_for_role($ledgers, 'expense'), 'id');
 ok(in_array(RENT, $expenseSlot, true) && in_array(ACC_DEPRECIATION, $expenseSlot, true) && !in_array(CASH, $expenseSlot, true),
@@ -134,6 +137,76 @@ ok($result['errors'] !== [] && $result['entries'] === [], 'Income cannot be the 
 
 $result = voucher_compose('contra', ['contra_from_ledger' => BANK, 'contra_to_ledger' => BANK, 'contra_amount' => '500'], $ledgers);
 ok($result['errors'] !== [], 'Money cannot move to the account it is already in');
+
+// A sweep is one movement of money even when it lands in several places, so
+// it belongs on one voucher rather than on three that each tell a third of it.
+$result = voucher_compose('contra', [
+    'contra_out_ledger' => [CASH], 'contra_out_amount' => ['30000'],
+    'contra_in_ledger' => [BANK, PETTY], 'contra_in_amount' => ['25000', '5000'],
+    'instrument_no' => 'DEP-92',
+], $ledgers);
+ok($result['errors'] === [], 'A till swept into two accounts composes cleanly');
+ok(near(side_of($result['entries'], CASH, 'credit'), 30000.00), 'The till is credited once, with the whole sweep');
+ok(near(side_of($result['entries'], BANK, 'debit'), 25000.00) && near(side_of($result['entries'], PETTY, 'debit'), 5000.00),
+    'And each receiving account is debited with its own share');
+ok(balanced($result['entries']), 'A one-to-many contra balances');
+ok(near($result['total'], 30000.00), 'Its total is the money that moved, not the two sides added together');
+
+$sweptMemo = '';
+foreach ($result['entries'] as $entry) {
+    if ((int) $entry['ledger_id'] === CASH) { $sweptMemo = (string) $entry['memo']; }
+}
+ok($sweptMemo === 'Transferred out to 2 accounts', 'A sweep into several accounts says so rather than naming one of them');
+
+$result = voucher_compose('contra', [
+    'contra_out_ledger' => [CASH, PETTY], 'contra_out_amount' => ['4000', '1000'],
+    'contra_in_ledger' => [BANK], 'contra_in_amount' => ['5000'],
+], $ledgers);
+ok($result['errors'] === [] && near(side_of($result['entries'], BANK, 'debit'), 5000.00),
+    'Two accounts emptied into one compose just as well');
+ok(balanced($result['entries']), 'And a many-to-one contra balances');
+$emptiedMemo = '';
+foreach ($result['entries'] as $entry) {
+    if ((int) $entry['ledger_id'] === CASH) { $emptiedMemo = (string) $entry['memo']; }
+}
+ok($emptiedMemo === 'Transferred out to Nabil Bank',
+    'A single counterparty is still named on the line, exactly as it always was');
+
+$result = voucher_compose('contra', [
+    'contra_out_ledger' => [CASH], 'contra_out_amount' => ['30000'],
+    'contra_in_ledger' => [BANK], 'contra_in_amount' => ['25000'],
+], $ledgers);
+ok($result['errors'] !== [] && $result['entries'] === [], 'A transfer whose two sides disagree is refused');
+
+$result = voucher_compose('contra', [
+    'contra_out_ledger' => [CASH], 'contra_out_amount' => ['1000'],
+    'contra_in_ledger' => [CASH], 'contra_in_amount' => ['1000'],
+], $ledgers);
+ok($result['errors'] !== [], 'An account cannot stand on both sides of a sweep');
+
+$result = voucher_compose('contra', [
+    'contra_out_ledger' => [CASH], 'contra_out_amount' => ['1000'],
+    'contra_in_ledger' => [BANK, INCOME], 'contra_in_amount' => ['600', '400'],
+], $ledgers);
+ok($result['errors'] !== [], 'And an income head cannot be one leg of it either');
+
+$composed = voucher_compose('contra', [
+    'contra_out_ledger' => [CASH], 'contra_out_amount' => ['30000'],
+    'contra_in_ledger' => [BANK, PETTY], 'contra_in_amount' => ['25000', '5000'],
+], $ledgers);
+$back = voucher_decompose('contra', [], $composed['entries'], $ledgers);
+ok($back['ok'] === true && count($back['contra_out']) === 1 && count($back['contra_in']) === 2,
+    'A sweep reopens with every account it touched');
+ok(near((float) $back['contra_in'][1]['amount'], 5000.00), 'Each of them carrying its own share');
+ok((int) $back['contra_from_ledger'] === CASH && near((float) $back['contra_amount'], 30000.00),
+    'And the single-account shape still points at the leading account');
+
+$prefill = voucher_prefill_from_input('contra', [
+    'contra_out_ledger' => [CASH], 'contra_out_amount' => ['30000'],
+    'contra_in_ledger' => [BANK, PETTY], 'contra_in_amount' => ['25000', '5000'],
+]);
+ok(count($prefill['contra_out']) === 1 && count($prefill['contra_in']) === 2,
+    'A rejected sweep comes back with both sides still typed in');
 
 // ---------------------------------------------------------------------------
 echo "\n4. Payment: one bank line, or several when the settlement was mixed\n";
