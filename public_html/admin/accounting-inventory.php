@@ -2285,6 +2285,30 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                     $itemMapCurrent[(string) $imRow['purpose']] = (int) $imRow['ledger_id'];
                 }
             }
+            // The ledger list, built once for the page.
+            //
+            // Eighteen selects on this screen each carried their own copy of a
+            // hundred and eighty ledgers — 335 KB of the same list, repeated.
+            // One copy goes into the template below and each select takes it on
+            // load; a select that already has a choice keeps that choice inline
+            // so its value is right before the script has run.
+            if (!isset($invLedgerOptionsHtml)) {
+                $invLedgerOptionsHtml = '';
+                $invLedgerOptionById = [];
+                foreach ($ledgers as $invLedgerRow) {
+                    $invLedgerLabel = $invLedgerRow['code'] . ' - ' . $invLedgerRow['name'];
+                    $invLedgerOption = '<option value="' . (int) $invLedgerRow['id'] . '">' . e($invLedgerLabel) . '</option>';
+                    $invLedgerOptionsHtml .= $invLedgerOption;
+                    $invLedgerOptionById[(int) $invLedgerRow['id']] = $invLedgerOption;
+                }
+                echo '<template id="inv-ledger-options">' . $invLedgerOptionsHtml . '</template>';
+            }
+            /** The one option a select already holds, so its value survives until the fill. */
+            $invLedgerChosen = static function (int $ledgerId) use (&$invLedgerOptionById): string {
+                return $ledgerId > 0 && isset($invLedgerOptionById[$ledgerId])
+                    ? str_replace('<option ', '<option selected ', $invLedgerOptionById[$ledgerId])
+                    : '';
+            };
             $itemFormPurposes = ['inventory_asset', 'purchase_clearing', 'cogs', 'opening_equity'];
             $itemPurposeMeta = inventory_mapping_purposes();
             ?>
@@ -2294,11 +2318,9 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                 $ownLedgerId = $itemMapCurrent[$itemFormPurpose] ?? 0;
                 ?>
                 <label><?= e($itemPurposeMeta[$itemFormPurpose]['label'] ?? $itemFormPurpose) ?> ledger (this item only)
-                    <select name="item_map[<?= e($itemFormPurpose) ?>]">
+                    <select name="item_map[<?= e($itemFormPurpose) ?>]" data-fill-from="inv-ledger-options">
                         <option value="0">— inherit default<?= $inheritLedger ? ': ' . e($inheritLedger['name']) : ' (not set)' ?> —</option>
-                        <?php foreach ($ledgers as $ledger): ?>
-                            <option value="<?= (int) $ledger['id'] ?>" <?= $ownLedgerId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
-                        <?php endforeach; ?>
+                        <?= $invLedgerChosen((int) $ownLedgerId) ?>
                     </select>
                 </label>
             <?php endforeach; ?>
@@ -2404,11 +2426,9 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                         <tr>
                             <td><strong><?= e($panelPurposeMeta[$panelPurpose]['label'] ?? $panelPurpose) ?></strong></td>
                             <td><span class="mbw-pill tone-gray"><?= e(ucfirst($panelPurposeMeta[$panelPurpose]['expect'] ?? '')) ?></span></td>
-                            <td><select name="map[<?= e($panelPurpose) ?>]" style="min-width:230px">
+                            <td><select name="map[<?= e($panelPurpose) ?>]" style="min-width:230px" data-fill-from="inv-ledger-options">
                                 <option value="0">— use inherited default —</option>
-                                <?php foreach ($ledgers as $ledger): ?>
-                                    <option value="<?= (int) $ledger['id'] ?>" <?= $panelOwnId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
-                                <?php endforeach; ?>
+                                <?= $invLedgerChosen((int) $panelOwnId) ?>
                             </select></td>
                             <td><?php if ($panelEffective): ?><span class="mbw-pill <?= $panelOwnId > 0 ? 'tone-green' : 'tone-gray' ?>"><?= e($panelEffective['name']) ?><?= $panelOwnId > 0 ? '' : ' (inherited)' ?></span><?php else: ?><span class="mbw-pill tone-red">Not set — postings needing it will be blocked</span><?php endif; ?></td>
                         </tr>
@@ -2508,22 +2528,16 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                 <span class="frm-optional">Recoverable — never added to the stock value</span>
             </label>
             <label>VAT on purchase ledger (debit)
-                <select name="vat_ledger_id">
+                <select name="vat_ledger_id" data-fill-from="inv-ledger-options">
                     <option value="0">— none —</option>
-                    <?php foreach ($ledgers as $ledger): ?>
-                        <option value="<?= (int) $ledger['id'] ?>"><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
-                    <?php endforeach; ?>
                 </select>
             </label>
             <label>TDS rate %<input type="number" step="0.01" min="0" max="100" name="tds_rate_pct" value="0" id="purMovTdsRate">
                 <span class="frm-optional" id="purMovTdsOut">No TDS withheld</span>
             </label>
             <label>TDS deducted ledger (credit)
-                <select name="tds_ledger_id">
+                <select name="tds_ledger_id" data-fill-from="inv-ledger-options">
                     <option value="0">— none —</option>
-                    <?php foreach ($ledgers as $ledger): ?>
-                        <option value="<?= (int) $ledger['id'] ?>"><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
-                    <?php endforeach; ?>
                 </select>
             </label>
             <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
@@ -3123,3 +3137,24 @@ document.addEventListener('DOMContentLoaded', function () {
 <?php // Unguarded: it emits itself only when a stub on this page needs it. ?>
 <?= shared_options_script() ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
+
+<script>
+// Each ledger picker takes its own copy of the list from the template above.
+// A select that already carries its choice keeps it: the copy is appended, and
+// the duplicate of the chosen one is dropped rather than shown twice.
+(function () {
+    var source = document.getElementById('inv-ledger-options');
+    if (!source) { return; }
+    document.querySelectorAll('select[data-fill-from="inv-ledger-options"]').forEach(function (select) {
+        var chosen = select.value;
+        var addition = document.createElement('select');
+        addition.innerHTML = source.innerHTML;
+        Array.prototype.forEach.call(addition.querySelectorAll('option'), function (option) {
+            if (chosen && option.value === chosen) { return; }
+            select.appendChild(option.cloneNode(true));
+        });
+        if (chosen && select.querySelector('option[value="' + chosen + '"]')) { select.value = chosen; }
+        select.removeAttribute('data-fill-from');
+    });
+})();
+</script>
