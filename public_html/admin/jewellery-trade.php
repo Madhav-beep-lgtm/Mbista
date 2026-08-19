@@ -389,7 +389,12 @@ $filterStatus = (string) ($_GET['status'] ?? '');
 $filterParty = (int) ($_GET['party'] ?? 0);
 $filterSource = (string) ($_GET['source'] ?? '');
 $docFilters = [
-    'limit' => 300,
+    // Fetched up to the list function's own cap and PAGED below. The cap used
+    // to be 300 and every one of them was drawn into a single document — over
+    // a megabyte of table for a screen that shows fifty rows, and no way to
+    // reach document 301 at all. Raising it and paging fixes both: a lighter
+    // page AND a longer reach.
+    'limit' => 1000,
     'search' => $filterSearch,
     'status' => $filterStatus,
     'party_id' => $filterParty,
@@ -399,6 +404,26 @@ if ($filterFrom !== '' && $filterTo !== '') {
     $docFilters['to'] = $filterTo;
 }
 $advancedInUse = $filterStatus !== '' || $filterParty > 0 || $filterSource !== '';
+
+/** The page of a document list being looked at, and the link that changes it. */
+$docPerPage = (int) ($_GET['per_page'] ?? 50);
+if (!in_array($docPerPage, [25, 50, 100, 200], true)) {
+    $docPerPage = 50;
+}
+$docPageQuery = static function (array $overrides) use ($view, $filterSearch, $filterStatus, $filterParty, $filterSource, $filterFrom, $filterTo, $docPerPage): string {
+    $query = array_filter([
+        'view' => $view,
+        'q' => $filterSearch,
+        'status' => $filterStatus,
+        'party' => $filterParty > 0 ? (string) $filterParty : '',
+        'source' => $filterSource,
+        'from' => $filterFrom,
+        'to' => $filterTo,
+        'per_page' => (string) $docPerPage,
+    ] + $overrides, static fn ($value): bool => (string) $value !== '');
+
+    return url('admin/jewellery-trade.php?' . http_build_query(array_merge($query, $overrides)));
+};
 
 if ($view === 'purchases') {
     $docs = jewellery_purchases_list($companyId, $docFilters + ['source' => $filterSource]);
@@ -414,6 +439,10 @@ if ($view === 'purchases') {
         $editExchanges = jewellery_sale_exchange_rows($companyId, (int) $editDoc['id']);
     }
 }
+
+$docPageCount = max(1, (int) ceil(count($docs) / $docPerPage));
+$docPage = max(1, min($docPageCount, (int) ($_GET['page'] ?? 1)));
+$docPageRows = array_slice($docs, ($docPage - 1) * $docPerPage, $docPerPage);
 
 // Rows a template or an import just put on the form. They REPLACE whatever the
 // grid would otherwise show, and are taken out of the session as they are read
@@ -818,8 +847,8 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         <div style="overflow-x:auto"><table>
             <thead><tr><th>No.</th><th>Date</th><th>Party</th><th>Source</th><th class="is-numeric">Metal</th><th class="is-numeric">VAT</th><th class="is-numeric">Total</th><th>Settlement</th><th>Status</th><th></th></tr></thead>
             <tbody>
-                <?php if ($docs === []): ?><tr><td colspan="10">No purchases yet.</td></tr><?php endif; ?>
-                <?php foreach ($docs as $row): ?>
+                <?php if ($docPageRows === []): ?><tr><td colspan="10">No purchases yet.</td></tr><?php endif; ?>
+                <?php foreach ($docPageRows as $row): ?>
                     <?php $isDraft = (string) $row['status'] === 'draft'; ?>
                     <tr>
                         <td><?= e($row['purchase_no']) ?></td>
@@ -868,6 +897,19 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <?php if ($docPageCount > 1): ?>
+            <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="purchases pages">
+                <?php if ($docPage > 1): ?><a class="button secondary" href="<?= e($docPageQuery(['page' => $docPage - 1])) ?>">Previous</a><?php endif; ?>
+                <span>Page <?= (int) $docPage ?> of <?= (int) $docPageCount ?> · <?= count($docs) ?> purchases</span>
+                <?php if ($docPage < $docPageCount): ?><a class="button secondary" href="<?= e($docPageQuery(['page' => $docPage + 1])) ?>">Next</a><?php endif; ?>
+                <span style="margin-left:auto;display:flex;gap:6px;align-items:center">Rows
+                    <?php foreach ([25, 50, 100, 200] as $size): ?>
+                        <a class="button soft" style="<?= $size === $docPerPage ? 'font-weight:700' : '' ?>"
+                           href="<?= e($docPageQuery(['per_page' => (string) $size, 'page' => 1])) ?>"><?= $size ?></a>
+                    <?php endforeach; ?>
+                </span>
+            </nav>
+        <?php endif; ?>
     </section>
 
 <?php elseif ($view === 'sales'): ?>
@@ -1107,8 +1149,8 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         <div style="overflow-x:auto"><table>
             <thead><tr><th>No.</th><th>Date</th><th>Customer</th><th class="is-numeric">Total</th><th class="is-numeric">Cash</th><th class="is-numeric">Exchange</th><th class="is-numeric">Balance</th><th class="is-numeric">COGS</th><th>Status</th><th></th></tr></thead>
             <tbody>
-                <?php if ($docs === []): ?><tr><td colspan="10">No sales yet.</td></tr><?php endif; ?>
-                <?php foreach ($docs as $row): ?>
+                <?php if ($docPageRows === []): ?><tr><td colspan="10">No sales yet.</td></tr><?php endif; ?>
+                <?php foreach ($docPageRows as $row): ?>
                     <?php $isDraft = (string) $row['status'] === 'draft'; ?>
                     <tr>
                         <td><?= e($row['sale_no']) ?></td>
@@ -1162,6 +1204,19 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <?php if ($docPageCount > 1): ?>
+            <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="sales pages">
+                <?php if ($docPage > 1): ?><a class="button secondary" href="<?= e($docPageQuery(['page' => $docPage - 1])) ?>">Previous</a><?php endif; ?>
+                <span>Page <?= (int) $docPage ?> of <?= (int) $docPageCount ?> · <?= count($docs) ?> sales</span>
+                <?php if ($docPage < $docPageCount): ?><a class="button secondary" href="<?= e($docPageQuery(['page' => $docPage + 1])) ?>">Next</a><?php endif; ?>
+                <span style="margin-left:auto;display:flex;gap:6px;align-items:center">Rows
+                    <?php foreach ([25, 50, 100, 200] as $size): ?>
+                        <a class="button soft" style="<?= $size === $docPerPage ? 'font-weight:700' : '' ?>"
+                           href="<?= e($docPageQuery(['per_page' => (string) $size, 'page' => 1])) ?>"><?= $size ?></a>
+                    <?php endforeach; ?>
+                </span>
+            </nav>
+        <?php endif; ?>
     </section>
 
 <?php elseif ($view === 'bills'): ?>

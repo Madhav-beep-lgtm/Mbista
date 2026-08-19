@@ -818,6 +818,20 @@ function jewellery_trace_backfill_legacy_balance(int $companyId, int $userId = 0
     if (!jewellery_trace_ready() || isset($done[$companyId])) {
         return;
     }
+    // Adopting a shop's on-hand stock is a ONE-TIME migration, and a migration
+    // does not belong inside somebody's page load. On a two-thousand-item shop
+    // this wrote two thousand traced pieces — fourteen thousand statements and
+    // the better part of a minute on a shared host — while a person sat looking
+    // at a half-drawn sales screen, and timed out before it finished so the
+    // next page load started it again.
+    //
+    // So it runs from the deploy, exactly as accounting_module_repair_database()
+    // does and for the same reason. A web request leaves it alone; the worst
+    // that means is that the "pick a traced piece" list is empty until the next
+    // deploy, and the item is typed in by hand as it always was.
+    if (PHP_SAPI !== 'cli') {
+        return;
+    }
     $done[$companyId] = true;
     $fy = current_fiscal_year();
     $backfillItems = jewellery_items_list($companyId, ['active_only' => true]);

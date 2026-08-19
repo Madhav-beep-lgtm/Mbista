@@ -47,4 +47,35 @@ if ($errors !== []) {
     exit(1);
 }
 
+// Adopt on-hand jewellery stock into traced pieces, for shops that predate
+// piece tracing. This is a one-time migration per company and it used to run
+// inside the sales page, where on a two-thousand-item shop it was fourteen
+// thousand statements and a timed-out request. It belongs here, with the other
+// once-per-deployment work.
+//
+// Non-fatal on purpose: a shop that cannot be adopted still sells, by typing
+// the item in as it always did. A deploy must not be refused over it.
+if (is_file($appBase . '/app/jewellery_stock.php')) {
+    require_once $appBase . '/app/jewellery_stock.php';
+    if (function_exists('jewellery_trace_ready') && jewellery_trace_ready()) {
+        $adopted = 0;
+        $companies = db()->query('SELECT DISTINCT i.company_id
+            FROM inventory_items i
+            INNER JOIN jewellery_item_profiles j ON j.inventory_item_id = i.id')->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($companies as $jwCompanyId) {
+            try {
+                jewellery_trace_backfill_legacy_balance((int) $jwCompanyId, 0);
+                $adopted++;
+            } catch (Throwable $exception) {
+                fwrite(STDERR, 'jewellery trace adoption skipped for company #' . (int) $jwCompanyId
+                    . ': ' . $exception->getMessage() . PHP_EOL);
+            }
+        }
+        if ($adopted > 0) {
+            echo 'jewellery: on-hand stock adopted into traced pieces for ' . $adopted . " company(ies).
+";
+        }
+    }
+}
+
 exit(0);
