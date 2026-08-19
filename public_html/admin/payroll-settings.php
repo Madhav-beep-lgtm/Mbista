@@ -30,15 +30,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
 
     if ($action === 'save_mappings') {
-        db()->prepare('UPDATE payroll_settings SET
+        // Hours per day is written only where the column exists, so this screen
+        // keeps saving on a server that has not applied migration 120 yet. The
+        // engine falls back to 8 in exactly the same case.
+        $hasHoursPerDay = column_exists('payroll_settings', 'standard_hours_per_day');
+        $settingsSql = 'UPDATE payroll_settings SET
                 salary_expense_ledger_id = :se, employer_contrib_expense_ledger_id = :ee,
                 tds_payable_ledger_id = :tds, sst_payable_ledger_id = :sst, retirement_payable_ledger_id = :rp,
                 salary_payable_ledger_id = :sp, advance_ledger_id = :adv, bank_ledger_id = :bank,
                 enforce_sod = :sod, auto_post = :ap,
-                standard_working_days = :wd, prorate_basic_worked_days = :pbwd, deduct_unpaid_leave = :dul,
+                standard_working_days = :wd, ' . ($hasHoursPerDay ? 'standard_hours_per_day = :hpd, ' : '') . 'prorate_basic_worked_days = :pbwd, deduct_unpaid_leave = :dul,
                 excess_tax_treatment = :ext
-            WHERE company_id = :cid')
-            ->execute([
+            WHERE company_id = :cid';
+        $settingsParams = [
                 'ext' => in_array((string) ($_POST['excess_tax_treatment'] ?? ''), ['offset', 'refund', 'carry_forward', 'manual'], true)
                     ? (string) $_POST['excess_tax_treatment'] : 'offset',
                 'se' => (int) ($_POST['salary_expense_ledger_id'] ?? 0) ?: null,
@@ -55,7 +59,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'pbwd' => isset($_POST['prorate_basic_worked_days']) ? 1 : 0,
                 'dul' => isset($_POST['deduct_unpaid_leave']) ? 1 : 0,
                 'cid' => $companyId,
-            ]);
+            ];
+        if ($hasHoursPerDay) {
+            $settingsParams['hpd'] = max(1.0, min(24.0, round((float) ($_POST['standard_hours_per_day'] ?? 8), 2)));
+        }
+        db()->prepare($settingsSql)->execute($settingsParams);
         payroll_settings($companyId); // ensures the row exists even on a fresh company
         flash('success', 'Ledger mappings and workflow settings saved.');
         redirect('admin/payroll-settings.php');
@@ -377,8 +385,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
               // says all three rather than only the one it was introduced for. ?>
         <label>Working days per month
             <input type="number" step="0.5" min="1" max="31" name="standard_working_days" value="<?= e((string) ($settings['standard_working_days'] ?? '30')) ?>">
-            <small style="display:block;color:var(--mbw-muted)">The days a full month is paid for. Worked days typed on the salary sheet are measured against this, the unpaid-leave day-rate divides by it, and overtime hours are paid at basic &divide; this &times; the overtime multiplier.</small>
+            <small style="display:block;color:var(--mbw-muted)">The days a full month is paid for. Worked days typed on the salary sheet are measured against this, and the unpaid-leave day-rate divides by it.</small>
         </label>
+        <?php // Only offered where migration 120 has been applied; the engine uses 8
+              // either way, so a server without the column is not misinformed. ?>
+        <?php if (column_exists('payroll_settings', 'standard_hours_per_day')): ?>
+            <?php $hoursPerDay = (float) ($settings['standard_hours_per_day'] ?? 8); ?>
+            <?php $workingDays = max(1.0, (float) ($settings['standard_working_days'] ?? 30)); ?>
+            <label>Working hours per day
+                <input type="number" step="0.25" min="1" max="24" name="standard_hours_per_day" value="<?= e(rtrim(rtrim(number_format($hoursPerDay, 2, '.', ''), '0'), '.')) ?>">
+                <small style="display:block;color:var(--mbw-muted)">Used to price an overtime hour: basic &divide; <?= e(rtrim(rtrim(number_format($workingDays, 2, '.', ''), '0'), '.')) ?> days &divide; <?= e(rtrim(rtrim(number_format($hoursPerDay, 2, '.', ''), '0'), '.')) ?> hours &times; <?= e(rtrim(rtrim(number_format((float) ($settings['ot_multiplier'] ?? 1.5), 2, '.', ''), '0'), '.')) ?>. On an 18,000 salary that is <?= e(number_format(18000 / $workingDays / max(1.0, $hoursPerDay) * (float) ($settings['ot_multiplier'] ?? 1.5), 2)) ?> an overtime hour.</small>
+            </label>
+        <?php endif; ?>
         <div style="grid-column:1/-1;padding:10px 12px;border-radius:8px;background:var(--mbw-surface-2,rgba(0,0,0,.03));font-size:12px;color:var(--mbw-muted)">
             <strong>Worked days pay regular pay.</strong> Typing worked days on the salary sheet pays basic and every standing allowance for those days, and gross follows. Overtime, service charge and one-time additions are not touched &mdash; they are earned by what happened, not by attendance. Where worked days are typed, the unpaid-leave cut is released rather than applied on top: both measure days not worked, and taking each would cut the same absence twice.
         </div>

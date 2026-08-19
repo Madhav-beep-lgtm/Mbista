@@ -715,7 +715,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <th class="is-numeric">Basic</th>
             <?php foreach ($regularColumns as $sheetComponent): ?><?= $sheetHead($sheetComponent) ?><?php endforeach; ?>
             <th class="is-numeric" title="Basic plus every standing allowance - the part of pay that worked days pro-rate.">Regular pay</th>
-            <th class="is-numeric" title="Hours typed here are paid at basic / standard days x the overtime multiplier, and they replace whatever weekly attendance calculated for this employee.">OT hours</th>
+            <?php
+            $otWorkingDays = max(1.0, (float) ($settings['standard_working_days'] ?? 30));
+            $otHoursPerDay = max(1.0, (float) ($settings['standard_hours_per_day'] ?? 8));
+            $otMultiplier = (float) ($settings['ot_multiplier'] ?? 1.5);
+            $otTrim = static fn (float $v): string => rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.');
+            ?>
+            <th class="is-numeric" title="Hours typed here are paid at basic &divide; <?= e($otTrim($otWorkingDays)) ?> days &divide; <?= e($otTrim($otHoursPerDay)) ?> hours &times; <?= e($otTrim($otMultiplier)) ?>, and they replace whatever weekly attendance calculated for this employee.">OT hours</th>
             <th class="is-numeric">Overtime</th>
             <?php foreach ($earnedColumns as $sheetComponent): ?><?= $sheetHead($sheetComponent) ?><?php endforeach; ?>
             <th class="is-numeric" title="Regular pay + overtime + everything else earned in this period.">Gross</th><th class="is-numeric">Assessable (yr)</th>

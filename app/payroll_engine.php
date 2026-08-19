@@ -717,11 +717,11 @@ function payroll_calculate_line(array $employee, array $run, array $taxVersion, 
     // out for the same employee: two sources for one set of hours is how people
     // get paid twice for one evening.
     //
-    // The rate is basic over the company's working days per month, times the
-    // overtime multiplier - 18,000 / 30 x 1.5 = 900 an hour at the default
-    // settings - computed from the CONTRACT basic, before unpaid leave or
-    // worked-day pro-rating: an absence reduces how much salary is earned, not
-    // the price of an overtime hour.
+    // The rate is basic over working days over hours per day, times the overtime
+    // multiplier - 18,000 / 30 / 8 x 1.5 = 112.50 an hour at the default
+    // settings - computed from the CONTRACT basic, which is the same figure as
+    // the pro-rated basic divided by the days actually worked and cannot divide
+    // by zero when nobody turned up.
     $typedOtHours = isset($inputs['overtime_hours']) && $inputs['overtime_hours'] !== null && $inputs['overtime_hours'] !== ''
         ? max(0.0, round((float) $inputs['overtime_hours'], 2))
         : null;

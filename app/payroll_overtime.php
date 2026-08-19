@@ -71,19 +71,25 @@ function payroll_ot_employee_rate(array $employee, array $settings): float
 /**
  * Hourly overtime rate for hours TYPED on the salary sheet.
  *
- * Basic salary over the company's working days per month, times the overtime
- * multiplier: 18,000 / 30 x 1.5 = 900 an hour at the default settings. This is
- * the rate this business pays, and it is deliberately its own function -
- * payroll_ot_employee_rate() divides by ot_monthly_hours (208 by default) and
- * drives the weekly ATTENDANCE workflow, so changing that one would silently
- * repay every attendance-derived hour already approved.
+ *     basic / working days per month / hours per day x overtime multiplier
  *
- * An employee carrying an explicit ot_hourly_rate still wins: that is a rate
- * somebody set for that person on purpose, and it is multiplied the same way.
+ * On the default settings, an 18,000 salary: 18,000 / 30 = 600 a day, / 8 = 75
+ * an hour, x 1.5 = 112.50 an overtime hour. Both divisors matter - dropping the
+ * hours-per-day one charges a whole day's pay for a single hour.
  *
- * $contractBasic must be the basic BEFORE unpaid leave or worked-day pro-rating.
- * Being absent reduces how much salary is earned, not the price of an overtime
- * hour.
+ * Written against the CONTRACT basic on purpose, and it is the same answer as
+ * dividing the pro-rated basic by the days actually worked: (18,000 x 5/30) / 5
+ * is 600 either way. Deriving it from the contract means an employee who worked
+ * no days at all still has an overtime rate instead of a division by zero.
+ *
+ * Deliberately its own function - payroll_ot_employee_rate() divides by
+ * ot_monthly_hours (208 by default) and drives the weekly ATTENDANCE workflow,
+ * so changing that one would silently reprice every attendance hour already
+ * approved.
+ *
+ * An employee carrying an explicit ot_hourly_rate still wins: that is already an
+ * hourly rate somebody set for that person on purpose, so it is multiplied and
+ * not divided again.
  */
 function payroll_ot_sheet_rate(float $contractBasic, array $employee, array $settings): float
 {
@@ -93,8 +99,11 @@ function payroll_ot_sheet_rate(float $contractBasic, array $employee, array $set
         return round($fixed * $multiplier, 4);
     }
     $workingDays = max(1.0, (float) ($settings['standard_working_days'] ?? 30));
+    // 8 is also the column default, so this reads the same before and after
+    // migration 120 - the setting only makes it editable.
+    $hoursPerDay = max(1.0, (float) ($settings['standard_hours_per_day'] ?? 8));
 
-    return round(($contractBasic / $workingDays) * $multiplier, 4);
+    return round(($contractBasic / $workingDays / $hoursPerDay) * $multiplier, 4);
 }
 
 /**
