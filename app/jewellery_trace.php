@@ -289,6 +289,36 @@ function jewellery_trace_transition(int $companyId, int $stockUnitId, string $ev
     }
 }
 
+/**
+ * How many traced pieces sit in each status, counted in the database.
+ *
+ * The screen used to get this by loading EVERY unit a second time — two
+ * thousand rows, joined five ways, so that PHP could tally nine numbers off
+ * them. The joins are repeated here exactly so the totals still describe the
+ * same set of rows the list itself would show.
+ */
+function jewellery_trace_status_counts(int $companyId): array
+{
+    if (!jewellery_trace_ready()) {
+        return [];
+    }
+    $stmt = db()->prepare('SELECT su.status, COUNT(*) AS n
+        FROM jewellery_stock_units su
+        INNER JOIN inventory_items i ON i.id = su.item_id AND i.company_id = su.company_id
+        INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = su.item_id AND jp.company_id = su.company_id
+        INNER JOIN jewellery_purities p ON p.id = su.purity_id AND p.company_id = su.company_id
+        INNER JOIN jewellery_units u ON u.id = su.unit_id AND u.company_id = su.company_id
+        WHERE su.company_id = :cid
+        GROUP BY su.status');
+    $stmt->execute(['cid' => $companyId]);
+    $counts = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $counts[(string) $row['status']] = (int) $row['n'];
+    }
+
+    return $counts;
+}
+
 function jewellery_trace_units_list(int $companyId, array $filters = []): array
 {
     if (!jewellery_trace_ready()) {

@@ -22,15 +22,35 @@ $filters = [
     'status' => (string) ($_GET['status'] ?? ''),
     'stock_kind' => (string) ($_GET['stock_kind'] ?? ''),
 ];
-$rows = jewellery_trace_units_list($companyId, $filters);
-$allRows = jewellery_trace_units_list($companyId);
+$allRows = jewellery_trace_units_list($companyId, $filters);
+// A page at a time. Two thousand traced pieces is 1.4 MB of table for a screen
+// somebody reads twenty lines of, and the list is a search result — the answer
+// is normally on the first page or the search needs narrowing.
+$tracePerPage = (int) ($_GET['per_page'] ?? 50);
+if (!in_array($tracePerPage, [25, 50, 100, 200], true)) {
+    $tracePerPage = 50;
+}
+$tracePageCount = max(1, (int) ceil(count($allRows) / $tracePerPage));
+$tracePage = max(1, min($tracePageCount, (int) ($_GET['page'] ?? 1)));
+$rows = array_slice($allRows, ($tracePage - 1) * $tracePerPage, $tracePerPage);
+$tracePageUrl = static function (array $overrides) use ($filters, $tracePerPage): string {
+    return url('admin/jewellery-trace.php?' . http_build_query(array_merge(array_filter([
+        'q' => $filters['q'],
+        'status' => $filters['status'],
+        'stock_kind' => $filters['stock_kind'],
+        'per_page' => (string) $tracePerPage,
+    ], static fn ($v): bool => (string) $v !== ''), $overrides)));
+};
 $selectedId = (int) ($_GET['id'] ?? 0);
 $selected = $selectedId > 0 ? jewellery_trace_unit($companyId, $selectedId) : null;
 $events = $selected ? jewellery_trace_lifecycle($companyId, $selectedId) : [];
+// Counted in the database over EVERY unit, not over the page being shown and
+// not by loading them all a second time.
 $counts = array_fill_keys(jewellery_trace_statuses(), 0);
-foreach ($allRows as $unit) {
-    $counts[(string) $unit['status']] = ($counts[(string) $unit['status']] ?? 0) + 1;
+foreach (jewellery_trace_status_counts($companyId) as $status => $howMany) {
+    $counts[$status] = $howMany;
 }
+$tracedTotal = array_sum($counts);
 
 $pageTitle = 'Jewellery Item Traceability';
 $pageSubtitle = 'One permanent identity from opening, purchase or order through custody, reservation and final sale.';
@@ -42,7 +62,7 @@ $fmt = static fn (float $number, int $places = 4): string => number_format($numb
 ?>
 
 <?php jw_page_head('Item Traceability', 'Search a trace code and see the exact item’s complete, append-only lifecycle.', 'search',
-    '<span class="mbw-pill tone-green">' . count($allRows) . ' traced item(s)</span>'); ?>
+    '<span class="mbw-pill tone-green">' . $tracedTotal . ' traced item(s)</span>'); ?>
 
 <nav class="mbw-tabbar" aria-label="Jewellery stock">
     <a class="mbw-tab" href="<?= e(url('admin/jewellery.php?view=stock')) ?>"><?= icon('layers') ?>Stock position</a>
@@ -118,6 +138,19 @@ $fmt = static fn (float $number, int $places = 4): string => number_format($numb
         <?php endforeach; ?>
         </tbody>
     </table></div>
+    <?php if ($tracePageCount > 1): ?>
+        <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="Trace pages">
+            <?php if ($tracePage > 1): ?><a class="button secondary" href="<?= e($tracePageUrl(['page' => $tracePage - 1])) ?>">Previous</a><?php endif; ?>
+            <span>Page <?= (int) $tracePage ?> of <?= (int) $tracePageCount ?> · <?= count($allRows) ?> matching</span>
+            <?php if ($tracePage < $tracePageCount): ?><a class="button secondary" href="<?= e($tracePageUrl(['page' => $tracePage + 1])) ?>">Next</a><?php endif; ?>
+            <span style="margin-left:auto;display:flex;gap:6px;align-items:center">Rows
+                <?php foreach ([25, 50, 100, 200] as $size): ?>
+                    <a class="button soft" style="<?= $size === $tracePerPage ? 'font-weight:700' : '' ?>"
+                       href="<?= e($tracePageUrl(['per_page' => (string) $size, 'page' => 1])) ?>"><?= $size ?></a>
+                <?php endforeach; ?>
+            </span>
+        </nav>
+    <?php endif; ?>
 </section>
 
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

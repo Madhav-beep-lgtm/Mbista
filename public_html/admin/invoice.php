@@ -1000,14 +1000,25 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
 
                         <div class="full invoice-lines-box <?php echo $showGoodsFields ? '' : 'is-hidden'; ?>" id="line-items-field">
                             <label>Invoice Line Items</label>
+                            <?php
+                            // The item list, built once for the page. Two line rows each
+                            // carrying their own copy came to 1.2 MB of the 1.3 MB this
+                            // page weighed, saying the same thing twice.
+                            $invoiceItemOptionsHtml = '';
+                            foreach ($inventoryItems as $invoiceItem) {
+                                $invoiceItemLabel = $invoiceItem['sku'] . ' - ' . $invoiceItem['name'];
+                                $invoiceItemOptionsHtml .= '<option value="' . (int) $invoiceItem['id'] . '"'
+                                    . ' data-rate="' . e((string) (float) $invoiceItem['sales_rate']) . '"'
+                                    . ' data-tax="' . e((string) (float) $invoiceItem['tax_rate']) . '"'
+                                    . ' data-label="' . e($invoiceItemLabel) . '">' . e($invoiceItemLabel) . '</option>';
+                            }
+                            ?>
+                            <template id="invoice-item-options"><?= $invoiceItemOptionsHtml ?></template>
                             <div class="invoice-line-entry">
-                                <select name="item_id[]">
+                                <?php // Filled from the template above: drawn inline this was the
+                                      // whole item master, once for every line on the form. ?>
+                                <select name="item_id[]" data-fill-from="invoice-item-options">
                                     <option value="0">No inventory item</option>
-                                    <?php foreach ($inventoryItems as $item): ?>
-                                        <option value="<?php echo e((int) $item['id']); ?>" data-rate="<?php echo e((float) $item['sales_rate']); ?>" data-tax="<?php echo e((float) $item['tax_rate']); ?>" data-label="<?php echo e($item['sku'] . ' - ' . $item['name']); ?>">
-                                            <?php echo e($item['sku'] . ' - ' . $item['name']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
                                 </select>
                                 <input type="text" name="line_description[]" placeholder="Line description">
                                 <input type="number" name="line_quantity[]" step="0.001" min="0" placeholder="Qty">
@@ -1015,13 +1026,10 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <input type="number" name="line_vat_rate[]" step="0.01" min="0" placeholder="VAT %" value="13.00">
                             </div>
                             <div class="invoice-line-entry">
-                                <select name="item_id[]">
+                                <?php // Filled from the template above: drawn inline this was the
+                                      // whole item master, once for every line on the form. ?>
+                                <select name="item_id[]" data-fill-from="invoice-item-options">
                                     <option value="0">No inventory item</option>
-                                    <?php foreach ($inventoryItems as $item): ?>
-                                        <option value="<?php echo e((int) $item['id']); ?>" data-rate="<?php echo e((float) $item['sales_rate']); ?>" data-tax="<?php echo e((float) $item['tax_rate']); ?>" data-label="<?php echo e($item['sku'] . ' - ' . $item['name']); ?>">
-                                            <?php echo e($item['sku'] . ' - ' . $item['name']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
                                 </select>
                                 <input type="text" name="line_description[]" placeholder="Line description">
                                 <input type="number" name="line_quantity[]" step="0.001" min="0" placeholder="Qty">
@@ -1627,6 +1635,19 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
             invoiceSourceSelect.addEventListener('change', syncInvoiceFields);
             syncInvoiceFields();
         }
+
+        // The line pickers hold only their placeholder until here; the list
+        // lives once on the page and each takes its own copy of it.
+        (function () {
+            var itemOptions = document.getElementById('invoice-item-options');
+            if (!itemOptions) { return; }
+            document.querySelectorAll('select[data-fill-from="invoice-item-options"]').forEach(function (select) {
+                var chosen = select.value;
+                select.insertAdjacentHTML('beforeend', itemOptions.innerHTML);
+                if (chosen && select.querySelector('option[value="' + chosen + '"]')) { select.value = chosen; }
+                select.removeAttribute('data-fill-from');
+            });
+        })();
 
         document.querySelectorAll('.invoice-line-entry select[name="item_id[]"]').forEach(function(select) {
             select.addEventListener('change', function() {

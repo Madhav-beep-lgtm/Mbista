@@ -1967,12 +1967,35 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 <?php if ($invView === 'valuation'): ?>
     <?php
     // Per-item IAS 2 valuation: cost from layers vs lower of cost and NRV.
+    //
+    // A PAGE at a time, for the same two reasons the stock list above already
+    // pages — and this view had been missed. inv_item_valuation() reads the
+    // cost layers and the item's NRV assessment, three statements apiece, and
+    // this mapped it over EVERY item rather than the ones on screen: about
+    // 6,700 queries and a table of two thousand rows on a shop this size, to
+    // show what a person reads fifty lines of. The totals in the foot are
+    // computed elsewhere, over the whole list, so they still speak for it all.
+    $valPerPage = (int) ($_GET['per_page'] ?? 50);
+    if (!in_array($valPerPage, [25, 50, 100, 200], true)) {
+        $valPerPage = 50;
+    }
+    $valPageCount = max(1, (int) ceil(count($items) / $valPerPage));
+    $valPage = max(1, min($valPageCount, (int) ($_GET['page'] ?? 1)));
     $valuationRows = array_map(static function (array $item) use ($companyId): array {
         $v = inv_item_valuation($companyId, $item);
         return $item + ['val' => $v];
-    }, $items);
+    }, array_slice($items, ($valPage - 1) * $valPerPage, $valPerPage));
+    // Its own link builder rather than the stock list's: that one carries no
+    // view and anchors to the table above, so paging from here would have
+    // landed the reader on a different screen than the one they were reading.
+    $valPageUrl = static function (array $overrides) use ($valPerPage): string {
+        return url('admin/accounting-inventory.php?' . http_build_query(array_merge([
+            'view' => 'valuation',
+            'per_page' => (string) $valPerPage,
+        ], $overrides))) . '#valuation-nrv';
+    };
     ?>
-    <section class="mbw-card" data-collapsible aria-label="Valuation and NRV">
+    <section class="mbw-card" id="valuation-nrv" data-collapsible aria-label="Valuation and NRV">
         <div class="mbw-card-head">
             <h2>Valuation &amp; NRV (IAS 2)</h2>
             <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Cost from perpetual layers; NRV uses each item's assessment or its sales rate as the selling price.</span></div>
@@ -2020,6 +2043,19 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                 </tr></tfoot>
             </table>
         </div>
+        <?php if ($valPageCount > 1): ?>
+            <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="Valuation pages">
+                <?php if ($valPage > 1): ?><a class="button secondary" href="<?= e($valPageUrl(['page' => $valPage - 1])) ?>">Previous</a><?php endif; ?>
+                <span>Page <?= (int) $valPage ?> of <?= (int) $valPageCount ?> · <?= count($items) ?> items</span>
+                <?php if ($valPage < $valPageCount): ?><a class="button secondary" href="<?= e($valPageUrl(['page' => $valPage + 1])) ?>">Next</a><?php endif; ?>
+                <span style="margin-left:auto;display:flex;gap:6px;align-items:center">Rows
+                    <?php foreach ([25, 50, 100, 200] as $size): ?>
+                        <a class="button soft" style="<?= $size === $valPerPage ? 'font-weight:700' : '' ?>"
+                           href="<?= e($valPageUrl(['per_page' => (string) $size, 'page' => 1])) ?>"><?= $size ?></a>
+                    <?php endforeach; ?>
+                </span>
+            </nav>
+        <?php endif; ?>
     </section>
 
     <section class="mbw-card" data-collapsible aria-label="Post NRV assessment">

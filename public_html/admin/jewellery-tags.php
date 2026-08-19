@@ -129,7 +129,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
 }
 
 $search = trim((string) ($_GET['search'] ?? ''));
-$items = jewellery_items_list($companyId, ['active_only' => 1, 'search' => $search]);
+$allItems = jewellery_items_list($companyId, ['active_only' => 1, 'search' => $search]);
+// A page at a time. The whole master went into one scrolling box — two MB of it
+// on a two-thousand-piece shop — to be scrolled past looking for a few rings.
+// Tags are printed a batch at a time anyway, so a page IS the batch; the search
+// above is how you get to the pieces you want.
+$tagPerPage = (int) ($_GET['per_page'] ?? 50);
+if (!in_array($tagPerPage, [25, 50, 100, 200], true)) {
+    $tagPerPage = 50;
+}
+$tagPageCount = max(1, (int) ceil(count($allItems) / $tagPerPage));
+$tagPage = max(1, min($tagPageCount, (int) ($_GET['page'] ?? 1)));
+$items = array_slice($allItems, ($tagPage - 1) * $tagPerPage, $tagPerPage);
+$tagPageUrl = static function (array $overrides) use ($search, $tagPerPage): string {
+    return url('admin/jewellery-tags.php?' . http_build_query(array_merge(array_filter([
+        'search' => $search,
+        'per_page' => (string) $tagPerPage,
+    ], static fn ($v): bool => (string) $v !== ''), $overrides)));
+};
 $selected = $requestedIds();
 
 $pageTitle = 'Print Tags';
@@ -144,7 +161,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-card" aria-label="Print tags">
     <div class="mbw-card-head">
         <h2>Print tags</h2>
-        <span class="frm-optional">Tick the pieces, then print. The tag is drawn by the printer itself, so the barcode is as crisp as the ZD230 can make it.</span>
+        <span class="frm-optional">Tick the pieces, then print. The tag is drawn by the printer itself, so the barcode is as crisp as the ZD230 can make it. Ticks apply to the page you are on — print it, then move to the next.</span>
     </div>
 
     <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
@@ -155,7 +172,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
     </form>
 
-    <?php if ($items === []): ?>
+    <?php if ($allItems === []): ?>
         <p class="frm-optional">No items match. Add stock first, or clear the search.</p>
     <?php else: ?>
     <form id="tag-item-form">
@@ -186,6 +203,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
                 </tbody>
             </table>
+        <?php if ($tagPageCount > 1): ?>
+            <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="Tag pages">
+                <?php if ($tagPage > 1): ?><a class="button secondary" href="<?= e($tagPageUrl(['page' => $tagPage - 1])) ?>">Previous</a><?php endif; ?>
+                <span>Page <?= (int) $tagPage ?> of <?= (int) $tagPageCount ?> · <?= count($allItems) ?> item(s)</span>
+                <?php if ($tagPage < $tagPageCount): ?><a class="button secondary" href="<?= e($tagPageUrl(['page' => $tagPage + 1])) ?>">Next</a><?php endif; ?>
+                <span style="margin-left:auto;display:flex;gap:6px;align-items:center">Rows
+                    <?php foreach ([25, 50, 100, 200] as $size): ?>
+                        <a class="button soft" style="<?= $size === $tagPerPage ? 'font-weight:700' : '' ?>"
+                           href="<?= e($tagPageUrl(['per_page' => (string) $size, 'page' => 1])) ?>"><?= $size ?></a>
+                    <?php endforeach; ?>
+                </span>
+            </nav>
+        <?php endif; ?>
         </div>
 
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px">
