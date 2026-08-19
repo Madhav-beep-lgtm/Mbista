@@ -374,6 +374,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // opening_amount and goes through the SHARED opening poster, which replaces
     // any prior voucher rather than adding one. There is no separate draft step
     // to keep in sync any more — correcting an opening is saving it again.
+    if ($action === 'carry_opening') {
+        require_permission('jewellery', 'post');
+        // Brings the previous year's closing forward as this year's opening.
+        // Writes no voucher: the value already carried with the ledgers, and
+        // posting it again here would count the same gold twice.
+        $result = jw_ob_generate($companyId, $fiscalYearId, $userId);
+        if (!$result['ok']) {
+            flash('error', $result['error']);
+        } else {
+            flash('success', $result['written'] . ' line(s) brought forward'
+                . ($result['carried'] ? " from the previous year's closing" : ' from the item master')
+                . ($result['kept'] > 0 ? ', keeping ' . $result['kept'] . ' line(s) you had already corrected' : '')
+                . '. Nothing was posted to the ledgers — they carry their own balances.');
+        }
+        redirect('admin/jewellery.php?view=opening');
+    }
+
+    if ($action === 'adjust_opening') {
+        require_permission('jewellery', 'post');
+        $result = jw_ob_adjust($companyId, $fiscalYearId, (int) ($_POST['row_id'] ?? 0), [
+            'gross_weight' => (float) ($_POST['gross_weight'] ?? 0),
+            'qty_pieces' => (float) ($_POST['qty_pieces'] ?? 0),
+            'amount' => (float) ($_POST['amount'] ?? 0),
+        ], (string) ($_POST['reason'] ?? ''), $userId);
+        if (!$result['ok']) {
+            flash('error', $result['error']);
+        } else {
+            flash('success', 'Opening line corrected.' . (($result['note'] ?? '') !== '' ? ' ' . $result['note'] : ' It matched what was carried, so nothing needed posting.'));
+        }
+        redirect('admin/jewellery.php?view=opening');
+    }
+
     if ($action === 'save_opening') {
         require_permission('jewellery', 'post');
         $result = jewellery_save_opening($companyId, $fiscalYearId, [
@@ -703,9 +735,18 @@ if ($view === 'items') {
     $editItem = jewellery_item($companyId, (int) ($_GET['edit'] ?? 0));
 }
 if ($view === 'opening') {
+    // Which kind of year this is decides what the screen even IS. In a
+    // company's first year an opening is typed. After that it is the previous
+    // year's closing, carried — there is nothing to type, because the two have
+    // to be the same figure.
+    $openingIsCarried = jw_ob_is_carried_year($companyId, $fiscalYearId);
+    $openingPrevFy = jw_ob_previous_fiscal_year($companyId, $fiscalYearId);
+
     // Handed the master this page has already read, rather than reading it
     // again: at a few thousand items that second pass is not free.
-    $openingAll = jewellery_opening_rows($companyId, $fiscalYearId, $items);
+    $openingAll = $openingIsCarried
+        ? jw_ob_rows($companyId, $fiscalYearId)
+        : jewellery_opening_rows($companyId, $fiscalYearId, $items);
 
     // The filters used to run in the browser, over every row the page had
     // already sent. A shop with a couple of thousand items was therefore being
@@ -720,8 +761,21 @@ if ($view === 'opening') {
         'purity' => trim((string) ($_GET['o_purity'] ?? '')),
         'status' => in_array((string) ($_GET['o_status'] ?? ''), ['posted', 'weight', 'none'], true) ? (string) $_GET['o_status'] : '',
     ];
-    $openingFilterOn = implode('', $openingFilters) !== '';
+    // A carried year has no posting status to filter on — nothing was posted —
+    // but it does have a holder, which is the question worth asking of it.
+    $openingHolder = in_array((string) ($_GET['o_holder'] ?? ''), array_keys(jw_ob_holder_labels()), true)
+        ? (string) $_GET['o_holder'] : '';
+    if ($openingIsCarried) {
+        $openingFilters['kind'] = '';
+        $openingFilters['status'] = '';
+    }
+    $openingFilterOn = implode('', $openingFilters) . $openingHolder !== '';
     $openingRows = jewellery_opening_filter($openingAll, $openingFilters);
+    if ($openingHolder !== '') {
+        $openingRows = array_values(array_filter($openingRows,
+            static fn (array $row): bool => (string) ($row['holder_type'] ?? '') === $openingHolder));
+    }
+    $openingCarriedTotals = $openingIsCarried ? jw_ob_totals($openingRows) : [];
 
     $openingPerPage = (int) ($_GET['o_per'] ?? 50);
     if (!in_array($openingPerPage, [25, 50, 100, 200], true)) {
@@ -731,7 +785,7 @@ if ($view === 'opening') {
     $openingPage = max(1, min($openingPageCount, (int) ($_GET['o_page'] ?? 1)));
     $openingPageRows = array_slice($openingRows, ($openingPage - 1) * $openingPerPage, $openingPerPage);
     /** This screen's own URL, with one or two parameters changed. */
-    $openingPageQuery = static function (array $overrides) use ($openingFilters, $openingPerPage): string {
+    $openingPageQuery = static function (array $overrides) use ($openingFilters, $openingHolder, $openingPerPage): string {
         $query = array_filter([
             'view' => 'opening',
             'o_q' => $openingFilters['search'],
@@ -739,6 +793,7 @@ if ($view === 'opening') {
             'o_kind' => $openingFilters['kind'],
             'o_purity' => $openingFilters['purity'],
             'o_status' => $openingFilters['status'],
+            'o_holder' => $openingHolder,
             'o_per' => (string) $openingPerPage,
         ] + $overrides, static fn ($value): bool => (string) $value !== '');
 
@@ -1676,10 +1731,21 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         ? count($openingRows) . ' of ' . count($openingAll)
         : (string) count($openingRows);
     ?>
+    <?php if (!$openingIsCarried): ?>
     <div class="notice" style="margin-bottom:14px">
         Opening stock is dated <strong><?= e(app_date($fyStart)) ?></strong>. It is the same figure the core
         <a href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory</a> item shows.
     </div>
+    <?php else: ?>
+    <div class="notice" style="margin-bottom:14px">
+        This is not the first year on these books, so its opening stock is <strong>brought forward</strong> from
+        <strong><?= e((string) ($openingPrevFy['label'] ?? 'the previous year')) ?></strong>&rsquo;s closing on
+        <strong><?= e(app_date((string) ($openingPrevFy['end_date'] ?? ''))) ?></strong> rather than typed again —
+        a closing and the opening after it have to be the same figure. Bringing it forward posts nothing: the
+        stock and &ldquo;Metal with&hellip;&rdquo; ledgers carry their own balances through
+        <a href="<?= e(url('admin/opening-balances.php')) ?>">Opening Balances</a>.
+    </div>
+    <?php endif; ?>
 
     <section class="mbw-kpi-grid" aria-label="Opening stock summary">
         <?php foreach ([
@@ -1691,7 +1757,40 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <?php endforeach; ?>
     </section>
 
-    <?php if ($canEdit): ?>
+    <?php if ($openingIsCarried): ?>
+    <section class="mbw-card" style="margin-bottom:14px">
+        <div class="mbw-card-head">
+            <h2>Brought forward from <?= e((string) ($openingPrevFy['label'] ?? 'the previous year')) ?></h2>
+            <?php if ($canEdit): ?>
+            <form method="post" style="display:inline" data-confirm="Recompute this year's opening from last year's closing? Lines you have corrected against a physical count are kept.">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="carry_opening">
+                <button type="submit" class="button"><?= icon('reconcile') ?><?= $openingAll === [] ? 'Bring forward' : 'Refresh' ?></button>
+            </form>
+            <?php endif; ?>
+        </div>
+        <?php if ($openingAll === []): ?>
+            <p class="frm-optional" style="margin:0">Nothing has been brought forward into this year yet. Press
+                <strong>Bring forward</strong> to replay last year&rsquo;s closing — per item, and per whoever was
+                holding it on the last day.</p>
+        <?php else: ?>
+            <?php // Shown apart because each has a ledger behind it: the shelf against
+                  // the stock ledgers, a kaligad against his own "Metal with" account.
+                  // A boundary that does not reconcile is worth seeing the day it opens. ?>
+            <div class="mbw-stat-row">
+                <?php foreach ($openingCarriedTotals as $carriedTotal): ?>
+                    <div class="mbw-stat">
+                        <span><?= e((string) $carriedTotal['label']) ?></span>
+                        <strong><?= e($sym) ?> <?= $fmt((float) $carriedTotal['amount']) ?></strong>
+                        <small><?= $fmt((float) $carriedTotal['fine_grams'] / 11.6638, 4) ?> fine tola · <?= (int) $carriedTotal['lines'] ?> line(s)</small>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($canEdit && !$openingIsCarried): ?>
     <section class="mbw-card" data-collapsible style="margin-bottom:14px">
         <div class="mbw-card-head">
             <h2>Upload Opening Stock from a Spreadsheet</h2>
@@ -1927,7 +2026,17 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php endif; ?>
     <?php endif; ?>
 
-    <?php if ($canEdit): ?>
+    <?php if ($canEdit && $openingIsCarried): ?>
+    <section class="mbw-card" style="margin-top:14px">
+        <div class="mbw-card-head"><h2>Recording an opening by hand</h2></div>
+        <p class="frm-optional" style="margin:0">Not in this year. An opening is typed once, in a company&rsquo;s
+            first year; from then on it is last year&rsquo;s closing and there is nothing to key. If a physical
+            count disagrees with a line above, use <strong>Correct</strong> on that line — it records the reason
+            and posts only the difference.</p>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($canEdit && !$openingIsCarried): ?>
     <section id="record-opening-stock" class="mbw-card" data-collapsible data-draggable>
         <div class="mbw-card-head"><h2>Record Opening Stock</h2></div>
         <form id="opening-stock-form" method="post" class="workspace-form-grid">
@@ -2017,7 +2126,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
     <?php endif; ?>
 
-    <?php if ($canEdit && $openingRows !== []): ?>
+    <?php if ($canEdit && !$openingIsCarried && $openingRows !== []): ?>
     <form id="opening-bulk-clear-form" method="post" style="margin-bottom:14px">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="clear_opening_bulk">
@@ -2043,6 +2152,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <input type="search" name="o_group" value="<?= e($openingFilters['group']) ?>" placeholder="All groups" aria-label="Filter by stock group" list="jw-opening-groups">
                 <datalist id="jw-opening-groups"><?php foreach (jewellery_categories_list($companyId, false) as $category): ?><option value="<?= e((string) $category['name']) ?>"><?php endforeach; ?></datalist>
             </label>
+            <?php if (!$openingIsCarried): ?>
             <label style="display:grid;gap:5px;min-width:150px;flex:0 1 170px">Stock type
                 <select name="o_kind" aria-label="Filter by stock type">
                     <option value="">All types</option>
@@ -2050,9 +2160,22 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <option value="customer_ordered" <?= $openingFilters['kind'] === 'customer_ordered' ? 'selected' : '' ?>>Customer ordered</option>
                 </select>
             </label>
+            <?php else: ?>
+            <?php // A carried year has no posting status to ask about — nothing was
+                  // posted. Who was holding it is the question that matters instead. ?>
+            <label style="display:grid;gap:5px;min-width:170px;flex:0 1 190px">Held by
+                <select name="o_holder" aria-label="Filter by who was holding it">
+                    <option value="">Anywhere</option>
+                    <?php foreach (jw_ob_holder_labels() as $holderKey => $holderLabel): ?>
+                        <option value="<?= e((string) $holderKey) ?>" <?= $openingHolder === (string) $holderKey ? 'selected' : '' ?>><?= e((string) $holderLabel) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <?php endif; ?>
             <label style="display:grid;gap:5px;min-width:130px;flex:0 1 150px">Purity
                 <input type="search" name="o_purity" value="<?= e($openingFilters['purity']) ?>" placeholder="All purities" aria-label="Filter by purity">
             </label>
+            <?php if (!$openingIsCarried): ?>
             <label style="display:grid;gap:5px;min-width:150px;flex:0 1 170px">Status
                 <select name="o_status" aria-label="Filter by posting status">
                     <option value="">All statuses</option>
@@ -2061,11 +2184,84 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <option value="none" <?= $openingFilters['status'] === 'none' ? 'selected' : '' ?>>Not in stock</option>
                 </select>
             </label>
+            <?php endif; ?>
             <div style="display:flex;gap:6px;align-items:end">
                 <button type="submit" class="button">Filter</button>
                 <?php if ($openingFilterOn): ?><a class="button soft" href="<?= e(url('admin/jewellery.php?view=opening')) ?>">Clear</a><?php endif; ?>
             </div>
         </form>
+        <?php if ($openingIsCarried): ?>
+        <?php // A carried year reads differently from a typed one: no posting
+              // status, because nothing was posted, and a HOLDER, because at a
+              // year end the metal is not all in one place. ?>
+        <div style="overflow-x:auto"><table>
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th>Stock group</th>
+                    <th>Held by</th>
+                    <th>Purity</th>
+                    <th class="is-numeric">Gross</th>
+                    <th class="is-numeric">Fine</th>
+                    <th class="is-numeric">Rate</th>
+                    <th class="is-numeric">Value</th>
+                    <th>Source</th>
+                    <?php if ($canEdit): ?><th style="width:110px"></th><?php endif; ?>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if ($openingPageRows === []): ?>
+                    <tr><td colspan="<?= $canEdit ? 10 : 9 ?>"><?= $openingFilterOn
+                        ? 'Nothing brought forward matches these filters.'
+                        : 'Nothing has been brought forward into this year yet — use "Bring forward" above.' ?></td></tr>
+                <?php endif; ?>
+                <?php foreach ($openingPageRows as $row): ?>
+                    <tr>
+                        <td><?= e((string) $row['item_code']) ?><br><small><?= e((string) $row['item_name']) ?></small></td>
+                        <td><?= e((string) ($row['category'] ?? '') !== '' ? (string) $row['category'] : 'Uncategorised') ?></td>
+                        <td><span class="mbw-pill <?= (string) $row['holder_type'] === 'stock' ? 'tone-green' : 'tone-amber' ?>"><?= e((string) $row['holder_label']) ?></span></td>
+                        <td><?= e((string) $row['purity_code']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['gross_weight'], 4) ?> <small><?= e((string) $row['unit_code']) ?></small></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['fine_weight'], 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $row['rate']) ?></td>
+                        <td class="is-numeric"><?= e($sym) ?><?= $fmt((float) $row['amount']) ?></td>
+                        <td>
+                            <?php if ((string) $row['source'] === 'adjusted'): ?>
+                                <span class="mbw-pill tone-amber">Corrected</span>
+                                <br><small><?= e((string) ($row['adjust_reason'] ?? '')) ?></small>
+                            <?php else: ?>
+                                <span class="mbw-pill tone-gray"><?= (string) $row['source'] === 'initial' ? 'From the master' : 'Carried' ?></span>
+                            <?php endif; ?>
+                        </td>
+                        <?php if ($canEdit): ?>
+                        <td>
+                            <?php // A <details> rather than a dialog: the correction needs three
+                                  // figures and a reason, which is too much for one cell and not
+                                  // worth a page of its own. ?>
+                            <details>
+                                <summary class="button soft" style="min-height:28px;padding:2px 8px;cursor:pointer">Correct</summary>
+                                <form method="post" style="display:grid;gap:6px;margin-top:8px;min-width:220px">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="adjust_opening">
+                                    <input type="hidden" name="row_id" value="<?= (int) $row['id'] ?>">
+                                    <label style="font-size:11px">Counted gross (<?= e((string) $row['unit_code']) ?>)
+                                        <input type="number" name="gross_weight" step="0.0001" min="0" value="<?= e((string) $row['gross_weight']) ?>" required></label>
+                                    <label style="font-size:11px">Pieces
+                                        <input type="number" name="qty_pieces" step="0.001" min="0" value="<?= e((string) $row['qty_pieces']) ?>"></label>
+                                    <label style="font-size:11px">Value (<?= e($sym) ?>)
+                                        <input type="number" name="amount" step="0.01" min="0" value="<?= e((string) $row['amount']) ?>" required></label>
+                                    <label style="font-size:11px">Why
+                                        <input type="text" name="reason" maxlength="255" placeholder="e.g. physical count short" required></label>
+                                    <button type="submit" class="button" style="min-height:30px">Post the difference</button>
+                                </form>
+                            </details>
+                        </td>
+                        <?php endif; ?>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+        <?php else: ?>
         <div style="overflow-x:auto"><table>
             <thead>
                 <tr>
@@ -2150,6 +2346,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <?php endif; ?>
         <?php if ($openingPageCount > 1): ?>
             <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="Opening stock pages">
                 <?php if ($openingPage > 1): ?><a class="button secondary" href="<?= e($openingPageQuery(['o_page' => $openingPage - 1])) ?>">Previous</a><?php endif; ?>

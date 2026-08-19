@@ -3520,6 +3520,54 @@ function accounting_module_repair_database(): array
             '`making_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `diamond_amount`');
     });
 
+    $run('Jewellery opening stock carried year to year (migration 121)', static function (): void {
+        if (!accounting_repair_table_exists('jewellery_stock_txns')) {
+            return;
+        }
+        // The per-year statement of what was brought forward. A quantity and
+        // weight record, never a posting: the value side already carries
+        // through the Opening Balances batch, where the stock ledgers and each
+        // "Metal with <kaligad>" ledger are ordinary assets. See the migration
+        // file for why a holder cannot be NULL here.
+        if (!accounting_repair_table_exists('jewellery_opening_balances')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `jewellery_opening_balances` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `fiscal_year_id` INT UNSIGNED NOT NULL,
+                `item_id` INT UNSIGNED NOT NULL,
+                `holder_type` ENUM('stock','karigar','refinery','customer') NOT NULL DEFAULT 'stock',
+                `holder_id` INT UNSIGNED NOT NULL DEFAULT 0,
+                `reserved` TINYINT(1) NOT NULL DEFAULT 0,
+                `qty_pieces` DECIMAL(14,3) NOT NULL DEFAULT 0.000,
+                `gross_grams` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+                `stone_grams` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+                `fine_grams` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+                `amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                `carried_gross_grams` DECIMAL(18,6) NOT NULL DEFAULT 0.000000,
+                `carried_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                `source` ENUM('carried','initial','adjusted') NOT NULL DEFAULT 'carried',
+                `adjust_reason` VARCHAR(255) DEFAULT NULL,
+                `adjustment_voucher_id` INT UNSIGNED DEFAULT NULL,
+                `adjusted_by` INT UNSIGNED DEFAULT NULL,
+                `adjusted_at` TIMESTAMP NULL DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_jw_ob_line` (`fiscal_year_id`, `item_id`, `holder_type`, `holder_id`, `reserved`),
+                KEY `idx_jw_ob_company_fy` (`company_id`, `fiscal_year_id`),
+                KEY `idx_jw_ob_item` (`item_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        // Added after the table shipped: a line generated before these existed
+        // has no frozen baseline, so an adjustment on it would measure from the
+        // live figure. Defaulting to zero is safe — the generate rewrites every
+        // non-adjusted line and fills them in.
+        accounting_repair_add_column('jewellery_opening_balances', 'carried_gross_grams',
+            '`carried_gross_grams` DECIMAL(18,6) NOT NULL DEFAULT 0.000000 AFTER `amount`');
+        accounting_repair_add_column('jewellery_opening_balances', 'carried_amount',
+            '`carried_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `carried_gross_grams`');
+    });
+
     $run('Every physical jewellery item has one traceable lifecycle (migration 111)', static function (): void {
         if (!accounting_repair_table_exists('jewellery_stock_units')) {
             accounting_repair_run_migration_file('111_jewellery_item_traceability.sql', [

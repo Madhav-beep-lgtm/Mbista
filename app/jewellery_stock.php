@@ -1350,6 +1350,123 @@ function jw_item_balances(int $companyId, array $itemIds, ?string $asOf = null, 
 
     return $out;
 }
+
+/**
+ * Every item's position at a date, split by WHO WAS HOLDING IT.
+ *
+ * At a year end metal is not all in one place: some sits in the showroom, some
+ * is out with a kaligad, some is with a refiner. Folded into one figure per
+ * item the boundary cannot be reconciled against the ledgers that hold those
+ * same positions in money — "Metal with RAM" is its own asset account.
+ *
+ * One query grouped by (item, holder), never one per item: this runs over the
+ * whole shop at a year end, where a per-item read would be thousands of round
+ * trips. Weights come back in GRAMS, which is what the caller stores; the
+ * screen converts to each item's own unit when it shows them.
+ *
+ * @return list<array{item_id:int, holder_type:string, holder_id:int, qty_pieces:float,
+ *                    gross_grams:float, stone_grams:float, fine_grams:float, value:float}>
+ */
+function jw_item_holder_balances(int $companyId, ?string $asOf = null, array $itemIds = []): array
+{
+    $sql = "SELECT item_id, holder_type, COALESCE(holder_id, 0) AS holder_id,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN qty_pieces ELSE -qty_pieces END), 0) AS qty_pieces,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN gross_grams ELSE -gross_grams END), 0) AS gross_grams,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN stone_weight ELSE -stone_weight END), 0) AS stone_grams,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN fine_grams ELSE -fine_grams END), 0) AS fine_grams,
+            COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END), 0) AS value
+        FROM jewellery_stock_txns
+        WHERE company_id = :cid";
+    $params = ['cid' => $companyId];
+
+    $ids = array_values(array_unique(array_filter(array_map('intval', $itemIds), static fn (int $id): bool => $id > 0)));
+    if ($ids !== []) {
+        $sql .= ' AND item_id IN (' . implode(',', $ids) . ')';
+    }
+    if ($asOf !== null && $asOf !== '') {
+        $sql .= ' AND txn_date <= :asof';
+        $params['asof'] = $asOf;
+    }
+    // A holding that has netted back to nothing is not a position — it is a
+    // kaligad who returned everything he was given.
+    //
+    // WEIGHT or VALUE, never a piece count on its own. Issuing metal for a job
+    // moves the weight and the money but leaves the piece count where it was,
+    // because the piece does not exist yet — the kaligad is still making it. A
+    // shelf row of "one bangle, no weight, no value" is that arithmetic
+    // showing through, not stock, and a year-end statement that repeated it
+    // would claim goods the shop does not have.
+    $sql .= ' GROUP BY item_id, holder_type, holder_id
+        HAVING ABS(fine_grams) > 0.00005 OR ABS(gross_grams) > 0.00005 OR ABS(value) > 0.004
+        ORDER BY item_id ASC, holder_type ASC, holder_id ASC';
+
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+
+    $rows = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $rows[] = [
+            'item_id' => (int) $row['item_id'],
+            'holder_type' => (string) $row['holder_type'],
+            'holder_id' => (int) $row['holder_id'],
+            'qty_pieces' => round((float) $row['qty_pieces'], 3),
+            'gross_grams' => (float) $row['gross_grams'],
+            'stone_grams' => (float) $row['stone_grams'],
+            'fine_grams' => (float) $row['fine_grams'],
+            'value' => jw_round_money((float) $row['value']),
+        ];
+    }
+
+    return $rows;
+}
+
+/**
+ * The traced pieces that were RESERVED against a customer order on a date.
+ *
+ * A piece made but not collected sits in the showroom — holder 'stock' — so the
+ * movement ledger cannot tell it from stock that is free to sell. The trace log
+ * can: each unit's last event on or before the date carries the status it was
+ * in then. Without that, a year end would show a shelf of goods that are in
+ * fact already spoken for.
+ *
+ * Returns item_id => reserved gross grams. Empty when the trace layer is not
+ * installed, in which case the statement simply shows one showroom line.
+ */
+function jw_reserved_units_at(int $companyId, string $asOf): array
+{
+    if ($asOf === '' || !jewellery_trace_ready()) {
+        return [];
+    }
+    // The last event per unit on or before the date, then the units whose
+    // status at that moment was 'reserved'. Written as a join against a
+    // grouped max rather than a window function so it runs on the older
+    // MariaDB a shared host may still be on.
+    $stmt = db()->prepare("SELECT su.item_id,
+            COALESCE(SUM(su.gross_weight), 0) AS gross,
+            COALESCE(SUM(su.qty_pieces), 0) AS pieces
+        FROM jewellery_stock_units su
+        INNER JOIN (
+            SELECT e.stock_unit_id, MAX(e.id) AS last_id
+            FROM jewellery_stock_unit_events e
+            WHERE e.company_id = :cid1 AND e.event_date <= :asof1
+            GROUP BY e.stock_unit_id
+        ) last ON last.stock_unit_id = su.id
+        INNER JOIN jewellery_stock_unit_events ev ON ev.id = last.last_id
+        WHERE su.company_id = :cid2 AND ev.to_status = 'reserved'
+        GROUP BY su.item_id");
+    $stmt->execute(['cid1' => $companyId, 'asof1' => $asOf, 'cid2' => $companyId]);
+
+    $reserved = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $reserved[(int) $row['item_id']] = [
+            'gross_grams' => (float) $row['gross'],
+            'qty_pieces' => round((float) $row['pieces'], 3),
+        ];
+    }
+
+    return $reserved;
+}
+
 /** Grams per one unit of an item's own weight unit. Cached: this is a hot path. */
 function jw_item_unit_grams(int $companyId, int $itemId): float
 {
@@ -1550,11 +1667,17 @@ function jewellery_stock_valuation(int $companyId, ?string $asOf = null): array
  * on a two-thousand-item shop — the whole of the opening page's load time on a
  * shared host, and growing with the shop rather than staying put.
  *
- * An item has at most one opening movement (saving an opening replaces the
- * previous one rather than stacking a second), but the order is pinned anyway
- * so that a company which somehow carries two always reads back the same one.
+ * An item has at most one opening movement per year (saving an opening replaces
+ * the previous one rather than stacking a second), but the order is pinned
+ * anyway so that a company which somehow carries two always reads back the
+ * same one.
+ *
+ * $fiscalYearId narrows it to the year being looked at. Without that the screen
+ * showed the same figures whatever year was selected, under a heading naming
+ * the year — which is how a first year's opening could be read as a second
+ * year's and then written over it.
  */
-function jewellery_opening_txns(int $companyId): array
+function jewellery_opening_txns(int $companyId, int $fiscalYearId = 0): array
 {
     // Who the piece is being held for lives on the traced unit, not on the
     // movement — joined in here so the list can show it and the edit button can
@@ -1567,9 +1690,17 @@ function jewellery_opening_txns(int $companyId): array
             u.customer_party_id, u.customer_name, u.customer_order_no" : '') . "
         FROM jewellery_stock_txns t"
         . ($traced ? ' LEFT JOIN jewellery_stock_units u ON u.id = t.stock_unit_id' : '') . "
-        WHERE t.company_id = :cid AND t.txn_type = 'opening'
+        WHERE t.company_id = :cid AND t.txn_type = 'opening'"
+        // A movement written before this column was filled in has no year to
+        // match on; it belongs to the first year, which is the only one those
+        // databases had.
+        . ($fiscalYearId > 0 ? ' AND (t.fiscal_year_id = :fy OR t.fiscal_year_id IS NULL)' : '') . "
         ORDER BY t.id ASC");
-    $stmt->execute(['cid' => $companyId]);
+    $params = ['cid' => $companyId];
+    if ($fiscalYearId > 0) {
+        $params['fy'] = $fiscalYearId;
+    }
+    $stmt->execute($params);
 
     $byItem = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -1585,6 +1716,11 @@ function jewellery_opening_txns(int $companyId): array
 /**
  * Opening rows for the jewellery items of a company, derived from the master.
  *
+ * This is the FIRST year's shape: an opening somebody keyed, held on the shared
+ * item master. From the second year on an opening is not keyed at all — it is
+ * the previous year's closing, carried, and jw_ob_rows() in jewellery_opening.php
+ * is what reads it.
+ *
  * $items lets a caller that has already listed the items hand them in rather
  * than have the whole master read a second time. Pass the UNFILTERED list: an
  * opening row exists per item that carries opening stock, not per item some
@@ -1594,7 +1730,7 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId, ?array $items
 {
     $fiscalYear = fiscal_year_by_id($fiscalYearId);
     $asOn = (string) ($fiscalYear['start_date'] ?? date('Y-m-d'));
-    $openingTxns = jewellery_opening_txns($companyId);
+    $openingTxns = jewellery_opening_txns($companyId, $fiscalYearId);
 
     $rows = [];
     foreach ($items ?? jewellery_items_list($companyId) as $item) {
@@ -1729,6 +1865,20 @@ function jewellery_save_opening(int $companyId, int $fiscalYearId, array $input,
     $fiscalYear = fiscal_year_by_id($fiscalYearId);
     if (!$fiscalYear || (int) $fiscalYear['company_id'] !== $companyId) {
         return ['ok' => false, 'error' => 'Choose a fiscal year that belongs to this company.', 'note' => '', 'voucher_id' => 0, 'item_id' => 0];
+    }
+    // An opening is KEYED only in a company's first year. After that it is the
+    // previous year's closing, carried — and there is nothing to type, because
+    // the two have to be the same figure.
+    //
+    // This used to be allowed in any year, and because an opening is held on
+    // the item master with no year on it, saving one in a later year did not
+    // create a second opening: it moved the first one onto the later year's
+    // start date, silently emptying the year it came from. Refusing is the
+    // whole of the fix; the carry-forward is where the figure comes from now.
+    if (function_exists('jw_ob_is_carried_year') && jw_ob_is_carried_year($companyId, $fiscalYearId)) {
+        return ['ok' => false, 'error' => 'This is not the first year on these books, so its opening stock is carried from the previous year\'s closing rather than typed. '
+            . 'Use "Bring forward from previous year" on the Opening Stock screen, then correct any line against a physical count.',
+            'note' => '', 'voucher_id' => 0, 'item_id' => $itemId];
     }
     // Opening stock is the position on the FIRST day of the year; pinning it
     // there stops it drifting into the middle of the period.
@@ -1926,3 +2076,10 @@ function jewellery_next_document_no(int $companyId, string $prefix): string
 // purchases, workshop receipts, orders and sales without another copy of the
 // rules in each module.
 require_once __DIR__ . '/jewellery_trace.php';
+
+// Year-to-year succession: what one year closed with, as what the next opened
+// with. At the FOOT of this file, and require_once on both sides, because
+// jewellery_opening.php needs the readers above — PHP resolves the cycle by
+// returning immediately from the inner require, so both files load whichever
+// one is asked for first.
+require_once __DIR__ . '/jewellery_opening.php';
