@@ -542,6 +542,95 @@ try {
 } catch (Throwable $e) { $withinReach = false; }
 ok($withinReach, 'And ALLOWS a 5 g issue that the old naive sum would have blocked as an overdraw');
 
+echo "\n16. The opening list costs the same whether a shop has ten items or a thousand\n";
+// The opening screen used to ask the database for one item's opening movement
+// at a time. At two thousand items that was two thousand round trips for one
+// page, and on a shared host it was the whole of why the page would not open.
+// The property worth guarding is not a number of milliseconds but the SHAPE:
+// the cost must not grow with the shop.
+$jwsBulkItem = db()->prepare("INSERT INTO inventory_items (company_id, sku, name, category, unit, status, opening_qty, opening_amount)
+    VALUES (:cid,:sku,:name,'Bangles','GM','active',:oq,:oa)");
+$jwsBulkProfile = db()->prepare("INSERT INTO jewellery_item_profiles (company_id, inventory_item_id, jewellery_type, metal_id, purity_id, unit_id, stock_kind, gross_weight)
+    VALUES (:cid,:iid,'ornament',:m,:p,:u,'showroom',0)");
+$jwsBulkTxn = db()->prepare("INSERT INTO jewellery_stock_txns (company_id, fiscal_year_id, item_id, txn_type, direction, txn_date,
+        metal_id, purity_id, unit_id, qty_pieces, gross_weight, fine_weight, rate, amount)
+    VALUES (:cid,:fy,:iid,'opening','in','2026-07-16',:m,:p,:u,1,:gw,:fw,1000,:amt)");
+/** $count more items carrying opening stock, named from $from upwards. */
+$jwsSeedOpenings = static function (int $from, int $count) use ($jwsBulkItem, $jwsBulkProfile, $jwsBulkTxn, $cidA, $fyA, $goldA, $p22A, $gramA): void {
+    for ($n = $from; $n < $from + $count; $n++) {
+        $jwsBulkItem->execute(['cid' => $cidA, 'sku' => 'PERF-' . $n, 'name' => 'Perf Bangle ' . $n,
+            'oq' => 10.0, 'oa' => 10000.0]);
+        $iid = (int) db()->lastInsertId();
+        $jwsBulkProfile->execute(['cid' => $cidA, 'iid' => $iid, 'm' => $goldA, 'p' => $p22A, 'u' => $gramA]);
+        $jwsBulkTxn->execute(['cid' => $cidA, 'fy' => $fyA, 'iid' => $iid, 'm' => $goldA, 'p' => $p22A,
+            'u' => $gramA, 'gw' => 10.0, 'fw' => 9.16, 'amt' => 10000.0]);
+    }
+};
+/** Statements this connection has answered, so a call's cost can be counted. */
+$jwsQueries = static function (): int {
+    return (int) (db()->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch(PDO::FETCH_ASSOC)['Value'] ?? 0);
+};
+/** The queries one opening-list build costs, net of the two counting it. */
+$jwsCostOfOpeningList = static function () use ($cidA, $fyA, $jwsQueries): array {
+    $before = $jwsQueries();
+    $rows = jewellery_opening_rows($cidA, $fyA);
+
+    return ['queries' => $jwsQueries() - $before - 2, 'rows' => count($rows)];
+};
+
+$jwsSeedOpenings(1, 10);
+$jwsSmall = $jwsCostOfOpeningList();
+$jwsSeedOpenings(11, 90);
+$jwsLarge = $jwsCostOfOpeningList();
+
+ok($jwsLarge['rows'] - $jwsSmall['rows'] === 90,
+    'Ninety more items with opening stock show up as ninety more rows');
+ok($jwsSmall['queries'] === $jwsLarge['queries'],
+    'And cost the SAME number of queries — ' . $jwsSmall['queries'] . ' at ' . $jwsSmall['rows']
+    . ' rows, ' . $jwsLarge['queries'] . ' at ' . $jwsLarge['rows'] . ' rows');
+ok($jwsLarge['queries'] <= 5, 'Which is a handful, not one per item (' . $jwsLarge['queries'] . ')');
+
+$jwsRows = jewellery_opening_rows($cidA, $fyA);
+$jwsHanded = jewellery_opening_rows($cidA, $fyA, jewellery_items_list($cidA));
+ok(count($jwsHanded) === count($jwsRows),
+    'Handing in the item master the caller already read gives the same list back');
+
+echo "\n17. The opening filters answer on the server, over the whole list\n";
+$jwsSample = [
+    ['item_code' => 'BG-1', 'item_name' => 'Bangle One', 'category' => 'Bangles', 'purity_code' => '22K',
+        'stock_kind' => 'showroom', 'posted' => true, 'voucher_id' => 41],
+    ['item_code' => 'CH-9', 'item_name' => 'Chain Nine', 'category' => '', 'purity_code' => '24K',
+        'stock_kind' => 'customer_ordered', 'posted' => true, 'voucher_id' => 0],
+    ['item_code' => 'RG-3', 'item_name' => 'Ring Three', 'category' => 'Rings', 'purity_code' => '22K',
+        'stock_kind' => 'showroom', 'posted' => false, 'voucher_id' => 0],
+    ['item_code' => 'BG-2', 'item_name' => 'Bangle Two', 'category' => 'Bangles', 'purity_code' => '22K',
+        'stock_kind' => 'showroom', 'posted' => false, 'voucher_id' => 0],
+];
+$jwsCodes = static function (array $rows): string {
+    return implode(',', array_column($rows, 'item_code'));
+};
+ok($jwsCodes(jewellery_opening_filter($jwsSample, [])) === 'BG-1,CH-9,RG-3,BG-2', 'No filter keeps every row, in order');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['search' => 'ring'])) === 'RG-3', 'The search reads the item name');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['search' => 'ch-9'])) === 'CH-9', 'And the code, without minding the case');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['group' => 'Bangles'])) === 'BG-1,BG-2', 'The group filter narrows to one group');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['group' => 'uncategorised'])) === 'CH-9',
+    'An item under no group answers to the name the screen prints for it');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['purity' => '22'])) === 'BG-1,RG-3,BG-2', 'Purity matches on part of the code');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['kind' => 'customer_ordered'])) === 'CH-9', 'Stock type is an exact match');
+ok(jewellery_opening_status($jwsSample[0]) === 'posted'
+    && jewellery_opening_status($jwsSample[1]) === 'weight'
+    && jewellery_opening_status($jwsSample[2]) === 'none',
+    'Posted, weight-only and not-in-stock are told apart');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['status' => 'none'])) === 'RG-3,BG-2',
+    'Two openings the books have never seen are found together');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['status' => 'weight'])) === 'CH-9',
+    'And a status filter finds the opening that moved metal but never reached the ledger');
+// Group alone gives two rows and status alone gives two others; together they
+// give the one row both are true of.
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['group' => 'Bangles', 'status' => 'none'])) === 'BG-2',
+    'Filters combine rather than replacing one another');
+ok(jewellery_opening_filter($jwsSample, ['group' => 'Chains']) === [], 'A filter that matches nothing returns nothing');
+
 jws_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

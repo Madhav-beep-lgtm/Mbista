@@ -364,6 +364,22 @@ echo "\nThe reports toolbar says what its buttons do\n";
  * so what is checked here is the part that CAN be: the page pulls in the skin
  * that styles them, and every button carries a word as well as a glyph.
  */
+// ---------------------------------------------------------------------------
+echo "\nOpening stock asks its questions on the server\n";
+// ---------------------------------------------------------------------------
+// This screen used to send every opening row it had and then hide the ones that
+// did not match, in the browser. A shop with a couple of thousand items was
+// handed a ten-megabyte document to look at fifty rows of. If the filter fields
+// ever lose their names, or the row-count chooser goes, that is the road back.
+$openingHtml = $renderedHtml['jewellery.php?view=opening'] ?? '';
+foreach (['o_q' => 'the search', 'o_group' => 'the stock group', 'o_kind' => 'the stock type',
+          'o_purity' => 'the purity', 'o_status' => 'the posting status'] as $field => $what) {
+    ok(str_contains($openingHtml, 'name="' . $field . '"'), 'Opening stock submits ' . $what . ' to the server');
+}
+ok(!str_contains($openingHtml, 'jw-filter-apply') && !str_contains($openingHtml, 'attachOpeningFilters'),
+    'And the old hide-rows-in-the-browser filter is gone with it');
+ok(str_contains($openingHtml, 'o_per'), 'The rows-per-page choice is on the page');
+
 $reportHtml = $renderedHtml['jewellery-reports.php?view=inventory'] ?? '';
 ok($reportHtml !== '', 'The reports page rendered');
 

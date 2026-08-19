@@ -687,7 +687,11 @@ $itemFilters = [
 $itemFilterOn = $itemFilters !== array_merge($itemFilters, ['search' => '', 'code' => '', 'name' => '',
     'group' => '', 'stock_kind' => '', 'item_type' => '', 'purity_id' => 0, 'status' => '']);
 if (in_array($view, ['items', 'opening', 'stock'], true)) {
-    $items = jewellery_items_list($companyId, $itemFilters);
+    // The f_ column filters belong to the Items screen. The other two filter in
+    // the browser, over the rows they were handed — so passing $itemFilters
+    // there would let a typed-in URL silently narrow an opening list that is
+    // meant to be the whole shop.
+    $items = jewellery_items_list($companyId, $view === 'items' ? $itemFilters : []);
 }
 // What the group/name/code filters may offer — every value the company has,
 // not just the ones surviving the current filter.
@@ -698,13 +702,59 @@ if ($view === 'items') {
     $editItem = jewellery_item($companyId, (int) ($_GET['edit'] ?? 0));
 }
 if ($view === 'opening') {
-    $openingRows = jewellery_opening_rows($companyId, $fiscalYearId);
+    // Handed the master this page has already read, rather than reading it
+    // again: at a few thousand items that second pass is not free.
+    $openingAll = jewellery_opening_rows($companyId, $fiscalYearId, $items);
+
+    // The filters used to run in the browser, over every row the page had
+    // already sent. A shop with a couple of thousand items was therefore being
+    // handed a ten-megabyte document to look at fifty rows of, and the browser
+    // spent longer laying it out than the server spent building it. The
+    // questions are answered here now, and only the page being looked at is
+    // sent — the same way the Items screen already works.
+    $openingFilters = [
+        'search' => trim((string) ($_GET['o_q'] ?? '')),
+        'group' => trim((string) ($_GET['o_group'] ?? '')),
+        'kind' => in_array((string) ($_GET['o_kind'] ?? ''), ['showroom', 'customer_ordered'], true) ? (string) $_GET['o_kind'] : '',
+        'purity' => trim((string) ($_GET['o_purity'] ?? '')),
+        'status' => in_array((string) ($_GET['o_status'] ?? ''), ['posted', 'weight', 'none'], true) ? (string) $_GET['o_status'] : '',
+    ];
+    $openingFilterOn = implode('', $openingFilters) !== '';
+    $openingRows = jewellery_opening_filter($openingAll, $openingFilters);
+
+    $openingPerPage = (int) ($_GET['o_per'] ?? 50);
+    if (!in_array($openingPerPage, [25, 50, 100, 200], true)) {
+        $openingPerPage = 50;
+    }
+    $openingPageCount = max(1, (int) ceil(count($openingRows) / $openingPerPage));
+    $openingPage = max(1, min($openingPageCount, (int) ($_GET['o_page'] ?? 1)));
+    $openingPageRows = array_slice($openingRows, ($openingPage - 1) * $openingPerPage, $openingPerPage);
+    /** This screen's own URL, with one or two parameters changed. */
+    $openingPageQuery = static function (array $overrides) use ($openingFilters, $openingPerPage): string {
+        $query = array_filter([
+            'view' => 'opening',
+            'o_q' => $openingFilters['search'],
+            'o_group' => $openingFilters['group'],
+            'o_kind' => $openingFilters['kind'],
+            'o_purity' => $openingFilters['purity'],
+            'o_status' => $openingFilters['status'],
+            'o_per' => (string) $openingPerPage,
+        ] + $overrides, static fn ($value): bool => (string) $value !== '');
+
+        return url('admin/jewellery.php?' . http_build_query(array_merge($query, $overrides)));
+    };
     // The batch being previewed: the one named in the URL, else whatever is
     // still waiting to be dealt with, so a half-finished import is never lost
     // behind a navigation.
     $importBatch = opening_import_batch($companyId, (int) ($_GET['import'] ?? 0))
         ?: opening_import_latest_staged($companyId, 'jewellery');
     $importRows = $importBatch ? opening_import_rows($companyId, (int) $importBatch['id']) : [];
+    // The master keyed by id, so a preview row can name the item it matched
+    // without searching the whole list again for each of them.
+    $importItemsById = [];
+    foreach ($items as $importItem) {
+        $importItemsById[(int) $importItem['id']] = $importItem;
+    }
 }
 if ($view === 'stock') {
     $position = jewellery_metal_position($companyId, $todayInFy);
@@ -1601,12 +1651,17 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
 <?php elseif ($view === 'opening'): ?>
     <?php
+    // Totalled over what the filter selected, not over the page being shown:
+    // a screenful of fifty rows is a scrolling position, not an answer.
     $openingValue = 0.0;
     $openingFine = 0.0;
     foreach ($openingRows as $row) {
         $openingValue += (float) $row['amount'];
         $openingFine += (float) $row['fine_weight'];
     }
+    $openingCountLabel = $openingFilterOn
+        ? count($openingRows) . ' of ' . count($openingAll)
+        : (string) count($openingRows);
     ?>
     <div class="notice" style="margin-bottom:14px">
         Opening stock is dated <strong><?= e(app_date($fyStart)) ?></strong>. It is the same figure the core
@@ -1615,7 +1670,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
     <section class="mbw-kpi-grid" aria-label="Opening stock summary">
         <?php foreach ([
-            ['Items with opening stock', (string) count($openingRows), 'box', count($openingRows) > 0 ? 'tone-green' : 'tone-gray'],
+            ['Items with opening stock', $openingCountLabel, 'box', count($openingRows) > 0 ? 'tone-green' : 'tone-gray'],
             ['Opening fine weight', $fmt($openingFine, 4), 'scale', 'tone-teal'],
             ['Opening value', $sym . $fmt($openingValue), 'wallet', 'tone-blue'],
         ] as [$kpiLabel, $kpiValue, $kpiIcon, $kpiTone]): ?>
@@ -1648,6 +1703,19 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             elseif ((string) $ir['status'] === 'committed') { $committedCount++; }
             else { $errorCount++; }
         }
+        // A two-thousand-line spreadsheet is a normal thing to upload, and this
+        // preview drew every line of it — each one carrying its own copy of the
+        // whole item master in a dropdown. The counts and the Commit button
+        // above still speak for the entire batch; only the rows are paged.
+        $importPerPage = 50;
+        $importPageCount = max(1, (int) ceil(count($importRows) / $importPerPage));
+        $importPage = max(1, min($importPageCount, (int) ($_GET['i_page'] ?? 1)));
+        $importPageRows = array_slice($importRows, ($importPage - 1) * $importPerPage, $importPerPage);
+        $importPageUrl = static function (int $page) use ($importBatch): string {
+            return url('admin/jewellery.php?' . http_build_query([
+                'view' => 'opening', 'import' => (int) $importBatch['id'], 'i_page' => $page,
+            ]));
+        };
     ?>
     <section class="mbw-card" data-collapsible style="margin-bottom:14px">
         <div class="mbw-card-head">
@@ -1688,7 +1756,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <th style="min-width:220px">Existing Item / Create</th><th style="min-width:220px">Validation Status</th><th>Actions</th>
             </tr></thead>
             <tbody>
-                <?php foreach ($importRows as $ir): ?>
+                <?php foreach ($importPageRows as $ir): ?>
                     <?php $isCommitted = (string) $ir['status'] === 'committed'; ?>
                     <tr<?= (string) $ir['status'] === 'error' ? ' style="background:var(--mbw-red-soft)"' : '' ?>>
                         <?php if ($isCommitted): ?>
@@ -1763,11 +1831,17 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             <td><input type="text" name="customer_name" style="width:150px" value="<?= e((string) $ir['customer_name']) ?>"></td>
                             <td><input type="text" name="order_number" style="width:120px" value="<?= e((string) $ir['order_number']) ?>"></td>
                             <td>
-                                <select name="item_id">
+                                <?php // Only the row's OWN item is drawn here. The rest of the
+                                      // master is on the page once, in the template below, and
+                                      // this select is filled from it the moment somebody opens
+                                      // it. Drawn per row, a two-thousand-item shop put two
+                                      // thousand options on every line of the preview. ?>
+                                <select name="item_id" data-jw-item-picker>
                                     <option value="0"><?= (int) ($ir['create_item'] ?? 0) === 1 ? 'Create new item from code' : '— not matched —' ?></option>
-                                    <?php foreach ($items as $it): ?>
-                                        <option value="<?= (int) $it['id'] ?>" <?= (int) $ir['item_id'] === (int) $it['id'] ? 'selected' : '' ?>><?= e($it['code'] . ' — ' . $it['name']) ?></option>
-                                    <?php endforeach; ?>
+                                    <?php $matched = $importItemsById[(int) $ir['item_id']] ?? null; ?>
+                                    <?php if ($matched !== null): ?>
+                                        <option value="<?= (int) $matched['id'] ?>" selected><?= e($matched['code'] . ' — ' . $matched['name']) ?></option>
+                                    <?php endif; ?>
                                 </select>
                             </td>
                             <td>
@@ -1797,6 +1871,45 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </tbody>
         </table></div>
         <datalist id="jw-import-groups"><?php foreach (jewellery_categories_list($companyId, false) as $category): ?><option value="<?= e((string) $category['name']) ?>"><?php endforeach; ?></datalist>
+        <?php if ($importPageCount > 1): ?>
+            <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="Import preview pages">
+                <?php if ($importPage > 1): ?><a class="button secondary" href="<?= e($importPageUrl($importPage - 1)) ?>">Previous</a><?php endif; ?>
+                <span>Page <?= (int) $importPage ?> of <?= (int) $importPageCount ?> · <?= count($importRows) ?> rows read</span>
+                <?php if ($importPage < $importPageCount): ?><a class="button secondary" href="<?= e($importPageUrl($importPage + 1)) ?>">Next</a><?php endif; ?>
+            </nav>
+        <?php endif; ?>
+        <?php // The item master, once per page instead of once per row. ?>
+        <template id="jw-import-item-options">
+            <?php foreach ($items as $it): ?><option value="<?= (int) $it['id'] ?>"><?= e($it['code'] . ' — ' . $it['name']) ?></option><?php endforeach; ?>
+        </template>
+        <script>
+        // Fill a row's item dropdown the first time somebody reaches for it.
+        // The options exist once on the page; each select takes its own copy on
+        // demand, so a preview of fifty rows carries fifty short lists rather
+        // than fifty copies of the whole shop.
+        (function () {
+            function fill(select) {
+                if (select.dataset.jwFilled) { return; }
+                select.dataset.jwFilled = '1';
+                var source = document.getElementById('jw-import-item-options');
+                if (!source) { return; }
+                var chosen = select.value;
+                var options = source.content.cloneNode(true);
+                // The row's own item is already the second option; drop the
+                // duplicate rather than show it twice.
+                options.querySelectorAll('option').forEach(function (option) {
+                    if (option.value === chosen && chosen !== '0') { option.remove(); }
+                });
+                select.appendChild(options);
+                select.value = chosen;
+            }
+            document.querySelectorAll('[data-jw-item-picker]').forEach(function (select) {
+                ['mousedown', 'focus', 'keydown'].forEach(function (event) {
+                    select.addEventListener(event, function () { fill(select); });
+                });
+            });
+        })();
+        </script>
     </section>
     <?php endif; ?>
     <?php endif; ?>
@@ -1874,28 +1987,43 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Opening Stock — <?= e((string) $fiscalYear['label']) ?> (<?= count($openingRows) ?>)</h2></div>
-        <div class="jw-opening-filter" style="display:flex;flex-wrap:wrap;gap:10px 12px;align-items:end;padding:0 0 14px">
+        <div class="mbw-card-head"><h2>Opening Stock — <?= e((string) $fiscalYear['label']) ?> (<?= e($openingCountLabel) ?>)</h2></div>
+        <?php // A real form, submitted to the server. Filtering in the browser
+              // meant every row had to be sent before any of them could be
+              // ruled out, which is what made this page unopenable. ?>
+        <form method="get" class="jw-opening-filter" style="display:flex;flex-wrap:wrap;gap:10px 12px;align-items:end;padding:0 0 14px">
+            <input type="hidden" name="view" value="opening">
+            <input type="hidden" name="o_per" value="<?= (int) $openingPerPage ?>">
             <label style="display:grid;gap:5px;min-width:220px;flex:1 1 220px">Search
-                <input type="search" placeholder="Item name or code" aria-label="Search by item or code" data-col="<?= $canEdit ? 1 : 0 ?>">
+                <input type="search" name="o_q" value="<?= e($openingFilters['search']) ?>" placeholder="Item name or code" aria-label="Search by item or code">
             </label>
             <label style="display:grid;gap:5px;min-width:160px;flex:1 1 160px">Stock group
-                <input type="search" placeholder="All groups" aria-label="Filter by stock group" data-col="<?= $canEdit ? 2 : 1 ?>">
+                <input type="search" name="o_group" value="<?= e($openingFilters['group']) ?>" placeholder="All groups" aria-label="Filter by stock group" list="jw-opening-groups">
+                <datalist id="jw-opening-groups"><?php foreach (jewellery_categories_list($companyId, false) as $category): ?><option value="<?= e((string) $category['name']) ?>"><?php endforeach; ?></datalist>
             </label>
             <label style="display:grid;gap:5px;min-width:150px;flex:0 1 170px">Stock type
-                <select aria-label="Filter by stock type" data-col="<?= $canEdit ? 3 : 2 ?>"><option value="">All types</option><option value="Showroom">Showroom</option><option value="Customer Ordered">Customer ordered</option></select>
+                <select name="o_kind" aria-label="Filter by stock type">
+                    <option value="">All types</option>
+                    <option value="showroom" <?= $openingFilters['kind'] === 'showroom' ? 'selected' : '' ?>>Showroom</option>
+                    <option value="customer_ordered" <?= $openingFilters['kind'] === 'customer_ordered' ? 'selected' : '' ?>>Customer ordered</option>
+                </select>
             </label>
             <label style="display:grid;gap:5px;min-width:130px;flex:0 1 150px">Purity
-                <input type="search" placeholder="All purities" aria-label="Filter by purity" data-col="<?= $canEdit ? 4 : 3 ?>">
+                <input type="search" name="o_purity" value="<?= e($openingFilters['purity']) ?>" placeholder="All purities" aria-label="Filter by purity">
             </label>
             <label style="display:grid;gap:5px;min-width:150px;flex:0 1 170px">Status
-                <select aria-label="Filter by posting status" data-col="<?= $canEdit ? 15 : 14 ?>"><option value="">All statuses</option><option value="Posted">Posted</option><option value="Weight only">Weight only</option><option value="Not in stock">Not in stock</option></select>
+                <select name="o_status" aria-label="Filter by posting status">
+                    <option value="">All statuses</option>
+                    <option value="posted" <?= $openingFilters['status'] === 'posted' ? 'selected' : '' ?>>Posted</option>
+                    <option value="weight" <?= $openingFilters['status'] === 'weight' ? 'selected' : '' ?>>Weight only</option>
+                    <option value="none" <?= $openingFilters['status'] === 'none' ? 'selected' : '' ?>>Not in stock</option>
+                </select>
             </label>
             <div style="display:flex;gap:6px;align-items:end">
-                <button type="button" class="button jw-filter-apply">Filter</button>
-                <button type="button" class="button soft jw-filter-clear">Clear</button>
+                <button type="submit" class="button">Filter</button>
+                <?php if ($openingFilterOn): ?><a class="button soft" href="<?= e(url('admin/jewellery.php?view=opening')) ?>">Clear</a><?php endif; ?>
             </div>
-        </div>
+        </form>
         <div style="overflow-x:auto"><table>
             <thead>
                 <tr>
@@ -1919,8 +2047,10 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </tr>
             </thead>
             <tbody>
-                <?php if ($openingRows === []): ?><tr><td colspan="<?= $canEdit ? 16 : 15 ?>">No item carries opening stock for this fiscal year.</td></tr><?php endif; ?>
-                <?php foreach ($openingRows as $row): ?>
+                <?php if ($openingPageRows === []): ?><tr><td colspan="<?= $canEdit ? 16 : 15 ?>"><?= $openingFilterOn
+                    ? 'No opening stock matches these filters.'
+                    : 'No item carries opening stock for this fiscal year.' ?></td></tr><?php endif; ?>
+                <?php foreach ($openingPageRows as $row): ?>
                     <tr>
                         <?php if ($canEdit): ?><td><input type="checkbox" class="opening-select-checkbox" value="<?= (int) $row['id'] ?>" aria-label="Select opening stock for <?= e($row['item_code']) ?>"></td><?php endif; ?>
                         <td><?= e($row['item_code']) ?><br><small><?= e($row['item_name']) ?></small></td>
@@ -1977,58 +2107,25 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <?php if ($openingPageCount > 1): ?>
+            <nav class="actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" aria-label="Opening stock pages">
+                <?php if ($openingPage > 1): ?><a class="button secondary" href="<?= e($openingPageQuery(['o_page' => $openingPage - 1])) ?>">Previous</a><?php endif; ?>
+                <span>Page <?= (int) $openingPage ?> of <?= (int) $openingPageCount ?> · <?= count($openingRows) ?> row<?= count($openingRows) === 1 ? '' : 's' ?></span>
+                <?php if ($openingPage < $openingPageCount): ?><a class="button secondary" href="<?= e($openingPageQuery(['o_page' => $openingPage + 1])) ?>">Next</a><?php endif; ?>
+                <span style="margin-left:auto;display:flex;gap:6px;align-items:center">Rows
+                    <?php foreach ([25, 50, 100, 200] as $size): ?>
+                        <a class="button soft" style="<?= $size === $openingPerPage ? 'font-weight:700' : '' ?>"
+                           href="<?= e($openingPageQuery(['o_per' => (string) $size, 'o_page' => 1])) ?>"><?= $size ?></a>
+                    <?php endforeach; ?>
+                </span>
+            </nav>
+        <?php endif; ?>
     </section>
     
-    <script>
-    // Attach per-column filters specifically for the Opening Stock table
-    (function () {
-        function attachOpeningFilters() {
-            var openingSection = Array.from(document.querySelectorAll('.mbw-card-head h2')).
-                map(function (h) { return {h:h, txt: (h.innerText||'').trim()}; }).
-                find(function (o) { return o.txt && o.txt.indexOf('Opening Stock') === 0; });
-            if (!openingSection || !openingSection.h) { return; }
-            var section = openingSection.h.closest('section'); if (!section) { return; }
-            var table = section.querySelector('table'); if (!table) { return; }
-            var filterBar = section.querySelector('.jw-opening-filter');
-            var inputs = Array.from((filterBar || section).querySelectorAll('[data-col]'));
-            if (!inputs.length) { return; }
-            function apply() {
-                var rows = Array.from(table.querySelectorAll('tbody tr'));
-                rows.forEach(function (row) {
-                    var cells = Array.from(row.querySelectorAll('td'));
-                    var show = true;
-                    inputs.forEach(function (inp) {
-                        var col = parseInt(inp.dataset.colIndex || inp.getAttribute('data-col') || inp.dataset.col, 10);
-                        if (Number.isNaN(col)) { return; }
-                        var cell = cells[col];
-                        var text = cell ? cell.innerText.toLowerCase() : '';
-                        if (inp.value && text.indexOf(inp.value.toLowerCase()) === -1) { show = false; }
-                    });
-                    row.style.display = show ? '' : 'none';
-                });
-            }
-            inputs.forEach(function (inp) {
-                if (!inp.dataset.colIndex) {
-                    if (inp.dataset.col) inp.dataset.colIndex = inp.dataset.col;
-                    else if (inp.getAttribute('data-col')) inp.dataset.colIndex = inp.getAttribute('data-col');
-                }
-                inp.addEventListener('input', apply);
-                inp.addEventListener('change', apply);
-            });
-            var clear = section.querySelector('.jw-filter-clear');
-            if (clear) {
-                clear.addEventListener('click', function () {
-                    inputs.forEach(function (inp) { inp.value = ''; });
-                    apply();
-                });
-            }
-            var applyButton = section.querySelector('.jw-filter-apply');
-            if (applyButton) { applyButton.addEventListener('click', apply); }
-            window.jwApplyFilters = apply;
-        }
-        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attachOpeningFilters); } else { attachOpeningFilters(); }
-    })();
-    </script>
+    <?php // The per-column filter script that used to live here hid rows the
+          // server had already sent, which meant every row had to be sent
+          // before any of them could be ruled out. The filter bar above is a
+          // real form now: rows that do not match never leave the database. ?>
 
     <script>
     // Editing reuses the opening form: saving replaces this item's prior

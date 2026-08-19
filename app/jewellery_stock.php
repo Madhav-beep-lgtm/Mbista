@@ -1543,23 +1543,59 @@ function jewellery_stock_valuation(int $companyId, ?string $asOf = null): array
 // with the right balance.
 // ---------------------------------------------------------------------------
 
-/** Opening rows for the jewellery items of a company, derived from the master. */
-function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
+/**
+ * Every opening movement a company has, keyed by the item it belongs to.
+ *
+ * One query, not one per item. Read per item this was two thousand round trips
+ * on a two-thousand-item shop — the whole of the opening page's load time on a
+ * shared host, and growing with the shop rather than staying put.
+ *
+ * An item has at most one opening movement (saving an opening replaces the
+ * previous one rather than stacking a second), but the order is pinned anyway
+ * so that a company which somehow carries two always reads back the same one.
+ */
+function jewellery_opening_txns(int $companyId): array
+{
+    $stmt = db()->prepare("SELECT item_id, id, voucher_id, qty_pieces, stone_weight, stone_carat, diamond_carat,
+            stone_amount, diamond_amount, making_amount, fine_weight
+        FROM jewellery_stock_txns
+        WHERE company_id = :cid AND txn_type = 'opening'
+        ORDER BY id ASC");
+    $stmt->execute(['cid' => $companyId]);
+
+    $byItem = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $itemId = (int) $row['item_id'];
+        if (!isset($byItem[$itemId])) {
+            $byItem[$itemId] = $row;
+        }
+    }
+
+    return $byItem;
+}
+
+/**
+ * Opening rows for the jewellery items of a company, derived from the master.
+ *
+ * $items lets a caller that has already listed the items hand them in rather
+ * than have the whole master read a second time. Pass the UNFILTERED list: an
+ * opening row exists per item that carries opening stock, not per item some
+ * screen happens to be showing.
+ */
+function jewellery_opening_rows(int $companyId, int $fiscalYearId, ?array $items = null): array
 {
     $fiscalYear = fiscal_year_by_id($fiscalYearId);
     $asOn = (string) ($fiscalYear['start_date'] ?? date('Y-m-d'));
+    $openingTxns = jewellery_opening_txns($companyId);
 
     $rows = [];
-    foreach (jewellery_items_list($companyId) as $item) {
+    foreach ($items ?? jewellery_items_list($companyId) as $item) {
         $gross = jw_round_weight((float) ($item['opening_qty'] ?? 0));
         $amount = jw_round_money((float) ($item['opening_amount'] ?? 0));
         if (abs($gross) < 0.00005 && abs($amount) < 0.005) {
             continue;
         }
-        $txn = db()->prepare("SELECT id, voucher_id, qty_pieces, stone_weight, stone_carat, diamond_carat, stone_amount, diamond_amount, making_amount, fine_weight FROM jewellery_stock_txns
-            WHERE company_id = :cid AND item_id = :iid AND txn_type = 'opening' LIMIT 1");
-        $txn->execute(['cid' => $companyId, 'iid' => (int) $item['id']]);
-        $txnRow = $txn->fetch(PDO::FETCH_ASSOC) ?: [];
+        $txnRow = $openingTxns[(int) $item['id']] ?? [];
 
         // The COMPUTED opening figures must win over the item's own spec
         // fields. `$item + [...]` keeps the LEFT operand's keys, and the item
@@ -1587,6 +1623,77 @@ function jewellery_opening_rows(int $companyId, int $fiscalYearId): array
     }
 
     return $rows;
+}
+
+/** What the opening list calls the group of an item filed under none. */
+const JW_OPENING_NO_GROUP = 'Uncategorised';
+
+/**
+ * The posting state of one opening row, as the screen names it.
+ *
+ * Three states, not two: an opening can have moved metal and still never have
+ * reached the ledger, and telling that apart from one the books have not seen
+ * at all is the difference between "check the voucher" and "enter it".
+ */
+function jewellery_opening_status(array $row): string
+{
+    if ((int) ($row['voucher_id'] ?? 0) > 0) {
+        return 'posted';
+    }
+
+    return !empty($row['posted']) ? 'weight' : 'none';
+}
+
+/**
+ * The opening rows that answer a set of screen filters.
+ *
+ * Pure, and applied to rows already in memory rather than in SQL: the whole
+ * list is read anyway to total it, so answering here costs nothing and keeps
+ * one set of rules whether the question arrived from a URL or from a test.
+ *
+ * Text matches are "contains", case-insensitively, on what the SCREEN shows —
+ * an item under no group answers to its printed name, because that is the word
+ * the person is looking at when they type it.
+ */
+function jewellery_opening_filter(array $rows, array $filters): array
+{
+    $search = mb_strtolower(trim((string) ($filters['search'] ?? '')));
+    $group = mb_strtolower(trim((string) ($filters['group'] ?? '')));
+    $purity = mb_strtolower(trim((string) ($filters['purity'] ?? '')));
+    $kind = (string) ($filters['kind'] ?? '');
+    $status = (string) ($filters['status'] ?? '');
+    if ($search === '' && $group === '' && $purity === '' && $kind === '' && $status === '') {
+        return array_values($rows);
+    }
+
+    $has = static function (string $haystack, string $needle): bool {
+        return $needle === '' || mb_strpos(mb_strtolower($haystack), $needle) !== false;
+    };
+
+    $kept = [];
+    foreach ($rows as $row) {
+        if ($search !== ''
+            && !$has((string) ($row['item_code'] ?? ''), $search)
+            && !$has((string) ($row['item_name'] ?? ''), $search)) {
+            continue;
+        }
+        $rowGroup = trim((string) ($row['category'] ?? ''));
+        if (!$has($rowGroup !== '' ? $rowGroup : JW_OPENING_NO_GROUP, $group)) {
+            continue;
+        }
+        if (!$has((string) ($row['purity_code'] ?? ''), $purity)) {
+            continue;
+        }
+        if ($kind !== '' && (string) ($row['stock_kind'] ?? 'showroom') !== $kind) {
+            continue;
+        }
+        if ($status !== '' && jewellery_opening_status($row) !== $status) {
+            continue;
+        }
+        $kept[] = $row;
+    }
+
+    return $kept;
 }
 
 /**
