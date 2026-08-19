@@ -347,11 +347,11 @@ if (isset($_GET['view']) && $_GET['view'] === 'print') {
     <html lang="en">
     <head>
         <meta charset="utf-8">
-        <title><?= e($reportNumberedTitle) ?> | <?= e($reportMeta['company_name']) ?></title>
+        <title><?= e($reportNumberedTitle) ?> | <?= e(statement_company_name((string) $reportMeta['company_name'])) ?></title>
         <style>
             body { font-family: "Inter", "Segoe UI", system-ui, sans-serif; margin: 30px; color: #16263e; }
-            .rpt-bar { background: #16325d; color: #fff; padding: 9px 14px; font-weight: 700; font-size: 14px; border-radius: 4px 4px 0 0; }
-            .rpt-letterhead { display: flex; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid #d7dfeb; border-top: 0; }
+            /* Full border now that nothing sits on top of it. */
+            .rpt-letterhead { display: flex; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid #d7dfeb; border-radius: 4px 4px 0 0; }
             .rpt-company { color: #16325d; font-weight: 800; font-size: 13px; letter-spacing: 0.02em; }
             .rpt-title { font-weight: 700; font-size: 15px; margin-top: 2px; }
             .rpt-entity { font-weight: 600; font-size: 12.5px; margin-top: 2px; }
@@ -377,7 +377,9 @@ if (isset($_GET['view']) && $_GET['view'] === 'print') {
         </style>
     </head>
     <body>
-        <div class="rpt-bar"><?= e($reportNumberedTitle) ?></div>
+        <?php // No title bar. The letterhead below prints the statement title
+              // already, and a heavy coloured band repeating it is the first thing
+              // on a page that a reader has no use for. ?>
         <?php rc_render_letterhead($report, $reportMeta); ?>
         <?php rc_render_table($report, $hasGroups); ?>
         <?php rc_render_notes($reportNotes); ?>

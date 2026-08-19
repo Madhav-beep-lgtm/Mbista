@@ -2601,7 +2601,7 @@ function rc_render_letterhead(array $report, array $meta): void
     ?>
     <div class="rpt-letterhead">
         <div>
-            <div class="rpt-company"><?= e(mb_strtoupper((string) $meta['company_name'])) ?></div>
+            <div class="rpt-company"><?= e(mb_strtoupper(statement_company_name((string) $meta['company_name']))) ?></div>
             <div class="rpt-title"><?= e($title) ?></div>
             <?php if (!empty($report['entity_line'])): ?>
                 <div class="rpt-entity"><?= e((string) $report['entity_line']) ?></div>

@@ -65,7 +65,7 @@ $fmt = static fn (float $n): string => number_format($n, 2);
 </head>
 <body>
 <div class="ps-head">
-    <h1><?= e($line['company_name']) ?> — Payslip</h1>
+    <h1><?= e(statement_company_name((string) $line['company_name'])) ?> — Payslip</h1>
     <div><?= e($line['period_label']) ?><?= $line['pay_date'] ? ' | Paid: ' . e(app_date((string) $line['pay_date'])) : '' ?></div>
 </div>
 <div class="ps-box ps-grid">

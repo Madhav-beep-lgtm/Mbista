@@ -8814,3 +8814,19 @@ function next_voucher_no(int $companyId, string $prefix, int $pad = 4): string
 
     return $prefix . str_pad((string) ((int) $stmt->fetchColumn() + 1), $pad, '0', STR_PAD_LEFT);
 }
+
+/**
+ * The company name as it belongs on a document somebody outside the office
+ * reads - a statement, a payslip.
+ *
+ * "(Client Books)" is how this system tells a client's books apart from the
+ * firm's own. It is an internal bookkeeping marker, not part of the legal
+ * entity, and printing it across the top of every document the client or their
+ * staff receive is noise at best and wrong about whose document it is at worst.
+ * Only that exact suffix is removed - a legal name can genuinely end in
+ * brackets, and stripping any parenthetical would eat part of it.
+ */
+function statement_company_name(string $name): string
+{
+    return trim((string) preg_replace('/\s*\(\s*client[\s_-]*books\s*\)\s*$/i', '', trim($name)));
+}
