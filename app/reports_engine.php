@@ -1555,10 +1555,18 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             // Dynamic component columns: one per pay component actually used in
             // this run (falls back to the aggregate layout for legacy runs).
             $componentCodes = [];
+            $componentDeducts = [];
             $componentByEmployee = [];
             if (table_exists('payroll_run_components')) {
-                $prcStmt = db()->prepare('SELECT payroll_employee_id, component_code, component_name, category, posting_behaviour, amount
-                    FROM payroll_run_components WHERE run_id = :run ORDER BY component_code ASC');
+                // Priced as PAID, not as configured. Worked days pro-rate a component,
+                // so a report printing the configured figure sits 12,000 of Dearness
+                // Allowance beside a gross that was built on 2,000 of it - a sheet
+                // whose own columns do not add up.
+                require_once __DIR__ . '/payroll_engine.php';
+                $prcStmt = db()->prepare('SELECT c.*, l.worked_days, l.period_days
+                    FROM payroll_run_components c
+                    LEFT JOIN payroll_run_lines l ON l.run_id = c.run_id AND l.payroll_employee_id = c.payroll_employee_id
+                    WHERE c.run_id = :run ORDER BY c.component_code ASC');
                 $prcStmt->execute(['run' => (int) $payrollRun['id']]);
                 foreach ($prcStmt->fetchAll() as $prcRow) {
                     $behaviour = (string) $prcRow['posting_behaviour'];
@@ -1567,23 +1575,38 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                         continue;
                     }
                     $componentCodes[(string) $prcRow['component_code']] = (string) $prcRow['component_name'];
-                    $componentByEmployee[(int) $prcRow['payroll_employee_id']][(string) $prcRow['component_code']] = (float) $prcRow['amount'];
+                    $componentDeducts[(string) $prcRow['component_code']] =
+                        in_array($behaviour, ['deduction_liability', 'advance_recovery'], true)
+                        || in_array($category, ['deduction', 'tax', 'advance_recovery'], true);
+                    $componentByEmployee[(int) $prcRow['payroll_employee_id']][(string) $prcRow['component_code']] = payroll_component_row_effective($prcRow);
                 }
                 ksort($componentCodes);
             }
 
             $rows = [];
             if ($componentCodes !== []) {
-                $codeList = array_keys($componentCodes);
+                // Earnings sit between Basic and Gross so a reader can add across and
+                // watch the row foot; deductions sit AFTER Gross with the other
+                // deductions. A deduction column standing in the earnings block
+                // invites exactly one mistake - adding it in - and then the sheet
+                // disagrees with itself in the reader's favour.
+                $earnCodes = array_values(array_filter(array_keys($componentCodes),
+                    static fn (string $c): bool => !($componentDeducts[$c] ?? false)));
+                $dedCodes = array_values(array_filter(array_keys($componentCodes),
+                    static fn (string $c): bool => (bool) ($componentDeducts[$c] ?? false)));
+                $codeList = array_merge($earnCodes, $dedCodes);
                 $fixedTail = 7; // gross, taxable, ret emp, ret er, tax, advance, net
                 $totals = array_fill(0, 1 + count($codeList) + $fixedTail, 0.0);
                 foreach ($payLines as $payLine) {
                     $employeeComponents = $componentByEmployee[(int) $payLine['payroll_employee_id']] ?? [];
                     $values = [(float) $payLine['basic']];
-                    foreach ($codeList as $code) {
+                    foreach ($earnCodes as $code) {
                         $values[] = (float) ($employeeComponents[$code] ?? 0);
                     }
                     $values[] = (float) $payLine['gross'];
+                    foreach ($dedCodes as $code) {
+                        $values[] = (float) ($employeeComponents[$code] ?? 0);
+                    }
                     $values[] = round((float) $payLine['assessable_annual'] / 12, 2);
                     $values[] = (float) $payLine['retirement_employee_month'];
                     $values[] = (float) $payLine['retirement_employer_month'];
@@ -1599,10 +1622,14 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                     );
                 }
                 $columns = [['Code', 'left', ''], ['Employee', 'left', ''], ['Basic (' . $sym . ')', 'right', '']];
-                foreach ($codeList as $code) {
+                foreach ($earnCodes as $code) {
                     $columns[] = [$componentCodes[$code] . ' (' . $sym . ')', 'right', ''];
                 }
-                foreach (['Gross', 'Taxable Rem.', 'Retirement Emp.', 'Retirement Emplr.', 'Income Tax', 'Advance', 'Net Pay'] as $tailLabel) {
+                $columns[] = ['Gross (' . $sym . ')', 'right', ''];
+                foreach ($dedCodes as $code) {
+                    $columns[] = [$componentCodes[$code] . ' — less (' . $sym . ')', 'right', ''];
+                }
+                foreach (['Taxable Rem.', 'Retirement Emp.', 'Retirement Emplr.', 'Income Tax', 'Advance', 'Net Pay'] as $tailLabel) {
                     $columns[] = [$tailLabel . ' (' . $sym . ')', 'right', ''];
                 }
             } else {
@@ -1649,11 +1676,17 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             }
             // Every component line of the period's non-cancelled runs, grouped
             // by component with per-employee detail.
-            $stmt = db()->prepare("SELECT c.component_code, c.component_name, c.category, c.taxable, c.amount, c.source,
-                    c.override_reason, r.period_label, r.status AS run_status,
+            // Priced as PAID, not as configured. Worked days pro-rate a component,
+            // so a report printing the configured figure sits 12,000 of Dearness
+            // Allowance beside a gross that was built on 2,000 of it - a sheet
+            // whose own columns do not add up.
+            require_once __DIR__ . '/payroll_engine.php';
+            $stmt = db()->prepare("SELECT c.*, l.worked_days, l.period_days,
+                    r.period_label, r.status AS run_status,
                     pe.employee_code, pe.department,
                     COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name
                 FROM payroll_run_components c
+                LEFT JOIN payroll_run_lines l ON l.run_id = c.run_id AND l.payroll_employee_id = c.payroll_employee_id
                 INNER JOIN payroll_runs r ON r.id = c.run_id
                 INNER JOIN payroll_employees pe ON pe.id = c.payroll_employee_id
                 LEFT JOIN users u ON u.id = pe.user_id
@@ -1680,14 +1713,15 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                         . ucwords(str_replace('_', ' ', (string) $componentLine['category']))
                         . ((int) $componentLine['taxable'] === 1 ? ', taxable' : ', non-taxable'), '', '', '', '', ''], 'section');
                 }
-                $componentTotal += (float) $componentLine['amount'];
-                $grand += (float) $componentLine['amount'];
+                $componentAmount = payroll_component_row_effective($componentLine);
+                $componentTotal += $componentAmount;
+                $grand += $componentAmount;
                 $rows[] = [
                     '', $componentLine['employee_code'] . ' — ' . $componentLine['person_name'],
                     (string) ($componentLine['department'] ?? '') ?: '–',
                     $componentLine['period_label'] . ' (' . $componentLine['run_status'] . ')',
                     (string) $componentLine['source'] . ((string) ($componentLine['override_reason'] ?? '') !== '' ? ' — ' . $componentLine['override_reason'] : ''),
-                    rc_fmt((float) $componentLine['amount']),
+                    rc_fmt($componentAmount),
                 ];
             }
             $flushComponent();
@@ -1796,12 +1830,18 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             }
             // Ledger-mapped detail behind each posted payroll voucher: every
             // component line with its snapshot mapping plus the voucher header.
-            $stmt = db()->prepare("SELECT c.component_code, c.component_name, c.posting_behaviour, c.category, c.amount,
+            // Priced as PAID, not as configured. Worked days pro-rate a component,
+            // so a report printing the configured figure sits 12,000 of Dearness
+            // Allowance beside a gross that was built on 2,000 of it - a sheet
+            // whose own columns do not add up.
+            require_once __DIR__ . '/payroll_engine.php';
+            $stmt = db()->prepare("SELECT c.*, l.worked_days, l.period_days,
                     dr.code AS dr_code, dr.name AS dr_name, cr.code AS cr_code, cr.name AS cr_name,
                     pe.employee_code,
                     COALESCE(u.name, pe.full_name, CONCAT('Employee ', pe.employee_code)) AS person_name,
                     r.period_label, r.accrual_voucher_id, v.voucher_no, v.voucher_date
                 FROM payroll_run_components c
+                LEFT JOIN payroll_run_lines l ON l.run_id = c.run_id AND l.payroll_employee_id = c.payroll_employee_id
                 INNER JOIN payroll_runs r ON r.id = c.run_id
                 INNER JOIN payroll_employees pe ON pe.id = c.payroll_employee_id
                 LEFT JOIN users u ON u.id = pe.user_id
@@ -1816,18 +1856,25 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             $rows = [];
             $total = 0.0;
             foreach ($stmt->fetchAll() as $postingLine) {
+                // The SQL filter keeps rows whose CONFIGURED amount is positive; a
+                // month of no days worked prices one of those at zero, and a zero
+                // posts nothing, so it has no place on a posting report.
+                $postingAmount = payroll_component_row_effective($postingLine);
+                if ($postingAmount <= 0.004) {
+                    continue;
+                }
                 $behaviour = (string) $postingLine['posting_behaviour'];
                 $isCredit = in_array($behaviour, ['deduction_liability', 'advance_recovery'], true)
                     || in_array((string) $postingLine['category'], ['deduction', 'tax', 'advance_recovery'], true);
-                $total += (float) $postingLine['amount'];
+                $total += $postingAmount;
                 $rows[] = [
                     $postingLine['component_code'] . ' — ' . $postingLine['component_name'],
                     $postingLine['employee_code'] . ' — ' . $postingLine['person_name'],
                     str_replace('_', ' ', $behaviour),
                     (string) ($postingLine['dr_code'] ?? '') !== '' ? $postingLine['dr_code'] . ' ' . $postingLine['dr_name'] : ($isCredit ? '–' : 'control (Salary expense)'),
                     (string) ($postingLine['cr_code'] ?? '') !== '' ? $postingLine['cr_code'] . ' ' . $postingLine['cr_name'] : ($isCredit ? 'control (per behaviour)' : '– (via Salary Payable)'),
-                    $isCredit ? '–' : rc_fmt((float) $postingLine['amount']),
-                    $isCredit ? rc_fmt((float) $postingLine['amount']) : '–',
+                    $isCredit ? '–' : rc_fmt($postingAmount),
+                    $isCredit ? rc_fmt($postingAmount) : '–',
                     (string) ($postingLine['voucher_no'] ?? '') !== ''
                         ? $postingLine['voucher_no'] . ($postingLine['voucher_date'] ? ' (' . $postingLine['voucher_date'] . ')' : '')
                         : $postingLine['period_label'] . ' — not posted',
@@ -1870,36 +1917,63 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             $csLines = $lineStmt->fetchAll();
             $componentCells = [];
             $componentCodes = [];
+            $componentDeducts = [];
             if (table_exists('payroll_run_components')) {
-                foreach (db()->query("SELECT run_id, payroll_employee_id, component_code, component_name, posting_behaviour, category, amount
-                        FROM payroll_run_components WHERE run_id IN ($idList)")->fetchAll() as $prc) {
+                // Priced as PAID, not as configured. Worked days pro-rate a component,
+                // so a report printing the configured figure sits 12,000 of Dearness
+                // Allowance beside a gross that was built on 2,000 of it - a sheet
+                // whose own columns do not add up.
+                require_once __DIR__ . '/payroll_engine.php';
+                foreach (db()->query("SELECT c.*, l.worked_days, l.period_days
+                        FROM payroll_run_components c
+                        LEFT JOIN payroll_run_lines l ON l.run_id = c.run_id AND l.payroll_employee_id = c.payroll_employee_id
+                        WHERE c.run_id IN ($idList)")->fetchAll() as $prc) {
                     if ((string) $prc['posting_behaviour'] === 'non_posting' || (string) $prc['category'] === 'info') {
                         continue;
                     }
                     $componentCodes[(string) $prc['component_code']] = (string) $prc['component_name'];
-                    $componentCells[(int) $prc['run_id']][(int) $prc['payroll_employee_id']][(string) $prc['component_code']] = (float) $prc['amount'];
+                    $componentDeducts[(string) $prc['component_code']] =
+                        in_array((string) $prc['posting_behaviour'], ['deduction_liability', 'advance_recovery'], true)
+                        || in_array((string) $prc['category'], ['deduction', 'tax', 'advance_recovery'], true);
+                    $componentCells[(int) $prc['run_id']][(int) $prc['payroll_employee_id']][(string) $prc['component_code']] = payroll_component_row_effective($prc);
                 }
                 ksort($componentCodes);
             }
-            $codeList = array_keys($componentCodes);
-            $tailLabels = ['Gross', 'Taxable Rem.', 'Total Ded.', 'Net Pay', 'Employer Contrib.', 'Tax Deducted'];
+            // Earnings sit between Basic and Gross so a reader can add across and
+            // watch the row foot; deductions sit AFTER Gross with the other
+            // deductions. A deduction column standing in the earnings block
+            // invites exactly one mistake - adding it in - and then the sheet
+            // disagrees with itself in the reader's favour.
+            $earnCodes = array_values(array_filter(array_keys($componentCodes),
+                static fn (string $c): bool => !($componentDeducts[$c] ?? false)));
+            $dedCodes = array_values(array_filter(array_keys($componentCodes),
+                static fn (string $c): bool => (bool) ($componentDeducts[$c] ?? false)));
+            $codeList = array_merge($earnCodes, $dedCodes);
+            $tailLabels = ['Taxable Rem.', 'Total Ded.', 'Net Pay', 'Employer Contrib.', 'Tax Deducted'];
             $columns = [['Period / Employee', 'left', ''], ['Basic (' . $sym . ')', 'right', '']];
-            foreach ($codeList as $code) {
+            foreach ($earnCodes as $code) {
                 $columns[] = [$code . ' (' . $sym . ')', 'right', ''];
+            }
+            $columns[] = ['Gross (' . $sym . ')', 'right', ''];
+            foreach ($dedCodes as $code) {
+                $columns[] = [$code . ' — less (' . $sym . ')', 'right', ''];
             }
             foreach ($tailLabels as $tailLabel) {
                 $columns[] = [$tailLabel . ' (' . $sym . ')', 'right', ''];
             }
             $width = count($columns);
             $emptyVector = static fn (): array => array_fill(0, 1 + count($codeList) + 6, 0.0);
-            $lineVector = static function (array $line, array $cells) use ($codeList): array {
+            $lineVector = static function (array $line, array $cells) use ($earnCodes, $dedCodes): array {
                 $v = [(float) $line['basic']];
-                foreach ($codeList as $code) {
+                foreach ($earnCodes as $code) {
                     $v[] = (float) ($cells[$code] ?? 0);
                 }
                 $ded = (float) $line['tax_month'] + (float) $line['retirement_employee_month'] + (float) $line['advance_deduction']
                     + (float) $line['other_deduction'] + (float) ($line['adj_deduction'] ?? 0);
                 $v[] = (float) $line['gross'];
+                foreach ($dedCodes as $code) {
+                    $v[] = (float) ($cells[$code] ?? 0);
+                }
                 $v[] = (float) ($line['assessable_month'] ?? 0) ?: round((float) $line['assessable_annual'] / 12, 2);
                 $v[] = $ded;
                 $v[] = (float) $line['net_pay'];

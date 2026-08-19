@@ -1548,6 +1548,23 @@ function payroll_run(int $runId): ?array
 }
 
 /**
+ * The paid amount for a component row that has been JOINED to its payroll line,
+ * so it carries worked_days and period_days beside the component's own columns.
+ *
+ * Every report selects the two together and would otherwise repeat the same null
+ * handling - and eventually get one of them subtly different, which is how one
+ * screen ends up disagreeing with another about what an employee was paid.
+ */
+function payroll_component_row_effective(array $row): float
+{
+    return payroll_component_effective_amount(
+        $row,
+        isset($row['worked_days']) && $row['worked_days'] !== null ? (float) $row['worked_days'] : null,
+        isset($row['period_days']) && $row['period_days'] !== null ? (float) $row['period_days'] : null
+    );
+}
+
+/**
  * Worked days and period days per employee for a run, as the CALCULATION used
  * them (they are written onto each line).
  *
