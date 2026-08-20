@@ -45,16 +45,141 @@ function xlsx_column_letters(int $columnIndex): string
  */
 function xlsx_build(array $rows, string $sheetName = 'Sheet1', array $colWidths = [], array $options = []): string
 {
+    return xlsx_build_sheets([$sheetName => $rows], $colWidths, $options);
+}
+
+/**
+ * A workbook of one or more sheets, as name => rows.
+ *
+ * The single-sheet writer above is the common case and delegates here. The
+ * sales upload template needs two sheets in one file — item-wise sales and
+ * invoice-wise settlement — because the two are reconciled against each other,
+ * and handing somebody two separate files invites uploading a mismatched pair.
+ */
+function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options = []): string
+{
     if (!class_exists('ZipArchive')) {
         throw new RuntimeException('The server is missing the PHP zip extension needed to write .xlsx files. Export as CSV instead.');
     }
+    if ($sheets === []) {
+        $sheets = ['Sheet1' => []];
+    }
     $xml = static fn (string $value): string => htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
 
-    // Excel refuses a workbook whose sheet name carries any of : \ / ? * [ ]
-    // or runs past 31 characters, so it is cleaned rather than trusted.
-    $safeSheet = trim(preg_replace('/[:\\\\\\/?*\[\]]/', ' ', $sheetName) ?: 'Sheet1');
-    $safeSheet = mb_substr($safeSheet === '' ? 'Sheet1' : $safeSheet, 0, 31);
+    // Widths may be given per sheet as [sheetName => [i => width]]; a flat
+    // array applies to every sheet, which is what a single sheet wants.
+    $widthsFor = static function (string $name, int $index) use ($colWidths): array {
+        if ($colWidths === []) {
+            return [];
+        }
+        if (isset($colWidths[$name]) && is_array($colWidths[$name])) {
+            return $colWidths[$name];
+        }
+        if (isset($colWidths[$index]) && is_array($colWidths[$index])) {
+            return $colWidths[$index];
+        }
 
+        return is_array(reset($colWidths)) ? [] : $colWidths;
+    };
+
+    $usedNames = [];
+    $sheetXmls = [];
+    $sheetEntries = [];
+    $index = 0;
+    foreach ($sheets as $rawName => $rows) {
+        $index++;
+        // Excel refuses a workbook whose sheet name carries any of : \ / ? * [ ]
+        // or runs past 31 characters, so it is cleaned rather than trusted.
+        $safeSheet = trim(preg_replace('/[:\\\\\/?*\[\]]/', ' ', (string) $rawName) ?: 'Sheet' . $index);
+        $safeSheet = mb_substr($safeSheet === '' ? 'Sheet' . $index : $safeSheet, 0, 31);
+        // Two sheets cannot share a name, and Excel reports the whole file as
+        // corrupt rather than saying which one is the problem.
+        $candidate = $safeSheet;
+        $suffix = 1;
+        while (isset($usedNames[mb_strtolower($candidate)])) {
+            $suffix++;
+            $candidate = mb_substr($safeSheet, 0, 28) . ' ' . $suffix;
+        }
+        $safeSheet = $candidate;
+        $usedNames[mb_strtolower($safeSheet)] = true;
+
+        $sheetXmls['xl/worksheets/sheet' . $index . '.xml'] = xlsx_worksheet_xml(
+            (array) $rows,
+            $widthsFor((string) $rawName, $index - 1),
+            $options
+        );
+        $sheetEntries[] = ['name' => $safeSheet, 'id' => $index];
+    }
+
+    $sheetsXml = '';
+    $sheetRelsXml = '';
+    $contentTypesXml = '';
+    foreach ($sheetEntries as $entry) {
+        $sheetsXml .= '<sheet name="' . $xml($entry['name']) . '" sheetId="' . $entry['id'] . '" r:id="rId' . $entry['id'] . '"/>';
+        $sheetRelsXml .= '<Relationship Id="rId' . $entry['id'] . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' . $entry['id'] . '.xml"/>';
+        $contentTypesXml .= '<Override PartName="/xl/worksheets/sheet' . $entry['id'] . '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+    }
+    // The styles relationship id follows the sheets, so it cannot collide with
+    // a worksheet the way a hard-coded rId2 would once there are two of them.
+    $stylesRid = 'rId' . (count($sheetEntries) + 1);
+
+    $files = [
+        '[Content_Types].xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            . '<Default Extension="xml" ContentType="application/xml"/>'
+            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            . $contentTypesXml
+            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            . '</Types>',
+        '_rels/.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            . '</Relationships>',
+        'xl/workbook.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            . '<sheets>' . $sheetsXml . '</sheets></workbook>',
+        'xl/_rels/workbook.xml.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            . $sheetRelsXml
+            . '<Relationship Id="' . $stylesRid . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            . '</Relationships>',
+        'xl/styles.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+            . '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+            . '<fill><patternFill patternType="solid"><fgColor rgb="FFF5E7C7"/><bgColor indexed="64"/></patternFill></fill></fills>'
+            . '<borders count="2"><border/><border><left style="thin"><color rgb="FFD0D5DD"/></left><right style="thin"><color rgb="FFD0D5DD"/></right>'
+            . '<top style="thin"><color rgb="FFD0D5DD"/></top><bottom style="thin"><color rgb="FFD0D5DD"/></bottom></border></borders>'
+            . '<cellStyleXfs count="1"><xf/></cellStyleXfs>'
+            . '<cellXfs count="3"><xf xfId="0"/><xf xfId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
+            . '<xf xfId="0" borderId="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf></cellXfs>'
+            . '</styleSheet>',
+    ] + $sheetXmls;
+
+    $tmp = tempnam(sys_get_temp_dir(), 'xlsx');
+    if ($tmp === false) {
+        throw new RuntimeException('Could not open a temporary file to build the workbook.');
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($tmp, ZipArchive::OVERWRITE) !== true) {
+        @unlink($tmp);
+        throw new RuntimeException('Could not create the .xlsx package.');
+    }
+    foreach ($files as $name => $contents) {
+        $zip->addFromString($name, $contents);
+    }
+    $zip->close();
+    $bytes = (string) file_get_contents($tmp);
+    @unlink($tmp);
+
+    return $bytes;
+}
+
+/** One worksheet's XML from its rows. */
+function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): string
+{
+    $xml = static fn (string $value): string => htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
     $rowsXml = '';
     $maxColumns = 0;
     $styledTable = !empty($options['styled_table']);
@@ -100,63 +225,12 @@ function xlsx_build(array $rows, string $sheetName = 'Sheet1', array $colWidths 
         $colsXml = '<cols><col min="1" max="' . $maxColumns . '" width="18" customWidth="1"/></cols>';
     }
 
-    $files = [
-        '[Content_Types].xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-            . '<Default Extension="xml" ContentType="application/xml"/>'
-            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            . '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-            . '</Types>',
-        '_rels/.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-            . '</Relationships>',
-        'xl/workbook.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            . '<sheets><sheet name="' . $xml($safeSheet) . '" sheetId="1" r:id="rId1"/></sheets></workbook>',
-        'xl/_rels/workbook.xml.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-            . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-            . '</Relationships>',
-        'xl/styles.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
-            . '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
-            . '<fill><patternFill patternType="solid"><fgColor rgb="FFF5E7C7"/><bgColor indexed="64"/></patternFill></fill></fills>'
-            . '<borders count="2"><border/><border><left style="thin"><color rgb="FFD0D5DD"/></left><right style="thin"><color rgb="FFD0D5DD"/></right>'
-            . '<top style="thin"><color rgb="FFD0D5DD"/></top><bottom style="thin"><color rgb="FFD0D5DD"/></bottom></border></borders>'
-            . '<cellStyleXfs count="1"><xf/></cellStyleXfs>'
-            . '<cellXfs count="3"><xf xfId="0"/><xf xfId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
-            . '<xf xfId="0" borderId="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf></cellXfs>'
-            . '</styleSheet>',
-        'xl/worksheets/sheet1.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . (!empty($options['freeze_header']) ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : '')
-            . $colsXml . '<sheetData>' . $rowsXml . '</sheetData>'
-            . (!empty($options['auto_filter']) && $maxColumns > 0 ? '<autoFilter ref="A1:' . xlsx_column_letters($maxColumns - 1) . max(1, count($rows)) . '"/>' : '')
-            . '</worksheet>',
-    ];
-
-    $tmp = tempnam(sys_get_temp_dir(), 'xlsx');
-    if ($tmp === false) {
-        throw new RuntimeException('Could not open a temporary file to build the workbook.');
-    }
-    $zip = new ZipArchive();
-    if ($zip->open($tmp, ZipArchive::OVERWRITE) !== true) {
-        @unlink($tmp);
-        throw new RuntimeException('Could not create the .xlsx package.');
-    }
-    foreach ($files as $name => $contents) {
-        $zip->addFromString($name, $contents);
-    }
-    $zip->close();
-    $bytes = (string) file_get_contents($tmp);
-    @unlink($tmp);
-
-    return $bytes;
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        . (!empty($options['freeze_header']) ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : '')
+        . $colsXml . '<sheetData>' . $rowsXml . '</sheetData>'
+        . (!empty($options['auto_filter']) && $maxColumns > 0 ? '<autoFilter ref="A1:' . xlsx_column_letters($maxColumns - 1) . max(1, count($rows)) . '"/>' : '')
+        . '</worksheet>';
 }
 
 /** Stream a table of rows as a .xlsx download and stop. */
@@ -304,7 +378,12 @@ function spreadsheet_read_csv(string $path, int $maxRows = 5000): array
  * into it, not a word. Blank cells are simply absent from the XML, so the row
  * is padded back out to keep column positions meaningful.
  */
-function spreadsheet_read_xlsx(string $path, int $maxRows = 5000): array
+/**
+ * Rows from a workbook. By default the FIRST sheet, which is what every
+ * importer that predates the two-sheet sales upload expects; pass $only as
+ * 'all' (via spreadsheet_read_xlsx_all) to get every sheet keyed by name.
+ */
+function spreadsheet_read_xlsx(string $path, int $maxRows = 5000, ?string $only = null): array
 {
     if (!class_exists('ZipArchive')) {
         throw new RuntimeException('The server is missing the PHP zip extension needed to read .xlsx files. Upload a .csv instead.');
@@ -334,18 +413,36 @@ function spreadsheet_read_xlsx(string $path, int $maxRows = 5000): array
     foreach ($rels->Relationship as $relationship) {
         $relTargets[(string) $relationship['Id']] = (string) $relationship['Target'];
     }
-    $sheetPath = null;
+    // Every sheet in workbook order, as name => path inside the zip. The
+    // caller asking for one sheet takes the first; the sales upload reads a
+    // workbook carrying an item-wise sheet and an invoice-wise sheet together.
+    $sheetPaths = [];
     foreach ($workbook->sheets->sheet as $sheet) {
         $rid = (string) ($sheet->attributes($relNs)['id'] ?? '');
         $target = $relTargets[$rid] ?? '';
-        if ($target !== '') {
-            $sheetPath = str_starts_with($target, '/') ? ltrim($target, '/') : 'xl/' . $target;
-            break;
+        if ($target === '') {
+            continue;
         }
+        $name = trim((string) ($sheet['name'] ?? ''));
+        if ($name === '') {
+            $name = 'Sheet' . (count($sheetPaths) + 1);
+        }
+        // Two sheets sharing a name cannot happen in Excel, but a hand-built
+        // workbook could; the later one is kept under a suffixed key rather
+        // than silently replacing the earlier.
+        while (isset($sheetPaths[$name])) {
+            $name .= ' ';
+        }
+        $sheetPaths[$name] = str_starts_with($target, '/') ? ltrim($target, '/') : 'xl/' . $target;
     }
-    if ($sheetPath === null) {
+    if ($sheetPaths === []) {
         $zip->close();
         throw new RuntimeException('No worksheet found in the workbook.');
+    }
+    // Only the first sheet is unzipped and parsed unless every sheet was
+    // asked for, so the common single-sheet import does no extra work.
+    if ($only === null) {
+        $sheetPaths = array_slice($sheetPaths, 0, 1, true);
     }
 
     $sharedStrings = [];
@@ -366,11 +463,26 @@ function spreadsheet_read_xlsx(string $path, int $maxRows = 5000): array
         }
     }
 
-    $sheetXml = $zip->getFromName($sheetPath);
-    $zip->close();
-    if ($sheetXml === false) {
-        throw new RuntimeException('The worksheet could not be read from the workbook.');
+    $sheetXmls = [];
+    foreach ($sheetPaths as $sheetName => $sheetPath) {
+        $sheetXmls[$sheetName] = $zip->getFromName($sheetPath);
     }
+    $zip->close();
+
+    $sheets = [];
+    foreach ($sheetXmls as $sheetName => $sheetXml) {
+        if ($sheetXml === false) {
+            throw new RuntimeException('The worksheet could not be read from the workbook.');
+        }
+        $sheets[$sheetName] = spreadsheet_xlsx_sheet_rows($sheetXml, $sharedStrings, $maxRows);
+    }
+
+    return $only === null ? reset($sheets) : $sheets;
+}
+
+/** The rows of ONE worksheet's XML, in the shape every importer here expects. */
+function spreadsheet_xlsx_sheet_rows(string $sheetXml, array $sharedStrings, int $maxRows): array
+{
     $worksheet = simplexml_load_string($sheetXml);
     if ($worksheet === false) {
         throw new RuntimeException('The worksheet XML could not be parsed.');
@@ -421,6 +533,18 @@ function spreadsheet_read_xlsx(string $path, int $maxRows = 5000): array
     }
 
     return $rows;
+}
+
+/**
+ * Every sheet in a workbook, as name => rows, in the order Excel holds them.
+ *
+ * The single-sheet reader above takes the first and is what every existing
+ * importer wants; this is for the sales upload, which needs the item-wise and
+ * the invoice-wise sheet out of one file.
+ */
+function spreadsheet_read_xlsx_all(string $path, int $maxRows = 5000): array
+{
+    return spreadsheet_read_xlsx($path, $maxRows, 'all');
 }
 
 /**
