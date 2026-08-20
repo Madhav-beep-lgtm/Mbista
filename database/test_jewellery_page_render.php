@@ -432,6 +432,32 @@ if (preg_match_all('~<select[^>]*data-jw-(?:item|stock)-fill[^>]*>~i', $gridHtml
 }
 ok($biggestRowSelect <= 2, 'No row-level picker carries the whole list (biggest holds ' . $biggestRowSelect . ' option(s))');
 
+// And the half of it that is easy to forget: the template has to CONTAIN the
+// list. An empty one leaves every picker on the page blank while the markup
+// still looks exactly right — the tags are all there, the stubs point at them,
+// and nothing renders wrong. This is asserted for every shared list on every
+// page the suite drew, not just this one.
+foreach ($renderedHtml as $renderedPage => $renderedBody) {
+    if (!preg_match_all('~<template id="(opts-[a-z0-9-]+|jw-[a-z-]+-options)"[^>]*>(.*?)</template>~s', (string) $renderedBody, $templateMatches, PREG_SET_ORDER)) {
+        continue;
+    }
+    foreach ($templateMatches as $templateMatch) {
+        $templateId = $templateMatch[1];
+        $templateOptions = substr_count($templateMatch[2], '<option');
+        // A list can legitimately be empty when the fixture has nothing in it
+        // (no traced stock, say); what must never happen is a template with no
+        // options while selects on the page are waiting to be filled from it.
+        $waiting = substr_count((string) $renderedBody, 'data-fill-from="' . str_replace('opts-', '', $templateId) . '"')
+            + ($templateId === 'jw-item-options' ? substr_count((string) $renderedBody, 'data-jw-item-fill') : 0)
+            + ($templateId === 'jw-stock-options' ? substr_count((string) $renderedBody, 'data-jw-stock-fill') : 0);
+        if ($waiting > 0) {
+            ok($templateOptions > 0,
+                $renderedPage . ': the ' . $templateId . ' template carries the list its '
+                . $waiting . ' picker(s) are waiting for');
+        }
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 echo "\nBilling an order from the delivery list keeps its layout\n";

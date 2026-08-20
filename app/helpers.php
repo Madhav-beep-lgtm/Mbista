@@ -191,12 +191,7 @@ function e(mixed $value): string
  */
 function shared_options(string $listId, callable $build, string $selectedValue = ''): array
 {
-    static $lists = [];
-
-    if (!array_key_exists($listId, $lists)) {
-        $lists[$listId] = (string) $build();
-    }
-    $options = $lists[$listId];
+    $options = shared_options_list($listId, $build);
 
     // A stub: only what this select already holds, so the page reads correctly
     // before the script runs.
@@ -211,6 +206,26 @@ function shared_options(string $listId, callable $build, string $selectedValue =
     }
 
     return ['html' => $stub, 'fill' => true];
+}
+
+/**
+ * The built list itself, memoised per id for the request.
+ *
+ * Both the stub-issuing call above and the <template> below read it from here.
+ * They used to each hold their own idea of it, which is how the template came
+ * to be emitted EMPTY once the stub stopped carrying a copy — the page looked
+ * right, and every dropdown on it was blank.
+ *
+ * $build is called at most once per list id per request.
+ */
+function shared_options_list(string $listId, callable $build): string
+{
+    static $lists = [];
+    if (!array_key_exists($listId, $lists)) {
+        $lists[$listId] = (string) $build();
+    }
+
+    return $lists[$listId];
 }
 
 /** Whether any select asked to be filled from this list. */
@@ -237,9 +252,8 @@ function shared_options_template(string $listId, callable $build): string
         return '';
     }
     $emitted[$listId] = true;
-    $list = shared_options($listId . '__template__', $build);
 
-    return '<template id="' . e('opts-' . $listId) . '">' . $list['html'] . '</template>';
+    return '<template id="' . e('opts-' . $listId) . '">' . shared_options_list($listId, $build) . '</template>';
 }
 
 /** The one script that fills every stub on the page. Emits once. */
