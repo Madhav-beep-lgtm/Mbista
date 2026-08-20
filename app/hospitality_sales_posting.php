@@ -57,7 +57,15 @@ function hospitality_posting_ledger(int $companyId, int $ledgerId): ?array
  * only demanded once a sheet actually carries discounts, and the VAT ledger
  * once VAT is being extracted, so those are checked at parse time too.
  */
-function hospitality_posting_config_errors(int $companyId, array $settings): array
+/**
+ * What is still missing before a sheet can post.
+ *
+ * $needsReceivable belongs to the SINGLE-sheet upload, which builds its own
+ * debit from a receivable ledger. The two-sheet upload takes its debit from the
+ * invoice sheet's party ledger instead and never reads a receivable, so making
+ * it demand one meant refusing to post over a setting that posts nothing.
+ */
+function hospitality_posting_config_errors(int $companyId, array $settings, bool $needsReceivable = true): array
 {
     // The category mapping rows carry the real ledger sets; the settings
     // ledgers are only a FALLBACK for categories without their own mapping.
@@ -67,9 +75,11 @@ function hospitality_posting_config_errors(int $companyId, array $settings): arr
     $hasDefaultSales = hospitality_posting_ledger($companyId, (int) ($settings['post_sales_ledger_id'] ?? 0)) !== null;
     $hasDefaultReceivable = hospitality_posting_ledger($companyId, (int) ($settings['post_receivable_ledger_id'] ?? 0)) !== null;
     if ($categoryMaps === [] && !$hasDefaultSales) {
-        $errors[] = 'Map each category to its ledgers below (sales · receivable · discount), or set a default Sales ledger as fallback.';
+        $errors[] = $needsReceivable
+            ? 'Map each category to its ledgers below (sales · receivable · discount), or set a default Sales ledger as fallback.'
+            : 'Map each sales category to its ledger in Settings, or set a default Sales ledger as fallback.';
     }
-    if (!$hasDefaultReceivable) {
+    if ($needsReceivable && !$hasDefaultReceivable) {
         $missingReceivable = $categoryMaps === [];
         foreach ($categoryMaps as $categoryMap) {
             if ((int) ($categoryMap['receivable_ledger_id'] ?? 0) <= 0 || $categoryMap['receivable_ledger_name'] === null) {

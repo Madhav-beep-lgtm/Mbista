@@ -262,6 +262,30 @@ $badResult = hospitality_post_sales_workbook($A['cid'], $A['fy'], $badParsed, 'b
 ok($badResult['ok'] === false, 'Posting refuses a pair that failed reconciliation');
 ok(str_contains((string) $badResult['error'], 'do not agree'), '  ...saying so plainly');
 
+echo "\n== A receivable ledger is not required ==\n";
+// The debit comes from the invoice sheet's party ledger, so a receivable is
+// neither read nor needed. It was demanded anyway, which refused the upload
+// over a setting that posts nothing.
+db()->exec('UPDATE hospitality_settings SET post_receivable_ledger_id = NULL WHERE company_id=' . $A['cid']);
+db()->exec('UPDATE hospitality_sales_ledger_maps SET receivable_ledger_id = NULL, discount_ledger_id = NULL WHERE company_id=' . $A['cid']);
+$noRecvSettings = hospitality_settings($A['cid']);
+ok(hospitality_posting_config_errors($A['cid'], $noRecvSettings, false) === [],
+    'With no receivable ledger anywhere, the two-sheet upload reports no setup problem');
+ok(hospitality_posting_config_errors($A['cid'], $noRecvSettings) !== [],
+    '  ...while the single-sheet path, which does post to one, still asks for it');
+$noRecvParsed = hospitality_workbook_parse($tmp, 'xlsx', null, null, $A['cid'], $A['fy'], $noRecvSettings);
+ok(($noRecvParsed['config_errors'] ?? ['x']) === [], '  ...and a sheet parses without complaint');
+$noRecvResult = hospitality_post_sales_workbook($A['cid'], $A['fy'], $noRecvParsed, 'no-receivable.xlsx', $A['uid'], true);
+ok($noRecvResult['ok'] === true, '  ...and posts' . (($noRecvResult['ok'] ?? false) ? '' : ': ' . ($noRecvResult['error'] ?? '')));
+$noRecvVoucher = (int) db()->query('SELECT id FROM vouchers WHERE company_id=' . $A['cid'] . " AND source_type='hospitality_sales_upload' ORDER BY id DESC LIMIT 1")->fetchColumn();
+$noRecvLegs = [];
+foreach (db()->query("SELECT e.entry_type, e.amount, l.name FROM voucher_entries e JOIN ledgers l ON l.id=e.ledger_id WHERE e.voucher_id=$noRecvVoucher")->fetchAll(PDO::FETCH_ASSOC) as $leg) {
+    $noRecvLegs[$leg['entry_type'] . '|' . $leg['name']] = (float) $leg['amount'];
+}
+ok(!isset($noRecvLegs['debit|Sales Receivable']), '  ...debiting the party ledger, never a receivable');
+ok(isset($noRecvLegs['debit|Cash in Hand']) || isset($noRecvLegs['debit|Sundry Debtors']),
+    '  ...which is the ledger the invoice sheet named');
+
 echo "\n== Tenant isolation ==\n";
 $settingsB = hospitality_settings($B['cid']);
 set_context($B['cid'], $B['fy']);

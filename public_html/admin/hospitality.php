@@ -655,15 +655,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if (hospitality_posting_ledger($companyId, $ledgerId) === null) {
                 flash('error', $label . ' must be an active ledger of this company.');
-                redirect('admin/hospitality.php?view=sales-upload');
+                redirect($back);
             }
             return $ledgerId;
         };
 
         $defaultSales = $checkLedger((int) ($_POST['post_sales_ledger_id'] ?? 0), 'The default Sales ledger');
-        $defaultReceivable = $checkLedger((int) ($_POST['post_receivable_ledger_id'] ?? 0), 'The default Receivable ledger');
-        $defaultDiscount = $checkLedger((int) ($_POST['post_discount_ledger_id'] ?? 0), 'The default Discount ledger');
         $vatLedger = $checkLedger((int) ($_POST['post_vat_ledger_id'] ?? 0), 'The VAT payable ledger');
+        // The receivable and discount ledgers are no longer on the form: the
+        // two-sheet upload takes its debit from the invoice sheet and nets
+        // discount into the sales credit. A field the form does not send KEEPS
+        // what is stored rather than being cleared — the single-sheet path
+        // still reads them, and silently wiping a tenant's setup because a
+        // column left the screen would be its own kind of bug.
+        $defaultReceivable = array_key_exists('post_receivable_ledger_id', $_POST)
+            ? $checkLedger((int) $_POST['post_receivable_ledger_id'], 'The default Receivable ledger')
+            : ((int) ($settings['post_receivable_ledger_id'] ?? 0) ?: null);
+        $defaultDiscount = array_key_exists('post_discount_ledger_id', $_POST)
+            ? $checkLedger((int) $_POST['post_discount_ledger_id'], 'The default Discount ledger')
+            : ((int) ($settings['post_discount_ledger_id'] ?? 0) ?: null);
 
         // Validate every category row before anything is written.
         $mapIds = (array) ($_POST['map_id'] ?? []);
@@ -673,6 +683,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mapDiscount = (array) ($_POST['map_discount_ledger'] ?? []);
         $mapNotes = (array) ($_POST['map_notes'] ?? []);
         $mapActive = (array) ($_POST['map_active'] ?? []);
+        // One read, so a row whose receivable/discount is not on the form can
+        // keep the one it already has.
+        $existingMapLedgers = [];
+        if ($mapReceivable === [] || $mapDiscount === []) {
+            $existingStmt = db()->prepare('SELECT id, receivable_ledger_id, discount_ledger_id
+                FROM hospitality_sales_ledger_maps WHERE company_id = :cid');
+            $existingStmt->execute(['cid' => $companyId]);
+            foreach ($existingStmt->fetchAll(PDO::FETCH_ASSOC) as $existingRow) {
+                $existingMapLedgers[(int) $existingRow['id']] = $existingRow;
+            }
+        }
         $rowsToSave = [];
         $seenNames = [];
         foreach ($mapIds as $index => $rawMapId) {
@@ -683,26 +704,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($name === '') {
                 flash('error', 'A category row is missing its name — every row needs the category exactly as written in the sheet.');
-                redirect('admin/hospitality.php?view=sales-upload');
+                redirect($back);
             }
             $norm = hospitality_sales_norm($name);
             if (isset($seenNames[$norm])) {
                 flash('error', 'Two rows use the same category name "' . $name . '" — merge them into one row.');
-                redirect('admin/hospitality.php?view=sales-upload');
+                redirect($back);
             }
             $seenNames[$norm] = true;
             $salesId = $checkLedger((int) ($mapSales[$index] ?? 0), 'The sales ledger for "' . $name . '"');
             if ($salesId === null) {
                 flash('error', 'Category "' . $name . '" needs a sales ledger.');
-                redirect('admin/hospitality.php?view=sales-upload');
+                redirect($back);
             }
             $rowsToSave[] = [
                 'id' => $mapId,
                 'name' => $name,
                 'norm' => $norm,
                 'sales' => $salesId,
-                'recv' => $checkLedger((int) ($mapReceivable[$index] ?? 0), 'The receivable ledger for "' . $name . '"'),
-                'disc' => $checkLedger((int) ($mapDiscount[$index] ?? 0), 'The discount ledger for "' . $name . '"'),
+                // Absent from the form: keep whatever the row already holds.
+                'recv' => array_key_exists($index, $mapReceivable)
+                    ? $checkLedger((int) $mapReceivable[$index], 'The receivable ledger for "' . $name . '"')
+                    : ((int) ($existingMapLedgers[$mapId]['receivable_ledger_id'] ?? 0) ?: null),
+                'disc' => array_key_exists($index, $mapDiscount)
+                    ? $checkLedger((int) $mapDiscount[$index], 'The discount ledger for "' . $name . '"')
+                    : ((int) ($existingMapLedgers[$mapId]['discount_ledger_id'] ?? 0) ?: null),
                 'notes' => trim((string) ($mapNotes[$index] ?? '')) ?: null,
                 'active' => isset($mapActive[$index]) ? 1 : 0,
             ];
@@ -719,7 +745,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ->execute([
                     'sales' => $defaultSales, 'vat' => $vatLedger, 'disc' => $defaultDiscount, 'recv' => $defaultReceivable,
                     'rate' => max(0.0, min(99.99, round((float) ($_POST['post_vat_rate'] ?? 13), 2))),
-                    'incl' => isset($_POST['post_amount_includes_vat']) ? 1 : 0,
+                    // Not on the form any more: the two-sheet upload reads the
+                    // Taxable Sales and VAT columns the sheet actually carries,
+                    // so there is nothing to infer. Kept as stored for the
+                    // single-sheet path, which still extracts VAT itself.
+                    'incl' => (int) ($settings['post_amount_includes_vat'] ?? 1),
                     'by' => $userId, 'cid' => $companyId,
                 ]);
 
@@ -752,7 +782,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', (string) $exception->getCode() === '23000'
                 ? 'Two rows ended up with the same category name — rename one of them and save again.'
                 : 'Could not save the ledger mapping: ' . $exception->getMessage());
-            redirect('admin/hospitality.php?view=sales-upload');
+            redirect($back);
         }
         log_activity('hospitality_ledger_map', $companyId, 'saved',
             'Hospitality ledger mapping saved: defaults + VAT + ' . count($rowsToSave) . ' category row(s).', $userId);
@@ -1740,18 +1770,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
 <?php elseif ($view === 'sales-upload'): ?>
     <?php
-    $ledgerOptions = hospitality_posting_ledger_options($companyId);
-    $configErrors = hospitality_posting_config_errors($companyId, $settings);
-    $allMapsStmt = db()->prepare('SELECT m.*, l.name AS ledger_name, l.code AS ledger_code, l.status AS ledger_status,
-            lr.name AS receivable_ledger_name, lr.code AS receivable_ledger_code,
-            ld.name AS discount_ledger_name, ld.code AS discount_ledger_code
-        FROM hospitality_sales_ledger_maps m
-        LEFT JOIN ledgers l ON l.id = m.sales_ledger_id AND l.company_id = m.company_id
-        LEFT JOIN ledgers lr ON lr.id = m.receivable_ledger_id AND lr.company_id = m.company_id
-        LEFT JOIN ledgers ld ON ld.id = m.discount_ledger_id AND ld.company_id = m.company_id
-        WHERE m.company_id = :cid ORDER BY m.map_type ASC, m.active DESC, m.display_value ASC');
-    $allMapsStmt->execute(['cid' => $companyId]);
-    $ledgerMapRows = $allMapsStmt->fetchAll();
+    // false: this screen posts the two-sheet upload, whose debit comes from the
+    // invoice sheet rather than a receivable ledger.
+    $configErrors = hospitality_posting_config_errors($companyId, $settings, false);
 
     // Preview the held pair when a token is present. Problems render inline
     // (the page header is already out, so flash() would only show next load).
@@ -1784,86 +1805,18 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         }
     }
 
-    $ledgerSelect = static function (string $name, ?int $selected, bool $required = false) use ($ledgerOptions): string {
-        $html = '<select name="' . e($name) . '"' . ($required ? ' required' : '') . '>';
-        $html .= '<option value="">— not set —</option>';
-        foreach ($ledgerOptions as $ledgerOption) {
-            $html .= '<option value="' . (int) $ledgerOption['id'] . '"' . ((int) $ledgerOption['id'] === (int) $selected ? ' selected' : '') . '>'
-                . e($ledgerOption['name'] . ' (' . $ledgerOption['code'] . ') — ' . $ledgerOption['type']) . '</option>';
-        }
-        return $html . '</select>';
-    };
     ?>
 
     <?php if ($salesPreview === null): ?>
     <?php if ($salesPreviewProblem !== null): ?>
         <div class="notice error" style="margin-bottom:14px"><?= e($salesPreviewProblem) ?></div>
     <?php endif; ?>
-    <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Ledger Mapping &amp; VAT (<?= count($ledgerMapRows) ?> categor<?= count($ledgerMapRows) === 1 ? 'y' : 'ies' ?>)</h2></div>
-        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
-            One row per category, exactly as written in the sheet (Food, Beverage, Bar…). Each category's totals post to ITS OWN ledgers —
-            <strong>Dr</strong> its receivable (gross − discount), <strong>Dr</strong> its discount, <strong>Cr</strong> its sales — plus <strong>Cr</strong> VAT payable (common, set below).
-            The <strong>Default</strong> row on top covers any category without its own row (and fills empty receivable/discount cells). One Save button stores everything.
-        </p>
-        <?php if (!$canEdit): ?><div class="notice">You have view-only access to this setup.</div><?php endif; ?>
-        <form method="post" <?= $canEdit ? '' : 'style="pointer-events:none;opacity:.7"' ?>>
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="save_ledger_mapping">
-            <input type="hidden" name="back_view" value="sales-upload">
-            <div style="overflow-x:auto"><table>
-                <thead><tr><th>Category (as written in the sheet)</th><th>Sales ledger (credit)</th><th>Receivable ledger (debit)</th><th>Discount ledger (debit)</th><th>Notes</th><th>Active</th></tr></thead>
-                <tbody>
-                    <tr style="background:var(--mbw-soft,rgba(0,0,0,.03))">
-                        <td><strong>Default / all other categories</strong><br><small style="color:var(--mbw-muted)">Fallback when a category has no row below or leaves a cell empty.</small></td>
-                        <td><?= $ledgerSelect('post_sales_ledger_id', (int) ($settings['post_sales_ledger_id'] ?? 0)) ?></td>
-                        <td><?= $ledgerSelect('post_receivable_ledger_id', (int) ($settings['post_receivable_ledger_id'] ?? 0)) ?></td>
-                        <td><?= $ledgerSelect('post_discount_ledger_id', (int) ($settings['post_discount_ledger_id'] ?? 0)) ?></td>
-                        <td><small style="color:var(--mbw-muted)">—</small></td>
-                        <td><span class="mbw-pill tone-blue">Always</span></td>
-                    </tr>
-                    <?php foreach ($ledgerMapRows as $index => $mapRow): ?>
-                        <tr>
-                            <td>
-                                <input type="hidden" name="map_id[<?= $index ?>]" value="<?= (int) $mapRow['id'] ?>">
-                                <input type="text" name="map_category[<?= $index ?>]" maxlength="160" value="<?= e($mapRow['display_value']) ?>" style="min-width:140px">
-                                <?= (string) $mapRow['map_type'] === 'item' ? '<br><span class="mbw-pill tone-purple">Item override</span>' : '' ?>
-                            </td>
-                            <td><?= $ledgerSelect('map_sales_ledger[' . $index . ']', (int) $mapRow['sales_ledger_id']) ?><?= $mapRow['ledger_name'] === null ? '<br><span class="mbw-pill tone-red">Ledger missing</span>' : '' ?></td>
-                            <td><?= $ledgerSelect('map_receivable_ledger[' . $index . ']', (int) ($mapRow['receivable_ledger_id'] ?? 0)) ?></td>
-                            <td><?= $ledgerSelect('map_discount_ledger[' . $index . ']', (int) ($mapRow['discount_ledger_id'] ?? 0)) ?></td>
-                            <td><input type="text" name="map_notes[<?= $index ?>]" maxlength="255" value="<?= e($mapRow['notes'] ?? '') ?>" style="min-width:110px"></td>
-                            <td style="text-align:center"><input type="checkbox" name="map_active[<?= $index ?>]" <?= (int) $mapRow['active'] === 1 ? 'checked' : '' ?>></td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <tr>
-                        <td>
-                            <input type="hidden" name="map_id[new]" value="0">
-                            <input type="text" name="map_category[new]" maxlength="160" placeholder="Add category… e.g. Beverage" style="min-width:140px">
-                        </td>
-                        <td><?= $ledgerSelect('map_sales_ledger[new]', 0) ?></td>
-                        <td><?= $ledgerSelect('map_receivable_ledger[new]', 0) ?></td>
-                        <td><?= $ledgerSelect('map_discount_ledger[new]', 0) ?></td>
-                        <td><input type="text" name="map_notes[new]" maxlength="255" style="min-width:110px"></td>
-                        <td style="text-align:center"><input type="checkbox" name="map_active[new]" checked></td>
-                    </tr>
-                </tbody>
-            </table></div>
-            <div class="workspace-form-grid" style="margin-top:12px">
-                <label>VAT payable ledger (credit — common for all categories)<?= $ledgerSelect('post_vat_ledger_id', (int) ($settings['post_vat_ledger_id'] ?? 0)) ?></label>
-                <label>VAT rate %<input type="number" step="0.01" min="0" max="99.99" name="post_vat_rate" value="<?= e(number_format((float) ($settings['post_vat_rate'] ?? 13), 2, '.', '')) ?>"></label>
-                <label class="checkbox-line" style="align-self:end"><input type="checkbox" name="post_amount_includes_vat" <?= (int) ($settings['post_amount_includes_vat'] ?? 1) === 1 ? 'checked' : '' ?>> Sheet amounts already include VAT (VAT is extracted out)</label>
-                <?php if ($canEdit): ?><div style="align-self:end"><button type="submit"><?= icon('settings') ?>Save Ledger Mapping</button></div><?php endif; ?>
-            </div>
-        </form>
-        <?php if ($configErrors !== []): ?>
-            <div class="notice error" style="margin-top:10px"><strong>Before posting:</strong> <?= e(implode(' ', $configErrors)) ?></div>
-        <?php endif; ?>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
-            Matching ignores letter case and extra spaces; an item override (from earlier setups) wins over its category row.
-            Untick Active to stop a row matching without losing it. A VAT column in the sheet, when filled, overrides the rate-based calculation.
-        </p>
-    </section>
+    <?php if ($configErrors !== []): ?>
+        <div class="notice error" style="margin-bottom:14px">
+            <strong>Before posting:</strong> <?= e(implode(' ', $configErrors)) ?>
+            <a href="<?= e(url('admin/hospitality.php?view=settings')) ?>">Open Settings →</a>
+        </div>
+    <?php endif; ?>
 
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Upload Daily Sales Sheet</h2></div>
@@ -2242,6 +2195,95 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
 
 <?php elseif ($view === 'settings'): ?>
+    <?php
+    // Where a sales category posts. This used to sit on the upload screen, but
+    // it is set up once and then left alone, and the upload screen is a place
+    // people visit daily — it belongs here.
+    //
+    // It carries the CREDIT side only. The debit comes from the Party Ledger
+    // Code on the invoice sheet, and discount is netted into the sales credit
+    // (the sheet's Taxable Sales is already net of it), so there is no
+    // receivable or discount ledger to choose. Existing values for those are
+    // left untouched in the database.
+    $ledgerOptions = hospitality_posting_ledger_options($companyId);
+    $configErrors = hospitality_posting_config_errors($companyId, $settings, false);
+    $allMapsStmt = db()->prepare('SELECT m.*, l.name AS ledger_name, l.code AS ledger_code, l.status AS ledger_status
+        FROM hospitality_sales_ledger_maps m
+        LEFT JOIN ledgers l ON l.id = m.sales_ledger_id AND l.company_id = m.company_id
+        WHERE m.company_id = :cid ORDER BY m.map_type ASC, m.active DESC, m.display_value ASC');
+    $allMapsStmt->execute(['cid' => $companyId]);
+    $ledgerMapRows = $allMapsStmt->fetchAll();
+    $ledgerSelect = static function (string $name, ?int $selected, bool $required = false) use ($ledgerOptions): string {
+        $html = '<select name="' . e($name) . '"' . ($required ? ' required' : '') . '>';
+        $html .= '<option value="">— not set —</option>';
+        foreach ($ledgerOptions as $ledgerOption) {
+            $html .= '<option value="' . (int) $ledgerOption['id'] . '"' . ((int) $ledgerOption['id'] === (int) $selected ? ' selected' : '') . '>'
+                . e($ledgerOption['name'] . ' (' . $ledgerOption['code'] . ') — ' . $ledgerOption['type']) . '</option>';
+        }
+        return $html . '</select>';
+    };
+    ?>
+    <section class="mbw-card" data-collapsible>
+        <div class="mbw-card-head"><h2>Sales Category Ledgers &amp; VAT (<?= count($ledgerMapRows) ?> categor<?= count($ledgerMapRows) === 1 ? 'y' : 'ies' ?>)</h2></div>
+        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
+            One row per category, exactly as written in the sheet (Food, Beverage, Bar…). Each category's taxable sales are
+            <strong>credited</strong> to its own ledger, and VAT to the one below. The <strong>Default</strong> row covers any category without a row of its own.
+            <br>The debit side is not set here — it comes from the <strong>Party Ledger Code</strong> on the invoice sheet, so a day settled across cash,
+            wallet and credit posts a debit to each. Discount is netted into the sales credit, which is what the sheet's Taxable Sales column already is.
+        </p>
+        <?php if (!$canEdit): ?><div class="notice">You have view-only access to this setup.</div><?php endif; ?>
+        <form method="post" <?= $canEdit ? '' : 'style="pointer-events:none;opacity:.7"' ?>>
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_ledger_mapping">
+            <input type="hidden" name="back_view" value="settings">
+            <div style="overflow-x:auto"><table>
+                <thead><tr><th>Category (as written in the sheet)</th><th>Sales ledger (credit)</th><th>Notes</th><th>Active</th></tr></thead>
+                <tbody>
+                    <tr style="background:var(--mbw-soft,rgba(0,0,0,.03))">
+                        <td><strong>Default / all other categories</strong><br><small style="color:var(--mbw-muted)">Fallback when a category has no row below.</small></td>
+                        <td><?= $ledgerSelect('post_sales_ledger_id', (int) ($settings['post_sales_ledger_id'] ?? 0)) ?></td>
+                        <td><small style="color:var(--mbw-muted)">—</small></td>
+                        <td><span class="mbw-pill tone-blue">Always</span></td>
+                    </tr>
+                    <?php foreach ($ledgerMapRows as $index => $mapRow): ?>
+                        <tr>
+                            <td>
+                                <input type="hidden" name="map_id[<?= $index ?>]" value="<?= (int) $mapRow['id'] ?>">
+                                <input type="text" name="map_category[<?= $index ?>]" maxlength="160" value="<?= e($mapRow['display_value']) ?>" style="min-width:160px">
+                                <?= (string) $mapRow['map_type'] === 'item' ? '<br><span class="mbw-pill tone-purple">Item override</span>' : '' ?>
+                            </td>
+                            <td><?= $ledgerSelect('map_sales_ledger[' . $index . ']', (int) $mapRow['sales_ledger_id']) ?><?= $mapRow['ledger_name'] === null ? '<br><span class="mbw-pill tone-red">Ledger missing</span>' : '' ?></td>
+                            <td><input type="text" name="map_notes[<?= $index ?>]" maxlength="255" value="<?= e($mapRow['notes'] ?? '') ?>" style="min-width:140px"></td>
+                            <td style="text-align:center"><input type="checkbox" name="map_active[<?= $index ?>]" <?= (int) $mapRow['active'] === 1 ? 'checked' : '' ?>></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <tr>
+                        <td>
+                            <input type="hidden" name="map_id[new]" value="0">
+                            <input type="text" name="map_category[new]" maxlength="160" placeholder="Add category… e.g. Beverage" style="min-width:160px">
+                        </td>
+                        <td><?= $ledgerSelect('map_sales_ledger[new]', 0) ?></td>
+                        <td><input type="text" name="map_notes[new]" maxlength="255" style="min-width:140px"></td>
+                        <td style="text-align:center"><input type="checkbox" name="map_active[new]" checked></td>
+                    </tr>
+                </tbody>
+            </table></div>
+            <div class="workspace-form-grid" style="margin-top:12px">
+                <label>VAT payable ledger (credit — common for all categories)<?= $ledgerSelect('post_vat_ledger_id', (int) ($settings['post_vat_ledger_id'] ?? 0)) ?></label>
+                <label>VAT rate %<input type="number" step="0.01" min="0" max="99.99" name="post_vat_rate" value="<?= e(number_format((float) ($settings['post_vat_rate'] ?? 13), 2, '.', '')) ?>">
+                    <small style="color:var(--mbw-muted)">Only used when a sheet has no VAT column of its own.</small></label>
+                <?php if ($canEdit): ?><div style="align-self:end"><button type="submit"><?= icon('settings') ?>Save Category Ledgers</button></div><?php endif; ?>
+            </div>
+        </form>
+        <?php if ($configErrors !== []): ?>
+            <div class="notice error" style="margin-top:10px"><strong>Before a sheet can post:</strong> <?= e(implode(' ', $configErrors)) ?></div>
+        <?php endif; ?>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
+            Matching ignores letter case and extra spaces; an item override (from earlier setups) wins over its category row.
+            Untick Active to stop a row matching without losing it.
+        </p>
+    </section>
+
     <?php
         $invMapRows = inventory_mapping_rows($companyId);
         $invMapGaps = inventory_mapping_gaps($companyId);

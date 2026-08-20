@@ -1000,7 +1000,9 @@ function hospitality_workbook_parse(string $primaryPath, string $primaryExt, ?st
         'invoices' => $invoices,
         'reconciliation' => $reconciliation,
         'duplicate_dates' => hospitality_sales_posted_dates($companyId, array_keys($items['days'])),
-        'config_errors' => hospitality_posting_config_errors($companyId, $settings),
+        // false: this upload's debit comes from the invoice sheet, so a
+        // receivable ledger is neither used nor required.
+        'config_errors' => hospitality_posting_config_errors($companyId, $settings, false),
     ];
 }
 
