@@ -49,6 +49,14 @@ if (!in_array($view, $allowedViews, true) && !isset($legacyViews[$view])) {
 $canPost = user_can_do('hospitality', 'create');
 $hasXlsx = class_exists('ZipArchive');
 
+/** One of a fixed set, or the fallback — a query string never picks its own value. */
+function jw_enum_like(?string $value, array $allowed, string $fallback): string
+{
+    $value = (string) $value;
+
+    return in_array($value, $allowed, true) ? $value : $fallback;
+}
+
 // Uploaded day-sheets are held (web-inaccessible) between preview and post.
 $salesUploadDir = __DIR__ . '/../uploads/hospitality-sales';
 
@@ -927,6 +935,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ---------------------------------------------------------------------------
 // CSV export (reference reports only)
 // ---------------------------------------------------------------------------
+// The Sales Reports on the upload screen are readings of what was uploaded, and
+// they leave the building the same three ways every other list here does.
+$salesReportExport = jw_enum_like($_GET['export'] ?? null, ['csv', 'xlsx', 'print'], '');
+if ($view === 'sales-upload' && $salesReportExport !== '' && isset($_GET['report'])) {
+    require_permission('hospitality', 'export');
+    require_once __DIR__ . '/../../app/export_engine.php';
+    $exportReportKey = (string) $_GET['report'];
+    if (!isset(hospitality_sales_report_options()[$exportReportKey])) {
+        $exportReportKey = 'sheet';
+    }
+    [$exportFromDefault, $exportToDefault] = hospitality_sales_report_default_range($companyId);
+    $exportFrom = $clampDate(trim((string) ($_GET['rfrom'] ?? $exportFromDefault)));
+    $exportTo = $clampDate(trim((string) ($_GET['rto'] ?? $exportToDefault)));
+    if ($exportTo < $exportFrom) {
+        $exportTo = $exportFrom;
+    }
+    // perPage huge: an export is the whole report, never the page on screen.
+    $exportReport = hospitality_sales_report(
+        $companyId, $exportFrom, $exportTo, $exportReportKey, 1, PHP_INT_MAX,
+        (string) ($_GET['rsort'] ?? ''), (string) ($_GET['rdir'] ?? 'asc')
+    );
+    log_activity('hospitality_sales_upload', $companyId, 'exported',
+        'Sales report "' . $exportReportKey . '" exported (' . $exportFrom . ' to ' . $exportTo . ').', $userId);
+    export_dispatch(
+        $salesReportExport,
+        'sales-' . $exportReportKey . '-' . $exportFrom . '-to-' . $exportTo,
+        hospitality_sales_report_export_rows($exportReport),
+        mb_substr((string) hospitality_sales_report_options()[$exportReportKey], 0, 31),
+        ['Company' => (string) ($company['name'] ?? ''), 'Period' => $exportFrom . ' to ' . $exportTo]
+    );
+}
+
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     require_permission('hospitality', 'export');
     $reportKey = (string) ($_GET['report'] ?? 'item');
@@ -1873,13 +1913,35 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         $reportTo = $reportFrom;
     }
     $reportPage = max(1, (int) ($_GET['rpage'] ?? 1));
-    $report = hospitality_sales_report($companyId, $reportFrom, $reportTo, $reportKey, $reportPage);
+    $reportSort = (string) ($_GET['rsort'] ?? '');
+    $reportDir = jw_enum_like($_GET['rdir'] ?? null, ['asc', 'desc'], 'asc');
+    $report = hospitality_sales_report($companyId, $reportFrom, $reportTo, $reportKey, $reportPage, 200, $reportSort, $reportDir);
     $reportPages = (int) ceil($report['total_rows'] / 200);
+    /** The query behind every link on this card, so filter and sort travel together. */
+    $reportQuery = static function (array $overrides = []) use ($reportKey, $reportFrom, $reportTo, $reportSort, $reportDir, $reportPage): string {
+        return http_build_query(array_merge([
+            'view' => 'sales-upload', 'report' => $reportKey,
+            'rfrom' => $reportFrom, 'rto' => $reportTo,
+            'rsort' => $reportSort, 'rdir' => $reportDir, 'rpage' => $reportPage,
+        ], $overrides));
+    };
     ?>
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2><?= icon('reports') ?> Sales Reports</h2></div>
+        <div class="mbw-card-head">
+            <h2><?= icon('reports') ?> Sales Reports</h2>
+            <?php if (user_can_do('hospitality', 'export') && $report['rows'] !== []): ?>
+                <span><?php // The file holds the whole report, sorted as it is on screen. ?>
+                    <?php foreach (['csv' => 'CSV', 'xlsx' => 'Excel', 'print' => 'PDF'] as $exportFormat => $exportLabel): ?>
+                        <a class="mbw-view-all" style="margin-left:10px"<?= $exportFormat === 'print' ? ' target="_blank" rel="noopener"' : '' ?>
+                           href="<?= e(url('admin/hospitality.php?' . $reportQuery(['export' => $exportFormat]))) ?>"><?= e($exportLabel) ?></a>
+                    <?php endforeach; ?>
+                </span>
+            <?php endif; ?>
+        </div>
         <form method="get" class="workspace-form-grid" style="margin-bottom:12px">
             <input type="hidden" name="view" value="sales-upload">
+            <input type="hidden" name="rsort" value="<?= e($reportSort) ?>">
+            <input type="hidden" name="rdir" value="<?= e($reportDir) ?>">
             <label>Report
                 <select name="report" onchange="this.form.submit()">
                     <?php foreach ($reportOptions as $optionKey => $optionLabel): ?>
@@ -1897,7 +1959,17 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <div style="overflow-x:auto"><table>
             <thead><tr>
                 <?php foreach ($report['columns'] as [$columnKey, $columnLabel, $columnNumeric]): ?>
-                    <th<?= $columnNumeric ? ' class="is-numeric"' : '' ?>><?= e($columnLabel) ?></th>
+                    <?php
+                    // Every heading sorts, and clicking the active one reverses it.
+                    $isSorted = $reportSort === $columnKey;
+                    $nextDir = ($isSorted && $reportDir === 'asc') ? 'desc' : 'asc';
+                    $arrow = $isSorted ? ($reportDir === 'asc' ? ' ▲' : ' ▼') : ' ⇅';
+                    ?>
+                    <th<?= $columnNumeric ? ' class="is-numeric"' : '' ?>>
+                        <a href="<?= e(url('admin/hospitality.php?' . $reportQuery(['rsort' => $columnKey, 'rdir' => $nextDir, 'rpage' => 1]))) ?>"
+                           style="color:inherit;text-decoration:none;white-space:nowrap"
+                           title="Sort by <?= e($columnLabel) ?> (<?= $nextDir === 'asc' ? 'ascending' : 'descending' ?>)"><?= e($columnLabel) ?><span style="opacity:<?= $isSorted ? '1' : '.35' ?>"><?= $arrow ?></span></a>
+                    </th>
                 <?php endforeach; ?>
             </tr></thead>
             <tbody>
@@ -1945,10 +2017,10 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12.5px">
                 Page <?= $reportPage ?> of <?= $reportPages ?>
                 <?php if ($reportPage > 1): ?>
-                    · <a href="<?= e(url('admin/hospitality.php?view=sales-upload&report=' . $reportKey . '&rfrom=' . $reportFrom . '&rto=' . $reportTo . '&rpage=' . ($reportPage - 1))) ?>">Previous</a>
+                    · <a href="<?= e(url('admin/hospitality.php?' . $reportQuery(['rpage' => $reportPage - 1]))) ?>">Previous</a>
                 <?php endif; ?>
                 <?php if ($reportPage < $reportPages): ?>
-                    · <a href="<?= e(url('admin/hospitality.php?view=sales-upload&report=' . $reportKey . '&rfrom=' . $reportFrom . '&rto=' . $reportTo . '&rpage=' . ($reportPage + 1))) ?>">Next</a>
+                    · <a href="<?= e(url('admin/hospitality.php?' . $reportQuery(['rpage' => $reportPage + 1]))) ?>">Next</a>
                 <?php endif; ?>
             </p>
         <?php endif; ?>

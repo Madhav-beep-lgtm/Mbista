@@ -1283,7 +1283,7 @@ function hospitality_sales_report_options(): array
  * Returns ['columns' => [[key, label, numeric]], 'rows' => [...],
  *          'totals' => [...], 'total_rows' => int].
  */
-function hospitality_sales_report(int $companyId, string $from, string $to, string $key, int $page = 1, int $perPage = 200): array
+function hospitality_sales_report(int $companyId, string $from, string $to, string $key, int $page = 1, int $perPage = 200, string $sort = '', string $dir = 'asc'): array
 {
     if (!table_exists('hospitality_sales_upload_lines')) {
         return ['columns' => [], 'rows' => [], 'totals' => [], 'total_rows' => 0];
@@ -1394,14 +1394,81 @@ function hospitality_sales_report(int $companyId, string $from, string $to, stri
     }
     $totalRows = count($rows);
 
+    // Sorted here rather than in SQL. The rows are already in hand, each report
+    // is bounded by what a kitchen actually has, and a second query to put them
+    // in a different order would be a round trip to do what usort does for
+    // nothing. The key is checked against this report's OWN columns, so it can
+    // only ever name a field that exists.
+    $sortable = [];
+    foreach ($columns as [$columnKey, $columnLabel, $columnNumeric]) {
+        $sortable[$columnKey] = $columnNumeric;
+    }
+    if ($sort !== '' && isset($sortable[$sort])) {
+        $numeric = $sortable[$sort];
+        $descending = strtolower($dir) === 'desc';
+        usort($rows, static function (array $a, array $b) use ($sort, $numeric, $descending): int {
+            $left = $a[$sort] ?? null;
+            $right = $b[$sort] ?? null;
+            $order = $numeric
+                ? ((float) $left <=> (float) $right)
+                : strcasecmp((string) $left, (string) $right);
+
+            return $descending ? -$order : $order;
+        });
+    }
+
     // Only the unaggregated listings can run to thousands of rows; the grouped
-    // ones are bounded by how many items or days a kitchen actually has.
+    // ones are bounded by how many items or days a kitchen actually has. Paging
+    // comes AFTER the sort, or page one would not be the first rows.
     if (in_array($key, ['sheet', 'invoice'], true)) {
         $page = max(1, $page);
         $rows = array_slice($rows, ($page - 1) * $perPage, $perPage);
     }
 
     return ['columns' => $columns, 'rows' => $rows, 'totals' => $totals, 'total_rows' => $totalRows];
+}
+
+/**
+ * One report flattened for a spreadsheet, headings and totals included.
+ *
+ * Built from the same columns and rows the screen renders, so the file and the
+ * page cannot disagree about what the report says.
+ */
+function hospitality_sales_report_export_rows(array $report): array
+{
+    $out = [];
+    $header = [];
+    foreach ($report['columns'] as [$columnKey, $columnLabel, $columnNumeric]) {
+        $header[] = $columnLabel;
+    }
+    $out[] = $header;
+
+    foreach ($report['rows'] as $row) {
+        $line = [];
+        foreach ($report['columns'] as [$columnKey, $columnLabel, $columnNumeric]) {
+            $value = $row[$columnKey] ?? '';
+            // Numbers go in as numbers so the spreadsheet can total them; only
+            // the labels are text.
+            $line[] = $columnNumeric ? (float) $value : (string) $value;
+        }
+        $out[] = $line;
+    }
+
+    if ($report['rows'] !== []) {
+        $totalLine = [];
+        foreach ($report['columns'] as $index => [$columnKey, $columnLabel, $columnNumeric]) {
+            if ($index === 0) {
+                $totalLine[] = 'Total (' . (int) $report['total_rows'] . ' rows)';
+                continue;
+            }
+            $totalLine[] = $columnNumeric && isset($report['totals'][$columnKey])
+                ? (float) $report['totals'][$columnKey]
+                : '';
+        }
+        $out[] = $totalLine;
+    }
+
+    return $out;
 }
 
 /**
