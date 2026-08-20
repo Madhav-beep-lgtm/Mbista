@@ -495,12 +495,15 @@ $listFilters = [
     'party_id' => $filterParty,
     'karigar_id' => $filterKarigar,
     'overdue_only' => $filterOverdue,
+    // Made to order, off the shelf, or the shop's own replenishment.
+    'source' => jw_enum($_GET['source'] ?? null, array_keys(jewellery_order_sources()), ''),
 ];
 if ($filterFrom !== '' && $filterTo !== '') {
     $listFilters['from'] = $filterFrom;
     $listFilters['to'] = $filterTo;
 }
-$advancedInUse = $filterStatus !== '' || $filterParty > 0 || $filterKarigar > 0 || $filterOverdue;
+$advancedInUse = $filterStatus !== '' || $filterParty > 0 || $filterKarigar > 0 || $filterOverdue
+    || (string) ($listFilters['source'] ?? '') !== '';
 
 // Add sorting support
 $sortParam = (string) ($_GET['sort'] ?? 'order_date_desc'); // Default sort by date descending
@@ -578,7 +581,7 @@ if ($view === 'orders' && table_exists('ledgers')) {
 $assignments = $view === 'assignments' ? jewellery_assignments_list($companyId, $listFilters) : [];
 // Assigning and receiving moved to their own pages; this view is the register
 // of what is OUT, so it no longer loads a receive preview.
-$deliveryOrigin = jw_enum($_GET['origin'] ?? null, array_keys(jewellery_delivery_origins()), '');
+$deliveryOrigin = jw_enum($_GET['origin'] ?? null, array_keys(jewellery_order_sources()), '');
 $deliverySort = jw_enum($_GET['sort'] ?? null, ['order', 'customer', 'origin', 'received', 'weight', 'waiting', 'promised'], 'received');
 $deliveryDir = jw_enum($_GET['dir'] ?? null, ['asc', 'desc'], 'asc');
 $pending = $view === 'delivery'
@@ -1149,11 +1152,41 @@ jw_filter_bar_styles();
                     $filterOverdue ? '1' : '', ['1' => 'Only these'], '— all —')],
             ],
         ]); ?>
+        <?php
+        $orderSourceLabels = jewellery_order_sources();
+        $orderSourceTones = jewellery_order_source_tones();
+        $orderSourceFilter = jw_enum($_GET['source'] ?? null, array_keys($orderSourceLabels), '');
+        ?>
+        <form method="get" style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input type="hidden" name="view" value="orders">
+            <?php foreach (['status', 'search', 'from', 'to', 'sort'] as $keepKey): ?>
+                <?php if (($_GET[$keepKey] ?? '') !== ''): ?>
+                    <input type="hidden" name="<?= e($keepKey) ?>" value="<?= e((string) $_GET[$keepKey]) ?>">
+                <?php endif; ?>
+            <?php endforeach; ?>
+            <label style="display:flex;gap:6px;align-items:center;margin:0">
+                <span style="color:var(--mbw-muted);font-size:12.5px">Order type</span>
+                <select name="source" class="field-compact" aria-label="How the order is being fulfilled" onchange="this.form.submit()">
+                    <option value="">All types</option>
+                    <?php foreach ($orderSourceLabels as $sourceKey => $sourceLabel): ?>
+                        <option value="<?= e($sourceKey) ?>" <?= $orderSourceFilter === $sourceKey ? 'selected' : '' ?>><?= e($sourceLabel) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <button type="submit" class="button secondary"><?= icon('filter') ?> Filter</button>
+            <?php if ($orderSourceFilter !== ''): ?>
+                <a class="button secondary" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">Show all types</a>
+            <?php endif; ?>
+            <span style="color:var(--mbw-muted);font-size:12px;margin-left:auto">
+                <strong>Made to order</strong> went to a kaligad · <strong>From showroom stock</strong> was set aside off the shelf
+            </span>
+        </form>
         <div class="mbw-tablewrap"><table>
             <thead><tr>
                 <th><a href="?view=orders&sort=<?= strpos($sortParam, 'order_no') === 0 && strpos($sortParam, '_asc') ? 'order_no_desc' : 'order_no_asc' ?>" style="cursor:pointer;text-decoration:none">No. <?= strpos($sortParam, 'order_no') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
                 <th><a href="?view=orders&sort=<?= strpos($sortParam, 'order_date') === 0 && strpos($sortParam, '_asc') ? 'order_date_desc' : 'order_date_asc' ?>" style="cursor:pointer;text-decoration:none">Date <?= strpos($sortParam, 'order_date') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
                 <th><a href="?view=orders&sort=<?= strpos($sortParam, 'party') === 0 && strpos($sortParam, '_asc') ? 'party_desc' : 'party_asc' ?>" style="cursor:pointer;text-decoration:none">Customer <?= strpos($sortParam, 'party') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
+                <th><a href="?view=orders&sort=<?= strpos($sortParam, 'source') === 0 && strpos($sortParam, '_asc') ? 'source_desc' : 'source_asc' ?>" style="cursor:pointer;text-decoration:none">Type <?= strpos($sortParam, 'source') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
                 <th><a href="?view=orders&sort=<?= strpos($sortParam, 'metal') === 0 && strpos($sortParam, '_asc') ? 'metal_desc' : 'metal_asc' ?>" style="cursor:pointer;text-decoration:none">Metal <?= strpos($sortParam, 'metal') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
                 <th class="is-numeric"><a href="?view=orders&sort=<?= strpos($sortParam, 'weight') === 0 && strpos($sortParam, '_asc') ? 'weight_desc' : 'weight_asc' ?>" style="cursor:pointer;text-decoration:none">Expected wt <?= strpos($sortParam, 'weight') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
                 <th><a href="?view=orders&sort=<?= strpos($sortParam, 'delivery') === 0 && strpos($sortParam, '_asc') ? 'delivery_desc' : 'delivery_asc' ?>" style="cursor:pointer;text-decoration:none">Delivery <?= strpos($sortParam, 'delivery') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
@@ -1161,12 +1194,19 @@ jw_filter_bar_styles();
                 <th></th>
             </tr></thead>
             <tbody>
-                <?php if ($orders === []): ?><tr><td colspan="8">No orders yet.</td></tr><?php endif; ?>
+                <?php if ($orders === []): ?><tr><td colspan="9">No orders yet.</td></tr><?php endif; ?>
                 <?php foreach ($orders as $row): ?>
                     <tr>
                         <td><?= e($row['order_no']) ?><?= ($row['design_no'] ?? '') !== '' ? '<br><small>' . e((string) $row['design_no']) . '</small>' : '' ?></td>
                         <td><?= e(app_date((string) $row['order_date'])) ?></td>
                         <td><?= e((string) ($row['party_name'] ?? $row['customer_name'] ?? 'Walk-in')) ?></td>
+                        <?php
+                        // How the customer is getting it: made for them by a
+                        // kaligad, or set aside off the shelf. Neither is
+                        // recorded as such — see jewellery_order_source_sql().
+                        $rowSource = (string) ($row['order_source'] ?? 'pending');
+                        ?>
+                        <td><span class="mbw-pill <?= e($orderSourceTones[$rowSource] ?? 'tone-gray') ?>"><?= e((string) ($orderSourceLabels[$rowSource] ?? $rowSource)) ?></span></td>
                         <td><?= e($row['metal_name'] . ' · ' . $row['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['expected_gross_weight'], 4) ?> <small><?= e($row['unit_code']) ?></small>
                             <?php // Actual weight and pure-metal content together — the pair a jewellery figure is read as. ?>
@@ -1557,8 +1597,8 @@ jw_filter_bar_styles();
     // waiting for a showroom one, and an assignment that came back before a
     // customer was attached is neither. They are told apart by the assignment's
     // kind and whether the order names anybody.
-    $deliveryOrigins = jewellery_delivery_origins();
-    $originTone = ['customer' => 'tone-blue', 'assignment' => 'tone-amber', 'showroom' => 'tone-purple'];
+    $deliveryOrigins = jewellery_order_sources();
+    $originTone = jewellery_order_source_tones();
     /** A column heading that sorts, and flips direction when it is the one already sorted on. */
     $sortHead = static function (string $key, string $label, bool $numeric = false) use ($deliverySort, $deliveryDir, $deliveryOrigin): string {
         $active = $deliverySort === $key;
@@ -1632,7 +1672,7 @@ jw_filter_bar_styles();
                         <td><?= e($row['order_no']) ?></td>
                         <td><?= $rowCustomer !== ''
                                 ? e($rowCustomer)
-                                : '<span style="color:var(--mbw-muted)">' . ($rowOrigin === 'showroom' ? 'Showroom stock' : 'Nobody yet') . '</span>' ?><?= ($row['customer_phone'] ?? '') !== '' ? '<br><small>' . e((string) $row['customer_phone']) . '</small>' : '' ?></td>
+                                : '<span style="color:var(--mbw-muted)">' . ($rowOrigin === 'replenishment' ? 'Shelf stock' : 'Nobody yet') . '</span>' ?><?= ($row['customer_phone'] ?? '') !== '' ? '<br><small>' . e((string) $row['customer_phone']) . '</small>' : '' ?></td>
                         <td><span class="mbw-pill <?= e($originTone[$rowOrigin] ?? 'tone-gray') ?>"><?= e((string) ($deliveryOrigins[$rowOrigin] ?? $rowOrigin)) ?></span></td>
                         <td><?= ($row['receive_date'] ?? null) ? e(app_date((string) $row['receive_date'])) : '—' ?></td>
                         <td class="is-numeric"><?= $fmt((float) ($row['received_gross_weight'] ?? 0), 4) ?> <small><?= e((string) $row['unit_code']) ?></small>
@@ -1662,9 +1702,9 @@ jw_filter_bar_styles();
             </tbody>
         </table></div>
         <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-            <strong>Customer ordered</strong> — somebody is waiting for it, and the order names them.
-            <strong>New assignment</strong> — work that came back before a customer was attached to it; it can be sold to whoever wants it, or an order raised against it.
-            <strong>Direct showroom order</strong> — made to replace shelf stock, so nobody is waiting.
+            <strong>Made to order</strong> — the piece went out to a kaligad for this customer and has come back; they are waiting for it.
+            <strong>From showroom stock</strong> — the customer chose a piece already on the shelf, so it was set aside rather than made.
+            <strong>Showroom replenishment</strong> — the shop's own work to restock the shelf; nobody is waiting for it.
             Any column heading sorts; click it again to reverse.
         </p>
     </section>

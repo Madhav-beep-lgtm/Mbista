@@ -495,8 +495,9 @@ function jewellery_order(int $companyId, int $orderId): ?array
 
 function jewellery_orders_list(int $companyId, array $filters = []): array
 {
+    $sourceSql = jewellery_order_source_sql();
     $sql = 'SELECT o.*, ap.name AS party_name, m.name AS metal_name, p.code AS purity_code, u.code AS unit_code,
-            i.sku AS item_code
+            i.sku AS item_code, ' . $sourceSql . ' AS order_source
         FROM jewellery_orders o
         LEFT JOIN accounting_parties ap ON ap.id = o.party_id
         INNER JOIN jewellery_metals m ON m.id = o.metal_id
@@ -527,6 +528,11 @@ function jewellery_orders_list(int $companyId, array $filters = []): array
         $sql .= ' AND EXISTS (SELECT 1 FROM jewellery_order_lines ol
             WHERE ol.order_id = o.id AND ol.karigar_id = :kid)';
         $params['kid'] = (int) $filters['karigar_id'];
+    }
+    // Made to order, off the shelf, or the shop's own replenishment.
+    if (isset(jewellery_order_sources()[(string) ($filters['source'] ?? '')])) {
+        $sql .= ' AND ' . $sourceSql . ' = :source';
+        $params['source'] = (string) $filters['source'];
     }
     if (!empty($filters['overdue_only'])) {
         // Promised, past due, and still nobody has come in for it. An
@@ -560,6 +566,8 @@ function jewellery_orders_list(int $companyId, array $filters = []): array
         'delivery_desc' => 'COALESCE(o.delivery_date, "9999-12-31") DESC',
         'status_asc' => 'o.status ASC',
         'status_desc' => 'o.status DESC',
+        'source_asc' => 'order_source ASC',
+        'source_desc' => 'order_source DESC',
     ];
     $sort = $sortMap[(string) ($filters['sort'] ?? 'order_date_desc')] ?? 'o.order_date DESC';
     $sql .= ' ORDER BY ' . $sort . ', o.id DESC LIMIT ' . max(1, min(1000, (int) ($filters['limit'] ?? 300)));
@@ -2958,45 +2966,74 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
  * "received but not delivered" board.
  */
 /**
- * Where a piece waiting for collection came from.
+ * How an order is being fulfilled.
  *
- * Three different things end up in the same queue and want handling
- * differently: a customer is waiting for one, nobody is waiting for another,
- * and the third is work that came back before anyone was attached to it.
- * There is no column that says which — it is read from the assignment's kind
- * and whether the order names anybody.
+ * A customer can get their piece two ways, and the shop needs to know which
+ * before it can answer "where is my ring":
+ *
+ *   Made to order        it went out to a kaligad and has to come back
+ *   From showroom stock  it was already on the shelf and is set aside for them
+ *
+ * A third kind is not a customer order at all: the shop assigning work to a
+ * kaligad to replenish its own shelf. Nobody is waiting for those.
+ *
+ * Nothing records this directly — it is read from whether the order has an
+ * assignment, and whether a showroom piece is reserved against it.
  */
-function jewellery_delivery_origins(): array
+function jewellery_order_sources(): array
 {
     return [
-        'customer' => 'Customer ordered',
-        'assignment' => 'New assignment (no customer yet)',
-        'showroom' => 'Direct showroom order',
+        'workshop' => 'Made to order',
+        'showroom' => 'From showroom stock',
+        'replenishment' => 'Showroom replenishment',
+        'pending' => 'Not started',
+    ];
+}
+
+/** The tone each kind is shown in, so the same thing is the same colour everywhere. */
+function jewellery_order_source_tones(): array
+{
+    return [
+        'workshop' => 'tone-blue',
+        'showroom' => 'tone-purple',
+        'replenishment' => 'tone-amber',
+        'pending' => 'tone-gray',
     ];
 }
 
 /**
- * The SQL that decides an order's origin, used for the column, the filter and
- * the counts so none of the three can disagree with the others.
+ * The SQL deciding it, shared by every list that shows it so none of them can
+ * disagree with another.
  *
- * MIN() rather than the bare column because an order can be split across two
- * kaligads: 'customer' sorts before 'self' in the enum, so this reads as
- * "showroom only if every part of it was made for the shelf" — if a customer is
- * involved anywhere, somebody is waiting.
+ * Written as EXISTS rather than a join so it can be dropped into a query
+ * whatever that query is already grouped by; both subqueries hit an index
+ * (idx_jw_assign_order, idx_jw_trace_order).
+ *
+ * An order the shop assigned to itself is checked FIRST: if any part of it was
+ * for the shelf rather than for a person, nobody is waiting on the counter for
+ * it, and that is the fact worth surfacing.
  */
-function jewellery_delivery_origin_sql(): string
+function jewellery_order_source_sql(string $orderAlias = 'o'): string
 {
+    $traced = jewellery_trace_ready()
+        ? "WHEN EXISTS (SELECT 1 FROM jewellery_stock_units xs
+                WHERE xs.company_id = {$orderAlias}.company_id AND xs.reserved_order_id = {$orderAlias}.id) THEN 'showroom'"
+        : '';
+
     return "CASE
-        WHEN MIN(a.assign_kind) = 'self' THEN 'showroom'
-        WHEN COALESCE(NULLIF(TRIM(ap.name), ''), NULLIF(TRIM(o.customer_name), '')) IS NOT NULL THEN 'customer'
-        ELSE 'assignment'
+        WHEN EXISTS (SELECT 1 FROM jewellery_order_assignments xa
+            WHERE xa.order_id = {$orderAlias}.id AND xa.status <> 'cancelled' AND xa.assign_kind = 'self') THEN 'replenishment'
+        WHEN EXISTS (SELECT 1 FROM jewellery_order_assignments xa
+            WHERE xa.order_id = {$orderAlias}.id AND xa.status <> 'cancelled') THEN 'workshop'
+        $traced
+        ELSE 'pending'
     END";
 }
 
 /**
  * Finished work nobody has collected yet.
  *
- * $filters takes 'origin' (one of jewellery_delivery_origins), and 'sort' /
+ * $filters takes 'origin' (one of jewellery_order_sources), and 'sort' /
  * 'dir' for the column headings. Sorting and filtering are done in SQL rather
  * than on the rows afterwards: the queue is 69 pieces in a quiet month and
  * several hundred in a busy one, and a shop that lets work sit only ever finds
@@ -3004,7 +3041,7 @@ function jewellery_delivery_origin_sql(): string
  */
 function jewellery_pending_delivery(int $companyId, array $filters = []): array
 {
-    $originSql = jewellery_delivery_origin_sql();
+    $originSql = jewellery_order_source_sql();
 
     // Only these can be sorted on, and each maps to an expression rather than
     // to whatever the caller sent — a sort key is going into an ORDER BY.
@@ -3052,7 +3089,7 @@ function jewellery_pending_delivery(int $companyId, array $filters = []): array
     // HAVING, not WHERE: the origin is decided from an aggregate, so it is not
     // known until the rows for an order have been brought together.
     $origin = (string) ($filters['origin'] ?? '');
-    if (isset(jewellery_delivery_origins()[$origin])) {
+    if (isset(jewellery_order_sources()[$origin])) {
         $sql .= " HAVING origin = :origin";
         $params['origin'] = $origin;
     }
@@ -3074,7 +3111,7 @@ function jewellery_pending_delivery(int $companyId, array $filters = []): array
  */
 function jewellery_pending_delivery_counts(int $companyId): array
 {
-    $originSql = jewellery_delivery_origin_sql();
+    $originSql = jewellery_order_source_sql();
     // The inner query is one row per ORDER; the outer one counts those. Written
     // the other way round it counted assignments, so a job split between two
     // kaligads made the queue look one piece longer than it was.
@@ -3088,7 +3125,7 @@ function jewellery_pending_delivery_counts(int $companyId): array
         ) t GROUP BY t.origin");
     $stmt->execute(['cid' => $companyId]);
 
-    $counts = ['customer' => 0, 'assignment' => 0, 'showroom' => 0];
+    $counts = array_fill_keys(array_keys(jewellery_order_sources()), 0);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $counts[(string) $row['origin']] = (int) $row['n'];
     }
