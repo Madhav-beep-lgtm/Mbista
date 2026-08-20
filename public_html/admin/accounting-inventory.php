@@ -15,6 +15,8 @@ require_once __DIR__ . '/../../app/opening_stock_import.php';
 // kitchen list is only touched for a company that has hospitality switched on
 // and an item actually marked.
 require_once __DIR__ . '/../../app/hospitality_engine.php';
+// A supplier's bill is entered as a grid and posted as one transaction.
+require_once __DIR__ . '/../../app/inventory_purchase_batch.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -38,21 +40,13 @@ if (!($inventoryProfile['show_inventory'] ?? false)) {
 $itemTypes = $inventoryProfile['show_manufacturing']
     ? ['stock', 'service', 'raw_material', 'finished_good', 'consumable']
     : ['stock', 'service', 'consumable'];
+// inventory_direction(), inventory_valid_date() and
+// inventory_company_warehouse_id() moved to app/inventory_valuation.php when
+// the multi-line purchase entry needed them too. They are loaded by bootstrap.
 $movementTypes = [
     'opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment',
     'write_off', 'damage', 'expiry', 'warehouse_transfer', 'departmental_transfer',
 ];
-
-function inventory_direction(string $type): string
-{
-    return in_array($type, ['opening', 'purchase', 'sales_return', 'produce'], true) ? 'in' : 'out';
-}
-
-function inventory_valid_date(string $value): ?string
-{
-    $parsed = DateTimeImmutable::createFromFormat('Y-m-d', $value);
-    return ($parsed && $parsed->format('Y-m-d') === $value) ? $value : null;
-}
 
 /**
  * The inventory posting purposes (chosen per item on the item form and its
@@ -139,17 +133,6 @@ function inventory_allowance_block_message(Throwable $e): ?string
  * so a tampered id from another tenant would otherwise insert cleanly and tag
  * this company's stock with a foreign location.
  */
-function inventory_company_warehouse_id(int $warehouseId, int $companyId): ?int
-{
-    if ($warehouseId <= 0) {
-        return null;
-    }
-    $stmt = db()->prepare('SELECT id FROM warehouses WHERE id = :id AND company_id = :company_id LIMIT 1');
-    $stmt->execute(['id' => $warehouseId, 'company_id' => $companyId]);
-
-    return ($stmt->fetchColumn() !== false) ? $warehouseId : null;
-}
-
 /**
  * Post the production journal (Dr finished-goods ledger / Cr input ledgers)
  * for a completed order, when the items involved have linked ledgers.
@@ -565,6 +548,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', 'Posted as voucher ' . $voucherNo . ' — ' . site_currency_symbol() . number_format((float) $draft['total_amount'], 2) . ' now in the ledger.');
         }
         redirect('admin/accounting-inventory.php');
+    }
+
+    if ($action === 'record_purchase_batch') {
+        require_permission('inventory', 'create');
+        $gridRows = (array) ($_POST['rows'] ?? []);
+        $checked = inv_purchase_batch_validate($companyId, $fiscalYearId, $gridRows);
+        $result = inv_purchase_batch_post($companyId, $fiscalYearId, $checked, $userId);
+        if (!$result['ok']) {
+            // Everything typed is handed back, along with the per-line reasons,
+            // so a long bill does not have to be keyed in twice.
+            $problems = $checked['errors'];
+            foreach ($checked['rows'] as $checkedRow) {
+                foreach ($checkedRow['errors'] as $rowProblem) {
+                    $problems[] = 'Line ' . $checkedRow['line'] . ': ' . $rowProblem;
+                }
+            }
+            if ($problems === []) {
+                $problems[] = (string) $result['error'];
+            }
+            $_SESSION['inv_purchase_grid'] = array_values($gridRows);
+            $_SESSION['inv_purchase_grid_errors'] = array_slice($problems, 0, 20);
+            flash('error', (string) $result['error']);
+            redirect('admin/accounting-inventory.php#movement-purchase');
+        }
+        $unmapped = 0;
+        foreach ($result['lines'] as $resultLine) {
+            if ($resultLine['map_missing'] !== []) {
+                $unmapped++;
+            }
+        }
+        flash('success', (int) $result['posted'] . ' purchase line(s) recorded'
+            . ((int) ($result['ingredients_added'] ?? 0) > 0 ? ', ' . (int) $result['ingredients_added'] . ' added to the kitchen ingredient list' : '')
+            . '. Bought-in stock is prepared as a draft entry — approve it in Purchase entries.'
+            . ($unmapped > 0 ? ' ' . $unmapped . ' line(s) recorded stock only: map their ledgers on the item to post the accounting entry.' : ''));
+        redirect('admin/accounting-inventory.php#movement-purchase-entries');
     }
 
     if ($action === 'record_movement') {
@@ -1732,6 +1750,28 @@ $itemStmt = db()->prepare('
 $itemStmt->execute(['company_id' => $companyId]);
 $items = $itemStmt->fetchAll();
 
+// The two lists the purchase grid picks from, read once for the page. Every
+// row of the grid shares one copy of each (see shared_options below), so ten
+// rows do not mean ten copies of the supplier list on the wire.
+$purchaseParties = [];
+if (table_exists('accounting_parties')) {
+    $partyStmt = db()->prepare("SELECT id, name FROM accounting_parties
+        WHERE company_id = :cid AND status = 'active' ORDER BY name ASC");
+    $partyStmt->execute(['cid' => $companyId]);
+    $purchaseParties = $partyStmt->fetchAll(PDO::FETCH_ASSOC);
+}
+$purchaseLedgers = [];
+if (table_exists('ledgers')) {
+    $purchaseLedgerStmt = db()->prepare("SELECT id, code, name FROM ledgers
+        WHERE company_id = :cid AND status = 'active' ORDER BY code ASC, name ASC");
+    $purchaseLedgerStmt->execute(['cid' => $companyId]);
+    $purchaseLedgers = $purchaseLedgerStmt->fetchAll(PDO::FETCH_ASSOC);
+}
+// Filled back in when a batch is refused, so nothing typed is lost.
+$purchaseGridRows = $_SESSION['inv_purchase_grid'] ?? [];
+$purchaseGridErrors = $_SESSION['inv_purchase_grid_errors'] ?? [];
+unset($_SESSION['inv_purchase_grid'], $_SESSION['inv_purchase_grid_errors']);
+
 $movementStmt = db()->prepare('
     SELECT t.*, i.sku, i.name AS item_name, i.unit
     FROM inventory_transactions t
@@ -2512,12 +2552,10 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         </form>
     </details>
 
-    <details class="feature-disclosure" id="movement-purchase" <?= $moveItemId > 0 ? 'open' : '' ?>>
-        <summary><span><strong><?= icon('tasks') ?>Record Purchase / Opening Stock</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
-        <form method="post" class="workspace-form-grid" id="purchaseMovementForm">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="record_movement">
-<?php $invMoveItemOptions = static function () use ($items): string {
+<?php
+// The item list the sale / issue / transfer forms further down share. It lived
+// inside the purchase form until that became a grid with a list of its own.
+$invMoveItemOptions = static function () use ($items): string {
     $html = '<option value="">Select item</option>';
     foreach ($items as $item) {
         $html .= '<option value="' . (int) $item['id'] . '"'
@@ -2527,88 +2565,143 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     }
 
     return $html;
-}; ?>
-            <?php $moveOpts = shared_options('inv-move-items', $invMoveItemOptions, (string) ($moveItemId ?: '')); ?>
-            <label>Item<select name="item_id" id="purMovItem" required<?= $moveOpts['fill'] ? ' data-fill-from="inv-move-items"' : '' ?>><?= $moveOpts['html'] ?></select></label>
-            <label>Movement<select name="transaction_type">
-                <option value="opening">Opening</option>
-                <option value="purchase">Purchase</option>
-                <option value="purchase_return">Purchase return</option>
-            </select></label>
-            <?php
-            $invSupplierOptions = [];
-            if (table_exists('accounting_parties')) {
-                $invSupplierStmt = db()->prepare("SELECT id, code, name FROM accounting_parties WHERE company_id = :cid AND status = 'active' AND party_type IN ('supplier', 'both') ORDER BY name ASC");
-                $invSupplierStmt->execute(['cid' => $companyId]);
-                $invSupplierOptions = $invSupplierStmt->fetchAll(PDO::FETCH_ASSOC);
+};
+?>
+    <details class="feature-disclosure" id="movement-purchase" <?= $moveItemId > 0 || !empty($purchaseGridRows) ? 'open' : '' ?>>
+        <summary><span><strong><?= icon('tasks') ?>Record Purchase / Opening Stock</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <?php
+        // A supplier's bill is rarely one line, so the whole bill is entered at
+        // once and posted together. Ten rows to start with, and the Add row
+        // button below for a longer one.
+        $gridRowCount = max(10, count($purchaseGridRows ?? []) + 2);
+        $gridDefaultDate = $todayInFy ?? date('Y-m-d');
+        $gridItemOptions = static function () use ($items): string {
+            $html = '<option value="">Select item…</option>';
+            foreach ($items as $gridItem) {
+                $html .= '<option value="' . (int) $gridItem['id'] . '"'
+                    . ' data-unit="' . e((string) $gridItem['unit']) . '"'
+                    . ' data-rate="' . e(number_format((float) $gridItem['purchase_rate'], 2, '.', '')) . '">'
+                    . e($gridItem['sku'] . ' — ' . $gridItem['name']) . '</option>';
             }
-            ?>
-            <label>Supplier (purchases post to their payable ledger)
-                <select name="supplier_party_id">
-                    <option value="0">— none (purchase clearing) —</option>
-                    <?php foreach ($invSupplierOptions as $sp): ?>
-                        <option value="<?= (int) $sp['id'] ?>"><?= e($sp['name'] . ' (' . $sp['code'] . ')') ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Warehouse<select name="warehouse_id"><option value="0">— unassigned —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>"><?= e($warehouse['name']) ?></option><?php endforeach; ?></select></label>
-            <label>Date<input type="date" name="transaction_date" value="<?= e(date('Y-m-d')) ?>" required></label>
-            <label>Reference<input type="text" name="ref_no" maxlength="120"></label>
-            <label>Quantity<input type="number" step="0.001" min="0.001" name="quantity" required></label>
-            <label>Rate<input type="number" step="0.01" min="0" name="rate" id="purMovRate" placeholder="Auto from item">
-                <span class="frm-optional">Excluding VAT — this is what the stock is worth</span>
-            </label>
-            <?php // The date on the bill and the date it is entered are two
-                  // different facts; the books date the purchase to the first. ?>
-            <label>Voucher posting date<input type="date" name="posting_date" value="<?= e(date('Y-m-d')) ?>"></label>
-            <label>VAT on purchase<input type="number" step="0.01" min="0" name="vat_amount" value="0.00" id="purMovVat">
-                <span class="frm-optional">Recoverable — never added to the stock value</span>
-            </label>
-            <label>VAT on purchase ledger (debit)
-                <select name="vat_ledger_id" data-fill-from="inv-ledger-options">
-                    <option value="0">— none —</option>
-                </select>
-            </label>
-            <label>TDS rate %<input type="number" step="0.01" min="0" max="100" name="tds_rate_pct" value="0" id="purMovTdsRate">
-                <span class="frm-optional" id="purMovTdsOut">No TDS withheld</span>
-            </label>
-            <label>TDS deducted ledger (credit)
-                <select name="tds_ledger_id" data-fill-from="inv-ledger-options">
-                    <option value="0">— none —</option>
-                </select>
-            </label>
-            <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
-            <div class="workspace-span-2"><small style="color:var(--mbw-muted)">Stock moves straight away; the accounting entry is prepared as a DRAFT and takes its voucher number when you post it under "Purchase entries" below.</small></div>
-            <button type="submit"><?= icon('tasks') ?>Record (draft entry)</button>
+
+            return $html;
+        };
+        $gridSupplierOptions = static function () use ($purchaseParties): string {
+            $html = '<option value="0">— none —</option>';
+            foreach ($purchaseParties as $gridParty) {
+                $html .= '<option value="' . (int) $gridParty['id'] . '">' . e((string) $gridParty['name']) . '</option>';
+            }
+
+            return $html;
+        };
+        $gridLedgerOptions = static function () use ($purchaseLedgers): string {
+            $html = '<option value="0">— not set —</option>';
+            foreach ($purchaseLedgers as $gridLedger) {
+                $html .= '<option value="' . (int) $gridLedger['id'] . '">' . e($gridLedger['code'] . ' — ' . $gridLedger['name']) . '</option>';
+            }
+
+            return $html;
+        };
+        ?>
+        <?php if (($purchaseGridErrors ?? []) !== []): ?>
+            <div class="notice error" style="margin-bottom:10px">
+                <strong>Nothing was recorded.</strong>
+                <ul style="margin:6px 0 0;padding-left:18px">
+                    <?php foreach (array_slice($purchaseGridErrors, 0, 12) as $gridError): ?><li><?= e((string) $gridError) ?></li><?php endforeach; ?>
+                </ul>
+            </div>
+        <?php endif; ?>
+        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
+            Enter the whole bill and post it in one go. Every line becomes its own stock movement and its own accounting entry —
+            exactly as entering them one at a time did — but they all succeed or all fail together, so a bill can never be half in.
+            Leave the rest of the rows blank.
+        </p>
+        <form method="post" id="purchaseGridForm">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="record_purchase_batch">
+            <div style="overflow-x:auto"><table class="mbw-grid-table" id="purchaseGrid">
+                <thead><tr>
+                    <th>Posting date</th>
+                    <th>Supplier inv. date</th>
+                    <th>Item</th>
+                    <th>Movement</th>
+                    <th>UoM</th>
+                    <th>Reference</th>
+                    <th class="is-numeric">Quantity</th>
+                    <th class="is-numeric">Rate<br><small>excl. VAT, after discount</small></th>
+                    <th class="is-numeric">Amount</th>
+                    <th>VAT applicability</th>
+                    <th class="is-numeric">VAT on purchase</th>
+                    <th>Supplier</th>
+                    <th>VAT ledger (Dr)</th>
+                    <th class="is-numeric">TDS base</th>
+                    <th class="is-numeric">TDS %</th>
+                    <th>TDS ledger (Cr)</th>
+                    <th>Notes</th>
+                    <th>Ingredient</th>
+                    <th></th>
+                </tr></thead>
+                <tbody>
+                <?php for ($gridRow = 0; $gridRow < $gridRowCount; $gridRow++): ?>
+                    <?php $prev = $purchaseGridRows[$gridRow] ?? []; ?>
+                    <tr class="jw-grid-row">
+                        <td><input type="date" name="rows[<?= $gridRow ?>][transaction_date]" value="<?= e((string) ($prev['transaction_date'] ?? ($gridRow === 0 ? $gridDefaultDate : ''))) ?>" style="width:140px"></td>
+                        <td><input type="date" name="rows[<?= $gridRow ?>][supplier_invoice_date]" value="<?= e((string) ($prev['supplier_invoice_date'] ?? '')) ?>" style="width:140px"></td>
+                        <td><?php $gridItemField = shared_options('inv-purchase-items', $gridItemOptions, (string) ($prev['item_id'] ?? '')); ?>
+                            <select name="rows[<?= $gridRow ?>][item_id]" class="inv-grid-item"<?= $gridItemField['fill'] ? ' data-fill-from="inv-purchase-items"' : '' ?> style="min-width:190px"><?= $gridItemField['html'] ?></select></td>
+                        <td><select name="rows[<?= $gridRow ?>][movement]" style="min-width:120px">
+                            <?php foreach (inv_purchase_batch_types() as $gridType => $gridTypeLabel): ?>
+                                <option value="<?= e($gridType) ?>" <?= (string) ($prev['movement'] ?? 'purchase') === $gridType ? 'selected' : '' ?>><?= e($gridTypeLabel) ?></option>
+                            <?php endforeach; ?>
+                        </select></td>
+                        <td><input type="text" class="inv-grid-uom" value="<?= e((string) ($prev['unit'] ?? '')) ?>" readonly tabindex="-1" style="width:70px;background:transparent;border:0;color:var(--mbw-muted)"></td>
+                        <td><input type="text" name="rows[<?= $gridRow ?>][ref_no]" maxlength="80" value="<?= e((string) ($prev['ref_no'] ?? '')) ?>" placeholder="Bill no." style="width:110px"></td>
+                        <td class="is-numeric"><input type="number" step="0.001" min="0" name="rows[<?= $gridRow ?>][quantity]" class="inv-grid-qty" value="<?= e((string) ($prev['quantity'] ?? '')) ?>" style="width:90px;text-align:right"></td>
+                        <td class="is-numeric"><input type="number" step="0.01" min="0" name="rows[<?= $gridRow ?>][rate]" class="inv-grid-rate" value="<?= e((string) ($prev['rate'] ?? '')) ?>" style="width:100px;text-align:right"></td>
+                        <td class="is-numeric"><input type="text" class="inv-grid-amount" value="" readonly tabindex="-1" style="width:110px;text-align:right;background:transparent;border:0"></td>
+                        <td><select name="rows[<?= $gridRow ?>][vat_mode]" class="inv-grid-vatmode" style="min-width:130px">
+                            <?php foreach (inv_purchase_vat_modes() as $gridMode => $gridModeMeta): ?>
+                                <option value="<?= e($gridMode) ?>" <?= (string) ($prev['vat_mode'] ?? 'standard') === $gridMode ? 'selected' : '' ?>><?= e((string) $gridModeMeta['label']) ?></option>
+                            <?php endforeach; ?>
+                            </select>
+                            <input type="number" step="0.01" min="0" max="100" name="rows[<?= $gridRow ?>][vat_rate]" class="inv-grid-vatrate" value="<?= e((string) ($prev['vat_rate'] ?? '')) ?>" placeholder="rate %" style="width:80px;display:<?= (string) ($prev['vat_mode'] ?? '') === 'custom' ? 'block' : 'none' ?>;margin-top:4px"></td>
+                        <td class="is-numeric"><input type="number" step="0.01" min="0" name="rows[<?= $gridRow ?>][vat_amount]" class="inv-grid-vat" value="<?= e((string) ($prev['vat_amount'] ?? '')) ?>" style="width:100px;text-align:right" placeholder="auto"></td>
+                        <td><?php $gridSupplierField = shared_options('inv-purchase-suppliers', $gridSupplierOptions, (string) ($prev['supplier_party_id'] ?? '')); ?>
+                            <select name="rows[<?= $gridRow ?>][supplier_party_id]"<?= $gridSupplierField['fill'] ? ' data-fill-from="inv-purchase-suppliers"' : '' ?> style="min-width:150px"><?= $gridSupplierField['html'] ?></select></td>
+                        <td><?php $gridVatLedgerField = shared_options('inv-purchase-ledgers', $gridLedgerOptions, (string) ($prev['vat_ledger_id'] ?? '')); ?>
+                            <select name="rows[<?= $gridRow ?>][vat_ledger_id]"<?= $gridVatLedgerField['fill'] ? ' data-fill-from="inv-purchase-ledgers"' : '' ?> style="min-width:160px"><?= $gridVatLedgerField['html'] ?></select></td>
+                        <td class="is-numeric"><input type="number" step="0.01" min="0" name="rows[<?= $gridRow ?>][tds_base]" value="<?= e((string) ($prev['tds_base'] ?? '')) ?>" style="width:100px;text-align:right" placeholder="whole line"></td>
+                        <td class="is-numeric"><input type="number" step="0.01" min="0" max="100" name="rows[<?= $gridRow ?>][tds_rate]" value="<?= e((string) ($prev['tds_rate'] ?? '')) ?>" style="width:70px;text-align:right"></td>
+                        <td><?php $gridTdsLedgerField = shared_options('inv-purchase-ledgers', $gridLedgerOptions, (string) ($prev['tds_ledger_id'] ?? '')); ?>
+                            <select name="rows[<?= $gridRow ?>][tds_ledger_id]"<?= $gridTdsLedgerField['fill'] ? ' data-fill-from="inv-purchase-ledgers"' : '' ?> style="min-width:160px"><?= $gridTdsLedgerField['html'] ?></select></td>
+                        <td><input type="text" name="rows[<?= $gridRow ?>][notes]" maxlength="255" value="<?= e((string) ($prev['notes'] ?? '')) ?>" style="width:120px"></td>
+                        <td style="text-align:center"><?php if (column_exists('inventory_items', 'is_ingredient')): ?>
+                            <input type="checkbox" name="rows[<?= $gridRow ?>][mark_ingredient]" value="1" <?= !empty($prev['mark_ingredient']) ? 'checked' : '' ?> title="Also make this item available to recipes">
+                        <?php endif; ?></td>
+                        <td><button type="button" class="button secondary inv-grid-clear" style="min-height:28px;padding:2px 8px" title="Clear this line">✕</button></td>
+                    </tr>
+                <?php endfor; ?>
+                </tbody>
+                <tfoot><tr>
+                    <th colspan="8" style="text-align:right">Bill total</th>
+                    <th class="is-numeric" id="purchaseGridAmount">0.00</th>
+                    <th></th>
+                    <th class="is-numeric" id="purchaseGridVat">0.00</th>
+                    <th colspan="8"><span id="purchaseGridPayable" style="color:var(--mbw-muted)"></span></th>
+                </tr></tfoot>
+            </table></div>
+            <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+                <button type="submit"><?= icon('badge-check') ?>Record all lines</button>
+                <button type="button" class="secondary" id="purchaseGridAddRow"><?= icon('plus') ?>Add row</button>
+            </div>
         </form>
-        <script>
-        (function () {
-            var item = document.getElementById('purMovItem');
-            var rate = document.getElementById('purMovRate');
-            item.addEventListener('change', function () {
-                var opt = item.options[item.selectedIndex];
-                if (opt && opt.value) { rate.value = opt.getAttribute('data-purchase-rate'); }
-            });
-            // The rate is typed; the rupees withheld are worked out, so they are
-            // seen before saving rather than for the first time on a voucher.
-            // The server recomputes from the same rate and value, so a browser
-            // that gets this wrong cannot change what is actually withheld.
-            var qty = document.querySelector('#movement-purchase input[name="quantity"]');
-            var tdsRate = document.getElementById('purMovTdsRate');
-            var tdsOut = document.getElementById('purMovTdsOut');
-            function showTds() {
-                if (!qty || !tdsRate || !tdsOut) { return; }
-                var value = (parseFloat(qty.value) || 0) * (parseFloat(rate.value) || 0);
-                var pct = parseFloat(tdsRate.value) || 0;
-                if (value <= 0 || pct <= 0) { tdsOut.textContent = 'No TDS withheld'; return; }
-                tdsOut.textContent = 'Withholds ' + (Math.round(value * pct) / 100).toFixed(2) +
-                    ' — the supplier is credited that much less';
-            }
-            [qty, rate, tdsRate].forEach(function (el) { if (el) { el.addEventListener('input', showTds); } });
-            showTds();
-        })();
-        </script>
+        <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
+            The reference is what ties these lines to the supplier's bill — it shows on the entry, so the bill can be found again when it is paid.
+            Bought-in stock is prepared as a draft entry so it can be read before it counts; approve it in <strong>Purchase entries</strong> below.
+            VAT and any tax withheld are shown next to the stock value they are deliberately kept out of.
+        </p>
     </details>
+
 
     <?php
     // Purchase and opening entries this company has prepared or posted, drafts
@@ -3174,8 +3267,122 @@ document.addEventListener('DOMContentLoaded', function () {
 <?= shared_options_template('inv-bom-items', $invItemOptions) ?>
 <?php endif; ?>
 <?php if (isset($invMoveItemOptions)): ?><?= shared_options_template('inv-move-items', $invMoveItemOptions) ?><?php endif; ?>
+<?php // The purchase grid draws the same three lists on every row; one copy of
+      // each goes down here and the rows take it on load. ?>
+<?php if (isset($gridItemOptions)): ?>
+<?= shared_options_template('inv-purchase-items', $gridItemOptions) ?>
+<?= shared_options_template('inv-purchase-suppliers', $gridSupplierOptions) ?>
+<?= shared_options_template('inv-purchase-ledgers', $gridLedgerOptions) ?>
+<?php endif; ?>
 <?php // Unguarded: it emits itself only when a stub on this page needs it. ?>
 <?= shared_options_script() ?>
+<?php if (isset($gridItemOptions)): ?>
+<script>
+// The purchase grid: unit and rate follow the item chosen, the amount and VAT
+// work themselves out, and the bill totals at the foot. Nothing here is needed
+// to POST the form — every figure is recalculated on the server before a
+// single row is written.
+(function () {
+    var grid = document.getElementById('purchaseGrid');
+    if (!grid) { return; }
+    var body = grid.tBodies[0];
+
+    function money(value) {
+        return (Math.round((value + Number.EPSILON) * 100) / 100).toFixed(2);
+    }
+
+    function recalcRow(row) {
+        var itemSelect = row.querySelector('.inv-grid-item');
+        var qty = parseFloat((row.querySelector('.inv-grid-qty') || {}).value) || 0;
+        var rate = parseFloat((row.querySelector('.inv-grid-rate') || {}).value) || 0;
+        var amount = qty * rate;
+        var amountCell = row.querySelector('.inv-grid-amount');
+        if (amountCell) { amountCell.value = amount > 0 ? money(amount) : ''; }
+
+        // The unit is the item's own, shown so a quantity is not typed against
+        // the wrong measure.
+        var chosen = itemSelect && itemSelect.selectedIndex >= 0 ? itemSelect.options[itemSelect.selectedIndex] : null;
+        var uom = row.querySelector('.inv-grid-uom');
+        if (uom) { uom.value = chosen ? (chosen.getAttribute('data-unit') || '') : ''; }
+
+        var modeSelect = row.querySelector('.inv-grid-vatmode');
+        var rateInput = row.querySelector('.inv-grid-vatrate');
+        var vatInput = row.querySelector('.inv-grid-vat');
+        var mode = modeSelect ? modeSelect.value : 'standard';
+        if (rateInput) { rateInput.style.display = mode === 'custom' ? 'block' : 'none'; }
+        if (vatInput && !vatInput.dataset.touched) {
+            var vatRate = 0;
+            if (mode === 'standard') { vatRate = 13; }
+            else if (mode === 'custom') { vatRate = parseFloat(rateInput ? rateInput.value : 0) || 0; }
+            vatInput.value = amount > 0 && vatRate > 0 ? money(amount * vatRate / 100) : '';
+            if (mode === 'exempt') { vatInput.value = ''; }
+        }
+        return { amount: amount, vat: parseFloat(vatInput ? vatInput.value : 0) || 0 };
+    }
+
+    function recalcAll() {
+        var totalAmount = 0, totalVat = 0;
+        Array.prototype.forEach.call(body.rows, function (row) {
+            var sums = recalcRow(row);
+            totalAmount += sums.amount;
+            totalVat += sums.vat;
+        });
+        var amountCell = document.getElementById('purchaseGridAmount');
+        var vatCell = document.getElementById('purchaseGridVat');
+        var payableCell = document.getElementById('purchaseGridPayable');
+        if (amountCell) { amountCell.textContent = money(totalAmount); }
+        if (vatCell) { vatCell.textContent = money(totalVat); }
+        if (payableCell) {
+            payableCell.textContent = totalAmount > 0
+                ? 'Bill including VAT: ' + money(totalAmount + totalVat)
+                : '';
+        }
+    }
+
+    grid.addEventListener('input', function (event) {
+        // A VAT figure typed by hand is the supplier's, and must not be
+        // overwritten by the rate the next time anything else changes.
+        if (event.target.classList.contains('inv-grid-vat')) {
+            event.target.dataset.touched = event.target.value === '' ? '' : '1';
+        }
+        recalcAll();
+    });
+    grid.addEventListener('change', recalcAll);
+    grid.addEventListener('click', function (event) {
+        var clear = event.target.closest ? event.target.closest('.inv-grid-clear') : null;
+        if (!clear) { return; }
+        var row = clear.closest('tr');
+        Array.prototype.forEach.call(row.querySelectorAll('input, select'), function (field) {
+            if (field.type === 'checkbox') { field.checked = false; }
+            else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
+            else if (!field.readOnly) { field.value = ''; }
+            delete field.dataset.touched;
+        });
+        recalcAll();
+    });
+
+    var addButton = document.getElementById('purchaseGridAddRow');
+    if (addButton) {
+        addButton.addEventListener('click', function () {
+            var last = body.rows[body.rows.length - 1];
+            var copy = last.cloneNode(true);
+            var nextIndex = body.rows.length;
+            Array.prototype.forEach.call(copy.querySelectorAll('[name]'), function (field) {
+                field.name = field.name.replace(/rows\[\d+\]/, 'rows[' + nextIndex + ']');
+                if (field.type === 'checkbox') { field.checked = false; }
+                else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
+                else { field.value = ''; }
+                delete field.dataset.touched;
+            });
+            Array.prototype.forEach.call(copy.querySelectorAll('input[readonly]'), function (field) { field.value = ''; });
+            body.appendChild(copy);
+        });
+    }
+
+    recalcAll();
+})();
+</script>
+<?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
 
 <script>

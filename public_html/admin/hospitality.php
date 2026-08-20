@@ -1059,7 +1059,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="sync_ingredients">
                     <input type="hidden" name="back_view" value="ingredients">
-                    <button type="submit" class="secondary" style="min-height:30px;padding:3px 12px"><?= icon('refresh') ?>Refresh from inventory</button>
+                    <button type="submit" class="secondary" style="min-height:30px;padding:3px 12px"><?= icon('reconcile') ?>Refresh from inventory</button>
                 </form>
             <?php endif; ?>
         </div>
@@ -1123,7 +1123,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </tbody>
             </table></div>
             <?php if ($canEdit && $ingredients !== []): ?>
-                <div style="margin-top:12px"><button type="submit"><?= icon('check') ?>Save recipe settings</button></div>
+                <div style="margin-top:12px"><button type="submit"><?= icon('badge-check') ?>Save recipe settings</button></div>
             <?php endif; ?>
         </form>
         <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
@@ -1177,7 +1177,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label class="checkbox-line" style="align-self:end"><input type="checkbox" name="tax_inclusive" <?= (int) ($editMenuItem['tax_inclusive'] ?? 0) === 1 ? 'checked' : '' ?>> Price is tax-inclusive</label>
             <label class="checkbox-line" style="align-self:end"><input type="checkbox" name="active" <?= (int) ($editMenuItem['active'] ?? 1) === 1 ? 'checked' : '' ?>> Active</label>
             <label class="workspace-span-2">Notes<input type="text" name="notes" maxlength="255" value="<?= e($editMenuItem['notes'] ?? '') ?>"></label>
-            <div class="workspace-span-2"><button type="submit"><?= icon('check') ?>Save Menu Item</button></div>
+            <div class="workspace-span-2"><button type="submit"><?= icon('badge-check') ?>Save Menu Item</button></div>
         </form>
     </section>
     <?php endif; ?>
@@ -2233,7 +2233,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <label class="checkbox-line"><input type="checkbox" name="allow_duplicate_dates" value="1"> Post anyway — these sheets hold additional sales for days already posted</label>
                 <?php endif; ?>
                 <div style="margin-top:10px">
-                    <button type="submit"><?= icon('check') ?>Post <?= count($pvItems['days']) ?> daily voucher<?= count($pvItems['days']) === 1 ? '' : 's' ?></button>
+                    <button type="submit"><?= icon('badge-check') ?>Post <?= count($pvItems['days']) ?> daily voucher<?= count($pvItems['days']) === 1 ? '' : 's' ?></button>
                 </div>
             </form>
         <?php endif; ?>

@@ -1726,3 +1726,39 @@ function inv_transaction_purposes(string $transactionType): array
         default                   => ['inventory_asset'],
     };
 }
+
+// --------------------------------------------------- shared movement helpers
+//
+// These sat on the Inventory & Manufacturing page until the multi-line purchase
+// entry needed them as well. Nothing about them is page-specific.
+
+/** Does this movement bring stock IN or send it OUT? */
+function inventory_direction(string $type): string
+{
+    return in_array($type, ['opening', 'purchase', 'sales_return', 'produce'], true) ? 'in' : 'out';
+}
+
+/** A date typed as YYYY-MM-DD, or null when it is not one. */
+function inventory_valid_date(string $value): ?string
+{
+    $parsed = DateTimeImmutable::createFromFormat('Y-m-d', $value);
+
+    return ($parsed && $parsed->format('Y-m-d') === $value) ? $value : null;
+}
+
+/**
+ * A warehouse id, but only if it belongs to this company.
+ *
+ * Returning null rather than the id is what stops a hand-edited form filing
+ * this company's stock into somebody else's location.
+ */
+function inventory_company_warehouse_id(int $warehouseId, int $companyId): ?int
+{
+    if ($warehouseId <= 0) {
+        return null;
+    }
+    $stmt = db()->prepare('SELECT id FROM warehouses WHERE id = :id AND company_id = :company_id LIMIT 1');
+    $stmt->execute(['id' => $warehouseId, 'company_id' => $companyId]);
+
+    return ($stmt->fetchColumn() !== false) ? $warehouseId : null;
+}
