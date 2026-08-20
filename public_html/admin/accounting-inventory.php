@@ -3529,6 +3529,7 @@ document.addEventListener('DOMContentLoaded', function () {
             Array.prototype.forEach.call(copy.querySelectorAll('[name]'), function (field) {
                 field.name = field.name.replace(/\[items\]\[\d+\]/, '[items][' + nextItem + ']');
                 if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
+                else if (field.type === 'hidden') { /* the tick's "no" answer — leave it */ }
                 else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
                 else { field.value = ''; }
                 delete field.dataset.touched;
@@ -3541,6 +3542,7 @@ document.addEventListener('DOMContentLoaded', function () {
             var itemRow = clearItem.closest('tr');
             Array.prototype.forEach.call(itemRow.querySelectorAll('input, select'), function (field) {
                 if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
+                else if (field.type === 'hidden') { /* the tick's "no" answer — leave it */ }
                 else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
                 else if (!field.readOnly) { field.value = ''; }
                 delete field.dataset.touched;
@@ -3561,6 +3563,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (itemGrid) {
                 Array.prototype.forEach.call(itemGrid.querySelectorAll('input, select'), function (field) {
                     if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
+                    else if (field.type === 'hidden') { /* the tick's "no" answer — leave it */ }
                     else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
                     else if (!field.readOnly) { field.value = ''; }
                     delete field.dataset.touched;
@@ -3628,6 +3631,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 Array.prototype.forEach.call(dialogCopy.querySelectorAll('[name]'), function (field) {
                     field.name = field.name.replace(/bills\[\d+\]/, 'bills[' + nextIndex + ']');
                     if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
+                    else if (field.type === 'hidden') { /* the tick's "no" answer — leave it */ }
                     else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
                     else { field.value = ''; }
                     delete field.dataset.touched;
