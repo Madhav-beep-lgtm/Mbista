@@ -819,7 +819,7 @@ function export_csv(string $filename, array $data): void
             }
             return $cell;
         }, $row);
-        fputcsv($output, $safeRow);
+        fputcsv($output, $safeRow, ',', '"', '\\');
     }
 
     fclose($output);

@@ -302,6 +302,45 @@ ok(count($unstarted) === 1, 'An order that has gone nowhere yet reads as Not sta
 ok((string) $unstarted[0]['order_no'] === '006', '  ...and it is the right one');
 
 
+echo "\n== The queue exports ==\n";
+// The spreadsheet is built from the same rows the screen renders, so the file
+// and the page can never disagree -- and the order number leads, because that
+// is what a customer quotes when they ring up.
+require_once __DIR__ . '/../app/export_engine.php';
+$exportRows = [['Order No', 'Order date', 'Customer', 'Phone', 'Ordered as', 'Item', 'Design',
+    'Received on', 'Weight back', 'Fine wt', 'Unit', 'Days waiting', 'Promised', 'Kaligads', 'Order status']];
+$exportLabels = jewellery_order_sources();
+foreach (jewellery_pending_delivery($cid) as $r) {
+    $exportRows[] = [
+        (string) $r['order_no'], (string) $r['order_date'],
+        (string) ($r['party_name'] ?? '') !== '' ? (string) $r['party_name'] : (string) ($r['customer_name'] ?? ''),
+        (string) ($r['customer_phone'] ?? ''),
+        (string) ($exportLabels[(string) ($r['origin'] ?? '')] ?? ''),
+        (string) ($r['expected_item'] ?? ''), (string) ($r['design_no'] ?? ''),
+        (string) ($r['receive_date'] ?? ''), $r['received_gross_weight'] ?? 0, $r['received_fine_weight'] ?? 0,
+        (string) ($r['unit_code'] ?? ''), (int) ($r['days_waiting'] ?? 0),
+        (string) ($r['delivery_date'] ?? ''), (int) ($r['assignment_count'] ?? 0), (string) $r['status'],
+    ];
+}
+ok((string) $exportRows[0][0] === 'Order No', 'The order number is the first column of the export');
+ok(count($exportRows) === $allCount + 1, 'Every row on the screen is in the export');
+$exportedNumbers = array_map(static fn (array $r): string => (string) $r[0], array_slice($exportRows, 1));
+ok(in_array('001', $exportedNumbers, true) && in_array('004', $exportedNumbers, true),
+    '  ...carrying the order numbers');
+ok(in_array('Made to order', array_column(array_slice($exportRows, 1), 4), true),
+    '  ...and the type in words, not a code');
+
+$xlsxBytes = xlsx_build($exportRows, 'Awaiting Collection');
+$xlsxPath = tempnam(sys_get_temp_dir(), 'jdq') . '.xlsx';
+file_put_contents($xlsxPath, $xlsxBytes);
+ok(str_starts_with($xlsxBytes, 'PK'), 'The Excel file is a real workbook, with nothing written in front of it');
+$readBack = spreadsheet_read_xlsx_all($xlsxPath);
+ok(array_keys($readBack) === ['Awaiting Collection'], '  ...on a sheet named for what it holds');
+ok(count(reset($readBack)) === $allCount + 1, '  ...and it reads back with every row');
+ok((string) reset($readBack)[0]['cells'][0] === 'Order No', '  ...order number still leading');
+@unlink($xlsxPath);
+
+
 echo "\n== Tenant isolation ==\n";
 db()->prepare('INSERT INTO companies (name, code, is_active, is_client_company) VALUES (:n, :c, 1, 1)')
     ->execute(['n' => 'Other Jewellers', 'c' => 'JDQ02']);

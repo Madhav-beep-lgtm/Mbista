@@ -941,15 +941,15 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="hospitality-' . $reportKey . '-gp-' . $rangeFrom . '-' . $rangeTo . '.csv"');
     $out = fopen('php://output', 'wb');
-    fputcsv($out, [$company['name'] . ' — Estimated Gross Profit (' . $reportKey . ')', $fiscalYear['label'] ?? '', $rangeFrom . ' to ' . $rangeTo, 'Generated ' . date('Y-m-d H:i') . ' by ' . ($currentUser['name'] ?? '')]);
-    fputcsv($out, ['Group', 'Net Qty', 'Gross Sales', 'Discount', 'VAT', 'Net Sales (ex VAT)', 'Estimated Cost', 'Estimated GP', 'GP %', 'Sales Contribution %', 'GP Contribution %']);
+    fputcsv($out, [$company['name'] . ' — Estimated Gross Profit (' . $reportKey . ')', $fiscalYear['label'] ?? '', $rangeFrom . ' to ' . $rangeTo, 'Generated ' . date('Y-m-d H:i') . ' by ' . ($currentUser['name'] ?? '')], ',', '"', '\\');
+    fputcsv($out, ['Group', 'Net Qty', 'Gross Sales', 'Discount', 'VAT', 'Net Sales (ex VAT)', 'Estimated Cost', 'Estimated GP', 'GP %', 'Sales Contribution %', 'GP Contribution %'], ',', '"', '\\');
     foreach ($rows as $row) {
         fputcsv($out, [
             $row['group'], $row['net_qty'], $row['gross_sales'], $row['discount'], $row['vat'], $row['net_sales'],
             $row['est_cost'], $row['est_gp'], $row['gp_pct'] ?? 'N/A', $row['sales_contribution_pct'] ?? 'N/A', $row['gp_contribution_pct'] ?? 'N/A',
-        ]);
+        ], ',', '"', '\\');
     }
-    fputcsv($out, ['Reference estimate only. This report does not represent posted Cost of Goods Sold and does not create or modify accounting entries.']);
+    fputcsv($out, ['Reference estimate only. This report does not represent posted Cost of Goods Sold and does not create or modify accounting entries.'], ',', '"', '\\');
     fclose($out);
     exit;
 }

@@ -632,6 +632,34 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
         }
         export_dispatch($exportFormat, 'jewellery-issues-' . $stamp, $data, 'Kaligad Issues', $exportMeta);
     }
+    if ($view === 'delivery') {
+        // The order number leads, because that is what the customer quotes and
+        // what the counter looks up. Everything the screen shows follows, plus
+        // the phone number, which is the point of a list of people to chase.
+        $data = [['Order No', 'Order date', 'Customer', 'Phone', 'Ordered as', 'Item', 'Design',
+            'Received on', 'Weight back', 'Fine wt', 'Unit', 'Days waiting', 'Promised', 'Kaligads', 'Order status']];
+        $sourceLabels = jewellery_order_sources();
+        foreach ($pending as $r) {
+            $data[] = [
+                (string) $r['order_no'],
+                (string) $r['order_date'],
+                (string) ($r['party_name'] ?? '') !== '' ? (string) $r['party_name'] : (string) ($r['customer_name'] ?? ''),
+                (string) ($r['customer_phone'] ?? ''),
+                (string) ($sourceLabels[(string) ($r['origin'] ?? '')] ?? ''),
+                (string) ($r['expected_item'] ?? ''),
+                (string) ($r['design_no'] ?? ''),
+                (string) ($r['receive_date'] ?? ''),
+                $r['received_gross_weight'] ?? 0,
+                $r['received_fine_weight'] ?? 0,
+                (string) ($r['unit_code'] ?? ''),
+                (int) ($r['days_waiting'] ?? 0),
+                (string) ($r['delivery_date'] ?? ''),
+                (int) ($r['assignment_count'] ?? 0),
+                (string) $r['status'],
+            ];
+        }
+        export_dispatch($exportFormat, 'jewellery-awaiting-collection-' . $stamp, $data, 'Awaiting Collection', $exportMeta);
+    }
     if ($view === 'ready-to-sale') {
         $data = [['Assignment', 'Kaligad', 'Ornament', 'Size/Design', 'Received on', 'Gross', 'Stone',
             'Net', 'Fine', 'Purity', 'Making charge', 'Held for', 'Order']];
@@ -1620,6 +1648,9 @@ jw_filter_bar_styles();
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Received but Not Delivered (<?= count($pending) ?><?= $deliveryOrigin !== '' ? ' of ' . (int) ($deliveryCounts['all'] ?? 0) : '' ?>)</h2>
+            <?php // The file holds exactly the rows on screen — the filter and
+                  // the sort travel with the link. ?>
+            <span><?= $canExport && $pending !== [] ? $exportLinks() : '' ?></span>
         </div>
         <form method="get" class="mbw-filterbar" style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <input type="hidden" name="view" value="delivery">

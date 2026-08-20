@@ -97,7 +97,7 @@ function hospitality_workbook_template_csv(string $which): string
     $rows = $sheets[$which === 'invoices' ? HOSPITALITY_SHEET_INVOICES : HOSPITALITY_SHEET_ITEMS];
     $handle = fopen('php://temp', 'r+b');
     foreach ($rows as $row) {
-        fputcsv($handle, $row);
+        fputcsv($handle, $row, ',', '"', '\\');
     }
     rewind($handle);
     $csv = (string) stream_get_contents($handle);
