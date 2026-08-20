@@ -1248,3 +1248,177 @@ function hospitality_post_sales_workbook(int $companyId, int $fiscalYearId, arra
         'needs_approval' => $needsApproval,
     ];
 }
+
+// -------------------------------------------------------------------- reports
+
+/**
+ * The sales reports offered on the upload screen.
+ *
+ * The uploaded sheets ARE the record, so every one of these is a reading of
+ * what was uploaded rather than a separate accumulation that could drift away
+ * from it. "As uploaded" is the default because it is the sheet the person
+ * looking at the screen just sent.
+ */
+function hospitality_sales_report_options(): array
+{
+    return [
+        'sheet' => 'Item-wise sales (as uploaded)',
+        'item' => 'Item-wise sales — totalled',
+        'date' => 'Date-wise sales',
+        'category' => 'Category-wise sales',
+        'party' => 'Party-wise sales',
+        'invoice' => 'Invoice-wise sales',
+    ];
+}
+
+/**
+ * One report over a date range.
+ *
+ * Every one of these is a single grouped query against an indexed date range,
+ * so a year of trading costs the same one round trip a week does. The raw
+ * "as uploaded" listing is the only one that can run long, and it is paged.
+ *
+ * Returns ['columns' => [[key, label, numeric]], 'rows' => [...],
+ *          'totals' => [...], 'total_rows' => int].
+ */
+function hospitality_sales_report(int $companyId, string $from, string $to, string $key, int $page = 1, int $perPage = 200): array
+{
+    if (!table_exists('hospitality_sales_upload_lines')) {
+        return ['columns' => [], 'rows' => [], 'totals' => [], 'total_rows' => 0];
+    }
+    $money = ['gross', 'discount', 'taxable', 'vat', 'total'];
+    $bind = ['cid' => $companyId, 'from' => $from, 'to' => $to];
+
+    // The money columns are the same five everywhere, so they are written once.
+    $itemSums = 'SUM(l.gross_amount) AS gross, SUM(l.discount) AS discount, SUM(l.taxable_amount) AS taxable,
+                 SUM(l.vat_amount) AS vat, SUM(l.taxable_amount + l.vat_amount) AS total';
+    $moneyColumns = [
+        ['gross', 'Sales Amount', true],
+        ['discount', 'Discount', true],
+        ['taxable', 'Taxable Sales', true],
+        ['vat', 'VAT', true],
+        ['total', 'Sales with VAT', true],
+    ];
+
+    switch ($key) {
+        case 'item':
+            $columns = array_merge([['label', 'Item', false], ['category', 'Category', false], ['qty', 'Qty', true]], $moneyColumns);
+            $sql = "SELECT l.item_name AS label, MIN(l.category) AS category, SUM(l.qty) AS qty, $itemSums
+                FROM hospitality_sales_upload_lines l
+                WHERE l.company_id = :cid AND l.sale_date BETWEEN :from AND :to
+                GROUP BY l.item_name ORDER BY total DESC, label ASC";
+            break;
+
+        case 'date':
+            $columns = array_merge([['label', 'Date', false], ['line_count', 'Lines', true], ['qty', 'Qty', true]], $moneyColumns);
+            $sql = "SELECT l.sale_date AS label, COUNT(*) AS line_count, SUM(l.qty) AS qty, $itemSums
+                FROM hospitality_sales_upload_lines l
+                WHERE l.company_id = :cid AND l.sale_date BETWEEN :from AND :to
+                GROUP BY l.sale_date ORDER BY label ASC";
+            break;
+
+        case 'category':
+            $columns = array_merge([['label', 'Category', false], ['line_count', 'Lines', true], ['qty', 'Qty', true]], $moneyColumns);
+            $sql = "SELECT l.category AS label, COUNT(*) AS line_count, SUM(l.qty) AS qty, $itemSums
+                FROM hospitality_sales_upload_lines l
+                WHERE l.company_id = :cid AND l.sale_date BETWEEN :from AND :to
+                GROUP BY l.category ORDER BY total DESC, label ASC";
+            break;
+
+        case 'party':
+            if (!table_exists('hospitality_sales_invoice_lines')) {
+                return ['columns' => [], 'rows' => [], 'totals' => [], 'total_rows' => 0, 'note' => 'Party-wise sales need the invoice sheet, which older uploads did not carry.'];
+            }
+            $columns = array_merge([['label', 'Party ledger', false], ['payment_type', 'Payment type', false], ['invoices', 'Invoices', true]], $moneyColumns);
+            $sql = "SELECT COALESCE(led.name, CONCAT('(unmatched code ', i.ledger_code, ')')) AS label,
+                    MIN(i.payment_type) AS payment_type, COUNT(*) AS invoices,
+                    SUM(i.gross_amount) AS gross, SUM(i.discount) AS discount, SUM(i.taxable_amount) AS taxable,
+                    SUM(i.vat_amount) AS vat, SUM(i.total_amount) AS total
+                FROM hospitality_sales_invoice_lines i
+                LEFT JOIN ledgers led ON led.id = i.ledger_id AND led.company_id = i.company_id
+                WHERE i.company_id = :cid AND i.sale_date BETWEEN :from AND :to
+                GROUP BY i.ledger_id, i.ledger_code ORDER BY total DESC, label ASC";
+            break;
+
+        case 'invoice':
+            if (!table_exists('hospitality_sales_invoice_lines')) {
+                return ['columns' => [], 'rows' => [], 'totals' => [], 'total_rows' => 0, 'note' => 'Invoice-wise sales need the invoice sheet, which older uploads did not carry.'];
+            }
+            $columns = array_merge([['label', 'Invoice No', false], ['sale_date', 'Date', false], ['payment_type', 'Payment type', false], ['party', 'Party ledger', false]], $moneyColumns);
+            $sql = "SELECT i.invoice_no AS label, i.sale_date, i.payment_type,
+                    COALESCE(led.name, i.ledger_code) AS party,
+                    i.gross_amount AS gross, i.discount AS discount, i.taxable_amount AS taxable,
+                    i.vat_amount AS vat, i.total_amount AS total
+                FROM hospitality_sales_invoice_lines i
+                LEFT JOIN ledgers led ON led.id = i.ledger_id AND led.company_id = i.company_id
+                WHERE i.company_id = :cid AND i.sale_date BETWEEN :from AND :to
+                ORDER BY i.sale_date ASC, i.id ASC";
+            break;
+
+        case 'sheet':
+        default:
+            $columns = [
+                ['sale_date', 'Date', false], ['category', 'Category', false], ['label', 'Item', false], ['qty', 'Qty', true],
+                ['gross', 'Total Sales Amount', true], ['discount', 'Discount', true],
+                ['taxable', 'Taxable Sales', true], ['vat', 'VAT', true], ['total', 'Sales with VAT', true],
+            ];
+            $sql = "SELECT l.sale_date, l.category, l.item_name AS label, l.qty,
+                    l.gross_amount AS gross, l.discount, l.taxable_amount AS taxable,
+                    l.vat_amount AS vat, (l.taxable_amount + l.vat_amount) AS total
+                FROM hospitality_sales_upload_lines l
+                WHERE l.company_id = :cid AND l.sale_date BETWEEN :from AND :to
+                ORDER BY l.sale_date ASC, l.id ASC";
+            break;
+    }
+
+    $stmt = db()->prepare($sql);
+    $stmt->execute($bind);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Totals are added here rather than asked for again: the rows are already
+    // in hand, and a second grouped query to re-add them would be a round trip
+    // for arithmetic PHP can do for nothing.
+    $totals = ['qty' => 0.0, 'line_count' => 0, 'invoices' => 0];
+    foreach ($money as $field) {
+        $totals[$field] = 0.0;
+    }
+    foreach ($rows as $row) {
+        foreach ($money as $field) {
+            $totals[$field] = round($totals[$field] + (float) ($row[$field] ?? 0), 2);
+        }
+        $totals['qty'] = round($totals['qty'] + (float) ($row['qty'] ?? 0), 3);
+        $totals['line_count'] += (int) ($row['line_count'] ?? 0);
+        $totals['invoices'] += (int) ($row['invoices'] ?? 0);
+    }
+    $totalRows = count($rows);
+
+    // Only the unaggregated listings can run to thousands of rows; the grouped
+    // ones are bounded by how many items or days a kitchen actually has.
+    if (in_array($key, ['sheet', 'invoice'], true)) {
+        $page = max(1, $page);
+        $rows = array_slice($rows, ($page - 1) * $perPage, $perPage);
+    }
+
+    return ['columns' => $columns, 'rows' => $rows, 'totals' => $totals, 'total_rows' => $totalRows];
+}
+
+/**
+ * The date range the reports open on: the last sheet uploaded.
+ *
+ * Somebody arriving at this screen has almost always just uploaded something,
+ * and what they want to see is what they just sent.
+ */
+function hospitality_sales_report_default_range(int $companyId): array
+{
+    if (table_exists('hospitality_sales_uploads')) {
+        $stmt = db()->prepare('SELECT date_from, date_to FROM hospitality_sales_uploads
+            WHERE company_id = :cid ORDER BY id DESC LIMIT 1');
+        $stmt->execute(['cid' => $companyId]);
+        $last = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($last) {
+            return [(string) $last['date_from'], (string) $last['date_to']];
+        }
+    }
+
+    return [date('Y-m-01'), date('Y-m-d')];
+}

@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/hospitality_engine.php';
 require_once __DIR__ . '/../../app/hospitality_sales_posting.php';
+require_once __DIR__ . '/../../app/hospitality_sales_workbook.php';
 // The inventory ledger mapping is ONE shared table; this page shows it rather
 // than keeping a restaurant copy of the same setting.
 require_once __DIR__ . '/../../app/inventory_mapping.php';
@@ -67,35 +68,61 @@ function hospitality_sales_prepare_dir(string $dir): void
     }
 }
 
-function hospitality_sales_stored_file(string $dir, string $token): ?array
+/**
+ * One held sheet.
+ *
+ * An upload is now a PAIR — what was sold and how it was paid — so each token
+ * can carry two files. $slot picks which: '' is the workbook (or the item-wise
+ * sheet when the pair arrived as two CSVs), '-b' the second file.
+ */
+function hospitality_sales_stored_file(string $dir, string $token, string $slot = ''): ?array
 {
-    if (!preg_match('/^[a-f0-9]{40}$/', $token)) {
+    if (!preg_match('/^[a-f0-9]{40}$/', $token) || !in_array($slot, ['', '-b'], true)) {
         return null;
     }
     foreach (['xlsx', 'csv'] as $extension) {
-        $path = $dir . '/' . $token . '.' . $extension;
+        $path = $dir . '/' . $token . $slot . '.' . $extension;
         if (is_file($path)) {
             return ['path' => $path, 'extension' => $extension];
         }
     }
+
     return null;
+}
+
+/** Everything held under one token, removed together once it has been posted. */
+function hospitality_sales_forget_upload(string $dir, string $token): void
+{
+    if (!preg_match('/^[a-f0-9]{40}$/', $token)) {
+        return;
+    }
+    foreach (['', '-b'] as $slot) {
+        foreach (['xlsx', 'csv'] as $extension) {
+            @unlink($dir . '/' . $token . $slot . '.' . $extension);
+        }
+    }
+    @unlink($dir . '/' . $token . '.name');
 }
 
 // Template downloads for the daily sales sheet.
 if ($view === 'sales-upload' && isset($_GET['template'])) {
     $template = (string) $_GET['template'];
+    // One workbook holding BOTH sheets is the template worth handing out: the
+    // pair is reconciled against each other, and two loose files invite
+    // uploading a mismatched set.
     if ($template === 'xlsx' && $hasXlsx) {
-        $bytes = hospitality_sales_template_xlsx();
+        $bytes = hospitality_workbook_template_xlsx();
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="daily-sales-template.xlsx"');
         header('Content-Length: ' . strlen($bytes));
         echo $bytes;
         exit;
     }
-    if ($template === 'csv') {
+    if ($template === 'csv' || $template === 'csv-invoices') {
+        $which = $template === 'csv-invoices' ? 'invoices' : 'items';
         header('Content-Type: text/csv; charset=UTF-8');
-        header('Content-Disposition: attachment; filename="daily-sales-template.csv"');
-        echo hospitality_sales_template_csv();
+        header('Content-Disposition: attachment; filename="daily-sales-' . $which . '.csv"');
+        echo hospitality_workbook_template_csv($which);
         exit;
     }
     redirect('admin/hospitality.php?view=sales-upload');
@@ -214,6 +241,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save_menu_item') {
         require_permission('hospitality', 'edit');
         $menuItemId = (int) ($_POST['menu_item_id'] ?? 0);
+        // The menu is whatever the tills have sold. Adding one by hand creates
+        // an item no sale will ever match, which then sits in the costing
+        // exceptions forever looking like a mapping fault.
+        if ($menuItemId <= 0) {
+            flash('error', 'Menu items are created from the daily sales upload, not by hand — upload a sheet that sells the item and it will appear here.');
+            redirect($back);
+        }
         $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
         if ($code === '' || $name === '') {
@@ -698,36 +732,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'sales_upload_file') {
         require_permission('hospitality', 'create');
-        $file = $_FILES['sales_file'] ?? null;
-        $errorCode = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
-        $size = (int) ($file['size'] ?? 0);
-        $extension = strtolower((string) pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
-        if ($errorCode !== UPLOAD_ERR_OK || $size <= 0) {
-            flash('error', 'Choose an Excel (.xlsx) or CSV day-sheet to upload.');
-            redirect('admin/hospitality.php?view=sales-upload');
-        }
-        if ($size > 10 * 1024 * 1024) {
-            flash('error', 'The file is larger than 10 MB.');
-            redirect('admin/hospitality.php?view=sales-upload');
-        }
-        if (!in_array($extension, ['xlsx', 'csv'], true)) {
-            flash('error', $extension === 'xls'
-                ? 'Legacy .xls files are not supported — open the file in Excel and save it as .xlsx or .csv.'
-                : 'Only .xlsx and .csv files can be uploaded.');
-            redirect('admin/hospitality.php?view=sales-upload');
-        }
-        if ($extension === 'xlsx' && !$hasXlsx) {
-            flash('error', 'This server cannot read .xlsx files (PHP zip extension missing). Save the sheet as .csv and upload that instead.');
-            redirect('admin/hospitality.php?view=sales-upload');
-        }
         hospitality_sales_prepare_dir($salesUploadDir);
         $token = bin2hex(random_bytes(20));
-        if (!move_uploaded_file((string) $file['tmp_name'], $salesUploadDir . '/' . $token . '.' . $extension)) {
-            flash('error', 'The uploaded file could not be stored. Try again.');
-            redirect('admin/hospitality.php?view=sales-upload');
+
+        // The pair may arrive as one workbook holding both sheets, or as two
+        // files. The second input is optional for exactly that reason.
+        $checkFile = static function (?array $file, bool $required) use ($hasXlsx): array {
+            $errorCode = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+            if ($errorCode === UPLOAD_ERR_NO_FILE || (int) ($file['size'] ?? 0) <= 0) {
+                return $required
+                    ? ['error' => 'Choose an Excel (.xlsx) or CSV sales sheet to upload.']
+                    : ['skip' => true];
+            }
+            if ($errorCode !== UPLOAD_ERR_OK) {
+                return ['error' => 'The file did not upload cleanly. Try again.'];
+            }
+            if ((int) $file['size'] > 10 * 1024 * 1024) {
+                return ['error' => 'The file is larger than 10 MB.'];
+            }
+            $extension = strtolower((string) pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
+            if (!in_array($extension, ['xlsx', 'csv'], true)) {
+                return ['error' => $extension === 'xls'
+                    ? 'Legacy .xls files are not supported — open the file in Excel and save it as .xlsx or .csv.'
+                    : 'Only .xlsx and .csv files can be uploaded.'];
+            }
+            if ($extension === 'xlsx' && !$hasXlsx) {
+                return ['error' => 'This server cannot read .xlsx files (PHP zip extension missing). Save the sheets as .csv and upload those instead.'];
+            }
+
+            return ['extension' => $extension];
+        };
+
+        foreach ([['sales_file', '', true], ['sales_file_2', '-b', false]] as [$field, $slot, $required]) {
+            $file = $_FILES[$field] ?? null;
+            $checked = $checkFile($file, $required);
+            if (isset($checked['skip'])) {
+                continue;
+            }
+            if (isset($checked['error'])) {
+                hospitality_sales_forget_upload($salesUploadDir, $token);
+                flash('error', (string) $checked['error']);
+                redirect('admin/hospitality.php?view=sales-upload');
+            }
+            if (!move_uploaded_file((string) $file['tmp_name'], $salesUploadDir . '/' . $token . $slot . '.' . $checked['extension'])) {
+                hospitality_sales_forget_upload($salesUploadDir, $token);
+                flash('error', 'The uploaded file could not be stored. Try again.');
+                redirect('admin/hospitality.php?view=sales-upload');
+            }
+            if ($slot === '') {
+                // Original file name is kept beside the sheet for the audit batch.
+                @file_put_contents($salesUploadDir . '/' . $token . '.name', mb_substr((string) $file['name'], 0, 255));
+            }
         }
-        // Original file name is kept beside the stored sheet for the audit batch.
-        @file_put_contents($salesUploadDir . '/' . $token . '.name', mb_substr((string) $file['name'], 0, 255));
         redirect('admin/hospitality.php?view=sales-upload&token=' . $token);
     }
 
@@ -736,31 +792,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $token = (string) ($_POST['token'] ?? '');
         $stored = hospitality_sales_stored_file($salesUploadDir, $token);
         if ($stored === null) {
-            flash('error', 'The uploaded sheet has expired. Upload it again.');
+            flash('error', 'The uploaded sheets have expired. Upload them again.');
             redirect('admin/hospitality.php?view=sales-upload');
         }
+        $storedSecond = hospitality_sales_stored_file($salesUploadDir, $token, '-b');
         try {
-            $parsed = hospitality_sales_upload_parse($stored['path'], $stored['extension'], $companyId, $fiscalYearId, hospitality_settings($companyId));
+            $parsed = hospitality_workbook_parse(
+                $stored['path'], $stored['extension'],
+                $storedSecond['path'] ?? null, $storedSecond['extension'] ?? null,
+                $companyId, $fiscalYearId, hospitality_settings($companyId)
+            );
         } catch (Throwable $exception) {
-            flash('error', 'Could not read the sheet: ' . $exception->getMessage());
+            flash('error', 'Could not read the sheets: ' . $exception->getMessage());
             redirect('admin/hospitality.php?view=sales-upload');
         }
-        if (!isset($parsed['error']) && (int) $parsed['error_count'] > 0 && (string) ($_POST['skip_invalid'] ?? '') !== '1') {
-            flash('error', (int) $parsed['error_count'] . ' row(s) still have errors. Fix them in the sheet and re-upload, or tick "Skip rows with errors".');
+        if (isset($parsed['error'])) {
+            flash('error', (string) $parsed['error']);
             redirect('admin/hospitality.php?view=sales-upload&token=' . $token);
         }
         $fileName = trim((string) @file_get_contents($salesUploadDir . '/' . $token . '.name')) ?: ('sales-sheet.' . $stored['extension']);
-        $result = hospitality_post_sales_upload($companyId, $fiscalYearId, $parsed, $fileName, $userId,
+        $result = hospitality_post_sales_workbook($companyId, $fiscalYearId, $parsed, $fileName, $userId,
             (string) ($_POST['allow_duplicate_dates'] ?? '') === '1');
         if (!$result['ok']) {
             flash('error', (string) $result['error']);
             redirect('admin/hospitality.php?view=sales-upload&token=' . $token);
         }
-        @unlink($stored['path']);
-        @unlink($salesUploadDir . '/' . $token . '.name');
-        flash('success', (int) $result['rows'] . ' sales row(s) ' . ($result['needs_approval']
-            ? 'submitted — ' . (int) $result['vouchers'] . ' daily voucher(s) are awaiting approval.'
-            : 'posted as ' . (int) $result['vouchers'] . ' daily sales voucher(s). See them in the Voucher Register.'));
+        hospitality_sales_forget_upload($salesUploadDir, $token);
+        flash('success', (int) $result['rows'] . ' item line(s) and ' . (int) $result['invoices'] . ' invoice(s) '
+            . ($result['needs_approval']
+                ? 'submitted — ' . (int) $result['vouchers'] . ' daily voucher(s) are awaiting approval.'
+                : 'posted as ' . (int) $result['vouchers'] . ' daily sales voucher(s). See them in the Voucher Register.')
+            . ((int) $result['menu_created'] > 0 ? ' ' . (int) $result['menu_created'] . ' new menu item(s) were added from the sheet.' : ''));
         redirect('admin/hospitality.php?view=sales-upload');
     }
 
@@ -974,9 +1036,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $menuItemsStmt->execute(['cid' => $companyId]);
     $menuItems = $menuItemsStmt->fetchAll();
     ?>
-    <?php if ($canEdit): ?>
+    <?php if ($canEdit && $editMenuItem): ?>
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2><?= $editMenuItem ? 'Edit Menu Item' : 'Add Menu Item' ?></h2><?php if ($editMenuItem): ?><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=menu-items')) ?>">Cancel</a><?php endif; ?></div>
+        <div class="mbw-card-head"><h2>Edit Menu Item</h2><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=menu-items')) ?>">Cancel</a></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_menu_item">
@@ -997,16 +1059,25 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label class="checkbox-line" style="align-self:end"><input type="checkbox" name="tax_inclusive" <?= (int) ($editMenuItem['tax_inclusive'] ?? 0) === 1 ? 'checked' : '' ?>> Price is tax-inclusive</label>
             <label class="checkbox-line" style="align-self:end"><input type="checkbox" name="active" <?= (int) ($editMenuItem['active'] ?? 1) === 1 ? 'checked' : '' ?>> Active</label>
             <label class="workspace-span-2">Notes<input type="text" name="notes" maxlength="255" value="<?= e($editMenuItem['notes'] ?? '') ?>"></label>
-            <div class="workspace-span-2"><button type="submit"><?= icon('plus') ?>Save Menu Item</button></div>
+            <div class="workspace-span-2"><button type="submit"><?= icon('check') ?>Save Menu Item</button></div>
         </form>
     </section>
+    <?php endif; ?>
+    <?php if ($canEdit && !$editMenuItem): ?>
+        <div class="notice" style="margin-bottom:14px">
+            The menu is built from the daily sales upload — every distinct item on a sheet becomes a menu item the first time it is sold,
+            with a standard price worked out from the busiest day it appears on. That keeps the menu matching what the kitchen is
+            actually selling, and it means every item here has sales behind it to cost.
+            <strong>Edit</strong> an item below to correct its price, unit or category.
+            <a href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Upload a sales sheet →</a>
+        </div>
     <?php endif; ?>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Menu Items (<?= count($menuItems) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Code</th><th>Name</th><th>Category</th><th class="is-numeric">Std. price</th><th>Unit</th><th>Recipes</th><th>Status</th><th></th></tr></thead>
             <tbody>
-                <?php if ($menuItems === []): ?><tr><td colspan="8">No menu items yet.</td></tr><?php endif; ?>
+                <?php if ($menuItems === []): ?><tr><td colspan="8">No menu items yet — they arrive with the first daily sales sheet you upload.</td></tr><?php endif; ?>
                 <?php foreach ($menuItems as $menuItem): ?>
                     <tr>
                         <td><strong><?= e($menuItem['code']) ?></strong></td>
@@ -1563,9 +1634,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         WHERE m.company_id = :cid ORDER BY m.map_type ASC, m.active DESC, m.display_value ASC');
     $allMapsStmt->execute(['cid' => $companyId]);
     $ledgerMapRows = $allMapsStmt->fetchAll();
-    $uploadHistory = hospitality_sales_uploads_history($companyId);
 
-    // Preview a stored sheet when a token is present. Problems render inline
+    // Preview the held pair when a token is present. Problems render inline
     // (the page header is already out, so flash() would only show next load).
     $salesPreview = null;
     $salesPreviewProblem = null;
@@ -1574,20 +1644,24 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         $storedSheet = hospitality_sales_stored_file($salesUploadDir, $salesToken);
         if ($storedSheet === null) {
             $salesToken = '';
-            $salesPreviewProblem = 'The uploaded sheet has expired. Upload it again.';
+            $salesPreviewProblem = 'The uploaded sheets have expired. Upload them again.';
         } else {
+            $storedSecond = hospitality_sales_stored_file($salesUploadDir, $salesToken, '-b');
             try {
-                $salesPreview = hospitality_sales_upload_parse($storedSheet['path'], $storedSheet['extension'], $companyId, $fiscalYearId, $settings);
+                $salesPreview = hospitality_workbook_parse(
+                    $storedSheet['path'], $storedSheet['extension'],
+                    $storedSecond['path'] ?? null, $storedSecond['extension'] ?? null,
+                    $companyId, $fiscalYearId, $settings
+                );
             } catch (Throwable $exception) {
-                @unlink($storedSheet['path']);
-                $salesToken = '';
-                $salesPreviewProblem = 'Could not read the sheet: ' . $exception->getMessage();
+                $salesPreviewProblem = 'Could not read the sheets: ' . $exception->getMessage();
             }
             if ($salesPreview !== null && isset($salesPreview['error'])) {
-                @unlink($storedSheet['path']);
+                // The files are deliberately KEPT: the usual reason to land
+                // here is a missing second sheet, and the fix is to add it
+                // rather than to upload the first one all over again.
                 $salesPreviewProblem = (string) $salesPreview['error'];
                 $salesPreview = null;
-                $salesToken = '';
             }
         }
     }
@@ -1682,13 +1756,19 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="sales_upload_file">
             <input type="hidden" name="back_view" value="sales-upload">
-            <label>Day-wise sales sheet (.xlsx or .csv, max 10 MB)
+            <label class="workspace-span-2">Sales workbook — both sheets (.xlsx, max 10 MB)
                 <input type="file" name="sales_file" accept=".xlsx,.csv" required>
+                <small style="color:var(--mbw-muted)">One Excel file holding the <strong>item-wise</strong> sheet (what was sold) and the <strong>invoice-wise</strong> sheet (how it was settled). Working in CSV? Put the item-wise sheet here and the invoice-wise one below.</small>
             </label>
-            <div style="align-self:end">
+            <label class="workspace-span-2">Second sheet — only if you are uploading two files
+                <input type="file" name="sales_file_2" accept=".xlsx,.csv">
+                <small style="color:var(--mbw-muted)">Leave this empty when your workbook already carries both sheets. Either order is fine — they are told apart by their column headings.</small>
+            </label>
+            <div class="workspace-span-2">
                 <button type="submit"><?= icon('upload') ?>Upload &amp; Preview</button>
-                <?php if ($hasXlsx): ?><a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=xlsx')) ?>">Excel template</a><?php endif; ?>
-                <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=csv')) ?>">CSV template</a>
+                <?php if ($hasXlsx): ?><a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=xlsx')) ?>">Excel template (both sheets)</a><?php endif; ?>
+                <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=csv')) ?>">CSV — item-wise</a>
+                <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=csv-invoices')) ?>">CSV — invoice-wise</a>
             </div>
         </form>
         <?php endif; ?>
@@ -1706,47 +1786,101 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </table></div>
     </section>
 
+    <?php
+    // What used to be an Upload History is now a set of readings OF what was
+    // uploaded. The sheets are the record, so a report here can only ever be a
+    // view of them -- there is no second accumulation to drift out of step.
+    $reportKey = (string) ($_GET['report'] ?? 'sheet');
+    $reportOptions = hospitality_sales_report_options();
+    if (!isset($reportOptions[$reportKey])) {
+        $reportKey = 'sheet';
+    }
+    [$defaultFrom, $defaultTo] = hospitality_sales_report_default_range($companyId);
+    $reportFrom = $clampDate(trim((string) ($_GET['rfrom'] ?? $defaultFrom)));
+    $reportTo = $clampDate(trim((string) ($_GET['rto'] ?? $defaultTo)));
+    if ($reportTo < $reportFrom) {
+        $reportTo = $reportFrom;
+    }
+    $reportPage = max(1, (int) ($_GET['rpage'] ?? 1));
+    $report = hospitality_sales_report($companyId, $reportFrom, $reportTo, $reportKey, $reportPage);
+    $reportPages = (int) ceil($report['total_rows'] / 200);
+    ?>
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Upload History (<?= count($uploadHistory) ?>)</h2></div>
+        <div class="mbw-card-head"><h2><?= icon('reports') ?> Sales Reports</h2></div>
+        <form method="get" class="workspace-form-grid" style="margin-bottom:12px">
+            <input type="hidden" name="view" value="sales-upload">
+            <label>Report
+                <select name="report" onchange="this.form.submit()">
+                    <?php foreach ($reportOptions as $optionKey => $optionLabel): ?>
+                        <option value="<?= e($optionKey) ?>" <?= $reportKey === $optionKey ? 'selected' : '' ?>><?= e($optionLabel) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label>From<input type="date" name="rfrom" value="<?= e($reportFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+            <label>To<input type="date" name="rto" value="<?= e($reportTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+            <div style="align-self:end"><button type="submit"><?= icon('search') ?>Show</button></div>
+        </form>
+        <?php if (isset($report['note'])): ?>
+            <div class="notice"><?= e((string) $report['note']) ?></div>
+        <?php endif; ?>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>#</th><th>File</th><th>Dates</th><th class="is-numeric">Rows</th><th class="is-numeric">Vouchers</th><th class="is-numeric">Gross</th><th class="is-numeric">Discount</th><th class="is-numeric">VAT</th><th class="is-numeric">Receivable</th><th>Status</th><th>Posted</th><th>Recipe costing</th></tr></thead>
+            <thead><tr>
+                <?php foreach ($report['columns'] as [$columnKey, $columnLabel, $columnNumeric]): ?>
+                    <th<?= $columnNumeric ? ' class="is-numeric"' : '' ?>><?= e($columnLabel) ?></th>
+                <?php endforeach; ?>
+            </tr></thead>
             <tbody>
-                <?php if ($uploadHistory === []): ?><tr><td colspan="12">No sheets posted yet.</td></tr><?php endif; ?>
-                <?php foreach ($uploadHistory as $upload): ?>
-                    <?php $costSummary = hospitality_upload_costing_summary($companyId, (int) $upload['id']); ?>
+                <?php if ($report['rows'] === []): ?>
+                    <tr><td colspan="<?= max(1, count($report['columns'])) ?>">Nothing uploaded for <?= e($reportFrom) ?> to <?= e($reportTo) ?>.</td></tr>
+                <?php endif; ?>
+                <?php foreach ($report['rows'] as $reportRow): ?>
                     <tr>
-                        <td><?= (int) $upload['id'] ?></td>
-                        <td><small><?= e($upload['file_name'] ?? '—') ?></small></td>
-                        <td><small><?= e($upload['date_from'] . ($upload['date_to'] !== $upload['date_from'] ? ' → ' . $upload['date_to'] : '')) ?></small></td>
-                        <td class="is-numeric"><?= (int) $upload['row_count'] ?></td>
-                        <td class="is-numeric"><a href="<?= e(url('admin/accounting.php')) ?>"><?= (int) $upload['voucher_count'] ?></a></td>
-                        <td class="is-numeric"><?= $fmt((float) $upload['gross_amount']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $upload['discount_amount']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $upload['vat_amount']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $upload['receivable_amount']) ?></td>
-                        <td><span class="mbw-pill <?= (string) $upload['status'] === 'posted' ? 'tone-green' : 'tone-amber' ?>"><?= e((string) $upload['status'] === 'posted' ? 'Posted' : 'Awaiting approval') ?></span></td>
-                        <td><small><?= e(($upload['posted_at'] ?? '') . ($upload['posted_by_name'] ? ' · ' . $upload['posted_by_name'] : '')) ?></small></td>
-                        <td style="white-space:nowrap">
-                            <?php if ((int) $costSummary['run_count'] > 0): ?>
-                                <span class="mbw-pill <?= (int) $costSummary['costed_lines'] === (int) $costSummary['total_lines'] ? 'tone-green' : 'tone-amber' ?>"><?= (int) $costSummary['costed_lines'] ?>/<?= (int) $costSummary['total_lines'] ?> costed</span>
-                                <br><small>Est. GP <?= e($sym) ?><?= $fmt((float) $costSummary['est_gp']) ?></small>
-                            <?php else: ?>
-                                <span class="mbw-pill tone-gray">Not costed</span>
-                            <?php endif; ?>
-                            <?php if ($canCost): ?>
-                                <form method="post" style="margin-top:4px">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="run_upload_costing">
-                                    <input type="hidden" name="upload_id" value="<?= (int) $upload['id'] ?>">
-                                    <button type="submit" class="button secondary" style="min-height:28px;padding:2px 8px" title="Match each row's item to its recipe and save an estimated cost & GP report per day"><?= icon('reconcile') ?><?= (int) $costSummary['run_count'] > 0 ? 'Re-cost' : 'Run costing' ?></button>
-                                </form>
-                            <?php endif; ?>
-                        </td>
+                        <?php foreach ($report['columns'] as [$columnKey, $columnLabel, $columnNumeric]): ?>
+                            <td<?= $columnNumeric ? ' class="is-numeric"' : '' ?>><?php
+                                $cellValue = $reportRow[$columnKey] ?? '';
+                                if (!$columnNumeric) {
+                                    echo e((string) $cellValue);
+                                } elseif ($columnKey === 'qty') {
+                                    echo e(rtrim(rtrim(number_format((float) $cellValue, 3, '.', ','), '0'), '.'));
+                                } elseif (in_array($columnKey, ['line_count', 'invoices'], true)) {
+                                    echo (int) $cellValue;
+                                } else {
+                                    echo $fmt((float) $cellValue);
+                                }
+                            ?></td>
+                        <?php endforeach; ?>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
+            <?php if ($report['rows'] !== []): ?>
+            <tfoot><tr>
+                <?php foreach ($report['columns'] as $columnIndex => [$columnKey, $columnLabel, $columnNumeric]): ?>
+                    <?php if ($columnIndex === 0): ?>
+                        <th>Total (<?= (int) $report['total_rows'] ?> row<?= $report['total_rows'] === 1 ? '' : 's' ?>)</th>
+                    <?php elseif ($columnNumeric && isset($report['totals'][$columnKey])): ?>
+                        <th class="is-numeric"><?= in_array($columnKey, ['line_count', 'invoices'], true)
+                            ? (int) $report['totals'][$columnKey]
+                            : ($columnKey === 'qty'
+                                ? e(rtrim(rtrim(number_format((float) $report['totals'][$columnKey], 3, '.', ','), '0'), '.'))
+                                : $fmt((float) $report['totals'][$columnKey])) ?></th>
+                    <?php else: ?>
+                        <th></th>
+                    <?php endif; ?>
+                <?php endforeach; ?>
+            </tr></tfoot>
+            <?php endif; ?>
         </table></div>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Vouchers are named HS-YYYYMMDD-…; find them in the Voucher Register filtered by type Sales. Wrong posting? Reverse it with a journal/credit note — uploads are never silently deleted. <strong>Run costing</strong> additionally saves a reference-only recipe cost &amp; estimated GP report per day (see Reports); re-running keeps every previous costing in the recalculation history.</p>
+        <?php if ($reportPages > 1): ?>
+            <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12.5px">
+                Page <?= $reportPage ?> of <?= $reportPages ?>
+                <?php if ($reportPage > 1): ?>
+                    · <a href="<?= e(url('admin/hospitality.php?view=sales-upload&report=' . $reportKey . '&rfrom=' . $reportFrom . '&rto=' . $reportTo . '&rpage=' . ($reportPage - 1))) ?>">Previous</a>
+                <?php endif; ?>
+                <?php if ($reportPage < $reportPages): ?>
+                    · <a href="<?= e(url('admin/hospitality.php?view=sales-upload&report=' . $reportKey . '&rfrom=' . $reportFrom . '&rto=' . $reportTo . '&rpage=' . ($reportPage + 1))) ?>">Next</a>
+                <?php endif; ?>
+            </p>
+        <?php endif; ?>
     </section>
 
     <?php
@@ -1802,109 +1936,192 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
     <?php else: ?>
     <?php
-    $previewValid = (int) $salesPreview['valid_count'];
-    $previewErrors = (int) $salesPreview['error_count'];
-    $previewTotals = $salesPreview['totals'];
+    $pvItems = $salesPreview['items'];
+    $pvInvoices = $salesPreview['invoices'];
+    $pvRecon = $salesPreview['reconciliation'];
+    $pvTotals = $pvItems['totals'];
+    $pvBlocked = !$pvRecon['ok'] || $pvItems['errors'] > 0 || $pvInvoices['errors'] > 0 || $salesPreview['config_errors'] !== [];
     ?>
-    <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Preview — check before posting</h2><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Upload a different sheet</a></div>
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Preview — check before posting</h2><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Upload different sheets</a></div>
         <section class="mbw-kpi-grid" aria-label="Sheet summary">
             <?php foreach ([
-                ['Rows ready', (string) $previewValid, 'tasks', 'tone-green'],
-                ['Rows with errors', (string) $previewErrors, 'search', $previewErrors > 0 ? 'tone-red' : 'tone-gray'],
-                ['Days (one voucher each)', (string) count($salesPreview['days']), 'calendar', 'tone-blue'],
-                ['Gross sales', $sym . $fmt((float) $previewTotals['gross']), 'wallet', 'tone-blue'],
-                ['Discount', $sym . $fmt((float) $previewTotals['discount']), 'tag', 'tone-amber'],
-                ['VAT', $sym . $fmt((float) $previewTotals['vat']), 'pie', 'tone-teal'],
-                ['Sales (taxable)', $sym . $fmt((float) $previewTotals['taxable']), 'analytics', 'tone-green'],
-                ['Receivable (Dr)', $sym . $fmt((float) $previewTotals['receivable']), 'reconcile', 'tone-green'],
+                ['Item lines', (string) $pvItems['valid'] . ($pvItems['errors'] > 0 ? ' (' . $pvItems['errors'] . ' in error)' : ''), 'tasks', $pvItems['errors'] > 0 ? 'tone-red' : 'tone-green'],
+                ['Invoices', (string) $pvInvoices['valid'] . ($pvInvoices['errors'] > 0 ? ' (' . $pvInvoices['errors'] . ' in error)' : ''), 'wallet', $pvInvoices['errors'] > 0 ? 'tone-red' : 'tone-green'],
+                ['Days (one voucher each)', (string) count($pvItems['days']), 'calendar', 'tone-blue'],
+                ['Taxable sales', $sym . $fmt((float) $pvTotals['taxable']), 'wallet', 'tone-blue'],
+                ['VAT', $sym . $fmt((float) $pvTotals['vat']), 'tag', 'tone-amber'],
+                ['Billed (with VAT)', $sym . $fmt((float) $pvTotals['total']), 'reports', 'tone-purple'],
             ] as [$kpiLabel, $kpiValue, $kpiIcon, $kpiTone]): ?>
-                <article class="mbw-kpi"><div><span class="mbw-kpi-label"><?= e($kpiLabel) ?></span><div class="mbw-kpi-value" style="font-size:1.02rem"><?= e($kpiValue) ?></div></div><span class="mbw-chip <?= e($kpiTone) ?>"><?= icon($kpiIcon) ?></span></article>
+                <article class="mbw-kpi <?= e($kpiTone) ?>"><span class="mbw-kpi-icon"><?= icon($kpiIcon) ?></span>
+                    <div><p class="mbw-kpi-label"><?= e($kpiLabel) ?></p><p class="mbw-kpi-value"><?= e($kpiValue) ?></p></div>
+                </article>
             <?php endforeach; ?>
         </section>
+
+        <!-- The reconciliation is the whole point of taking two sheets, so it
+             is the first thing on the page rather than a footnote. -->
+        <div class="notice <?= $pvRecon['ok'] ? '' : 'error' ?>" style="margin-top:12px">
+            <strong><?= $pvRecon['ok'] ? 'The two sheets agree.' : 'The two sheets do not agree — nothing can be posted until they do.' ?></strong>
+            <?php if ($pvRecon['ok']): ?>
+                Both cover <?= e((string) $pvRecon['item_range'][0]) ?> to <?= e((string) $pvRecon['item_range'][1]) ?>, and every money column matches.
+            <?php else: ?>
+                <ul style="margin:8px 0 0;padding-left:18px">
+                    <?php foreach ($pvRecon['problems'] as $problem): ?><li><?= e($problem) ?></li><?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
+        </div>
+        <div style="overflow-x:auto;margin-top:10px"><table>
+            <thead><tr><th>Checked</th><th class="is-numeric">Item-wise sheet</th><th class="is-numeric">Invoice-wise sheet</th><th class="is-numeric">Difference</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>Trading period</td>
+                    <td class="is-numeric"><?= e((string) $pvRecon['item_range'][0]) ?> → <?= e((string) $pvRecon['item_range'][1]) ?></td>
+                    <td class="is-numeric"><?= e((string) $pvRecon['invoice_range'][0]) ?> → <?= e((string) $pvRecon['invoice_range'][1]) ?></td>
+                    <td class="is-numeric"><?= $pvRecon['item_range'] === $pvRecon['invoice_range']
+                        ? '<span class="mbw-pill tone-green">Same</span>'
+                        : '<span class="mbw-pill tone-red">Different</span>' ?></td>
+                </tr>
+                <?php foreach ($pvRecon['differences'] as $difference): ?>
+                    <tr>
+                        <td><?= e((string) $difference['label']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $difference['items']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $difference['invoices']) ?></td>
+                        <td class="is-numeric"><?= abs((float) $difference['gap']) < 0.011
+                            ? '<span class="mbw-pill tone-green">Agrees</span>'
+                            : '<span class="mbw-pill tone-red">' . $fmt((float) $difference['gap']) . '</span>' ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+
         <?php if ($salesPreview['config_errors'] !== []): ?>
-            <div class="notice error" style="margin-top:10px"><strong>Posting setup incomplete:</strong> <?= e(implode(' ', $salesPreview['config_errors'])) ?> Save the posting ledgers first, then re-open this preview.</div>
+            <div class="notice error" style="margin-top:10px"><strong>Posting setup incomplete:</strong> <?= e(implode(' ', $salesPreview['config_errors'])) ?> Save the posting ledgers above, then re-open this preview.</div>
         <?php endif; ?>
         <?php if ($salesPreview['duplicate_dates'] !== []): ?>
-            <div class="notice error" style="margin-top:10px"><strong>Already posted dates:</strong> <?= e(implode(', ', $salesPreview['duplicate_dates'])) ?> — an earlier upload already posted sales for these days. Post anyway only if this sheet holds ADDITIONAL sales for them.</div>
+            <div class="notice error" style="margin-top:10px"><strong>Already posted dates:</strong> <?= e(implode(', ', $salesPreview['duplicate_dates'])) ?> — an earlier upload already posted sales for these days. Post anyway only if these sheets hold ADDITIONAL sales for them.</div>
         <?php endif; ?>
     </section>
 
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Voucher per Day</h2></div>
+        <div class="mbw-card-head"><h2>The entry each day will post</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Date</th><th class="is-numeric">Rows</th><th class="is-numeric">Dr Receivable</th><th class="is-numeric">Dr Discount</th><th>Cr Sales ledger(s)</th><th class="is-numeric">Cr VAT</th></tr></thead>
+            <thead><tr><th>Date</th><th>Debit — settled to</th><th>Credit — sales by category</th><th class="is-numeric">VAT</th><th class="is-numeric">Voucher total</th></tr></thead>
             <tbody>
-                <?php if ($salesPreview['days'] === []): ?><tr><td colspan="6">No valid rows — fix the errors below.</td></tr><?php endif; ?>
-                <?php foreach ($salesPreview['days'] as $day): ?>
+                <?php if ($pvItems['days'] === []): ?><tr><td colspan="5">No valid rows — fix the errors below.</td></tr><?php endif; ?>
+                <?php foreach ($pvItems['days'] as $dayDate => $day): ?>
+                    <?php $dayInvoice = $pvInvoices['days'][$dayDate] ?? null; ?>
                     <tr>
-                        <td><strong><?= e($day['date']) ?></strong><?php $bsDay = bs_format($day['date']); ?><?= $bsDay !== '' ? '<br><small>' . e($bsDay) . '</small>' : '' ?></td>
-                        <td class="is-numeric"><?= (int) $day['rows'] ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $day['receivable']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $day['discount']) ?></td>
+                        <td><strong><?= e((string) $dayDate) ?></strong></td>
                         <td>
-                            <?php foreach ($day['ledgers'] as $dayLedger): ?>
-                                <div style="display:flex;justify-content:space-between;gap:14px"><small><?= e($dayLedger['label']) ?></small><small><?= $fmt((float) $dayLedger['taxable']) ?></small></div>
+                            <?php if ($dayInvoice === null): ?>
+                                <span class="mbw-pill tone-red">Nothing on the invoice sheet for this day</span>
+                            <?php else: ?>
+                                <?php foreach ($dayInvoice['ledgers'] as $legLedger): ?>
+                                    <div><?= e((string) $legLedger['name']) ?> <span style="color:var(--mbw-muted)"><?= $fmt((float) $legLedger['total']) ?></span></div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php foreach ($day['ledgers'] as $legLedger): ?>
+                                <div><?= e((string) $legLedger['label']) ?> <span style="color:var(--mbw-muted)"><?= $fmt((float) $legLedger['taxable']) ?></span></div>
                             <?php endforeach; ?>
                         </td>
                         <td class="is-numeric"><?= $fmt((float) $day['vat']) ?></td>
+                        <td class="is-numeric"><strong><?= $fmt((float) $day['total']) ?></strong></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
+            Discount is already taken off the credit — the sheets carry Taxable Sales net of it, and that is what the VAT was worked out on.
+        </p>
     </section>
 
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Rows (<?= count($salesPreview['rows']) ?>)</h2></div>
+        <div class="mbw-card-head"><h2>Item-wise sheet (<?= count($pvItems['rows']) ?> row<?= count($pvItems['rows']) === 1 ? '' : 's' ?>)</h2></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Sheet row</th><th>Date</th><th>Category</th><th>Item</th><th class="is-numeric">Qty</th><th class="is-numeric">Amount</th><th class="is-numeric">Discount</th><th class="is-numeric">VAT</th><th class="is-numeric">Taxable</th><th>Sales ledger</th><th>Status</th></tr></thead>
+            <thead><tr><th>#</th><th>Date</th><th>Category</th><th>Item</th><th class="is-numeric">Qty</th><th class="is-numeric">Amount</th><th class="is-numeric">Discount</th><th class="is-numeric">Taxable</th><th class="is-numeric">VAT</th><th class="is-numeric">With VAT</th><th>Sales ledger</th></tr></thead>
             <tbody>
-                <?php foreach ($salesPreview['rows'] as $previewRow): ?>
-                    <tr>
+                <?php foreach (array_slice($pvItems['rows'], 0, 300) as $previewRow): ?>
+                    <tr<?= $previewRow['errors'] !== [] ? ' style="background:rgba(220,53,69,.08)"' : '' ?>>
                         <td><?= (int) $previewRow['n'] ?></td>
-                        <td><small><?= e($previewRow['date'] ?? $previewRow['date_raw']) ?></small></td>
-                        <td><?= e($previewRow['category']) ?></td>
-                        <td><?= e($previewRow['item']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $previewRow['qty'], 3) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $previewRow['gross']) ?></td>
+                        <td><?= e((string) ($previewRow['date'] ?? $previewRow['date_raw'])) ?></td>
+                        <td><?= e((string) $previewRow['category']) ?></td>
+                        <td><?= e((string) $previewRow['item']) ?></td>
+                        <td class="is-numeric"><?= e(rtrim(rtrim(number_format((float) $previewRow['qty'], 3, '.', ','), '0'), '.')) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $previewRow['discount']) ?></td>
-                        <td class="is-numeric"><?= $fmt((float) $previewRow['vat']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $previewRow['taxable']) ?></td>
-                        <td><small><?= e((string) ($previewRow['ledger_label'] ?? '—')) ?><?= $previewRow['ledger_source'] !== null ? ' <span class="mbw-pill ' . ($previewRow['ledger_source'] === 'item' ? 'tone-purple' : ($previewRow['ledger_source'] === 'category' ? 'tone-blue' : 'tone-gray')) . '">' . e((string) $previewRow['ledger_source']) . '</span>' : '' ?></small></td>
-                        <td>
-                            <?php if ($previewRow['errors'] === []): ?>
-                                <span class="mbw-pill tone-green">✓ Ready</span>
-                            <?php else: ?>
-                                <span class="mbw-pill tone-red"><?= count($previewRow['errors']) ?> error(s)</span>
-                                <ul style="color:var(--mbw-red, #b42318);font-size:.85rem;margin:4px 0 0;padding-left:16px"><?php foreach ($previewRow['errors'] as $rowError): ?><li><?= e($rowError) ?></li><?php endforeach; ?></ul>
-                            <?php endif; ?>
-                        </td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['vat']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['total']) ?></td>
+                        <td><?php if ($previewRow['errors'] !== []): ?>
+                            <span class="mbw-pill tone-red"><?= e(implode(' ', $previewRow['errors'])) ?></span>
+                        <?php else: ?><?= e((string) $previewRow['ledger_label']) ?><?php endif; ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <?php if (count($pvItems['rows']) > 300): ?>
+            <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Showing the first 300 of <?= count($pvItems['rows']) ?> rows. All of them will post.</p>
+        <?php endif; ?>
     </section>
 
-    <div class="mbw-card" style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
-        <form method="post" style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;width:100%">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="sales_upload_commit">
-            <input type="hidden" name="back_view" value="sales-upload">
-            <input type="hidden" name="token" value="<?= e($salesToken) ?>">
-            <?php if ($previewErrors > 0): ?>
-                <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" name="skip_invalid" value="1" checked> Skip the <?= $previewErrors ?> row(s) with errors</label>
-            <?php endif; ?>
-            <?php if ($salesPreview['duplicate_dates'] !== []): ?>
-                <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" name="allow_duplicate_dates" value="1"> Post anyway (dates already posted: <?= e(implode(', ', $salesPreview['duplicate_dates'])) ?>)</label>
-            <?php endif; ?>
-            <span style="flex:1"></span>
-            <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Cancel</a>
-            <?php if ($canPost && $previewValid > 0 && $salesPreview['config_errors'] === []): ?>
-                <button type="submit"><?= icon('chevron-right') ?>Post <?= count($salesPreview['days']) ?> Daily Voucher(s)</button>
-            <?php endif; ?>
-        </form>
-    </div>
+    <section class="mbw-card" data-collapsible>
+        <div class="mbw-card-head"><h2>Invoice-wise sheet (<?= count($pvInvoices['rows']) ?> row<?= count($pvInvoices['rows']) === 1 ? '' : 's' ?>)</h2></div>
+        <div style="overflow-x:auto"><table>
+            <thead><tr><th>#</th><th>Date</th><th>Invoice No</th><th>Payment type</th><th>Ledger code</th><th>Resolved ledger</th><th class="is-numeric">Amount</th><th class="is-numeric">Discount</th><th class="is-numeric">Taxable</th><th class="is-numeric">VAT</th><th class="is-numeric">With VAT</th></tr></thead>
+            <tbody>
+                <?php foreach (array_slice($pvInvoices['rows'], 0, 300) as $previewRow): ?>
+                    <tr<?= $previewRow['errors'] !== [] ? ' style="background:rgba(220,53,69,.08)"' : '' ?>>
+                        <td><?= (int) $previewRow['n'] ?></td>
+                        <td><?= e((string) ($previewRow['date'] ?? $previewRow['date_raw'])) ?></td>
+                        <td><?= e((string) $previewRow['invoice_no']) ?></td>
+                        <td><?= e((string) $previewRow['payment_type']) ?></td>
+                        <td><?= e((string) $previewRow['ledger_code']) ?></td>
+                        <td><?php if ($previewRow['errors'] !== []): ?>
+                            <span class="mbw-pill tone-red"><?= e(implode(' ', $previewRow['errors'])) ?></span>
+                        <?php else: ?><span class="mbw-pill tone-green"><?= e((string) $previewRow['ledger_name']) ?></span><?php endif; ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['discount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['taxable']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['vat']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $previewRow['total']) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
+        <?php if (count($pvInvoices['rows']) > 300): ?>
+            <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Showing the first 300 of <?= count($pvInvoices['rows']) ?> rows. All of them will post.</p>
+        <?php endif; ?>
+    </section>
+
+    <section class="mbw-card">
+        <div class="mbw-card-head"><h2>Post</h2></div>
+        <?php if (!$canPost): ?>
+            <div class="notice error">You do not have permission to post sales.</div>
+        <?php elseif ($pvBlocked): ?>
+            <div class="notice error">
+                Nothing can be posted while the sheets disagree or rows carry errors. Fix them in the workbook and upload it again —
+                posting part of a day would leave the two sheets out of step permanently.
+            </div>
+        <?php else: ?>
+            <form method="post">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="sales_upload_commit">
+                <input type="hidden" name="back_view" value="sales-upload">
+                <input type="hidden" name="token" value="<?= e($salesToken) ?>">
+                <?php if ($salesPreview['duplicate_dates'] !== []): ?>
+                    <label class="checkbox-line"><input type="checkbox" name="allow_duplicate_dates" value="1"> Post anyway — these sheets hold additional sales for days already posted</label>
+                <?php endif; ?>
+                <div style="margin-top:10px">
+                    <button type="submit"><?= icon('check') ?>Post <?= count($pvItems['days']) ?> daily voucher<?= count($pvItems['days']) === 1 ? '' : 's' ?></button>
+                </div>
+            </form>
+        <?php endif; ?>
+    </section>
     <?php endif; ?>
+
 
 <?php elseif ($view === 'settings'): ?>
     <?php
