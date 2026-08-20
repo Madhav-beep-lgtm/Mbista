@@ -2365,6 +2365,59 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     $editorState = $_SESSION['hospitality_sheet_editor'] ?? null;
     $editorItemColumns = hospitality_workbook_editor_columns('items');
     $editorInvoiceColumns = hospitality_workbook_editor_columns('invoices');
+
+    // Category and Item are chosen, not typed. A typed category that nothing
+    // maps has no sales ledger, and a typed item name that differs by a space
+    // becomes a second menu item for the same dish -- both are errors this
+    // screen exists to prevent, so it stops offering the chance to make them.
+    //
+    // The lists include whatever is already on the sheet, even when the books
+    // have not seen it before: the editor must never silently change a row it
+    // was asked to show, and a first upload legitimately brings new items.
+    $editorCategories = [];
+    $editorItems = [];
+    if ($editorState !== null) {
+        foreach ((array) $editorState['items'] as $editorSeen) {
+            $seenCategory = trim((string) ($editorSeen['category'] ?? ''));
+            if ($seenCategory !== '') {
+                $editorCategories[$seenCategory] = true;
+            }
+            $seenItem = trim((string) ($editorSeen['item'] ?? ''));
+            if ($seenItem !== '') {
+                $editorItems[$seenItem] = true;
+            }
+        }
+    }
+    // Everything the tenant has mapped a ledger to, so a bad category can be
+    // corrected to one that actually posts somewhere.
+    $editorMapStmt = db()->prepare("SELECT display_value FROM hospitality_sales_ledger_maps
+        WHERE company_id = :cid AND map_type = 'category' AND active = 1 ORDER BY display_value ASC");
+    $editorMapStmt->execute(['cid' => $companyId]);
+    foreach ($editorMapStmt->fetchAll(PDO::FETCH_COLUMN) as $mappedCategory) {
+        $editorCategories[(string) $mappedCategory] = true;
+    }
+    $editorMenuStmt = db()->prepare('SELECT name FROM hospitality_menu_items
+        WHERE company_id = :cid AND active = 1 ORDER BY name ASC');
+    $editorMenuStmt->execute(['cid' => $companyId]);
+    foreach ($editorMenuStmt->fetchAll(PDO::FETCH_COLUMN) as $menuName) {
+        $editorItems[(string) $menuName] = true;
+    }
+    ksort($editorCategories, SORT_NATURAL | SORT_FLAG_CASE);
+    ksort($editorItems, SORT_NATURAL | SORT_FLAG_CASE);
+
+    /** The option list for one of the two, built once and shared by every row. */
+    $editorOptionsFor = static function (array $values): callable {
+        return static function () use ($values): string {
+            $html = '<option value="">— choose —</option>';
+            foreach (array_keys($values) as $value) {
+                $html .= '<option value="' . e((string) $value) . '">' . e((string) $value) . '</option>';
+            }
+
+            return $html;
+        };
+    };
+    $editorCategoryOptions = $editorOptionsFor($editorCategories);
+    $editorItemOptions = $editorOptionsFor($editorItems);
     $editorChecked = null;
     if ($editorState !== null) {
         $editorChecked = hospitality_workbook_parse_rows(
@@ -2405,6 +2458,14 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         return $filled;
     };
     $editorHasRows = $editorState !== null;
+    // The editor is here to fix what is wrong, so that is what it shows. A
+    // month's sheet is several hundred rows and drawing them all as inputs runs
+    // to well over a megabyte of boxes nobody is going to touch.
+    //
+    // The rows that are FINE still travel with the form, as hidden fields —
+    // posting uses what is on this screen, so anything left off it would be
+    // left out of the books.
+    $editorShowAll = ($_GET['all'] ?? '') === '1';
     $editorClean = $editorChecked !== null && !isset($editorChecked['error'])
         && $editorChecked['items']['errors'] === 0 && $editorChecked['invoices']['errors'] === 0
         && $editorChecked['reconciliation']['ok'];
@@ -2490,7 +2551,22 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 ['invoices', 'Invoice-wise sheet — how it was settled', $editorInvoiceColumns, (array) $editorState['invoices'], $editorInvoiceErrors, 'invoice_rows'],
             ] as [$editorSheet, $editorTitle, $editorColumns, $editorRows, $editorErrors, $editorField]): ?>
                 <section class="mbw-card" data-collapsible style="margin-bottom:14px">
-                    <div class="mbw-card-head"><h2><?= e($editorTitle) ?> (<?= count($editorRows) ?>)</h2></div>
+                    <div class="mbw-card-head">
+                        <h2><?= e($editorTitle) ?> (<?= count($editorRows) ?>)</h2>
+                        <?php $editorWrongCount = count(array_filter($editorErrors, static fn (array $e): bool => $e !== [])); ?>
+                        <span style="font-size:12.5px;color:var(--mbw-muted)">
+                            <?php if ($editorShowAll): ?>
+                                Showing every row ·
+                                <a href="<?= e(url('admin/hospitality.php?view=sheet-editor')) ?>">Show only what needs fixing</a>
+                            <?php elseif ($editorWrongCount > 0): ?>
+                                Showing the <?= (int) $editorWrongCount ?> row(s) that need fixing ·
+                                <a href="<?= e(url('admin/hospitality.php?view=sheet-editor&all=1')) ?>">Show all <?= count($editorRows) ?></a>
+                            <?php else: ?>
+                                Nothing wrong on this sheet ·
+                                <a href="<?= e(url('admin/hospitality.php?view=sheet-editor&all=1')) ?>">Show all <?= count($editorRows) ?></a>
+                            <?php endif; ?>
+                        </span>
+                    </div>
                     <div style="overflow-x:auto"><table class="mbw-grid-table">
                         <thead><tr>
                             <th style="width:44px">#</th>
@@ -2507,6 +2583,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             $editorDrawn[] = [];
                             $editorDrawn[] = [];
                             ?>
+                            <?php $editorHiddenCount = 0; ?>
                             <?php foreach ($editorDrawn as $editorIndex => $editorRow): ?>
                                 <?php
                                 $filledBefore = $editorFilledIndex($editorDrawn, $editorIndex, $editorColumns);
@@ -2518,13 +2595,47 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                                     }
                                 }
                                 $rowErrors = $rowIsBlank ? [] : ($editorErrors[$filledBefore] ?? []);
+                                // Shown: anything wrong, the spare lines at the foot, or
+                                // everything when it has been asked for.
+                                $rowShown = $editorShowAll || $rowErrors !== [] || $rowIsBlank;
                                 ?>
+                                <?php if (!$rowShown): ?>
+                                    <?php
+                                    // Carried, not drawn. Nine hidden fields instead of nine
+                                    // boxes is about a tenth of the bytes.
+                                    $editorHiddenCount++;
+                                    foreach ($editorColumns as $editorKey => $editorLabel): ?>
+                                        <input type="hidden" name="<?= e($editorField) ?>[<?= $editorIndex ?>][<?= e($editorKey) ?>]" value="<?= e((string) ($editorRow[$editorKey] ?? '')) ?>">
+                                    <?php endforeach; ?>
+                                    <?php continue; ?>
+                                <?php endif; ?>
                                 <tr<?= $rowErrors !== [] ? ' style="background:rgba(220,53,69,.08)"' : '' ?>>
                                     <td><?= $editorIndex + 1 ?></td>
                                     <?php foreach ($editorColumns as $editorKey => $editorLabel): ?>
-                                        <td><input type="text" name="<?= e($editorField) ?>[<?= $editorIndex ?>][<?= e($editorKey) ?>]"
-                                                   value="<?= e((string) ($editorRow[$editorKey] ?? '')) ?>"
-                                                   style="width:<?= in_array($editorKey, ['item', 'category', 'payment_type'], true) ? '150' : '110' ?>px"></td>
+                                        <td>
+                                            <?php
+                                            $cellName = $editorField . '[' . $editorIndex . '][' . $editorKey . ']';
+                                            $cellValue = (string) ($editorRow[$editorKey] ?? '');
+                                            $cellList = $editorKey === 'category' ? 'hosp-edit-categories'
+                                                : ($editorKey === 'item' ? 'hosp-edit-items' : '');
+                                            ?>
+                                            <?php if ($cellList !== ''): ?>
+                                                <?php
+                                                // One copy of the list for the page, not one per row: a
+                                                // month's sheet is hundreds of rows, and a full item list
+                                                // on each of them is megabytes of the same thing.
+                                                $cellField = shared_options(
+                                                    $cellList,
+                                                    $cellList === 'hosp-edit-categories' ? $editorCategoryOptions : $editorItemOptions,
+                                                    $cellValue
+                                                );
+                                                ?>
+                                                <select name="<?= e($cellName) ?>"<?= $cellField['fill'] ? ' data-fill-from="' . e($cellList) . '"' : '' ?> style="min-width:160px"><?= $cellField['html'] ?></select>
+                                            <?php else: ?>
+                                                <input type="text" name="<?= e($cellName) ?>" value="<?= e($cellValue) ?>"
+                                                       style="width:<?= $editorKey === 'payment_type' ? '130' : '110' ?>px">
+                                            <?php endif; ?>
+                                        </td>
                                     <?php endforeach; ?>
                                     <td><?= $rowErrors !== []
                                         ? '<span class="mbw-pill tone-red">' . e(implode(' ', $rowErrors)) . '</span>'
@@ -2533,6 +2644,12 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             <?php endforeach; ?>
                         </tbody>
                     </table></div>
+                    <?php if ($editorHiddenCount > 0): ?>
+                        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
+                            <?= (int) $editorHiddenCount ?> row(s) with nothing wrong are not drawn, to keep this screen quick.
+                            They are still part of the sheet and still post.
+                        </p>
+                    <?php endif; ?>
                 </section>
             <?php endforeach; ?>
 
@@ -2556,9 +2673,16 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
                     <strong>Check again</strong> re-reads every row exactly as an upload would. Dates may be typed in AD or BS.
                     Posting uses what is on this screen, not the file that was uploaded.
+                    <br>Category and Item are chosen from a list — a category nothing maps has no sales ledger to post to, and an
+                    item name that differs by a space becomes a second menu item for the same dish. The lists hold everything your
+                    books know plus everything on this sheet.
                 </p>
             </section>
         </form>
+        <?php // The single copy of each list the stubs above are filled from. ?>
+        <?= shared_options_template('hosp-edit-categories', $editorCategoryOptions) ?>
+        <?= shared_options_template('hosp-edit-items', $editorItemOptions) ?>
+        <?= shared_options_script() ?>
     <?php endif; ?>
 
 <?php elseif ($view === 'settings'): ?>
