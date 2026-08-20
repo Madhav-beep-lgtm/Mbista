@@ -552,7 +552,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'record_purchase_batch') {
         require_permission('inventory', 'create');
-        $gridRows = (array) ($_POST['rows'] ?? []);
+        // The form is bills-with-items; the engine posts flat lines. Folding
+        // out here keeps the tested engine untouched and means a bill's header
+        // is copied onto its lines by code rather than re-typed by a person.
+        $gridBills = (array) ($_POST['bills'] ?? []);
+        $gridRows = $gridBills !== []
+            ? inv_purchase_bills_to_rows($gridBills)
+            : (array) ($_POST['rows'] ?? []);
         $checked = inv_purchase_batch_validate($companyId, $fiscalYearId, $gridRows);
         $result = inv_purchase_batch_post($companyId, $fiscalYearId, $checked, $userId);
         if (!$result['ok']) {
@@ -561,12 +567,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $problems = $checked['errors'];
             foreach ($checked['rows'] as $checkedRow) {
                 foreach ($checkedRow['errors'] as $rowProblem) {
-                    $problems[] = 'Line ' . $checkedRow['line'] . ': ' . $rowProblem;
+                    $problems[] = 'Item ' . $checkedRow['line'] . ': ' . $rowProblem;
                 }
             }
             if ($problems === []) {
                 $problems[] = (string) $result['error'];
             }
+            // Everything typed is handed back in the shape the FORM uses, so a
+            // long bill is not re-keyed over one bad line.
+            $_SESSION['inv_purchase_bills'] = array_values($gridBills);
             $_SESSION['inv_purchase_grid'] = array_values($gridRows);
             $_SESSION['inv_purchase_grid_errors'] = array_slice($problems, 0, 20);
             flash('error', (string) $result['error']);
@@ -1769,8 +1778,9 @@ if (table_exists('ledgers')) {
 }
 // Filled back in when a batch is refused, so nothing typed is lost.
 $purchaseGridRows = $_SESSION['inv_purchase_grid'] ?? [];
+$purchaseBills = $_SESSION['inv_purchase_bills'] ?? [];
 $purchaseGridErrors = $_SESSION['inv_purchase_grid_errors'] ?? [];
-unset($_SESSION['inv_purchase_grid'], $_SESSION['inv_purchase_grid_errors']);
+unset($_SESSION['inv_purchase_grid'], $_SESSION['inv_purchase_bills'], $_SESSION['inv_purchase_grid_errors']);
 
 $movementStmt = db()->prepare('
     SELECT t.*, i.sku, i.name AS item_name, i.unit
@@ -2570,11 +2580,20 @@ $invMoveItemOptions = static function () use ($items): string {
     <details class="feature-disclosure" id="movement-purchase" <?= $moveItemId > 0 || !empty($purchaseGridRows) ? 'open' : '' ?>>
         <summary><span><strong><?= icon('tasks') ?>Record Purchase / Opening Stock</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <?php
-        // A supplier's bill is rarely one line, so the whole bill is entered at
-        // once and posted together. Ten rows to start with, and the Add row
-        // button below for a longer one.
-        $gridRowCount = max(10, count($purchaseGridRows ?? []) + 2);
+        // A supplier's bill is ONE date, ONE movement, ONE bill number and ONE
+        // supplier, with several items under it. The form is shaped that way --
+        // the header on the row, the items behind a button -- because that is
+        // how the paper reads, and asking for the supplier again on every line
+        // is how a bill gets split across two accounts by a mis-click.
+        //
+        // What varies per item is what genuinely varies: quantity, rate,
+        // whether it carries VAT, whether tax is withheld, and whether it is
+        // also a kitchen ingredient. A bill of milk and mobile data has one
+        // exempt line and one standard line on the same invoice.
+        $billCount = max(3, count($purchaseBills ?? []) + 1);
+        $itemRowsPerBill = 6;
         $gridDefaultDate = $todayInFy ?? date('Y-m-d');
+        $marksIngredients = column_exists('inventory_items', 'is_ingredient');
         $gridItemOptions = static function () use ($items): string {
             $html = '<option value="">Select item…</option>';
             foreach ($items as $gridItem) {
@@ -2603,125 +2622,164 @@ $invMoveItemOptions = static function () use ($items): string {
             return $html;
         };
         ?>
-        <?php if (($purchaseGridErrors ?? []) !== []): ?>
-            <div class="notice error" style="margin-bottom:10px">
-                <strong>Nothing was recorded.</strong>
-                <ul style="margin:6px 0 0;padding-left:18px">
-                    <?php foreach (array_slice($purchaseGridErrors, 0, 12) as $gridError): ?><li><?= e((string) $gridError) ?></li><?php endforeach; ?>
+        <?php if (!empty($purchaseGridErrors)): ?>
+            <div class="notice error" style="margin-bottom:12px">
+                <strong>Nothing was recorded.</strong> Every line has to be right before any of them post:
+                <ul style="margin:8px 0 0;padding-left:18px">
+                    <?php foreach ($purchaseGridErrors as $gridProblem): ?><li><?= e((string) $gridProblem) ?></li><?php endforeach; ?>
                 </ul>
             </div>
         <?php endif; ?>
         <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
-            Enter the whole bill and post it in one go. Every line becomes its own stock movement and its own accounting entry —
-            exactly as entering them one at a time did — but they all succeed or all fail together, so a bill can never be half in.
-            Leave the rest of the rows blank.
+            One row per supplier's bill. Click <strong>Items</strong> to enter what is on it — each item carries its own quantity, rate,
+            VAT treatment and withholding, because one invoice can hold an exempt line and a standard one.
+            Every item becomes its own stock movement and its own accounting entry, and they all succeed or all fail together,
+            so a bill can never be half in.
         </p>
-        <form method="post" id="purchaseGridForm">
+        <form method="post" id="purchaseBillForm">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="record_purchase_batch">
-            <div style="overflow-x:auto"><table class="mbw-grid-table" id="purchaseGrid">
+            <div style="overflow-x:auto"><table class="mbw-grid-table" id="purchaseBills">
                 <thead><tr>
                     <th>Posting date</th>
                     <th>Supplier inv. date</th>
-                    <th>Item</th>
                     <th>Movement</th>
-                    <th>UoM</th>
-                    <th>Reference</th>
-                    <th class="is-numeric">Quantity</th>
-                    <th class="is-numeric">Rate<br><small>excl. VAT, after discount</small></th>
-                    <th class="is-numeric">Amount</th>
-                    <th style="text-align:center">VAT<br>
-                        <label style="font-weight:400;font-size:11px;color:var(--mbw-muted);white-space:nowrap">
-                            <input type="checkbox" id="purchaseGridVatAll" checked> all
-                        </label>
-                    </th>
-                    <th class="is-numeric">VAT on purchase</th>
+                    <th>Bill reference</th>
                     <th>Supplier</th>
+                    <th style="text-align:center">Items</th>
+                    <th class="is-numeric">Qty</th>
+                    <th class="is-numeric">Amount</th>
+                    <th class="is-numeric">VAT</th>
+                    <th class="is-numeric">TDS</th>
                     <th>VAT ledger (Dr)</th>
-                    <th style="text-align:center">TDS<br>
-                        <label style="font-weight:400;font-size:11px;color:var(--mbw-muted);white-space:nowrap">
-                            <input type="checkbox" id="purchaseGridTdsAll"> all
-                        </label>
-                    </th>
-                    <th class="is-numeric">TDS base</th>
-                    <th class="is-numeric">TDS %</th>
                     <th>TDS ledger (Cr)</th>
                     <th>Notes</th>
-                    <th>Ingredient</th>
                     <th></th>
                 </tr></thead>
                 <tbody>
-                <?php for ($gridRow = 0; $gridRow < $gridRowCount; $gridRow++): ?>
-                    <?php $prev = $purchaseGridRows[$gridRow] ?? []; ?>
-                    <tr class="jw-grid-row">
-                        <td><input type="date" name="rows[<?= $gridRow ?>][transaction_date]" value="<?= e((string) ($prev['transaction_date'] ?? ($gridRow === 0 ? $gridDefaultDate : ''))) ?>" style="width:140px"></td>
-                        <td><input type="date" name="rows[<?= $gridRow ?>][supplier_invoice_date]" value="<?= e((string) ($prev['supplier_invoice_date'] ?? '')) ?>" style="width:140px"></td>
-                        <td><?php $gridItemField = shared_options('inv-purchase-items', $gridItemOptions, (string) ($prev['item_id'] ?? '')); ?>
-                            <select name="rows[<?= $gridRow ?>][item_id]" class="inv-grid-item"<?= $gridItemField['fill'] ? ' data-fill-from="inv-purchase-items"' : '' ?> style="min-width:190px"><?= $gridItemField['html'] ?></select></td>
-                        <td><select name="rows[<?= $gridRow ?>][movement]" style="min-width:120px">
-                            <?php foreach (inv_purchase_batch_types() as $gridType => $gridTypeLabel): ?>
-                                <option value="<?= e($gridType) ?>" <?= (string) ($prev['movement'] ?? 'purchase') === $gridType ? 'selected' : '' ?>><?= e($gridTypeLabel) ?></option>
+                <?php for ($billIndex = 0; $billIndex < $billCount; $billIndex++): ?>
+                    <?php $bill = $purchaseBills[$billIndex] ?? []; ?>
+                    <tr class="inv-bill-row" data-bill="<?= $billIndex ?>">
+                        <td><input type="date" name="bills[<?= $billIndex ?>][transaction_date]" value="<?= e((string) ($bill['transaction_date'] ?? ($billIndex === 0 ? $gridDefaultDate : ''))) ?>" style="width:150px"></td>
+                        <td><input type="date" name="bills[<?= $billIndex ?>][supplier_invoice_date]" value="<?= e((string) ($bill['supplier_invoice_date'] ?? '')) ?>" style="width:150px"></td>
+                        <td><select name="bills[<?= $billIndex ?>][movement]" style="min-width:130px">
+                            <?php foreach (inv_purchase_batch_types() as $billType => $billTypeLabel): ?>
+                                <option value="<?= e($billType) ?>" <?= (string) ($bill['movement'] ?? 'purchase') === $billType ? 'selected' : '' ?>><?= e($billTypeLabel) ?></option>
                             <?php endforeach; ?>
                         </select></td>
-                        <td><input type="text" class="inv-grid-uom" value="<?= e((string) ($prev['unit'] ?? '')) ?>" readonly tabindex="-1" style="width:70px;background:transparent;border:0;color:var(--mbw-muted)"></td>
-                        <td><input type="text" name="rows[<?= $gridRow ?>][ref_no]" maxlength="80" value="<?= e((string) ($prev['ref_no'] ?? '')) ?>" placeholder="Bill no." style="width:110px"></td>
-                        <td class="is-numeric"><input type="number" step="0.001" min="0" name="rows[<?= $gridRow ?>][quantity]" class="inv-grid-qty" value="<?= e((string) ($prev['quantity'] ?? '')) ?>" style="width:90px;text-align:right"></td>
-                        <td class="is-numeric"><input type="number" step="0.01" min="0" name="rows[<?= $gridRow ?>][rate]" class="inv-grid-rate" value="<?= e((string) ($prev['rate'] ?? '')) ?>" style="width:100px;text-align:right"></td>
-                        <td class="is-numeric"><input type="text" class="inv-grid-amount" value="" readonly tabindex="-1" style="width:110px;text-align:right;background:transparent;border:0"></td>
-                        <?php
-                        // Ticked means the line carries VAT. A returning row
-                        // keeps what it had; a fresh one starts ticked, because
-                        // that is what nearly every purchase line is.
-                        $gridVatOn = array_key_exists('vat_applicable', $prev)
-                            ? !empty($prev['vat_applicable'])
-                            : ((string) ($prev['vat_mode'] ?? 'standard') !== 'exempt');
-                        ?>
+                        <td><input type="text" name="bills[<?= $billIndex ?>][ref_no]" maxlength="80" value="<?= e((string) ($bill['ref_no'] ?? '')) ?>" placeholder="Bill no." style="width:120px"></td>
+                        <td><?php $billSupplier = shared_options('inv-purchase-suppliers', $gridSupplierOptions, (string) ($bill['supplier_party_id'] ?? '')); ?>
+                            <select name="bills[<?= $billIndex ?>][supplier_party_id]"<?= $billSupplier['fill'] ? ' data-fill-from="inv-purchase-suppliers"' : '' ?> style="min-width:160px"><?= $billSupplier['html'] ?></select></td>
                         <td style="text-align:center">
-                            <?php // The hidden field is what an un-ticked box sends; the
-                                  // checkbox overrides it when it is ticked. ?>
-                            <input type="hidden" name="rows[<?= $gridRow ?>][vat_applicable]" value="0">
-                            <input type="checkbox" class="inv-grid-vaton" name="rows[<?= $gridRow ?>][vat_applicable]" value="1" <?= $gridVatOn ? 'checked' : '' ?>
-                                   title="Untick if this item is VAT exempt">
-                            <input type="number" step="0.01" min="0" max="100" name="rows[<?= $gridRow ?>][vat_rate]" class="inv-grid-vatrate"
-                                   value="<?= e((string) ($prev['vat_rate'] ?? '')) ?>" placeholder="<?= e(number_format((float) default_vat_rate(), 2, '.', '')) ?>%"
-                                   title="Leave blank for the standard rate" style="width:70px;margin-top:4px;<?= $gridVatOn ? '' : 'display:none' ?>"></td>
-                        <td class="is-numeric"><input type="number" step="0.01" min="0" name="rows[<?= $gridRow ?>][vat_amount]" class="inv-grid-vat" value="<?= e((string) ($prev['vat_amount'] ?? '')) ?>" style="width:100px;text-align:right" placeholder="auto"></td>
-                        <td><?php $gridSupplierField = shared_options('inv-purchase-suppliers', $gridSupplierOptions, (string) ($prev['supplier_party_id'] ?? '')); ?>
-                            <select name="rows[<?= $gridRow ?>][supplier_party_id]"<?= $gridSupplierField['fill'] ? ' data-fill-from="inv-purchase-suppliers"' : '' ?> style="min-width:150px"><?= $gridSupplierField['html'] ?></select></td>
-                        <td><?php $gridVatLedgerField = shared_options('inv-purchase-ledgers', $gridLedgerOptions, (string) ($prev['vat_ledger_id'] ?? '')); ?>
-                            <select name="rows[<?= $gridRow ?>][vat_ledger_id]"<?= $gridVatLedgerField['fill'] ? ' data-fill-from="inv-purchase-ledgers"' : '' ?> style="min-width:160px"><?= $gridVatLedgerField['html'] ?></select></td>
-                        <?php $gridTdsOn = !empty($prev['tds_applicable']) || (float) ($prev['tds_rate'] ?? 0) > 0; ?>
-                        <td style="text-align:center">
-                            <input type="hidden" name="rows[<?= $gridRow ?>][tds_applicable]" value="0">
-                            <input type="checkbox" class="inv-grid-tdson" name="rows[<?= $gridRow ?>][tds_applicable]" value="1" <?= $gridTdsOn ? 'checked' : '' ?>
-                                   title="Tick if tax is withheld on this line"></td>
-                        <td class="is-numeric"><input type="number" step="0.01" min="0" name="rows[<?= $gridRow ?>][tds_base]" value="<?= e((string) ($prev['tds_base'] ?? '')) ?>" style="width:100px;text-align:right" placeholder="whole line"></td>
-                        <td class="is-numeric"><input type="number" step="0.01" min="0" max="100" name="rows[<?= $gridRow ?>][tds_rate]" value="<?= e((string) ($prev['tds_rate'] ?? '')) ?>" style="width:70px;text-align:right"></td>
-                        <td><?php $gridTdsLedgerField = shared_options('inv-purchase-ledgers', $gridLedgerOptions, (string) ($prev['tds_ledger_id'] ?? '')); ?>
-                            <select name="rows[<?= $gridRow ?>][tds_ledger_id]"<?= $gridTdsLedgerField['fill'] ? ' data-fill-from="inv-purchase-ledgers"' : '' ?> style="min-width:160px"><?= $gridTdsLedgerField['html'] ?></select></td>
-                        <td><input type="text" name="rows[<?= $gridRow ?>][notes]" maxlength="255" value="<?= e((string) ($prev['notes'] ?? '')) ?>" style="width:120px"></td>
-                        <td style="text-align:center"><?php if (column_exists('inventory_items', 'is_ingredient')): ?>
-                            <input type="checkbox" name="rows[<?= $gridRow ?>][mark_ingredient]" value="1" <?= !empty($prev['mark_ingredient']) ? 'checked' : '' ?> title="Also make this item available to recipes">
-                        <?php endif; ?></td>
-                        <td><button type="button" class="button secondary inv-grid-clear" style="min-height:28px;padding:2px 8px" title="Clear this line">✕</button></td>
+                            <button type="button" class="button secondary inv-bill-open" data-bill="<?= $billIndex ?>" style="min-height:30px;padding:3px 12px">
+                                <?= icon('box') ?> <span class="inv-bill-count">0</span> item(s)
+                            </button>
+                        </td>
+                        <td class="is-numeric inv-bill-qty" style="color:var(--mbw-muted)">—</td>
+                        <td class="is-numeric inv-bill-amount" style="color:var(--mbw-muted)">—</td>
+                        <td class="is-numeric inv-bill-vat" style="color:var(--mbw-muted)">—</td>
+                        <td class="is-numeric inv-bill-tds" style="color:var(--mbw-muted)">—</td>
+                        <td><?php $billVatLedger = shared_options('inv-purchase-ledgers', $gridLedgerOptions, (string) ($bill['vat_ledger_id'] ?? '')); ?>
+                            <select name="bills[<?= $billIndex ?>][vat_ledger_id]"<?= $billVatLedger['fill'] ? ' data-fill-from="inv-purchase-ledgers"' : '' ?> style="min-width:160px"><?= $billVatLedger['html'] ?></select></td>
+                        <td><?php $billTdsLedger = shared_options('inv-purchase-ledgers', $gridLedgerOptions, (string) ($bill['tds_ledger_id'] ?? '')); ?>
+                            <select name="bills[<?= $billIndex ?>][tds_ledger_id]"<?= $billTdsLedger['fill'] ? ' data-fill-from="inv-purchase-ledgers"' : '' ?> style="min-width:160px"><?= $billTdsLedger['html'] ?></select></td>
+                        <td><input type="text" name="bills[<?= $billIndex ?>][notes]" maxlength="255" value="<?= e((string) ($bill['notes'] ?? '')) ?>" style="width:130px"></td>
+                        <td><button type="button" class="button secondary inv-bill-clear" style="min-height:28px;padding:2px 8px" title="Clear this bill">✕</button></td>
                     </tr>
                 <?php endfor; ?>
                 </tbody>
                 <tfoot><tr>
-                    <th colspan="8" style="text-align:right">Bill total</th>
-                    <th class="is-numeric" id="purchaseGridAmount">0.00</th>
-                    <th></th>
-                    <th class="is-numeric" id="purchaseGridVat">0.00</th>
-                    <th colspan="8"><span id="purchaseGridPayable" style="color:var(--mbw-muted)"></span></th>
+                    <th colspan="6" style="text-align:right">All bills</th>
+                    <th class="is-numeric" id="purchaseAllQty">0</th>
+                    <th class="is-numeric" id="purchaseAllAmount">0.00</th>
+                    <th class="is-numeric" id="purchaseAllVat">0.00</th>
+                    <th class="is-numeric" id="purchaseAllTds">0.00</th>
+                    <th colspan="4"><span id="purchaseAllPayable" style="color:var(--mbw-muted)"></span></th>
                 </tr></tfoot>
             </table></div>
+
+            <?php // One popup per bill. The fields live in the form the whole time,
+                  // so opening and closing changes nothing about what will post. ?>
+            <?php for ($billIndex = 0; $billIndex < $billCount; $billIndex++): ?>
+                <?php $billItems = (array) ($purchaseBills[$billIndex]['items'] ?? []); ?>
+                <dialog class="inv-bill-dialog" id="invBillDialog<?= $billIndex ?>" style="max-width:96vw;width:1100px;border:1px solid var(--mbw-line,#d0d5dd);border-radius:12px;padding:0">
+                    <div style="padding:16px 18px;border-bottom:1px solid var(--mbw-line,#d0d5dd);display:flex;align-items:center;justify-content:space-between">
+                        <strong>Items on bill <span class="inv-dialog-ref"></span></strong>
+                        <button type="button" class="button secondary inv-bill-close" style="min-height:30px;padding:3px 12px">Done</button>
+                    </div>
+                    <div style="padding:14px 18px;max-height:70vh;overflow:auto">
+                        <div style="overflow-x:auto"><table class="mbw-grid-table inv-item-grid" data-bill="<?= $billIndex ?>">
+                            <thead><tr>
+                                <th>Item</th>
+                                <th>UoM</th>
+                                <th class="is-numeric">Quantity</th>
+                                <th class="is-numeric">Rate<br><small>excl. VAT, after discount</small></th>
+                                <th class="is-numeric">Amount</th>
+                                <th style="text-align:center">VAT<br><label style="font-weight:400;font-size:11px;color:var(--mbw-muted)"><input type="checkbox" class="inv-item-vatall" checked> all</label></th>
+                                <th class="is-numeric">VAT</th>
+                                <th style="text-align:center">TDS<br><label style="font-weight:400;font-size:11px;color:var(--mbw-muted)"><input type="checkbox" class="inv-item-tdsall"> all</label></th>
+                                <th class="is-numeric">TDS %</th>
+                                <?php if ($marksIngredients): ?><th style="text-align:center">Ingredient</th><?php endif; ?>
+                                <th>Notes</th>
+                                <th></th>
+                            </tr></thead>
+                            <tbody>
+                            <?php for ($itemIndex = 0; $itemIndex < max($itemRowsPerBill, count($billItems) + 1); $itemIndex++): ?>
+                                <?php
+                                $line = $billItems[$itemIndex] ?? [];
+                                $lineVatOn = array_key_exists('vat_applicable', $line) ? !empty($line['vat_applicable']) : true;
+                                $lineTdsOn = !empty($line['tds_applicable']);
+                                $lineName = 'bills[' . $billIndex . '][items][' . $itemIndex . ']';
+                                ?>
+                                <tr class="inv-item-row">
+                                    <td><?php $lineItemField = shared_options('inv-purchase-items', $gridItemOptions, (string) ($line['item_id'] ?? '')); ?>
+                                        <select name="<?= e($lineName) ?>[item_id]" class="inv-grid-item"<?= $lineItemField['fill'] ? ' data-fill-from="inv-purchase-items"' : '' ?> style="min-width:220px"><?= $lineItemField['html'] ?></select></td>
+                                    <td><input type="text" class="inv-grid-uom" value="" readonly tabindex="-1" style="width:70px;background:transparent;border:0;color:var(--mbw-muted)"></td>
+                                    <td class="is-numeric"><input type="number" step="0.001" min="0" name="<?= e($lineName) ?>[quantity]" class="inv-grid-qty" value="<?= e((string) ($line['quantity'] ?? '')) ?>" style="width:90px;text-align:right"></td>
+                                    <td class="is-numeric"><input type="number" step="0.01" min="0" name="<?= e($lineName) ?>[rate]" class="inv-grid-rate" value="<?= e((string) ($line['rate'] ?? '')) ?>" style="width:100px;text-align:right"></td>
+                                    <td class="is-numeric"><input type="text" class="inv-grid-amount" value="" readonly tabindex="-1" style="width:110px;text-align:right;background:transparent;border:0"></td>
+                                    <td style="text-align:center">
+                                        <input type="hidden" name="<?= e($lineName) ?>[vat_applicable]" value="0">
+                                        <input type="checkbox" class="inv-grid-vaton" name="<?= e($lineName) ?>[vat_applicable]" value="1" <?= $lineVatOn ? 'checked' : '' ?> title="Untick if this item is VAT exempt">
+                                        <input type="number" step="0.01" min="0" max="100" name="<?= e($lineName) ?>[vat_rate]" class="inv-grid-vatrate" value="<?= e((string) ($line['vat_rate'] ?? '')) ?>" placeholder="<?= e(number_format((float) default_vat_rate(), 2, '.', '')) ?>%" title="Leave blank for the standard rate" style="width:70px;margin-top:4px;<?= $lineVatOn ? '' : 'display:none' ?>">
+                                    </td>
+                                    <td class="is-numeric"><input type="number" step="0.01" min="0" name="<?= e($lineName) ?>[vat_amount]" class="inv-grid-vat" value="<?= e((string) ($line['vat_amount'] ?? '')) ?>" style="width:100px;text-align:right" placeholder="auto"></td>
+                                    <td style="text-align:center">
+                                        <input type="hidden" name="<?= e($lineName) ?>[tds_applicable]" value="0">
+                                        <input type="checkbox" class="inv-grid-tdson" name="<?= e($lineName) ?>[tds_applicable]" value="1" <?= $lineTdsOn ? 'checked' : '' ?> title="Tick if tax is withheld on this item">
+                                    </td>
+                                    <td class="is-numeric"><input type="number" step="0.01" min="0" max="100" name="<?= e($lineName) ?>[tds_rate]" class="inv-grid-tdsrate" value="<?= e((string) ($line['tds_rate'] ?? '')) ?>" style="width:80px;text-align:right"></td>
+                                    <?php if ($marksIngredients): ?>
+                                        <td style="text-align:center"><input type="checkbox" name="<?= e($lineName) ?>[mark_ingredient]" value="1" <?= !empty($line['mark_ingredient']) ? 'checked' : '' ?> title="Also make this item available to recipes"></td>
+                                    <?php endif; ?>
+                                    <td><input type="text" name="<?= e($lineName) ?>[notes]" maxlength="255" value="<?= e((string) ($line['notes'] ?? '')) ?>" style="width:120px"></td>
+                                    <td><button type="button" class="button secondary inv-item-clear" style="min-height:28px;padding:2px 8px" title="Take this item off the bill">✕</button></td>
+                                </tr>
+                            <?php endfor; ?>
+                            </tbody>
+                            <tfoot><tr>
+                                <th colspan="4" style="text-align:right">Bill total</th>
+                                <th class="is-numeric inv-dialog-amount">0.00</th>
+                                <th></th>
+                                <th class="is-numeric inv-dialog-vat">0.00</th>
+                                <th colspan="<?= $marksIngredients ? 5 : 4 ?>"></th>
+                            </tr></tfoot>
+                        </table></div>
+                        <div style="margin-top:12px;display:flex;gap:8px">
+                            <button type="button" class="button secondary inv-item-add" data-bill="<?= $billIndex ?>"><?= icon('plus') ?>Add item</button>
+                            <button type="button" class="button secondary inv-bill-close" style="margin-left:auto"><?= icon('check') ?>Done</button>
+                        </div>
+                    </div>
+                </dialog>
+            <?php endfor; ?>
+
             <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-                <button type="submit"><?= icon('badge-check') ?>Record all lines</button>
-                <button type="button" class="secondary" id="purchaseGridAddRow"><?= icon('plus') ?>Add row</button>
+                <button type="submit"><?= icon('badge-check') ?>Record all bills</button>
+                <button type="button" class="secondary" id="purchaseAddBill"><?= icon('plus') ?>Add bill</button>
             </div>
         </form>
         <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-            The reference is what ties these lines to the supplier's bill — it shows on the entry, so the bill can be found again when it is paid.
+            The reference is what ties a bill's lines together — it shows on the entry, so the bill can be found again when it is paid.
             Bought-in stock is prepared as a draft entry so it can be read before it counts; approve it in <strong>Purchase entries</strong> below.
             VAT and any tax withheld are shown next to the stock value they are deliberately kept out of.
         </p>
@@ -3303,24 +3361,27 @@ document.addEventListener('DOMContentLoaded', function () {
 <?= shared_options_script() ?>
 <?php if (isset($gridItemOptions)): ?>
 <script>
-// The purchase grid: unit and rate follow the item chosen, the amount and VAT
-// work themselves out, and the bill totals at the foot. Nothing here is needed
-// to POST the form — every figure is recalculated on the server before a
-// single row is written.
+// The purchase form is bills with items behind a popup, so the arithmetic runs
+// in two places: inside a dialog, where a line's own amount and tax are worked
+// out, and on the bill row behind it, which shows what the popup adds up to.
 (function () {
-    var grid = document.getElementById('purchaseGrid');
-    if (!grid) { return; }
-    var body = grid.tBodies[0];
-
-    function money(value) {
-        return (Math.round((value + Number.EPSILON) * 100) / 100).toFixed(2);
-    }
+    var billTable = document.getElementById('purchaseBills');
+    if (!billTable) { return; }
 
     // The company's own rate, so a tenant on something other than 13% is not
     // quietly given 13 anyway.
     var STANDARD_VAT = <?= (float) default_vat_rate() ?>;
+    var money = function (n) { return (Math.round(n * 100) / 100).toFixed(2); };
 
-    function recalcRow(row) {
+    function itemGridFor(billIndex) {
+        return document.querySelector('.inv-item-grid[data-bill="' + billIndex + '"]');
+    }
+    function billRowFor(billIndex) {
+        return billTable.querySelector('.inv-bill-row[data-bill="' + billIndex + '"]');
+    }
+
+    // One item line: its amount, its VAT, and what it withholds.
+    function recalcItem(row) {
         var itemSelect = row.querySelector('.inv-grid-item');
         var qty = parseFloat((row.querySelector('.inv-grid-qty') || {}).value) || 0;
         var rate = parseFloat((row.querySelector('.inv-grid-rate') || {}).value) || 0;
@@ -3336,7 +3397,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // VAT is a tick: on means the line carries it, at the standard rate
         // unless a rate is typed beside the box. Off means exempt, and the rate
-        // box goes with it -- there is no rate on an exempt line.
+        // and the figure go with it.
         var vatOn = row.querySelector('.inv-grid-vaton');
         var rateInput = row.querySelector('.inv-grid-vatrate');
         var vatInput = row.querySelector('.inv-grid-vat');
@@ -3353,55 +3414,178 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
 
-        // TDS the other way round: off unless somebody ticks it, and its
-        // figures are only reachable while it is on.
+        // TDS the other way round: off unless somebody ticks it.
         var tdsOn = row.querySelector('.inv-grid-tdson');
+        var tdsRateInput = row.querySelector('.inv-grid-tdsrate');
         var tdsApplies = tdsOn ? tdsOn.checked : false;
-        Array.prototype.forEach.call(
-            row.querySelectorAll('[name*="[tds_base]"], [name*="[tds_rate]"], [name*="[tds_ledger_id]"]'),
-            function (field) {
-                field.readOnly = !tdsApplies && field.tagName !== 'SELECT';
-                field.style.opacity = tdsApplies ? '' : '.45';
-                if (!tdsApplies && field.tagName !== 'SELECT') { field.value = ''; }
-            }
-        );
+        if (tdsRateInput) {
+            tdsRateInput.readOnly = !tdsApplies;
+            tdsRateInput.style.opacity = tdsApplies ? '' : '.45';
+            if (!tdsApplies) { tdsRateInput.value = ''; }
+        }
 
-        return { amount: amount, vat: applies ? (parseFloat(vatInput ? vatInput.value : 0) || 0) : 0 };
+        return {
+            qty: qty,
+            amount: amount,
+            vat: applies ? (parseFloat(vatInput ? vatInput.value : 0) || 0) : 0,
+            tds: tdsApplies ? amount * (parseFloat(tdsRateInput ? tdsRateInput.value : 0) || 0) / 100 : 0,
+            filled: (itemSelect && itemSelect.value !== '') || qty > 0 || rate > 0
+        };
+    }
+
+    // A whole bill: every item in its popup, and the summary on the row behind.
+    function recalcBill(billIndex) {
+        var grid = itemGridFor(billIndex);
+        var row = billRowFor(billIndex);
+        if (!grid || !row) { return { amount: 0, vat: 0, tds: 0, qty: 0, count: 0 }; }
+
+        var totals = { qty: 0, amount: 0, vat: 0, tds: 0, count: 0 };
+        Array.prototype.forEach.call(grid.tBodies[0].rows, function (itemRow) {
+            var sums = recalcItem(itemRow);
+            if (!sums.filled) { return; }
+            totals.count++;
+            totals.qty += sums.qty;
+            totals.amount += sums.amount;
+            totals.vat += sums.vat;
+            totals.tds += sums.tds;
+        });
+
+        var dialogAmount = grid.querySelector('.inv-dialog-amount');
+        var dialogVat = grid.querySelector('.inv-dialog-vat');
+        if (dialogAmount) { dialogAmount.textContent = money(totals.amount); }
+        if (dialogVat) { dialogVat.textContent = money(totals.vat); }
+
+        // What the row shows once the popup is shut: how many items are on the
+        // bill, and what they come to.
+        var countLabel = row.querySelector('.inv-bill-count');
+        if (countLabel) { countLabel.textContent = String(totals.count); }
+        [['inv-bill-qty', totals.qty], ['inv-bill-amount', totals.amount],
+         ['inv-bill-vat', totals.vat], ['inv-bill-tds', totals.tds]].forEach(function (pair) {
+            var cell = row.querySelector('.' + pair[0]);
+            if (!cell) { return; }
+            cell.textContent = totals.count === 0 ? '—' : money(pair[1]);
+            cell.style.color = totals.count === 0 ? 'var(--mbw-muted)' : '';
+        });
+        return totals;
     }
 
     function recalcAll() {
-        var totalAmount = 0, totalVat = 0;
-        Array.prototype.forEach.call(body.rows, function (row) {
-            var sums = recalcRow(row);
-            totalAmount += sums.amount;
-            totalVat += sums.vat;
+        var all = { qty: 0, amount: 0, vat: 0, tds: 0 };
+        Array.prototype.forEach.call(billTable.querySelectorAll('.inv-bill-row'), function (row) {
+            var totals = recalcBill(row.getAttribute('data-bill'));
+            all.qty += totals.qty;
+            all.amount += totals.amount;
+            all.vat += totals.vat;
+            all.tds += totals.tds;
         });
-        var amountCell = document.getElementById('purchaseGridAmount');
-        var vatCell = document.getElementById('purchaseGridVat');
-        var payableCell = document.getElementById('purchaseGridPayable');
-        if (amountCell) { amountCell.textContent = money(totalAmount); }
-        if (vatCell) { vatCell.textContent = money(totalVat); }
-        if (payableCell) {
-            payableCell.textContent = totalAmount > 0
-                ? 'Bill including VAT: ' + money(totalAmount + totalVat)
+        var set = function (id, value) {
+            var cell = document.getElementById(id);
+            if (cell) { cell.textContent = value; }
+        };
+        set('purchaseAllQty', money(all.qty));
+        set('purchaseAllAmount', money(all.amount));
+        set('purchaseAllVat', money(all.vat));
+        set('purchaseAllTds', money(all.tds));
+        var payable = document.getElementById('purchaseAllPayable');
+        if (payable) {
+            payable.textContent = all.amount > 0
+                ? 'Including VAT: ' + money(all.amount + all.vat)
+                + (all.tds > 0 ? ' · payable after withholding: ' + money(all.amount + all.vat - all.tds) : '')
                 : '';
         }
     }
 
-    // Tick every box in a column, or clear them all. A bill that is entirely
-    // exempt is then one click rather than one per line.
-    [['purchaseGridVatAll', '.inv-grid-vaton'], ['purchaseGridTdsAll', '.inv-grid-tdson']].forEach(function (pair) {
-        var master = document.getElementById(pair[0]);
-        if (!master) { return; }
-        master.addEventListener('change', function () {
-            Array.prototype.forEach.call(grid.querySelectorAll(pair[1]), function (box) {
-                box.checked = master.checked;
+    // ------------------------------------------------------------ the popup
+    document.addEventListener('click', function (event) {
+        var open = event.target.closest ? event.target.closest('.inv-bill-open') : null;
+        if (open) {
+            var billIndex = open.getAttribute('data-bill');
+            var dialog = document.getElementById('invBillDialog' + billIndex);
+            if (!dialog) { return; }
+            var row = billRowFor(billIndex);
+            var reference = row ? row.querySelector('[name$="[ref_no]"]') : null;
+            var label = dialog.querySelector('.inv-dialog-ref');
+            if (label) { label.textContent = reference && reference.value ? reference.value : '(no reference yet)'; }
+            recalcBill(billIndex);
+            if (typeof dialog.showModal === 'function') { dialog.showModal(); } else { dialog.setAttribute('open', 'open'); }
+            return;
+        }
+        var close = event.target.closest ? event.target.closest('.inv-bill-close') : null;
+        if (close) {
+            var owner = close.closest('dialog');
+            if (!owner) { return; }
+            if (typeof owner.close === 'function') { owner.close(); } else { owner.removeAttribute('open'); }
+            recalcAll();
+            return;
+        }
+        var addItem = event.target.closest ? event.target.closest('.inv-item-add') : null;
+        if (addItem) {
+            var grid = itemGridFor(addItem.getAttribute('data-bill'));
+            if (!grid) { return; }
+            var body = grid.tBodies[0];
+            var last = body.rows[body.rows.length - 1];
+            var copy = last.cloneNode(true);
+            var nextItem = body.rows.length;
+            Array.prototype.forEach.call(copy.querySelectorAll('[name]'), function (field) {
+                field.name = field.name.replace(/\[items\]\[\d+\]/, '[items][' + nextItem + ']');
+                if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
+                else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
+                else { field.value = ''; }
+                delete field.dataset.touched;
+            });
+            body.appendChild(copy);
+            return;
+        }
+        var clearItem = event.target.closest ? event.target.closest('.inv-item-clear') : null;
+        if (clearItem) {
+            var itemRow = clearItem.closest('tr');
+            Array.prototype.forEach.call(itemRow.querySelectorAll('input, select'), function (field) {
+                if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
+                else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
+                else if (!field.readOnly) { field.value = ''; }
+                delete field.dataset.touched;
             });
             recalcAll();
-        });
+            return;
+        }
+        var clearBill = event.target.closest ? event.target.closest('.inv-bill-clear') : null;
+        if (clearBill) {
+            // A bill and everything on it. The items live in the dialog, so
+            // clearing the row alone would leave them behind to post.
+            var billRow = clearBill.closest('tr');
+            var index = billRow.getAttribute('data-bill');
+            Array.prototype.forEach.call(billRow.querySelectorAll('input, select'), function (field) {
+                if (field.tagName === 'SELECT') { field.selectedIndex = 0; } else { field.value = ''; }
+            });
+            var itemGrid = itemGridFor(index);
+            if (itemGrid) {
+                Array.prototype.forEach.call(itemGrid.querySelectorAll('input, select'), function (field) {
+                    if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
+                    else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
+                    else if (!field.readOnly) { field.value = ''; }
+                    delete field.dataset.touched;
+                });
+            }
+            recalcAll();
+        }
     });
 
-    grid.addEventListener('input', function (event) {
+    // Tick every VAT or TDS box on a bill, or clear them all.
+    document.addEventListener('change', function (event) {
+        var master = event.target;
+        var isVat = master.classList && master.classList.contains('inv-item-vatall');
+        var isTds = master.classList && master.classList.contains('inv-item-tdsall');
+        if (!isVat && !isTds) { return; }
+        var grid = master.closest('.inv-item-grid');
+        if (!grid) { return; }
+        Array.prototype.forEach.call(grid.querySelectorAll(isVat ? '.inv-grid-vaton' : '.inv-grid-tdson'), function (box) {
+            box.checked = master.checked;
+        });
+        recalcAll();
+    });
+
+    document.addEventListener('input', function (event) {
+        if (!event.target.closest || !event.target.closest('.inv-item-grid')) { return; }
         // A VAT figure typed by hand is the supplier's, and must not be
         // overwritten by the rate the next time anything else changes.
         if (event.target.classList.contains('inv-grid-vat')) {
@@ -3409,36 +3593,48 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         recalcAll();
     });
-    grid.addEventListener('change', recalcAll);
-    grid.addEventListener('click', function (event) {
-        var clear = event.target.closest ? event.target.closest('.inv-grid-clear') : null;
-        if (!clear) { return; }
-        var row = clear.closest('tr');
-        Array.prototype.forEach.call(row.querySelectorAll('input, select'), function (field) {
-            // A cleared line is a fresh line, and a fresh line carries VAT.
-            if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
-            else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
-            else if (!field.classList.contains('inv-grid-uom') && !field.classList.contains('inv-grid-amount')) { field.value = ''; }
-            delete field.dataset.touched;
-        });
-        recalcAll();
+    document.addEventListener('change', function (event) {
+        if (event.target.closest && event.target.closest('.inv-item-grid')) { recalcAll(); }
     });
 
-    var addButton = document.getElementById('purchaseGridAddRow');
-    if (addButton) {
-        addButton.addEventListener('click', function () {
-            var last = body.rows[body.rows.length - 1];
-            var copy = last.cloneNode(true);
-            var nextIndex = body.rows.length;
-            Array.prototype.forEach.call(copy.querySelectorAll('[name]'), function (field) {
-                field.name = field.name.replace(/rows\[\d+\]/, 'rows[' + nextIndex + ']');
-                if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
-                else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
-                else { field.value = ''; }
-                delete field.dataset.touched;
+    var addBill = document.getElementById('purchaseAddBill');
+    if (addBill) {
+        addBill.addEventListener('click', function () {
+            // A new bill needs its own popup as well as its own row, so the
+            // pair is cloned together and renumbered.
+            var rows = billTable.querySelectorAll('.inv-bill-row');
+            var lastRow = rows[rows.length - 1];
+            var nextIndex = rows.length;
+            var rowCopy = lastRow.cloneNode(true);
+            rowCopy.setAttribute('data-bill', String(nextIndex));
+            Array.prototype.forEach.call(rowCopy.querySelectorAll('[name]'), function (field) {
+                field.name = field.name.replace(/bills\[\d+\]/, 'bills[' + nextIndex + ']');
+                if (field.tagName === 'SELECT') { field.selectedIndex = 0; } else { field.value = ''; }
             });
-            Array.prototype.forEach.call(copy.querySelectorAll('input[readonly]'), function (field) { field.value = ''; });
-            body.appendChild(copy);
+            var opener = rowCopy.querySelector('.inv-bill-open');
+            if (opener) { opener.setAttribute('data-bill', String(nextIndex)); }
+            lastRow.parentNode.appendChild(rowCopy);
+
+            var lastDialog = document.getElementById('invBillDialog' + (nextIndex - 1));
+            if (lastDialog) {
+                var dialogCopy = lastDialog.cloneNode(true);
+                dialogCopy.id = 'invBillDialog' + nextIndex;
+                dialogCopy.removeAttribute('open');
+                var copiedGrid = dialogCopy.querySelector('.inv-item-grid');
+                if (copiedGrid) { copiedGrid.setAttribute('data-bill', String(nextIndex)); }
+                Array.prototype.forEach.call(dialogCopy.querySelectorAll('[data-bill]'), function (el) {
+                    el.setAttribute('data-bill', String(nextIndex));
+                });
+                Array.prototype.forEach.call(dialogCopy.querySelectorAll('[name]'), function (field) {
+                    field.name = field.name.replace(/bills\[\d+\]/, 'bills[' + nextIndex + ']');
+                    if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
+                    else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
+                    else { field.value = ''; }
+                    delete field.dataset.touched;
+                });
+                lastDialog.parentNode.appendChild(dialogCopy);
+            }
+            recalcAll();
         });
     }
 

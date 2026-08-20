@@ -266,6 +266,72 @@ ok((int) db()->query("SELECT is_ingredient FROM inventory_items WHERE id=$milk")
 ok((int) db()->query("SELECT COUNT(*) FROM hospitality_ingredients WHERE company_id=$cid AND inventory_item_id=$milk")->fetchColumn() === 1,
     '  ...and it reaches the kitchen list in the same go');
 
+echo "\n== A bill is one header and many items ==\n";
+// A supplier's invoice is one date, one movement, one bill number and one
+// supplier, with several items under it. The form is shaped that way and folded
+// out here, so the header is copied onto each line by code rather than re-typed
+// by a person -- which is how a bill ends up split across two accounts.
+$oneBill = [[
+    'transaction_date' => '2026-08-26', 'supplier_invoice_date' => '2026-08-22',
+    'movement' => 'purchase', 'ref_no' => 'ABC-7700', 'supplier_party_id' => $supplierId,
+    'vat_ledger_id' => $lVat, 'tds_ledger_id' => $lTds, 'notes' => 'whole bill',
+    'items' => [
+        // milk: exempt
+        ['item_id' => $milk, 'quantity' => 100, 'rate' => 20, 'vat_applicable' => '0'],
+        // flour: standard rated
+        ['item_id' => $flour, 'quantity' => 50, 'rate' => 60, 'vat_applicable' => '1'],
+        // sugar: standard AND withheld, with its own note
+        ['item_id' => $sugar, 'quantity' => 10, 'rate' => 100, 'vat_applicable' => '1',
+         'tds_applicable' => '1', 'tds_rate' => '1.5', 'notes' => 'this line only'],
+        // the spare the form always carries
+        ['item_id' => 0, 'quantity' => 0, 'rate' => 0],
+    ],
+]];
+$foldedRows = inv_purchase_bills_to_rows($oneBill);
+ok(count($foldedRows) === 3, 'Three items become three lines, the spare dropped');
+ok(count(array_unique(array_column($foldedRows, 'ref_no'))) === 1, 'The bill number is on every line');
+ok(count(array_unique(array_column($foldedRows, 'supplier_party_id'))) === 1, 'So is the supplier');
+ok(count(array_unique(array_column($foldedRows, 'transaction_date'))) === 1, 'So is the date');
+ok((string) $foldedRows[2]['notes'] === 'this line only', "A line's own note wins over the bill's");
+ok((string) $foldedRows[0]['notes'] === 'whole bill', "  ...and a line without one takes the bill's");
+
+$foldedChecked = inv_purchase_batch_validate($cid, $fyId, $foldedRows);
+ok($foldedChecked['valid'] === 3, 'All three validate');
+ok(near((float) $foldedChecked['rows'][0]['vat_amount'], 0.00), 'The exempt item carries no VAT');
+ok(near((float) $foldedChecked['rows'][1]['vat_amount'], 390.00), 'The standard one carries 13% (390.00 on 3,000)');
+ok(near((float) $foldedChecked['rows'][2]['tds_rate'], 1.5), 'Only the item marked for it withholds');
+ok(near((float) $foldedChecked['rows'][0]['tds_rate'], 0.00), '  ...and the others do not');
+
+$foldedResult = inv_purchase_batch_post($cid, $fyId, $foldedChecked, $uid);
+ok($foldedResult['ok'] === true, 'The bill posts' . ($foldedResult['ok'] ? '' : ': ' . $foldedResult['error']));
+ok((int) $foldedResult['posted'] === 3, '  ...as three movements, one per item');
+$foldedRefs = db()->query("SELECT DISTINCT ref_no FROM inventory_transactions
+    WHERE company_id=$cid AND ref_no='ABC-7700'")->fetchAll(PDO::FETCH_COLUMN);
+ok(count($foldedRefs) === 1, '  ...all tied together by the one bill number');
+
+echo "\n== Several bills at once ==\n";
+$twoBills = [
+    ['transaction_date' => '2026-08-27', 'movement' => 'purchase', 'ref_no' => 'BILL-A', 'supplier_party_id' => $supplierId,
+     'vat_ledger_id' => $lVat, 'items' => [['item_id' => $milk, 'quantity' => 5, 'rate' => 10, 'vat_applicable' => '0']]],
+    ['transaction_date' => '2026-08-27', 'movement' => 'purchase', 'ref_no' => 'BILL-B', 'supplier_party_id' => $supplierId,
+     'vat_ledger_id' => $lVat, 'items' => [
+        ['item_id' => $flour, 'quantity' => 2, 'rate' => 50, 'vat_applicable' => '1'],
+        ['item_id' => $sugar, 'quantity' => 3, 'rate' => 40, 'vat_applicable' => '1'],
+     ]],
+];
+$twoRows = inv_purchase_bills_to_rows($twoBills);
+ok(count($twoRows) === 3, 'Two bills of one and two items make three lines');
+ok((string) $twoRows[0]['ref_no'] === 'BILL-A' && (string) $twoRows[2]['ref_no'] === 'BILL-B',
+    '  ...each keeping its own bill number');
+$twoChecked = inv_purchase_batch_validate($cid, $fyId, $twoRows);
+ok($twoChecked['valid'] === 3, '  ...and all of them validate');
+
+// A bill with no items at all is not an error; the form always shows a spare.
+ok(inv_purchase_bills_to_rows([['transaction_date' => '2026-08-27', 'items' => []]]) === [],
+    'A bill nobody filled in contributes nothing');
+ok(inv_purchase_bills_to_rows([]) === [], 'And no bills at all is simply no rows');
+
+
 echo "\n== Shape: a long bill costs a fixed number of lookups ==\n";
 $bigGrid = [];
 for ($i = 0; $i < 60; $i++) {

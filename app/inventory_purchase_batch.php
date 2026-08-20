@@ -49,6 +49,71 @@ function inv_purchase_vat_modes(): array
 }
 
 /**
+ * A bill, flattened into the per-item rows the engine posts.
+ *
+ * A supplier's invoice is one date, one movement, one bill number and one
+ * supplier, with several items under it. The form is built that way -- header
+ * once, items in a popup -- because that is how the paper reads, and asking for
+ * the supplier again on every line is how a bill ends up split across two
+ * accounts by a mis-click.
+ *
+ * What VARIES per item is what genuinely varies: quantity, rate, whether it
+ * carries VAT, whether tax is withheld on it, and whether it is also a kitchen
+ * ingredient. A bill of milk and mobile data has one exempt line and one
+ * standard line, and no amount of header-level VAT would describe it.
+ *
+ * The engine below is untouched: it still receives flat rows, each carrying its
+ * own copy of the header. This is only the fold-out.
+ */
+function inv_purchase_bills_to_rows(array $bills): array
+{
+    $rows = [];
+    foreach ($bills as $bill) {
+        $items = (array) ($bill['items'] ?? []);
+        if ($items === []) {
+            continue;
+        }
+        // Everything the whole bill shares, copied onto each of its lines.
+        $header = [
+            'transaction_date' => (string) ($bill['transaction_date'] ?? ''),
+            'supplier_invoice_date' => (string) ($bill['supplier_invoice_date'] ?? ''),
+            'movement' => (string) ($bill['movement'] ?? 'purchase'),
+            'ref_no' => (string) ($bill['ref_no'] ?? ''),
+            'supplier_party_id' => (int) ($bill['supplier_party_id'] ?? 0),
+            'vat_ledger_id' => (int) ($bill['vat_ledger_id'] ?? 0),
+            'tds_ledger_id' => (int) ($bill['tds_ledger_id'] ?? 0),
+            'warehouse_id' => (int) ($bill['warehouse_id'] ?? 0),
+        ];
+        foreach ($items as $item) {
+            // A line nobody filled in is a spare, not a mistake.
+            if ((int) ($item['item_id'] ?? 0) <= 0
+                && (float) ($item['quantity'] ?? 0) <= 0
+                && (float) ($item['rate'] ?? 0) <= 0) {
+                continue;
+            }
+            $rows[] = $header + [
+                'item_id' => (int) ($item['item_id'] ?? 0),
+                'quantity' => $item['quantity'] ?? 0,
+                'rate' => $item['rate'] ?? 0,
+                'vat_applicable' => $item['vat_applicable'] ?? '0',
+                'vat_rate' => (string) ($item['vat_rate'] ?? ''),
+                'vat_amount' => (string) ($item['vat_amount'] ?? ''),
+                'tds_applicable' => $item['tds_applicable'] ?? '0',
+                'tds_rate' => (string) ($item['tds_rate'] ?? ''),
+                'tds_base' => (string) ($item['tds_base'] ?? ''),
+                'mark_ingredient' => $item['mark_ingredient'] ?? '',
+                // The line's own note if it has one, else the bill's.
+                'notes' => trim((string) ($item['notes'] ?? '')) !== ''
+                    ? (string) $item['notes']
+                    : (string) ($bill['notes'] ?? ''),
+            ];
+        }
+    }
+
+    return $rows;
+}
+
+/**
  * Check every row of the grid, resolving items and suppliers in two queries
  * rather than two per row.
  *
