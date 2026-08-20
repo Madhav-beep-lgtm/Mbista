@@ -2630,10 +2630,19 @@ $invMoveItemOptions = static function () use ($items): string {
                     <th class="is-numeric">Quantity</th>
                     <th class="is-numeric">Rate<br><small>excl. VAT, after discount</small></th>
                     <th class="is-numeric">Amount</th>
-                    <th>VAT applicability</th>
+                    <th style="text-align:center">VAT<br>
+                        <label style="font-weight:400;font-size:11px;color:var(--mbw-muted);white-space:nowrap">
+                            <input type="checkbox" id="purchaseGridVatAll" checked> all
+                        </label>
+                    </th>
                     <th class="is-numeric">VAT on purchase</th>
                     <th>Supplier</th>
                     <th>VAT ledger (Dr)</th>
+                    <th style="text-align:center">TDS<br>
+                        <label style="font-weight:400;font-size:11px;color:var(--mbw-muted);white-space:nowrap">
+                            <input type="checkbox" id="purchaseGridTdsAll"> all
+                        </label>
+                    </th>
                     <th class="is-numeric">TDS base</th>
                     <th class="is-numeric">TDS %</th>
                     <th>TDS ledger (Cr)</th>
@@ -2659,17 +2668,33 @@ $invMoveItemOptions = static function () use ($items): string {
                         <td class="is-numeric"><input type="number" step="0.001" min="0" name="rows[<?= $gridRow ?>][quantity]" class="inv-grid-qty" value="<?= e((string) ($prev['quantity'] ?? '')) ?>" style="width:90px;text-align:right"></td>
                         <td class="is-numeric"><input type="number" step="0.01" min="0" name="rows[<?= $gridRow ?>][rate]" class="inv-grid-rate" value="<?= e((string) ($prev['rate'] ?? '')) ?>" style="width:100px;text-align:right"></td>
                         <td class="is-numeric"><input type="text" class="inv-grid-amount" value="" readonly tabindex="-1" style="width:110px;text-align:right;background:transparent;border:0"></td>
-                        <td><select name="rows[<?= $gridRow ?>][vat_mode]" class="inv-grid-vatmode" style="min-width:130px">
-                            <?php foreach (inv_purchase_vat_modes() as $gridMode => $gridModeMeta): ?>
-                                <option value="<?= e($gridMode) ?>" <?= (string) ($prev['vat_mode'] ?? 'standard') === $gridMode ? 'selected' : '' ?>><?= e((string) $gridModeMeta['label']) ?></option>
-                            <?php endforeach; ?>
-                            </select>
-                            <input type="number" step="0.01" min="0" max="100" name="rows[<?= $gridRow ?>][vat_rate]" class="inv-grid-vatrate" value="<?= e((string) ($prev['vat_rate'] ?? '')) ?>" placeholder="rate %" style="width:80px;display:<?= (string) ($prev['vat_mode'] ?? '') === 'custom' ? 'block' : 'none' ?>;margin-top:4px"></td>
+                        <?php
+                        // Ticked means the line carries VAT. A returning row
+                        // keeps what it had; a fresh one starts ticked, because
+                        // that is what nearly every purchase line is.
+                        $gridVatOn = array_key_exists('vat_applicable', $prev)
+                            ? !empty($prev['vat_applicable'])
+                            : ((string) ($prev['vat_mode'] ?? 'standard') !== 'exempt');
+                        ?>
+                        <td style="text-align:center">
+                            <?php // The hidden field is what an un-ticked box sends; the
+                                  // checkbox overrides it when it is ticked. ?>
+                            <input type="hidden" name="rows[<?= $gridRow ?>][vat_applicable]" value="0">
+                            <input type="checkbox" class="inv-grid-vaton" name="rows[<?= $gridRow ?>][vat_applicable]" value="1" <?= $gridVatOn ? 'checked' : '' ?>
+                                   title="Untick if this item is VAT exempt">
+                            <input type="number" step="0.01" min="0" max="100" name="rows[<?= $gridRow ?>][vat_rate]" class="inv-grid-vatrate"
+                                   value="<?= e((string) ($prev['vat_rate'] ?? '')) ?>" placeholder="<?= e(number_format((float) default_vat_rate(), 2, '.', '')) ?>%"
+                                   title="Leave blank for the standard rate" style="width:70px;margin-top:4px;<?= $gridVatOn ? '' : 'display:none' ?>"></td>
                         <td class="is-numeric"><input type="number" step="0.01" min="0" name="rows[<?= $gridRow ?>][vat_amount]" class="inv-grid-vat" value="<?= e((string) ($prev['vat_amount'] ?? '')) ?>" style="width:100px;text-align:right" placeholder="auto"></td>
                         <td><?php $gridSupplierField = shared_options('inv-purchase-suppliers', $gridSupplierOptions, (string) ($prev['supplier_party_id'] ?? '')); ?>
                             <select name="rows[<?= $gridRow ?>][supplier_party_id]"<?= $gridSupplierField['fill'] ? ' data-fill-from="inv-purchase-suppliers"' : '' ?> style="min-width:150px"><?= $gridSupplierField['html'] ?></select></td>
                         <td><?php $gridVatLedgerField = shared_options('inv-purchase-ledgers', $gridLedgerOptions, (string) ($prev['vat_ledger_id'] ?? '')); ?>
                             <select name="rows[<?= $gridRow ?>][vat_ledger_id]"<?= $gridVatLedgerField['fill'] ? ' data-fill-from="inv-purchase-ledgers"' : '' ?> style="min-width:160px"><?= $gridVatLedgerField['html'] ?></select></td>
+                        <?php $gridTdsOn = !empty($prev['tds_applicable']) || (float) ($prev['tds_rate'] ?? 0) > 0; ?>
+                        <td style="text-align:center">
+                            <input type="hidden" name="rows[<?= $gridRow ?>][tds_applicable]" value="0">
+                            <input type="checkbox" class="inv-grid-tdson" name="rows[<?= $gridRow ?>][tds_applicable]" value="1" <?= $gridTdsOn ? 'checked' : '' ?>
+                                   title="Tick if tax is withheld on this line"></td>
                         <td class="is-numeric"><input type="number" step="0.01" min="0" name="rows[<?= $gridRow ?>][tds_base]" value="<?= e((string) ($prev['tds_base'] ?? '')) ?>" style="width:100px;text-align:right" placeholder="whole line"></td>
                         <td class="is-numeric"><input type="number" step="0.01" min="0" max="100" name="rows[<?= $gridRow ?>][tds_rate]" value="<?= e((string) ($prev['tds_rate'] ?? '')) ?>" style="width:70px;text-align:right"></td>
                         <td><?php $gridTdsLedgerField = shared_options('inv-purchase-ledgers', $gridLedgerOptions, (string) ($prev['tds_ledger_id'] ?? '')); ?>
@@ -3291,6 +3316,10 @@ document.addEventListener('DOMContentLoaded', function () {
         return (Math.round((value + Number.EPSILON) * 100) / 100).toFixed(2);
     }
 
+    // The company's own rate, so a tenant on something other than 13% is not
+    // quietly given 13 anyway.
+    var STANDARD_VAT = <?= (float) default_vat_rate() ?>;
+
     function recalcRow(row) {
         var itemSelect = row.querySelector('.inv-grid-item');
         var qty = parseFloat((row.querySelector('.inv-grid-qty') || {}).value) || 0;
@@ -3305,19 +3334,39 @@ document.addEventListener('DOMContentLoaded', function () {
         var uom = row.querySelector('.inv-grid-uom');
         if (uom) { uom.value = chosen ? (chosen.getAttribute('data-unit') || '') : ''; }
 
-        var modeSelect = row.querySelector('.inv-grid-vatmode');
+        // VAT is a tick: on means the line carries it, at the standard rate
+        // unless a rate is typed beside the box. Off means exempt, and the rate
+        // box goes with it -- there is no rate on an exempt line.
+        var vatOn = row.querySelector('.inv-grid-vaton');
         var rateInput = row.querySelector('.inv-grid-vatrate');
         var vatInput = row.querySelector('.inv-grid-vat');
-        var mode = modeSelect ? modeSelect.value : 'standard';
-        if (rateInput) { rateInput.style.display = mode === 'custom' ? 'block' : 'none'; }
-        if (vatInput && !vatInput.dataset.touched) {
-            var vatRate = 0;
-            if (mode === 'standard') { vatRate = 13; }
-            else if (mode === 'custom') { vatRate = parseFloat(rateInput ? rateInput.value : 0) || 0; }
-            vatInput.value = amount > 0 && vatRate > 0 ? money(amount * vatRate / 100) : '';
-            if (mode === 'exempt') { vatInput.value = ''; }
+        var applies = !vatOn || vatOn.checked;
+        if (rateInput) { rateInput.style.display = applies ? '' : 'none'; }
+        if (vatInput) {
+            vatInput.readOnly = !applies;
+            if (!applies) {
+                vatInput.value = '';
+            } else if (!vatInput.dataset.touched) {
+                var typed = parseFloat(rateInput ? rateInput.value : '') || 0;
+                var vatRate = typed > 0 ? typed : STANDARD_VAT;
+                vatInput.value = amount > 0 && vatRate > 0 ? money(amount * vatRate / 100) : '';
+            }
         }
-        return { amount: amount, vat: parseFloat(vatInput ? vatInput.value : 0) || 0 };
+
+        // TDS the other way round: off unless somebody ticks it, and its
+        // figures are only reachable while it is on.
+        var tdsOn = row.querySelector('.inv-grid-tdson');
+        var tdsApplies = tdsOn ? tdsOn.checked : false;
+        Array.prototype.forEach.call(
+            row.querySelectorAll('[name*="[tds_base]"], [name*="[tds_rate]"], [name*="[tds_ledger_id]"]'),
+            function (field) {
+                field.readOnly = !tdsApplies && field.tagName !== 'SELECT';
+                field.style.opacity = tdsApplies ? '' : '.45';
+                if (!tdsApplies && field.tagName !== 'SELECT') { field.value = ''; }
+            }
+        );
+
+        return { amount: amount, vat: applies ? (parseFloat(vatInput ? vatInput.value : 0) || 0) : 0 };
     }
 
     function recalcAll() {
@@ -3339,6 +3388,19 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    // Tick every box in a column, or clear them all. A bill that is entirely
+    // exempt is then one click rather than one per line.
+    [['purchaseGridVatAll', '.inv-grid-vaton'], ['purchaseGridTdsAll', '.inv-grid-tdson']].forEach(function (pair) {
+        var master = document.getElementById(pair[0]);
+        if (!master) { return; }
+        master.addEventListener('change', function () {
+            Array.prototype.forEach.call(grid.querySelectorAll(pair[1]), function (box) {
+                box.checked = master.checked;
+            });
+            recalcAll();
+        });
+    });
+
     grid.addEventListener('input', function (event) {
         // A VAT figure typed by hand is the supplier's, and must not be
         // overwritten by the rate the next time anything else changes.
@@ -3353,9 +3415,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!clear) { return; }
         var row = clear.closest('tr');
         Array.prototype.forEach.call(row.querySelectorAll('input, select'), function (field) {
-            if (field.type === 'checkbox') { field.checked = false; }
+            // A cleared line is a fresh line, and a fresh line carries VAT.
+            if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
             else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
-            else if (!field.readOnly) { field.value = ''; }
+            else if (!field.classList.contains('inv-grid-uom') && !field.classList.contains('inv-grid-amount')) { field.value = ''; }
             delete field.dataset.touched;
         });
         recalcAll();
@@ -3369,7 +3432,7 @@ document.addEventListener('DOMContentLoaded', function () {
             var nextIndex = body.rows.length;
             Array.prototype.forEach.call(copy.querySelectorAll('[name]'), function (field) {
                 field.name = field.name.replace(/rows\[\d+\]/, 'rows[' + nextIndex + ']');
-                if (field.type === 'checkbox') { field.checked = false; }
+                if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
                 else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
                 else { field.value = ''; }
                 delete field.dataset.touched;

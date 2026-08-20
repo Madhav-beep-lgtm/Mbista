@@ -152,7 +152,22 @@ function inv_purchase_batch_validate(int $companyId, int $fiscalYearId, array $r
 
         $amount = round($qty * $rate, 2);
 
-        $vatMode = (string) ($raw['vat_mode'] ?? 'standard');
+        // The grid asks the question as a tick, because that is how a bill
+        // reads: nearly every line carries VAT, and the exempt ones are the
+        // exception worth un-ticking. A rate typed beside the tick overrides
+        // the standard one, which is what a partial exemption needs.
+        if (array_key_exists('vat_applicable', $raw)) {
+            $typedRate = trim((string) ($raw['vat_rate'] ?? ''));
+            if (empty($raw['vat_applicable'])) {
+                $vatMode = 'exempt';
+            } elseif ($typedRate !== '') {
+                $vatMode = 'custom';
+            } else {
+                $vatMode = 'standard';
+            }
+        } else {
+            $vatMode = (string) ($raw['vat_mode'] ?? 'standard');
+        }
         if (!isset($vatModes[$vatMode])) {
             $vatMode = 'standard';
         }
@@ -184,6 +199,13 @@ function inv_purchase_batch_validate(int $companyId, int $fiscalYearId, array $r
 
         $tdsBase = max(0.0, round((float) ($raw['tds_base'] ?? 0), 2));
         $tdsRate = max(0.0, min(100.0, (float) ($raw['tds_rate'] ?? 0)));
+        // TDS is a tick too, but the other way round: most lines have none, so
+        // it is off unless somebody says otherwise. Un-ticked means no
+        // withholding whatever rate is sitting in the box.
+        if (array_key_exists('tds_applicable', $raw) && empty($raw['tds_applicable'])) {
+            $tdsRate = 0.0;
+            $tdsBase = 0.0;
+        }
         if ($tdsRate > 0 && $tdsBase <= 0) {
             // The whole line is the usual base, so an omitted one is filled in
             // rather than refused.

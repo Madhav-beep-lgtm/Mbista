@@ -201,6 +201,59 @@ $outside = inv_purchase_batch_validate($cid, $fyId, [
 ]);
 ok($outside['rows'][0]['errors'] !== [], 'A date with no fiscal year is caught before posting');
 
+echo "\n== VAT and TDS as tick marks ==\n";
+// The grid asks the question the way a bill reads it: nearly every line carries
+// VAT, so the box is ticked and the exempt ones are un-ticked. TDS is the other
+// way round -- off unless somebody says otherwise.
+$tickGrid = inv_purchase_batch_validate($cid, $fyId, [
+    // ticked, no rate typed => the standard rate
+    ['item_id' => $sugar, 'movement' => 'purchase', 'transaction_date' => '2026-08-24', 'quantity' => 10, 'rate' => 100,
+     'vat_applicable' => '1', 'vat_ledger_id' => $lVat],
+    // un-ticked => exempt, whatever else is on the row
+    ['item_id' => $sugar, 'movement' => 'purchase', 'transaction_date' => '2026-08-24', 'quantity' => 10, 'rate' => 100,
+     'vat_applicable' => '0', 'vat_rate' => '13', 'vat_ledger_id' => $lVat],
+    // ticked WITH a rate => that rate, for a partial exemption
+    ['item_id' => $sugar, 'movement' => 'purchase', 'transaction_date' => '2026-08-24', 'quantity' => 10, 'rate' => 100,
+     'vat_applicable' => '1', 'vat_rate' => '5', 'vat_ledger_id' => $lVat],
+]);
+ok(near((float) $tickGrid['rows'][0]['vat_amount'], 130.00), 'A ticked line carries VAT at the standard rate');
+ok((string) $tickGrid['rows'][0]['vat_mode'] === 'standard', '  ...as a standard-rated line');
+ok(near((float) $tickGrid['rows'][1]['vat_amount'], 0.00), 'An un-ticked line is exempt');
+ok((string) $tickGrid['rows'][1]['vat_mode'] === 'exempt', '  ...even with a rate left in the box beside it');
+ok($tickGrid['rows'][1]['errors'] === [], '  ...and that is not an error, it is the point of the tick');
+ok(near((float) $tickGrid['rows'][2]['vat_amount'], 50.00), 'A rate typed beside a ticked box wins (5% of 1,000)');
+
+$tdsTicks = inv_purchase_batch_validate($cid, $fyId, [
+    ['item_id' => $sugar, 'movement' => 'purchase', 'transaction_date' => '2026-08-24', 'quantity' => 10, 'rate' => 100,
+     'vat_applicable' => '0', 'tds_applicable' => '1', 'tds_rate' => '1.5', 'tds_ledger_id' => $lTds, 'supplier_party_id' => $supplierId],
+    ['item_id' => $sugar, 'movement' => 'purchase', 'transaction_date' => '2026-08-24', 'quantity' => 10, 'rate' => 100,
+     'vat_applicable' => '0', 'tds_applicable' => '0', 'tds_rate' => '1.5', 'tds_ledger_id' => $lTds, 'supplier_party_id' => $supplierId],
+]);
+ok(near((float) $tdsTicks['rows'][0]['tds_rate'], 1.5), 'A ticked TDS line withholds');
+ok(near((float) $tdsTicks['rows'][0]['tds_base'], 1000.00), '  ...on the whole line by default');
+ok(near((float) $tdsTicks['rows'][1]['tds_rate'], 0.00), 'An un-ticked TDS line withholds nothing');
+ok(near((float) $tdsTicks['rows'][1]['tds_base'], 0.00), '  ...whatever rate was left in the box');
+
+// The old dropdown still works, so nothing that posted before stops posting.
+$legacy = inv_purchase_batch_validate($cid, $fyId, [
+    ['item_id' => $sugar, 'movement' => 'purchase', 'transaction_date' => '2026-08-24', 'quantity' => 10, 'rate' => 100,
+     'vat_mode' => 'exempt'],
+]);
+ok((string) $legacy['rows'][0]['vat_mode'] === 'exempt', 'A row sent the old way, naming its vat_mode, still works');
+
+$tickPost = inv_purchase_batch_post($cid, $fyId, $tickGrid, $uid);
+ok($tickPost['ok'] === true, 'A ticked grid posts' . ($tickPost['ok'] ? '' : ': ' . $tickPost['error']));
+
+// Ticking VAT without saying where it posts is refused rather than silently
+// dropped -- the tick is a claim that the line carries tax.
+$noLedger = inv_purchase_batch_validate($cid, $fyId, [
+    ['item_id' => $sugar, 'movement' => 'purchase', 'transaction_date' => '2026-08-25', 'quantity' => 1, 'rate' => 100,
+     'vat_applicable' => '1'],
+]);
+$noLedgerPost = inv_purchase_batch_post($cid, $fyId, $noLedger, $uid);
+ok($noLedgerPost['ok'] === false, 'Ticking VAT with no VAT ledger is refused, not quietly dropped');
+
+
 echo "\n== Marking a line as a kitchen ingredient ==\n";
 ok((int) db()->query("SELECT is_ingredient FROM inventory_items WHERE id=$milk")->fetchColumn() === 0, 'Milk starts as an ordinary item');
 $ingGrid = inv_purchase_batch_validate($cid, $fyId, [
