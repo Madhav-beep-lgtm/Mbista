@@ -342,6 +342,85 @@ ok(count($withBlank) === 3, 'Blank editor rows are dropped rather than reported 
 
 @unlink($brokenFile);
 
+echo "\n== Rounding is not a mistake, and a mistake is not rounding ==\n";
+// A till rounds every line to the paisa and a day's sheet adds hundreds of them
+// up, so a total arrives a few paisa from what the parts make. Under a rupee is
+// rounding; a rupee or more is somebody's error.
+$tolIH = ['Date', 'Category', 'Item', 'Qty', 'Total Sales Amount', 'Discount', 'Taxable Sales', 'VAT', 'Sales with VAT'];
+$tolVH = ['Date', 'Invoice No', 'Payment Type', 'Party Ledger Code', 'Sales Amount', 'Less: Discount', 'Taxable Sales', 'VAT', 'Sales with VAT'];
+$tolParse = static function (array $i, array $v) use ($wrap, $A, $settings): array {
+    return hospitality_workbook_parse_rows($wrap($i), $wrap($v), $A['cid'], $A['fy'], $settings);
+};
+
+// 132.74 − 33.19 = 99.55; the till wrote 99.56.
+$onePaisa = $tolParse(
+    [$tolIH, ['2026-07-08', 'Food', 'Chiya', 1, '132.74', '33.19', '99.56', '12.94', '112.50']],
+    [$tolVH, ['2026-07-08', 'INV-1', 'Cash', '1100', '132.74', '33.19', '99.56', '12.94', '112.50']]
+);
+ok($onePaisa['items']['errors'] === 0, 'A row whose taxable is one paisa out is accepted');
+ok(near((float) $onePaisa['items']['totals']['taxable'], 99.56), "  ...keeping the sheet's own figure rather than recomputing it");
+ok($onePaisa['reconciliation']['ok'] === true, '  ...and the pair reconciles');
+
+$underRupee = $tolParse(
+    [$tolIH, ['2026-07-08', 'Food', 'Momo', 1, '1000', '0', '1000', '130', '1130']],
+    [$tolVH, ['2026-07-08', 'INV-1', 'Cash', '1100', '1000', '0', '1000', '130', '1129.40']]
+);
+ok($underRupee['reconciliation']['ok'] === true, 'Sheets 0.60 apart reconcile');
+
+// Both rows add up on their own; they simply describe different money.
+$overRupee = $tolParse(
+    [$tolIH, ['2026-07-08', 'Food', 'Momo', 1, '1000', '0', '1000', '130', '1130']],
+    [$tolVH, ['2026-07-08', 'INV-1', 'Cash', '1100', '995', '0', '995', '129.35', '1124.35']]
+);
+ok($overRupee['items']['errors'] === 0 && $overRupee['invoices']['errors'] === 0, 'Both rows are internally sound');
+ok($overRupee['reconciliation']['ok'] === false, '  ...but sheets 5.65 apart are refused');
+ok($overRupee['reconciliation']['blocked_by_rows'] === false, '  ...as a real mismatch, not a row problem');
+
+echo "\n== A sheet nobody can read says so once ==\n";
+// The live case: every invoice row failed, so the sheet totalled zero and the
+// reconciliation reported all five money columns as out — one problem told
+// seven times, burying the row errors that caused it.
+$allBad = $tolParse(
+    [$tolIH, ['2026-07-08', 'Food', 'Momo', 1, '30238.92', '2515.27', '27723.65', '3604.10', '31327.75']],
+    [$tolVH, ['2026-07-08', 'INV-1', 'Cash', 'NO-SUCH-LEDGER', '30238.92', '2515.27', '27723.65', '3604.10', '31327.75'],
+              ['2026-07-08', 'INV-2', 'Cash', 'ALSO-MISSING', '1', '0', '1', '0.13', '1.13']]
+);
+ok($allBad['invoices']['valid'] === 0, 'Every invoice row fails, so that sheet totals nothing');
+ok($allBad['reconciliation']['blocked_by_rows'] === true, 'The reconciliation reports itself blocked by the rows');
+ok(count($allBad['reconciliation']['problems']) === 1, '  ...saying it once, not once per column');
+ok(str_contains($allBad['reconciliation']['problems'][0], '2 row(s)'), '  ...and how many rows are wrong');
+ok(array_filter($allBad['reconciliation']['problems'], static fn ($x) => str_contains($x, 'does not agree')) === [],
+    '  ...with no column-by-column echo of the same thing');
+
+echo "\n== Slack on the sheet, none in the books ==\n";
+// The voucher engine refuses anything off by more than half a paisa, so the
+// residual has to land somewhere before posting: on the largest sales line,
+// never on the debit, which is what the customer actually paid.
+$roundIH = [$tolIH,
+    ['2026-07-09', 'Food', 'Momo', 1, '1000', '0', '1000', '130', '1130'],
+    ['2026-07-09', 'Bar', 'Beer', 1, '500', '0', '500', '65', '565']];
+$roundVH = [$tolVH, ['2026-07-09', 'INV-9', 'Cash', '1100', '1500', '0', '1500', '195', '1694.40']];
+$rounded = $tolParse($roundIH, $roundVH);
+ok($rounded['reconciliation']['ok'] === true, 'A day 0.60 out reconciles');
+$roundedResult = hospitality_post_sales_workbook($A['cid'], $A['fy'], $rounded, 'rounding.xlsx', $A['uid'], true);
+ok($roundedResult['ok'] === true, '  ...and posts' . ($roundedResult['ok'] ? '' : ': ' . $roundedResult['error']));
+$roundedVoucher = (int) db()->query('SELECT id FROM vouchers WHERE company_id=' . $A['cid'] . " AND source_type='hospitality_sales_upload' ORDER BY id DESC LIMIT 1")->fetchColumn();
+$roundedSums = db()->query("SELECT SUM(CASE WHEN entry_type='debit' THEN amount ELSE 0 END) dr,
+    SUM(CASE WHEN entry_type='credit' THEN amount ELSE 0 END) cr FROM voucher_entries WHERE voucher_id=$roundedVoucher")->fetch(PDO::FETCH_ASSOC);
+ok(near((float) $roundedSums['dr'], (float) $roundedSums['cr']), 'The voucher balances to the paisa regardless');
+ok(near((float) $roundedSums['dr'], 1694.40), '  ...at what was settled, not at what the items added to');
+$roundedLegs = [];
+foreach (db()->query("SELECT e.amount, e.memo, l.name FROM voucher_entries e JOIN ledgers l ON l.id = e.ledger_id
+    WHERE e.voucher_id = $roundedVoucher AND e.entry_type = 'credit'")->fetchAll(PDO::FETCH_ASSOC) as $roundedLeg) {
+    $roundedLegs[(string) $roundedLeg['name']] = $roundedLeg;
+}
+ok(near((float) $roundedLegs['Sales — Food']['amount'], 999.40), 'The residual lands on the LARGEST sales line');
+ok(near((float) $roundedLegs['Sales — Bar']['amount'], 500.00), '  ...leaving the smaller one alone');
+ok(str_contains((string) $roundedLegs['Sales — Food']['memo'], 'rounding'), '  ...and that line says it carries rounding');
+$roundedNarration = (string) db()->query("SELECT narration FROM vouchers WHERE id = $roundedVoucher")->fetchColumn();
+ok(str_contains($roundedNarration, 'rounding'), '  ...as does the entry itself');
+
+
 echo "\n== Tenant isolation ==\n";
 $settingsB = hospitality_settings($B['cid']);
 set_context($B['cid'], $B['fy']);

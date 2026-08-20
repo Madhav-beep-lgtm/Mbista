@@ -37,8 +37,19 @@ require_once __DIR__ . '/export_engine.php';
 /** Rows either sheet may carry before the file is rejected as too big. */
 const HOSPITALITY_WORKBOOK_MAX_ROWS = 5000;
 
-/** How far the two sheets may disagree on a money column and still post. */
-const HOSPITALITY_WORKBOOK_TOLERANCE = 0.01;
+/**
+ * How far a figure may be out and still be treated as rounding.
+ *
+ * A till rounds every line to the paisa and a day's sheet adds hundreds of them
+ * up, so a total arrives a few paisa away from what the parts make. Under a
+ * rupee is rounding; a rupee or more is somebody's mistake, and the difference
+ * between those two is the whole judgement this constant encodes.
+ *
+ * The BOOKS are not given this slack. A voucher still has to balance to the
+ * half-paisa — see hospitality_workbook_absorb_rounding(), which puts the
+ * residual on the largest sales line rather than letting it through.
+ */
+const HOSPITALITY_WORKBOOK_TOLERANCE = 0.99;
 
 /** The sheet names written into the template, and looked for on the way back in. */
 const HOSPITALITY_SHEET_ITEMS = 'Item-wise Sales';
@@ -710,6 +721,32 @@ function hospitality_workbook_reconcile(array $items, array $invoices): array
 {
     $problems = [];
 
+    // A sheet with nothing usable on it totals zero, and comparing zero against
+    // a real figure reports every column as out. That is one problem told seven
+    // times, and it buries the row errors that actually caused it. Say what is
+    // wrong once, and stop.
+    if ($items['valid'] === 0 || $invoices['valid'] === 0) {
+        if ($items['valid'] === 0) {
+            $problems[] = $items['errors'] > 0
+                ? 'Nothing on the item-wise sheet can be read — all ' . (int) $items['errors'] . ' row(s) have errors. Fix those first; until then there is nothing to compare.'
+                : 'The item-wise sheet has no rows.';
+        }
+        if ($invoices['valid'] === 0) {
+            $problems[] = $invoices['errors'] > 0
+                ? 'Nothing on the invoice-wise sheet can be read — all ' . (int) $invoices['errors'] . ' row(s) have errors. Fix those first; until then there is nothing to compare.'
+                : 'The invoice-wise sheet has no rows.';
+        }
+
+        return [
+            'ok' => false,
+            'problems' => $problems,
+            'differences' => [],
+            'item_range' => ['', ''],
+            'invoice_range' => ['', ''],
+            'blocked_by_rows' => true,
+        ];
+    }
+
     $itemDates = array_keys($items['days']);
     $invoiceDates = array_keys($invoices['days']);
     $itemFirst = $itemDates === [] ? '' : (string) reset($itemDates);
@@ -781,7 +818,46 @@ function hospitality_workbook_reconcile(array $items, array $invoices): array
         'differences' => $differences,
         'item_range' => [$itemFirst, $itemLast],
         'invoice_range' => [$invoiceFirst, $invoiceLast],
+        'blocked_by_rows' => false,
     ];
+}
+
+/**
+ * Put a day's rounding residual on its largest sales line.
+ *
+ * The two sheets are allowed to disagree by under a rupee, because that is what
+ * rounding hundreds of till lines does. A VOUCHER is allowed no such thing: the
+ * engine refuses anything off by more than half a paisa, and rightly.
+ *
+ * So the slack has to land somewhere before posting. It goes on the biggest
+ * credit, because that is the figure with the most rounding in it and the one
+ * where a few paisa is least material. The DEBIT side is never touched -- it is
+ * what the customer actually paid, and that is not an estimate.
+ *
+ * Returns the adjusted credits, and by how much, so the entry can say so.
+ */
+function hospitality_workbook_absorb_rounding(array $creditsByLedger, float $debitTotal, float $vat): array
+{
+    $creditTotal = $vat;
+    foreach ($creditsByLedger as $leg) {
+        $creditTotal += (float) $leg['taxable'];
+    }
+    $residual = round($debitTotal - $creditTotal, 2);
+    if (abs($residual) < 0.005 || $creditsByLedger === []) {
+        return ['credits' => $creditsByLedger, 'residual' => 0.0, 'ledger_id' => 0];
+    }
+
+    $largestKey = null;
+    $largest = null;
+    foreach ($creditsByLedger as $key => $leg) {
+        if ($largest === null || (float) $leg['taxable'] > $largest) {
+            $largest = (float) $leg['taxable'];
+            $largestKey = $key;
+        }
+    }
+    $creditsByLedger[$largestKey]['taxable'] = round((float) $creditsByLedger[$largestKey]['taxable'] + $residual, 2);
+
+    return ['credits' => $creditsByLedger, 'residual' => $residual, 'ledger_id' => (int) $largestKey];
 }
 
 // ------------------------------------------------------- menu items from sales
@@ -1211,12 +1287,15 @@ function hospitality_post_sales_workbook(int $companyId, int $fiscalYearId, arra
             }
 
             $entries = [];
-            // Debits: one per ledger the day was settled to.
+            // Debits: one per ledger the day was settled to. This side is what
+            // the customer actually paid, so it is never adjusted.
+            $dayDebitTotal = 0.0;
             foreach ($dayInvoices['ledgers'] as $ledgerId => $leg) {
                 $amount = round((float) $leg['total'], 2);
                 if ($amount <= 0) {
                     continue;
                 }
+                $dayDebitTotal = round($dayDebitTotal + $amount, 2);
                 $entries[] = [
                     'ledger_id' => (int) $ledgerId,
                     'entry_type' => 'debit',
@@ -1224,9 +1303,20 @@ function hospitality_post_sales_workbook(int $companyId, int $fiscalYearId, arra
                     'memo' => 'Daily sales settled to ' . (string) $leg['name'] . ' — ' . $date,
                 ];
             }
+
+            // The two sheets are allowed to disagree by under a rupee, because
+            // that is what rounding hundreds of till lines does. A voucher is
+            // allowed no such thing, so whatever is left over lands on the
+            // largest sales line before any of this is written.
+            $dayVat = round((float) $dayItems['vat'], 2);
+            $absorbed = hospitality_workbook_absorb_rounding($dayItems['ledgers'], $dayDebitTotal, $dayVat);
+            $dayCredits = $absorbed['credits'];
+            $dayResidual = (float) $absorbed['residual'];
+            $dayResidualLedger = $dayResidual !== 0.0 ? (int) $absorbed['ledger_id'] : 0;
+
             // Credits: one per category sold, at the taxable figure (net of
             // discount, which the sheet has already taken off).
-            foreach ($dayItems['ledgers'] as $ledgerId => $leg) {
+            foreach ($dayCredits as $ledgerId => $leg) {
                 $amount = round((float) $leg['taxable'], 2);
                 if ($amount <= 0) {
                     continue;
@@ -1235,14 +1325,19 @@ function hospitality_post_sales_workbook(int $companyId, int $fiscalYearId, arra
                     'ledger_id' => (int) $ledgerId,
                     'entry_type' => 'credit',
                     'amount' => $amount,
-                    'memo' => 'Daily sales — ' . (string) $leg['category'] . ' — ' . $date,
+                    // The line that took the rounding says so, so nobody has to
+                    // work out later why a category is a few paisa off the sheet.
+                    'memo' => 'Daily sales — ' . (string) $leg['category'] . ' — ' . $date
+                        . ((int) $ledgerId === $dayResidualLedger
+                            ? ' (includes ' . number_format($dayResidual, 2) . ' rounding)'
+                            : ''),
                 ];
             }
-            if ((float) $dayItems['vat'] > 0) {
+            if ($dayVat > 0) {
                 $entries[] = [
                     'ledger_id' => (int) $vatLedger['id'],
                     'entry_type' => 'credit',
-                    'amount' => round((float) $dayItems['vat'], 2),
+                    'amount' => $dayVat,
                     'memo' => 'VAT on daily sales — ' . $date,
                 ];
             }
@@ -1262,7 +1357,10 @@ function hospitality_post_sales_workbook(int $companyId, int $fiscalYearId, arra
                 'reference_no' => mb_substr('Day sheet ' . $date . ' (' . $fileName . ')', 0, 120),
                 'voucher_date' => $date,
                 'narration' => 'Hospitality daily sales for ' . $date . ' — ' . (int) $dayItems['rows'] . ' item line(s) settled across '
-                    . count($dayInvoices['ledgers']) . ' ledger(s), from ' . ($fileName !== '' ? $fileName : 'the sales workbook') . '.',
+                    . count($dayInvoices['ledgers']) . ' ledger(s), from ' . ($fileName !== '' ? $fileName : 'the sales workbook') . '.'
+                    . ($dayResidual !== 0.0
+                        ? ' Sales carry ' . number_format($dayResidual, 2) . ' of rounding so the entry balances against what was settled.'
+                        : ''),
                 'total_amount' => round((float) $dayItems['total'], 2),
                 'status' => $needsApproval ? 'draft' : 'posted',
                 'approval_state' => $needsApproval ? 'pending_approval' : 'approved',
