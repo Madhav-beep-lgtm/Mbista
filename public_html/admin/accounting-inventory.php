@@ -43,6 +43,41 @@ $itemTypes = $inventoryProfile['show_manufacturing']
 // inventory_direction(), inventory_valid_date() and
 // inventory_company_warehouse_id() moved to app/inventory_valuation.php when
 // the multi-line purchase entry needed them too. They are loaded by bootstrap.
+/**
+ * Back to the page the form was submitted from.
+ *
+ * Each task is its own page now, so a redirect to the bare URL would drop
+ * somebody who just saved a warehouse onto Item Master. Every form on this
+ * screen carries the task it belongs to, and this hands it back.
+ */
+function inv_back_url(string $extra = ''): string
+{
+    $tasks = ['item', 'warehouses', 'purchase', 'sale', 'adjust', 'transfer', 'manufacturing', 'bom'];
+    $task = (string) ($_POST['task'] ?? $_GET['task'] ?? '');
+    $views = ['inventory', 'valuation', 'manufacturing'];
+    $view = (string) ($_POST['view'] ?? $_GET['view'] ?? '');
+
+    $query = [];
+    if (in_array($view, $views, true) && $view !== 'inventory') {
+        $query[] = 'view=' . $view;
+    }
+    if (in_array($task, $tasks, true)) {
+        $query[] = 'task=' . $task;
+    }
+    // $extra is either a #fragment or further query pairs the caller already
+    // built, so it is appended rather than merged.
+    $fragment = '';
+    if (str_starts_with($extra, '#')) {
+        $fragment = $extra;
+    } elseif ($extra !== '') {
+        $query[] = ltrim($extra, '&?');
+    }
+
+    return 'admin/accounting-inventory.php'
+        . ($query !== [] ? '?' . implode('&', $query) : '')
+        . $fragment;
+}
+
 $movementTypes = [
     'opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment',
     'write_off', 'damage', 'expiry', 'warehouse_transfer', 'departmental_transfer',
@@ -206,13 +241,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('accounting', 'post');
         if ((string) (current_user()['role'] ?? '') !== 'admin') {
             flash('error', 'Only an admin can remove the sample data.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         require_once __DIR__ . '/../../app/stock_report_engine.php';
         $purge = sr_purge_sample_inventory($companyId, $userId);
         log_activity('inventory_item', $companyId, 'sample_purged', 'Sample inventory removed: ' . $purge['items'] . ' items, ' . $purge['transactions'] . ' movements, ' . $purge['vouchers'] . ' vouchers, ' . $purge['orders'] . ' orders.', $userId);
         flash('success', 'Sample data removed: ' . $purge['items'] . ' item(s), ' . $purge['transactions'] . ' movement(s), ' . $purge['vouchers'] . ' voucher(s), ' . $purge['orders'] . ' manufacturing order(s). The Stock Summary now shows only stock recorded through Inventory & Manufacturing.');
-        redirect('admin/accounting-inventory.php');
+        redirect(inv_back_url());
     }
 
     if ($action === 'save_item') {
@@ -230,7 +265,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $existing = inventory_company_item($itemId, $companyId);
             if (!$existing) {
                 flash('error', 'Item not found for this company.');
-                redirect('admin/accounting-inventory.php');
+                redirect(inv_back_url());
             }
             if (!in_array((string) $existing['item_type'], $allowedTypes, true)) {
                 $allowedTypes[] = (string) $existing['item_type'];
@@ -238,7 +273,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($sku === '' || $name === '' || !in_array($itemType, $allowedTypes, true) || !in_array($status, ['active', 'inactive'], true)) {
             flash('error', 'SKU, item name, type, and status are required.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
 
         $validMethods = ['fifo', 'weighted_average', 'specific'];
@@ -378,7 +413,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? 'Could not save item: SKU "' . $sku . '" already exists in this company.'
                 : 'Could not save item: ' . $exception->getMessage());
         }
-        redirect('admin/accounting-inventory.php');
+        redirect(inv_back_url());
     }
 
     // --- Opening stock from a spreadsheet --------------------------------
@@ -400,11 +435,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $extension, $originalName, 'inventory', $userId);
             flash($staged['valid_count'] === $staged['row_count'] ? 'success' : 'info',
                 $staged['row_count'] . ' row(s) read, ' . $staged['valid_count'] . ' ready. Nothing posted yet.');
-            redirect('admin/accounting-inventory.php?import=' . $staged['import_id'] . '#opening-import');
+            redirect(inv_back_url('import=' . $staged['import_id'] . '#opening-import'));
         } catch (Throwable $uploadException) {
             flash('error', $uploadException->getMessage());
         }
-        redirect('admin/accounting-inventory.php#opening-import');
+        redirect(inv_back_url('#opening-import'));
     }
 
     if ($action === 'update_opening_import_row') {
@@ -415,19 +450,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'amount' => (float) ($_POST['amount'] ?? 0),
         ]);
         flash($res['ok'] ? 'success' : 'error', $res['ok'] ? 'Row updated.' : $res['error']);
-        redirect('admin/accounting-inventory.php?import=' . (int) ($_POST['import_id'] ?? 0) . '#opening-import');
+        redirect(inv_back_url('import=' . (int) ($_POST['import_id'] ?? 0) . '#opening-import'));
     }
 
     if ($action === 'delete_opening_import_row') {
         $res = opening_import_delete_row($companyId, (int) ($_POST['row_id'] ?? 0));
         flash($res['ok'] ? 'success' : 'error', $res['ok'] ? 'Row removed.' : $res['error']);
-        redirect('admin/accounting-inventory.php?import=' . (int) ($_POST['import_id'] ?? 0) . '#opening-import');
+        redirect(inv_back_url('import=' . (int) ($_POST['import_id'] ?? 0) . '#opening-import'));
     }
 
     if ($action === 'discard_opening_import') {
         $res = opening_import_discard($companyId, (int) ($_POST['import_id'] ?? 0));
         flash($res['ok'] ? 'success' : 'error', $res['ok'] ? 'Import discarded.' : $res['error']);
-        redirect('admin/accounting-inventory.php#opening-import');
+        redirect(inv_back_url('#opening-import'));
     }
 
     if ($action === 'commit_opening_import') {
@@ -443,7 +478,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             flash('error', $res['error']);
         }
-        redirect('admin/accounting-inventory.php?import=' . $importId . '#opening-import');
+        redirect(inv_back_url('import=' . $importId . '#opening-import'));
     }
     if ($action === 'save_warehouse') {
         require_permission('inventory', 'create');
@@ -451,7 +486,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $warehouseCode = trim((string) ($_POST['code'] ?? '')) ?: null;
         if ($warehouseName === '') {
             flash('error', 'Warehouse name is required.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         try {
             db()->prepare('INSERT INTO warehouses (company_id, name, code, is_active) VALUES (:company_id, :name, :code, 1)')
@@ -463,7 +498,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? 'Could not save warehouse: a warehouse named "' . $warehouseName . '" already exists in this company.'
                 : 'Could not save warehouse: ' . $exception->getMessage());
         }
-        redirect('admin/accounting-inventory.php');
+        redirect(inv_back_url());
     }
 
     if ($action === 'toggle_warehouse') {
@@ -474,14 +509,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $warehouse = $warehouseStmt->fetch();
         if (!$warehouse) {
             flash('error', 'Warehouse not found for this company.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         $newActive = (int) $warehouse['is_active'] === 1 ? 0 : 1;
         db()->prepare('UPDATE warehouses SET is_active = :is_active WHERE id = :id AND company_id = :company_id')
             ->execute(['is_active' => $newActive, 'id' => $warehouseId, 'company_id' => $companyId]);
         security_event('warehouse_toggled', 'success', 'Warehouse #' . $warehouseId . ' ' . ($newActive ? 'activated' : 'deactivated') . '.', $companyId, $userId);
         flash('success', 'Warehouse "' . $warehouse['name'] . '" ' . ($newActive ? 'activated' : 'deactivated') . '.');
-        redirect('admin/accounting-inventory.php');
+        redirect(inv_back_url());
     }
 
     if ($action === 'post_movement_draft') {
@@ -495,16 +530,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $draft = $draftStmt->fetch(PDO::FETCH_ASSOC);
         if (!$draft) {
             flash('error', 'That entry was not found for this company.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         if ((string) $draft['status'] !== 'draft') {
             flash('error', 'This entry is already posted as ' . (string) $draft['voucher_no'] . '.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         $draftDate = (string) ($draft['voucher_date'] ?? date('Y-m-d'));
         if (is_period_locked($companyId, (int) $draft['fiscal_year_id'], $draftDate)) {
             flash('error', 'The entry is dated ' . $draftDate . ', which is inside a locked accounting period.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         // A draft may be saved unbalanced; the books may not. The shared writer
         // only checks this when a voucher is CREATED as posted, and posting
@@ -517,7 +552,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (abs(round($balance, 2)) > 0.005) {
             flash('error', 'Refusing to post: this entry is out by ' . number_format(abs($balance), 2) . '.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         $voucherNo = '';
         $posted = false;
@@ -547,7 +582,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             security_event('inventory_movement_posted', 'success', 'Purchase voucher ' . $voucherNo . ' posted.', $companyId, $userId);
             flash('success', 'Posted as voucher ' . $voucherNo . ' — ' . site_currency_symbol() . number_format((float) $draft['total_amount'], 2) . ' now in the ledger.');
         }
-        redirect('admin/accounting-inventory.php');
+        redirect(inv_back_url());
     }
 
     if ($action === 'record_purchase_batch') {
@@ -579,7 +614,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['inv_purchase_grid'] = array_values($gridRows);
             $_SESSION['inv_purchase_grid_errors'] = array_slice($problems, 0, 20);
             flash('error', (string) $result['error']);
-            redirect('admin/accounting-inventory.php#movement-purchase');
+            redirect(inv_back_url('#movement-purchase'));
         }
         $unmapped = 0;
         foreach ($result['lines'] as $resultLine) {
@@ -591,7 +626,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             . ((int) ($result['ingredients_added'] ?? 0) > 0 ? ', ' . (int) $result['ingredients_added'] . ' added to the kitchen ingredient list' : '')
             . '. Bought-in stock is prepared as a draft entry — approve it in Purchase entries.'
             . ($unmapped > 0 ? ' ' . $unmapped . ' line(s) recorded stock only: map their ledgers on the item to post the accounting entry.' : ''));
-        redirect('admin/accounting-inventory.php#movement-purchase-entries');
+        redirect(inv_back_url('#movement-purchase-entries'));
     }
 
     if ($action === 'record_movement') {
@@ -616,12 +651,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $moveTdsLedgerId = (int) ($_POST['tds_ledger_id'] ?? 0);
         if ($qty <= 0 || !in_array($type, $movementTypes, true)) {
             flash('error', 'Select an item, movement type, and positive quantity.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         $item = inventory_company_item($itemId, $companyId);
         if (!$item) {
             flash('error', 'Item not found for this company.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         $method = (string) ($item['valuation_method'] ?? 'weighted_average');
 
@@ -635,12 +670,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $moveFiscalYear = fiscal_year_for_date($companyId, $date);
             if (!$moveFiscalYear) {
                 flash('error', 'No fiscal year covers ' . $date . '. Open a fiscal year for that period before recording stock.');
-                redirect('admin/accounting-inventory.php');
+                redirect(inv_back_url());
             }
             $moveBlocker = fiscal_year_posting_blocker($moveFiscalYear, $date);
             if ($moveBlocker !== null) {
                 flash('error', $moveBlocker);
-                redirect('admin/accounting-inventory.php');
+                redirect(inv_back_url());
             }
         }
 
@@ -654,7 +689,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (inv_movement_is_location_only($type)) {
             if ($warehouseId === null || $toWarehouseId === null || $warehouseId === $toWarehouseId) {
                 flash('error', 'Select two different warehouses for a transfer (from and to).');
-                redirect('admin/accounting-inventory.php');
+                redirect(inv_back_url());
             }
             // Availability must be checked at the SOURCE warehouse, not company-
             // wide: the company can hold plenty of an item while the warehouse
@@ -663,7 +698,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sourceQty = inv_item_warehouse_qty($companyId, $itemId, $warehouseId);
             if ($qty > $sourceQty + 0.0005) {
                 flash('error', 'Insufficient stock at the source warehouse: it holds ' . number_format($sourceQty, 3) . ' ' . $item['unit'] . ' of ' . $item['sku'] . ' (company-wide on hand is ' . number_format((float) $item['on_hand'], 3) . ', but stock can only move out of the location that actually holds it).');
-                redirect('admin/accounting-inventory.php');
+                redirect(inv_back_url());
             }
             // Informational unit cost: the item's current carrying cost per unit.
             // The layers are not consumed, so nothing is actually drawn down here.
@@ -725,7 +760,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 flash('error', 'Could not record transfer: ' . $exception->getMessage());
             }
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
 
         // Adjustments choose their own direction (stock count corrections go
@@ -735,7 +770,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             : inventory_direction($type);
         if ($type === 'opening' && (float) $item['opening_qty'] > 0) {
             flash('error', 'This item already has an opening quantity (' . number_format((float) $item['opening_qty'], 3) . ') on its master record — edit the item instead of recording a second opening, or stock would be double-counted.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         if ($direction === 'out') {
             // When a warehouse is chosen, availability must be checked at THAT
@@ -746,11 +781,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sourceWarehouseQty = inv_item_warehouse_qty($companyId, $itemId, $warehouseId);
                 if ($qty > $sourceWarehouseQty + 0.0005) {
                     flash('error', 'Insufficient stock at the selected warehouse: it holds ' . number_format($sourceWarehouseQty, 3) . ' ' . $item['unit'] . ' of ' . $item['sku'] . ' (company-wide on hand is ' . number_format((float) $item['on_hand'], 3) . ', but stock can only leave the location that actually holds it).');
-                    redirect('admin/accounting-inventory.php');
+                    redirect(inv_back_url());
                 }
             } elseif ($qty > (float) $item['on_hand'] + 0.0005) {
                 flash('error', 'Insufficient stock: only ' . number_format((float) $item['on_hand'], 3) . ' ' . $item['unit'] . ' of ' . $item['sku'] . ' on hand. Record a purchase or an inward adjustment first.');
-                redirect('admin/accounting-inventory.php');
+                redirect(inv_back_url());
             }
         }
         if ($rate <= 0) {
@@ -862,7 +897,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             flash('error', 'Could not record movement: ' . $exception->getMessage());
         }
-        redirect('admin/accounting-inventory.php');
+        redirect(inv_back_url());
     }
 
     if ($action === 'post_nrv_assessment') {
@@ -999,7 +1034,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete_movement') {
         if ((string) ($currentUser['role'] ?? '') !== 'admin') {
             flash('error', 'Only an administrator can delete stock movements.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         $movementId = (int) ($_POST['movement_id'] ?? 0);
         $linkedGuard = column_exists('inventory_transactions', 'jewellery_stock_txn_id')
@@ -1011,7 +1046,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $movement = $mvStmt->fetch(PDO::FETCH_ASSOC);
         if (!$movement) {
             flash('error', 'Movement not found, or it is controlled by Manufacturing/Jewellery (reverse it from its source document instead).');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         // A transfer is a PAIR of rows (out of the source, in to the destination).
         // Deleting or reversing one leg on its own would leave the other standing,
@@ -1019,13 +1054,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // back with a transfer in the opposite direction instead.
         if (inv_movement_is_location_only((string) $movement['transaction_type'])) {
             flash('error', 'This is one leg of a transfer. Deleting a single leg would leave stock stranded at the other location — record a transfer in the opposite direction instead.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         // A movement that posted a GL voucher must not be silently deleted —
         // that would orphan a posted voucher. Reverse it instead (spec E).
         if ((int) ($movement['voucher_id'] ?? 0) > 0) {
             flash('error', 'This movement posted an accounting voucher — use "Reverse" instead of delete, so both the stock and the voucher are reversed and the audit trail is preserved.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         try {
             db()->beginTransaction();
@@ -1043,13 +1078,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (db()->inTransaction()) { db()->rollBack(); }
             flash('error', inventory_allowance_block_message($e) ?? 'Could not delete movement: ' . $e->getMessage());
         }
-        redirect('admin/accounting-inventory.php');
+        redirect(inv_back_url());
     }
 
     if ($action === 'reverse_movement') {
         if ((string) ($currentUser['role'] ?? '') !== 'admin') {
             flash('error', 'Only an administrator can reverse stock movements.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         $movementId = (int) ($_POST['movement_id'] ?? 0);
         $linkedGuard = column_exists('inventory_transactions', 'jewellery_stock_txn_id')
@@ -1061,11 +1096,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $movement = $mvStmt->fetch(PDO::FETCH_ASSOC);
         if (!$movement) {
             flash('error', 'Movement not found, or it is controlled by Manufacturing/Jewellery (reverse it from its source document instead).');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         if (inv_movement_is_location_only((string) $movement['transaction_type'])) {
             flash('error', 'This is one leg of a transfer. Reversing a single leg would leave stock stranded at the other location — record a transfer in the opposite direction instead.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         // One reversal per movement: the mirror row is keyed REV-<id>, so a
         // re-submit (or double click) must not duplicate stock and GL again.
@@ -1073,7 +1108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $revExistsStmt->execute(['cid' => $companyId, 'ref' => 'REV-' . $movementId]);
         if ($revExistsStmt->fetchColumn()) {
             flash('error', 'Movement #' . $movementId . ' has already been reversed — reversing it again would duplicate the stock and the accounting entries.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         $revItem = inventory_company_item((int) $movement['item_id'], $companyId);
         try {
@@ -1166,7 +1201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (db()->inTransaction()) { db()->rollBack(); }
             flash('error', inventory_allowance_block_message($e) ?? 'Could not reverse movement: ' . $e->getMessage());
         }
-        redirect('admin/accounting-inventory.php');
+        redirect(inv_back_url());
     }
 
     if ($action === 'save_inventory_mappings') {
@@ -1182,14 +1217,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mapItemId = $mapScope === 'item' ? (int) ($_POST['map_item_id'] ?? 0) : 0;
         if ($mapScope === 'category' && $mapCategory === '') {
             flash('error', 'Select an item category for the override.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         if ($mapScope === 'item') {
             $chk = db()->prepare('SELECT COUNT(*) FROM inventory_items WHERE id = :id AND company_id = :cid');
             $chk->execute(['id' => $mapItemId, 'cid' => $companyId]);
             if ($mapItemId <= 0 || (int) $chk->fetchColumn() === 0) {
                 flash('error', 'Select a valid inventory item for the override.');
-                redirect('admin/accounting-inventory.php');
+                redirect(inv_back_url());
             }
         }
         $scopeWhere = 'company_id = :cid AND scope = :scope AND purpose = :p AND '
@@ -1252,7 +1287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('inventory', 'create');
         if (!($inventoryProfile['show_manufacturing'] ?? false)) {
             flash('error', 'BOMs are available only for manufacturing companies.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         $bomNo = strtoupper(trim((string) ($_POST['bom_no'] ?? ''))) ?: ('BOM-' . date('ymdHis'));
         $finishedItemId = (int) ($_POST['finished_item_id'] ?? 0);
@@ -1262,7 +1297,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $finishedItem = inventory_company_item($finishedItemId, $companyId);
         if (!$finishedItem) {
             flash('error', 'Select the finished product for this BOM.');
-            redirect('admin/accounting-inventory.php?view=manufacturing');
+            redirect(inv_back_url());
         }
         $lineItems = $_POST['bom_item_id'] ?? [];
         $lineQtys = $_POST['bom_qty'] ?? [];
@@ -1284,7 +1319,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($lines === []) {
             flash('error', 'Add at least one component line to the BOM.');
-            redirect('admin/accounting-inventory.php?view=manufacturing');
+            redirect(inv_back_url());
         }
         try {
             db()->beginTransaction();
@@ -1303,14 +1338,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (db()->inTransaction()) { db()->rollBack(); }
             flash('error', (string) $e->getCode() === '23000' ? 'BOM number ' . $bomNo . ' already exists.' : 'Could not save BOM: ' . $e->getMessage());
         }
-        redirect('admin/accounting-inventory.php?view=manufacturing');
+        redirect(inv_back_url());
     }
 
     if ($action === 'create_manufacturing_order') {
         require_permission('inventory', 'create');
         if (!($inventoryProfile['show_manufacturing'] ?? false)) {
             flash('error', 'Manufacturing orders are available only for manufacturing companies.');
-            redirect('admin/accounting-inventory.php');
+            redirect(inv_back_url());
         }
         $orderNo = strtoupper(trim((string) ($_POST['order_no'] ?? '')));
         $finishedItemId = (int) ($_POST['finished_item_id'] ?? 0);
@@ -1335,7 +1370,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $finishedItem = inventory_company_item($finishedItemId, $companyId);
         if (!$finishedItem || $quantity <= 0) {
             flash('error', 'Finished item and quantity are required.');
-            redirect('admin/accounting-inventory.php?view=manufacturing');
+            redirect(inv_back_url());
         }
 
         // Validate the input lines up front: company ownership, no self-
@@ -1350,16 +1385,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($inputItemId === $finishedItemId) {
                 flash('error', 'The finished item cannot also be one of its own input materials.');
-                redirect('admin/accounting-inventory.php?view=manufacturing');
+                redirect(inv_back_url());
             }
             $inputItem = inventory_company_item($inputItemId, $companyId);
             if (!$inputItem) {
                 flash('error', 'Input item not found for this company.');
-                redirect('admin/accounting-inventory.php?view=manufacturing');
+                redirect(inv_back_url());
             }
             if ($inputQty > (float) $inputItem['on_hand'] + 0.0005) {
                 flash('error', 'Insufficient stock of ' . $inputItem['sku'] . ': ' . number_format((float) $inputItem['on_hand'], 3) . ' ' . $inputItem['unit'] . ' on hand, ' . number_format($inputQty, 3) . ' required.');
-                redirect('admin/accounting-inventory.php?view=manufacturing');
+                redirect(inv_back_url());
             }
             if ($inputRate <= 0) {
                 $inputRate = round((float) $inputItem['purchase_rate'], 2);
@@ -1368,7 +1403,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($inputs === []) {
             flash('error', 'Add at least one input material line (item and quantity).');
-            redirect('admin/accounting-inventory.php?view=manufacturing');
+            redirect(inv_back_url());
         }
 
         // Same fiscal-period gate as record_movement: material issues and the
@@ -1378,12 +1413,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $moFy = fiscal_year_for_date($companyId, $moDate);
             if (!$moFy) {
                 flash('error', 'No fiscal year covers ' . $moDate . '. Open a fiscal year for that period before recording production.');
-                redirect('admin/accounting-inventory.php?view=manufacturing');
+                redirect(inv_back_url());
             }
             $moBlocker = fiscal_year_posting_blocker($moFy, $moDate);
             if ($moBlocker !== null) {
                 flash('error', $moBlocker);
-                redirect('admin/accounting-inventory.php?view=manufacturing');
+                redirect(inv_back_url());
             }
         }
 
@@ -1493,7 +1528,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('success', 'Production order ' . $orderNo . ' started: materials issued at actual cost ' . site_currency_symbol() . number_format($totalInputCost, 2) . '.'
                     . ($wipVoucherId > 0 ? ' WIP journal posted (Dr Work in Progress / Cr materials).' : $wipNote)
                     . ' Complete it from the orders table below.');
-                redirect('admin/accounting-inventory.php?view=manufacturing');
+                redirect(inv_back_url());
             }
 
             // IAS 2 absorbed cost: materials (net of abnormal waste) + labour +
@@ -1554,7 +1589,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? 'Could not create manufacturing order: order number ' . $orderNo . ' already exists.'
                 : 'Could not create manufacturing order: ' . $exception->getMessage());
         }
-        redirect('admin/accounting-inventory.php?view=manufacturing');
+        redirect(inv_back_url());
     }
 
     if ($action === 'complete_manufacturing_order' || $action === 'cancel_manufacturing_order') {
@@ -1565,7 +1600,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $order = $orderStmt->fetch();
         if (!$order) {
             flash('error', 'Open production order not found (it may already be completed or cancelled).');
-            redirect('admin/accounting-inventory.php?view=manufacturing');
+            redirect(inv_back_url());
         }
         $orderNo = (string) $order['order_no'];
         // Full item rows so the stock ledger resolves through the mapping chain
@@ -1582,7 +1617,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $moBlocker = $moFy ? fiscal_year_posting_blocker($moFy, $today) : ('No fiscal year covers ' . $today . '. Open a fiscal year for this period first.');
         if ($moBlocker !== null) {
             flash('error', $moBlocker);
-            redirect('admin/accounting-inventory.php?view=manufacturing');
+            redirect(inv_back_url());
         }
         // The WIP journal posted when this order STARTED (if any): completion
         // must credit Work in Progress — crediting the material ledgers again
@@ -1636,7 +1671,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 security_event('inventory_movement_reversed', 'success', 'Manufacturing order #' . $orderId . ' cancelled.', $companyId, $userId);
                 log_activity('manufacturing_order', $orderId, 'cancelled', 'Production order cancelled, materials returned.', $userId);
                 flash('success', 'Order ' . $orderNo . ' cancelled and issued materials returned to stock.');
-                redirect('admin/accounting-inventory.php?view=manufacturing');
+                redirect(inv_back_url());
             }
 
             $quantity = (float) $order['quantity'];
@@ -1715,7 +1750,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             flash('error', 'Could not update order ' . $orderNo . ': ' . $exception->getMessage());
         }
-        redirect('admin/accounting-inventory.php?view=manufacturing');
+        redirect(inv_back_url());
     }
 }
 
@@ -1891,6 +1926,7 @@ $inventoryTypeCards = $inventoryProfile['show_manufacturing']
         ['Consumable', 'Low-value operational items tracked for stock control.'],
 ];
 $invView = (string) ($_GET['view'] ?? 'inventory');
+
 // 'mapping' is gone on purpose: ledgers are chosen per item on the item form
 // and each item's "This item posts to" panel — same arrangement as fixed
 // assets. Old global/category rows keep working as inherited defaults.
@@ -1901,6 +1937,52 @@ if ($inventoryProfile['show_manufacturing'] ?? false) {
 if (!in_array($invView, $allowedViews, true)) {
     $invView = 'inventory';
 }
+
+// ---------------------------------------------------------------------------
+// One task per page
+// ---------------------------------------------------------------------------
+// These used to be six forms stacked on one page with script showing one at a
+// time. Every visit paid for all of them: the purchase grid with its bills and
+// popups, the warehouse list, the sale, adjustment and transfer forms, and the
+// priced item list — to look at one.
+//
+// Each is its own page now. The tabs are links, and only the chosen task is
+// built, both its markup and the reads behind it.
+$invTaskSections = $invView === 'inventory'
+    ? [
+        'item' => ['opening-import', 'create-item', 'item-ledgers', 'item-stock-summary'],
+        'warehouses' => ['warehouses'],
+        'purchase' => ['movement-purchase', 'movement-purchase-entries'],
+        'sale' => ['movement-sale'],
+        'adjust' => ['movement-adjust'],
+        'transfer' => ['movement-transfer'],
+    ]
+    : [
+        'manufacturing' => ['manufacturing'],
+        'bom' => ['bom'],
+    ];
+$invTask = (string) ($_GET['task'] ?? '');
+if (!isset($invTaskSections[$invTask])) {
+    $invTask = (string) array_key_first($invTaskSections);
+}
+// Editing an item, or coming back from a purchase that would not post, has to
+// land on the task that owns the form — otherwise the work is on a page nobody
+// is looking at.
+if (($editItem ?? null) !== null || ($moveItemId ?? 0) > 0) {
+    $invTask = ($moveItemId ?? 0) > 0 && ($_GET['task'] ?? '') === '' ? $invTask : $invTask;
+}
+if ($invView === 'inventory' && ($_GET['task'] ?? '') === '' && !empty($purchaseGridErrors)) {
+    $invTask = 'purchase';
+}
+$invShownSections = array_flip($invTaskSections[$invTask]);
+/** Is this section part of the task being looked at? */
+$invShows = static function (string $sectionId) use ($invShownSections): bool {
+    return isset($invShownSections[$sectionId]);
+};
+// Dropped into every form on the page, so a save comes back to the page it was
+// made on rather than to whichever task happens to be first.
+$invTaskField = '<input type="hidden" name="task" value="' . e($invTask) . '">'
+    . '<input type="hidden" name="view" value="' . e($invView) . '">';
 $lowOnly = (string) ($_GET['low'] ?? '') === '1';
 $isLowStock = static fn (array $item): bool => (float) $item['reorder_level'] > 0 && (float) $item['on_hand'] <= (float) $item['reorder_level'];
 $visibleItems = $lowOnly ? array_values(array_filter($items, $isLowStock)) : $items;
@@ -2030,7 +2112,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 <div class="notice" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
     <span><strong><?= $sampleCount ?> sample item(s)</strong> (SMP-…) from the demo seed are mixed into your inventory and its reports.</span>
     <form method="post" style="margin:0" data-confirm="Remove ALL sample inventory data (SMP-… items, their movements, cost layers, stock vouchers, and sample manufacturing orders)? Real data is not touched. This cannot be undone.">
-        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
         <input type="hidden" name="action" value="purge_sample_inventory">
         <button type="submit" class="button secondary" style="color:var(--mbw-red, #a33)">Remove sample data</button>
     </form>
@@ -2140,7 +2222,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Computes lower of cost and net realisable value (IAS 2.28-33) and posts a write-down or a capped reversal.</span></div>
         </div>
         <form method="post" class="workspace-form-grid">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="post_nrv_assessment">
             <label>Item<select name="item_id" id="nrvItem" required>
                 <option value="">Select item</option>
@@ -2192,25 +2274,46 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     <div class="mbw-card-head inventory-workbench-head">
     <div>
         <h2><?= $invView === 'manufacturing' ? 'Manufacturing Workspace' : 'Inventory Workspace' ?></h2>
-        <p>Select one task below. Only the selected form will be shown.</p>
+        <p>Choose a task. Each one is its own page, so only that form is built.</p>
     </div>
 </div>
 
+<?php // The input-item list, shared by Production Order and Bill of
+      // Materials. Defined out here because those are separate pages now
+      // and each needs it. ?>
+<?php $invItemOptions = static function () use ($items): string {
+    // The placeholder belongs in the list, not beside it: filling a select
+    // replaces everything inside it, so anything left outside disappears the
+    // moment the script runs.
+    $html = '<option value="">Select item</option>';
+    foreach ($items as $item) {
+        if ($item['status'] !== 'active') { continue; }
+        $html .= '<option value="' . (int) $item['id'] . '">'
+            . e($item['sku'] . ' - ' . $item['name'] . ' (on hand ' . number_format((float) $item['on_hand'], 3) . ')')
+            . '</option>';
+    }
+
+    return $html;
+}; ?>
+
 <nav class="inventory-action-tabs" aria-label="Inventory tasks">
-    <?php if ($invView === 'inventory'): ?>
-        <button type="button" class="inventory-action-tab is-active" data-workspace-target="create-item"><?= icon('services') ?><span>Item Master</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="warehouses"><?= icon('companies') ?><span>Warehouses</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="movement-purchase"><?= icon('cart') ?><span>Purchase Stock</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="movement-sale"><?= icon('invoices') ?><span>Sales & Returns</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="movement-adjust"><?= icon('settings') ?><span>Adjustments</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="movement-transfer"><?= icon('services') ?><span>Transfers</span></button>
-    <?php else: ?>
-        <button type="button" class="inventory-action-tab is-active" data-workspace-target="manufacturing"><?= icon('settings') ?><span>Production Order</span></button>
-        <button type="button" class="inventory-action-tab" data-workspace-target="bom"><?= icon('documents') ?><span>Bill of Materials</span></button>
-    <?php endif; ?>
+    <?php
+    // Links, not buttons: each task is its own page, so it can be bookmarked,
+    // opened in a tab, and reached with the back button.
+    $invTaskLabels = $invView === 'inventory'
+        ? ['item' => ['Item Master', 'services'], 'warehouses' => ['Warehouses', 'companies'],
+           'purchase' => ['Purchase Stock', 'cart'], 'sale' => ['Sales & Returns', 'invoices'],
+           'adjust' => ['Adjustments', 'settings'], 'transfer' => ['Transfers', 'services']]
+        : ['manufacturing' => ['Production Order', 'settings'], 'bom' => ['Bill of Materials', 'documents']];
+    ?>
+    <?php foreach ($invTaskLabels as $taskKey => [$taskLabel, $taskIcon]): ?>
+        <a class="inventory-action-tab <?= $invTask === $taskKey ? 'is-active' : '' ?>"
+           href="<?= e(url('admin/accounting-inventory.php?view=' . $invView . '&task=' . $taskKey)) ?>"><?= icon($taskIcon) ?><span><?= e($taskLabel) ?></span></a>
+    <?php endforeach; ?>
 </nav>
 <div class="workspace-feature-stack">
     <?php if ($invView === 'inventory'): ?>
+    <?php if ($invShows('opening-import')): ?>
     <details class="feature-disclosure" id="opening-import">
         <summary><span><strong><?= icon('documents') ?>Opening stock from a spreadsheet</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
         <p class="frm-optional" style="margin:0 0 12px">
@@ -2218,7 +2321,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             <a href="<?= e(url('admin/accounting-inventory.php?opening_template=xlsx')) ?>">Download template</a>
         </p>
         <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="upload_opening">
             <label>Spreadsheet<input type="file" name="opening_file" accept=".xlsx,.csv" required></label>
             <div style="align-self:end">
@@ -2246,13 +2349,13 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
             <form method="post" style="display:inline" onsubmit="return confirm('Commit <?= $invReady ?> row(s) as opening stock?');">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                 <input type="hidden" name="action" value="commit_opening_import">
                 <input type="hidden" name="import_id" value="<?= (int) $invImportBatch['id'] ?>">
                 <button type="submit" class="button" <?= $invReady > 0 ? '' : 'disabled' ?>>Commit <?= $invReady ?></button>
             </form>
             <form method="post" style="display:inline" onsubmit="return confirm('Discard this import? Nothing has reached the books.');">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                 <input type="hidden" name="action" value="discard_opening_import">
                 <input type="hidden" name="import_id" value="<?= (int) $invImportBatch['id'] ?>">
                 <button type="submit" class="button secondary">Discard</button>
@@ -2273,7 +2376,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                             <td><span class="mbw-pill tone-green">Committed</span></td>
                         <?php else: ?>
                         <form method="post">
-                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                             <input type="hidden" name="action" value="update_opening_import_row">
                             <input type="hidden" name="import_id" value="<?= (int) $invImportBatch['id'] ?>">
                             <input type="hidden" name="row_id" value="<?= (int) $ir['id'] ?>">
@@ -2298,7 +2401,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                                 <button type="submit" class="button secondary" style="min-height:30px;padding:3px 9px">Save</button>
                         </form>
                                 <form method="post" style="display:inline" onsubmit="return confirm('Remove row <?= (int) $ir['source_row_no'] ?>?');">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                                     <input type="hidden" name="action" value="delete_opening_import_row">
                                     <input type="hidden" name="import_id" value="<?= (int) $invImportBatch['id'] ?>">
                                     <input type="hidden" name="row_id" value="<?= (int) $ir['id'] ?>">
@@ -2312,11 +2415,13 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         </table></div>
         <?php endif; ?>
     </details>
+    <?php endif; ?>
 
+    <?php if ($invShows('create-item')): ?>
     <details class="feature-disclosure" id="create-item" open>
         <summary><span><strong><?= icon('services') ?><?= $editItem ? 'Edit item' : 'Create item' ?></strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="save_item">
             <input type="hidden" name="item_id" value="<?= e((int) ($editItem['id'] ?? 0)) ?>">
             <label>SKU<input type="text" name="sku" maxlength="80" value="<?= e($editItem['sku'] ?? '') ?>" required></label>
@@ -2485,6 +2590,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             <div class="workspace-span-2"><button type="submit"><?= icon('services') ?>Save item</button><?php if ($editItem): ?> <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php')) ?>">Cancel edit</a><?php endif; ?></div>
         </form>
     </details>
+    <?php endif; ?>
 
     <?php if ($editItem): ?>
     <?php
@@ -2495,10 +2601,11 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     // is shown so the effective ledger is never a mystery.
     $panelPurposeMeta = inventory_mapping_purposes();
     ?>
-    <details class="feature-disclosure" open>
+    <?php if ($invShows('item-ledgers')): ?>
+    <details class="feature-disclosure" id="item-ledgers" open>
         <summary><span><strong><?= icon('accounting') ?>This item posts to (ledgers)</strong><small><?= e($editItem['sku']) ?> — <?= e($editItem['name']) ?>: acquisition, sales, adjustment, NRV and production ledgers. Applies to this item only.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
         <form method="post">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="save_inventory_mappings">
             <input type="hidden" name="map_scope" value="item">
             <input type="hidden" name="map_item_id" value="<?= (int) $editItem['id'] ?>">
@@ -2526,7 +2633,9 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         </form>
     </details>
     <?php endif; ?>
+    <?php endif; ?>
 
+    <?php if ($invShows('warehouses')): ?>
     <details class="feature-disclosure" id="warehouses">
         <summary><span><strong><?= icon('services') ?>Warehouses / Locations</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <div class="rc-table-scroll">
@@ -2542,7 +2651,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                             <td><span class="mbw-pill <?= $whActive ? 'tone-green' : 'tone-red' ?>"><?= $whActive ? 'Active' : 'Inactive' ?></span></td>
                             <td>
                                 <form method="post" style="display:inline">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                                     <input type="hidden" name="action" value="toggle_warehouse">
                                     <input type="hidden" name="warehouse_id" value="<?= e((int) $warehouse['id']) ?>">
                                     <button type="submit" class="button secondary"><?= $whActive ? 'Deactivate' : 'Activate' ?></button>
@@ -2554,13 +2663,14 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             </table>
         </div>
         <form method="post" class="workspace-form-grid" style="margin-top:12px">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="save_warehouse">
             <label>Name<input type="text" name="name" maxlength="120" required></label>
             <label>Code<input type="text" name="code" maxlength="40" placeholder="Optional"></label>
             <div class="workspace-span-2"><button type="submit"><?= icon('services') ?>Add warehouse</button></div>
         </form>
     </details>
+    <?php endif; ?>
 
 <?php
 // The item list the sale / issue / transfer forms further down share. It lived
@@ -2577,6 +2687,7 @@ $invMoveItemOptions = static function () use ($items): string {
     return $html;
 };
 ?>
+    <?php if ($invShows('movement-purchase')): ?>
     <details class="feature-disclosure" id="movement-purchase" <?= $moveItemId > 0 || !empty($purchaseGridRows) ? 'open' : '' ?>>
         <summary><span><strong><?= icon('tasks') ?>Record Purchase / Opening Stock</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <?php
@@ -2637,7 +2748,7 @@ $invMoveItemOptions = static function () use ($items): string {
             so a bill can never be half in.
         </p>
         <form method="post" id="purchaseBillForm">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="record_purchase_batch">
             <div style="overflow-x:auto"><table class="mbw-grid-table" id="purchaseBills">
                 <thead><tr>
@@ -2767,7 +2878,7 @@ $invMoveItemOptions = static function () use ($items): string {
                         </table></div>
                         <div style="margin-top:12px;display:flex;gap:8px">
                             <button type="button" class="button secondary inv-item-add" data-bill="<?= $billIndex ?>"><?= icon('plus') ?>Add item</button>
-                            <button type="button" class="button secondary inv-bill-close" style="margin-left:auto"><?= icon('check') ?>Done</button>
+                            <button type="button" class="button secondary inv-bill-close" style="margin-left:auto"><?= icon('badge-check') ?>Done</button>
                         </div>
                     </div>
                 </dialog>
@@ -2784,6 +2895,7 @@ $invMoveItemOptions = static function () use ($items): string {
             VAT and any tax withheld are shown next to the stock value they are deliberately kept out of.
         </p>
     </details>
+    <?php endif; ?>
 
 
     <?php
@@ -2791,8 +2903,12 @@ $invMoveItemOptions = static function () use ($items): string {
     // first because they are the ones still waiting on somebody. The lines are
     // shown in full so the VAT sitting outside the stock value, and the
     // withholding taken off the supplier, can be read before any of it counts.
+    //
+    // Read only on the page that shows them. Every task used to pay for this,
+    // including the ones that never mention a purchase.
     $purEntries = [];
     $purLines = [];
+    if ($invShows('movement-purchase-entries')):
     $purStmt = db()->prepare("
         SELECT v.id, v.voucher_no, v.status, v.voucher_date, v.posting_date, v.total_amount, v.reference_no,
                t.transaction_type, t.qty_in, t.rate, i.sku, i.name AS item_name
@@ -2820,6 +2936,8 @@ $invMoveItemOptions = static function () use ($items): string {
         }
     }
     ?>
+    <?php endif; ?>
+    <?php if ($invShows('movement-purchase-entries')): ?>
     <details class="feature-disclosure" id="movement-purchase-entries" <?= array_filter($purEntries, static fn (array $r): bool => (string) $r['status'] === 'draft') !== [] ? 'open' : '' ?>>
         <summary><span><strong><?= icon('tasks') ?>Purchase entries</strong><small>A draft is not in the books yet — posting puts it there and gives it its voucher number.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
         <?php if ($purEntries === []): ?>
@@ -2854,7 +2972,7 @@ $invMoveItemOptions = static function () use ($items): string {
                         <td>
                             <?php if ($peDraft): ?>
                                 <form method="post" onsubmit="return confirm('Post this entry to the ledger? It will be given a voucher number.');">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                                     <input type="hidden" name="action" value="post_movement_draft">
                                     <input type="hidden" name="voucher_id" value="<?= e((int) $pe['id']) ?>">
                                     <button type="submit">Post it</button>
@@ -2869,11 +2987,13 @@ $invMoveItemOptions = static function () use ($items): string {
         </table></div>
         <?php endif; ?>
     </details>
+    <?php endif; ?>
 
+    <?php if ($invShows('movement-sale')): ?>
     <details class="feature-disclosure" id="movement-sale">
         <summary><span><strong><?= icon('tasks') ?>Record Sale / Sales Return</strong><small>Manual, non-invoiced stock-outs — inventory-sourced invoices auto-post their own sale movement via invoice.php.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid" id="saleMovementForm">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="record_movement">
             <?php $moveOpts = shared_options('inv-move-items', $invMoveItemOptions, (string) ($moveItemId ?: '')); ?>
             <label>Item<select name="item_id" id="saleMovItem" required<?= $moveOpts['fill'] ? ' data-fill-from="inv-move-items"' : '' ?>><?= $moveOpts['html'] ?></select></label>
@@ -2900,11 +3020,13 @@ $invMoveItemOptions = static function () use ($items): string {
         })();
         </script>
     </details>
+    <?php endif; ?>
 
+    <?php if ($invShows('movement-adjust')): ?>
     <details class="feature-disclosure" id="movement-adjust">
         <summary><span><strong><?= icon('tasks') ?>Adjustments &amp; Write-offs</strong><small>Stock count corrections, write-offs, damage, and expiry.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid" id="adjustForm">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="record_movement">
             <?php $moveOpts = shared_options('inv-move-items', $invMoveItemOptions, (string) ($moveItemId ?: '')); ?>
             <label>Item<select name="item_id" id="adjItem" required<?= $moveOpts['fill'] ? ' data-fill-from="inv-move-items"' : '' ?>><?= $moveOpts['html'] ?></select></label>
@@ -2943,11 +3065,13 @@ $invMoveItemOptions = static function () use ($items): string {
         })();
         </script>
     </details>
+    <?php endif; ?>
 
+    <?php if ($invShows('movement-transfer')): ?>
     <details class="feature-disclosure" id="movement-transfer">
         <summary><span><strong><?= icon('tasks') ?>Warehouse / Departmental Transfer</strong><small>Move stock between locations — quantity only, no GL impact.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="record_movement">
             <?php $moveOpts = shared_options('inv-move-items', $invMoveItemOptions, (string) ($moveItemId ?: '')); ?>
             <label>Item<select name="item_id" required<?= $moveOpts['fill'] ? ' data-fill-from="inv-move-items"' : '' ?>><?= $moveOpts['html'] ?></select></label>
@@ -2965,13 +3089,15 @@ $invMoveItemOptions = static function () use ($items): string {
             <button type="submit"><?= icon('tasks') ?>Record transfer</button>
         </form>
     </details>
+    <?php endif; ?>
 
     <?php endif; ?>
     <?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing'): ?>
+        <?php if ($invShows('manufacturing')): ?>
         <details class="feature-disclosure" id="manufacturing" open>
             <summary><span><strong><?= icon('settings') ?>Production Order</strong><small>Start production (materials move to Work in Progress) or complete it in one step.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
             <form method="post" class="workspace-form-grid">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                 <input type="hidden" name="action" value="create_manufacturing_order">
                 <label>Order no<input type="text" name="order_no" placeholder="Leave blank for auto"></label>
                 <label>Mode<select name="production_mode">
@@ -3003,20 +3129,6 @@ $invMoveItemOptions = static function () use ($items): string {
                                 <tr>
                                     <?php // Four rows once meant four copies of the whole item master.
                                           // One list now, shared. See shared_options(). ?>
-<?php $invItemOptions = static function () use ($items): string {
-    // The placeholder belongs in the list, not beside it: filling a select
-    // replaces everything inside it, so anything left outside disappears the
-    // moment the script runs.
-    $html = '<option value="">Select item</option>';
-    foreach ($items as $item) {
-        if ($item['status'] !== 'active') { continue; }
-        $html .= '<option value="' . (int) $item['id'] . '">'
-            . e($item['sku'] . ' - ' . $item['name'] . ' (on hand ' . number_format((float) $item['on_hand'], 3) . ')')
-            . '</option>';
-    }
-
-    return $html;
-}; ?>
                                     <?php $inputOpts = shared_options('inv-input-items', $invItemOptions); ?>
                                     <td><select name="input_item_id[]"<?= $inputOpts['fill'] ? ' data-fill-from="inv-input-items"' : '' ?>><?= $inputOpts['html'] ?></select></td>
                                     <td class="is-numeric"><input type="number" step="0.001" min="0" name="input_quantity[]"></td>
@@ -3033,11 +3145,13 @@ $invMoveItemOptions = static function () use ($items): string {
                 <button type="submit"><?= icon('settings') ?>Save production order</button>
             </form>
         </details>
+        <?php endif; ?>
 
+        <?php if ($invShows('bom')): ?>
         <details class="feature-disclosure" id="bom">
             <summary><span><strong><?= icon('documents') ?>Bill of Materials</strong><small>Define the standard recipe (components, expected waste, standard costs) for variance reporting.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
             <form method="post" class="workspace-form-grid">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                 <input type="hidden" name="action" value="save_bom">
                 <label>BOM no<input type="text" name="bom_no" placeholder="Leave blank for auto"></label>
                 <label>Finished product<select name="finished_item_id" required><option value="">Select finished item</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name']) ?></option><?php endforeach; ?></select></label>
@@ -3069,6 +3183,7 @@ $invMoveItemOptions = static function () use ($items): string {
                 <button type="submit"><?= icon('documents') ?>Save BOM</button>
             </form>
         </details>
+        <?php endif; ?>
     <?php endif; ?>
 </div>
 </section>
@@ -3094,6 +3209,7 @@ $invMoveItemOptions = static function () use ($items): string {
 <?php endif; ?>
 
 <?php if ($invView === 'inventory'): ?>
+<?php if ($invShows('item-stock-summary')): ?>
 <section class="mbw-card" data-collapsible id="item-stock-summary">
     <div class="mbw-card-head">
         <h2>Item Stock Summary<?= $lowOnly ? ' — low stock only' : '' ?>
@@ -3146,8 +3262,11 @@ $invMoveItemOptions = static function () use ($items): string {
         </nav>
     <?php endif; ?>
 </section>
+<?php endif; ?>
 
-<?php if ($showWarehouseStockCard): ?>
+<?php // Stock by warehouse answers "what is where", which is the warehouse
+      // task's question. It is built only on that page. ?>
+<?php if ($showWarehouseStockCard && $invShows('warehouses')): ?>
 <section class="mbw-card" data-collapsible aria-label="Stock by warehouse">
     <div class="mbw-card-head"><h2>Stock by Warehouse</h2></div>
     <div class="rc-table-scroll">
@@ -3192,14 +3311,14 @@ $invMoveItemOptions = static function () use ($items): string {
                                 && !in_array((string) $movement['transaction_type'], ['consume', 'produce'], true)): ?>
                                 <?php if ((int) ($movement['voucher_id'] ?? 0) > 0): ?>
                                     <form method="post" style="display:inline" data-confirm="Reverse this <?= e(str_replace('_', ' ', $movement['transaction_type'])) ?> of <?= e($movement['sku']) ?>? A mirror stock entry and a reversing voucher (Dr/Cr swapped) are posted; the originals are kept for audit.">
-                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                                         <input type="hidden" name="action" value="reverse_movement">
                                         <input type="hidden" name="movement_id" value="<?= e((int) $movement['id']) ?>">
                                         <button type="submit" class="button secondary" title="Reverse this posted movement">Reverse</button>
                                     </form>
                                 <?php else: ?>
                                     <form method="post" style="display:inline" data-confirm="Delete this <?= e(str_replace('_', ' ', $movement['transaction_type'])) ?> movement of <?= e($movement['sku']) ?> dated <?= e($movement['transaction_date']) ?>? Stock on hand recalculates immediately.">
-                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                                         <input type="hidden" name="action" value="delete_movement">
                                         <input type="hidden" name="movement_id" value="<?= e((int) $movement['id']) ?>">
                                         <button type="submit" class="button secondary" title="Delete this stock-only movement"><?= icon('trash') ?></button>
@@ -3243,13 +3362,13 @@ $invMoveItemOptions = static function () use ($items): string {
                         <td style="white-space:nowrap">
                             <?php if ($orderOpen): ?>
                                 <form method="post" style="display:inline" data-confirm="Complete <?= e($order['order_no']) ?>? <?= e(number_format((float) $order['quantity'], 3)) ?> finished goods will be received into stock at the material cost.">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                                     <input type="hidden" name="action" value="complete_manufacturing_order">
                                     <input type="hidden" name="order_id" value="<?= e((int) $order['id']) ?>">
                                     <button type="submit">Complete</button>
                                 </form>
                                 <form method="post" style="display:inline" data-confirm="Cancel <?= e($order['order_no']) ?>? Issued materials will be returned to stock.">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                                     <input type="hidden" name="action" value="cancel_manufacturing_order">
                                     <input type="hidden" name="order_id" value="<?= e((int) $order['id']) ?>">
                                     <button type="submit" class="button secondary">Cancel</button>
@@ -3288,58 +3407,10 @@ $invMoveItemOptions = static function () use ($items): string {
     </section>
     <?php endif; ?>
 <?php endif; ?>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    const tabs = Array.from(document.querySelectorAll('.inventory-action-tab'));
-    const panels = Array.from(document.querySelectorAll('.workspace-feature-stack .feature-disclosure'));
-
-    if (!tabs.length || !panels.length) {
-        return;
-    }
-
-    function activateWorkspace(targetId, updateUrl) {
-        const selectedPanel = document.getElementById(targetId);
-
-        if (!selectedPanel) {
-            return;
-        }
-
-        tabs.forEach(function (tab) {
-            const active = tab.dataset.workspaceTarget === targetId;
-            tab.classList.toggle('is-active', active);
-            tab.setAttribute('aria-selected', active ? 'true' : 'false');
-        });
-
-        panels.forEach(function (panel) {
-            const active = panel.id === targetId;
-            panel.hidden = !active;
-            panel.open = active;
-        });
-
-        if (updateUrl) {
-            history.replaceState(null, '', window.location.pathname + window.location.search + '#' + targetId);
-        }
-    }
-
-    tabs.forEach(function (tab) {
-        tab.addEventListener('click', function () {
-            activateWorkspace(tab.dataset.workspaceTarget, true);
-        });
-    });
-
-    const parameters = new URLSearchParams(window.location.search);
-    const hashTarget = window.location.hash.replace('#', '');
-    let initialTarget = tabs[0].dataset.workspaceTarget;
-
-    if (parameters.has('move_item') && document.getElementById('movement-purchase')) {
-        initialTarget = 'movement-purchase';
-    } else if (hashTarget && document.getElementById(hashTarget)) {
-        initialTarget = hashTarget;
-    }
-
-    activateWorkspace(initialTarget, false);
-});
-</script>
+<?php // The tab script that used to show one panel and hide the rest has gone.
+      // Each task is its own page now, so there is only ever one panel to show —
+      // and left in place it would have hidden that one whenever the hash did not
+      // match. ?>
 <?php // Before the footer on purpose: the footer loads searchable-select.js,
       // which decides whether to take a dropdown over by counting its options.
       // It has to find the real list here, not the stub. ?>
