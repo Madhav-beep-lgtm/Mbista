@@ -152,9 +152,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
     $back = 'admin/hospitality.php?view=' . urlencode((string) ($_POST['back_view'] ?? $view));
 
+    // Only the recipe side of an ingredient is editable here. Its code, name,
+    // category, purchase unit and cost belong to the inventory item and are
+    // maintained there; this screen holds what inventory has no opinion about.
+    if ($action === 'save_ingredient_recipe') {
+        require_permission('hospitality', 'edit');
+        $rows = (array) ($_POST['recipe'] ?? []);
+        $saved = 0;
+        $problems = [];
+        $stmt = db()->prepare('UPDATE hospitality_ingredients
+            SET recipe_unit = :runit, conversion_factor = :conv, wastage_pct = :wastage, yield_pct = :yield, updated_by = :by
+            WHERE id = :id AND company_id = :cid');
+        foreach ($rows as $rowId => $row) {
+            $rowId = (int) $rowId;
+            if ($rowId <= 0) {
+                continue;
+            }
+            $recipeUnit = trim((string) ($row['recipe_unit'] ?? '')) ?: 'Unit';
+            $conversion = round((float) ($row['conversion_factor'] ?? 0), 4);
+            $wastage = round((float) ($row['wastage_pct'] ?? 0), 2);
+            $yield = round((float) ($row['yield_pct'] ?? 100), 2);
+            $label = trim((string) ($row['label'] ?? ('#' . $rowId)));
+            if ($conversion <= 0) {
+                $problems[] = $label . ': the conversion must be greater than zero.';
+                continue;
+            }
+            if ($wastage < 0 || $wastage >= 100) {
+                $problems[] = $label . ': wastage must be between 0% and below 100%.';
+                continue;
+            }
+            if ($yield <= 0 || $yield > 100) {
+                $problems[] = $label . ': yield must be above 0% and at most 100%.';
+                continue;
+            }
+            $stmt->execute([
+                'id' => $rowId, 'cid' => $companyId,
+                'runit' => mb_substr($recipeUnit, 0, 40), 'conv' => $conversion,
+                'wastage' => $wastage, 'yield' => $yield, 'by' => $userId,
+            ]);
+            $saved++;
+        }
+        if ($problems !== []) {
+            flash('error', implode(' ', array_slice($problems, 0, 5)));
+        } else {
+            log_activity('hospitality_ingredient', $companyId, 'recipe_fields_updated', $saved . ' ingredient recipe setting(s) updated.', $userId);
+            flash('success', $saved . ' ingredient' . ($saved === 1 ? '' : 's') . ' updated.');
+        }
+        redirect($back);
+    }
+
+    if ($action === 'sync_ingredients') {
+        require_permission('hospitality', 'edit');
+        $syncResult = hospitality_sync_ingredients_from_inventory($companyId, $userId);
+        flash('success', 'Ingredient list refreshed from inventory — '
+            . $syncResult['created'] . ' added, ' . $syncResult['updated'] . ' updated, '
+            . $syncResult['restored'] . ' restored, ' . $syncResult['retired'] . ' retired.');
+        redirect($back);
+    }
+
     if ($action === 'save_ingredient') {
         require_permission('hospitality', 'edit');
         $ingredientId = (int) ($_POST['ingredient_id'] ?? 0);
+        // Ingredients come from inventory items now; this path only still
+        // exists to edit one typed in before that was true.
+        if ($ingredientId <= 0) {
+            flash('error', 'Ingredients are created by ticking "Use as a recipe ingredient" on an inventory item, not here.');
+            redirect($back);
+        }
         $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
         $conversion = round((float) ($_POST['conversion_factor'] ?? 0), 4);
@@ -950,75 +1014,129 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
 
 <?php elseif ($view === 'ingredients'): ?>
     <?php
-    $editIngredient = null;
-    $editIngredientId = (int) ($_GET['ingredient'] ?? 0);
-    if ($editIngredientId > 0) {
-        $eiStmt = db()->prepare('SELECT * FROM hospitality_ingredients WHERE id = :id AND company_id = :cid');
-        $eiStmt->execute(['id' => $editIngredientId, 'cid' => $companyId]);
-        $editIngredient = $eiStmt->fetch() ?: null;
+    // The list is brought in line with inventory on the way in, so an item
+    // ticked as an ingredient a moment ago is already here. It writes nothing
+    // when nothing has changed, which is the usual case.
+    $ingredientSync = ['created' => 0, 'updated' => 0, 'retired' => 0, 'restored' => 0];
+    if ($canEdit && hospitality_ingredients_linked()) {
+        $ingredientSync = hospitality_sync_ingredients_from_inventory($companyId, $userId);
     }
-    $ingredientsStmt = db()->prepare('SELECT i.*, (SELECT COUNT(*) FROM hospitality_recipe_lines l WHERE l.ingredient_id = i.id) AS used_in
-        FROM hospitality_ingredients i WHERE i.company_id = :cid ORDER BY i.code ASC');
+    $hasItemLink = hospitality_ingredients_linked();
+    $ingredientsStmt = db()->prepare('SELECT i.*, ' . ($hasItemLink ? 'it.sku AS item_sku, it.status AS item_status,' : 'NULL AS item_sku, NULL AS item_status,') . '
+            (SELECT COUNT(*) FROM hospitality_recipe_lines l WHERE l.ingredient_id = i.id) AS used_in
+        FROM hospitality_ingredients i
+        ' . ($hasItemLink ? 'LEFT JOIN inventory_items it ON it.id = i.inventory_item_id AND it.company_id = i.company_id' : '') . '
+        WHERE i.company_id = :cid ORDER BY i.active DESC, i.code ASC');
     $ingredientsStmt->execute(['cid' => $companyId]);
     $ingredients = $ingredientsStmt->fetchAll();
+    $unlinkedCount = 0;
+    foreach ($ingredients as $ingredientRow) {
+        if (($ingredientRow['inventory_item_id'] ?? null) === null) {
+            $unlinkedCount++;
+        }
+    }
     ?>
-    <?php if ($canEdit): ?>
-    <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2><?= $editIngredient ? 'Edit Ingredient' : 'Add Ingredient' ?></h2><?php if ($editIngredient): ?><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=ingredients')) ?>">Cancel</a><?php endif; ?></div>
-        <form method="post" class="workspace-form-grid">
+    <div class="notice" style="margin-bottom:14px">
+        <strong>Ingredients come from the item master.</strong>
+        The kitchen buys rice once, so it is described once: tick <em>Use as a recipe ingredient</em> on an inventory item and it appears here.
+        Its code, name, category, purchase unit and cost stay with the item, where they are bought and valued.
+        What this screen holds is only what the item master has no opinion about — the unit a recipe measures it in,
+        how many of those are in a purchase unit, and the wastage and yield of preparing it.
+        <a href="<?= e(url('admin/accounting-inventory.php?view=items')) ?>">Open the item master →</a>
+        <?php if ($ingredientSync['created'] > 0 || $ingredientSync['retired'] > 0 || $ingredientSync['restored'] > 0): ?>
+            <br><span class="mbw-pill tone-green" style="margin-top:6px;display:inline-block">Just refreshed:
+                <?= (int) $ingredientSync['created'] ?> added,
+                <?= (int) $ingredientSync['restored'] ?> restored,
+                <?= (int) $ingredientSync['retired'] ?> retired</span>
+        <?php endif; ?>
+    </div>
+
+    <section class="mbw-card">
+        <div class="mbw-card-head">
+            <h2>Ingredient Master (<?= count($ingredients) ?>)</h2>
+            <?php if ($canEdit): ?>
+                <form method="post" style="margin:0">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="sync_ingredients">
+                    <input type="hidden" name="back_view" value="ingredients">
+                    <button type="submit" class="secondary" style="min-height:30px;padding:3px 12px"><?= icon('refresh') ?>Refresh from inventory</button>
+                </form>
+            <?php endif; ?>
+        </div>
+        <?php if (!$canEdit): ?><div class="notice">You have view-only access to this list.</div><?php endif; ?>
+        <form method="post">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="save_ingredient">
+            <input type="hidden" name="action" value="save_ingredient_recipe">
             <input type="hidden" name="back_view" value="ingredients">
-            <input type="hidden" name="ingredient_id" value="<?= e((int) ($editIngredient['id'] ?? 0)) ?>">
-            <label>Code<input type="text" name="code" maxlength="40" required value="<?= e($editIngredient['code'] ?? '') ?>" placeholder="RICE"></label>
-            <label>Name<input type="text" name="name" maxlength="160" required value="<?= e($editIngredient['name'] ?? '') ?>" placeholder="Basmati Rice"></label>
-            <label>Name (Nepali)<input type="text" name="name_np" maxlength="160" value="<?= e($editIngredient['name_np'] ?? '') ?>"></label>
-            <label>Category<input type="text" name="category" maxlength="80" value="<?= e($editIngredient['category'] ?? '') ?>" placeholder="Grains"></label>
-            <label>Purchase unit<input type="text" name="purchase_unit" maxlength="40" value="<?= e($editIngredient['purchase_unit'] ?? 'KG') ?>" placeholder="KG"></label>
-            <label>Recipe unit<input type="text" name="recipe_unit" maxlength="40" value="<?= e($editIngredient['recipe_unit'] ?? 'Gram') ?>" placeholder="Gram"></label>
-            <label>Conversion (recipe units per purchase unit)<input type="number" step="0.0001" min="0.0001" name="conversion_factor" required value="<?= e(number_format((float) ($editIngredient['conversion_factor'] ?? 1000), 4, '.', '')) ?>" placeholder="1000"></label>
-            <label>Reference cost per purchase unit<input type="number" step="0.0001" min="0" name="purchase_cost" required value="<?= e(number_format((float) ($editIngredient['purchase_cost'] ?? 0), 4, '.', '')) ?>"></label>
-            <label>Cost source
-                <select name="cost_source">
-                    <option value="manual" <?= (string) ($editIngredient['cost_source'] ?? 'manual') === 'manual' ? 'selected' : '' ?>>Manual reference cost</option>
-                    <option value="latest_purchase" <?= (string) ($editIngredient['cost_source'] ?? '') === 'latest_purchase' ? 'selected' : '' ?>>Latest purchase (entered manually from purchases)</option>
-                </select>
-            </label>
-            <label>Effective date<input type="date" name="effective_date" required value="<?= e($editIngredient['effective_date'] ?? date('Y-m-d')) ?>"></label>
-            <label>Wastage % (0–99)<input type="number" step="0.01" min="0" max="99.99" name="wastage_pct" value="<?= e(number_format((float) ($editIngredient['wastage_pct'] ?? 0), 2, '.', '')) ?>"></label>
-            <label>Yield % (1–100)<input type="number" step="0.01" min="0.01" max="100" name="yield_pct" value="<?= e(number_format((float) ($editIngredient['yield_pct'] ?? 100), 2, '.', '')) ?>"></label>
-            <label class="checkbox-line" style="align-self:end"><input type="checkbox" name="active" <?= (int) ($editIngredient['active'] ?? 1) === 1 ? 'checked' : '' ?>> Active</label>
-            <label class="workspace-span-2">Notes<input type="text" name="notes" maxlength="255" value="<?= e($editIngredient['notes'] ?? '') ?>"></label>
-            <div class="workspace-span-2"><button type="submit"><?= icon('plus') ?>Save Ingredient</button></div>
+            <div style="overflow-x:auto"><table>
+                <thead><tr>
+                    <th>Item</th><th>Category</th>
+                    <th class="is-numeric">Cost / purchase unit</th>
+                    <th>Recipe unit</th><th class="is-numeric">Recipe units per purchase unit</th>
+                    <th class="is-numeric">Wastage %</th><th class="is-numeric">Yield %</th>
+                    <th class="is-numeric">Cost / recipe unit</th>
+                    <th>Used in</th><th>Status</th>
+                </tr></thead>
+                <tbody>
+                    <?php if ($ingredients === []): ?>
+                        <tr><td colspan="10">No ingredients yet — tick <em>Use as a recipe ingredient</em> on an inventory item and it will appear here.</td></tr>
+                    <?php endif; ?>
+                    <?php foreach ($ingredients as $ingredient): ?>
+                        <?php
+                        $unitCost = hospitality_ingredient_unit_cost($ingredient);
+                        $rowId = (int) $ingredient['id'];
+                        $isLinked = ($ingredient['inventory_item_id'] ?? null) !== null;
+                        ?>
+                        <tr<?= (int) $ingredient['active'] === 1 ? '' : ' style="opacity:.6"' ?>>
+                            <td>
+                                <strong><?= e((string) $ingredient['code']) ?></strong> — <?= e((string) $ingredient['name']) ?>
+                                <?php if ($isLinked): ?>
+                                    <br><a style="font-size:12px" href="<?= e(url('admin/accounting-inventory.php?view=items&item=' . (int) $ingredient['inventory_item_id'])) ?>">Inventory item <?= e((string) ($ingredient['item_sku'] ?? '')) ?> →</a>
+                                <?php else: ?>
+                                    <br><span class="mbw-pill tone-amber">Not linked to an item</span>
+                                <?php endif; ?>
+                                <?php if ($canEdit): ?>
+                                    <input type="hidden" name="recipe[<?= $rowId ?>][label]" value="<?= e((string) $ingredient['code']) ?>">
+                                <?php endif; ?>
+                            </td>
+                            <td><?= e((string) ($ingredient['category'] ?? '—')) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) $ingredient['purchase_cost'], 4) ?><br><small style="color:var(--mbw-muted)">per <?= e((string) $ingredient['purchase_unit']) ?></small></td>
+                            <td><?php if ($canEdit): ?>
+                                <input type="text" name="recipe[<?= $rowId ?>][recipe_unit]" maxlength="40" value="<?= e((string) $ingredient['recipe_unit']) ?>" style="width:90px">
+                            <?php else: ?><?= e((string) $ingredient['recipe_unit']) ?><?php endif; ?></td>
+                            <td class="is-numeric"><?php if ($canEdit): ?>
+                                <input type="number" step="0.0001" min="0.0001" name="recipe[<?= $rowId ?>][conversion_factor]" value="<?= e(number_format((float) $ingredient['conversion_factor'], 4, '.', '')) ?>" style="width:110px;text-align:right">
+                            <?php else: ?><?= e(rtrim(rtrim(number_format((float) $ingredient['conversion_factor'], 4, '.', ''), '0'), '.')) ?><?php endif; ?></td>
+                            <td class="is-numeric"><?php if ($canEdit): ?>
+                                <input type="number" step="0.01" min="0" max="99.99" name="recipe[<?= $rowId ?>][wastage_pct]" value="<?= e(number_format((float) $ingredient['wastage_pct'], 2, '.', '')) ?>" style="width:80px;text-align:right">
+                            <?php else: ?><?= e(number_format((float) $ingredient['wastage_pct'], 2)) ?><?php endif; ?></td>
+                            <td class="is-numeric"><?php if ($canEdit): ?>
+                                <input type="number" step="0.01" min="0.01" max="100" name="recipe[<?= $rowId ?>][yield_pct]" value="<?= e(number_format((float) $ingredient['yield_pct'], 2, '.', '')) ?>" style="width:80px;text-align:right">
+                            <?php else: ?><?= e(number_format((float) $ingredient['yield_pct'], 2)) ?><?php endif; ?></td>
+                            <td class="is-numeric"><?= $unitCost['ok']
+                                ? $fmt($unitCost['unit_cost'], 4)
+                                : '<span class="mbw-pill tone-red">' . e((string) $unitCost['error']) . '</span>' ?></td>
+                            <td><?= (int) $ingredient['used_in'] > 0 ? '<span class="mbw-pill tone-blue">' . (int) $ingredient['used_in'] . ' recipe(s)</span>' : '—' ?></td>
+                            <td><span class="mbw-pill <?= (int) $ingredient['active'] === 1 ? 'tone-green' : 'tone-gray' ?>"><?= (int) $ingredient['active'] === 1 ? 'Active' : 'Inactive' ?></span></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table></div>
+            <?php if ($canEdit && $ingredients !== []): ?>
+                <div style="margin-top:12px"><button type="submit"><?= icon('check') ?>Save recipe settings</button></div>
+            <?php endif; ?>
         </form>
+        <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
+            Cost per recipe unit is the purchase cost divided by the conversion, adjusted for wastage and yield — it is what a recipe is costed at.
+            Un-ticking an item on the item master makes its ingredient inactive rather than deleting it, because recipes may already quote it and
+            their costed history must not move.
+            <?php if ($unlinkedCount > 0): ?>
+                <br><?= (int) $unlinkedCount ?> ingredient<?= $unlinkedCount === 1 ? ' was' : 's were' ?> entered before ingredients came from the item master.
+                <?= $unlinkedCount === 1 ? 'It keeps' : 'They keep' ?> working; link <?= $unlinkedCount === 1 ? 'it' : 'them' ?> by creating the matching inventory item and ticking the box there.
+            <?php endif; ?>
+        </p>
     </section>
-    <?php endif; ?>
-    <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Ingredient Master (<?= count($ingredients) ?>)</h2></div>
-        <div style="overflow-x:auto"><table>
-            <thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Units</th><th class="is-numeric">Cost / purchase unit</th><th class="is-numeric">Cost / recipe unit</th><th>Wastage / Yield</th><th>Effective</th><th>Used in</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-                <?php if ($ingredients === []): ?><tr><td colspan="11">No ingredients yet. Add rice, oil, eggs, chicken… with purchase→recipe unit conversions.</td></tr><?php endif; ?>
-                <?php foreach ($ingredients as $ingredient): ?>
-                    <?php $unitCost = hospitality_ingredient_unit_cost($ingredient); ?>
-                    <tr>
-                        <td><strong><?= e($ingredient['code']) ?></strong></td>
-                        <td><?= e($ingredient['name']) ?><?= $ingredient['name_np'] ? ' <small>(' . e($ingredient['name_np']) . ')</small>' : '' ?></td>
-                        <td><?= e($ingredient['category'] ?? '—') ?></td>
-                        <td><small><?= e($ingredient['purchase_unit'] . ' → ' . $ingredient['recipe_unit'] . ' × ' . rtrim(rtrim(number_format((float) $ingredient['conversion_factor'], 4, '.', ''), '0'), '.')) ?></small></td>
-                        <td class="is-numeric"><?= $fmt((float) $ingredient['purchase_cost'], 4) ?></td>
-                        <td class="is-numeric"><?= $unitCost['ok'] ? $fmt($unitCost['unit_cost'], 4) : '<span class="mbw-pill tone-red">' . e($unitCost['error']) . '</span>' ?></td>
-                        <td><small><?= e(number_format((float) $ingredient['wastage_pct'], 1)) ?>% / <?= e(number_format((float) $ingredient['yield_pct'], 1)) ?>%</small></td>
-                        <td><small><?= e($ingredient['effective_date']) ?></small></td>
-                        <td><?= (int) $ingredient['used_in'] > 0 ? '<span class="mbw-pill tone-blue">' . (int) $ingredient['used_in'] . ' recipe(s)</span>' : '—' ?></td>
-                        <td><span class="mbw-pill <?= (int) $ingredient['active'] === 1 ? 'tone-green' : 'tone-gray' ?>"><?= (int) $ingredient['active'] === 1 ? 'Active' : 'Inactive' ?></span></td>
-                        <td><?php if ($canEdit): ?><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/hospitality.php?view=ingredients&ingredient=' . (int) $ingredient['id'])) ?>">Edit</a><?php endif; ?></td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table></div>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Ingredients used in recipes cannot be deleted — deactivate them instead; historical snapshots keep their costs. Reference layer only: inventory valuation is untouched.</p>
-    </section>
+
 
 <?php elseif ($view === 'menu-items'): ?>
     <?php

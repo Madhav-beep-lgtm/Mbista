@@ -976,3 +976,151 @@ function hospitality_run_delete(int $companyId, int $runId, int $userId, string 
     return true;
 }
 
+// ------------------------------------------- ingredients from inventory items
+
+/**
+ * Is the ingredient master fed from inventory on this database?
+ *
+ * Older installs have ingredients that were typed in directly and carry no
+ * inventory item. Those keep working; the link is additive.
+ */
+function hospitality_ingredients_linked(): bool
+{
+    return table_exists('hospitality_ingredients')
+        && column_exists('hospitality_ingredients', 'inventory_item_id')
+        && column_exists('inventory_items', 'is_ingredient');
+}
+
+/**
+ * Bring the ingredient master in line with the inventory items marked as
+ * ingredients.
+ *
+ * The kitchen buys rice once, so it should be described once. Ticking "use as
+ * a recipe ingredient" on an inventory item is what puts it here; the name,
+ * code, category, purchase unit and cost are READ from the item every time,
+ * because inventory is where those are actually maintained. What stays on the
+ * ingredient is only what inventory has no opinion about — the unit a recipe
+ * measures it in, how many of those go in a purchase unit, and the wastage and
+ * yield of preparing it.
+ *
+ * Un-ticking an item deactivates its ingredient rather than deleting it:
+ * recipes may already quote it, and their costed history must not change
+ * because somebody adjusted a checkbox today.
+ *
+ * Three queries regardless of how many items there are — read both sides, then
+ * write only the differences.
+ */
+function hospitality_sync_ingredients_from_inventory(int $companyId, ?int $userId = null): array
+{
+    if (!hospitality_ingredients_linked()) {
+        return ['created' => 0, 'updated' => 0, 'retired' => 0, 'restored' => 0];
+    }
+
+    $itemStmt = db()->prepare("SELECT id, sku, name, category, unit, purchase_rate, status
+        FROM inventory_items WHERE company_id = :cid AND is_ingredient = 1");
+    $itemStmt->execute(['cid' => $companyId]);
+    $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $linkedStmt = db()->prepare('SELECT id, inventory_item_id, code, name, category, purchase_unit, purchase_cost, active
+        FROM hospitality_ingredients WHERE company_id = :cid AND inventory_item_id IS NOT NULL');
+    $linkedStmt->execute(['cid' => $companyId]);
+    $linked = [];
+    foreach ($linkedStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $linked[(int) $row['inventory_item_id']] = $row;
+    }
+
+    $created = 0;
+    $updated = 0;
+    $restored = 0;
+    $today = date('Y-m-d');
+    $seen = [];
+
+    $insert = db()->prepare('INSERT INTO hospitality_ingredients
+            (company_id, inventory_item_id, code, name, category, purchase_unit, recipe_unit, conversion_factor,
+             purchase_cost, cost_source, effective_date, wastage_pct, yield_pct, active, notes, created_by, updated_by)
+        VALUES (:cid, :item, :code, :name, :cat, :punit, :runit, 1.0000,
+             :cost, :src, :eff, 0.00, 100.00, :active, :notes, :by, :by2)');
+    $update = db()->prepare('UPDATE hospitality_ingredients
+        SET code = :code, name = :name, category = :cat, purchase_unit = :punit,
+            purchase_cost = :cost, active = :active, updated_by = :by
+        WHERE id = :id AND company_id = :cid');
+
+    foreach ($items as $item) {
+        $itemId = (int) $item['id'];
+        $seen[$itemId] = true;
+        $active = (string) $item['status'] === 'active' ? 1 : 0;
+        $existing = $linked[$itemId] ?? null;
+
+        if ($existing === null) {
+            $insert->execute([
+                'cid' => $companyId,
+                'item' => $itemId,
+                'code' => mb_substr((string) $item['sku'], 0, 40),
+                'name' => mb_substr((string) $item['name'], 0, 160),
+                'cat' => mb_substr((string) ($item['category'] ?? ''), 0, 80) ?: null,
+                'punit' => mb_substr((string) $item['unit'], 0, 40) ?: 'Unit',
+                // The recipe unit starts as the purchase unit at one-to-one.
+                // A cook who measures rice in grams changes it here, and that
+                // is the one thing this screen is still for.
+                'runit' => mb_substr((string) $item['unit'], 0, 40) ?: 'Unit',
+                'cost' => round((float) $item['purchase_rate'], 4),
+                'src' => 'latest_purchase',
+                'eff' => $today,
+                'active' => $active,
+                'notes' => 'Linked to inventory item ' . (string) $item['sku'] . '.',
+                'by' => $userId ?: null,
+                'by2' => $userId ?: null,
+            ]);
+            $created++;
+            continue;
+        }
+
+        // Only write when something actually differs, so a page that syncs on
+        // load does not churn the table on every view.
+        $sameCode = (string) $existing['code'] === mb_substr((string) $item['sku'], 0, 40);
+        $sameName = (string) $existing['name'] === mb_substr((string) $item['name'], 0, 160);
+        $sameCategory = (string) ($existing['category'] ?? '') === mb_substr((string) ($item['category'] ?? ''), 0, 80);
+        $sameUnit = (string) $existing['purchase_unit'] === (mb_substr((string) $item['unit'], 0, 40) ?: 'Unit');
+        $sameCost = abs((float) $existing['purchase_cost'] - (float) $item['purchase_rate']) < 0.00005;
+        $sameActive = (int) $existing['active'] === $active;
+        if ($sameCode && $sameName && $sameCategory && $sameUnit && $sameCost && $sameActive) {
+            continue;
+        }
+        $update->execute([
+            'id' => (int) $existing['id'],
+            'cid' => $companyId,
+            'code' => mb_substr((string) $item['sku'], 0, 40),
+            'name' => mb_substr((string) $item['name'], 0, 160),
+            'cat' => mb_substr((string) ($item['category'] ?? ''), 0, 80) ?: null,
+            'punit' => mb_substr((string) $item['unit'], 0, 40) ?: 'Unit',
+            'cost' => round((float) $item['purchase_rate'], 4),
+            'active' => $active,
+            'by' => $userId ?: null,
+        ]);
+        if ((int) $existing['active'] === 0 && $active === 1) {
+            $restored++;
+        } else {
+            $updated++;
+        }
+    }
+
+    // Anything linked to an item that is no longer marked: deactivate, never
+    // delete. A recipe may quote it, and costed history must not move because
+    // of a checkbox changed today.
+    $retired = 0;
+    $orphans = [];
+    foreach ($linked as $itemId => $row) {
+        if (!isset($seen[$itemId]) && (int) $row['active'] === 1) {
+            $orphans[] = (int) $row['id'];
+        }
+    }
+    if ($orphans !== []) {
+        $placeholders = implode(',', array_fill(0, count($orphans), '?'));
+        $stmt = db()->prepare("UPDATE hospitality_ingredients SET active = 0
+            WHERE company_id = ? AND id IN ($placeholders)");
+        $stmt->execute(array_merge([$companyId], $orphans));
+        $retired = count($orphans);
+    }
+
+    return ['created' => $created, 'updated' => $updated, 'retired' => $retired, 'restored' => $restored];
+}

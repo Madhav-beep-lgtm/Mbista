@@ -11,6 +11,10 @@ require_once __DIR__ . '/../../app/jewellery_stock.php';
 // show the SAME table rather than each keeping a copy of the list.
 require_once __DIR__ . '/../../app/inventory_mapping.php';
 require_once __DIR__ . '/../../app/opening_stock_import.php';
+// An inventory item can also BE a recipe ingredient. Pure definitions — the
+// kitchen list is only touched for a company that has hospitality switched on
+// and an item actually marked.
+require_once __DIR__ . '/../../app/hospitality_engine.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -283,6 +287,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'status' => $status,
             'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
         ];
+        // Ticking this is what puts the item in the kitchen's ingredient list.
+        // The column is only written when the database has it, so an install
+        // that has not run the repair pass yet saves exactly as before.
+        $marksIngredient = column_exists('inventory_items', 'is_ingredient');
+        if ($marksIngredient) {
+            $params['is_ingredient'] = isset($_POST['is_ingredient']) ? 1 : 0;
+        }
 
         if ($params['opening_amount'] <= 0 && $params['opening_qty'] > 0) {
             // Legacy convenience: an omitted value defaults ONCE to qty x the
@@ -301,6 +312,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 db()->prepare('
                     UPDATE inventory_items
                     SET ledger_id = :ledger_id, sku = :sku, name = :name, category = :category, item_type = :item_type,
+                        ' . ($marksIngredient ? 'is_ingredient = :is_ingredient,' : '') . '
                         valuation_method = :valuation_method, unit = :unit,
                         hs_code = :hs_code, tax_rate = :tax_rate, sales_rate = :sales_rate, purchase_rate = :purchase_rate,
                         opening_qty = :opening_qty, opening_amount = :opening_amount, reorder_level = :reorder_level, default_warehouse_id = :default_warehouse_id,
@@ -315,10 +327,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 db()->prepare('
                     INSERT INTO inventory_items (
-                        company_id, ledger_id, sku, name, category, item_type, valuation_method, unit, hs_code, tax_rate,
+                        company_id, ledger_id, sku, name, category, item_type, ' . ($marksIngredient ? 'is_ingredient, ' : '') . 'valuation_method, unit, hs_code, tax_rate,
                         sales_rate, purchase_rate, opening_qty, opening_amount, reorder_level, default_warehouse_id, status, notes
                     ) VALUES (
-                        :company_id, :ledger_id, :sku, :name, :category, :item_type, :valuation_method, :unit, :hs_code, :tax_rate,
+                        :company_id, :ledger_id, :sku, :name, :category, :item_type, ' . ($marksIngredient ? ':is_ingredient, ' : '') . ':valuation_method, :unit, :hs_code, :tax_rate,
                         :sales_rate, :purchase_rate, :opening_qty, :opening_amount, :reorder_level, :default_warehouse_id, :status, :notes
                     )
                 ')->execute($params);
@@ -363,6 +375,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->commit();
             if (($openingResult['note'] ?? '') !== '') {
                 flash('error', $openingResult['note']);
+            }
+            // An item marked as an ingredient appears in the kitchen's list
+            // straight away. Done after the commit rather than inside it: the
+            // ingredient master is a convenience view of this item, and failing
+            // to refresh it must never roll back the item itself.
+            if ($marksIngredient && function_exists('hospitality_sync_ingredients_from_inventory')) {
+                try {
+                    hospitality_sync_ingredients_from_inventory($companyId, $userId);
+                } catch (Throwable $ingredientError) {
+                    flash('error', 'The item saved, but the kitchen ingredient list could not be refreshed: ' . $ingredientError->getMessage());
+                }
             }
         } catch (Throwable $exception) {
             if (db()->inTransaction()) {
@@ -2255,6 +2278,17 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             }
             ?>
             <label>Type<select name="item_type"><?php foreach ($formItemTypes as $type): ?><option value="<?= e($type) ?>" <?= ($editItem['item_type'] ?? 'stock') === $type ? 'selected' : '' ?>><?= e(str_replace('_', ' ', ucfirst($type))) ?></option><?php endforeach; ?></select></label>
+            <?php if (column_exists('inventory_items', 'is_ingredient') && function_exists('hospitality_enabled_for_company') && hospitality_enabled_for_company($companyId)): ?>
+                <label class="checkbox-line" style="align-self:end">
+                    <input type="checkbox" name="is_ingredient" value="1" <?= (int) ($editItem['is_ingredient'] ?? 0) === 1 ? 'checked' : '' ?>>
+                    Use as a recipe ingredient
+                </label>
+                <p class="workspace-span-2" style="margin:-4px 0 0;color:var(--mbw-muted);font-size:12px">
+                    Ticking this puts the item in the kitchen's ingredient list, where recipes can quote it. Its name, code, category,
+                    purchase unit and cost keep coming from here — the ingredient screen only holds what this form has no opinion about:
+                    the unit a recipe measures it in, and the wastage and yield of preparing it.
+                </p>
+            <?php endif; ?>
             <label>Valuation method
                 <select name="valuation_method">
                     <?php $vm = (string) ($editItem['valuation_method'] ?? 'weighted_average'); ?>

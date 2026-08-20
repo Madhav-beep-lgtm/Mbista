@@ -1985,6 +1985,28 @@ function accounting_module_repair_database(): array
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         }
         accounting_repair_add_column('hospitality_sales_uploads', 'invoice_count', '`invoice_count` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `row_count`');
+
+        // An inventory item can BE a recipe ingredient (migration 123).
+        //
+        // The kitchen buys rice once, and it used to be entered twice: into
+        // inventory, where it is bought and valued, and again into the
+        // ingredient master, where recipes cost it. Two records of the same
+        // sack, free to disagree about its name, its unit and its cost. The
+        // inventory item is now the record; only what inventory has no opinion
+        // about -- the unit a recipe measures in, the trimming loss -- stays on
+        // the ingredient.
+        accounting_repair_add_column('inventory_items', 'is_ingredient', '`is_ingredient` TINYINT(1) NOT NULL DEFAULT 0 AFTER `item_type`');
+        if (accounting_repair_table_exists('hospitality_ingredients')) {
+            accounting_repair_add_column('hospitality_ingredients', 'inventory_item_id', '`inventory_item_id` INT UNSIGNED DEFAULT NULL AFTER `company_id`');
+            if (accounting_repair_column_exists('hospitality_ingredients', 'inventory_item_id')) {
+                $hasLink = db()->query("SHOW INDEX FROM `hospitality_ingredients` WHERE Key_name = 'uq_hosp_ingredient_item'")->fetch();
+                if (!$hasLink) {
+                    // NULLs never collide in a UNIQUE, so ingredients typed in
+                    // before this existed keep working untouched.
+                    db()->exec('ALTER TABLE `hospitality_ingredients` ADD UNIQUE KEY `uq_hosp_ingredient_item` (`company_id`, `inventory_item_id`)');
+                }
+            }
+        }
     });
 
     // Ordered after the hospitality steps above: that is what guarantees the
