@@ -2252,7 +2252,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 
 <?php if ($invView === 'inventory'): ?>
 <details class="mbw-card" data-collapsible aria-label="Help and workflow">
-    <summary class="mbw-card-head" style="cursor:pointer"><h2>Help &amp; Workflow</h2><span class="mbw-card-tools" style="color:var(--mbw-muted);font-size:12.5px">Process flow and item types — click to open</span></summary>
+    <summary class="mbw-card-head" style="cursor:pointer"><h2>Help &amp; Workflow</h2></summary>
     <div class="inventory-process-grid" style="margin-bottom:14px">
         <?php foreach ($inventoryProcessSteps as $index => $process): ?>
             <article><b><?= e((string) ($index + 1)) ?></b><span><?= icon($index === 0 ? 'services' : ($index === count($inventoryProcessSteps) - 1 ? 'reports' : 'documents')) ?></span><strong><?= e($process[0]) ?></strong><small><?= e($process[1]) ?></small></article>
@@ -2795,7 +2795,7 @@ $invMoveItemOptions = static function () use ($items): string {
                         <td><?php $billTdsLedger = shared_options('inv-purchase-ledgers', $gridLedgerOptions, (string) ($bill['tds_ledger_id'] ?? '')); ?>
                             <select name="bills[<?= $billIndex ?>][tds_ledger_id]"<?= $billTdsLedger['fill'] ? ' data-fill-from="inv-purchase-ledgers"' : '' ?> style="min-width:160px"><?= $billTdsLedger['html'] ?></select></td>
                         <td><input type="text" name="bills[<?= $billIndex ?>][notes]" maxlength="255" value="<?= e((string) ($bill['notes'] ?? '')) ?>" style="width:130px"></td>
-                        <td><button type="button" class="button secondary inv-bill-clear" style="min-height:28px;padding:2px 8px" title="Clear this bill">✕</button></td>
+                        <td><button type="button" class="button secondary jw-line-remove inv-bill-clear" title="Clear this bill and its items" aria-label="Clear this bill and its items"><?= icon('close') ?></button></td>
                     </tr>
                 <?php endfor; ?>
                 </tbody>
@@ -2813,12 +2813,12 @@ $invMoveItemOptions = static function () use ($items): string {
                   // so opening and closing changes nothing about what will post. ?>
             <?php for ($billIndex = 0; $billIndex < $billCount; $billIndex++): ?>
                 <?php $billItems = (array) ($purchaseBills[$billIndex]['items'] ?? []); ?>
-                <dialog class="inv-bill-dialog" id="invBillDialog<?= $billIndex ?>" style="max-width:96vw;width:1100px;border:1px solid var(--mbw-line,#d0d5dd);border-radius:12px;padding:0">
-                    <div style="padding:16px 18px;border-bottom:1px solid var(--mbw-line,#d0d5dd);display:flex;align-items:center;justify-content:space-between">
+                <dialog class="inv-bill-dialog" id="invBillDialog<?= $billIndex ?>">
+                    <div class="inv-bill-dialog-head">
                         <strong>Items on bill <span class="inv-dialog-ref"></span></strong>
-                        <button type="button" class="button secondary inv-bill-close" style="min-height:30px;padding:3px 12px">Done</button>
+                        <button type="button" class="button secondary inv-bill-close">Done</button>
                     </div>
-                    <div style="padding:14px 18px;max-height:70vh;overflow:auto">
+                    <div class="inv-bill-dialog-body">
                         <div style="overflow-x:auto"><table class="mbw-grid-table inv-item-grid" data-bill="<?= $billIndex ?>">
                             <thead><tr>
                                 <th>Item</th>
@@ -2864,7 +2864,7 @@ $invMoveItemOptions = static function () use ($items): string {
                                         <td style="text-align:center"><input type="checkbox" name="<?= e($lineName) ?>[mark_ingredient]" value="1" <?= !empty($line['mark_ingredient']) ? 'checked' : '' ?> title="Also make this item available to recipes"></td>
                                     <?php endif; ?>
                                     <td><input type="text" name="<?= e($lineName) ?>[notes]" maxlength="255" value="<?= e((string) ($line['notes'] ?? '')) ?>" style="width:120px"></td>
-                                    <td><button type="button" class="button secondary inv-item-clear" style="min-height:28px;padding:2px 8px" title="Take this item off the bill">✕</button></td>
+                                    <td><button type="button" class="button secondary jw-line-remove inv-item-clear" title="Take this item off the bill" aria-label="Take this item off the bill"><?= icon('close') ?></button></td>
                                 </tr>
                             <?php endfor; ?>
                             </tbody>

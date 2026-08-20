@@ -2642,10 +2642,12 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                                         ? '<span class="mbw-pill tone-red">' . e(implode(' ', $rowErrors)) . '</span>'
                                         : ($rowIsBlank ? '<small style="color:var(--mbw-muted)">spare</small>' : '<span class="mbw-pill tone-green">OK</span>') ?></td>
                                     <td style="white-space:nowrap">
-                                        <button type="button" class="button secondary hosp-edit-recalc" style="min-height:28px;padding:2px 8px"
-                                                title="Work the money out again from Amount and Discount">=</button>
-                                        <button type="button" class="button secondary hosp-edit-drop" style="min-height:28px;padding:2px 8px"
-                                                title="Take this line out of the sheet">✕</button>
+                                        <button type="button" class="button secondary jw-line-remove hosp-edit-recalc"
+                                                title="Work the money out again from Amount and Discount"
+                                                aria-label="Work the money out again"><?= icon('reconcile') ?></button>
+                                        <button type="button" class="button secondary jw-line-remove hosp-edit-drop"
+                                                title="Empty this line"
+                                                aria-label="Empty this line"><?= icon('close') ?></button>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -2679,7 +2681,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </div>
                 <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
                     <strong>Save &amp; check</strong> keeps your edits and re-reads every row exactly as an upload would.
-                    On a row, <strong>=</strong> works the money out again from Amount and Discount, and <strong>✕</strong> empties the line. Dates may be typed in AD or BS.
+                    On a row, the first button works the money out again from Amount and Discount, and the second empties the line. Dates may be typed in AD or BS.
                     Posting uses what is on this screen, not the file that was uploaded.
                     <br>Category and Item are chosen from a list — a category nothing maps has no sales ledger to post to, and an
                     item name that differs by a space becomes a second menu item for the same dish. The lists hold everything your

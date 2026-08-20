@@ -1014,6 +1014,146 @@ body.admin-layout .inventory-action-tabs {
   gap: 6px;
   border-bottom: 1px solid var(--mbw-border);
 }
+
+/* Data-entry grids.
+   --------------------------------------------------------------------------
+   A grid of inputs is not a reading table: the cells want to be tight so a
+   long bill fits on a screen, and the rows want a line between them so the eye
+   does not slip. The class was being used as a hook with nothing behind it,
+   which is how three screens ended up each inventing their own padding
+   inline. */
+body.admin-layout .mbw-grid-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+body.admin-layout .mbw-grid-table th,
+body.admin-layout .mbw-grid-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--mbw-border);
+  vertical-align: middle;
+}
+body.admin-layout .mbw-grid-table thead th {
+  font-size: 11.5px;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+body.admin-layout .mbw-grid-table tbody tr:hover { background: var(--mbw-soft, rgba(8, 119, 91, .04)); }
+body.admin-layout .mbw-grid-table :is(input, select) { max-width: 100%; }
+
+/* The item popup on a purchase bill.
+   Sized here rather than inline so the width is one decision, and so the
+   backdrop is dimmed — a modal that does not dim reads as part of the page
+   behind it. */
+body.admin-layout .inv-bill-dialog {
+  width: min(1100px, 96vw);
+  max-width: 96vw;
+  padding: 0;
+  border: 1px solid var(--mbw-border);
+  border-radius: var(--mbw-radius, 12px);
+  background: var(--mbw-surface, #fff);
+  color: inherit;
+}
+body.admin-layout .inv-bill-dialog::backdrop { background: rgba(8, 26, 20, .45); }
+body.admin-layout .inv-bill-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--mbw-border);
+}
+body.admin-layout .inv-bill-dialog-body {
+  padding: 14px 18px;
+  max-height: 70vh;
+  overflow: auto;
+}
+/* A line being edited, marked so the row under the cursor is obvious in a
+   grid that is mostly input boxes. */
+body.admin-layout .inv-item-row:focus-within { background: var(--mbw-soft, rgba(8, 119, 91, .06)); }
+
+/* The tile icon on a KPI card. It had no rule, so the glyph took whatever size
+   the SVG happened to carry. */
+body.admin-layout .mbw-kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--mbw-radius-sm, 8px);
+  background: var(--mbw-soft, rgba(8, 119, 91, .08));
+  flex: 0 0 auto;
+}
+body.admin-layout .mbw-kpi-icon .ui-icon { width: 18px; height: 18px; }
+
+/* The inventory task tabs.
+   --------------------------------------------------------------------------
+   These had no rule of their own: they were <button> elements and borrowed
+   the button look. When each task became its own page they became <a>, and an
+   anchor inherits none of that — so they turned into a row of bare text
+   links. The look belongs to the CLASS, not to whichever element carries it,
+   which is what this fixes. */
+body.admin-layout .inventory-action-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid var(--mbw-border);
+  border-bottom: 0;
+  border-radius: var(--mbw-radius-sm) var(--mbw-radius-sm) 0 0;
+  background: var(--mbw-surface, #fff);
+  color: var(--mbw-brand, #08775b);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+body.admin-layout .inventory-action-tab .ui-icon {
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+}
+body.admin-layout .inventory-action-tab:hover,
+body.admin-layout .inventory-action-tab:focus-visible {
+  background: var(--mbw-soft, rgba(8, 119, 91, .08));
+  color: var(--mbw-brand-strong, #08634a);
+}
+body.admin-layout .inventory-action-tab.is-active {
+  background: #08634a;
+  border-color: #08634a;
+  color: #fff;
+}
+body.admin-layout .inventory-action-tab.is-active .ui-icon { color: #fff; }
+/* A tab is a place to go, so it needs the same thumb target as everything
+   else on a small screen. */
+@media (max-width: 720px) {
+  body.admin-layout .inventory-action-tab {
+    min-height: 44px;
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+body.admin-layout.theme-dark .inventory-action-tab,
+body.admin-layout.admin-dark .inventory-action-tab {
+  background: #0d1815;
+  border-color: rgba(255, 255, 255, .28);
+  color: #c9eee0;
+}
+body.admin-layout.theme-dark .inventory-action-tab:hover,
+body.admin-layout.admin-dark .inventory-action-tab:hover {
+  background: #16271f;
+  color: #fff;
+}
+body.admin-layout.theme-dark .inventory-action-tab.is-active,
+body.admin-layout.admin-dark .inventory-action-tab.is-active {
+  background: #08775b;
+  border-color: #50c99b;
+  color: #fff;
+}
 body.admin-layout .rc2-filters-body {
   display: flex;
   flex-wrap: wrap;
