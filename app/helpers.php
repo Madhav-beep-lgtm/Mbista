@@ -5451,8 +5451,18 @@ function store_first_admin(array $data): int
 function log_activity(string $entityType, int $entityId, string $action, ?string $details = null, ?int $actorId = null): void
 {
     $hasIp = column_exists('activity_logs', 'ip_address');
-    $columns = 'entity_type, entity_id, action, details, actor_id' . ($hasIp ? ', ip_address' : '');
-    $values = ':entity_type, :entity_id, :action, :details, :actor_id' . ($hasIp ? ', :ip_address' : '');
+    // Stamp the company the action happened in. The Audit Trail shows a client
+    // owner only their own company's history, filtering on this column — and
+    // nothing had ever written it, so every client's audit trail was empty
+    // however much work they had done. Left NULL when there is no company in
+    // context (a signup, say), which is what the accountant-wide view expects.
+    $hasCompany = column_exists('activity_logs', 'company_id');
+    $columns = 'entity_type, entity_id, action, details, actor_id'
+        . ($hasIp ? ', ip_address' : '')
+        . ($hasCompany ? ', company_id' : '');
+    $values = ':entity_type, :entity_id, :action, :details, :actor_id'
+        . ($hasIp ? ', :ip_address' : '')
+        . ($hasCompany ? ', :company_id' : '');
     $params = [
         'entity_type' => $entityType,
         'entity_id' => $entityId,
@@ -5462,6 +5472,9 @@ function log_activity(string $entityType, int $entityId, string $action, ?string
     ];
     if ($hasIp) {
         $params['ip_address'] = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    }
+    if ($hasCompany) {
+        $params['company_id'] = current_company_id() ?: null;
     }
     $stmt = db()->prepare('INSERT INTO activity_logs (' . $columns . ') VALUES (' . $values . ')');
     $stmt->execute($params);
