@@ -3268,10 +3268,33 @@ function sync_company_party_ledgers_from_chart(int $companyId, ?int $actorId = n
         ? 'g.party_role IS NOT NULL'
         : "((g.master_key = 'current_asset' AND LOWER(TRIM(g.name)) IN ('trade receivables','advances to suppliers'))
             OR (g.master_key = 'current_liability' AND LOWER(TRIM(g.name)) IN ('trade payables','advances from customers')))";
+    // Only the ledgers that have NO party yet.
+    //
+    // This runs on every load of the Chart of Ledgers, and it used to hand
+    // every party-role ledger to sync_party_from_chart_ledger() — three
+    // statements apiece — almost always to find the party already there and do
+    // nothing. On a chart with a hundred and twenty of them that was 360 round
+    // trips per page view. Asking the question in SQL leaves the steady state
+    // at one query, and a ledger created outside this screen is still picked
+    // up the next time somebody opens it.
+    $linkedColumns = ['ledger_id'];
+    foreach (['payable_ledger_id', 'advance_ledger_id', 'supplier_advance_ledger_id'] as $roleColumn) {
+        if (column_exists('accounting_parties', $roleColumn)) {
+            $linkedColumns[] = $roleColumn;
+        }
+    }
+    $alreadyLinked = implode(' OR ', array_map(
+        static fn (string $column): string => 'ap.' . $column . ' = l.id',
+        $linkedColumns
+    ));
     $stmt = db()->prepare("SELECT l.id
         FROM ledgers l
         INNER JOIN ledger_groups g ON g.id = l.group_id AND g.company_id = l.company_id
         WHERE l.company_id = :cid AND l.status = 'active' AND l.is_system = 0 AND {$roleCondition}
+          AND NOT EXISTS (
+              SELECT 1 FROM accounting_parties ap
+              WHERE ap.company_id = l.company_id AND ({$alreadyLinked})
+          )
         ORDER BY l.id ASC");
     $stmt->execute(['cid' => $companyId]);
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $ledgerId) {
