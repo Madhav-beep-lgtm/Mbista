@@ -1015,6 +1015,126 @@ body.admin-layout .inventory-action-tabs {
   border-bottom: 1px solid var(--mbw-border);
 }
 
+/* The "create an item without leaving the order" modal, and the toast that
+   reports a payroll problem.
+   --------------------------------------------------------------------------
+   Both were painted inline with fixed hex — #0066cc for a button, #f8d7da for
+   an error, #7b241c for the toast. A fixed colour is invisible to the theme:
+   in dark mode the error box kept its pale pink while everything around it
+   went dark, and none of those blues is the green this app is built in.
+   Tokens instead, so they follow the theme like everything else. */
+body.admin-layout .jw-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  overflow: auto;
+  background: rgba(8, 26, 20, .55);
+}
+body.admin-layout .jw-modal-panel {
+  margin: 40px auto;
+  width: 90%;
+  max-width: 600px;
+  border-radius: var(--mbw-radius);
+  background: var(--mbw-surface);
+  color: var(--mbw-text);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .28);
+}
+body.admin-layout .jw-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--mbw-border);
+}
+body.admin-layout .jw-modal-head h2 { margin: 0; font-size: 18px; }
+body.admin-layout .jw-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: var(--mbw-radius-sm);
+  background: none;
+  color: var(--mbw-muted);
+  cursor: pointer;
+}
+body.admin-layout .jw-modal-close:hover {
+  border-color: var(--mbw-border);
+  color: var(--mbw-primary);
+}
+/* The primary action on the modal, and the small +Add beside a line. Both
+   were a blue this app does not otherwise use. */
+body.admin-layout .jw-modal-submit,
+body.admin-layout .jw-add-item-btn {
+  border: 1px solid var(--mbw-primary);
+  background: var(--mbw-primary);
+  color: #fff;
+  cursor: pointer;
+}
+body.admin-layout .jw-modal-submit:hover,
+body.admin-layout .jw-add-item-btn:hover {
+  background: #08634a;
+  border-color: #08634a;
+}
+body.admin-layout .jw-add-item-btn {
+  padding: 6px 10px;
+  min-height: 34px;
+  border-radius: var(--mbw-radius-sm);
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+body.admin-layout .jw-modal-cancel,
+body.admin-layout .jw-modal-submit {
+  flex: 1;
+  padding: 10px;
+  border-radius: var(--mbw-radius-sm);
+  font-weight: 500;
+}
+body.admin-layout .jw-modal-cancel {
+  border: 1px solid var(--mbw-border);
+  background: var(--mbw-surface);
+  color: inherit;
+  cursor: pointer;
+}
+/* What the modal says went wrong, or right. */
+body.admin-layout .jw-modal-note {
+  margin-top: 15px;
+  padding: 10px;
+  border-radius: var(--mbw-radius-sm);
+  font-size: 13px;
+}
+body.admin-layout .jw-modal-note.is-error {
+  background: var(--mbw-red-soft);
+  color: var(--mbw-red);
+  border: 1px solid var(--mbw-red);
+}
+body.admin-layout .jw-modal-note.is-success {
+  background: var(--mbw-green-soft);
+  color: var(--mbw-green);
+  border: 1px solid var(--mbw-green);
+}
+/* The payroll toast. It reports a failure, so it takes the red token rather
+   than a maroon nothing else in the app uses. */
+body.admin-layout .mbw-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 9999;
+  max-width: min(560px, 90vw);
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  background: var(--mbw-red);
+  color: #fff;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .28);
+}
+
 /* Data-entry grids.
    --------------------------------------------------------------------------
    A grid of inputs is not a reading table: the cells want to be tight so a
@@ -1039,7 +1159,7 @@ body.admin-layout .mbw-grid-table thead th {
   text-transform: uppercase;
   white-space: nowrap;
 }
-body.admin-layout .mbw-grid-table tbody tr:hover { background: var(--mbw-soft, rgba(8, 119, 91, .04)); }
+body.admin-layout .mbw-grid-table tbody tr:hover { background: var(--mbw-primary-soft); }
 body.admin-layout .mbw-grid-table :is(input, select) { max-width: 100%; }
 
 /* The item popup on a purchase bill.
@@ -1051,8 +1171,8 @@ body.admin-layout .inv-bill-dialog {
   max-width: 96vw;
   padding: 0;
   border: 1px solid var(--mbw-border);
-  border-radius: var(--mbw-radius, 12px);
-  background: var(--mbw-surface, #fff);
+  border-radius: var(--mbw-radius);
+  background: var(--mbw-surface);
   color: inherit;
 }
 body.admin-layout .inv-bill-dialog::backdrop { background: rgba(8, 26, 20, .45); }
@@ -1071,7 +1191,7 @@ body.admin-layout .inv-bill-dialog-body {
 }
 /* A line being edited, marked so the row under the cursor is obvious in a
    grid that is mostly input boxes. */
-body.admin-layout .inv-item-row:focus-within { background: var(--mbw-soft, rgba(8, 119, 91, .06)); }
+body.admin-layout .inv-item-row:focus-within { background: var(--mbw-primary-soft); }
 
 /* The tile icon on a KPI card. It had no rule, so the glyph took whatever size
    the SVG happened to carry. */
@@ -1081,8 +1201,8 @@ body.admin-layout .mbw-kpi-icon {
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: var(--mbw-radius-sm, 8px);
-  background: var(--mbw-soft, rgba(8, 119, 91, .08));
+  border-radius: var(--mbw-radius-sm);
+  background: var(--mbw-primary-soft);
   flex: 0 0 auto;
 }
 body.admin-layout .mbw-kpi-icon .ui-icon { width: 18px; height: 18px; }
@@ -1103,8 +1223,8 @@ body.admin-layout .inventory-action-tab {
   border: 1px solid var(--mbw-border);
   border-bottom: 0;
   border-radius: var(--mbw-radius-sm) var(--mbw-radius-sm) 0 0;
-  background: var(--mbw-surface, #fff);
-  color: var(--mbw-brand, #08775b);
+  background: var(--mbw-surface);
+  color: var(--mbw-primary);
   font-size: 13.5px;
   font-weight: 600;
   line-height: 1.2;
@@ -1119,8 +1239,8 @@ body.admin-layout .inventory-action-tab .ui-icon {
 }
 body.admin-layout .inventory-action-tab:hover,
 body.admin-layout .inventory-action-tab:focus-visible {
-  background: var(--mbw-soft, rgba(8, 119, 91, .08));
-  color: var(--mbw-brand-strong, #08634a);
+  background: var(--mbw-primary-soft);
+  color: #08634a;
 }
 body.admin-layout .inventory-action-tab.is-active {
   background: #08634a;

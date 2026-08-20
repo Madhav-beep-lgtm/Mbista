@@ -524,7 +524,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                             </select>
-                            <button type="button" class="jw-add-item-btn" data-row-index="<?= $i ?>" style="padding:4px 8px;background:#0066cc;color:white;border:none;border-radius:3px;cursor:pointer;font-size:12px;white-space:nowrap;flex-shrink:0">+ Add</button>
+                            <button type="button" class="jw-add-item-btn" data-row-index="<?= $i ?>" title="Create a new item">+ Add</button>
                         </div>
                     </td>
                     <td data-label="Purity">
@@ -651,11 +651,13 @@ function jw_line_grid_scripts(array $ctx = []): void
     $baseUnit = $ctx['base_unit'] ?? null;
     ?>
 <!-- Modal for Creating New Items in Kaligadh Orders -->
-<div id="jw-item-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;overflow:auto">
-    <div style="background:white;margin:40px auto;width:90%;max-width:600px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15)">
-        <div style="padding:20px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center">
-            <h2 style="margin:0;font-size:18px">Create New Item</h2>
-            <button type="button" id="jw-modal-close" style="background:none;border:none;font-size:24px;cursor:pointer;color:#999">&times;</button>
+<div id="jw-item-modal" class="jw-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="jw-modal-title">
+    <div class="jw-modal-panel">
+        <div class="jw-modal-head">
+            <h2 id="jw-modal-title">Create New Item</h2>
+            <?php // A close control captioned with a glyph announces "button" and
+                  // nothing else; the label is what a screen reader reads. ?>
+            <button type="button" id="jw-modal-close" class="jw-modal-close" aria-label="Close without creating an item"><?= icon('close') ?></button>
         </div>
         <form id="jw-item-create-form" style="padding:20px">
             <input type="hidden" name="action" value="create_item_ajax">
@@ -806,12 +808,12 @@ function jw_line_grid_scripts(array $ctx = []): void
             </div>
 
             <div style="display:flex;gap:10px;margin-top:25px">
-                <button type="button" id="jw-modal-cancel" style="flex:1;padding:10px;border:1px solid #ddd;background:white;border-radius:4px;cursor:pointer;font-weight:500">Cancel</button>
-                <button type="submit" id="jw-modal-submit" style="flex:1;padding:10px;border:none;background:#0066cc;color:white;border-radius:4px;cursor:pointer;font-weight:500">Create Item</button>
+                <button type="button" id="jw-modal-cancel" class="jw-modal-cancel">Cancel</button>
+                <button type="submit" id="jw-modal-submit" class="jw-modal-submit">Create Item</button>
             </div>
 
-            <div id="jw-modal-error" style="margin-top:15px;padding:10px;background:#f8d7da;color:#721c24;border:1px solid #f5c6cb;border-radius:4px;display:none;font-size:13px"></div>
-            <div id="jw-modal-success" style="margin-top:15px;padding:10px;background:#d4edda;color:#155724;border:1px solid #c3e6cb;border-radius:4px;display:none;font-size:13px"></div>
+            <div id="jw-modal-error" class="jw-modal-note is-error" style="display:none" role="alert"></div>
+            <div id="jw-modal-success" class="jw-modal-note is-success" style="display:none" role="status"></div>
         </form>
     </div>
 </div>

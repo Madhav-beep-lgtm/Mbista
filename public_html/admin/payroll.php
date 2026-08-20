@@ -1221,9 +1221,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     var say = function (message) {
         if (!toast) {
             toast = document.createElement('div');
-            toast.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9999;'
-                + 'max-width:min(560px,90vw);padding:10px 16px;border-radius:10px;font-size:13px;line-height:1.4;'
-                + 'background:#7b241c;color:#fff;box-shadow:0 12px 30px rgba(0,0,0,.28);display:none';
+            // Painted by .mbw-toast rather than here: a colour written into
+            // script cannot follow the theme, and this one was a maroon
+            // nothing else in the app uses.
+            toast.className = 'mbw-toast';
+            toast.setAttribute('role', 'alert');
+            toast.style.display = 'none';
             document.body.appendChild(toast);
         }
         toast.textContent = message;
