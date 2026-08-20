@@ -969,6 +969,106 @@ function hospitality_workbook_parse(string $primaryPath, string $primaryExt, ?st
         return ['error' => (string) $read['error']];
     }
 
+    return hospitality_workbook_parse_rows($read['items'], $read['invoices'], $companyId, $fiscalYearId, $settings);
+}
+
+/**
+ * The columns the sheet editor lays out, in the order it shows them.
+ *
+ * The editor writes rows in THIS shape and hands them straight back to the
+ * parsers, so what is on screen and what is checked are the same thing. The
+ * order matches the template, because somebody comparing the two should not
+ * have to translate.
+ */
+function hospitality_workbook_editor_columns(string $sheet): array
+{
+    if ($sheet === 'invoices') {
+        return ['date' => 'Date', 'invoice_no' => 'Invoice No', 'payment_type' => 'Payment Type',
+            'ledger_code' => 'Party Ledger Code', 'amount' => 'Sales Amount', 'discount' => 'Less: Discount',
+            'taxable' => 'Taxable Sales', 'vat' => 'VAT', 'total' => 'Sales with VAT'];
+    }
+
+    return ['date' => 'Date', 'category' => 'Category', 'item' => 'Item', 'qty' => 'Qty',
+        'amount' => 'Total Sales Amount', 'discount' => 'Discount',
+        'taxable' => 'Taxable Sales', 'vat' => 'VAT', 'total' => 'Sales with VAT'];
+}
+
+/**
+ * Turn the editor's per-field rows back into the header-plus-cells shape the
+ * parsers read, so an edited sheet is checked by exactly the same code an
+ * uploaded one is.
+ *
+ * A row with nothing in it at all is dropped rather than reported: the editor
+ * always shows a spare line or two, and a blank one is not a mistake.
+ */
+function hospitality_workbook_editor_to_cells(array $editorRows, string $sheet): array
+{
+    $columns = hospitality_workbook_editor_columns($sheet);
+    $out = [['n' => 1, 'cells' => array_values($columns)]];
+    $lineNo = 1;
+    foreach ($editorRows as $row) {
+        $cells = [];
+        $anything = false;
+        foreach (array_keys($columns) as $field) {
+            $value = trim((string) ($row[$field] ?? ''));
+            if ($value !== '') {
+                $anything = true;
+            }
+            $cells[] = $value;
+        }
+        if (!$anything) {
+            continue;
+        }
+        $lineNo++;
+        $out[] = ['n' => $lineNo, 'cells' => $cells];
+    }
+
+    return $out;
+}
+
+/**
+ * Parsed rows back into the editor's fields.
+ *
+ * The DATE goes back as the AD date the parser resolved, not the Bikram Sambat
+ * the sheet was written in: what is being edited is what the system read, and
+ * showing something other than that is how a correction gets made to the wrong
+ * cell. A row the parser could not date at all keeps its raw text, because that
+ * is exactly the row somebody is here to fix.
+ */
+function hospitality_workbook_rows_to_editor(array $rows, string $sheet): array
+{
+    $columns = array_keys(hospitality_workbook_editor_columns($sheet));
+    $out = [];
+    foreach ($rows as $row) {
+        $line = [];
+        foreach ($columns as $field) {
+            if ($field === 'date') {
+                $line['date'] = (string) ($row['date'] ?? '') !== ''
+                    ? (string) $row['date']
+                    : (string) ($row['date_raw'] ?? '');
+                continue;
+            }
+            $value = $row[$field] ?? '';
+            $line[$field] = is_float($value) || is_int($value)
+                ? rtrim(rtrim(number_format((float) $value, 4, '.', ''), '0'), '.')
+                : (string) $value;
+        }
+        $out[] = $line;
+    }
+
+    return $out;
+}
+
+/**
+ * Parse and reconcile a pair already read into rows.
+ *
+ * The file path version above goes through here, and so does the sheet editor,
+ * which means a corrected row is checked by the same code that rejected it.
+ */
+function hospitality_workbook_parse_rows(array $itemRows, array $invoiceRows, int $companyId, int $fiscalYearId, array $settings): array
+{
+    $read = ['items' => $itemRows, 'invoices' => $invoiceRows];
+
     $fy = fiscal_year_by_id($fiscalYearId);
     $context = [
         'fy_start' => (string) ($fy['start_date'] ?? ''),

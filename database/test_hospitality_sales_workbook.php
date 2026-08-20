@@ -286,6 +286,62 @@ ok(!isset($noRecvLegs['debit|Sales Receivable']), '  ...debiting the party ledge
 ok(isset($noRecvLegs['debit|Cash in Hand']) || isset($noRecvLegs['debit|Sundry Debtors']),
     '  ...which is the ledger the invoice sheet named');
 
+echo "\n== A sheet that will not go in can be fixed on screen ==\n";
+// A wrong cell used to mean opening Excel, finding the row, fixing it, saving,
+// and uploading the whole file again. The editor holds the rows as typed and
+// checks them with the SAME parser that rejected them, so a correction is
+// tested by the code that objected to it.
+$brokenItems = [
+    ['Date', 'Category', 'Item', 'Qty', 'Total Sales Amount', 'Discount', 'Taxable Sales', 'VAT', 'Sales with VAT'],
+    ['2026-07-20', 'Food', 'Momo', 10, '1000', '0', '1000', '130', '1130'],
+    ['2026-07-20', 'Bar', 'Beer', 5, '500', '0', '500', '65', '999'],
+];
+$brokenInvoices = [
+    ['Date', 'Invoice No', 'Payment Type', 'Party Ledger Code', 'Sales Amount', 'Less: Discount', 'Taxable Sales', 'VAT', 'Sales with VAT'],
+    ['2026-07-20', 'INV-9', 'Cash', 'NOPE', '1500', '0', '1500', '195', '1695'],
+];
+$brokenFile = tempnam(sys_get_temp_dir(), 'hwbed') . '.xlsx';
+file_put_contents($brokenFile, xlsx_build_sheets([HOSPITALITY_SHEET_ITEMS => $brokenItems, HOSPITALITY_SHEET_INVOICES => $brokenInvoices]));
+$brokenParsed = hospitality_workbook_parse($brokenFile, 'xlsx', null, null, $A['cid'], $A['fy'], $settings);
+ok($brokenParsed['items']['errors'] === 1 && $brokenParsed['invoices']['errors'] === 1, 'The sheet arrives with a bad row on each side');
+ok(hospitality_post_sales_workbook($A['cid'], $A['fy'], $brokenParsed, 'broken.xlsx', $A['uid'], true)['ok'] === false,
+    '  ...and will not post as it stands');
+
+$editItems = hospitality_workbook_rows_to_editor($brokenParsed['items']['rows'], 'items');
+$editInvoices = hospitality_workbook_rows_to_editor($brokenParsed['invoices']['rows'], 'invoices');
+ok(count($editItems) === 2 && count($editInvoices) === 1, 'Every row is laid out for editing, good and bad alike');
+ok((string) $editItems[0]['item'] === 'Momo', '  ...carrying what the file said');
+ok((string) $editItems[0]['date'] === '2026-07-20', '  ...showing the date the parser READ, not the raw cell');
+ok((string) $editInvoices[0]['ledger_code'] === 'NOPE', '  ...including the code that could not be found');
+
+// The two corrections, exactly as somebody would type them.
+$editItems[1]['total'] = '565';
+$editInvoices[0]['ledger_code'] = '1100';
+$fixed = hospitality_workbook_parse_rows(
+    hospitality_workbook_editor_to_cells($editItems, 'items'),
+    hospitality_workbook_editor_to_cells($editInvoices, 'invoices'),
+    $A['cid'], $A['fy'], $settings
+);
+ok($fixed['items']['errors'] === 0 && $fixed['invoices']['errors'] === 0, 'The corrected rows carry no errors');
+ok($fixed['reconciliation']['ok'] === true, '  ...and the two sheets now agree');
+
+$vouchersBeforeFix = (int) db()->query('SELECT COUNT(*) FROM vouchers WHERE company_id=' . $A['cid'])->fetchColumn();
+$fixedResult = hospitality_post_sales_workbook($A['cid'], $A['fy'], $fixed, 'broken.xlsx (corrected)', $A['uid'], true);
+ok($fixedResult['ok'] === true, 'What is on screen posts' . ($fixedResult['ok'] ? '' : ': ' . $fixedResult['error']));
+ok((int) db()->query('SELECT COUNT(*) FROM vouchers WHERE company_id=' . $A['cid'])->fetchColumn() === $vouchersBeforeFix + 1,
+    '  ...as one voucher for the one day');
+$fixedVoucher = (int) db()->query('SELECT id FROM vouchers WHERE company_id=' . $A['cid'] . ' ORDER BY id DESC LIMIT 1')->fetchColumn();
+$fixedSums = db()->query("SELECT SUM(CASE WHEN entry_type='debit' THEN amount ELSE 0 END) dr,
+    SUM(CASE WHEN entry_type='credit' THEN amount ELSE 0 END) cr FROM voucher_entries WHERE voucher_id=$fixedVoucher")->fetch(PDO::FETCH_ASSOC);
+ok(near((float) $fixedSums['dr'], (float) $fixedSums['cr']), '  ...balanced');
+ok(near((float) $fixedSums['dr'], 1695.00), '  ...at the corrected total, not the one that was typed wrong');
+
+// A blank line in the editor is a spare, not a mistake.
+$withBlank = hospitality_workbook_editor_to_cells(array_merge($editItems, [[], ['date' => '', 'item' => '']]), 'items');
+ok(count($withBlank) === 3, 'Blank editor rows are dropped rather than reported as errors (header + 2)');
+
+@unlink($brokenFile);
+
 echo "\n== Tenant isolation ==\n";
 $settingsB = hospitality_settings($B['cid']);
 set_context($B['cid'], $B['fy']);

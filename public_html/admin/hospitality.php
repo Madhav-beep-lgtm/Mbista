@@ -37,7 +37,7 @@ $canExport = user_can_do('hospitality', 'export');
 // Simplified layout: the Excel sales upload drives both posting and costing,
 // so the invoice-mapping flow keeps working under the hood but its tabs are
 // folded away. Old links keep landing somewhere sensible.
-$allowedViews = ['dashboard', 'ingredients', 'menu-items', 'recipes', 'reports', 'sales-upload', 'settings'];
+$allowedViews = ['dashboard', 'ingredients', 'menu-items', 'recipes', 'reports', 'sales-upload', 'sheet-editor', 'settings'];
 $legacyViews = ['mapping' => 'sales-upload', 'costing' => 'sales-upload', 'gp' => 'reports'];
 $view = (string) ($_GET['view'] ?? 'dashboard');
 if (isset($legacyViews[$view]) && !isset($_GET['export'])) {
@@ -889,6 +889,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/hospitality.php?view=sales-upload&token=' . $token);
     }
 
+    // The sheet editor works on rows, not on the file. A correction typed here
+    // is checked by the very code that rejected it on the way in, and posted
+    // from what is on screen -- the held file is never rewritten, because a
+    // spreadsheet that no longer matches what was uploaded is its own problem.
+    if ($action === 'sheet_editor_check' || $action === 'sheet_editor_post') {
+        require_permission('hospitality', 'create');
+        $editorItems = hospitality_workbook_editor_to_cells((array) ($_POST['item_rows'] ?? []), 'items');
+        $editorInvoices = hospitality_workbook_editor_to_cells((array) ($_POST['invoice_rows'] ?? []), 'invoices');
+        $_SESSION['hospitality_sheet_editor'] = [
+            'items' => array_values((array) ($_POST['item_rows'] ?? [])),
+            'invoices' => array_values((array) ($_POST['invoice_rows'] ?? [])),
+            'file_name' => mb_substr(trim((string) ($_POST['file_name'] ?? '')), 0, 255),
+        ];
+        if ($action === 'sheet_editor_check') {
+            flash('success', 'Checked. Anything still wrong is marked on its own row.');
+            redirect('admin/hospitality.php?view=sheet-editor');
+        }
+
+        $editorParsed = hospitality_workbook_parse_rows($editorItems, $editorInvoices, $companyId, $fiscalYearId, hospitality_settings($companyId));
+        if (isset($editorParsed['error'])) {
+            flash('error', (string) $editorParsed['error']);
+            redirect('admin/hospitality.php?view=sheet-editor');
+        }
+        $editorFileName = (string) ($_SESSION['hospitality_sheet_editor']['file_name'] ?? '') ?: 'corrected sheet';
+        $editorResult = hospitality_post_sales_workbook($companyId, $fiscalYearId, $editorParsed, $editorFileName, $userId,
+            (string) ($_POST['allow_duplicate_dates'] ?? '') === '1');
+        if (!$editorResult['ok']) {
+            flash('error', (string) $editorResult['error']);
+            redirect('admin/hospitality.php?view=sheet-editor');
+        }
+        unset($_SESSION['hospitality_sheet_editor']);
+        flash('success', (int) $editorResult['rows'] . ' item line(s) and ' . (int) $editorResult['invoices'] . ' invoice(s) '
+            . ($editorResult['needs_approval']
+                ? 'submitted — ' . (int) $editorResult['vouchers'] . ' daily voucher(s) awaiting approval.'
+                : 'posted as ' . (int) $editorResult['vouchers'] . ' daily sales voucher(s).'));
+        redirect('admin/hospitality.php?view=sales-upload');
+    }
+
+    // Load a held upload into the editor, so a sheet that would not go in can
+    // be fixed here instead of in Excel and uploaded all over again.
+    if ($action === 'sheet_editor_load') {
+        require_permission('hospitality', 'create');
+        $loadToken = (string) ($_POST['token'] ?? '');
+        $loadPrimary = hospitality_sales_stored_file($salesUploadDir, $loadToken);
+        if ($loadPrimary === null) {
+            flash('error', 'That upload has expired. Upload the sheets again.');
+            redirect('admin/hospitality.php?view=sales-upload');
+        }
+        $loadSecond = hospitality_sales_stored_file($salesUploadDir, $loadToken, '-b');
+        try {
+            $loaded = hospitality_workbook_parse(
+                $loadPrimary['path'], $loadPrimary['extension'],
+                $loadSecond['path'] ?? null, $loadSecond['extension'] ?? null,
+                $companyId, $fiscalYearId, hospitality_settings($companyId)
+            );
+        } catch (Throwable $loadError) {
+            flash('error', 'Could not read the sheets: ' . $loadError->getMessage());
+            redirect('admin/hospitality.php?view=sales-upload');
+        }
+        if (isset($loaded['error'])) {
+            flash('error', (string) $loaded['error']);
+            redirect('admin/hospitality.php?view=sales-upload&token=' . $loadToken);
+        }
+        $_SESSION['hospitality_sheet_editor'] = [
+            'items' => hospitality_workbook_rows_to_editor($loaded['items']['rows'], 'items'),
+            'invoices' => hospitality_workbook_rows_to_editor($loaded['invoices']['rows'], 'invoices'),
+            'file_name' => trim((string) @file_get_contents($salesUploadDir . '/' . $loadToken . '.name')),
+        ];
+        redirect('admin/hospitality.php?view=sheet-editor');
+    }
+
+    if ($action === 'sheet_editor_clear') {
+        unset($_SESSION['hospitality_sheet_editor']);
+        redirect('admin/hospitality.php?view=sheet-editor');
+    }
+
     if ($action === 'sales_upload_commit') {
         require_permission('hospitality', 'create');
         $token = (string) ($_POST['token'] ?? '');
@@ -1018,6 +1094,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         'menu-items' => ['Menu Items', 'receipt-voucher'],
         'recipes' => ['Recipes', 'layers'],
         'sales-upload' => ['Sales Upload', 'documents'],
+        'sheet-editor' => ['Sheet Editor', 'edit'],
         'reports' => ['Reports', 'reports'],
         'settings' => ['Settings', 'sliders'],
     ] as $tabView => [$tabLabel, $tabIcon]): ?>
@@ -2245,8 +2322,15 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <div class="notice error">You do not have permission to post sales.</div>
         <?php elseif ($pvBlocked): ?>
             <div class="notice error">
-                Nothing can be posted while the sheets disagree or rows carry errors. Fix them in the workbook and upload it again —
+                Nothing can be posted while the sheets disagree or rows carry errors —
                 posting part of a day would leave the two sheets out of step permanently.
+                <br><br>Fix them <strong>here</strong> rather than going back to Excel for one cell:
+                <form method="post" style="display:inline">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="sheet_editor_load">
+                    <input type="hidden" name="token" value="<?= e($salesToken) ?>">
+                    <button type="submit" class="secondary" style="min-height:30px;padding:3px 12px"><?= icon('edit') ?> Open in Sheet Editor</button>
+                </form>
             </div>
         <?php else: ?>
             <form method="post">
@@ -2265,6 +2349,217 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
     <?php endif; ?>
 
+
+<?php elseif ($view === 'sheet-editor'): ?>
+    <?php
+    // What was uploaded, laid out so it can be corrected here.
+    //
+    // A sheet that will not go in used to mean opening Excel, finding the row,
+    // fixing it, saving, and uploading the whole thing again -- for one cell.
+    // The rows are held as typed and checked by the same parser that rejected
+    // them, so a correction is tested by the code that objected to it.
+    //
+    // The uploaded FILE is never rewritten. A spreadsheet on disk that no
+    // longer says what was uploaded is a worse problem than the one being
+    // solved; what posts is what is on this screen.
+    $editorState = $_SESSION['hospitality_sheet_editor'] ?? null;
+    $editorItemColumns = hospitality_workbook_editor_columns('items');
+    $editorInvoiceColumns = hospitality_workbook_editor_columns('invoices');
+    $editorChecked = null;
+    if ($editorState !== null) {
+        $editorChecked = hospitality_workbook_parse_rows(
+            hospitality_workbook_editor_to_cells((array) $editorState['items'], 'items'),
+            hospitality_workbook_editor_to_cells((array) $editorState['invoices'], 'invoices'),
+            $companyId, $fiscalYearId, $settings
+        );
+    }
+    /** Errors for the nth filled row of a sheet, keyed so a row can show its own. */
+    $editorErrorsFor = static function (?array $parsed, string $which): array {
+        if ($parsed === null || isset($parsed['error'])) {
+            return [];
+        }
+        $byIndex = [];
+        foreach ($parsed[$which]['rows'] ?? [] as $offset => $parsedRow) {
+            $byIndex[$offset] = $parsedRow['errors'];
+        }
+        return $byIndex;
+    };
+    $editorItemErrors = $editorErrorsFor($editorChecked, 'items');
+    $editorInvoiceErrors = $editorErrorsFor($editorChecked, 'invoices');
+    // The editor drops blank rows before parsing, so the nth NON-BLANK row on
+    // screen is the nth parsed row. Anything else would put a message on the
+    // wrong line.
+    $editorFilledIndex = static function (array $rows, int $upTo, array $columns): int {
+        $filled = 0;
+        foreach ($rows as $index => $row) {
+            if ($index >= $upTo) {
+                break;
+            }
+            foreach (array_keys($columns) as $field) {
+                if (trim((string) ($row[$field] ?? '')) !== '') {
+                    $filled++;
+                    break;
+                }
+            }
+        }
+        return $filled;
+    };
+    $editorHasRows = $editorState !== null;
+    $editorClean = $editorChecked !== null && !isset($editorChecked['error'])
+        && $editorChecked['items']['errors'] === 0 && $editorChecked['invoices']['errors'] === 0
+        && $editorChecked['reconciliation']['ok'];
+    ?>
+
+    <?php if (!$editorHasRows): ?>
+        <?php
+        $heldUploads = [];
+        foreach (glob($salesUploadDir . '/*.name') ?: [] as $heldName) {
+            $heldToken = basename($heldName, '.name');
+            if (hospitality_sales_stored_file($salesUploadDir, $heldToken) === null) {
+                continue;
+            }
+            $heldUploads[] = ['token' => $heldToken,
+                'name' => trim((string) @file_get_contents($heldName)) ?: 'sales sheet',
+                'when' => (int) @filemtime($heldName)];
+        }
+        usort($heldUploads, static fn (array $a, array $b): int => $b['when'] <=> $a['when']);
+        ?>
+        <section class="mbw-card">
+            <div class="mbw-card-head"><h2>Sheet Editor</h2></div>
+            <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:13px">
+                Open an uploaded sheet here to correct it. A sheet that will not go in — a date typed wrong, a ledger code that
+                does not exist, a row whose VAT does not add up — can be fixed on this screen and posted, instead of going back to
+                Excel and uploading the whole file again for one cell.
+                <br>The uploaded file itself is left alone; what posts is what you see here.
+            </p>
+            <?php if ($heldUploads === []): ?>
+                <div class="notice">
+                    Nothing is waiting to be edited. Upload a sheet on
+                    <a href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Sales Upload</a> first — if it has problems,
+                    come back here and fix them.
+                </div>
+            <?php else: ?>
+                <div style="overflow-x:auto"><table>
+                    <thead><tr><th>File</th><th>Uploaded</th><th></th></tr></thead>
+                    <tbody>
+                        <?php foreach ($heldUploads as $held): ?>
+                            <tr>
+                                <td><?= e($held['name']) ?></td>
+                                <td><small><?= e(date('Y-m-d H:i', $held['when'])) ?></small></td>
+                                <td>
+                                    <form method="post" style="margin:0">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="sheet_editor_load">
+                                        <input type="hidden" name="token" value="<?= e($held['token']) ?>">
+                                        <button type="submit" class="secondary" style="min-height:30px;padding:3px 12px"><?= icon('edit') ?> Open in editor</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table></div>
+                <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">Uploads are held for six hours, then cleared.</p>
+            <?php endif; ?>
+        </section>
+
+    <?php else: ?>
+        <?php if ($editorChecked !== null && isset($editorChecked['error'])): ?>
+            <div class="notice error" style="margin-bottom:14px"><?= e((string) $editorChecked['error']) ?></div>
+        <?php elseif ($editorClean): ?>
+            <div class="notice" style="margin-bottom:14px">
+                <strong>Everything checks out.</strong> Both sheets agree and no row has an error — this can be posted.
+            </div>
+        <?php elseif ($editorChecked !== null): ?>
+            <div class="notice error" style="margin-bottom:14px">
+                <strong>Still to fix:</strong>
+                <?= (int) $editorChecked['items']['errors'] ?> item row(s) and <?= (int) $editorChecked['invoices']['errors'] ?> invoice row(s) have errors.
+                <?php if (!$editorChecked['reconciliation']['ok']): ?>
+                    <ul style="margin:8px 0 0;padding-left:18px">
+                        <?php foreach ($editorChecked['reconciliation']['problems'] as $editorProblem): ?><li><?= e($editorProblem) ?></li><?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="file_name" value="<?= e((string) ($editorState['file_name'] ?? '')) ?>">
+
+            <?php foreach ([
+                ['items', 'Item-wise sheet — what was sold', $editorItemColumns, (array) $editorState['items'], $editorItemErrors, 'item_rows'],
+                ['invoices', 'Invoice-wise sheet — how it was settled', $editorInvoiceColumns, (array) $editorState['invoices'], $editorInvoiceErrors, 'invoice_rows'],
+            ] as [$editorSheet, $editorTitle, $editorColumns, $editorRows, $editorErrors, $editorField]): ?>
+                <section class="mbw-card" data-collapsible style="margin-bottom:14px">
+                    <div class="mbw-card-head"><h2><?= e($editorTitle) ?> (<?= count($editorRows) ?>)</h2></div>
+                    <div style="overflow-x:auto"><table class="mbw-grid-table">
+                        <thead><tr>
+                            <th style="width:44px">#</th>
+                            <?php foreach ($editorColumns as $editorKey => $editorLabel): ?>
+                                <th><?= e($editorLabel) ?></th>
+                            <?php endforeach; ?>
+                            <th>Problem</th>
+                        </tr></thead>
+                        <tbody>
+                            <?php
+                            // Two spare rows at the foot, so a line the sheet
+                            // missed can be added without another upload.
+                            $editorDrawn = array_values($editorRows);
+                            $editorDrawn[] = [];
+                            $editorDrawn[] = [];
+                            ?>
+                            <?php foreach ($editorDrawn as $editorIndex => $editorRow): ?>
+                                <?php
+                                $filledBefore = $editorFilledIndex($editorDrawn, $editorIndex, $editorColumns);
+                                $rowIsBlank = true;
+                                foreach (array_keys($editorColumns) as $editorCheckKey) {
+                                    if (trim((string) ($editorRow[$editorCheckKey] ?? '')) !== '') {
+                                        $rowIsBlank = false;
+                                        break;
+                                    }
+                                }
+                                $rowErrors = $rowIsBlank ? [] : ($editorErrors[$filledBefore] ?? []);
+                                ?>
+                                <tr<?= $rowErrors !== [] ? ' style="background:rgba(220,53,69,.08)"' : '' ?>>
+                                    <td><?= $editorIndex + 1 ?></td>
+                                    <?php foreach ($editorColumns as $editorKey => $editorLabel): ?>
+                                        <td><input type="text" name="<?= e($editorField) ?>[<?= $editorIndex ?>][<?= e($editorKey) ?>]"
+                                                   value="<?= e((string) ($editorRow[$editorKey] ?? '')) ?>"
+                                                   style="width:<?= in_array($editorKey, ['item', 'category', 'payment_type'], true) ? '150' : '110' ?>px"></td>
+                                    <?php endforeach; ?>
+                                    <td><?= $rowErrors !== []
+                                        ? '<span class="mbw-pill tone-red">' . e(implode(' ', $rowErrors)) . '</span>'
+                                        : ($rowIsBlank ? '<small style="color:var(--mbw-muted)">spare</small>' : '<span class="mbw-pill tone-green">OK</span>') ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table></div>
+                </section>
+            <?php endforeach; ?>
+
+            <section class="mbw-card">
+                <div class="mbw-card-head"><h2>Check and post</h2></div>
+                <?php if ($editorChecked !== null && !isset($editorChecked['error']) && $editorChecked['duplicate_dates'] !== []): ?>
+                    <div class="notice error" style="margin-bottom:10px">
+                        <strong>Already posted dates:</strong> <?= e(implode(', ', $editorChecked['duplicate_dates'])) ?>.
+                        <label class="checkbox-line" style="margin-top:6px"><input type="checkbox" name="allow_duplicate_dates" value="1"> Post anyway — these are additional sales for those days</label>
+                    </div>
+                <?php endif; ?>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button type="submit" name="action" value="sheet_editor_check" class="secondary"><?= icon('search') ?> Check again</button>
+                    <?php if ($editorClean && $canPost): ?>
+                        <button type="submit" name="action" value="sheet_editor_post"><?= icon('check') ?> Post <?= count($editorChecked['items']['days']) ?> daily voucher(s)</button>
+                    <?php else: ?>
+                        <button type="button" disabled title="Fix the rows marked above first"><?= icon('check') ?> Post</button>
+                    <?php endif; ?>
+                    <button type="submit" name="action" value="sheet_editor_clear" class="secondary" formnovalidate>Discard</button>
+                </div>
+                <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
+                    <strong>Check again</strong> re-reads every row exactly as an upload would. Dates may be typed in AD or BS.
+                    Posting uses what is on this screen, not the file that was uploaded.
+                </p>
+            </section>
+        </form>
+    <?php endif; ?>
 
 <?php elseif ($view === 'settings'): ?>
     <?php
