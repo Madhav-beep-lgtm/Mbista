@@ -2957,11 +2957,88 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
  * Orders finished by the karigar but still sitting in the shop — the
  * "received but not delivered" board.
  */
-function jewellery_pending_delivery(int $companyId): array
+/**
+ * Where a piece waiting for collection came from.
+ *
+ * Three different things end up in the same queue and want handling
+ * differently: a customer is waiting for one, nobody is waiting for another,
+ * and the third is work that came back before anyone was attached to it.
+ * There is no column that says which — it is read from the assignment's kind
+ * and whether the order names anybody.
+ */
+function jewellery_delivery_origins(): array
 {
-    $stmt = db()->prepare("SELECT o.*, ap.name AS party_name, p.code AS purity_code, u.code AS unit_code,
-            r.receive_date, r.received_gross_weight, r.received_fine_weight, r.receipt_no,
-            DATEDIFF(CURDATE(), r.receive_date) AS days_waiting
+    return [
+        'customer' => 'Customer ordered',
+        'assignment' => 'New assignment (no customer yet)',
+        'showroom' => 'Direct showroom order',
+    ];
+}
+
+/**
+ * The SQL that decides an order's origin, used for the column, the filter and
+ * the counts so none of the three can disagree with the others.
+ *
+ * MIN() rather than the bare column because an order can be split across two
+ * kaligads: 'customer' sorts before 'self' in the enum, so this reads as
+ * "showroom only if every part of it was made for the shelf" — if a customer is
+ * involved anywhere, somebody is waiting.
+ */
+function jewellery_delivery_origin_sql(): string
+{
+    return "CASE
+        WHEN MIN(a.assign_kind) = 'self' THEN 'showroom'
+        WHEN COALESCE(NULLIF(TRIM(ap.name), ''), NULLIF(TRIM(o.customer_name), '')) IS NOT NULL THEN 'customer'
+        ELSE 'assignment'
+    END";
+}
+
+/**
+ * Finished work nobody has collected yet.
+ *
+ * $filters takes 'origin' (one of jewellery_delivery_origins), and 'sort' /
+ * 'dir' for the column headings. Sorting and filtering are done in SQL rather
+ * than on the rows afterwards: the queue is 69 pieces in a quiet month and
+ * several hundred in a busy one, and a shop that lets work sit only ever finds
+ * out by looking at this list.
+ */
+function jewellery_pending_delivery(int $companyId, array $filters = []): array
+{
+    $originSql = jewellery_delivery_origin_sql();
+
+    // Only these can be sorted on, and each maps to an expression rather than
+    // to whatever the caller sent — a sort key is going into an ORDER BY.
+    $sortable = [
+        'order' => 'o.order_no',
+        'customer' => "COALESCE(NULLIF(TRIM(ap.name), ''), NULLIF(TRIM(o.customer_name), ''), 'zzz')",
+        'origin' => 'origin',
+        'received' => 'receive_date',
+        'weight' => 'received_gross_weight',
+        'waiting' => 'days_waiting',
+        'promised' => 'o.delivery_date',
+    ];
+    $sort = (string) ($filters['sort'] ?? '');
+    $orderBy = $sortable[$sort] ?? 'r.receive_date';
+    $direction = strtolower((string) ($filters['dir'] ?? '')) === 'desc' ? 'DESC' : 'ASC';
+    // A missing receive date or promise sorts to the end either way, so the
+    // rows that carry a date are always the ones being read.
+    $nullsLast = in_array($orderBy, ['receive_date', 'o.delivery_date', 'received_gross_weight'], true)
+        ? $orderBy . ' IS NULL, '
+        : '';
+
+    // ONE row per order, not one per assignment. A job split between two
+    // kaligads has two received assignments, and this list used to show it
+    // twice — the same ring, counted twice, waiting twice. It is ready when the
+    // LAST part came back, and the weight back is all of it.
+    $sql = "SELECT o.*, ap.name AS party_name, p.code AS purity_code, u.code AS unit_code,
+            MAX(r.receive_date) AS receive_date,
+            SUM(r.received_gross_weight) AS received_gross_weight,
+            SUM(r.received_fine_weight) AS received_fine_weight,
+            MAX(r.receipt_no) AS receipt_no,
+            COUNT(DISTINCT a.id) AS assignment_count,
+            MIN(a.assign_kind) AS assign_kind,
+            DATEDIFF(CURDATE(), MAX(r.receive_date)) AS days_waiting,
+            $originSql AS origin
         FROM jewellery_orders o
         LEFT JOIN accounting_parties ap ON ap.id = o.party_id
         INNER JOIN jewellery_purities p ON p.id = o.purity_id
@@ -2969,10 +3046,55 @@ function jewellery_pending_delivery(int $companyId): array
         LEFT JOIN jewellery_order_assignments a ON a.order_id = o.id AND a.status = 'received'
         LEFT JOIN jewellery_order_receipts r ON r.assignment_id = a.id
         WHERE o.company_id = :cid AND o.status = 'received'
-        ORDER BY r.receive_date ASC, o.id ASC");
-    $stmt->execute(['cid' => $companyId]);
+        GROUP BY o.id";
+    $params = ['cid' => $companyId];
+
+    // HAVING, not WHERE: the origin is decided from an aggregate, so it is not
+    // known until the rows for an order have been brought together.
+    $origin = (string) ($filters['origin'] ?? '');
+    if (isset(jewellery_delivery_origins()[$origin])) {
+        $sql .= " HAVING origin = :origin";
+        $params['origin'] = $origin;
+    }
+    // The sortable expressions above name aggregates by their alias, which is
+    // what ORDER BY wants after a GROUP BY.
+    $sql .= " ORDER BY $nullsLast$orderBy $direction, o.id ASC";
+
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * How many are waiting, per origin — the whole queue, whatever is filtered.
+ *
+ * One grouped query, so the tabs can show their counts without loading the
+ * three lists to count them.
+ */
+function jewellery_pending_delivery_counts(int $companyId): array
+{
+    $originSql = jewellery_delivery_origin_sql();
+    // The inner query is one row per ORDER; the outer one counts those. Written
+    // the other way round it counted assignments, so a job split between two
+    // kaligads made the queue look one piece longer than it was.
+    $stmt = db()->prepare("SELECT t.origin, COUNT(*) AS n FROM (
+            SELECT o.id, $originSql AS origin
+            FROM jewellery_orders o
+            LEFT JOIN accounting_parties ap ON ap.id = o.party_id
+            LEFT JOIN jewellery_order_assignments a ON a.order_id = o.id AND a.status = 'received'
+            WHERE o.company_id = :cid AND o.status = 'received'
+            GROUP BY o.id
+        ) t GROUP BY t.origin");
+    $stmt->execute(['cid' => $companyId]);
+
+    $counts = ['customer' => 0, 'assignment' => 0, 'showroom' => 0];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $counts[(string) $row['origin']] = (int) $row['n'];
+    }
+    $counts['all'] = array_sum($counts);
+
+    return $counts;
 }
 
 /**

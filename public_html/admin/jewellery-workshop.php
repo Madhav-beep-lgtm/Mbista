@@ -578,7 +578,13 @@ if ($view === 'orders' && table_exists('ledgers')) {
 $assignments = $view === 'assignments' ? jewellery_assignments_list($companyId, $listFilters) : [];
 // Assigning and receiving moved to their own pages; this view is the register
 // of what is OUT, so it no longer loads a receive preview.
-$pending = $view === 'delivery' ? jewellery_pending_delivery($companyId) : [];
+$deliveryOrigin = jw_enum($_GET['origin'] ?? null, array_keys(jewellery_delivery_origins()), '');
+$deliverySort = jw_enum($_GET['sort'] ?? null, ['order', 'customer', 'origin', 'received', 'weight', 'waiting', 'promised'], 'received');
+$deliveryDir = jw_enum($_GET['dir'] ?? null, ['asc', 'desc'], 'asc');
+$pending = $view === 'delivery'
+    ? jewellery_pending_delivery($companyId, ['origin' => $deliveryOrigin, 'sort' => $deliverySort, 'dir' => $deliveryDir])
+    : [];
+$deliveryCounts = $view === 'delivery' ? jewellery_pending_delivery_counts($companyId) : [];
 // A showroom piece comes back to the shelf, not to a collection queue, and the
 // output register is the two flows in one list — the only place they belong
 // together, because it asks about the shop's output as a whole.
@@ -1545,19 +1551,89 @@ jw_filter_bar_styles();
     </section>
 
 <?php elseif ($view === 'delivery'): ?>
+    <?php
+    // Three different things end up in this queue and want handling
+    // differently: somebody is waiting for a customer's piece, nobody is
+    // waiting for a showroom one, and an assignment that came back before a
+    // customer was attached is neither. They are told apart by the assignment's
+    // kind and whether the order names anybody.
+    $deliveryOrigins = jewellery_delivery_origins();
+    $originTone = ['customer' => 'tone-blue', 'assignment' => 'tone-amber', 'showroom' => 'tone-purple'];
+    /** A column heading that sorts, and flips direction when it is the one already sorted on. */
+    $sortHead = static function (string $key, string $label, bool $numeric = false) use ($deliverySort, $deliveryDir, $deliveryOrigin): string {
+        $active = $deliverySort === $key;
+        $next = ($active && $deliveryDir === 'asc') ? 'desc' : 'asc';
+        $arrow = $active ? ($deliveryDir === 'asc' ? ' ▲' : ' ▼') : '';
+        $href = url('admin/jewellery-workshop.php?view=delivery&sort=' . $key . '&dir=' . $next
+            . ($deliveryOrigin !== '' ? '&origin=' . $deliveryOrigin : ''));
+
+        return '<th' . ($numeric ? ' class="is-numeric"' : '') . '>'
+            . '<a href="' . e($href) . '" style="color:inherit;text-decoration:none;white-space:nowrap"'
+            . ' title="Sort by ' . e($label) . ' (' . ($next === 'asc' ? 'ascending' : 'descending') . ')">'
+            . e($label) . '<span style="opacity:' . ($active ? '1' : '.35') . '">' . ($arrow ?: ' ⇅') . '</span></a></th>';
+    };
+    ?>
     <div class="notice" style="margin-bottom:14px">
         These orders have come back from the kaligad and are finished, but the customer has not collected them yet.
     </div>
+
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Received but Not Delivered (<?= count($pending) ?>)</h2></div>
+        <div class="mbw-card-head">
+            <h2>Received but Not Delivered (<?= count($pending) ?><?= $deliveryOrigin !== '' ? ' of ' . (int) ($deliveryCounts['all'] ?? 0) : '' ?>)</h2>
+        </div>
+        <form method="get" class="mbw-filterbar" style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input type="hidden" name="view" value="delivery">
+            <input type="hidden" name="sort" value="<?= e($deliverySort) ?>">
+            <input type="hidden" name="dir" value="<?= e($deliveryDir) ?>">
+            <label style="display:flex;gap:6px;align-items:center;margin:0">
+                <span style="color:var(--mbw-muted);font-size:12.5px">Ready to deliver from</span>
+                <select name="origin" class="field-compact" aria-label="Where the piece came from" onchange="this.form.submit()">
+                    <option value="">All (<?= (int) ($deliveryCounts['all'] ?? 0) ?>)</option>
+                    <?php foreach ($deliveryOrigins as $originKey => $originLabel): ?>
+                        <option value="<?= e($originKey) ?>" <?= $deliveryOrigin === $originKey ? 'selected' : '' ?>>
+                            <?= e($originLabel) ?> (<?= (int) ($deliveryCounts[$originKey] ?? 0) ?>)
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <button type="submit" class="button secondary"><?= icon('filter') ?> Filter</button>
+            <?php if ($deliveryOrigin !== ''): ?>
+                <a class="button secondary" href="<?= e(url('admin/jewellery-workshop.php?view=delivery&sort=' . $deliverySort . '&dir=' . $deliveryDir)) ?>">Show all</a>
+            <?php endif; ?>
+            <span style="margin-left:auto;color:var(--mbw-muted);font-size:12.5px">
+                <?php foreach ($deliveryOrigins as $originKey => $originLabel): ?>
+                    <span class="mbw-pill <?= e($originTone[$originKey] ?? 'tone-gray') ?>" style="margin-left:6px"><?= e($originLabel) ?>: <?= (int) ($deliveryCounts[$originKey] ?? 0) ?></span>
+                <?php endforeach; ?>
+            </span>
+        </form>
         <div class="mbw-tablewrap"><table>
-            <thead><tr><th>Order</th><th>Customer</th><th>Received on</th><th class="is-numeric">Weight back</th><th class="is-numeric">Days waiting</th><th>Promised</th><th></th></tr></thead>
+            <thead><tr>
+                <?= $sortHead('order', 'Order') ?>
+                <?= $sortHead('customer', 'Customer') ?>
+                <?= $sortHead('origin', 'Ordered as') ?>
+                <?= $sortHead('received', 'Received on') ?>
+                <?= $sortHead('weight', 'Weight back', true) ?>
+                <?= $sortHead('waiting', 'Days waiting', true) ?>
+                <?= $sortHead('promised', 'Promised') ?>
+                <th></th>
+            </tr></thead>
             <tbody>
-                <?php if ($pending === []): ?><tr><td colspan="7">Nothing is waiting for collection.</td></tr><?php endif; ?>
+                <?php if ($pending === []): ?>
+                    <tr><td colspan="8"><?= $deliveryOrigin !== ''
+                        ? 'Nothing of that kind is waiting for collection.'
+                        : 'Nothing is waiting for collection.' ?></td></tr>
+                <?php endif; ?>
                 <?php foreach ($pending as $row): ?>
+                    <?php
+                    $rowOrigin = (string) ($row['origin'] ?? 'customer');
+                    $rowCustomer = trim((string) ($row['party_name'] ?? '')) ?: trim((string) ($row['customer_name'] ?? ''));
+                    ?>
                     <tr>
                         <td><?= e($row['order_no']) ?></td>
-                        <td><?= e((string) ($row['party_name'] ?? $row['customer_name'] ?? 'Walk-in')) ?><?= ($row['customer_phone'] ?? '') !== '' ? '<br><small>' . e((string) $row['customer_phone']) . '</small>' : '' ?></td>
+                        <td><?= $rowCustomer !== ''
+                                ? e($rowCustomer)
+                                : '<span style="color:var(--mbw-muted)">' . ($rowOrigin === 'showroom' ? 'Showroom stock' : 'Nobody yet') . '</span>' ?><?= ($row['customer_phone'] ?? '') !== '' ? '<br><small>' . e((string) $row['customer_phone']) . '</small>' : '' ?></td>
+                        <td><span class="mbw-pill <?= e($originTone[$rowOrigin] ?? 'tone-gray') ?>"><?= e((string) ($deliveryOrigins[$rowOrigin] ?? $rowOrigin)) ?></span></td>
                         <td><?= ($row['receive_date'] ?? null) ? e(app_date((string) $row['receive_date'])) : '—' ?></td>
                         <td class="is-numeric"><?= $fmt((float) ($row['received_gross_weight'] ?? 0), 4) ?> <small><?= e((string) $row['unit_code']) ?></small>
                             <?php if ((float) ($row['received_fine_weight'] ?? 0) > 0.00005): ?>
@@ -1585,7 +1661,14 @@ jw_filter_bar_styles();
                 <?php endforeach; ?>
             </tbody>
         </table></div>
+        <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
+            <strong>Customer ordered</strong> — somebody is waiting for it, and the order names them.
+            <strong>New assignment</strong> — work that came back before a customer was attached to it; it can be sold to whoever wants it, or an order raised against it.
+            <strong>Direct showroom order</strong> — made to replace shelf stock, so nobody is waiting.
+            Any column heading sorts; click it again to reverse.
+        </p>
     </section>
+
 
 <?php elseif ($view === 'ready-to-sale'): ?>
     <?php // Sold is the stock ledger's business, but PROMISED is this board's:
