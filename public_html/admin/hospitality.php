@@ -2567,13 +2567,14 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             <?php endif; ?>
                         </span>
                     </div>
-                    <div style="overflow-x:auto"><table class="mbw-grid-table">
+                    <div style="overflow-x:auto"><table class="mbw-grid-table hosp-edit-grid">
                         <thead><tr>
                             <th style="width:44px">#</th>
                             <?php foreach ($editorColumns as $editorKey => $editorLabel): ?>
                                 <th><?= e($editorLabel) ?></th>
                             <?php endforeach; ?>
                             <th>Problem</th>
+                            <th></th>
                         </tr></thead>
                         <tbody>
                             <?php
@@ -2640,6 +2641,12 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                                     <td><?= $rowErrors !== []
                                         ? '<span class="mbw-pill tone-red">' . e(implode(' ', $rowErrors)) . '</span>'
                                         : ($rowIsBlank ? '<small style="color:var(--mbw-muted)">spare</small>' : '<span class="mbw-pill tone-green">OK</span>') ?></td>
+                                    <td style="white-space:nowrap">
+                                        <button type="button" class="button secondary hosp-edit-recalc" style="min-height:28px;padding:2px 8px"
+                                                title="Work the money out again from Amount and Discount">=</button>
+                                        <button type="button" class="button secondary hosp-edit-drop" style="min-height:28px;padding:2px 8px"
+                                                title="Take this line out of the sheet">✕</button>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -2662,7 +2669,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     </div>
                 <?php endif; ?>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
-                    <button type="submit" name="action" value="sheet_editor_check" class="secondary"><?= icon('search') ?> Check again</button>
+                    <button type="submit" name="action" value="sheet_editor_check"><?= icon('check') ?> Save &amp; check</button>
                     <?php if ($editorClean && $canPost): ?>
                         <button type="submit" name="action" value="sheet_editor_post"><?= icon('check') ?> Post <?= count($editorChecked['items']['days']) ?> daily voucher(s)</button>
                     <?php else: ?>
@@ -2671,7 +2678,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <button type="submit" name="action" value="sheet_editor_clear" class="secondary" formnovalidate>Discard</button>
                 </div>
                 <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-                    <strong>Check again</strong> re-reads every row exactly as an upload would. Dates may be typed in AD or BS.
+                    <strong>Save &amp; check</strong> keeps your edits and re-reads every row exactly as an upload would.
+                    On a row, <strong>=</strong> works the money out again from Amount and Discount, and <strong>✕</strong> empties the line. Dates may be typed in AD or BS.
                     Posting uses what is on this screen, not the file that was uploaded.
                     <br>Category and Item are chosen from a list — a category nothing maps has no sales ledger to post to, and an
                     item name that differs by a space becomes a second menu item for the same dish. The lists hold everything your
@@ -2679,6 +2687,82 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </p>
             </section>
         </form>
+        <script>
+        // The money on a row is four figures that must agree, and the sheet
+        // arrives with them already out by a paisa often enough that fixing
+        // them by hand is most of what this screen would otherwise be for:
+        //
+        //     Taxable  = Amount − Discount
+        //     VAT      = Taxable × rate
+        //     With VAT = Taxable + VAT
+        //
+        // Editing any of the first three works the rest out again. The one
+        // being typed in is never overwritten while it has focus, or a number
+        // would change under the cursor.
+        (function () {
+            var VAT_RATE = <?= (float) ($settings['post_vat_rate'] ?? 13) ?>;
+            var grids = document.querySelectorAll('.hosp-edit-grid');
+            if (!grids.length) { return; }
+
+            function num(field) { return field ? (parseFloat(field.value) || 0) : 0; }
+            function put(field, value) {
+                if (!field || field === document.activeElement) { return; }
+                field.value = value === 0 ? '0' : String(Math.round(value * 100) / 100);
+            }
+            function fieldIn(row, name) { return row.querySelector('[name$="[' + name + ']"]'); }
+
+            function recalc(row, edited) {
+                var amount = fieldIn(row, 'amount');
+                var discount = fieldIn(row, 'discount');
+                var taxable = fieldIn(row, 'taxable');
+                var vat = fieldIn(row, 'vat');
+                var total = fieldIn(row, 'total');
+                if (!amount || !taxable || !vat || !total) { return; }
+                // Nothing to work out on a line nobody has started.
+                if (amount.value === '' && taxable.value === '' && vat.value === '') { return; }
+
+                var taxableValue;
+                if (edited === 'taxable') {
+                    // Taxable typed directly: believe it, and leave Amount and
+                    // Discount alone -- they are what the till reported.
+                    taxableValue = num(taxable);
+                } else {
+                    taxableValue = num(amount) - num(discount);
+                    put(taxable, taxableValue);
+                }
+                if (edited !== 'vat') {
+                    put(vat, taxableValue * VAT_RATE / 100);
+                }
+                put(total, taxableValue + num(vat));
+            }
+
+            Array.prototype.forEach.call(grids, function (grid) {
+                grid.addEventListener('input', function (event) {
+                    var field = event.target;
+                    var match = /\[(amount|discount|taxable|vat)\]$/.exec(field.name || '');
+                    if (!match) { return; }
+                    recalc(field.closest('tr'), match[1]);
+                });
+                grid.addEventListener('click', function (event) {
+                    var button = event.target.closest ? event.target.closest('button') : null;
+                    if (!button) { return; }
+                    var row = button.closest('tr');
+                    if (button.classList.contains('hosp-edit-recalc')) {
+                        recalc(row, 'amount');
+                        return;
+                    }
+                    if (button.classList.contains('hosp-edit-drop')) {
+                        // Emptied rather than removed: the row indexes are what
+                        // tie a line to its error message, and a blank row is
+                        // already understood as a spare.
+                        Array.prototype.forEach.call(row.querySelectorAll('input, select'), function (f) {
+                            if (f.tagName === 'SELECT') { f.selectedIndex = 0; } else { f.value = ''; }
+                        });
+                    }
+                });
+            });
+        })();
+        </script>
         <?php // The single copy of each list the stubs above are filled from. ?>
         <?= shared_options_template('hosp-edit-categories', $editorCategoryOptions) ?>
         <?= shared_options_template('hosp-edit-items', $editorItemOptions) ?>
