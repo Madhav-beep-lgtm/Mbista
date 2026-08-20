@@ -184,7 +184,7 @@ function jw_aml_stream_csv(int $companyId, string $from, string $to, string $sta
     header('Cache-Control: no-cache, no-store, must-revalidate');
     $output = fopen('php://output', 'w');
     fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
-    fputcsv($output, ['Case','Type','Date','Due','Customer','PAN','Amount','Transactions','Risk','Rule','Status','goAML reference']);
+    fputcsv($output, ['Case','Type','Date','Due','Customer','PAN','Amount','Transactions','Risk','Rule','Status','goAML reference'], ',', '"', '\\');
     $offset = 0;
     do {
         $rows = jw_aml_cases($companyId, $from, $to, $status, 500, $offset);
@@ -192,7 +192,7 @@ function jw_aml_stream_csv(int $companyId, string $from, string $to, string $sta
             $row = [(int)$c['id'],$c['case_type'],$c['case_date'],$c['due_on'],$c['party_name'],$c['pan_no'],
                 $c['aggregate_amount'],$c['transaction_count'],$c['risk_score'],$c['rule_code'],$c['status'],$c['goaml_reference']];
             fputcsv($output, array_map(static fn($cell) => is_string($cell) && preg_match('/^[=+@\t]/', $cell)
-                ? "'".$cell : $cell, $row));
+                ? "'".$cell : $cell, $row), ',', '"', '\\');
         }
         $offset += count($rows);
     } while (count($rows) === 500);

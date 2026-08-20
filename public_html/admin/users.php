@@ -703,7 +703,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         $headers[] = 'Access Level';
     }
     $headers[] = 'Created At';
-    fputcsv($output, $headers);
+    fputcsv($output, $headers, ',', '"', '\\');
 
     foreach ($rows as $row) {
         $csvRow = [
@@ -719,7 +719,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $csvRow[] = ACCESS_LEVELS[$row['access_level']] ?? $row['access_level'];
         }
         $csvRow[] = $row['created_at'];
-        fputcsv($output, $csvRow);
+        fputcsv($output, $csvRow, ',', '"', '\\');
     }
 
     fclose($output);

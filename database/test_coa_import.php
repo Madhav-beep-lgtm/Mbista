@@ -54,7 +54,7 @@ function coaimp_csv(array $rows): string
 {
     $path = tempnam(sys_get_temp_dir(), 'coa') . '.csv';
     $h = fopen($path, 'w');
-    foreach ($rows as $row) { fputcsv($h, $row); }
+    foreach ($rows as $row) { fputcsv($h, $row, ',', '"', '\\'); }
     fclose($h);
 
     return $path;

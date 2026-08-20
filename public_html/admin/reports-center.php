@@ -300,13 +300,13 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $reportId . '-' . $fromDate . '-to-' . $toDate . '.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, [$reportLabel . ' — ' . ($company['name'] ?? '') . ' — ' . app_date_range($fromDate, $toDate)]);
-    fputcsv($out, array_map(static fn (array $col): string => ($col[2] !== '' ? $col[2] . ' ' : '') . $col[0], $report['columns']));
+    fputcsv($out, [$reportLabel . ' — ' . ($company['name'] ?? '') . ' — ' . app_date_range($fromDate, $toDate)], ',', '"', '\\');
+    fputcsv($out, array_map(static fn (array $col): string => ($col[2] !== '' ? $col[2] . ' ' : '') . $col[0], $report['columns']), ',', '"', '\\');
     foreach ($report['rows'] as $row) {
-        fputcsv($out, rc_row_cells($row));
+        fputcsv($out, rc_row_cells($row), ',', '"', '\\');
     }
     if ($report['totals'] !== null) {
-        fputcsv($out, $report['totals']);
+        fputcsv($out, $report['totals'], ',', '"', '\\');
     }
     security_event('report_exported', 'success', 'Report exported: ' . $reportLabel . ' (CSV).', $companyId, $userId);
     fclose($out);

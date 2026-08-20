@@ -42,12 +42,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     // chart; balances are derived from the perpetual ledger, and re-importing
     // them would either double-post or be skipped, so writing numbers here
     // would only imply a round-trip that does not exist.
-    fputcsv($out, COA_IMPORT_COLUMNS);
+    fputcsv($out, COA_IMPORT_COLUMNS, ',', '"', '\\');
     foreach ($masters as $masterKey => $master) {
-        fputcsv($out, ['Master', $masterKey, $master['label'], $masterKey, $master['nature'], '', '', '', 'Active']);
+        fputcsv($out, ['Master', $masterKey, $master['label'], $masterKey, $master['nature'], '', '', '', 'Active'], ',', '"', '\\');
     }
     foreach ($groups as $g) {
-        fputcsv($out, ['Group', $g['code'], $g['name'], $g['master_key'], ledger_master_nature((string) $g['master_key']) ?? '', '', '', '', ((int) $g['is_active'] === 1 ? 'Active' : 'Inactive')]);
+        fputcsv($out, ['Group', $g['code'], $g['name'], $g['master_key'], ledger_master_nature((string) $g['master_key']) ?? '', '', '', '', ((int) $g['is_active'] === 1 ? 'Active' : 'Inactive')], ',', '"', '\\');
     }
     // Stream the potentially large ledger set instead of retaining it in PHP
     // memory. CSV responses are consumed one row at a time by the browser.
@@ -55,7 +55,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $exportLedgers->execute(['cid' => $companyId]);
     while ($l = $exportLedgers->fetch(PDO::FETCH_ASSOC)) {
         $g = $groupsById[(int) ($l['group_id'] ?? 0)] ?? null;
-        fputcsv($out, ['Ledger', $l['code'], $l['name'], $g['master_key'] ?? '', $l['type'], $g['code'] ?? '', '', '', ucfirst((string) $l['status'])]);
+        fputcsv($out, ['Ledger', $l['code'], $l['name'], $g['master_key'] ?? '', $l['type'], $g['code'] ?? '', '', '', ucfirst((string) $l['status'])], ',', '"', '\\');
     }
     fclose($out);
     exit;

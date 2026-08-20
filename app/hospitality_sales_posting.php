@@ -668,7 +668,7 @@ function hospitality_sales_template_csv(): string
 {
     $handle = fopen('php://temp', 'r+b');
     foreach (hospitality_sales_template_rows() as $row) {
-        fputcsv($handle, $row);
+        fputcsv($handle, $row, ',', '"', '\\');
     }
     rewind($handle);
     $csv = (string) stream_get_contents($handle);

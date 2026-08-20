@@ -444,7 +444,7 @@ function voucher_import_template_csv(): string
 {
     $handle = fopen('php://temp', 'r+b');
     foreach (voucher_import_template_rows() as $row) {
-        fputcsv($handle, $row);
+        fputcsv($handle, $row, ',', '"', '\\');
     }
     rewind($handle);
     $csv = (string) stream_get_contents($handle);
@@ -459,13 +459,13 @@ function voucher_import_ledger_list_csv(int $companyId): string
         WHERE l.company_id = :company_id AND l.status = 'active' ORDER BY l.name ASC");
     $stmt->execute(['company_id' => $companyId]);
     $handle = fopen('php://temp', 'r+b');
-    fputcsv($handle, ['Ledger Code', 'Ledger Name', 'Group', 'Master Group', 'Bank/Cash Ledger']);
+    fputcsv($handle, ['Ledger Code', 'Ledger Name', 'Group', 'Master Group', 'Bank/Cash Ledger'], ',', '"', '\\');
     foreach ($stmt->fetchAll() as $ledger) {
         fputcsv($handle, [
             $ledger['code'], $ledger['name'], $ledger['group_name'] ?? '',
             ucwords(str_replace('_', ' ', (string) ($ledger['master_key'] ?? ''))),
             ((int) $ledger['is_cash_or_bank'] === 1) ? 'Yes' : 'No',
-        ]);
+        ], ',', '"', '\\');
     }
     rewind($handle);
     $csv = (string) stream_get_contents($handle);
