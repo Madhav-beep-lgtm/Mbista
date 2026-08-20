@@ -2669,11 +2669,11 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     </div>
                 <?php endif; ?>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
-                    <button type="submit" name="action" value="sheet_editor_check"><?= icon('check') ?> Save &amp; check</button>
+                    <button type="submit" name="action" value="sheet_editor_check"><?= icon('badge-check') ?> Save &amp; check</button>
                     <?php if ($editorClean && $canPost): ?>
-                        <button type="submit" name="action" value="sheet_editor_post"><?= icon('check') ?> Post <?= count($editorChecked['items']['days']) ?> daily voucher(s)</button>
+                        <button type="submit" name="action" value="sheet_editor_post"><?= icon('badge-check') ?> Post <?= count($editorChecked['items']['days']) ?> daily voucher(s)</button>
                     <?php else: ?>
-                        <button type="button" disabled title="Fix the rows marked above first"><?= icon('check') ?> Post</button>
+                        <button type="button" disabled title="Fix the rows marked above first"><?= icon('badge-check') ?> Post</button>
                     <?php endif; ?>
                     <button type="submit" name="action" value="sheet_editor_clear" class="secondary" formnovalidate>Discard</button>
                 </div>
