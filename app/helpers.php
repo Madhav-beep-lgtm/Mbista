@@ -177,36 +177,26 @@ function e(mixed $value): string
  * four times, and a page with two such grids shipped it eight. On a few hundred
  * items nobody notices; on a few thousand it is most of the page.
  *
- * The first select using a list gets it inline, so the form still works when no
- * script runs. Every later one is sent holding just the option it already has
- * selected, marked with data-fill-from; shared_options_script() copies the list
- * into them from a <template>.
+ * EVERY select is sent holding only what it already has selected, marked with
+ * data-fill-from; shared_options_script() copies the list into them from a
+ * single <template>. So a page carries one copy of a long list however many
+ * pickers use it.
+ *
+ * This used to give the FIRST select its copy inline, so a form still worked
+ * with no script at all. That fallback is gone deliberately: these screens
+ * compute their own totals in script and are not usable without it, so the
+ * inline copy bought nothing and cost a second full list on every page.
  *
  * $build is called at most once per list id per request.
  */
 function shared_options(string $listId, callable $build, string $selectedValue = ''): array
 {
     static $lists = [];
-    static $inlineUsed = [];
 
     if (!array_key_exists($listId, $lists)) {
         $lists[$listId] = (string) $build();
     }
     $options = $lists[$listId];
-
-    if (empty($inlineUsed[$listId])) {
-        $inlineUsed[$listId] = true;
-        if ($selectedValue !== '') {
-            $options = preg_replace(
-                '/<option value="' . preg_quote($selectedValue, '/') . '"/',
-                '<option selected value="' . $selectedValue . '"',
-                $options,
-                1
-            ) ?? $options;
-        }
-
-        return ['html' => $options, 'fill' => false];
-    }
 
     // A stub: only what this select already holds, so the page reads correctly
     // before the script runs.
@@ -236,10 +226,9 @@ function shared_options_stub_issued(string $listId, bool $mark = false): bool
 }
 
 /**
- * The hidden copy the stubs are filled from. Emits once per list id, and only
- * when something actually needs it — a page that uses a list once already has
- * it inline, and a template there would put a second copy on the page to save
- * nothing.
+ * The one copy the stubs are filled from. Emits once per list id, and only when
+ * a select on this page actually asked to be filled from it — a view that never
+ * drew the grid should not ship the list at all.
  */
 function shared_options_template(string $listId, callable $build): string
 {
@@ -275,7 +264,20 @@ function shared_options_script(): string
         var template = document.getElementById('opts-' + select.getAttribute('data-fill-from'));
         if (!template) { return; }
         var chosen = select.value;
-        select.innerHTML = template.innerHTML;
+        // APPEND to what the stub already holds rather than replacing it. Some
+        // selects carry a placeholder of their own that is not part of the
+        // shared list — "— money, not metal —" on a tender row — and replacing
+        // the contents wiped it off every row but the first.
+        var already = {};
+        Array.prototype.forEach.call(select.options, function (option) { already[option.value] = true; });
+        var incoming = document.createElement('select');
+        incoming.innerHTML = template.innerHTML;
+        var addition = document.createDocumentFragment();
+        Array.prototype.forEach.call(incoming.options, function (option) {
+            if (already[option.value]) { return; }
+            addition.appendChild(option.cloneNode(true));
+        });
+        select.appendChild(addition);
         // Only restore a value the list still offers, or a stale one would
         // silently become whichever option happens to be first.
         if (chosen && select.querySelector('option[value="' + chosen + '"]')) {

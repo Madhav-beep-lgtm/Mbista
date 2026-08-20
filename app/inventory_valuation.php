@@ -883,6 +883,67 @@ function inv_item_valuation(int $companyId, array $item): array
 }
 
 /**
+ * The same valuation as inv_item_valuation(), for many items in three sweeps.
+ *
+ * Item by item that function costs four statements — two proving there is no
+ * backfill to do, one for the cost layers, one for the NRV assessment — so a
+ * page of fifty rows spent two hundred round trips to price them. The bulk
+ * helpers it needs already existed for the KPI totals; this returns the per-row
+ * figures a table needs instead of three sums.
+ *
+ * The arithmetic below is inv_item_valuation()'s, line for line, including the
+ * legacy fallback to purchase_rate for an item that has no layers yet. If one
+ * changes the other has to.
+ *
+ * @return array<int, array{qty: float, cost_value: float, unit_cost: float,
+ *                          nrv_per_unit: float, lower_value: float, write_down: float}>
+ */
+function inv_item_valuations(int $companyId, array $items): array
+{
+    if ($items === []) {
+        return [];
+    }
+    inv_ensure_layers_bulk($companyId, $items);
+    $ids = array_map(static fn (array $item): int => (int) $item['id'], $items);
+    $balances = inv_layer_balances($companyId, $ids);
+    $assessments = inv_nrv_latest($companyId, $ids);
+
+    $out = [];
+    foreach ($items as $item) {
+        $itemId = (int) $item['id'];
+        $qty = $balances[$itemId]['qty'] ?? 0.0;
+        $costValue = $balances[$itemId]['value'] ?? 0.0;
+        if ($qty <= INV_EPSILON && isset($item['on_hand'])) {
+            $qty = inv_round_qty((float) $item['on_hand']);
+            $costValue = inv_round_money($qty * (float) ($item['purchase_rate'] ?? 0));
+        }
+        $unitCost = $qty > INV_EPSILON ? $costValue / $qty : 0.0;
+
+        $sellingPrice = (float) ($item['sales_rate'] ?? 0);
+        $completion = 0.0;
+        $selling = 0.0;
+        if (isset($assessments[$itemId])) {
+            $sellingPrice = $assessments[$itemId]['selling_price'];
+            $completion = $assessments[$itemId]['completion_cost'];
+            $selling = $assessments[$itemId]['selling_cost'];
+        }
+        $nrvPerUnit = $sellingPrice > 0 ? ($sellingPrice - $completion - $selling) : $unitCost;
+        $lowerValue = inv_round_money($qty * min($unitCost, $nrvPerUnit));
+
+        $out[$itemId] = [
+            'qty' => $qty,
+            'cost_value' => inv_round_money($costValue),
+            'unit_cost' => inv_round_cost($unitCost),
+            'nrv_per_unit' => inv_round_cost($nrvPerUnit),
+            'lower_value' => $lowerValue,
+            'write_down' => inv_round_money(max(0.0, inv_round_money($costValue) - $lowerValue)),
+        ];
+    }
+
+    return $out;
+}
+
+/**
  * Company-wide valuation totals across all active items (drives the KPI cards).
  * @return array{cost: float, lower: float, write_down: float}
  */

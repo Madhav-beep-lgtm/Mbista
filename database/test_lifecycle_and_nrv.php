@@ -290,6 +290,27 @@ db()->exec("DELETE FROM vouchers WHERE company_id=$co AND (source_type IN ('asse
 db()->exec("DELETE FROM inventory_nrv_assessments WHERE item_id=$iid");
 db()->exec("DELETE FROM inventory_cost_layers WHERE item_id=$iid");
 db()->exec("DELETE FROM inventory_transactions WHERE item_id=$iid");
+// ---------------------------------------------------------------------------
+// The bulk pricing must agree with the per-item pricing, figure for figure.
+//
+// inv_item_valuations() exists only so a page of fifty rows costs three
+// statements instead of two hundred. It duplicates inv_item_valuation()'s
+// arithmetic to do it, so the two are compared here against a real item with
+// layers and an assessment behind it — a comment claiming they match is not
+// worth anything on a number that ends up in the accounts.
+// Given real stock first, or the comparison is six zeros agreeing with six
+// zeros and proves nothing: by this point in the suite the item is depleted.
+inv_add_layer($co, $iid, 8.0, 125.0, date('Y-m-d'));
+$freshItem = db()->query("SELECT * FROM inventory_items WHERE id=$iid")->fetch(PDO::FETCH_ASSOC);
+$oneAtATime = inv_item_valuation($co, $freshItem);
+$inBulk = inv_item_valuations($co, [$freshItem])[$iid] ?? [];
+foreach (['qty', 'cost_value', 'unit_cost', 'nrv_per_unit', 'lower_value', 'write_down'] as $valuationField) {
+    $oneValue = (float) ($oneAtATime[$valuationField] ?? -1);
+    $bulkValue = (float) ($inBulk[$valuationField] ?? -2);
+    ok('S35', 'Bulk pricing agrees with per-item pricing on ' . $valuationField,
+        abs($oneValue - $bulkValue) < 0.005, $oneValue . ' vs ' . $bulkValue);
+}
+
 db()->exec("DELETE FROM inventory_items WHERE id=$iid");
 db()->exec("DELETE FROM warehouses WHERE id IN ($whA,$whB)");
 db()->exec("DELETE FROM lease_schedule_lines WHERE lease_id=$leaseId");

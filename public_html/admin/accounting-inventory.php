@@ -1981,10 +1981,13 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     }
     $valPageCount = max(1, (int) ceil(count($items) / $valPerPage));
     $valPage = max(1, min($valPageCount, (int) ($_GET['page'] ?? 1)));
-    $valuationRows = array_map(static function (array $item) use ($companyId): array {
-        $v = inv_item_valuation($companyId, $item);
-        return $item + ['val' => $v];
-    }, array_slice($items, ($valPage - 1) * $valPerPage, $valPerPage));
+    // Priced in three sweeps for the whole page rather than four statements per
+    // row — same arithmetic, see inv_item_valuations().
+    $valPageItems = array_slice($items, ($valPage - 1) * $valPerPage, $valPerPage);
+    $valPriced = inv_item_valuations($companyId, $valPageItems);
+    $valuationRows = array_map(static function (array $item) use ($valPriced): array {
+        return $item + ['val' => $valPriced[(int) $item['id']] ?? []];
+    }, $valPageItems);
     // Its own link builder rather than the stock list's: that one carries no
     // view and anchors to the table above, so paging from here would have
     // landed the reader on a different screen than the one they were reading.
@@ -2895,8 +2898,11 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         <thead><tr><th>SKU</th><th>Name</th><th>Type</th><th>Method</th><th>Unit</th><th class="is-numeric">On hand</th><th class="is-numeric">Unit cost</th><th class="is-numeric">Value at cost</th><th class="is-numeric">Reorder</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
             <?php if ($visibleItems === []): ?><tr><td colspan="11"><?= $lowOnly ? 'No items are at or below their reorder level.' : 'No items yet.' ?></td></tr><?php endif; ?>
+            <?php // Priced for the whole page in three sweeps, not four statements
+                  // a row — same arithmetic, see inv_item_valuations().
+                  $pagedPriced = inv_item_valuations($companyId, $pagedItems); ?>
             <?php foreach ($pagedItems as $item): ?>
-                <?php $low = $isLowStock($item); $iv = inv_item_valuation($companyId, $item); ?>
+                <?php $low = $isLowStock($item); $iv = $pagedPriced[(int) $item['id']] ?? []; ?>
                 <tr>
                     <td><?= e($item['sku']) ?></td><td><?= e($item['name']) ?></td><td><?= e(str_replace('_', ' ', $item['item_type'])) ?></td>
                     <td><span class="mbw-pill tone-gray"><?= e(strtoupper(str_replace('_', ' ', (string) ($item['valuation_method'] ?? 'weighted_average')))) ?></span></td>
