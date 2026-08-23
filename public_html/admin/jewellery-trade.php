@@ -953,7 +953,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
             <input type="hidden" name="view" value="sales">
             <input type="hidden" name="for_party" value="<?= (int) $saleParty ?>">
         </form>
-        <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="New Sale" data-popup-open="<?= $editDoc ? '1' : '0' ?>">
+        <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="New Sale" data-popup-open="<?= ($editDoc || ($_GET['popup'] ?? '') === 'sale') ? '1' : '0' ?>">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_sale">
             <input type="hidden" name="back_view" value="sales">
@@ -1419,6 +1419,7 @@ document.addEventListener("change", function (event) {
     var party = parseInt(select.value, 10) || 0;
     var target = new URL(window.location.href);
     target.searchParams.set("view", "sales");
+    target.searchParams.set("popup", "sale");
     target.searchParams.delete("sell_order");
     target.searchParams.delete("sell_orders[]");
     if (party > 0) {
