@@ -1485,8 +1485,10 @@ function jewellery_sale_exchange_rows(int $companyId, int $saleId): array
 
 function jewellery_sales_list(int $companyId, array $filters = []): array
 {
-    $sql = 'SELECT s.*, ap.name AS party_name FROM jewellery_sales s
+    $sql = 'SELECT s.*, ap.name AS party_name, o.order_no AS order_no
+        FROM jewellery_sales s
         LEFT JOIN accounting_parties ap ON ap.id = s.party_id
+        LEFT JOIN jewellery_orders o ON o.id = s.order_id
         WHERE s.company_id = :cid';
     $params = ['cid' => $companyId];
     if (($filters['from'] ?? '') !== '' && ($filters['to'] ?? '') !== '') {

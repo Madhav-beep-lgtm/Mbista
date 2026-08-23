@@ -1164,7 +1164,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2></div>
+        <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2><span><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
         <?php jw_render_filter_bar([
             'hidden' => ['view' => 'sales'],
             'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
@@ -1180,22 +1180,33 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         ]); ?>
 
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>No.</th><th>Date</th><th>Customer</th><th class="is-numeric">Total</th><th class="is-numeric">Cash</th><th class="is-numeric">Exchange</th><th class="is-numeric">Balance</th><th class="is-numeric">COGS</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>No.</th><th>Order ref.</th><th>Date</th><th>Customer</th><th class="is-numeric">Total</th><th class="is-numeric">Received</th><th class="is-numeric">Advance applied</th><th class="is-numeric">Exchange</th><th class="is-numeric">Pending</th><th class="is-numeric">COGS</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
-                <?php if ($docPageRows === []): ?><tr><td colspan="10">No sales yet.</td></tr><?php endif; ?>
+                <?php if ($docPageRows === []): ?><tr><td colspan="12">No sales yet.</td></tr><?php endif; ?>
                 <?php foreach ($docPageRows as $row): ?>
                     <?php $isDraft = (string) $row['status'] === 'draft'; ?>
                     <tr>
                         <td><?= e($row['sale_no']) ?></td>
+                        <td><?= e((string) ($row['order_no'] ?? '—')) ?></td>
                         <td><?= e(app_date((string) $row['sale_date'])) ?></td>
                         <td><?= e((string) ($row['party_name'] ?? $row['customer_name'] ?? 'Walk-in')) ?></td>
                         <td class="is-numeric"><strong><?= e($sym) ?><?= $fmt((float) $row['total_amount']) ?></strong></td>
                         <td class="is-numeric"><?= $fmt((float) $row['received_amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['advance_amount'] ?? 0)) ?></td>
                         <td class="is-numeric"><?= (float) $row['exchange_amount'] > 0 ? '<span class="mbw-pill tone-amber">' . $fmt((float) $row['exchange_amount']) . '</span>' : '—' ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['balance_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['cogs_amount']) ?></td>
                         <td><span class="mbw-pill <?= $isDraft ? 'tone-amber' : 'tone-green' ?>"><?= $isDraft ? 'Draft' : 'Posted' ?></span></td>
                         <td style="white-space:nowrap">
+                            <select class="jw-sale-action" aria-label="Actions for <?= e((string) $row['sale_no']) ?>">
+                                <option value="">Actions</option>
+                                <?php if ($isDraft && $canEdit): ?><option value="<?= e(url('admin/jewellery-trade.php?view=sales&edit=' . (int) $row['id'])) ?>">Edit</option><?php endif; ?>
+                                <option value="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'])) ?>">Preview</option>
+                                <option value="<?= e(url('admin/jewellery-invoice.php?id=' . (int) $row['id'])) ?>">Invoice</option>
+                                <?php if ($canExport): ?><option value="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'] . '&format=xlsx')) ?>">Export Excel</option><?php endif; ?>
+                                <?php if ($isDraft && $canPost): ?><option value="<?= e(url('admin/jewellery-trade.php?view=sales&confirm_post=' . (int) $row['id'])) ?>">Post sale</option><?php endif; ?>
+                            </select>
+                            <span hidden>
                             <?php if ($isDraft && $canEdit): ?>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-trade.php?view=sales&edit=' . (int) $row['id'])) ?>">Edit</a>
                             <?php endif; ?>
@@ -1232,7 +1243,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                     <button type="submit" class="button soft" style="min-height:30px;padding:3px 8px;color:var(--mbw-red,#e5484d)" title="Delete this draft sale"><?= icon('trash') ?></button>
                                 </form>
                             <?php endif; ?>
-                        </td>
+                            </span></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -1410,6 +1421,10 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 <?php endif; ?>
 
 <script>
+document.addEventListener("change", function (event) {
+    var action = event.target.closest(".jw-sale-action");
+    if (action && action.value) { window.location.assign(action.value); }
+});
 // Pick a customer first, then reload this same sale with the customer's open
 // orders. This gives the counter a clear delivery view before anything is
 // added to the bill.
