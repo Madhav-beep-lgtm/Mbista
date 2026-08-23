@@ -728,6 +728,9 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     jw_render_line_grid($prefix, $existing, $slots, $legend, [
         'items' => $items, 'purities' => $purities, 'units' => $units,
         'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $onHand,
+        // Sales use established catalogue items only. Creating stock master
+        // records belongs in the item master, never at the sales counter.
+        'allow_item_create' => $view !== 'sales',
         'head_actions' => $headActions,
         'stock_units' => $view === 'sales' && $prefix === 'l' ? $saleStockUnits : [],
         'autofill_stock' => $view === 'sales' && $prefix === 'l',

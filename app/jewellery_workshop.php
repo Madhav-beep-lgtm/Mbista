@@ -3274,6 +3274,21 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
     if ($received !== null && $receivedLineIndex < 0 && count($workshopLineIndexes) === 1) {
         $receivedLineIndex = $workshopLineIndexes[0];
     }
+    // Some older multi-line orders retained neither line-level assignment link.
+    // The returned item itself is still authoritative when it identifies exactly
+    // one ordered item; this is the safe legacy fallback for those orders.
+    if ($received !== null && $receivedLineIndex < 0) {
+        $matchingItemLines = [];
+        foreach ($orderLines as $index => $orderLine) {
+            if ((string) ($orderLine['source'] ?? 'workshop') !== 'stock'
+                && (int) ($orderLine['item_id'] ?? 0) === $itemId) {
+                $matchingItemLines[] = $index;
+            }
+        }
+        if (count($matchingItemLines) === 1) {
+            $receivedLineIndex = $matchingItemLines[0];
+        }
+    }
     $lines = [];
     foreach ($orderLines as $index => $orderLine) {
         // That line is the one the karigar worked to, so it takes the weight

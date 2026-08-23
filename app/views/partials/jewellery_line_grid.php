@@ -244,6 +244,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
     $baseUnit = $ctx['base_unit'] ?? null;
     $onHand = $ctx['on_hand'] ?? [];
     $fmt = $ctx['fmt'] ?? static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
+    $allowItemCreate = !array_key_exists('allow_item_create', $ctx) || !empty($ctx['allow_item_create']);
     // Orders only. Kaligads specialise — the one who makes chains does not set
     // stones — so each item on an order goes to its own craftsman and carries
     // its own promised date. A sale or a purchase has neither, so the two
@@ -524,7 +525,9 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                             </select>
-                            <button type="button" class="jw-add-item-btn" data-row-index="<?= $i ?>" title="Create a new item">+ Add</button>
+                            <?php if ($allowItemCreate): ?>
+                                <button type="button" class="jw-add-item-btn" data-row-index="<?= $i ?>" title="Create a new item">+ Add</button>
+                            <?php endif; ?>
                         </div>
                     </td>
                     <td data-label="Purity">
