@@ -991,6 +991,10 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         <form method="get" id="jw-collect-form">
             <input type="hidden" name="view" value="sales">
             <input type="hidden" name="for_party" value="<?= (int) $saleParty ?>">
+            <!-- Billing ticked orders reloads to prefill the sale. Keep that
+                 freshly prepared sale inside its popup instead of leaving the
+                 form collapsed below the sales register. -->
+            <input type="hidden" name="popup" value="sale">
         </form>
         <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="New Sale" data-popup-open="<?= ($editDoc || ($_GET['popup'] ?? '') === 'sale') ? '1' : '0' ?>">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
