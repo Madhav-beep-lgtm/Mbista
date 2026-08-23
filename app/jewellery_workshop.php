@@ -3257,26 +3257,36 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
     // weighed when it came back for the SHOWROOM, and those figures are already
     // on its order line — letting a customer's receipt overwrite them would
     // bill one physical piece using another one's weight.
-    $firstWorkshopIndex = -1;
+    $receivedLineIndex = -1;
+    $workshopLineIndexes = [];
     foreach ($orderLines as $index => $orderLine) {
         if ((string) ($orderLine['source'] ?? 'workshop') !== 'stock') {
-            $firstWorkshopIndex = $index;
-            break;
+            $workshopLineIndexes[] = $index;
+            // A receipt is linked to its assignment, which is linked to the
+            // exact order line it completed. Do not overwrite another item.
+            if ($received !== null && (int) ($orderLine['assignment_id'] ?? 0) > 0
+                && (int) $orderLine['assignment_id'] === (int) ($received['assignment_id'] ?? 0)) {
+                $receivedLineIndex = $index;
+            }
         }
+    }
+    // One-line legacy orders may not have retained the line assignment link.
+    if ($received !== null && $receivedLineIndex < 0 && count($workshopLineIndexes) === 1) {
+        $receivedLineIndex = $workshopLineIndexes[0];
     }
     $lines = [];
     foreach ($orderLines as $index => $orderLine) {
         // That line is the one the karigar worked to, so it takes the weight
         // and rate actually received. The rest stand as ordered.
-        $isFirst = $index === $firstWorkshopIndex;
-        $lineGross = $isFirst && $received !== null ? $gross : jw_round_weight((float) $orderLine['gross_weight']);
+        $isReceivedLine = $index === $receivedLineIndex;
+        $lineGross = $isReceivedLine && $received !== null ? $gross : jw_round_weight((float) $orderLine['gross_weight']);
         $lineRate = (float) $orderLine['rate'];
-        if ($isFirst && $rate > 0) {
+        if ($isReceivedLine && $rate > 0) {
             $lineRate = $rate;
         }
         $lines[] = [
-            'item_id' => $isFirst ? $itemId : (int) $orderLine['item_id'],
-            'purity_id' => $isFirst ? $purityId : (int) $orderLine['purity_id'],
+            'item_id' => $isReceivedLine ? $itemId : (int) $orderLine['item_id'],
+            'purity_id' => $isReceivedLine ? $purityId : (int) $orderLine['purity_id'],
             'unit_id' => (int) $orderLine['unit_id'],
             'stock_unit_id' => (int) ($orderLine['stock_unit_id'] ?? 0) ?: null,
             'qty_pieces' => (float) $orderLine['qty_pieces'] ?: 1,
@@ -3284,11 +3294,11 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
             // What actually came back governs the first line's stones, exactly
             // as it governs its weight; the order's own estimate stands only
             // until there is a receipt to go on.
-            'stone_weight' => $isFirst && $received !== null ? $stoneWeight : (float) $orderLine['stone_weight'],
+            'stone_weight' => $isReceivedLine && $received !== null ? $stoneWeight : (float) $orderLine['stone_weight'],
             'wastage_pct' => (float) $orderLine['wastage_pct'],
-            'wastage_weight' => $isFirst ? 0.0 : (float) $orderLine['wastage_weight'],
+            'wastage_weight' => $isReceivedLine ? 0.0 : (float) $orderLine['wastage_weight'],
             'rate' => $lineRate,
-            'making_amount' => $isFirst ? $making : (float) $orderLine['making_amount'],
+            'making_amount' => $isReceivedLine ? $making : (float) $orderLine['making_amount'],
             'stone_amount' => (float) $orderLine['stone_amount'],
             'stone_carat' => (float) $orderLine['stone_carat'],
             'diamond_amount' => (float) $orderLine['diamond_amount'],

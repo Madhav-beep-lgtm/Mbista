@@ -541,6 +541,22 @@ if ($view === 'sales') {
         }
     }
     $saleStockUnits = array_values($byTrace);
+
+    // A historical order can name an item that was later archived. It is still
+    // a valid item on that customer's bill, so retain it in the sale picker
+    // instead of rendering an empty item field after the order is prefilled.
+    $listedItemIds = array_fill_keys(array_map(static fn (array $item): int => (int) $item['id'], $items), true);
+    foreach ($editLines as $editLine) {
+        $itemId = (int) ($editLine['item_id'] ?? 0);
+        if ($itemId <= 0 || isset($listedItemIds[$itemId])) {
+            continue;
+        }
+        $historicalItem = jewellery_item($companyId, $itemId);
+        if ($historicalItem) {
+            $items[] = $historicalItem;
+            $listedItemIds[$itemId] = true;
+        }
+    }
 }
 
 // Posting is confirmed with the mapping ON THE SCREEN. The Post button leads
