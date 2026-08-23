@@ -564,6 +564,9 @@ if (!in_array($ptab, ['profile', 'ledger', 'documents', 'notes'], true)) {
     $ptab = 'profile';
 }
 $searchQuery = trim((string) ($_GET['q'] ?? ''));
+$codeFilter = trim((string) ($_GET['code'] ?? ''));
+$nameFilter = trim((string) ($_GET['name'] ?? ''));
+$panFilter = trim((string) ($_GET['pan'] ?? ''));
 $statusFilter = (string) ($_GET['status'] ?? '');
 $classificationFilter = (string) ($_GET['classification'] ?? '');
 $linkStatusFilter = (string) ($_GET['link_status'] ?? '');
@@ -1462,7 +1465,10 @@ if ($statusFilter !== '' && in_array($statusFilter, ['open', 'paid', 'overdue'],
 }
 // The toolbar search filters the unified party directory using party identity,
 // contact details and tax registration information.
-$partyMatchesSearch = static function (array $party) use ($searchQuery): bool {
+$partyMatchesSearch = static function (array $party) use ($searchQuery, $codeFilter, $nameFilter, $panFilter): bool {
+    if ($codeFilter !== '' && (string) ($party['code'] ?? '') !== $codeFilter) { return false; }
+    if ($nameFilter !== '' && (string) ($party['name'] ?? '') !== $nameFilter) { return false; }
+    if ($panFilter !== '' && (string) ($party['pan_no'] ?? '') !== $panFilter) { return false; }
     if ($searchQuery === '') {
         return true;
     }
@@ -1730,7 +1736,7 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
         <?php endif; ?>
         <a class="button<?= $primaryAction === 'party' ? '' : ' secondary' ?>" href="<?= e(parties_page_url(['panel' => 'party', 'edit_id' => null])) ?>"><?= icon('users') ?><?= e($newPartyLabel) ?></a>
     </div>
-    <form class="reference-filter-group" method="get" action="<?= e(url('admin/accounting-parties.php')) ?>">
+    <form class="reference-filter-group" method="get" action="<?= e(url('admin/accounting-parties.php')) ?>" style="display:flex;flex-wrap:nowrap;gap:10px;align-items:end;overflow-x:auto;padding-bottom:4px">
         <?php if (!in_array($tab, ['customers', 'suppliers'], true)): ?><input type="hidden" name="tab" value="<?= e($tab) ?>"><?php endif; ?>
         <?php if ($typeFilter !== ''): ?><input type="hidden" name="type" value="<?= e($typeFilter) ?>"><?php endif; ?>
         <?php if (in_array($tab, ['sales', 'purchases'], true)): ?>
@@ -1746,32 +1752,38 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
             </select>
         <?php endif; ?>
         <?php if (in_array($tab, $partyDirectoryTabs, true)): ?>
-            <select name="classification" aria-label="Party classification">
+            <label style="display:grid;gap:4px;flex:0 0 150px;margin:0"><span>Code</span><select name="code" class="js-searchable" aria-label="Filter by code"><option value="">All codes</option><?php foreach ($parties as $partyOption): ?><?php if (($partyOption['code'] ?? '') !== ''): ?><option value="<?= e((string) $partyOption['code']) ?>" <?= $codeFilter === (string) $partyOption['code'] ? 'selected' : '' ?>><?= e((string) $partyOption['code']) ?></option><?php endif; ?><?php endforeach; ?></select></label>
+            <label style="display:grid;gap:4px;flex:0 0 180px;margin:0"><span>Name</span><select name="name" class="js-searchable" aria-label="Filter by name"><option value="">All names</option><?php foreach ($parties as $partyOption): ?><?php if (($partyOption['name'] ?? '') !== ''): ?><option value="<?= e((string) $partyOption['name']) ?>" <?= $nameFilter === (string) $partyOption['name'] ? 'selected' : '' ?>><?= e((string) $partyOption['name']) ?></option><?php endif; ?><?php endforeach; ?></select></label>
+            <label style="display:grid;gap:4px;flex:0 0 150px;margin:0"><span>PAN</span><select name="pan" class="js-searchable" aria-label="Filter by PAN"><option value="">All PANs</option><?php foreach ($parties as $partyOption): ?><?php if (($partyOption['pan_no'] ?? '') !== ''): ?><option value="<?= e((string) $partyOption['pan_no']) ?>" <?= $panFilter === (string) $partyOption['pan_no'] ? 'selected' : '' ?>><?= e((string) $partyOption['pan_no']) ?></option><?php endif; ?><?php endforeach; ?></select></label>
+            <label style="display:grid;gap:4px;flex:0 0 160px;margin:0"><span>Classification</span><select name="classification" aria-label="Party classification">
                 <option value="">All classifications</option>
                 <option value="customer" <?= $classificationFilter === 'customer' ? 'selected' : '' ?>>Customers</option>
                 <option value="supplier" <?= $classificationFilter === 'supplier' ? 'selected' : '' ?>>Suppliers</option>
                 <option value="both" <?= $classificationFilter === 'both' ? 'selected' : '' ?>>Customer &amp; Supplier</option>
-            </select>
+            </select></label>
 
-            <select name="link_status" aria-label="Party link status">
+            <label style="display:grid;gap:4px;flex:0 0 145px;margin:0"><span>Link status</span><select name="link_status" aria-label="Party link status">
                 <option value="">All link statuses</option>
                 <option value="linked" <?= $linkStatusFilter === 'linked' ? 'selected' : '' ?>>Linked</option>
                 <option value="unlinked" <?= $linkStatusFilter === 'unlinked' ? 'selected' : '' ?>>Unlinked</option>
                 <option value="duplicate" <?= $linkStatusFilter === 'duplicate' ? 'selected' : '' ?>>Possible duplicates</option>
-            </select>
+            </select></label>
 
-            <select name="balance_status" aria-label="Party balance status">
+            <label style="display:grid;gap:4px;flex:0 0 150px;margin:0"><span>Balance status</span><select name="balance_status" aria-label="Party balance status">
                 <option value="">All balance statuses</option>
                 <option value="debit" <?= $balanceStatusFilter === 'debit' ? 'selected' : '' ?>>Debit balance</option>
                 <option value="credit" <?= $balanceStatusFilter === 'credit' ? 'selected' : '' ?>>Credit balance</option>
                 <option value="zero" <?= $balanceStatusFilter === 'zero' ? 'selected' : '' ?>>Zero balance</option>
-            </select>
+            </select></label>
         <?php endif; ?>
-        <div class="reference-search"><?= icon('search') ?><input type="search" name="q" value="<?= e($searchQuery) ?>" placeholder="<?= e(in_array($tab, $partyDirectoryTabs, true) ? 'Search code, name, PAN, phone or email' : 'Search invoice, party, or ref no.') ?>"></div>
+        <div class="reference-search" style="flex:0 0 220px"><?= icon('search') ?><input type="search" name="q" value="<?= e($searchQuery) ?>" placeholder="<?= e(in_array($tab, $partyDirectoryTabs, true) ? 'Other search' : 'Search invoice, party, or ref no.') ?>"></div>
         <button class="button secondary" type="submit"><?= icon('filter') ?>Filter</button>
         <?php if (in_array($tab, $partyDirectoryTabs, true)): ?>
             <a class="button secondary" href="<?= e(parties_page_url([
                 'q' => null,
+                'code' => null,
+                'name' => null,
+                'pan' => null,
                 'classification' => null,
                 'link_status' => null,
                 'balance_status' => null,
