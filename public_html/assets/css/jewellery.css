@@ -609,3 +609,38 @@ table.jw-opening-import-table td:nth-child(17) { min-width: 190px; }
     .jw-assign-page .jw-filter-actions > *,
     .jw-assign-page .jw-export-group > * { width: 100%; }
 }
+
+/* The section heading inside the consolidated summary.
+   One report reads top to bottom, so each section needs a visible seam or the
+   figures under it run into the ones above. A rule and a tint do it without a
+   second table and without the five boxes this layout replaced. */
+.jw-summary-section > th {
+  background: var(--mbw-surface-2, #f2f6f3);
+  border-top: 2px solid var(--mbw-border, #d7e2da);
+  font-size: 13.5px;
+  letter-spacing: .01em;
+}
+.jw-summary-section > th svg {
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+/* The first section sits right under the table head; it needs no seam above. */
+tbody > .jw-summary-section:first-child > th {
+  border-top: 0;
+}
+
+/* The per-column filter row under a table's headings.
+   It is controls, not data, so it is tightened up and tinted to read as part
+   of the head rather than as the first row of the report. */
+.mbw-filter-row > td {
+  background: var(--mbw-surface-2, #f7faf8);
+  padding: 6px 8px;
+  vertical-align: top;
+  border-bottom: 2px solid var(--mbw-border, #d7e2da);
+}
+.mbw-filter-row input,
+.mbw-filter-row select {
+  min-height: 30px;
+  padding: 3px 6px;
+  font-size: 12.5px;
+}

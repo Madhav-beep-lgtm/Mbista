@@ -575,6 +575,123 @@ function spreadsheet_read_rows(string $path, string $originalName, int $maxRows 
  *
  * @param string $format csv | xlsx | print
  */
+/**
+ * Append a TOTAL row to export rows, once, for every format.
+ *
+ * A register printed without its total is a list, not a report: the reader adds
+ * it up by hand, gets a different answer from the person beside them, and
+ * neither can tell which of them is wrong. It goes in here rather than in each
+ * page so the CSV, the Excel and the PDF all carry the same footing.
+ *
+ * WHICH COLUMNS ARE SUMMED. Pass them and they are used. Left out, a column is
+ * summed when every data cell in it is a number or blank AND at least one is a
+ * number — with a skip-list over the header, because plenty of columns hold
+ * numbers that must never be added up:
+ *
+ *   a RATE or a PERCENTAGE — adding two rates gives a number that is not a rate
+ *   a DATE, a document NUMBER, a CODE, an ID — sequence, not quantity
+ *   DAYS LATE — the sum of two ages is not an age
+ *
+ * The skip-list errs towards leaving a column alone. A total nobody asked for
+ * is worse than a total that is missing: the missing one is noticed, and the
+ * wrong one is quoted.
+ *
+ * @param  array<int, array<int, mixed>> $rows        header row first, then data
+ * @param  array<int, int>               $sumColumns  0-based; empty means detect
+ * @return array<int, array<int, mixed>> the same rows with a total appended
+ */
+function export_totals_row(array $rows, array $sumColumns = [], string $label = 'Total'): array
+{
+    if (count($rows) < 2) {
+        return $rows;
+    }
+    $header = array_values((array) $rows[0]);
+    $body = array_slice($rows, 1);
+    $width = count($header);
+    if ($width === 0) {
+        return $rows;
+    }
+
+    $isNumber = static fn ($v): bool => is_int($v) || is_float($v)
+        || (is_string($v) && trim($v) !== '' && preg_match('/^-?[\d,]+(\.\d+)?$/', trim($v)) === 1);
+    $toNumber = static fn ($v): float => (float) str_replace(',', '', (string) $v);
+
+    if ($sumColumns === []) {
+        // Never summed, whatever the cells look like.
+        $never = ['rate', '%', 'pct', 'percent', 'date', 'days', 'no.', 'no', 'code', 'id',
+            // A running balance already holds the answer on its last row.
+            'balance',
+            'status', 'purity', 'unit', 'kind', 'basis', 'section', 'phase', 'ref', 'reference',
+            'party', 'customer', 'supplier', 'item', 'type', 'source', 'label', 'figure'];
+        for ($column = 0; $column < $width; $column++) {
+            $heading = strtolower(trim((string) ($header[$column] ?? '')));
+            $skip = false;
+            foreach ($never as $word) {
+                // Whole word, so "Rate" is skipped and "Corporate" is not.
+                if ($heading === $word || preg_match('/\b' . preg_quote($word, '/') . '\b/', $heading) === 1) {
+                    $skip = true;
+                    break;
+                }
+            }
+            if ($skip) {
+                continue;
+            }
+            $sawNumber = false;
+            $allNumericOrBlank = true;
+            foreach ($body as $row) {
+                $cell = array_values((array) $row)[$column] ?? '';
+                if ($cell === null || (is_string($cell) && trim($cell) === '')) {
+                    continue;
+                }
+                if ($isNumber($cell)) {
+                    $sawNumber = true;
+                    continue;
+                }
+                $allNumericOrBlank = false;
+                break;
+            }
+            if ($sawNumber && $allNumericOrBlank) {
+                $sumColumns[] = $column;
+            }
+        }
+    }
+    if ($sumColumns === []) {
+        return $rows;
+    }
+
+    $totals = array_fill(0, $width, '');
+    $totals[0] = $label;
+    foreach ($sumColumns as $column) {
+        if ($column < 0 || $column >= $width) {
+            continue;
+        }
+        $sum = 0.0;
+        $decimals = 0;
+        foreach ($body as $row) {
+            $cell = array_values((array) $row)[$column] ?? '';
+            if (!$isNumber($cell)) {
+                continue;
+            }
+            $sum += $toNumber($cell);
+            // Foot the column to the SAME number of places its rows are
+            // written in, so a total of four-decimal weights does not print
+            // beside them as a rounded two.
+            $dot = strrpos(rtrim((string) $cell), '.');
+            if ($dot !== false) {
+                $decimals = max($decimals, strlen(rtrim((string) $cell)) - $dot - 1);
+            }
+        }
+        $totals[$column] = number_format($sum, min(6, $decimals), '.', '');
+    }
+    // The label needs somewhere to live. If column 0 is itself being totalled,
+    // the label would overwrite that figure, so it steps aside to column 1.
+    if (in_array(0, $sumColumns, true) && $width > 1) {
+        $totals[1] = $totals[1] === '' ? $label : $totals[1];
+    }
+    $rows[] = $totals;
+
+    return $rows;
+}
 function export_dispatch(string $format, string $basename, array $rows, string $title, array $meta = [], array $options = []): void
 {
     switch ($format) {

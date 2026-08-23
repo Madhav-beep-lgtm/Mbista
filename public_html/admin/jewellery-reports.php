@@ -103,6 +103,10 @@ if (isset($_GET['export']) && $canExport) {
         $summaryMeta = $meta;
         $summaryMeta['Weights'] = $consolidated['base_unit'] !== ''
             ? ('fine ' . $consolidated['base_unit']) : 'fine, base unit';
+        // NOT footed, and this is the one report that must not be. Its Value
+        // column holds rupees, weights and counts one under the other, so a sum
+        // down it is the single figure on the page that could not mean anything.
+        // Each section already foots itself where a footing makes sense.
         export_dispatch($format, 'jewellery-summary-' . $stamp, $data, 'Consolidated Summary', $summaryMeta);
     }
     if ($view === 'sales') {
@@ -114,6 +118,11 @@ if (isset($_GET['export']) && $canExport) {
                 $r['making_amount'], $r['stone_side'], $r['vat_base'], $r['vat_amount'], $r['revenue'],
                 $r['cogs_amount'], $r['gross_profit'], $r['gp_pct']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'jewellery-sales-' . $stamp, $data, 'Sales Detailed', $meta);
     }
     if ($view === 'purchases') {
@@ -124,6 +133,11 @@ if (isset($_GET['export']) && $canExport) {
                 $r['purity_code'], $r['qty_pieces'], $r['gross_weight'], $r['fine_weight'], $r['rate'],
                 $r['metal_amount'], $r['making_amount'], $r['stone_side'], $r['vat_amount'], $r['stock_amount']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'jewellery-purchases-' . $stamp, $data, 'Purchase Detailed', $meta);
     }
     if ($view === 'inventory') {
@@ -134,6 +148,11 @@ if (isset($_GET['export']) && $canExport) {
                 $r['opening_value'], $r['in_fine'], $r['in_value'], $r['out_fine'], $r['out_value'],
                 $r['closing_fine'], $r['closing_value'], $r['own_fine'], $r['with_others_fine'], $r['avg_fine_rate']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'jewellery-inventory-' . $stamp, $data, 'Inventory Detailed', $meta);
     }
     if ($view === 'vat') {
@@ -153,6 +172,11 @@ if (isset($_GET['export']) && $canExport) {
             $data[] = [$t['tax_code'], $t['tax_name'], $t['output_base'], $t['output_amount'],
                 $t['input_base'], $t['input_amount'], $t['net_payable']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'jewellery-vat-' . $stamp, $data, 'Tax Register', $meta);
     }
     if ($view === 'uncollected') {
@@ -164,6 +188,11 @@ if (isset($_GET['export']) && $canExport) {
                 $r['days_late'], $r['expected_gross_weight'], $r['unit_code'],
                 $r['total_amount'], $r['advance_amount'], $r['balance_due'], $r['status']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'jewellery-uncollected-' . $stamp, $data, 'Uncollected Orders', $meta);
     }
     if ($view === 'bills') {
@@ -181,6 +210,11 @@ if (isset($_GET['export']) && $canExport) {
             }
             $exportOffset += $exportBillCount;
         } while ($exportBillCount === 5000);
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'jewellery-bills-' . $stamp, $data, 'Bill-wise Outstanding', $meta);
     }
     if ($view === 'karigar' && $karigarId > 0) {
@@ -193,6 +227,11 @@ if (isset($_GET['export']) && $canExport) {
         $meta['Kaligad'] = (string) ($ledger['karigar']['name'] ?? '');
         $meta['Opening fine'] = number_format((float) $ledger['opening_fine'], 4);
         $meta['Closing fine'] = number_format((float) $ledger['closing_fine'], 4);
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'kaligad-ledger-' . $stamp, $data, 'Kaligad Ledger', $meta);
     }
     if ($view === 'orders') {
@@ -205,6 +244,11 @@ if (isset($_GET['export']) && $canExport) {
                 $r['total_amount'], $r['advance_held'], $r['advance_applied'], $r['advance_unapplied'],
                 $r['sale_no'], $r['billed_amount'], $r['balance_amount'], $r['delivery_date'], $r['status']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'jewellery-order-status-' . $stamp, $data, 'Order Status', $meta);
     }
     if ($view === 'workshop') {
@@ -218,6 +262,11 @@ if (isset($_GET['export']) && $canExport) {
                 $r['receipt_no'], $r['receive_date'], $r['received_gross_weight'], $r['received_fine_weight'],
                 $r['pending_fine'], $r['wastage_fine_weight'], $r['making_amount'], $r['status']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'jewellery-workshop-' . $stamp, $data,
             $pendingOnly ? 'Gold Pending Return' : 'Gold Issued to Kaligad', $meta);
     }
@@ -235,6 +284,11 @@ if (isset($_GET['export']) && $canExport) {
         foreach ($report['adjustments'] as $a) {
             $data[] = [$a['settlement_no'], $a['sale_no'], $a['sale_date'], $a['party_label'], $a['amount']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'jewellery-advance-register-' . $stamp, $data, 'Advance Register', $meta);
     }
     if ($view === 'profit') {
@@ -245,6 +299,11 @@ if (isset($_GET['export']) && $canExport) {
             $data[] = [$r['order_no'], $r['order_date'], $r['party_label'], $r['sale_no'], $r['sale_date'],
                 $r['revenue'], $r['cogs'], $r['karigar_wages'], $r['wastage_borne'], $r['profit'], $r['margin_pct']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'jewellery-order-profit-' . $stamp, $data, 'Order Profitability', $meta);
     }
     if ($view === 'statement' && $karigarId > 0) {
@@ -276,6 +335,11 @@ if (isset($_GET['export']) && $canExport) {
         $meta['Kaligad'] = (string) ($st['karigar']['name'] ?? '');
         $meta['Metal valued at'] = number_format((float) $st['rate']['fine_rate'], 2) . ' per fine ' . $unit
             . ' (' . (string) $st['rate']['label'] . ')';
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($format, 'kaligad-statement-' . $stamp, $data, 'Kaligad Statement', $meta);
     }
 }

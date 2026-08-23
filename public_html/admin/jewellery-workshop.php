@@ -654,6 +654,11 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
                 $r['expected_gross_weight'], $r['expected_fine_weight'], $r['unit_code'],
                 $r['total_amount'] ?? 0, $r['advance_amount'] ?? 0, $r['delivery_date'], $r['status']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($exportFormat, 'jewellery-orders-' . $stamp, $data, 'Orders', $exportMeta);
     }
     if ($view === 'assignments') {
@@ -665,6 +670,11 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
                 $r['issued_gross_weight'], $r['issued_fine_weight'],
                 (string) ($r['expected_return_date'] ?? ''), $r['status']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($exportFormat, 'jewellery-issues-' . $stamp, $data, 'Kaligad Issues', $exportMeta);
     }
     if ($view === 'delivery') {
@@ -693,6 +703,11 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
                 (string) $r['status'],
             ];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($exportFormat, 'jewellery-awaiting-collection-' . $stamp, $data, 'Awaiting Collection', $exportMeta);
     }
     if ($view === 'ready-to-sale') {
@@ -707,13 +722,21 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
                 (string) ($r['reserved_for'] ?? '') !== '' ? (string) $r['reserved_for'] : 'On the shelf',
                 (string) ($r['reserved_order_no'] ?? '')];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($exportFormat, 'jewellery-ready-to-sale-' . $stamp, $data, 'Ready to Sale', $exportMeta);
     }
     if ($view === 'output') {
         // Through the shared flattener, so the register, its spreadsheet and
         // its printed sheet carry the same columns in the same order.
+        // Named so it can be footed like every other export rather than being
+        // the one report that quietly goes out without a total.
+        $data = export_totals_row(jewellery_output_export_rows($output, $sym));
         export_dispatch($exportFormat, 'jewellery-workshop-output-' . $stamp,
-            jewellery_output_export_rows($output, $sym), 'Workshop Output', $exportMeta);
+            $data, 'Workshop Output', $exportMeta);
     }
     if ($view === 'karigars') {
         $data = [['Code', 'Name', 'Phone', 'Engagement', 'Making basis', 'Making rate',
@@ -736,6 +759,11 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
             : number_format((float) $karigarRows[0]['fine_rate'], 2) . ' per fine ('
                 . (string) $karigarRows[0]['rate_label'] . ')';
         $rateMeta['As at'] = $todayInFy;
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($exportFormat, 'jewellery-kaligads-' . $stamp, $data, 'Kaligads', $rateMeta);
     }
     if ($view === 'refinery') {
@@ -746,6 +774,11 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
                 $r['issued_fine_weight'], $r['received_fine_weight'] ?? 0, $r['loss_fine_weight'] ?? 0,
                 $r['surplus_fine_weight'] ?? 0, $r['charges_amount'] ?? 0, $r['status']];
         }
+        // Footed before it goes out: a register without its total is a list,
+        // and the reader adds it up by hand and disagrees with the person
+        // beside them. export_totals_row() leaves rates, dates and document
+        // numbers alone — see its own note for why that list errs wide.
+        $data = export_totals_row($data);
         export_dispatch($exportFormat, 'jewellery-refinery-' . $stamp, $data, 'Refinery Jobs', $exportMeta);
     }
     // A view without an export (delivery) simply falls through to the screen.

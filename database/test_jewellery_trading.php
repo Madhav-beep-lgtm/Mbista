@@ -664,6 +664,43 @@ foreach (array_slice($exportRows, 1) as $exportRow) {
 ok($everyRowLabelled, 'And every row carries its section AND the date it is true on, so it can be read alone');
 $sectionsInFile = array_values(array_unique(array_column(array_slice($exportRows, 1), 0)));
 ok(count($sectionsInFile) === 5, 'All five sections reach the file, in order');
+echo "\nE. Every register goes out with its total\n";
+// A register printed without its total is a list: the reader adds it up by hand
+// and disagrees with the person beside them, and neither can say who is wrong.
+require_once __DIR__ . '/../app/export_engine.php';
+$footed = export_totals_row([
+    ['Sale no.', 'Order ref.', 'Date', 'Customer', 'Total', 'Received', 'Pending', 'COGS', 'Status'],
+    ['JS-00023', '110', '2026-07-21', 'Rena Khadka', '211000.19', '211000.00', '0.19', '65283.28', 'posted'],
+    ['JS-00024', '111', '2026-07-22', 'Sita Rai', '100.50', '100.00', '0.50', '30.00', 'posted'],
+]);
+$totalRow = end($footed);
+ok(count($footed) === 4, 'The register gains exactly one row');
+ok((string) $totalRow[0] === 'Total', 'And it says what it is');
+ok(near((float) $totalRow[4], 211100.69) && near((float) $totalRow[7], 65313.28),
+    'The money columns are footed');
+ok((string) $totalRow[2] === '' && (string) $totalRow[8] === '',
+    'A date and a status are left blank, not summed');
+ok((string) $totalRow[1] === '', 'And so is a document reference — sequence is not quantity');
+
+// THE COLUMNS THAT MUST NEVER BE ADDED UP. A wrong total is quoted; a missing
+// one is merely noticed, so the skip-list errs wide on purpose.
+$ledger = export_totals_row([
+    ['Date', 'Ref', 'Fine wt', 'Rate', 'Amount', 'Balance fine'],
+    ['2026-07-21', 'A', '1.8320', '152000.00', '150000.00', '1.8320'],
+    ['2026-07-22', 'B', '0.9160', '152000.00', '75000.00', '2.7480'],
+]);
+$ledgerTotal = end($ledger);
+ok(near((float) $ledgerTotal[2], 2.7480, 0.0011), 'A weight column is footed');
+ok((string) $ledgerTotal[3] === '', 'A RATE is not — two rates added make something that is not a rate');
+ok((string) $ledgerTotal[5] === '', 'And a RUNNING BALANCE is not — its last row already holds the answer');
+ok(near((float) $ledgerTotal[4], 225000.00), 'While the amount beside them still foots');
+
+// A footing keeps the places its rows are written in.
+$weights = export_totals_row([['Item', 'Fine wt'], ['A', '1.8320'], ['B', '0.9160']]);
+ok((string) end($weights)[1] === '2.7480', 'A four-decimal column foots to four decimals, not two');
+
+$empty = export_totals_row([['Item', 'Amount']]);
+ok(count($empty) === 1, 'A register with no rows gains no total row to foot');
 jwt_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

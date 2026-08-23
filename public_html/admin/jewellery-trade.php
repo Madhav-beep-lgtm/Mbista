@@ -565,6 +565,11 @@ if ($view === 'sales' && isset($_GET['export'])) {
             $row['exchange_amount'], $row['balance_amount'], $row['cogs_amount'], $row['status'],
         ];
     }
+    // Footed before it goes out: a register without its total is a list,
+    // and the reader adds it up by hand and disagrees with the person
+    // beside them. export_totals_row() leaves rates, dates and document
+    // numbers alone — see its own note for why that list errs wide.
+    $data = export_totals_row($data);
     export_dispatch($format, 'jewellery-sales-register-' . date('Ymd-His'), $data, 'Sales Register', [
         'Company' => (string) $company['name'],
         'Period' => ($filterFrom ?: $fyStart) . ' to ' . ($filterTo ?: $fyEnd),
@@ -782,6 +787,11 @@ if ($view === 'bills' && isset($_GET['export'])) {
             $party['settled_metal_amount'], $party['settled_metal_fine'], $party['settled_cash_amount'],
             $party['outstanding'], $party['outstanding_fine'], ''];
     }
+    // Footed before it goes out: a register without its total is a list,
+    // and the reader adds it up by hand and disagrees with the person
+    // beside them. export_totals_row() leaves rates, dates and document
+    // numbers alone — see its own note for why that list errs wide.
+    $data = export_totals_row($data);
     export_dispatch($format, 'jewellery-bill-outstanding-' . date('Ymd-His'), $data, 'Bill-wise Outstanding', [
         'Company' => (string) $company['name'],
         'Weights' => $unitCode !== '' ? ('fine ' . $unitCode) : 'fine, base unit',
@@ -1476,6 +1486,12 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                 <option value="<?= e(url('admin/jewellery-trade.php?view=sales&journal_sale=' . (int) $row['id'])) ?>">View journal entry</option>
                                 <?php if ($canExport): ?><option value="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'] . '&format=xlsx')) ?>">Export Excel</option><?php endif; ?>
                                 <?php if ($isDraft && $canPost): ?><option value="<?= e(url('admin/jewellery-trade.php?view=sales&confirm_post=' . (int) $row['id'])) ?>">Post sale</option><?php endif; ?>
+                                <?php // UNPOST WENT MISSING when these actions were gathered into one
+                                      // dropdown: the form below still existed but had been hidden with
+                                      // the rest of the old buttons, so a posted bill could be looked at
+                                      // and printed and never corrected. A wrong bill that cannot be
+                                      // taken back is the worst state a ledger can offer. ?>
+                                <?php if (!$isDraft && $canPost): ?><option value="unpost-sale">Unpost sale</option><?php endif; ?>
                                 <?php if ($isDraft && $canEdit): ?><option value="delete-draft">Delete draft sale</option><?php endif; ?>
                             </select>
                             <span hidden>
@@ -1799,13 +1815,24 @@ document.addEventListener("DOMContentLoaded", function () {
 document.addEventListener("change", function (event) {
     var action = event.target.closest(".jw-sale-action");
     if (!action || !action.value) { return; }
-    if (action.value === "delete-draft") {
-        var saleNo = action.dataset.saleNo || "this draft sale";
-        if (!window.confirm("Delete draft sale " + saleNo + "?")) { action.value = ""; return; }
+    // The options that POST rather than navigate. A table rather than a branch
+    // each, so adding the next one is a line here and an <option> above — which
+    // is how Unpost came to be missing from this menu in the first place.
+    var posting = {
+        "delete-draft": { action: "delete_sale", ask: "Delete draft sale {no}?" },
+        "unpost-sale": {
+            action: "unpost_sale",
+            ask: "Unpost sale {no}? Its voucher, COGS and stock movements will be removed."
+        }
+    };
+    var post = posting[action.value];
+    if (post) {
+        var saleNo = action.dataset.saleNo || "this sale";
+        if (!window.confirm(post.ask.replace("{no}", saleNo))) { action.value = ""; return; }
         var form = document.createElement("form");
         form.method = "post";
         form.action = window.location.pathname;
-        [["csrf_token", action.dataset.csrf || ""], ["action", "delete_sale"],
+        [["csrf_token", action.dataset.csrf || ""], ["action", post.action],
             ["back_view", "sales"], ["doc_id", action.dataset.saleId || "0"]].forEach(function (field) {
             var input = document.createElement("input");
             input.type = "hidden"; input.name = field[0]; input.value = field[1]; form.appendChild(input);
