@@ -2671,6 +2671,18 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
     if ($receivedGross <= 0) {
         return ['ok' => false, 'error' => 'Enter the weight received back.'];
     }
+    // HOW MANY FINISHED PIECES CAME BACK. A receipt is a physical hand-over of
+    // an ornament, so a missing or zero count means ONE, never none. Read as
+    // "none" it put the piece into stock with its weight but with no piece
+    // against it, and the next counter sale of that very ornament was refused
+    // by the negative-stock guard for taking out a piece the register said had
+    // never arrived — an ordered item, received from the kaligad, that could
+    // not then be billed. jewellery_trace.php has always read a receipt as one
+    // piece when it is not told otherwise; the stock ledger now agrees.
+    $receivedPieces = round((float) ($input['qty_pieces'] ?? 0), 3);
+    if ($receivedPieces <= 0) {
+        $receivedPieces = 1.0;
+    }
     // Stones set into the piece, weighed apart — the fine equivalent and the
     // wastage settle over the METAL only (gross − stone).
     $stoneWeight = jw_round_weight((float) ($input['stone_weight'] ?? 0));
@@ -2744,7 +2756,7 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
                 'cid' => $companyId, 'fy' => $fiscalYearId ?: null, 'aid' => $assignmentId, 'no' => $no,
                 'date' => $receiveDate, 'item' => $receivedItemId, 'purity' => $receivedPurityId,
                 'unit' => (int) $assignment['unit_id'],
-                'pieces' => round((float) ($input['qty_pieces'] ?? 0), 3),
+                'pieces' => $receivedPieces,
                 'gross' => $receivedGross, 'fine' => $preview['received_fine'],
                 'wfine' => $preview['wastage_fine'], 'afine' => $preview['allowed_fine'], 'efine' => $preview['excess_fine'],
                 'rate' => $preview['avg_fine_rate'], 'wamount' => $preview['wastage_amount'],
@@ -2920,7 +2932,7 @@ function jewellery_receive_from_karigar(int $companyId, int $fiscalYearId, array
             'item_id' => $receivedItemId, 'txn_type' => 'receive_karigar', 'direction' => 'in',
             'txn_date' => $receiveDate, 'ref_no' => $no, 'holder_type' => 'stock',
             'purity_id' => $receivedPurityId, 'unit_id' => (int) $assignment['unit_id'],
-            'qty_pieces' => round((float) ($input['qty_pieces'] ?? 0), 3),
+            'qty_pieces' => $receivedPieces,
             'gross_weight' => $receivedGross, 'fine_weight' => $preview['received_fine'],
             'rate' => $preview['avg_fine_rate'],
             'amount' => $returnedValue,

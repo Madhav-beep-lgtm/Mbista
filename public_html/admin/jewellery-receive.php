@@ -350,7 +350,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <label>Receive date
                     <input type="date" value="<?= e($typedDate) ?>" disabled>
                 </label>
-                <label class="frm-span-3">Description
+                <?php // THE PIECE COUNT IS WHAT THE COUNTER SELLS AGAINST. Billing
+                      // the ornament out takes a piece off the register, so a
+                      // receipt that names none leaves a piece that has weight
+                      // but cannot be sold. One, unless the kaligad hands back
+                      // a set on the one job. ?>
+                <label>Pieces received
+                    <input type="number" name="qty_pieces" step="0.001" min="0.001" value="1" required>
+                </label>
+                <label class="frm-span-2">Description
                     <input type="text" name="notes" maxlength="255" placeholder="Anything about this piece worth recording"
                            value="<?= e((string) ($target['notes'] ?? '')) ?>">
                 </label>

@@ -1948,6 +1948,69 @@ ok(!jewellery_update_assignment($cidA, (int) $foreignKarigarSaved['id'],
 ok($q("SELECT COUNT(*) FROM activity_logs WHERE entity_type='jewellery_assignment' AND entity_id=$editAid AND action='updated'") > 0,
     'Successful assignment changes create audit activity');
 
+echo "\n28. A receipt with no piece count still puts ONE piece on the shelf\n";
+// The receive screen posts what the person typed and nothing else, and it never
+// asked how many pieces came back — so the receipt recorded NONE. The ornament
+// went into stock carrying its weight but with no piece against it, and the
+// counter sale of that same ornament was then refused for taking out a piece
+// the register said had never arrived. A receipt is the hand-over of at least
+// one piece; nothing about it is optional.
+$piecesBefore = (float) jw_item_balance($cidA, $chain, null, 'stock')['qty_pieces'];
+$blindIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 2, 'issue_date' => '2026-09-20', 'making_basis' => 'flat', 'making_rate' => 500,
+], $userA);
+ok($blindIssue['ok'], 'Two tola go out for a piece' . ($blindIssue['ok'] ? '' : ' — ' . $blindIssue['error']));
+$blindAid = (int) $blindIssue['assignment_id'];
+// NO qty_pieces in the payload — exactly what the screen used to send.
+$blindBack = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => $blindAid, 'received_item_id' => $chain, 'received_purity_id' => $p22,
+    'received_gross_weight' => 2, 'receive_date' => '2026-09-21',
+], $userA);
+ok($blindBack['ok'], 'It comes back with no piece count typed'
+    . ($blindBack['ok'] ? '' : ' — ' . $blindBack['error']));
+$blindReceiptId = (int) ($blindBack['receipt_id'] ?? 0);
+ok(near((float) db()->query("SELECT qty_pieces FROM jewellery_order_receipts WHERE id=$blindReceiptId")->fetchColumn(), 1.0, 0.0005),
+    'The receipt records one piece, not none');
+ok(near(jw_item_balance($cidA, $chain, null, 'stock')['qty_pieces'], $piecesBefore + 1, 0.0005),
+    'And the shelf is one piece heavier');
+// The symptom the fault actually showed the shop: billing that ornament out.
+$sellResult = null;
+try {
+    $sellResult = jw_record_stock_txn($cidA, [
+        'item_id' => $chain, 'txn_type' => 'sale', 'direction' => 'out', 'txn_date' => '2026-09-22',
+        'purity_id' => $p22, 'unit_id' => $tola, 'qty_pieces' => 1, 'gross_weight' => 2,
+    ]);
+} catch (Throwable $sellException) {
+    $sellResult = $sellException->getMessage();
+}
+ok(is_int($sellResult), 'The piece can then be sold across the counter'
+    . (is_int($sellResult) ? '' : ' — ' . (string) $sellResult));
+echo "\n29. The backfill brings a legacy zero-piece receipt back\n";
+// Rows already in the books from before the fix: the receipt and its stock
+// movement both say zero pieces, and fixing the code corrects none of them.
+// Put a real receipt back into that state and prove the repair every jewellery
+// page runs on load corrects it — and that running it twice does not go on to
+// invent a second piece.
+db()->exec("UPDATE jewellery_order_receipts SET qty_pieces = 0 WHERE id = $blindReceiptId");
+db()->exec("UPDATE jewellery_stock_txns SET qty_pieces = 0
+    WHERE company_id = $cidA AND source_type = 'jewellery_order_receipt' AND source_id = $blindReceiptId
+      AND direction = 'in' AND holder_type = 'stock'");
+$legacyPieces = (float) jw_item_balance($cidA, $chain, null, 'stock')['qty_pieces'];
+ok(near((float) db()->query("SELECT qty_pieces FROM jewellery_order_receipts WHERE id=$blindReceiptId")->fetchColumn(), 0.0, 0.0005),
+    'The receipt is back in its pre-fix state: zero pieces');
+accounting_module_repair_database();
+ok(near((float) db()->query("SELECT qty_pieces FROM jewellery_order_receipts WHERE id=$blindReceiptId")->fetchColumn(), 1.0, 0.0005),
+    'The repair puts the piece back on the receipt');
+ok(near((float) db()->query("SELECT qty_pieces FROM jewellery_stock_txns WHERE company_id=$cidA
+        AND source_type='jewellery_order_receipt' AND source_id=$blindReceiptId
+        AND direction='in' AND holder_type='stock'")->fetchColumn(), 1.0, 0.0005),
+    'And on the stock movement behind it');
+ok(near(jw_item_balance($cidA, $chain, null, 'stock')['qty_pieces'], $legacyPieces + 1, 0.0005),
+    'The shelf counts that piece again');
+accounting_module_repair_database();
+ok(near((float) db()->query("SELECT qty_pieces FROM jewellery_order_receipts WHERE id=$blindReceiptId")->fetchColumn(), 1.0, 0.0005),
+    'Running the repair twice does not add a second piece');
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

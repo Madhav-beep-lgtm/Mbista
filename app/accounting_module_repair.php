@@ -3698,5 +3698,44 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('A kaligad receipt brings back a countable piece (migration 125)', static function (): void {
+        // The receive screen never asked how many finished pieces came back, so
+        // every receipt posted before it did recorded NONE. The ornament went
+        // into stock with its weight but with no piece against it, and the
+        // counter sale of that same ornament was then refused — "stock holds
+        // 0.000 pieces of BG-42 but the movement takes out 1.000" — for taking
+        // out a piece the register said had never arrived. An ordered item,
+        // received from the kaligad, that could not be billed.
+        //
+        // A receipt is the hand-over of at least one piece, so zero is never a
+        // figure anybody meant, and the guard below makes this re-runnable: a
+        // receipt that already carries a count is not touched.
+        if (!accounting_repair_table_exists('jewellery_order_receipts')
+            || !accounting_repair_table_exists('jewellery_stock_txns')) {
+            return;
+        }
+        db()->exec('UPDATE `jewellery_order_receipts`
+               SET `qty_pieces` = 1
+             WHERE `qty_pieces` <= 0
+               AND `received_gross_weight` > 0');
+
+        // The register follows the RECEIPT rather than assuming one, so a
+        // receipt that did carry a count — typed through the engine, where the
+        // field always existed — has its movement corrected to that same count.
+        //
+        // Only the piece column moves. Weight, value and the voucher behind
+        // them were right all along; this fault was never in the money.
+        db()->exec("UPDATE `jewellery_stock_txns` t
+             INNER JOIN `jewellery_order_receipts` r
+                ON r.`id` = t.`source_id` AND r.`company_id` = t.`company_id`
+               SET t.`qty_pieces` = r.`qty_pieces`
+             WHERE t.`source_type` = 'jewellery_order_receipt'
+               AND t.`txn_type` = 'receive_karigar'
+               AND t.`direction` = 'in'
+               AND t.`holder_type` = 'stock'
+               AND t.`qty_pieces` <= 0
+               AND r.`qty_pieces` > 0");
+    });
+
     return $errors;
 }
