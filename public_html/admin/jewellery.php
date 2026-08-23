@@ -357,6 +357,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'item_id' => $newItemId,
                 'item_name' => (string) ($_POST['name'] ?? ''),
                 'item_code' => (string) ($_POST['code'] ?? ''),
+                'purity_id' => (int) ($_POST['purity_id'] ?? 0),
                 'message' => 'Item created successfully'
             ]);
             exit;

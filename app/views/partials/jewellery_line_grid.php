@@ -1358,7 +1358,24 @@ function jw_line_grid_scripts(array $ctx = []): void
 
                     // Explicitly set the select value to display the newly created item
                     currentItemSelect.value = data.item_id;
-                    setNewAssignmentItemState(currentItemSelect.closest('tr'));
+                    var createdRow = currentItemSelect.closest('tr');
+                    var puritySelect = createdRow && createdRow.querySelector('select[name$="_purity_id[]"]');
+                    if (puritySelect && data.purity_id) {
+                        puritySelect.disabled = false;
+                        puritySelect.value = String(data.purity_id);
+                        Array.prototype.forEach.call(createdRow.querySelectorAll('.jw-purity-lock:not([data-issued])'), function (lock) {
+                            lock.parentNode.removeChild(lock);
+                        });
+                        var purityLock = document.createElement('input');
+                        purityLock.type = 'hidden';
+                        purityLock.className = 'jw-purity-lock';
+                        purityLock.name = puritySelect.name;
+                        purityLock.value = puritySelect.value;
+                        puritySelect.parentNode.appendChild(purityLock);
+                        puritySelect.disabled = true;
+                        puritySelect.title = 'Set when this item was created';
+                    }
+                    setNewAssignmentItemState(createdRow);
 
                     // Trigger change event to notify any listeners
                     currentItemSelect.dispatchEvent(new Event("change", { bubbles: true }));
