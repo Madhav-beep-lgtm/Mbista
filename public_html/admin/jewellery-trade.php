@@ -446,6 +446,26 @@ if ($view === 'purchases') {
     }
 }
 
+// The journal action accepts a sale id only.  Resolving its voucher through
+// the company and source keeps the debit/credit view strictly tenant-scoped.
+$journalSaleId = $view === 'sales' ? (int) ($_GET['journal_sale'] ?? 0) : 0;
+$saleJournal = null;
+$saleJournalEntries = [];
+if ($journalSaleId > 0 && jewellery_sale($companyId, $journalSaleId)) {
+    $journalStmt = db()->prepare("SELECT id, voucher_no, voucher_date, narration, total_amount
+        FROM vouchers WHERE company_id = :cid AND source_type = 'jewellery_sale'
+          AND source_id = :sid AND status = 'posted' ORDER BY id DESC LIMIT 1");
+    $journalStmt->execute(['cid' => $companyId, 'sid' => $journalSaleId]);
+    $saleJournal = $journalStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    if ($saleJournal) {
+        $entryStmt = db()->prepare('SELECT ve.entry_type, ve.amount, ve.memo, l.code, l.name
+            FROM voucher_entries ve INNER JOIN ledgers l ON l.id = ve.ledger_id
+            WHERE ve.voucher_id = :vid ORDER BY ve.id ASC');
+        $entryStmt->execute(['vid' => (int) $saleJournal['id']]);
+        $saleJournalEntries = $entryStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+}
+
 $docPageCount = max(1, (int) ceil(count($docs) / $docPerPage));
 $docPage = max(1, min($docPageCount, (int) ($_GET['page'] ?? 1)));
 $docPageRows = array_slice($docs, ($docPage - 1) * $docPerPage, $docPerPage);
@@ -1241,6 +1261,19 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         </form>
         <dialog id="jw-sales-range-dialog" aria-label="Date range" style="width:min(430px,calc(100vw - 32px));border:0;border-radius:14px;padding:20px;box-shadow:0 18px 48px rgba(0,0,0,.28)"><form method="dialog"><h2 style="margin:0 0 16px">Date range</h2><div class="workspace-form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))"><label>From<input type="date" id="jw-sales-from-picker" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label><label>To<input type="date" id="jw-sales-to-picker" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label></div><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px"><button type="submit" class="button secondary">Cancel</button><button type="button" class="button" id="jw-sales-range-apply">Apply date range</button></div></form></dialog>
 
+        <?php if ($journalSaleId > 0): ?>
+        <dialog id="jw-sale-journal-dialog" aria-label="Sale journal entry" style="width:min(760px,calc(100vw - 32px));border:0;border-radius:14px;padding:22px;box-shadow:0 18px 48px rgba(0,0,0,.28)">
+            <div style="display:flex;justify-content:space-between;gap:16px;align-items:start"><div><h2 style="margin:0">Journal entry</h2><p style="margin:4px 0 16px;color:var(--mbw-muted,#64748b)"><?= $saleJournal ? 'Voucher ' . e((string) $saleJournal['voucher_no']) . ' · ' . e(app_date((string) $saleJournal['voucher_date'])) : 'This sale is still a draft, so it has no posted journal entry.' ?></p></div><button type="button" class="button secondary" data-jw-close-journal>Close</button></div>
+            <?php if ($saleJournal): ?>
+                <div style="overflow-x:auto"><table><thead><tr><th>Ledger</th><th>Memo</th><th class="is-numeric">Debit (<?= e($sym) ?>)</th><th class="is-numeric">Credit (<?= e($sym) ?>)</th></tr></thead><tbody>
+                <?php $journalDebit = 0.0; $journalCredit = 0.0; foreach ($saleJournalEntries as $entry): ?>
+                    <?php $isDebit = (string) $entry['entry_type'] === 'debit'; $amount = (float) $entry['amount']; $journalDebit += $isDebit ? $amount : 0; $journalCredit += $isDebit ? 0 : $amount; ?>
+                    <tr><td><?= e(trim((string) $entry['code'] . ' — ' . (string) $entry['name'])) ?></td><td><?= e((string) ($entry['memo'] ?? '')) ?></td><td class="is-numeric"><?= $isDebit ? e($fmt($amount)) : '—' ?></td><td class="is-numeric"><?= !$isDebit ? e($fmt($amount)) : '—' ?></td></tr>
+                <?php endforeach; ?>
+                </tbody><tfoot><tr><th colspan="2">Totals</th><th class="is-numeric"><?= e($fmt($journalDebit)) ?></th><th class="is-numeric"><?= e($fmt($journalCredit)) ?></th></tr><tr><td colspan="4" style="text-align:right"><strong><?= abs($journalDebit - $journalCredit) < 0.005 ? 'Balanced' : 'Difference: ' . e($sym) . e($fmt(abs($journalDebit - $journalCredit))) ?></strong></td></tr></tfoot></table></div>
+            <?php endif; ?>
+        </dialog>
+        <?php endif; ?>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>No.</th><th>Order ref.</th><th>Date</th><th>Customer</th><th class="is-numeric">Total</th><th class="is-numeric">Received</th><th class="is-numeric">Advance applied</th><th class="is-numeric">Exchange</th><th class="is-numeric">Pending</th><th class="is-numeric">COGS</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
@@ -1267,6 +1300,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                 <?php if ($isDraft && $canEdit): ?><option value="<?= e(url('admin/jewellery-trade.php?view=sales&edit=' . (int) $row['id'])) ?>">Edit</option><?php endif; ?>
                                 <option value="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'])) ?>">Preview</option>
                                 <option value="<?= e(url('admin/jewellery-invoice.php?id=' . (int) $row['id'])) ?>">Invoice</option>
+                                <option value="<?= e(url('admin/jewellery-trade.php?view=sales&journal_sale=' . (int) $row['id'])) ?>">View journal entry</option>
                                 <?php if ($canExport): ?><option value="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'] . '&format=xlsx')) ?>">Export Excel</option><?php endif; ?>
                                 <?php if ($isDraft && $canPost): ?><option value="<?= e(url('admin/jewellery-trade.php?view=sales&confirm_post=' . (int) $row['id'])) ?>">Post sale</option><?php endif; ?>
                                 <?php if ($isDraft && $canEdit): ?><option value="delete-draft">Delete draft sale</option><?php endif; ?>
@@ -1486,6 +1520,19 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 <?php endif; ?>
 
 <script>
+document.addEventListener("DOMContentLoaded", function () {
+    var journal = document.getElementById("jw-sale-journal-dialog");
+    if (!journal || !window.HTMLDialogElement) { return; }
+    journal.showModal();
+    journal.querySelectorAll("[data-jw-close-journal]").forEach(function (button) {
+        button.addEventListener("click", function () { journal.close(); });
+    });
+    journal.addEventListener("close", function () {
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, "", <?= json_encode(url('admin/jewellery-trade.php?view=sales')) ?>);
+        }
+    });
+});
 document.addEventListener("DOMContentLoaded", function () {
     var open = document.getElementById("jw-sales-range-open"), dialog = document.getElementById("jw-sales-range-dialog");
     var from = document.getElementById("jw-sales-from"), to = document.getElementById("jw-sales-to");

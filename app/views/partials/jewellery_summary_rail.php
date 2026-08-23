@@ -43,7 +43,7 @@ function jw_summary_rail(array $ctx): void
                 <?php endif; ?>
             </div>
             <div class="jw-summary-total">
-                <span>Document total (<?= e($sym) ?>) — before tax</span>
+                <span>Invoice total (<?= e($sym) ?>)</span>
                 <strong data-jw-sum="total">0.00</strong>
             </div>
             <?php
