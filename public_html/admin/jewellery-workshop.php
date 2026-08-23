@@ -1242,8 +1242,9 @@ jw_filter_bar_styles();
             <input type="hidden" name="view" value="orders">
             <?php if ($sortParam !== ''): ?><input type="hidden" name="sort" value="<?= e($sortParam) ?>"><?php endif; ?>
             <label style="display:grid;gap:4px;flex:1.3 0 190px;margin:0"><span style="font-size:12.5px">Order no.</span><select name="q" class="js-searchable" aria-label="Search or select an order number"><option value="">— all orders —</option><?php foreach ($orderNumberOptions as $orderNumber): ?><option value="<?= e((string) $orderNumber) ?>" <?= $filterSearch === (string) $orderNumber ? 'selected' : '' ?>><?= e((string) $orderNumber) ?></option><?php endforeach; ?></select></label>
-            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">From</span><input name="from" type="date" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
-            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">To</span><input name="to" type="date" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+            <input type="hidden" name="from" id="jw-orders-date-from" value="<?= e($filterFrom) ?>">
+            <input type="hidden" name="to" id="jw-orders-date-to" value="<?= e($filterTo) ?>">
+            <label style="display:grid;gap:4px;flex:1 0 230px;margin:0"><span style="font-size:12.5px">Date range</span><button type="button" class="field-compact" id="jw-orders-date-range-open" style="text-align:left;white-space:nowrap" aria-haspopup="dialog"><span id="jw-orders-date-range-label"><?= e($filterFrom !== '' || $filterTo !== '' ? ($filterFrom !== '' ? app_date($filterFrom) : 'Start') . ' – ' . ($filterTo !== '' ? app_date($filterTo) : 'End') : 'All dates') ?></span></button></label>
             <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">Status</span><?= jw_filter_select('status', $filterStatus, ['draft' => 'Draft', 'confirmed' => 'Confirmed', 'assigned' => 'Assigned', 'partially_received' => 'Partially Received', 'received' => 'Received', 'invoiced' => 'Invoiced', 'delivered' => 'Delivered', 'closed' => 'Closed', 'cancelled' => 'Cancelled']) ?></label>
             <label style="display:grid;gap:4px;flex:1 0 180px;margin:0"><span style="font-size:12.5px">Customer</span><?= jw_filter_select('party', (string) $filterParty, array_column($parties, 'name', 'id')) ?></label>
             <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">Kaligad</span><?= jw_filter_select('karigar', (string) $filterKarigar, array_column($karigars, 'code', 'id')) ?></label>
@@ -1260,6 +1261,40 @@ jw_filter_bar_styles();
             <button type="submit" class="button secondary"><?= icon('filter') ?> Filter</button>
             <a class="button secondary" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">Clear</a>
         </form>
+        <dialog id="jw-orders-date-range-dialog" aria-label="Choose order date range" style="width:min(430px,calc(100vw - 32px));border:0;border-radius:14px;padding:20px;box-shadow:0 18px 48px rgba(0,0,0,.28)">
+            <form method="dialog">
+                <h2 style="margin:0 0 16px">Date range</h2>
+                <div class="workspace-form-grid">
+                    <label>From<input type="date" id="jw-orders-date-from-picker" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+                    <label>To<input type="date" id="jw-orders-date-to-picker" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
+                    <button type="submit" class="button secondary">Cancel</button>
+                    <button type="button" class="button" id="jw-orders-date-range-apply">Apply date range</button>
+                </div>
+            </form>
+        </dialog>
+        <script>
+        (function () {
+            var open = document.getElementById('jw-orders-date-range-open');
+            var dialog = document.getElementById('jw-orders-date-range-dialog');
+            var from = document.getElementById('jw-orders-date-from');
+            var to = document.getElementById('jw-orders-date-to');
+            var fromPicker = document.getElementById('jw-orders-date-from-picker');
+            var toPicker = document.getElementById('jw-orders-date-to-picker');
+            var apply = document.getElementById('jw-orders-date-range-apply');
+            var label = document.getElementById('jw-orders-date-range-label');
+            if (!open || !dialog || !from || !to || !fromPicker || !toPicker || !apply || !label || !window.HTMLDialogElement) { return; }
+            open.addEventListener('click', function () { dialog.showModal(); });
+            apply.addEventListener('click', function () {
+                from.value = fromPicker.value;
+                to.value = toPicker.value;
+                label.textContent = from.value || to.value ? (from.value || 'Start') + ' – ' + (to.value || 'End') : 'All dates';
+                dialog.close();
+            });
+            dialog.addEventListener('click', function (event) { if (event.target === dialog) { dialog.close(); } });
+        })();
+        </script>
         <p style="color:var(--mbw-muted);font-size:12px;margin:0 0 12px"><strong>Made to order</strong> went to a kaligad · <strong>From showroom stock</strong> was set aside off the shelf.</p>
         <div class="mbw-tablewrap"><table>
             <thead><tr>
