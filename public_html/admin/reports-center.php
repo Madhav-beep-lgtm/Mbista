@@ -669,7 +669,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <div class="rc2-note-row">
                     <input type="text" name="note_no[]" value="<?= e((string) $note['note_no']) ?>" maxlength="10" aria-label="Note number" placeholder="No.">
                     <textarea name="note_body[]" rows="2" aria-label="Note text" placeholder="Note text..."><?= e((string) $note['body']) ?></textarea>
-                    <button type="button" class="rc2-note-remove" data-note-remove title="Remove this note" aria-label="Remove note"><?= icon('close') ?></button>
+                    <button type="button" class="rc2-note-remove mbw-delete-action" data-note-remove title="Delete this note" aria-label="Delete this note"><?= icon('trash') ?></button>
                 </div>
             <?php endforeach; ?>
         </div>
@@ -677,7 +677,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <div class="rc2-note-row">
                 <input type="text" name="note_no[]" value="" maxlength="10" aria-label="Note number" placeholder="No.">
                 <textarea name="note_body[]" rows="2" aria-label="Note text" placeholder="Note text..."></textarea>
-                <button type="button" class="rc2-note-remove" data-note-remove title="Remove this note" aria-label="Remove note"><?= icon('close') ?></button>
+                <button type="button" class="rc2-note-remove mbw-delete-action" data-note-remove title="Delete this note" aria-label="Delete this note"><?= icon('trash') ?></button>
             </div>
         </template>
         <div class="rc2-notes-actions">

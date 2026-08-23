@@ -824,7 +824,7 @@ jw_filter_bar_styles();
                             </td>
                             <td><input type="number" name="tender_gross_weight[]" step="0.0001" min="0" value="0"></td>
                             <td><input type="number" name="tender_amount[]" class="jw-tender-amount" step="0.01" min="0" value="0"></td>
-                            <td><button type="button" class="button secondary jw-line-remove" title="Remove this way of paying"><?= icon('close') ?></button></td>
+                            <td><button type="button" class="button secondary jw-line-remove mbw-delete-action" title="Delete this payment row" aria-label="Delete this payment row"><?= icon('trash') ?></button></td>
                         </tr>
                     </tbody>
                 </table></div>

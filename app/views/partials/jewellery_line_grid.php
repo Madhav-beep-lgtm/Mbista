@@ -608,7 +608,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                     <?php endif; ?>
                     <td class="c-del" data-label="">
                         <?php // Clearing the item empties the row, and an empty row is ignored on save. ?>
-                        <button type="button" class="jw-line-remove" aria-label="Remove this row"><?= icon('close') ?></button>
+                        <button type="button" class="jw-line-remove mbw-delete-action" title="Delete this row" aria-label="Delete this row"><?= icon('trash') ?></button>
                     </td>
                 </tr>
             <?php endfor; ?>

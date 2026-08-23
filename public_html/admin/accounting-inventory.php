@@ -2795,7 +2795,7 @@ $invMoveItemOptions = static function () use ($items): string {
                         <td><?php $billTdsLedger = shared_options('inv-purchase-ledgers', $gridLedgerOptions, (string) ($bill['tds_ledger_id'] ?? '')); ?>
                             <select name="bills[<?= $billIndex ?>][tds_ledger_id]"<?= $billTdsLedger['fill'] ? ' data-fill-from="inv-purchase-ledgers"' : '' ?> style="min-width:160px"><?= $billTdsLedger['html'] ?></select></td>
                         <td><input type="text" name="bills[<?= $billIndex ?>][notes]" maxlength="255" value="<?= e((string) ($bill['notes'] ?? '')) ?>" style="width:130px"></td>
-                        <td><button type="button" class="button secondary jw-line-remove inv-bill-clear" title="Clear this bill and its items" aria-label="Clear this bill and its items"><?= icon('close') ?></button></td>
+                        <td><button type="button" class="button secondary jw-line-remove mbw-delete-action inv-bill-clear" title="Delete this bill and its items" aria-label="Delete this bill and its items"><?= icon('trash') ?></button></td>
                     </tr>
                 <?php endfor; ?>
                 </tbody>
@@ -2864,7 +2864,7 @@ $invMoveItemOptions = static function () use ($items): string {
                                         <td style="text-align:center"><input type="checkbox" name="<?= e($lineName) ?>[mark_ingredient]" value="1" <?= !empty($line['mark_ingredient']) ? 'checked' : '' ?> title="Also make this item available to recipes"></td>
                                     <?php endif; ?>
                                     <td><input type="text" name="<?= e($lineName) ?>[notes]" maxlength="255" value="<?= e((string) ($line['notes'] ?? '')) ?>" style="width:120px"></td>
-                                    <td><button type="button" class="button secondary jw-line-remove inv-item-clear" title="Take this item off the bill" aria-label="Take this item off the bill"><?= icon('close') ?></button></td>
+                                    <td><button type="button" class="button secondary jw-line-remove mbw-delete-action inv-item-clear" title="Delete this item from the bill" aria-label="Delete this item from the bill"><?= icon('trash') ?></button></td>
                                 </tr>
                             <?php endfor; ?>
                             </tbody>
@@ -3133,7 +3133,7 @@ $invMoveItemOptions = static function () use ($items): string {
                                     <td><select name="input_item_id[]"<?= $inputOpts['fill'] ? ' data-fill-from="inv-input-items"' : '' ?>><?= $inputOpts['html'] ?></select></td>
                                     <td class="is-numeric"><input type="number" step="0.001" min="0" name="input_quantity[]"></td>
                                     <td class="is-numeric"><input type="number" step="0.01" min="0" name="input_rate[]" placeholder="Auto: purchase rate"></td>
-                                    <td><button type="button" class="button secondary" style="min-height:32px;padding:3px 10px;color:var(--mbw-red, #a33)" title="Remove this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value='';});this.closest('tr').querySelector('select').selectedIndex=0;}"><?= icon('close') ?></button></td>
+                                    <td><button type="button" class="button secondary mbw-delete-action" title="Delete this row" aria-label="Delete this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value='';});this.closest('tr').querySelector('select').selectedIndex=0;}"><?= icon('trash') ?></button></td>
                                 </tr>
                             <?php endfor; ?>
                         </tbody>
@@ -3172,7 +3172,7 @@ $invMoveItemOptions = static function () use ($items): string {
                                     <td class="is-numeric"><input type="number" step="0.0001" min="0" name="bom_qty[]"></td>
                                     <td class="is-numeric"><input type="number" step="0.001" min="0" name="bom_waste[]" value="0"></td>
                                     <td class="is-numeric"><input type="number" step="0.000001" min="0" name="bom_rate[]" placeholder="Auto: purchase rate"></td>
-                                    <td><button type="button" class="button secondary" style="min-height:32px;padding:3px 10px;color:var(--mbw-red, #a33)" title="Remove this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value=i.name==='bom_waste[]'?'0':'';});this.closest('tr').querySelector('select').selectedIndex=0;}"><?= icon('close') ?></button></td>
+                                    <td><button type="button" class="button secondary mbw-delete-action" title="Delete this row" aria-label="Delete this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value=i.name==='bom_waste[]'?'0':'';});this.closest('tr').querySelector('select').selectedIndex=0;}"><?= icon('trash') ?></button></td>
                                 </tr>
                             <?php endfor; ?>
                         </tbody>

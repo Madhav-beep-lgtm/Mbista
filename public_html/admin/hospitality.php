@@ -1945,18 +1945,12 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <input type="hidden" name="action" value="sales_upload_file">
             <input type="hidden" name="back_view" value="sales-upload">
             <label class="workspace-span-2">Sales workbook — both sheets (.xlsx, max 10 MB)
-                <input type="file" name="sales_file" accept=".xlsx,.csv" required>
-                <small style="color:var(--mbw-muted)">One Excel file holding the <strong>item-wise</strong> sheet (what was sold) and the <strong>invoice-wise</strong> sheet (how it was settled). Working in CSV? Put the item-wise sheet here and the invoice-wise one below.</small>
-            </label>
-            <label class="workspace-span-2">Second sheet — only if you are uploading two files
-                <input type="file" name="sales_file_2" accept=".xlsx,.csv">
-                <small style="color:var(--mbw-muted)">Leave this empty when your workbook already carries both sheets. Either order is fine — they are told apart by their column headings.</small>
+                <input type="file" name="sales_file" accept=".xlsx" required>
+                <small style="color:var(--mbw-muted)">One Excel file holding the <strong>item-wise</strong> sheet (what was sold) and the <strong>invoice-wise</strong> sheet (how it was settled). Either order is fine — they are told apart by their column headings.</small>
             </label>
             <div class="workspace-span-2">
                 <button type="submit"><?= icon('upload') ?>Upload &amp; Preview</button>
                 <?php if ($hasXlsx): ?><a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=xlsx')) ?>">Excel template (both sheets)</a><?php endif; ?>
-                <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=csv')) ?>">CSV — item-wise</a>
-                <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=csv-invoices')) ?>">CSV — invoice-wise</a>
             </div>
         </form>
         <?php endif; ?>
@@ -2645,9 +2639,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                                         <button type="button" class="button secondary jw-line-remove hosp-edit-recalc"
                                                 title="Work the money out again from Amount and Discount"
                                                 aria-label="Work the money out again"><?= icon('reconcile') ?></button>
-                                        <button type="button" class="button secondary jw-line-remove hosp-edit-drop"
+                                        <button type="button" class="button secondary jw-line-remove mbw-delete-action hosp-edit-drop"
                                                 title="Empty this line"
-                                                aria-label="Empty this line"><?= icon('close') ?></button>
+                                                aria-label="Delete this line"><?= icon('trash') ?></button>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>

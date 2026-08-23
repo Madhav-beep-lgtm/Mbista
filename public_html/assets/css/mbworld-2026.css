@@ -1346,6 +1346,25 @@ body.admin-layout .jw-line-remove {
   border-radius: var(--mbw-radius-sm);
   line-height: 1.1;
 }
+/* Destructive row actions use one unmistakable treatment everywhere: a red
+   trash icon. A close glyph means dismiss, not delete, and was too easy to
+   misread beside dense data-entry grids. */
+body.admin-layout .mbw-delete-action {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 4px 9px;
+  border: 1px solid #b42318 !important;
+  border-radius: var(--mbw-radius-sm);
+  background: #c83a32 !important;
+  color: #fff !important;
+  line-height: 1;
+}
+body.admin-layout .mbw-delete-action:hover,
+body.admin-layout .mbw-delete-action:focus-visible {
+  border-color: #8f211b !important;
+  background: #a72822 !important;
+  color: #fff !important;
+}
 @media (max-width: 720px) {
   body.admin-layout .jw-line-remove {
     min-height: 44px;
