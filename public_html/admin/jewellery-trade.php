@@ -1039,6 +1039,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         // Ticking one still out with the kaligad would bill a
                         // customer for gold nobody has yet.
                         $collectTotalAdvance = 0.0;
+                        $clientOrderPrefills = [];
                         foreach ($openOrders as $ord):
                             $isSelling = in_array((int) $ord['id'], $sellingOrderIds, true);
                             $isReady = (string) $ord['status'] === 'received';
@@ -1046,6 +1047,19 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                             // contain several pieces. Show every ordered line to
                             // the counter before it is collected.
                             $orderedLines = jewellery_order_line_rows($companyId, (int) $ord['id']);
+                            // The same server-side prefill used by the old page
+                            // reload is embedded once here. The button below can
+                            // fill the open sale in place, without navigating
+                            // away from the counter screen.
+                            if ($isReady) {
+                                $clientPrefill = jewellery_order_sale_prefill($companyId, (int) $ord['id']);
+                                if (!empty($clientPrefill['ok'])) {
+                                    $clientOrderPrefills[(int) $ord['id']] = [
+                                        'order_no' => (string) $ord['order_no'],
+                                        'lines' => array_values((array) $clientPrefill['lines']),
+                                    ];
+                                }
+                            }
                             if ($isSelling) { $collectTotalAdvance += (float) $ord['advance_amount']; }
                         ?>
                             <tr<?= $isSelling ? ' style="background:var(--mbw-accent-soft,#eef7f1)"' : '' ?>>
@@ -1085,9 +1099,11 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                       // re-fills the grid below from the orders chosen, which is a
                       // fresh page, not a sale being saved. ?>
                 <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                    <button type="submit" form="jw-collect-form" class="button secondary"><?= icon('journal') ?>Bill the ticked orders</button>
+                    <button type="button" id="jw-bill-ticked-orders" class="button secondary"><?= icon('journal') ?>Bill the ticked orders</button>
                     <small style="color:var(--mbw-muted,#64748b)">Anything left unticked stays waiting for its own bill.</small>
                 </div>
+                <script type="application/json" id="jw-order-prefills"><?= json_encode($clientOrderPrefills, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
+                <div id="jw-order-prefill-note" class="mbw-note tone-green" style="display:none;margin-top:10px" role="status"></div>
                 <?php if ($orderPrefill): ?>
                     <?php foreach ($sellingOrderIds as $sellingId): ?>
                         <input type="hidden" name="deliver_order_ids[]" value="<?= (int) $sellingId ?>">
@@ -1485,6 +1501,64 @@ document.addEventListener("change", function (event) {
     }
     window.location.assign(action.value);
 });
+
+// Fill selected ready orders directly into the open sale. This deliberately
+// avoids a GET submit: the counter keeps its place, the popup stays open, and
+// only the order lines that are still unbilled are copied into the grid.
+(function () {
+    var bill = document.getElementById("jw-bill-ticked-orders");
+    var source = document.getElementById("jw-order-prefills");
+    if (!bill || !source) { return; }
+    var prefills = {};
+    try { prefills = JSON.parse(source.textContent || "{}"); } catch (ignore) { return; }
+    function field(row, name) {
+        return Array.prototype.find.call(row.querySelectorAll("[name]"), function (input) { return input.name === name; }) || null;
+    }
+    function put(row, name, value) {
+        var input = field(row, name);
+        if (!input) { return; }
+        input.value = value == null ? "" : String(value);
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    function rows() { return Array.prototype.slice.call(document.querySelectorAll('select[name="l_item_id[]"]')).map(function (select) { return select.closest("tr"); }); }
+    bill.addEventListener("click", function () {
+        var selected = Array.prototype.filter.call(document.querySelectorAll(".jw-collect-tick:checked"), function (tick) { return !tick.disabled; });
+        var lines = [];
+        selected.forEach(function (tick) {
+            var one = prefills[String(tick.value)];
+            if (one && Array.isArray(one.lines)) { lines = lines.concat(one.lines); }
+        });
+        if (!lines.length) { window.alert("Tick at least one ready order to bill."); return; }
+        var gridRows = rows();
+        var add = document.querySelector(".jw-line-add");
+        while (gridRows.length < lines.length && add) { add.click(); gridRows = rows(); }
+        if (gridRows.length < lines.length) { window.alert("There are not enough item rows to fill these orders."); return; }
+        gridRows.forEach(function (row) {
+            ["item_id", "order_line_id", "stock_unit_id", "purity_id", "unit_id", "qty_pieces", "gross_weight", "stone_weight", "wastage_pct", "wastage_weight", "rate", "making_amount", "stone_amount", "stone_carat", "diamond_amount", "diamond_carat", "other_diamond_amount", "other_diamond_carat", "notes"].forEach(function (key) {
+                put(row, "l_" + key + "[]", key === "notes" ? "" : 0);
+            });
+        });
+        lines.forEach(function (line, index) {
+            var row = gridRows[index];
+            ["item_id", "order_line_id", "stock_unit_id", "purity_id", "unit_id", "qty_pieces", "gross_weight", "stone_weight", "wastage_pct", "wastage_weight", "rate", "making_amount", "stone_amount", "stone_carat", "diamond_amount", "diamond_carat", "other_diamond_amount", "other_diamond_carat", "notes"].forEach(function (key) {
+                put(row, "l_" + key + "[]", line[key] == null ? (key === "notes" ? "" : 0) : line[key]);
+            });
+        });
+        document.querySelectorAll(".jw-client-deliver-order").forEach(function (input) { input.remove(); });
+        var saleForm = bill.closest("form.jw-layout");
+        if (saleForm) {
+            selected.forEach(function (tick) {
+                var input = document.createElement("input");
+                input.type = "hidden"; input.name = "deliver_order_ids[]"; input.value = tick.value;
+                input.className = "jw-client-deliver-order"; saleForm.appendChild(input);
+            });
+        }
+        var note = document.getElementById("jw-order-prefill-note");
+        if (note) { note.textContent = selected.length + " order(s) filled below. Only their remaining unsold items were added."; note.style.display = "block"; }
+        var grid = document.querySelector(".jw-lines-scroll");
+        if (grid) { grid.scrollIntoView({ behavior: "smooth", block: "nearest" }); }
+    });
+})();
 // Pick a customer first, then reload this same sale with the customer's open
 // orders. This gives the counter a clear delivery view before anything is
 // added to the bill.
