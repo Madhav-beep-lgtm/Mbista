@@ -2051,7 +2051,7 @@ $wageBillId = (int) db()->query("SELECT id FROM jewellery_bills WHERE company_id
     AND source_id=" . (int) $billBack['receipt_id'] . " LIMIT 1")->fetchColumn();
 ok($wageBillId > 0, 'The receipt opened a bill-wise wage bill');
 
-$billMetal = jw_report_karigar_bill_metal($cidA, [$wageBillId]);
+$billMetal = jw_report_bill_metal($cidA, [$wageBillId]);
 ok(isset($billMetal[$wageBillId]), 'The bill book can say what metal is behind that bill');
 $bm = $billMetal[$wageBillId] ?? [];
 // 2 tola of 22K is 1.832 fine, out and back — no wastage on this one.
@@ -2072,7 +2072,7 @@ $cashPart = jewellery_save_settlement($cidA, $fyA, [
     'mode' => 'cash', 'amount' => 8000, 'ledger_id' => $cash,
 ], [['bill_id' => $wageBillId, 'amount' => 8000]], $userA);
 ok(jewellery_post_settlement($cidA, $cashPart, $userA)['ok'], '8,000 of it is paid in cash');
-$bm = jw_report_karigar_bill_metal($cidA, [$wageBillId])[$wageBillId];
+$bm = jw_report_bill_metal($cidA, [$wageBillId])[$wageBillId];
 ok(near((float) $bm['settled_cash_amount'], 8000.0), 'That shows as settled in CASH');
 ok(near((float) $bm['settled_metal_amount'], 0.0), 'And not a rupee of it as metal');
 ok(near((float) $bm['outstanding_amount'], 12000.0), '12,000 still stands');
@@ -2086,7 +2086,7 @@ $metalPart = jewellery_save_settlement($cidA, $fyA, [
 $metalPosted = jewellery_post_settlement($cidA, $metalPart, $userA);
 ok($metalPosted['ok'], '5,000 more is handed over in gold'
     . ($metalPosted['ok'] ? '' : ' — ' . $metalPosted['error']));
-$bm = jw_report_karigar_bill_metal($cidA, [$wageBillId])[$wageBillId];
+$bm = jw_report_bill_metal($cidA, [$wageBillId])[$wageBillId];
 ok(near((float) $bm['settled_metal_amount'], 5000.0), 'The gold shows as settled in METAL, kept apart from the cash');
 ok((float) $bm['settled_metal_fine'] > 0, 'And carries the WEIGHT of gold that changed hands, not only its value');
 ok(near((float) $bm['settled_cash_amount'], 8000.0), 'The cash already paid is untouched by it');

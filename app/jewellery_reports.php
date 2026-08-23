@@ -805,7 +805,7 @@ function jw_report_karigar_wages(int $companyId, string $from, string $to): arra
 
 /** Outstanding bills grouped by party — the bill-wise seller/buyer statement. */
 /**
- * THE METAL BEHIND A SET OF KALIGAD BILLS, batched into three queries.
+ * THE METAL BEHIND A SET OF BILLS, batched into four queries.
  *
  * A kaligad's bill is money, and money is the wrong unit to argue with a
  * goldsmith in. What he wants to know — and what the shop needs beside the
@@ -813,8 +813,16 @@ function jw_report_karigar_wages(int $companyId, string $from, string $to): arra
  * came back, how much of the bill has been settled in gold rather than in cash,
  * and what is still owed said as a weight and not only as rupees.
  *
- * Only kaligad bills have any of this. A purchase or a sale bill has no
- * assignment behind it, so it is not asked about and comes back absent.
+ * TWO DIFFERENT QUESTIONS, and they do not have the same scope.
+ *
+ *   THE JOB — ordered against received — exists only where an assignment sits
+ *   behind the bill, which means kaligad bills and nothing else. A purchase or
+ *   a sale bill comes back with has_job false and no weights.
+ *
+ *   HOW IT WAS SETTLED is asked of EVERY bill, because any of them can be paid
+ *   in old gold. Restricting the split to kaligad bills was a real fault while
+ *   it lasted: a supplier paid in metal had that metal reported in the cash
+ *   column, which is the one place the distinction actually matters.
  *
  * ORDERED vs RECEIVED. The bill is raised on what CAME BACK, never on what went
  * out — the two differ by the wastage, and by whatever metal the kaligad put in
@@ -832,10 +840,9 @@ function jw_report_karigar_wages(int $companyId, string $from, string $to): arra
  * SUM() reports 10 + 5 as 15 of nothing.
  *
  * @param  array<int, int> $billIds
- * @return array<int, array<string, mixed>> keyed by bill id; a bill that is not
- *         a kaligad bill is simply absent from the result
+ * @return array<int, array<string, mixed>> keyed by bill id
  */
-function jw_report_karigar_bill_metal(int $companyId, array $billIds): array
+function jw_report_bill_metal(int $companyId, array $billIds): array
 {
     $ids = array_values(array_unique(array_filter(array_map('intval', $billIds), static fn (int $id): bool => $id > 0)));
     if ($companyId <= 0 || $ids === []) {
@@ -846,32 +853,20 @@ function jw_report_karigar_bill_metal(int $companyId, array $billIds): array
     $baseGrams = (float) ($baseUnit['grams'] ?? 0) ?: 1.0;
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
 
-    // --- 1. the job behind each bill ---------------------------------------
-    $jobStmt = db()->prepare("SELECT b.id AS bill_id, b.bill_amount, b.settled_amount,
-            (b.bill_amount - b.settled_amount) AS outstanding,
-            r.receipt_no, r.received_fine_weight, r.avg_fine_rate, r.qty_pieces, r.unit_id AS receipt_unit_id,
-            a.issued_fine_weight, a.unit_id AS assignment_unit_id
-        FROM jewellery_bills b
-        INNER JOIN jewellery_order_receipts r ON r.id = b.source_id AND r.company_id = b.company_id
-        INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id AND a.company_id = b.company_id
-        WHERE b.company_id = ? AND b.bill_type = 'karigar'
-          AND b.source_type = 'jewellery_order_receipt' AND b.id IN ($placeholders)");
-    $jobStmt->execute(array_merge([$companyId], $ids));
-
+    // --- 1. every bill asked about, job or no job --------------------------
+    $billStmt = db()->prepare("SELECT id, bill_amount, settled_amount,
+            (bill_amount - settled_amount) AS outstanding
+        FROM jewellery_bills WHERE company_id = ? AND id IN ($placeholders)");
+    $billStmt->execute(array_merge([$companyId], $ids));
     $metal = [];
-    foreach ($jobStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $billId = (int) $row['bill_id'];
-        $receiptUnitId = (int) $row['receipt_unit_id'];
-        // The rate the bill was actually struck at, restated per fine BASE unit
-        // so it can divide an outstanding expressed in those same terms.
-        $receiptUnitGrams = (float) ($unitMap[$receiptUnitId]['grams'] ?? 0) ?: 1.0;
-        $billRate = jw_round_rate((float) $row['avg_fine_rate'] * ($baseGrams / $receiptUnitGrams));
-        $metal[$billId] = [
-            'receipt_no' => (string) $row['receipt_no'],
-            'ordered_fine' => jw_weight_in_base((float) $row['issued_fine_weight'], (int) $row['assignment_unit_id'], $unitMap, $baseUnit),
-            'received_fine' => jw_weight_in_base((float) $row['received_fine_weight'], $receiptUnitId, $unitMap, $baseUnit),
-            'qty_pieces' => round((float) $row['qty_pieces'], 3),
-            'bill_rate' => $billRate,
+    foreach ($billStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $metal[(int) $row['id']] = [
+            'has_job' => false,
+            'receipt_no' => '',
+            'ordered_fine' => 0.0,
+            'received_fine' => 0.0,
+            'qty_pieces' => 0.0,
+            'bill_rate' => 0.0,
             'settled_metal_amount' => 0.0,
             'settled_metal_fine' => 0.0,
             'settled_cash_amount' => 0.0,
@@ -884,16 +879,41 @@ function jw_report_karigar_bill_metal(int $companyId, array $billIds): array
         return [];
     }
 
-    // --- 2. what each posted settlement was tendered in ---------------------
-    $metalBillIds = array_keys($metal);
-    $allocPlaceholders = implode(',', array_fill(0, count($metalBillIds), '?'));
+    // --- 2. the job behind the kaligad ones --------------------------------
+    $jobStmt = db()->prepare("SELECT b.id AS bill_id,
+            r.receipt_no, r.received_fine_weight, r.avg_fine_rate, r.qty_pieces, r.unit_id AS receipt_unit_id,
+            a.issued_fine_weight, a.unit_id AS assignment_unit_id
+        FROM jewellery_bills b
+        INNER JOIN jewellery_order_receipts r ON r.id = b.source_id AND r.company_id = b.company_id
+        INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id AND a.company_id = b.company_id
+        WHERE b.company_id = ? AND b.bill_type = 'karigar'
+          AND b.source_type = 'jewellery_order_receipt' AND b.id IN ($placeholders)");
+    $jobStmt->execute(array_merge([$companyId], $ids));
+    foreach ($jobStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $billId = (int) $row['bill_id'];
+        if (!isset($metal[$billId])) {
+            continue;
+        }
+        $receiptUnitId = (int) $row['receipt_unit_id'];
+        // The rate the bill was actually struck at, restated per fine BASE unit
+        // so it can divide an outstanding expressed in those same terms.
+        $receiptUnitGrams = (float) ($unitMap[$receiptUnitId]['grams'] ?? 0) ?: 1.0;
+        $metal[$billId]['has_job'] = true;
+        $metal[$billId]['receipt_no'] = (string) $row['receipt_no'];
+        $metal[$billId]['ordered_fine'] = jw_weight_in_base((float) $row['issued_fine_weight'], (int) $row['assignment_unit_id'], $unitMap, $baseUnit);
+        $metal[$billId]['received_fine'] = jw_weight_in_base((float) $row['received_fine_weight'], $receiptUnitId, $unitMap, $baseUnit);
+        $metal[$billId]['qty_pieces'] = round((float) $row['qty_pieces'], 3);
+        $metal[$billId]['bill_rate'] = jw_round_rate((float) $row['avg_fine_rate'] * ($baseGrams / $receiptUnitGrams));
+    }
+
+    // --- 3. what each posted settlement was tendered in ---------------------
     $allocStmt = db()->prepare("SELECT al.bill_id, al.amount AS allocated, s.id AS settlement_id,
             s.amount AS settlement_amount, s.mode AS settlement_mode,
             s.fine_weight AS settlement_fine, s.unit_id AS settlement_unit_id
         FROM jewellery_settlement_allocations al
         INNER JOIN jewellery_settlements s ON s.id = al.settlement_id
-        WHERE al.company_id = ? AND s.status = 'posted' AND al.bill_id IN ($allocPlaceholders)");
-    $allocStmt->execute(array_merge([$companyId], $metalBillIds));
+        WHERE al.company_id = ? AND s.status = 'posted' AND al.bill_id IN ($placeholders)");
+    $allocStmt->execute(array_merge([$companyId], $ids));
     $allocations = $allocStmt->fetchAll(PDO::FETCH_ASSOC);
 
     if ($allocations !== []) {
@@ -920,7 +940,7 @@ function jw_report_karigar_bill_metal(int $companyId, array $billIds): array
             }
         }
 
-        // --- 3. apportion each allocation over its settlement's tenders -----
+        // --- 4. apportion each allocation over its settlement's tenders -----
         foreach ($allocations as $allocation) {
             $billId = (int) $allocation['bill_id'];
             if (!isset($metal[$billId])) {
@@ -958,14 +978,71 @@ function jw_report_karigar_bill_metal(int $companyId, array $billIds): array
         $metal[$billId]['settled_cash_amount'] = jw_round_money($row['settled_cash_amount']);
         // The same outstanding the money column shows, said in metal — at the
         // rate the bill was struck at, which is the one rate both sides have
-        // already agreed to.
+        // already agreed to. Only a bill with a job behind it has such a rate.
         $metal[$billId]['outstanding_fine'] = $row['bill_rate'] > 0
             ? jw_round_weight($row['outstanding_amount'] / $row['bill_rate']) : 0.0;
     }
 
     return $metal;
 }
-function jw_report_bill_outstanding(int $companyId, string $billType = '', int $limit = 500, int $offset = 0): array
+/**
+ * Does one bill survive the column filters?
+ *
+ * ONE TEST PER COLUMN, in the order the table shows them, so the filter row
+ * under the headings and this function can be read against each other. Text
+ * matches loosely (a substring, case-insensitively) because somebody typing
+ * "JRC-1" means every bill that starts that way; a numeric filter is a FLOOR —
+ * "show me what is at least this big" — which is the question actually asked of
+ * a money or weight column.
+ *
+ * An absent or blank filter is not a filter. It never narrows anything, so a
+ * page with an empty filter row shows the same rows it always did.
+ */
+function jw_bill_matches_filters(array $bill, array $filters): bool
+{
+    $metal = $bill['metal'] ?? null;
+    $text = static function (string $key, string $haystack) use ($filters): bool {
+        $needle = trim((string) ($filters[$key] ?? ''));
+        return $needle === '' || stripos($haystack, $needle) !== false;
+    };
+    $atLeast = static function (string $key, float $value) use ($filters): bool {
+        $raw = trim((string) ($filters[$key] ?? ''));
+        return $raw === '' || $value + 0.00005 >= (float) $raw;
+    };
+
+    if (!$text('party', (string) ($bill['party_name'] ?? ''))) { return false; }
+    if (!$text('bill_no', (string) ($bill['bill_no'] ?? ''))) { return false; }
+    $type = trim((string) ($filters['bill_type'] ?? ''));
+    if ($type !== '' && (string) $bill['bill_type'] !== $type) { return false; }
+    $from = trim((string) ($filters['from'] ?? ''));
+    $to = trim((string) ($filters['to'] ?? ''));
+    if ($from !== '' && (string) $bill['bill_date'] < $from) { return false; }
+    if ($to !== '' && (string) $bill['bill_date'] > $to) { return false; }
+
+    // The metal floors answer "nothing here" rather than "zero" on a bill with
+    // no job behind it: a purchase bill is not a kaligad job that ordered 0.000
+    // fine, and asking for at least some metal must not drag it into the list.
+    foreach ([['ordered_min', 'ordered_fine'], ['received_min', 'received_fine']] as [$filterKey, $metalKey]) {
+        if (trim((string) ($filters[$filterKey] ?? '')) === '') { continue; }
+        if ($metal === null || !$metal['has_job']) { return false; }
+        if (!$atLeast($filterKey, (float) $metal[$metalKey])) { return false; }
+    }
+    if (!$atLeast('billed_min', (float) $bill['bill_amount'])) { return false; }
+    if (!$atLeast('settled_metal_min', (float) ($metal['settled_metal_amount'] ?? 0))) { return false; }
+    $cash = $metal === null ? (float) $bill['settled_amount'] : (float) $metal['settled_cash_amount'];
+    if (!$atLeast('settled_cash_min', $cash)) { return false; }
+    if (!$atLeast('outstanding_min', (float) $bill['outstanding'])) { return false; }
+    if (trim((string) ($filters['outstanding_fine_min'] ?? '')) !== '') {
+        if ($metal === null || !$metal['has_job']) { return false; }
+        if (!$atLeast('outstanding_fine_min', (float) $metal['outstanding_fine'])) { return false; }
+    }
+    $status = trim((string) ($filters['status'] ?? ''));
+    if ($status !== '' && (string) $bill['status'] !== $status) { return false; }
+
+    return true;
+}
+
+function jw_report_bill_outstanding(int $companyId, string $billType = '', int $limit = 500, int $offset = 0, array $filters = []): array
 {
     $bills = jewellery_bills_list($companyId, [
         'bill_type' => $billType,
@@ -977,11 +1054,17 @@ function jw_report_bill_outstanding(int $companyId, string $billType = '', int $
     // The metal behind the kaligad bills, fetched once for the whole page
     // rather than per row — a party with thirty open bills was thirty round
     // trips waiting to happen.
-    $metalByBill = jw_report_karigar_bill_metal($companyId, array_map('intval', array_column($bills, 'id')));
+    $metalByBill = jw_report_bill_metal($companyId, array_map('intval', array_column($bills, 'id')));
 
     $parties = [];
     foreach ($bills as $bill) {
         $bill['metal'] = $metalByBill[(int) $bill['id']] ?? null;
+        // Filtered AFTER enrichment, because half the columns being filtered on
+        // do not exist until the metal is attached. A party whose every bill is
+        // filtered out never opens a group, so no empty headings are left over.
+        if ($filters !== [] && !jw_bill_matches_filters($bill, $filters)) {
+            continue;
+        }
         $partyId = (int) $bill['party_id'];
         if (!isset($parties[$partyId])) {
             $parties[$partyId] = [

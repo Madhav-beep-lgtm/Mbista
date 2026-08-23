@@ -712,11 +712,27 @@ if (in_array($view, ['sales', 'purchases'], true) && $canPost) {
 }
 
 $outstanding = [];
+// Declared for every view, not just bills: the card head reads it when it
+// builds the export links, and a view that never sets it must not warn.
+$billFilters = [];
 $settlements = [];
 $settleParty = (int) ($_GET['party'] ?? 0);
 $partyBills = [];
 if ($view === 'bills') {
-    $outstanding = jw_report_bill_outstanding($companyId);
+    // ONE FILTER PER HEADING, read straight off the querystring and handed to
+    // the report. They are applied there rather than here so the EXPORTS get
+    // the same rows — a filtered screen whose PDF quietly holds everything is
+    // worse than no filter at all.
+    $billFilters = [];
+    foreach (['party', 'bill_no', 'bill_type', 'from', 'to', 'ordered_min', 'received_min',
+              'billed_min', 'settled_metal_min', 'settled_cash_min', 'outstanding_min',
+              'outstanding_fine_min', 'status'] as $filterKey) {
+        $value = trim((string) ($_GET[$filterKey] ?? ''));
+        if ($value !== '') {
+            $billFilters[$filterKey] = $value;
+        }
+    }
+    $outstanding = jw_report_bill_outstanding($companyId, '', 500, 0, $billFilters);
     $settlements = jewellery_settlements_list($companyId, ['limit' => 50]);
     if ($settleParty > 0) {
         $partyBills = jewellery_open_bills($companyId, $settleParty);
@@ -742,18 +758,22 @@ if ($view === 'bills' && isset($_GET['export'])) {
             if ($metal !== null && $unitCode === '') {
                 $unitCode = (string) ($metal['base_unit']['code'] ?? '');
             }
+            // A job behind the bill governs only the ORDERED/RECEIVED pair. How
+            // it was settled is asked of every bill, because any of them can be
+            // paid in old gold.
+            $hasJob = $metal !== null && $metal['has_job'];
             $data[] = [
                 $party['party_name'], $bill['bill_no'], ucfirst((string) $bill['bill_type']),
                 (string) $bill['bill_date'],
-                $metal['receipt_no'] ?? '',
-                $metal === null ? '' : $metal['ordered_fine'],
-                $metal === null ? '' : $metal['received_fine'],
+                $hasJob ? $metal['receipt_no'] : '',
+                $hasJob ? $metal['ordered_fine'] : '',
+                $hasJob ? $metal['received_fine'] : '',
                 $bill['bill_amount'],
                 $metal === null ? '' : $metal['settled_metal_amount'],
                 $metal === null ? '' : $metal['settled_metal_fine'],
-                $metal === null ? '' : $metal['settled_cash_amount'],
+                $metal === null ? (float) $bill['settled_amount'] : $metal['settled_cash_amount'],
                 $bill['outstanding'],
-                $metal === null ? '' : $metal['outstanding_fine'],
+                $hasJob ? $metal['outstanding_fine'] : '',
                 str_replace('_', ' ', (string) $bill['status']),
             ];
         }
@@ -1536,7 +1556,8 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     </section>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Bill-wise Outstanding</h2><span><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=bills&export=csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=bills&export=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-trade.php?view=bills&export=print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
+        <div class="mbw-card-head"><h2>Bill-wise Outstanding</h2><span><?php if ($canExport): ?><?php foreach (['csv' => ['CSV', 'download'], 'xlsx' => ['Excel', 'analytics'], 'print' => ['PDF', 'documents']] as $billFormat => [$billLabel, $billIcon]): ?><?php // The file follows the FILTERS. An export that ignores the row the person just narrowed is the bug this whole feature exists to avoid. ?><a class="mbw-view-all"<?= $billFormat === 'print' ? ' target="_blank" rel="noopener"' : '' ?> href="<?= e(url('admin/jewellery-trade.php?' . http_build_query(['view' => 'bills', 'export' => $billFormat] + $billFilters))) ?>" aria-label="Export <?= e($billLabel) ?>" title="Export <?= e($billLabel) ?>"><?= icon($billIcon) ?></a><?php endforeach; ?><?php endif; ?></span></div>
+        <form method="get" id="jw-bill-filters"><input type="hidden" name="view" value="bills"></form>
         <div style="overflow-x:auto"><table>
             <?php // THE METAL COLUMNS ONLY MEAN SOMETHING FOR A KALIGAD, whose bill
                   // is raised on gold that came back off a job. A purchase or a
@@ -1548,21 +1569,67 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <th class="is-numeric">Settled — metal</th><th class="is-numeric">Settled — cash</th>
                 <th class="is-numeric">Outstanding</th><th class="is-numeric">Outstanding (fine)</th>
                 <th>Status</th></tr></thead>
-            <tbody>
-                <?php if ($outstanding === []): ?><tr><td colspan="12">Nothing outstanding — every bill is settled.</td></tr><?php endif; ?>
+            <?php // A FILTER UNDER EVERY HEADING, in its own column, so the control
+                  // and the thing it narrows are never a guess apart. Text boxes
+                  // match loosely; a number is a floor — "at least this much" —
+                  // which is the question a money or weight column gets asked.
+                  //
+                  // One <form> wrapping a table row is not valid HTML, so the row
+                  // holds plain inputs and a form elsewhere on the page owns them
+                  // through the form= attribute. ?>
+            <tr class="mbw-filter-row">
+                <td><input form="jw-bill-filters" type="text" name="party" value="<?= e((string) ($_GET['party'] ?? '')) ?>" placeholder="Party" style="width:100%;min-width:90px"></td>
+                <td><input form="jw-bill-filters" type="text" name="bill_no" value="<?= e((string) ($_GET['bill_no'] ?? '')) ?>" placeholder="Bill" style="width:100%;min-width:80px"></td>
+                <td>
+                    <select form="jw-bill-filters" name="bill_type" style="width:100%;min-width:90px">
+                        <?php foreach (['' => 'All', 'karigar' => 'Karigar', 'purchase' => 'Purchase', 'sale' => 'Sale'] as $typeValue => $typeLabel): ?>
+                            <option value="<?= e($typeValue) ?>" <?= (string) ($_GET['bill_type'] ?? '') === $typeValue ? 'selected' : '' ?>><?= e($typeLabel) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </td>
+                <td>
+                    <input form="jw-bill-filters" type="date" name="from" value="<?= e((string) ($_GET['from'] ?? '')) ?>" aria-label="Billed from" style="width:100%;min-width:120px">
+                    <input form="jw-bill-filters" type="date" name="to" value="<?= e((string) ($_GET['to'] ?? '')) ?>" aria-label="Billed to" style="width:100%;min-width:120px;margin-top:3px">
+                </td>
+                <td><input form="jw-bill-filters" type="number" step="0.0001" min="0" name="ordered_min" value="<?= e((string) ($_GET['ordered_min'] ?? '')) ?>" placeholder="min" style="width:100%;min-width:70px"></td>
+                <td><input form="jw-bill-filters" type="number" step="0.0001" min="0" name="received_min" value="<?= e((string) ($_GET['received_min'] ?? '')) ?>" placeholder="min" style="width:100%;min-width:70px"></td>
+                <td><input form="jw-bill-filters" type="number" step="0.01" min="0" name="billed_min" value="<?= e((string) ($_GET['billed_min'] ?? '')) ?>" placeholder="min" style="width:100%;min-width:70px"></td>
+                <td><input form="jw-bill-filters" type="number" step="0.01" min="0" name="settled_metal_min" value="<?= e((string) ($_GET['settled_metal_min'] ?? '')) ?>" placeholder="min" style="width:100%;min-width:70px"></td>
+                <td><input form="jw-bill-filters" type="number" step="0.01" min="0" name="settled_cash_min" value="<?= e((string) ($_GET['settled_cash_min'] ?? '')) ?>" placeholder="min" style="width:100%;min-width:70px"></td>
+                <td><input form="jw-bill-filters" type="number" step="0.01" min="0" name="outstanding_min" value="<?= e((string) ($_GET['outstanding_min'] ?? '')) ?>" placeholder="min" style="width:100%;min-width:70px"></td>
+                <td><input form="jw-bill-filters" type="number" step="0.0001" min="0" name="outstanding_fine_min" value="<?= e((string) ($_GET['outstanding_fine_min'] ?? '')) ?>" placeholder="min" style="width:100%;min-width:70px"></td>
+                <td>
+                    <select form="jw-bill-filters" name="status" style="width:100%;min-width:90px">
+                        <?php foreach (['' => 'All', 'open' => 'Open', 'part_settled' => 'Part settled'] as $statusValue => $statusLabel): ?>
+                            <option value="<?= e($statusValue) ?>" <?= (string) ($_GET['status'] ?? '') === $statusValue ? 'selected' : '' ?>><?= e($statusLabel) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div style="display:flex;gap:4px;margin-top:4px">
+                        <button form="jw-bill-filters" type="submit" class="button soft" style="min-height:26px;padding:1px 8px;flex:1">Filter</button>
+                        <a class="button soft" style="min-height:26px;padding:1px 8px;flex:1;text-align:center" href="<?= e(url('admin/jewellery-trade.php?view=bills')) ?>">Clear</a>
+                    </div>
+                </td>
+            </tr>
+                <?php if ($outstanding === []): ?><tr><td colspan="12"><?= $billFilters === [] ? 'Nothing outstanding — every bill is settled.' : 'No bill matches those filters.' ?></td></tr><?php endif; ?>
                 <?php foreach ($outstanding as $party): ?>
                     <?php foreach ($party['bills'] as $index => $bill): ?>
-                        <?php $metal = $bill['metal'] ?? null; ?>
+                        <?php
+                            $metal = $bill['metal'] ?? null;
+                            // has_job, not "is there a metal record": every bill has
+                            // one now, because every bill can be settled in gold. Only
+                            // the ordered/received pair needs an assignment behind it.
+                            $hasJob = $metal !== null && $metal['has_job'];
+                        ?>
                         <tr>
                             <td><?php if ($index === 0): ?><strong><?= e($party['party_name']) ?></strong><?php endif; ?></td>
-                            <td><?= e($bill['bill_no']) ?><?= $metal !== null && $metal['receipt_no'] !== '' ? '<br><small>' . e((string) $metal['receipt_no']) . '</small>' : '' ?></td>
+                            <td><?= e($bill['bill_no']) ?><?= $hasJob && $metal['receipt_no'] !== '' ? '<br><small>' . e((string) $metal['receipt_no']) . '</small>' : '' ?></td>
                             <td><?= e(ucfirst((string) $bill['bill_type'])) ?></td>
                             <td><?= e(app_date((string) $bill['bill_date'])) ?></td>
                             <?php // WHAT WENT OUT AND WHAT CAME BACK. The bill is raised on
                                   // the second of the two; they differ by the wastage and by
                                   // any metal the kaligad added out of his own. ?>
-                            <td class="is-numeric"><?= $metal === null ? '—' : $fmt((float) $metal['ordered_fine'], 4) ?></td>
-                            <td class="is-numeric"><?= $metal === null ? '—' : '<strong>' . $fmt((float) $metal['received_fine'], 4) . '</strong>' ?></td>
+                            <td class="is-numeric"><?= $hasJob ? $fmt((float) $metal['ordered_fine'], 4) : '—' ?></td>
+                            <td class="is-numeric"><?= $hasJob ? '<strong>' . $fmt((float) $metal['received_fine'], 4) . '</strong>' : '—' ?></td>
                             <td class="is-numeric"><?= $fmt((float) $bill['bill_amount']) ?></td>
                             <td class="is-numeric">
                                 <?php if ($metal === null || $metal['settled_metal_amount'] < 0.005): ?>—
@@ -1575,8 +1642,8 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                             <td class="is-numeric"><strong><?= $fmt((float) $bill['outstanding']) ?></strong></td>
                             <?php // The same outstanding, said in metal, at the rate the bill
                                   // was struck at — the one rate both sides already agreed. ?>
-                            <td class="is-numeric" title="<?= $metal === null ? '' : 'At ' . $fmt((float) $metal['bill_rate'], 2) . ' per fine — the rate this receipt was settled at' ?>">
-                                <?= $metal === null || $metal['outstanding_fine'] <= 0.00005 ? '—' : $fmt((float) $metal['outstanding_fine'], 4) ?>
+                            <td class="is-numeric" title="<?= $hasJob ? 'At ' . $fmt((float) $metal['bill_rate'], 2) . ' per fine — the rate this receipt was settled at' : '' ?>">
+                                <?= !$hasJob || $metal['outstanding_fine'] <= 0.00005 ? '—' : $fmt((float) $metal['outstanding_fine'], 4) ?>
                             </td>
                             <td><span class="mbw-pill <?= (string) $bill['status'] === 'open' ? 'tone-amber' : 'tone-blue' ?>"><?= e(str_replace('_', ' ', (string) $bill['status'])) ?></span></td>
                         </tr>

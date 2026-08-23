@@ -325,6 +325,85 @@ function jewellery_karigar_position(int $companyId, int $karigarId, string $asOf
  * to a gram row. Summing the raw column — which is what a single SUM() would
  * do — silently reports 10 tola + 5 g as 15 of nothing.
  */
+/**
+ * The same position as jewellery_holder_metal_position(), for MANY holders at
+ * once — the batched sibling, in the shape jw_item_balances() already set.
+ *
+ * The directory asked the single version once per row, which is one query per
+ * kaligad for a column, and the row also wanted its wages and its committed
+ * weight. Nineteen kaligads came to three hundred and sixty-one queries for one
+ * screen. This asks the same question once for all of them.
+ *
+ * Every holder id passed comes back, at zero if nothing has ever moved to them,
+ * so a caller can index the result without first checking whether the key is
+ * there.
+ *
+ * @param  array<int, int> $holderIds
+ * @return array<int, array<string, mixed>> keyed by holder id
+ */
+function jewellery_holder_metal_positions(int $companyId, string $holderType, array $holderIds, string $asOf = ''): array
+{
+    $baseUnit = jewellery_base_unit($companyId);
+    $ids = array_values(array_unique(array_filter(array_map('intval', $holderIds), static fn (int $id): bool => $id > 0)));
+    $out = [];
+    foreach ($ids as $id) {
+        $out[$id] = ['fine_weight' => 0.0, 'stone_carat' => 0.0, 'metal_value' => 0.0, 'base_unit' => $baseUnit];
+    }
+    if ($companyId <= 0 || $ids === []) {
+        return $out;
+    }
+
+    // Rows, not SUM(). The unit lives on each row and only the unit table knows
+    // how to add a tola row to a gram row — the same reason the single-holder
+    // version does its arithmetic in PHP.
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $sql = "SELECT t.holder_id, t.direction, t.unit_id, t.fine_weight, t.amount,
+            COALESCE(m.metal_kind, 'metal') AS metal_kind
+        FROM jewellery_stock_txns t
+        LEFT JOIN jewellery_item_profiles j ON j.inventory_item_id = t.item_id
+        LEFT JOIN jewellery_metals m ON m.id = j.metal_id
+        WHERE t.company_id = ? AND t.holder_type = ? AND t.holder_id IN ($placeholders)";
+    $params = array_merge([$companyId, $holderType], $ids);
+    if ($asOf !== '') {
+        $sql .= ' AND t.txn_date <= ?';
+        $params[] = $asOf;
+    }
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+
+    $unitMap = jw_unit_map($companyId);
+    $fine = array_fill_keys($ids, 0.0);
+    $value = array_fill_keys($ids, 0.0);
+    $stone = array_fill_keys($ids, 0.0);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $holderId = (int) $row['holder_id'];
+        if (!isset($fine[$holderId])) {
+            continue;
+        }
+        $sign = (string) $row['direction'] === 'in' ? 1 : -1;
+        $value[$holderId] += $sign * (float) $row['amount'];
+        // A stone is not metal — the identical rule the single version keeps,
+        // and for the identical reason: carats folded into a fine weight make a
+        // kaligad look to be holding gold he was never given.
+        if ((string) $row['metal_kind'] === 'stone') {
+            $stone[$holderId] += $sign * (float) $row['fine_weight']
+                * (($unitMap[(int) $row['unit_id']]['grams'] ?? 0.2) / 0.2);
+            continue;
+        }
+        $fine[$holderId] += $sign * jw_weight_in_base((float) $row['fine_weight'], (int) $row['unit_id'], $unitMap, $baseUnit);
+    }
+
+    foreach ($ids as $id) {
+        $out[$id] = [
+            'fine_weight' => jw_round_weight($fine[$id]),
+            'stone_carat' => jw_round_weight($stone[$id]),
+            'metal_value' => jw_round_money($value[$id]),
+            'base_unit' => $baseUnit,
+        ];
+    }
+
+    return $out;
+}
 function jewellery_holder_metal_position(int $companyId, string $holderType, int $holderId, string $asOf = ''): array
 {
     // A stone is not metal, and the fine figure is a METAL accountability: it
@@ -1704,39 +1783,108 @@ function jewellery_karigar_metal_balance(int $companyId, int $karigarId, string 
 function jewellery_karigar_settlement_rows(int $companyId, array $karigars, string $asOf = '', ?float $typedRate = null): array
 {
     $asOf = $asOf !== '' ? $asOf : date('Y-m-d');
+    if ($karigars === []) {
+        return [];
+    }
+    $karigarIds = array_values(array_filter(array_map(
+        static fn (array $k): int => (int) ($k['id'] ?? 0), $karigars), static fn (int $id): bool => $id > 0));
+
+    // --- everything the rows need, asked once ------------------------------
+    // Three grouped questions instead of nineteen per row. What was here before
+    // called the single-holder position twice per kaligad (once for the metal,
+    // once for the balance), summed his wage bills on its own, and then walked
+    // the whole rate ladder AGAIN for every row — 361 queries to draw a screen
+    // of nineteen names.
+    $positions = jewellery_holder_metal_positions($companyId, 'karigar', $karigarIds, $asOf);
+
+    $unitMap = jw_unit_map($companyId);
+    $baseUnit = jewellery_base_unit($companyId);
+
+    // What the still-outstanding work needs, per kaligad. Only issues still
+    // 'issued' count: once a piece is back, the metal for it is not committed
+    // any more. Summed row by row for the unit reason, as ever.
+    $committed = array_fill_keys($karigarIds, 0.0);
+    if ($karigarIds !== []) {
+        $placeholders = implode(',', array_fill(0, count($karigarIds), '?'));
+        $committedStmt = db()->prepare("SELECT a.karigar_id, l.fine_weight, l.unit_id
+            FROM jewellery_order_lines l
+            INNER JOIN jewellery_order_assignments a ON a.id = l.assignment_id
+            WHERE l.company_id = ? AND a.status = 'issued' AND a.karigar_id IN ($placeholders)");
+        $committedStmt->execute(array_merge([$companyId], $karigarIds));
+        foreach ($committedStmt->fetchAll(PDO::FETCH_ASSOC) as $line) {
+            $karigarId = (int) $line['karigar_id'];
+            if (!isset($committed[$karigarId])) {
+                continue;
+            }
+            $committed[$karigarId] += jw_weight_in_base((float) $line['fine_weight'], (int) $line['unit_id'], $unitMap, $baseUnit);
+        }
+    }
+
+    // Wages still owed, by party. An employee kaligad has no party — their
+    // wages go through payroll — and simply has nothing here.
+    $partyIds = array_values(array_filter(array_map(
+        static fn (array $k): int => (int) ($k['party_id'] ?? 0), $karigars), static fn (int $id): bool => $id > 0));
+    $payableByParty = [];
+    if ($partyIds !== []) {
+        $partyPlaceholders = implode(',', array_fill(0, count($partyIds), '?'));
+        $billStmt = db()->prepare("SELECT party_id, COALESCE(SUM(bill_amount - settled_amount), 0) AS payable
+            FROM jewellery_bills
+            WHERE company_id = ? AND status IN ('open', 'part_settled') AND party_id IN ($partyPlaceholders)
+            GROUP BY party_id");
+        $billStmt->execute(array_merge([$companyId], $partyIds));
+        foreach ($billStmt->fetchAll(PDO::FETCH_ASSOC) as $bill) {
+            $payableByParty[(int) $bill['party_id']] = jw_round_money((float) $bill['payable']);
+        }
+    }
+
+    // THE RATE IS ONE LADDER FOR THE WHOLE LIST, so it is walked once. Typed
+    // beats everything and the board is the same quote for every row; only the
+    // last rung — a holding's own carrying value — can differ per kaligad, and
+    // that one needs no query at all, being value over weight on figures
+    // already in hand. Passing zero cost here is what makes the shared call
+    // stop at 'none' rather than answering with one man's average for all.
+    $sharedRate = jw_statement_fine_rate($companyId, ['fine_rate' => $typedRate ?? 0.0], $asOf, 0.0, 0.0);
+
     $rows = [];
     foreach ($karigars as $karigar) {
         $karigarId = (int) ($karigar['id'] ?? 0);
-        $position = jewellery_karigar_position($companyId, $karigarId, $asOf);
-        $balance = jewellery_karigar_metal_balance($companyId, $karigarId, $asOf);
+        $position = $positions[$karigarId]
+            ?? ['fine_weight' => 0.0, 'metal_value' => 0.0, 'base_unit' => $baseUnit];
+        $held = (float) $position['fine_weight'];
+        $carrying = jw_round_money((float) $position['metal_value']);
+        $committedFine = jw_round_weight($committed[$karigarId] ?? 0.0);
+        $difference = jw_round_weight($held - $committedFine);
+        $wages = $payableByParty[(int) ($karigar['party_id'] ?? 0)] ?? 0.0;
 
-        // Cost fallback from THIS kaligad's own holding, which is what the
-        // metal on his bench is carried at in the books.
-        $rate = jw_statement_fine_rate(
-            $companyId,
-            ['fine_rate' => $typedRate ?? 0.0],
-            $asOf,
-            (float) $balance['held_fine'],
-            (float) $position['metal_value']
-        );
+        $rate = $sharedRate;
+        if ((string) $rate['source'] === 'none' && abs($held) > 0.00005) {
+            // Nothing typed and nothing on the board: fall back to what THIS
+            // kaligad's holding is carried at, which is the same last rung
+            // jw_statement_fine_rate() would have taken, without the trip.
+            $rate = [
+                'fine_rate' => jw_round_rate($carrying / $held),
+                'source' => 'cost',
+                'label' => 'Carrying value — no rate quoted, enter one above',
+                'rate_row' => null,
+            ];
+        }
         $fineRate = (float) $rate['fine_rate'];
-        $metalValue = jw_round_money((float) $balance['difference_fine'] * $fineRate);
-        $wages = jw_round_money((float) $position['wages_payable']);
+        $metalValue = jw_round_money($difference * $fineRate);
 
         $rows[] = $karigar + [
-            'held_fine' => (float) $balance['held_fine'],
-            'committed_fine' => (float) $balance['committed_fine'],
-            'difference_fine' => (float) $balance['difference_fine'],
-            'excess_fine' => (float) $balance['excess_fine'],
-            'shortfall_fine' => (float) $balance['shortfall_fine'],
-            'carrying_value' => jw_round_money((float) $position['metal_value']),
+            'held_fine' => $held,
+            'committed_fine' => $committedFine,
+            'difference_fine' => $difference,
+            'excess_fine' => max(0.0, $difference),
+            'shortfall_fine' => max(0.0, -$difference),
+            'carrying_value' => $carrying,
             'fine_rate' => jw_round_rate($fineRate),
             'rate_source' => (string) $rate['source'],
             'rate_label' => (string) $rate['label'],
             'metal_value' => $metalValue,
             'wages_payable' => $wages,
             'net_settlement' => jw_round_money($metalValue + $wages),
-            'base_unit' => $balance['base_unit'],
+            'base_unit' => $baseUnit,
         ];
     }
 

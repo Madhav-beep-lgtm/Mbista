@@ -475,6 +475,99 @@ $looseLine = db()->query("SELECT * FROM jewellery_sale_lines WHERE sale_id = $lo
 ok(near((float) $looseLine['stone_weight'], 0.0) && near((float) $looseLine['net_weight'], 3.0),
     'A loose diamond keeps its carats as its weight — nothing is subtracted from itself');
 
+echo "\nA. A filter under every heading of the bill book\n";
+// The bill book is the screen a settlement happens over, and it was a wall of
+// rows. Each heading now has a control beneath it, and they are applied where
+// the report is BUILT rather than in the browser, so the CSV, the Excel and the
+// PDF carry the rows the person narrowed to and not the whole book.
+$allBills = jw_report_bill_outstanding($cidA);
+$countRows = static function (array $parties): int {
+    $n = 0;
+    foreach ($parties as $party) { $n += count($party['bills']); }
+    return $n;
+};
+$totalRows = $countRows($allBills);
+ok($totalRows > 0, "The unfiltered bill book has rows to narrow ($totalRows)");
+
+// A party filter matches loosely — somebody typing part of a name means it.
+$byParty = jw_report_bill_outstanding($cidA, '', 500, 0, ['party' => 'Retail Customer']);
+ok($byParty !== [] && count($byParty) === 1, 'Filtering by party name returns that one party');
+// Not "fewer rows" — that depends on who happens to owe what. What must hold
+// is that nothing belonging to anybody else came back with them.
+$onlyThatParty = $byParty !== [];
+foreach ($byParty as $party) {
+    if ((int) $party['party_id'] !== $customer) { $onlyThatParty = false; }
+}
+ok($onlyThatParty && $countRows($byParty) <= $totalRows, 'And no other party comes with them');
+
+// A type filter is exact: "purchase" must not also answer for a sale.
+$byType = jw_report_bill_outstanding($cidA, '', 500, 0, ['bill_type' => 'purchase']);
+$onlyPurchases = true;
+foreach ($byType as $party) {
+    foreach ($party['bills'] as $bill) {
+        if ((string) $bill['bill_type'] !== 'purchase') { $onlyPurchases = false; }
+    }
+}
+ok($onlyPurchases, 'A bill-type filter returns purchases and nothing else');
+
+// A numeric filter is a FLOOR, which is the question a money column gets asked.
+$bigOnly = jw_report_bill_outstanding($cidA, '', 500, 0, ['outstanding_min' => '1000000000']);
+ok($countRows($bigOnly) === 0, 'An outstanding floor nobody meets returns an empty book, not everything');
+$allPass = jw_report_bill_outstanding($cidA, '', 500, 0, ['outstanding_min' => '0']);
+ok($countRows($allPass) === $totalRows, 'A floor of zero narrows nothing');
+
+// A date window that ends before the first bill must return nothing.
+$tooEarly = jw_report_bill_outstanding($cidA, '', 500, 0, ['to' => '2020-01-01']);
+ok($countRows($tooEarly) === 0, 'A date window before any bill returns nothing');
+
+// A blank filter is not a filter.
+$blank = jw_report_bill_outstanding($cidA, '', 500, 0, ['party' => '', 'billed_min' => '', 'status' => '']);
+ok($countRows($blank) === $totalRows, 'Blank controls narrow nothing at all');
+
+// THE METAL FLOORS MUST NOT DRAG IN A BILL THAT HAS NO JOB. A purchase bill is
+// not a kaligad job that ordered 0.000 fine, and answering a "at least some
+// metal" filter with it would be a lie the export would then carry.
+$needsMetal = jw_report_bill_outstanding($cidA, '', 500, 0, ['ordered_min' => '0']);
+$anyWithoutJob = false;
+foreach ($needsMetal as $party) {
+    foreach ($party['bills'] as $bill) {
+        if (($bill['metal']['has_job'] ?? false) !== true) { $anyWithoutJob = true; }
+    }
+}
+ok(!$anyWithoutJob, 'A metal filter answers only with bills that have a job behind them');
+
+echo "\nB. Metal paid to a supplier is not reported as cash\n";
+// The settled split used to be computed for kaligad bills alone, so a supplier
+// paid in old gold had that gold counted in the CASH column — the one place the
+// distinction actually decides anything.
+// A bill of its own, because the fixture settles the one it opened earlier.
+$goldBillPurchase = jewellery_save_purchase($cidA, $fyA, ['purchase_date' => '2026-09-04',
+    'party_id' => $supplier, 'settle_mode' => 'credit', 'source' => 'supplier'],
+    [['item_id' => $bar, 'gross_weight' => 1, 'rate' => 100000]], $userA);
+ok(jewellery_post_purchase($cidA, $goldBillPurchase, $userA)['ok'], 'A credit purchase opens a supplier bill');
+$supplierBills = jewellery_open_bills($cidA, $supplier, 'purchase');
+if ($supplierBills !== []) {
+    $supplierBillId = (int) $supplierBills[0]['id'];
+    $payInGold = 5000.0;
+    $goldSettlement = jewellery_save_settlement($cidA, $fyA, [
+        'settlement_date' => '2026-09-05', 'party_id' => $supplier, 'direction' => 'paid',
+        'mode' => 'metal', 'amount' => $payInGold,
+        'item_id' => $oldGold, 'purity_id' => $p22, 'unit_id' => $tola, 'gross_weight' => 0.05,
+    ], [['bill_id' => $supplierBillId, 'amount' => $payInGold]], $userA);
+    $goldPosted = jewellery_post_settlement($cidA, $goldSettlement, $userA);
+    ok($goldPosted['ok'], 'The supplier is paid part of his bill in old gold'
+        . ($goldPosted['ok'] ? '' : ' — ' . $goldPosted['error']));
+    $supplierMetal = jw_report_bill_metal($cidA, [$supplierBillId])[$supplierBillId] ?? null;
+    ok($supplierMetal !== null, 'The bill book has a settled split for a PURCHASE bill too');
+    ok($supplierMetal !== null && near((float) $supplierMetal['settled_metal_amount'], $payInGold),
+        'The gold is reported as settled in METAL');
+    ok($supplierMetal !== null && near((float) $supplierMetal['settled_cash_amount'], 0.0),
+        'And not a rupee of it lands in the cash column');
+    ok($supplierMetal !== null && (bool) $supplierMetal['has_job'] === false,
+        'While ordered/received stay absent — a purchase has no kaligad job behind it');
+} else {
+    ok(false, 'The fixture no longer leaves an open supplier bill to settle in gold');
+}
 jwt_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";
