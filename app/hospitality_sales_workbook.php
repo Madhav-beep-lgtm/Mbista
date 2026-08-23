@@ -274,7 +274,7 @@ function hospitality_workbook_read(string $primaryPath, string $primaryExt, ?str
         return ['error' => 'The item-wise sales sheet is missing. It carries what was sold — Date, Category, Item, Qty and the money columns — and is what the sales and VAT credits are built from.'];
     }
     if ($invoices === null) {
-        return ['error' => 'The invoice-wise sheet is missing. It carries how the day was settled — Date, Invoice No, Payment Type and Party Ledger Code — and is what the debit side is built from. Upload the workbook that holds both sheets, or add the second file below.'];
+        return ['error' => 'The invoice-wise sheet is missing. It carries how the day was settled — Date, Invoice No, Payment Type and Party Ledger Code — and is what the debit side is built from. Both sheets have to be in the one workbook; download the template to see how it is laid out.'];
     }
 
     return ['items' => $items, 'invoices' => $invoices];
