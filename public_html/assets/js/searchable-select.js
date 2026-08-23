@@ -21,7 +21,8 @@
         '.ss-group{position:sticky;top:0;padding:6px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;' +
         'text-transform:uppercase;color:var(--mbw-muted,#5b6b64);background:var(--mbw-soft,#eef5f0)}' +
         '.ss-item.is-active,.ss-item:hover{background:var(--mbw-soft,#eef5f0)}' +
-        '.ss-empty{padding:10px 12px;font-size:12px;color:var(--mbw-muted,#5b6b64)}';
+        '.ss-empty{padding:10px 12px;font-size:12px;color:var(--mbw-muted,#5b6b64)}' +
+        '.ss-overlay-active{position:relative!important;z-index:1000!important;overflow:visible!important}';
 
     function injectStyle() {
         if (document.getElementById('ss-style')) { return; }
@@ -29,6 +30,31 @@
         s.id = 'ss-style';
         s.textContent = STYLE;
         document.head.appendChild(s);
+    }
+
+    // Dropdown lists live inside many horizontally scrolling tables. An
+    // absolutely positioned list cannot escape an ancestor with overflow set,
+    // so it used to appear behind the next row. Lift every clipping ancestor
+    // only while the list is open, then put the normal scrolling back.
+    function setOverlayAncestors(node, enabled) {
+        if (!node) { return; }
+        if (!enabled) {
+            (node._ssOverlayAncestors || []).forEach(function (ancestor) {
+                ancestor.classList.remove('ss-overlay-active');
+            });
+            node._ssOverlayAncestors = [];
+            return;
+        }
+        if (node._ssOverlayAncestors && node._ssOverlayAncestors.length) { return; }
+        var ancestors = [];
+        for (var parent = node.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+            var style = window.getComputedStyle(parent);
+            if (style.overflow !== 'visible' || style.overflowX !== 'visible' || style.overflowY !== 'visible') {
+                parent.classList.add('ss-overlay-active');
+                ancestors.push(parent);
+            }
+        }
+        node._ssOverlayAncestors = ancestors;
     }
 
     function enhance(sel) {
@@ -82,6 +108,7 @@
             list.style.display = 'none';
             input.setAttribute('aria-expanded', 'false');
             activeIndex = -1;
+            setOverlayAncestors(input, false);
         }
         function choose(idx) {
             var opt = visible[idx];
@@ -139,6 +166,7 @@
         }
 
         input.addEventListener('focus', function () {
+            setOverlayAncestors(input, true);
             input.select();
             render('');
         });
