@@ -568,19 +568,6 @@ if ($view === 'sales') {
     }
     $saleStockUnits = array_values($byTrace);
 
-    // Ornament codes are physical stock, not a reusable catalogue choice at
-    // the counter. Only a trace that is still available may put its item in a
-    // normal sale picker. Bullion/raw gold remains available by item because
-    // it is sold by weight rather than as one individually tagged piece.
-    $availableTraceItems = array_fill_keys(array_map(
-        static fn (array $unit): int => (int) ($unit['item_id'] ?? 0),
-        $saleStockUnits
-    ), true);
-    $items = array_values(array_filter($items, static function (array $item) use ($availableTraceItems): bool {
-        return (string) ($item['item_type'] ?? '') === 'bullion'
-            || isset($availableTraceItems[(int) $item['id']]);
-    }));
-
     // A historical order can name an item that was later archived. It is still
     // a valid item on that customer's bill, so retain it in the sale picker
     // instead of rendering an empty item field after the order is prefilled.
@@ -1244,13 +1231,16 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         <td class="is-numeric"><?= $fmt((float) $row['cogs_amount']) ?></td>
                         <td><span class="mbw-pill <?= $isDraft ? 'tone-amber' : 'tone-green' ?>"><?= $isDraft ? 'Draft' : 'Posted' ?></span></td>
                         <td style="white-space:nowrap">
-                            <select class="jw-sale-action" aria-label="Actions for <?= e((string) $row['sale_no']) ?>">
+                            <select class="jw-sale-action" aria-label="Actions for <?= e((string) $row['sale_no']) ?>"
+                                    data-sale-id="<?= (int) $row['id'] ?>" data-sale-no="<?= e((string) $row['sale_no']) ?>"
+                                    data-csrf="<?= e(csrf_token()) ?>">
                                 <option value="">Actions</option>
                                 <?php if ($isDraft && $canEdit): ?><option value="<?= e(url('admin/jewellery-trade.php?view=sales&edit=' . (int) $row['id'])) ?>">Edit</option><?php endif; ?>
                                 <option value="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'])) ?>">Preview</option>
                                 <option value="<?= e(url('admin/jewellery-invoice.php?id=' . (int) $row['id'])) ?>">Invoice</option>
                                 <?php if ($canExport): ?><option value="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'] . '&format=xlsx')) ?>">Export Excel</option><?php endif; ?>
                                 <?php if ($isDraft && $canPost): ?><option value="<?= e(url('admin/jewellery-trade.php?view=sales&confirm_post=' . (int) $row['id'])) ?>">Post sale</option><?php endif; ?>
+                                <?php if ($isDraft && $canEdit): ?><option value="delete-draft">Delete draft sale</option><?php endif; ?>
                             </select>
                             <span hidden>
                             <?php if ($isDraft && $canEdit): ?>
@@ -1479,7 +1469,21 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 document.addEventListener("change", function (event) {
     var action = event.target.closest(".jw-sale-action");
-    if (action && action.value) { window.location.assign(action.value); }
+    if (!action || !action.value) { return; }
+    if (action.value === "delete-draft") {
+        var saleNo = action.dataset.saleNo || "this draft sale";
+        if (!window.confirm("Delete draft sale " + saleNo + "?")) { action.value = ""; return; }
+        var form = document.createElement("form");
+        form.method = "post";
+        form.action = window.location.pathname;
+        [["csrf_token", action.dataset.csrf || ""], ["action", "delete_sale"],
+            ["back_view", "sales"], ["doc_id", action.dataset.saleId || "0"]].forEach(function (field) {
+            var input = document.createElement("input");
+            input.type = "hidden"; input.name = field[0]; input.value = field[1]; form.appendChild(input);
+        });
+        document.body.appendChild(form); form.submit(); return;
+    }
+    window.location.assign(action.value);
 });
 // Pick a customer first, then reload this same sale with the customer's open
 // orders. This gives the counter a clear delivery view before anything is
