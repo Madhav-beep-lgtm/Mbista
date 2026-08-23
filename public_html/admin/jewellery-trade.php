@@ -98,7 +98,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'discount' => (float) ($_POST['discount'] ?? 0),
                 'sales_person' => (string) ($_POST['sales_person'] ?? ''),
                 'customer_ref' => (string) ($_POST['customer_ref'] ?? ''),
-                'tran_date_bs' => (string) ($_POST['tran_date_bs'] ?? ''),
+                // B.S. is a display/storage companion to the selected A.D.
+                // transaction date; it is never typed manually at the counter.
+                'tran_date_bs' => bs_format((string) ($_POST['tran_date'] ?? $_POST['sale_date'] ?? '')),
                 'remarks' => (string) ($_POST['remarks'] ?? ''),
                 'received_amount' => (float) ($_POST['received_amount'] ?? 0),
                 'paid_cash' => (float) ($_POST['paid_cash'] ?? 0),
@@ -1020,7 +1022,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <label>Bill ref.<input type="text" name="ref_no" maxlength="120" value="<?= e((string) ($editDoc['ref_no'] ?? '')) ?>"></label>
                 <label>Sales person<input type="text" name="sales_person" maxlength="120" value="<?= e((string) ($editDoc['sales_person'] ?? '')) ?>"></label>
                 <label>Customer id / ref.<input type="text" name="customer_ref" maxlength="60" value="<?= e((string) ($editDoc['customer_ref'] ?? '')) ?>"></label>
-                <label>Tran. date (B.S.)<input type="text" name="tran_date_bs" maxlength="20" placeholder="2082-03-15" value="<?= e((string) ($editDoc['tran_date_bs'] ?? '')) ?>"></label>
+                <label>Transaction date (A.D.)<input type="date" name="tran_date" value="<?= e((string) ($editDoc['sale_date'] ?? $todayInFy)) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
                 <label>Other charges (<?= e($sym) ?>)<input type="number" name="other_charges" step="0.01" min="0" value="<?= e((string) ($editDoc['other_charges'] ?? '0')) ?>"></label>
                 <label>Discount (<?= e($sym) ?>)<input type="number" name="discount" step="0.01" min="0" value="<?= e((string) ($editDoc['discount'] ?? '0')) ?>"></label>
                 <label>Skills Promotion Tax (<?= e($sym) ?>)<input type="number" name="manual_tax_amount" step="0.01" min="0" placeholder="auto" value="<?= e((string) ($editDoc['manual_tax_amount'] ?? '')) ?>">
