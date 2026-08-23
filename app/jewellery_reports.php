@@ -1110,6 +1110,206 @@ function jw_report_bill_outstanding(int $companyId, string $billType = '', int $
 // Dashboard summary
 // ---------------------------------------------------------------------------
 
+/**
+ * THE WHOLE SHOP ON ONE PAGE — the five questions an owner actually opens the
+ * books to ask, each with the handful of figures that answer it.
+ *
+ * The summary this replaces was seventeen tiles in a row: true, complete, and
+ * no help, because reading it meant knowing which four of the seventeen went
+ * together. These are grouped, and each group SAYS WHAT DATE IT IS TRUE ON,
+ * which is the thing a consolidated figure most often gets wrong.
+ *
+ * Two bases live here, and mixing them silently is how a summary starts lying:
+ *
+ *   AS AT a date — stock and advances. Both are built from movements, so both
+ *   can be asked honestly about any day: what was on the shelf then, what was
+ *   held then. Rolling them back is real, not an estimate.
+ *
+ *   AS IT STANDS — receivables. A bill's settled_amount is a live figure, not a
+ *   history, so pretending to date-scope it would produce something that is
+ *   neither today's position nor that day's. It is reported as it stands, and
+ *   says so, and agrees with the Bills screen because it is the same question.
+ *
+ * The period ones — sales, profit, orders taken — are simply what happened
+ * between the two dates.
+ *
+ * Every row carries its own 'kind' so the screen and the export format it the
+ * same way, from the same call. A summary whose PDF rounds differently from the
+ * page it was printed from is a summary nobody trusts twice.
+ *
+ * @return array{from:string,to:string,sections:array<int,array<string,mixed>>}
+ */
+function jw_report_consolidated(int $companyId, string $from, string $to): array
+{
+    $money = static fn (string $label, float $value, bool $strong = false): array
+        => ['label' => $label, 'value' => jw_round_money($value), 'kind' => 'money', 'strong' => $strong];
+    $weight = static fn (string $label, float $value, bool $strong = false): array
+        => ['label' => $label, 'value' => jw_round_weight($value), 'kind' => 'weight', 'strong' => $strong];
+    $count = static fn (string $label, float $value, bool $strong = false): array
+        => ['label' => $label, 'value' => $value, 'kind' => 'count', 'strong' => $strong];
+
+    // --- 1. total stock, as at $to -----------------------------------------
+    // Own shelf and other people's hands are kept apart on purpose. Metal with
+    // a kaligad is the shop's asset and is NOT stock it can sell this morning,
+    // and one figure covering both has answered "what have I got?" wrongly in
+    // every shop that ever added them up.
+    $ownFine = 0.0; $ownPieces = 0.0; $ownValue = 0.0;
+    $outFine = 0.0; $outPieces = 0.0; $outValue = 0.0;
+    foreach (jewellery_metal_position($companyId, $to) as $row) {
+        if ((string) $row['holder_type'] === 'stock') {
+            $ownFine += (float) $row['fine'];
+            $ownPieces += (float) $row['pieces'];
+            $ownValue += (float) $row['value'];
+            continue;
+        }
+        $outFine += (float) $row['fine'];
+        $outPieces += (float) $row['pieces'];
+        $outValue += (float) $row['value'];
+    }
+    $baseUnit = jewellery_base_unit($companyId);
+    $unitCode = (string) ($baseUnit['code'] ?? '');
+
+    // --- 2. sales and profit, over the period ------------------------------
+    $sales = jw_report_sales_detail($companyId, $from, $to);
+    $billsRaised = db()->prepare("SELECT COUNT(*) FROM jewellery_sales
+        WHERE company_id = :cid AND status = 'posted' AND sale_date BETWEEN :from AND :to");
+    $billsRaised->execute(['cid' => $companyId, 'from' => $from, 'to' => $to]);
+
+    // --- 3. advance outstanding, as at $to ---------------------------------
+    // Taken in, less handed back, less what has already paid for a bill. The
+    // remainder is money the shop is holding and still owes goods against — a
+    // liability, however comfortable the bank balance looks.
+    $advanceReceived = 0.0; $advanceRefunded = 0.0; $advanceApplied = 0.0;
+    if (column_exists('jewellery_settlements', 'is_advance')) {
+        $advStmt = db()->prepare("SELECT
+                COALESCE(SUM(CASE WHEN direction = 'received' THEN amount ELSE 0 END), 0) AS taken,
+                COALESCE(SUM(CASE WHEN direction = 'paid' THEN amount ELSE 0 END), 0) AS refunded
+            FROM jewellery_settlements
+            WHERE company_id = :cid AND is_advance = 1 AND status = 'posted' AND settlement_date <= :to");
+        $advStmt->execute(['cid' => $companyId, 'to' => $to]);
+        $advRow = $advStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $advanceReceived = (float) ($advRow['taken'] ?? 0);
+        $advanceRefunded = (float) ($advRow['refunded'] ?? 0);
+
+        if (table_exists('jewellery_advance_allocations')) {
+            // Dated by the BILL it funded, not by when the advance arrived —
+            // that is the day it stopped being money held and became money
+            // earned, and it is the only date that makes the three figures add
+            // up on any given morning.
+            $usedStmt = db()->prepare("SELECT COALESCE(SUM(a.amount), 0)
+                FROM jewellery_advance_allocations a
+                INNER JOIN jewellery_sales s ON s.id = a.sale_id
+                WHERE a.company_id = :cid AND s.status <> 'cancelled' AND s.sale_date <= :to");
+            $usedStmt->execute(['cid' => $companyId, 'to' => $to]);
+            $advanceApplied = (float) $usedStmt->fetchColumn();
+        }
+    }
+    $advanceHeld = $advanceReceived - $advanceRefunded - $advanceApplied;
+
+    // --- 4. customer receivables, as they stand ----------------------------
+    $billTotals = jewellery_open_bill_totals($companyId);
+    $recvStmt = db()->prepare("SELECT COUNT(*) AS bills, COUNT(DISTINCT party_id) AS parties,
+            MIN(bill_date) AS oldest
+        FROM jewellery_bills
+        WHERE company_id = :cid AND bill_type = 'sale' AND status IN ('open', 'part_settled')");
+    $recvStmt->execute(['cid' => $companyId]);
+    $recvRow = $recvStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $oldest = (string) ($recvRow['oldest'] ?? '');
+    $oldestDays = $oldest !== '' ? (int) floor((strtotime($to) - strtotime($oldest)) / 86400) : 0;
+
+    // --- 5. orders received, over the period -------------------------------
+    $orderStmt = db()->prepare("SELECT COUNT(*) AS orders,
+            COALESCE(SUM(total_amount), 0) AS value,
+            COALESCE(SUM(advance_amount), 0) AS advance
+        FROM jewellery_orders
+        WHERE company_id = :cid AND status <> 'cancelled' AND order_date BETWEEN :from AND :to");
+    $orderStmt->execute(['cid' => $companyId, 'from' => $from, 'to' => $to]);
+    $orderRow = $orderStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $orderValue = (float) ($orderRow['value'] ?? 0);
+    $orderAdvance = (float) ($orderRow['advance'] ?? 0);
+    $openStmt = db()->prepare("SELECT COUNT(*) FROM jewellery_orders
+        WHERE company_id = :cid AND status IN ('draft', 'confirmed', 'assigned')");
+    $openStmt->execute(['cid' => $companyId]);
+
+    return [
+        'from' => $from,
+        'to' => $to,
+        'base_unit' => $unitCode,
+        'sections' => [
+            [
+                'key' => 'stock', 'title' => 'Total stock', 'icon' => 'box',
+                'note' => 'As at ' . $to,
+                'headline' => jw_round_money($ownValue + $outValue),
+                'rows' => [
+                    $weight('Fine on own shelf' . ($unitCode !== '' ? ' (' . $unitCode . ')' : ''), $ownFine, true),
+                    $count('Pieces on own shelf', round($ownPieces, 3)),
+                    $money('Value of own stock', $ownValue, true),
+                    $weight('Fine out with kaligads and refiners', $outFine),
+                    $count('Pieces out with them', round($outPieces, 3)),
+                    $money('Value out with them', $outValue),
+                    $money('Total metal the shop owns', $ownValue + $outValue, true),
+                ],
+            ],
+            [
+                'key' => 'sales', 'title' => 'Total sales and profit', 'icon' => 'wallet',
+                'note' => $from . ' to ' . $to,
+                'headline' => jw_round_money((float) $sales['totals']['revenue']),
+                'rows' => [
+                    $money('Sales revenue', (float) $sales['totals']['revenue'], true),
+                    $money('Cost of goods sold', (float) $sales['totals']['cogs_amount']),
+                    $money('Gross profit', (float) $sales['totals']['gross_profit'], true),
+                    [
+                        'label' => 'Gross profit %',
+                        'value' => $sales['totals']['gp_pct'],
+                        'kind' => 'percent', 'strong' => false,
+                    ],
+                    $weight('Fine weight sold' . ($unitCode !== '' ? ' (' . $unitCode . ')' : ''), (float) $sales['totals']['fine_weight']),
+                    $count('Bills posted', (int) $billsRaised->fetchColumn()),
+                ],
+            ],
+            [
+                'key' => 'advances', 'title' => 'Advance outstanding', 'icon' => 'card',
+                'note' => 'As at ' . $to,
+                'headline' => jw_round_money($advanceHeld),
+                'rows' => [
+                    $money('Advances taken in', $advanceReceived),
+                    $money('Applied to bills', $advanceApplied),
+                    $money('Refunded', $advanceRefunded),
+                    $money('Still held — goods owed against it', $advanceHeld, true),
+                ],
+            ],
+            [
+                'key' => 'receivables', 'title' => 'Customer receivables', 'icon' => 'handshake',
+                'note' => 'As it stands',
+                'headline' => jw_round_money((float) $billTotals['receivable']),
+                'rows' => [
+                    $money('Owed by customers', (float) $billTotals['receivable'], true),
+                    $count('Bills still open', (int) ($recvRow['bills'] ?? 0)),
+                    $count('Customers owing', (int) ($recvRow['parties'] ?? 0)),
+                    [
+                        'label' => 'Oldest unpaid bill',
+                        'value' => $oldest !== '' ? ($oldest . ' (' . $oldestDays . ' days)') : '—',
+                        'kind' => 'text', 'strong' => false,
+                    ],
+                    $money('Owed BY the shop (suppliers and kaligads)', (float) $billTotals['payable']),
+                ],
+            ],
+            [
+                'key' => 'orders', 'title' => 'Orders received', 'icon' => 'journal',
+                'note' => $from . ' to ' . $to,
+                'headline' => jw_round_money($orderValue),
+                'rows' => [
+                    $count('Orders taken', (int) ($orderRow['orders'] ?? 0), true),
+                    $money('Value ordered', $orderValue, true),
+                    $money('Advance held against them', $orderAdvance),
+                    $money('Balance still to collect', $orderValue - $orderAdvance),
+                    $count('Orders open right now', (int) $openStmt->fetchColumn()),
+                    $count('Finished, awaiting collection', count(jewellery_pending_delivery($companyId))),
+                ],
+            ],
+        ],
+    ];
+}
 /** Headline numbers for the module dashboard over a period. */
 function jw_report_summary(int $companyId, string $from, string $to): array
 {

@@ -92,6 +92,28 @@ if (isset($_GET['export']) && $canExport) {
     $stamp = $from . '_to_' . $to;
     $format = jw_enum($_GET['export'] ?? null, ['csv', 'xlsx', 'print', 'pdf'], 'csv');
     $meta = ['Period' => app_date($from) . ' to ' . app_date($to)];
+    if ($view === 'summary') {
+        // The consolidated page, flat: one row per figure with the section it
+        // belongs to beside it, so a spreadsheet can pivot on it and a PDF reads
+        // in the same order as the screen. The BASIS travels with each section —
+        // a stock figure "as at" a date and a receivable "as it stands" are not
+        // the same kind of number, and a column of bare amounts hides that.
+        $consolidated = jw_report_consolidated($companyId, $from, $to);
+        $data = [['Section', 'Basis', 'Figure', 'Value', 'Kind']];
+        foreach ($consolidated['sections'] as $section) {
+            foreach ($section['rows'] as $row) {
+                $data[] = [
+                    $section['title'], $section['note'], $row['label'],
+                    $row['value'] === null ? '' : $row['value'],
+                    (string) $row['kind'],
+                ];
+            }
+        }
+        $summaryMeta = $meta;
+        $summaryMeta['Weights'] = $consolidated['base_unit'] !== ''
+            ? ('fine ' . $consolidated['base_unit']) : 'fine, base unit';
+        export_dispatch($format, 'jewellery-summary-' . $stamp, $data, 'Consolidated Summary', $summaryMeta);
+    }
     if ($view === 'sales') {
         $data = [['Date', 'Sale no', 'Party', 'Item', 'Purity', 'Pieces', 'Gross wt', 'Fine wt', 'Rate',
             'Metal', 'Making', 'Stone / diamond', 'VAT base', 'VAT', 'Revenue', 'COGS', 'Gross profit', 'GP %']];
@@ -457,7 +479,7 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
             </label>
         <?php endif; ?>
         <button type="submit" class="jw-report-apply"><?= icon('search') ?> Apply</button>
-        <?php if ($canExport && in_array($view, ['sales', 'purchases', 'inventory', 'vat', 'bills', 'karigar', 'statement',
+        <?php if ($canExport && in_array($view, ['summary', 'sales', 'purchases', 'inventory', 'vat', 'bills', 'karigar', 'statement',
             'uncollected', 'orders', 'workshop', 'advreg', 'profit'], true)): ?>
             <?php
                 // Their own class rather than .button.soft, whose colours five
@@ -474,30 +496,55 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
 </section>
 
 <?php if ($view === 'summary'): ?>
-    <?php $s = jw_report_summary($companyId, $from, $to); ?>
-    <section class="mbw-kpi-grid" style="margin-top:14px" aria-label="Jewellery summary">
-        <?php foreach ([
-            ['Sales revenue', $sym . $fmt($s['sales_revenue']), 'wallet', 'tone-blue'],
-            ['Cost of goods sold', $sym . $fmt($s['sales_cogs']), 'box', 'tone-amber'],
-            ['Gross profit', $sym . $fmt($s['gross_profit']), 'analytics', 'tone-green'],
-            ['Gross profit %', $s['gp_pct'] === null ? 'N/A' : $fmt($s['gp_pct']) . '%', 'pie', 'tone-green'],
-            ['Fine weight sold', $fmt($s['sales_fine'], 4), 'scale', 'tone-teal'],
-            ['Purchases (landed)', $sym . $fmt($s['purchase_value']), 'box', 'tone-blue'],
-            ['Fine weight bought', $fmt($s['purchase_fine'], 4), 'scale', 'tone-teal'],
-            ['Output VAT', $sym . $fmt($s['vat_output']), 'receipt-voucher', 'tone-gray'],
-            ['Input VAT', $sym . $fmt($s['vat_input']), 'receipt-voucher', 'tone-gray'],
-            ['Net VAT', $sym . $fmt($s['vat_net']), 'reconcile', $s['vat_net'] > 0 ? 'tone-red' : 'tone-green'],
-            ['Fine in own stock', $fmt($s['own_fine'], 4), 'scale', 'tone-green'],
-            ['Fine with others', $fmt($s['out_fine'], 4), 'handshake', $s['out_fine'] > 0 ? 'tone-amber' : 'tone-gray'],
-            ['Stock value', $sym . $fmt($s['stock_value']), 'wallet', 'tone-blue'],
-            ['Receivable', $sym . $fmt($s['receivable']), 'card', 'tone-blue'],
-            ['Payable', $sym . $fmt($s['payable']), 'card', 'tone-amber'],
-            ['Open orders', (string) $s['open_orders'], 'journal', 'tone-teal'],
-            ['Awaiting collection', (string) $s['pending_delivery'], 'box', $s['pending_delivery'] > 0 ? 'tone-amber' : 'tone-gray'],
-        ] as [$kpiLabel, $kpiValue, $kpiIcon, $kpiTone]): ?>
-            <article class="mbw-kpi"><div><span class="mbw-kpi-label"><?= e($kpiLabel) ?></span><div class="mbw-kpi-value" style="font-size:1.02rem"><?= e($kpiValue) ?></div></div><span class="mbw-chip <?= e($kpiTone) ?>"><?= icon($kpiIcon) ?></span></article>
+    <?php
+        $consolidated = jw_report_consolidated($companyId, $from, $to);
+        // One formatter for both the screen and the file. The row says what kind
+        // of number it is; nothing here has to remember which column was money.
+        $cellValue = static function (array $row) use ($sym, $fmt): string {
+            return match ((string) $row['kind']) {
+                'money' => $sym . $fmt((float) $row['value']),
+                'weight' => $fmt((float) $row['value'], 4),
+                'count' => $fmt((float) $row['value'], (float) $row['value'] == (int) $row['value'] ? 0 : 3),
+                'percent' => $row['value'] === null ? 'N/A' : $fmt((float) $row['value']) . '%',
+                default => (string) $row['value'],
+            };
+        };
+    ?>
+    <?php // THE FIVE QUESTIONS, each with its own card and — the part the old
+          // seventeen-tile row could not say — the date it is true on. ?>
+    <section class="mbw-kpi-grid" style="margin-top:14px" aria-label="Jewellery headline figures">
+        <?php foreach ($consolidated['sections'] as $section): ?>
+            <article class="mbw-kpi">
+                <div>
+                    <span class="mbw-kpi-label"><?= e($section['title']) ?></span>
+                    <div class="mbw-kpi-value" style="font-size:1.02rem"><?= e($sym . $fmt((float) $section['headline'])) ?></div>
+                    <small style="opacity:.7"><?= e($section['note']) ?></small>
+                </div>
+                <span class="mbw-chip tone-blue"><?= icon($section['icon']) ?></span>
+            </article>
         <?php endforeach; ?>
     </section>
+
+    <div class="jw-summary-grid" style="display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));margin-top:14px">
+        <?php foreach ($consolidated['sections'] as $section): ?>
+            <section class="mbw-card">
+                <div class="mbw-card-head">
+                    <h2><?= icon($section['icon']) ?><?= e($section['title']) ?></h2>
+                    <span style="opacity:.7;font-size:12.5px"><?= e($section['note']) ?></span>
+                </div>
+                <div class="mbw-tablewrap"><table>
+                    <tbody>
+                        <?php foreach ($section['rows'] as $row): ?>
+                            <tr>
+                                <td><?= $row['strong'] ? '<strong>' . e((string) $row['label']) . '</strong>' : e((string) $row['label']) ?></td>
+                                <td class="is-numeric"><?= $row['strong'] ? '<strong>' . e($cellValue($row)) . '</strong>' : e($cellValue($row)) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table></div>
+            </section>
+        <?php endforeach; ?>
+    </div>
 
 <?php elseif ($view === 'sales'): ?>
     <?php $report = jw_report_sales_detail($companyId, $from, $to); $groups = jw_report_sales_grouped($companyId, $from, $to, $groupBy); ?>

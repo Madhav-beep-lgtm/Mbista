@@ -568,6 +568,85 @@ if ($supplierBills !== []) {
 } else {
     ok(false, 'The fixture no longer leaves an open supplier bill to settle in gold');
 }
+echo "\nC. The whole shop on one page\n";
+// Five questions an owner opens the books to ask. Each figure here is checked
+// against the report that owns it, because a summary that quietly disagrees
+// with the detail behind it is worse than no summary — it gets believed first
+// and corrected last.
+$cons = jw_report_consolidated($cidA, '2026-07-16', '2027-07-15');
+$sectionBy = [];
+foreach ($cons['sections'] as $section) { $sectionBy[(string) $section['key']] = $section; }
+$valueOf = static function (array $section, string $label) {
+    foreach ($section['rows'] as $row) {
+        if ((string) $row['label'] === $label || str_starts_with((string) $row['label'], $label)) {
+            return $row['value'];
+        }
+    }
+    return null;
+};
+
+ok(array_keys($sectionBy) === ['stock', 'sales', 'advances', 'receivables', 'orders'],
+    'All five sections are there, in the order they were asked for');
+$everySectionDated = true;
+foreach ($cons['sections'] as $section) {
+    if (trim((string) $section['note']) === '') { $everySectionDated = false; }
+}
+ok($everySectionDated, 'And every one of them says what date it is true on');
+
+// 1. Stock — against the metal position it is built from.
+$ownFine = 0.0; $ownValue = 0.0; $outValue = 0.0;
+foreach (jewellery_metal_position($cidA, '2027-07-15') as $posRow) {
+    if ((string) $posRow['holder_type'] === 'stock') {
+        $ownFine += (float) $posRow['fine'];
+        $ownValue += (float) $posRow['value'];
+    } else {
+        $outValue += (float) $posRow['value'];
+    }
+}
+ok(near((float) $valueOf($sectionBy['stock'], 'Fine on own shelf'), $ownFine, 0.0011),
+    'Total stock agrees with the metal position on fine weight');
+ok(near((float) $valueOf($sectionBy['stock'], 'Value of own stock'), $ownValue),
+    'And on the value of what is on the shelf');
+ok(near((float) $sectionBy['stock']['headline'], $ownValue + $outValue),
+    'Its headline is everything the shop owns, on the shelf or out with a kaligad');
+
+// 2. Sales and profit — against the sales detail report.
+$salesTotals = jw_report_sales_detail($cidA, '2026-07-16', '2027-07-15')['totals'];
+ok(near((float) $valueOf($sectionBy['sales'], 'Sales revenue'), (float) $salesTotals['revenue']),
+    'Sales revenue agrees with the sales register');
+ok(near((float) $valueOf($sectionBy['sales'], 'Gross profit'), (float) $salesTotals['gross_profit']),
+    'And so does gross profit');
+ok(near((float) $valueOf($sectionBy['sales'], 'Cost of goods sold'), (float) $salesTotals['cogs_amount']),
+    'And cost of goods sold');
+
+// 3. Advances — the arithmetic that makes "still held" mean anything.
+$adv = $sectionBy['advances'];
+ok(near((float) $valueOf($adv, 'Still held'),
+    (float) $valueOf($adv, 'Advances taken in')
+    - (float) $valueOf($adv, 'Applied to bills')
+    - (float) $valueOf($adv, 'Refunded')),
+    'Advance still held is what came in, less what it paid for and what went back');
+
+// 4. Receivables — against the bill book.
+$billTotals = jewellery_open_bill_totals($cidA);
+ok(near((float) $valueOf($sectionBy['receivables'], 'Owed by customers'), (float) $billTotals['receivable']),
+    'Customer receivables agree with the open bills');
+ok(near((float) $valueOf($sectionBy['receivables'], 'Owed BY the shop'), (float) $billTotals['payable']),
+    'And what the shop owes is kept the other side of the line, not netted off');
+
+// 5. Orders — against the orders themselves.
+$orderCount = (int) db()->query("SELECT COUNT(*) FROM jewellery_orders WHERE company_id=$cidA
+    AND status <> 'cancelled' AND order_date BETWEEN '2026-07-16' AND '2027-07-15'")->fetchColumn();
+ok((int) $valueOf($sectionBy['orders'], 'Orders taken') === $orderCount,
+    'Orders received counts the orders actually taken in the period');
+ok(near((float) $valueOf($sectionBy['orders'], 'Balance still to collect'),
+    (float) $valueOf($sectionBy['orders'], 'Value ordered') - (float) $valueOf($sectionBy['orders'], 'Advance held against them')),
+    'And the balance to collect is the value less the advance already held');
+
+// A window with nothing in it must report nothing, not everything.
+$empty = jw_report_consolidated($cidA, '2019-01-01', '2019-01-31');
+ok(near((float) $valueOf($empty['sections'][1], 'Sales revenue'), 0.0),
+    'A period before the shop existed reports no sales rather than all of them');
 jwt_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";
