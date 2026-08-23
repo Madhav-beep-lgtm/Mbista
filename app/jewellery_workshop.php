@@ -3042,6 +3042,20 @@ function jewellery_order_source_sql(string $orderAlias = 'o'): string
 function jewellery_pending_delivery(int $companyId, array $filters = []): array
 {
     $originSql = jewellery_order_source_sql();
+    $params = ['cid' => $companyId];
+    $where = [];
+    $q = trim((string) ($filters['q'] ?? ''));
+    if ($q !== '') {
+        $where[] = "(o.order_no LIKE :q OR ap.name LIKE :q OR o.customer_name LIKE :q)";
+        $params['q'] = '%' . $q . '%';
+    }
+    foreach (['received_from', 'received_to', 'promised_from', 'promised_to'] as $dateKey) {
+        $date = (string) ($filters[$dateKey] ?? '');
+        if (preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $date) !== 1) { continue; }
+        if ($dateKey === 'promised_from') { $where[] = 'o.delivery_date >= :promised_from'; $params['promised_from'] = $date; }
+        if ($dateKey === 'promised_to') { $where[] = 'o.delivery_date <= :promised_to'; $params['promised_to'] = $date; }
+    }
+    $whereSql = $where === [] ? '' : ' AND ' . implode(' AND ', $where);
 
     // Only these can be sorted on, and each maps to an expression rather than
     // to whatever the caller sent — a sort key is going into an ORDER BY.
@@ -3082,17 +3096,32 @@ function jewellery_pending_delivery(int $companyId, array $filters = []): array
         INNER JOIN jewellery_units u ON u.id = o.unit_id
         LEFT JOIN jewellery_order_assignments a ON a.order_id = o.id AND a.status = 'received'
         LEFT JOIN jewellery_order_receipts r ON r.assignment_id = a.id
-        WHERE o.company_id = :cid AND o.status = 'received'
+        WHERE o.company_id = :cid AND o.status = 'received'$whereSql
         GROUP BY o.id";
-    $params = ['cid' => $companyId];
 
-    // HAVING, not WHERE: the origin is decided from an aggregate, so it is not
-    // known until the rows for an order have been brought together.
+    // HAVING is used for values calculated after assignments and receipts are
+    // grouped: origin, latest receipt date, returned weight and days waiting.
+    $having = [];
     $origin = (string) ($filters['origin'] ?? '');
     if (isset(jewellery_order_sources()[$origin])) {
-        $sql .= " HAVING origin = :origin";
+        $having[] = 'origin = :origin';
         $params['origin'] = $origin;
     }
+    foreach (['received_from', 'received_to'] as $dateKey) {
+        $date = (string) ($filters[$dateKey] ?? '');
+        if (preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $date) !== 1) { continue; }
+        $operator = $dateKey === 'received_from' ? '>=' : '<=';
+        $having[] = 'receive_date ' . $operator . ' :' . $dateKey;
+        $params[$dateKey] = $date;
+    }
+    foreach (['weight_min' => '>=', 'weight_max' => '<=', 'waiting_min' => '>=', 'waiting_max' => '<='] as $numberKey => $operator) {
+        $value = (string) ($filters[$numberKey] ?? '');
+        if ($value === '' || !is_numeric($value) || (float) $value < 0) { continue; }
+        $column = str_starts_with($numberKey, 'weight_') ? 'received_gross_weight' : 'days_waiting';
+        $having[] = $column . ' ' . $operator . ' :' . $numberKey;
+        $params[$numberKey] = (float) $value;
+    }
+    if ($having !== []) { $sql .= ' HAVING ' . implode(' AND ', $having); }
     // The sortable expressions above name aggregates by their alias, which is
     // what ORDER BY wants after a GROUP BY.
     $sql .= " ORDER BY $nullsLast$orderBy $direction, o.id ASC";

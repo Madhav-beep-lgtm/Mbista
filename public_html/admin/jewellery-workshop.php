@@ -584,8 +584,19 @@ $assignments = $view === 'assignments' ? jewellery_assignments_list($companyId, 
 $deliveryOrigin = jw_enum($_GET['origin'] ?? null, array_keys(jewellery_order_sources()), '');
 $deliverySort = jw_enum($_GET['sort'] ?? null, ['order', 'customer', 'origin', 'received', 'weight', 'waiting', 'promised'], 'received');
 $deliveryDir = jw_enum($_GET['dir'] ?? null, ['asc', 'desc'], 'asc');
+$deliveryFilters = [
+    'q' => trim((string) ($_GET['q'] ?? '')),
+    'received_from' => trim((string) ($_GET['received_from'] ?? '')),
+    'received_to' => trim((string) ($_GET['received_to'] ?? '')),
+    'weight_min' => trim((string) ($_GET['weight_min'] ?? '')),
+    'weight_max' => trim((string) ($_GET['weight_max'] ?? '')),
+    'waiting_min' => trim((string) ($_GET['waiting_min'] ?? '')),
+    'waiting_max' => trim((string) ($_GET['waiting_max'] ?? '')),
+    'promised_from' => trim((string) ($_GET['promised_from'] ?? '')),
+    'promised_to' => trim((string) ($_GET['promised_to'] ?? '')),
+];
 $pending = $view === 'delivery'
-    ? jewellery_pending_delivery($companyId, ['origin' => $deliveryOrigin, 'sort' => $deliverySort, 'dir' => $deliveryDir])
+    ? jewellery_pending_delivery($companyId, $deliveryFilters + ['origin' => $deliveryOrigin, 'sort' => $deliverySort, 'dir' => $deliveryDir])
     : [];
 $deliveryCounts = $view === 'delivery' ? jewellery_pending_delivery_counts($companyId) : [];
 // A showroom piece comes back to the shelf, not to a collection queue, and the
@@ -1628,18 +1639,22 @@ jw_filter_bar_styles();
     $deliveryOrigins = jewellery_order_sources();
     $originTone = jewellery_order_source_tones();
     /** A column heading that sorts, and flips direction when it is the one already sorted on. */
-    $sortHead = static function (string $key, string $label, bool $numeric = false) use ($deliverySort, $deliveryDir, $deliveryOrigin): string {
+    $sortHead = static function (string $key, string $label, bool $numeric = false) use ($deliverySort, $deliveryDir, $deliveryOrigin, $deliveryFilters): string {
         $active = $deliverySort === $key;
         $next = ($active && $deliveryDir === 'asc') ? 'desc' : 'asc';
         $arrow = $active ? ($deliveryDir === 'asc' ? ' ▲' : ' ▼') : '';
-        $href = url('admin/jewellery-workshop.php?view=delivery&sort=' . $key . '&dir=' . $next
-            . ($deliveryOrigin !== '' ? '&origin=' . $deliveryOrigin : ''));
+        $query = array_filter($deliveryFilters, static fn (string $value): bool => $value !== '') + [
+            'view' => 'delivery', 'sort' => $key, 'dir' => $next,
+        ];
+        if ($deliveryOrigin !== '') { $query['origin'] = $deliveryOrigin; }
+        $href = url('admin/jewellery-workshop.php?' . http_build_query($query));
 
         return '<th' . ($numeric ? ' class="is-numeric"' : '') . '>'
             . '<a href="' . e($href) . '" style="color:inherit;text-decoration:none;white-space:nowrap"'
             . ' title="Sort by ' . e($label) . ' (' . ($next === 'asc' ? 'ascending' : 'descending') . ')">'
             . e($label) . '<span style="opacity:' . ($active ? '1' : '.35') . '">' . ($arrow ?: ' ⇅') . '</span></a></th>';
     };
+    $deliveryHasFilters = $deliveryOrigin !== '' || array_filter($deliveryFilters, static fn (string $value): bool => $value !== '') !== [];
     ?>
     <div class="notice" style="margin-bottom:14px">
         These orders have come back from the kaligad and are finished, but the customer has not collected them yet.
@@ -1667,8 +1682,25 @@ jw_filter_bar_styles();
                     <?php endforeach; ?>
                 </select>
             </label>
+            <input type="search" name="q" class="field-compact" value="<?= e($deliveryFilters['q']) ?>" placeholder="Order or customer" aria-label="Filter by order number or customer">
+            <label style="display:flex;gap:4px;align-items:center;margin:0"><small>Received</small>
+                <input type="date" name="received_from" class="field-compact" value="<?= e($deliveryFilters['received_from']) ?>" aria-label="Received on or after">
+                <span>–</span><input type="date" name="received_to" class="field-compact" value="<?= e($deliveryFilters['received_to']) ?>" aria-label="Received on or before">
+            </label>
+            <label style="display:flex;gap:4px;align-items:center;margin:0"><small>Weight</small>
+                <input type="number" name="weight_min" class="field-compact" step="0.0001" min="0" value="<?= e($deliveryFilters['weight_min']) ?>" placeholder="Min" aria-label="Minimum returned weight">
+                <span>–</span><input type="number" name="weight_max" class="field-compact" step="0.0001" min="0" value="<?= e($deliveryFilters['weight_max']) ?>" placeholder="Max" aria-label="Maximum returned weight">
+            </label>
+            <label style="display:flex;gap:4px;align-items:center;margin:0"><small>Days waiting</small>
+                <input type="number" name="waiting_min" class="field-compact" step="1" min="0" value="<?= e($deliveryFilters['waiting_min']) ?>" placeholder="Min" aria-label="Minimum days waiting">
+                <span>–</span><input type="number" name="waiting_max" class="field-compact" step="1" min="0" value="<?= e($deliveryFilters['waiting_max']) ?>" placeholder="Max" aria-label="Maximum days waiting">
+            </label>
+            <label style="display:flex;gap:4px;align-items:center;margin:0"><small>Promised</small>
+                <input type="date" name="promised_from" class="field-compact" value="<?= e($deliveryFilters['promised_from']) ?>" aria-label="Promised on or after">
+                <span>–</span><input type="date" name="promised_to" class="field-compact" value="<?= e($deliveryFilters['promised_to']) ?>" aria-label="Promised on or before">
+            </label>
             <button type="submit" class="button secondary"><?= icon('filter') ?> Filter</button>
-            <?php if ($deliveryOrigin !== ''): ?>
+            <?php if ($deliveryHasFilters): ?>
                 <a class="button secondary" href="<?= e(url('admin/jewellery-workshop.php?view=delivery&sort=' . $deliverySort . '&dir=' . $deliveryDir)) ?>">Show all</a>
             <?php endif; ?>
             <span style="margin-left:auto;color:var(--mbw-muted);font-size:12.5px">
