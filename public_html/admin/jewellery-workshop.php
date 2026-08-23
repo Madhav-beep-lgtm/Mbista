@@ -1064,6 +1064,25 @@ jw_filter_bar_styles();
         dialog.addEventListener('click', function (event) {
             if (event.target === dialog) { dialog.close(); }
         });
+        <?php if ($editOrder): ?>
+        // Advance records belong to the order being edited. Put their summary and
+        // actions in the same modal instead of leaving a second form behind it.
+        window.setTimeout(function () {
+            var advanceManager = document.getElementById('jw-order-advance-manager');
+            if (!advanceManager) { return; }
+            dialog.appendChild(advanceManager);
+            advanceManager.querySelectorAll('[data-jw-advance-toggle]').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    var target = button.getAttribute('data-jw-advance-toggle');
+                    advanceManager.querySelectorAll('[data-jw-advance-form]').forEach(function (form) {
+                        form.hidden = form.getAttribute('data-jw-advance-form') !== target;
+                    });
+                    var form = advanceManager.querySelector('[data-jw-advance-form="' + target + '"]');
+                    if (form) { form.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+                });
+            });
+        }, 0);
+        <?php endif; ?>
     })();
 
     // The save button never clears a half-finished order. What is missing is
@@ -1111,9 +1130,9 @@ jw_filter_bar_styles();
     <?php endif; ?>
 
     <?php if ($editOrder && $canEdit): ?>
-    <section class="mbw-card" data-collapsible style="margin-top:14px">
+    <section class="mbw-card" id="jw-order-advance-manager" style="margin-top:14px">
         <div class="mbw-card-head">
-            <h2>Advance on <?= e((string) $editOrder['order_no']) ?></h2>
+            <h2>Advance Management — <?= e((string) $editOrder['order_no']) ?></h2>
         </div>
 
         <div class="mbw-stat-row" style="margin-bottom:14px">
@@ -1161,8 +1180,15 @@ jw_filter_bar_styles();
         <?php endif; ?>
 
 
-        <h3 style="margin:16px 0 8px">Take an advance</h3>
-        <form method="post" class="workspace-form-grid">
+        <div class="jw-advance-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+            <button type="button" class="button" data-jw-advance-toggle="record">Record New Advance</button>
+            <?php if ((float) $advanceAvailable > 0.005): ?>
+                <button type="button" class="button secondary" data-jw-advance-toggle="refund">Refund Advance</button>
+            <?php endif; ?>
+        </div>
+
+        <form method="post" class="workspace-form-grid jw-advance-form" data-jw-advance-form="record" hidden>
+            <h3 style="grid-column:1/-1;margin:16px 0 0">Record New Advance</h3>
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_advance">
             <input type="hidden" name="back_view" value="orders">
@@ -1175,8 +1201,8 @@ jw_filter_bar_styles();
         </form>
 
         <?php if ((float) $advanceAvailable > 0.005): ?>
-        <h3 style="margin:16px 0 8px">Refund what is left</h3>
-        <form method="post" class="workspace-form-grid">
+        <form method="post" class="workspace-form-grid jw-advance-form" data-jw-advance-form="refund" hidden>
+            <h3 style="grid-column:1/-1;margin:16px 0 0">Refund Advance</h3>
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="refund_advance">
             <input type="hidden" name="back_view" value="orders">
