@@ -1193,42 +1193,24 @@ jw_filter_bar_styles();
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Orders (<?= count($orders) ?>)</h2><span><?= $canExport ? $exportLinks() : '' ?></span></div>
-        <?php jw_render_filter_bar([
-            'hidden' => ['view' => 'orders'],
-            'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
-            'min_date' => $fyStart, 'max_date' => $fyEnd,
-            'reset' => url('admin/jewellery-workshop.php?view=orders'),
-            'advanced_in_use' => $advancedInUse,
-            'advanced' => [
-                ['label' => 'Status', 'html' => jw_filter_select('status', $filterStatus, [
-                    'draft' => 'Draft', 'confirmed' => 'Confirmed', 'assigned' => 'Assigned',
-                    'partially_received' => 'Partially Received', 'received' => 'Received',
-                    'invoiced' => 'Invoiced', 'delivered' => 'Delivered', 'closed' => 'Closed',
-                    'cancelled' => 'Cancelled',
-                ])],
-                ['label' => 'Customer', 'html' => jw_filter_select('party', (string) $filterParty,
-                    array_column($parties, 'name', 'id'))],
-                ['label' => 'Kaligad', 'html' => jw_filter_select('karigar', (string) $filterKarigar,
-                    array_column($karigars, 'code', 'id'))],
-                ['label' => 'Past due, uncollected', 'html' => jw_filter_select('overdue',
-                    $filterOverdue ? '1' : '', ['1' => 'Only these'], '— all —')],
-            ],
-        ]); ?>
         <?php
         $orderSourceLabels = jewellery_order_sources();
         $orderSourceTones = jewellery_order_source_tones();
         $orderSourceFilter = jw_enum($_GET['source'] ?? null, array_keys($orderSourceLabels), '');
         ?>
-        <form method="get" style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <form method="get" style="margin-bottom:8px;display:flex;gap:10px;flex-wrap:nowrap;align-items:end;overflow-x:auto;padding:2px 0 8px">
             <input type="hidden" name="view" value="orders">
-            <?php foreach (['status', 'search', 'from', 'to', 'sort'] as $keepKey): ?>
-                <?php if (($_GET[$keepKey] ?? '') !== ''): ?>
-                    <input type="hidden" name="<?= e($keepKey) ?>" value="<?= e((string) $_GET[$keepKey]) ?>">
-                <?php endif; ?>
-            <?php endforeach; ?>
-            <label style="display:flex;gap:6px;align-items:center;margin:0">
-                <span style="color:var(--mbw-muted);font-size:12.5px">Order type</span>
-                <select name="source" class="field-compact" aria-label="How the order is being fulfilled" onchange="this.form.submit()">
+            <?php if ($sortParam !== ''): ?><input type="hidden" name="sort" value="<?= e($sortParam) ?>"><?php endif; ?>
+            <label style="display:grid;gap:4px;min-width:190px;margin:0"><span style="font-size:12.5px">Search</span><input name="search" type="search" value="<?= e($filterSearch) ?>" placeholder="Search orders..."></label>
+            <label style="display:grid;gap:4px;min-width:150px;margin:0"><span style="font-size:12.5px">From</span><input name="from" type="date" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+            <label style="display:grid;gap:4px;min-width:150px;margin:0"><span style="font-size:12.5px">To</span><input name="to" type="date" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+            <label style="display:grid;gap:4px;min-width:150px;margin:0"><span style="font-size:12.5px">Status</span><?= jw_filter_select('status', $filterStatus, ['draft' => 'Draft', 'confirmed' => 'Confirmed', 'assigned' => 'Assigned', 'partially_received' => 'Partially Received', 'received' => 'Received', 'invoiced' => 'Invoiced', 'delivered' => 'Delivered', 'closed' => 'Closed', 'cancelled' => 'Cancelled']) ?></label>
+            <label style="display:grid;gap:4px;min-width:180px;margin:0"><span style="font-size:12.5px">Customer</span><?= jw_filter_select('party', (string) $filterParty, array_column($parties, 'name', 'id')) ?></label>
+            <label style="display:grid;gap:4px;min-width:150px;margin:0"><span style="font-size:12.5px">Kaligad</span><?= jw_filter_select('karigar', (string) $filterKarigar, array_column($karigars, 'code', 'id')) ?></label>
+            <label style="display:grid;gap:4px;min-width:170px;margin:0"><span style="font-size:12.5px">Past due, uncollected</span><?= jw_filter_select('overdue', $filterOverdue ? '1' : '', ['1' => 'Only these'], '— all —') ?></label>
+            <label style="display:grid;gap:4px;min-width:160px;margin:0">
+                <span style="font-size:12.5px">Order type</span>
+                <select name="source" class="field-compact" aria-label="How the order is being fulfilled">
                     <option value="">All types</option>
                     <?php foreach ($orderSourceLabels as $sourceKey => $sourceLabel): ?>
                         <option value="<?= e($sourceKey) ?>" <?= $orderSourceFilter === $sourceKey ? 'selected' : '' ?>><?= e($sourceLabel) ?></option>
@@ -1236,13 +1218,9 @@ jw_filter_bar_styles();
                 </select>
             </label>
             <button type="submit" class="button secondary"><?= icon('filter') ?> Filter</button>
-            <?php if ($orderSourceFilter !== ''): ?>
-                <a class="button secondary" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">Show all types</a>
-            <?php endif; ?>
-            <span style="color:var(--mbw-muted);font-size:12px;margin-left:auto">
-                <strong>Made to order</strong> went to a kaligad · <strong>From showroom stock</strong> was set aside off the shelf
-            </span>
+            <a class="button secondary" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">Clear</a>
         </form>
+        <p style="color:var(--mbw-muted);font-size:12px;margin:0 0 12px"><strong>Made to order</strong> went to a kaligad · <strong>From showroom stock</strong> was set aside off the shelf.</p>
         <div class="mbw-tablewrap"><table>
             <thead><tr>
                 <th><a href="?view=orders&sort=<?= strpos($sortParam, 'order_no') === 0 && strpos($sortParam, '_asc') ? 'order_no_desc' : 'order_no_asc' ?>" style="cursor:pointer;text-decoration:none">No. <?= strpos($sortParam, 'order_no') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
