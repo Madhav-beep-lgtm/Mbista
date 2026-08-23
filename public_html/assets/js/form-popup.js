@@ -21,6 +21,9 @@
         if (card.dataset.popupOpen === '1') { dialog.showModal(); return; }
         var launch = document.createElement('button');
         launch.type = 'button'; launch.className = 'button';
+        // Some form workspaces make every direct button fill the row. A popup
+        // launcher is an action, not a form submit row, so keep it compact.
+        launch.style.cssText = 'width:max-content!important;display:inline-flex!important;flex:0 0 auto;align-self:flex-start;margin:0 0 14px;';
         launch.textContent = card.dataset.popupLabel || title;
         dialog.parentNode.insertBefore(launch, dialog);
         launch.addEventListener('click', function () { dialog.showModal(); });
