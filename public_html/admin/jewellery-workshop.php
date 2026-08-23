@@ -845,7 +845,7 @@ jw_filter_bar_styles();
         <div class="mbw-card-head">
             <h2><?= $editOrder ? 'Edit Order — ' . e((string) $editOrder['order_no']) : 'New Order' ?></h2>
             <?php if ($editOrder): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">New order</a><?php endif; ?>
-            <?php if (!$editOrder): ?><button type="button" class="button secondary" id="jw-new-order-close">Close</button><?php endif; ?>
+            <button type="button" class="button secondary" id="jw-order-close">Close</button>
         </div>
         <form method="post" data-jw-order-form>
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1048,14 +1048,18 @@ jw_filter_bar_styles();
     (function () {
         var editor = document.getElementById('jw-order-editor');
         var open = document.getElementById('jw-new-order-open');
-        var close = document.getElementById('jw-new-order-close');
-        if (!editor || !open || !close || !window.HTMLDialogElement) { return; }
+        var close = document.getElementById('jw-order-close');
+        if (!editor || !close || !window.HTMLDialogElement) { return; }
         var dialog = document.createElement('dialog');
         dialog.className = 'jw-order-dialog';
-        dialog.setAttribute('aria-label', 'New jewellery order');
+        dialog.setAttribute('aria-label', <?= $editOrder ? "'Edit jewellery order'" : "'New jewellery order'" ?>);
         editor.parentNode.insertBefore(dialog, editor);
         dialog.appendChild(editor);
-        open.addEventListener('click', function () { dialog.showModal(); });
+        if (open) {
+            open.addEventListener('click', function () { dialog.showModal(); });
+        } else {
+            dialog.showModal();
+        }
         close.addEventListener('click', function () { dialog.close(); });
         dialog.addEventListener('click', function (event) {
             if (event.target === dialog) { dialog.close(); }
