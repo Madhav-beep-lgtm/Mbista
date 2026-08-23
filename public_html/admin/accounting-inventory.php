@@ -2819,7 +2819,7 @@ $invMoveItemOptions = static function () use ($items): string {
                         <button type="button" class="button secondary inv-bill-close">Done</button>
                     </div>
                     <div class="inv-bill-dialog-body">
-                        <div style="overflow-x:auto"><table class="mbw-grid-table inv-item-grid" data-bill="<?= $billIndex ?>">
+                        <div class="inv-item-grid-scroll"><table class="mbw-grid-table inv-item-grid" data-bill="<?= $billIndex ?>">
                             <thead><tr>
                                 <th>Item</th>
                                 <th>UoM</th>

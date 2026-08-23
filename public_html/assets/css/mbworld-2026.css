@@ -1167,8 +1167,9 @@ body.admin-layout .mbw-grid-table :is(input, select) { max-width: 100%; }
    backdrop is dimmed — a modal that does not dim reads as part of the page
    behind it. */
 body.admin-layout .inv-bill-dialog {
-  width: min(1100px, 96vw);
-  max-width: 96vw;
+  width: min(1760px, 98vw);
+  max-width: 98vw;
+  max-height: 92vh;
   padding: 0;
   border: 1px solid var(--mbw-border);
   border-radius: var(--mbw-radius);
@@ -1186,9 +1187,43 @@ body.admin-layout .inv-bill-dialog-head {
 }
 body.admin-layout .inv-bill-dialog-body {
   padding: 14px 18px;
-  max-height: 70vh;
+  max-height: calc(92vh - 82px);
   overflow: auto;
 }
+/* Purchase bills have many fields per item. Keep the dialog wide, retain
+   generous usable field widths, and always expose a horizontal scrollbar when
+   a smaller screen cannot fit the whole line. */
+body.admin-layout .inv-item-grid-scroll {
+  width: 100%;
+  overflow-x: scroll;
+  overflow-y: visible;
+  padding-bottom: 8px;
+}
+body.admin-layout .inv-bill-dialog .inv-item-grid {
+  width: max-content;
+  min-width: 1640px;
+  table-layout: fixed;
+}
+body.admin-layout .inv-bill-dialog .inv-item-grid th:first-child,
+body.admin-layout .inv-bill-dialog .inv-item-grid td:first-child { width: 320px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(2),
+body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(2) { width: 88px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(3),
+body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(3) { width: 125px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(4),
+body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(4) { width: 150px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(5),
+body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(5) { width: 145px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(6),
+body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(6) { width: 110px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(7),
+body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(7) { width: 135px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(8),
+body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(8) { width: 90px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(9),
+body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(9) { width: 105px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid th:last-child,
+body.admin-layout .inv-bill-dialog .inv-item-grid td:last-child { width: 56px; }
 /* A line being edited, marked so the row under the cursor is obvious in a
    grid that is mostly input boxes. */
 body.admin-layout .inv-item-row:focus-within { background: var(--mbw-primary-soft); }
