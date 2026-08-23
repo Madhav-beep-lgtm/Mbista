@@ -129,10 +129,17 @@ function jw_document_taxes(int $companyId, string $docType, int $docId): array
     if (!table_exists('jewellery_line_taxes')) {
         return [];
     }
+    // A draft can be edited repeatedly.  Tax rows for a deleted/replaced line
+    // must never be posted again merely because they still share the document
+    // id.  Restrict the tax register to lines that still belong to this exact
+    // sale or purchase.
+    $lineTable = $docType === 'purchase' ? 'jewellery_purchase_lines' : 'jewellery_sale_lines';
+    $documentColumn = $docType === 'purchase' ? 'purchase_id' : 'sale_id';
     $stmt = db()->prepare('SELECT tax_code, tax_name, output_purpose, input_purpose, MIN(sequence) AS sequence,
             SUM(base_amount) AS base_amount, SUM(amount) AS amount
-        FROM jewellery_line_taxes
-        WHERE company_id = :cid AND doc_type = :dt AND doc_id = :did
+        FROM jewellery_line_taxes t
+        INNER JOIN `' . $lineTable . '` line ON line.id = t.line_id AND line.`' . $documentColumn . '` = t.doc_id
+        WHERE t.company_id = :cid AND t.doc_type = :dt AND t.doc_id = :did
         GROUP BY tax_code, tax_name, output_purpose, input_purpose
         ORDER BY sequence ASC, tax_code ASC');
     $stmt->execute(['cid' => $companyId, 'dt' => $docType, 'did' => $docId]);
@@ -2152,9 +2159,18 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
         // owed. Each tax names the purpose it credits, so a new tax posts to
         // its own account without touching this code.
         $documentTaxes = jw_document_taxes($companyId, 'sale', $saleId);
+        // The invoice is the source of truth: its CURRENT saved line totals
+        // include any manual tax adjustment.  Historical tax-detail rows are
+        // retained for reporting/mapping only and must not alter the amount
+        // being credited to the tax payable accounts.
+        $lineVatTotal = jw_round_money(array_sum(array_map(static fn (array $line): float => (float) ($line['vat_amount'] ?? 0), $lines)));
+        $lineOtherTaxTotal = jw_round_money(array_sum(array_map(static fn (array $line): float => (float) ($line['tax_amount'] ?? 0), $lines)));
         $postedTax = 0.0;
+        $otherTaxAssigned = false;
         foreach ($documentTaxes as $tax) {
-            $amount = jw_round_money((float) $tax['amount']);
+            $isVat = strtoupper(trim((string) $tax['tax_code'])) === 'VAT';
+            $amount = $isVat ? $lineVatTotal : ($otherTaxAssigned ? 0.0 : $lineOtherTaxTotal);
+            $otherTaxAssigned = $otherTaxAssigned || !$isVat;
             if (abs($amount) < 0.005) {
                 continue;
             }
@@ -2162,14 +2178,11 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
                 'amount' => -$amount, 'memo' => $tax['tax_code'] . ' ' . $sale['sale_no']];
             $postedTax = jw_round_money($postedTax + $amount);
         }
-        // A punched tax total that differs from the computed one still has to
-        // reach the ledger, or the voucher will not balance against the total.
-        $headerTax = jw_round_money((float) $sale['vat_amount'] + (float) ($sale['tax_amount'] ?? 0));
-        $taxGap = jw_round_money($headerTax - $postedTax);
-        if (abs($taxGap) >= 0.005) {
-            $gapPurpose = $documentTaxes !== [] ? (string) $documentTaxes[0]['output_purpose'] : 'vat_output';
-            $legs[] = ['ledger_id' => jw_require_ledger($companyId, $gapPurpose),
-                'amount' => -$taxGap, 'memo' => 'Tax adjustment ' . $sale['sale_no']];
+        if ($lineVatTotal > 0 && !array_filter($documentTaxes, static fn (array $tax): bool => strtoupper(trim((string) $tax['tax_code'])) === 'VAT')) {
+            $legs[] = ['ledger_id' => jw_require_ledger($companyId, 'vat_output'), 'amount' => -$lineVatTotal, 'memo' => 'VAT ' . $sale['sale_no']];
+        }
+        if ($lineOtherTaxTotal > 0 && !$otherTaxAssigned) {
+            $legs[] = ['ledger_id' => jw_require_ledger($companyId, 'spt_output'), 'amount' => -$lineOtherTaxTotal, 'memo' => 'SPT ' . $sale['sale_no']];
         }
         if ((float) $sale['other_charges'] > 0) {
             $legs[] = ['ledger_id' => jw_require_ledger($companyId, 'other_charges'), 'amount' => -(float) $sale['other_charges'], 'memo' => 'Other charges ' . $sale['sale_no']];
