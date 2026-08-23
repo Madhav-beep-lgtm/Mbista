@@ -451,7 +451,9 @@ if ($view === 'purchases') {
 $journalSaleId = $view === 'sales' ? (int) ($_GET['journal_sale'] ?? 0) : 0;
 $saleJournal = null;
 $saleJournalEntries = [];
-if ($journalSaleId > 0 && jewellery_sale($companyId, $journalSaleId)) {
+$saleJournalPreview = null;
+$journalSale = $journalSaleId > 0 ? jewellery_sale($companyId, $journalSaleId) : null;
+if ($journalSale) {
     $journalStmt = db()->prepare("SELECT id, voucher_no, voucher_date, narration, total_amount
         FROM vouchers WHERE company_id = :cid AND source_type = 'jewellery_sale'
           AND source_id = :sid AND status = 'posted' ORDER BY id DESC LIMIT 1");
@@ -463,6 +465,11 @@ if ($journalSaleId > 0 && jewellery_sale($companyId, $journalSaleId)) {
             WHERE ve.voucher_id = :vid ORDER BY ve.id ASC');
         $entryStmt->execute(['vid' => (int) $saleJournal['id']]);
         $saleJournalEntries = $entryStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+    if (!$saleJournal && (string) $journalSale['status'] === 'draft') {
+        // This uses the same dry-run posting engine as the Confirm & Post
+        // screen.  It is therefore a real draft journal, not an estimate.
+        $saleJournalPreview = jewellery_preview_posting($companyId, 'sale', $journalSaleId);
     }
 }
 
@@ -1263,7 +1270,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 
         <?php if ($journalSaleId > 0): ?>
         <dialog id="jw-sale-journal-dialog" aria-label="Sale journal entry" style="width:min(760px,calc(100vw - 32px));border:0;border-radius:14px;padding:22px;box-shadow:0 18px 48px rgba(0,0,0,.28)">
-            <div style="display:flex;justify-content:space-between;gap:16px;align-items:start"><div><h2 style="margin:0">Journal entry</h2><p style="margin:4px 0 16px;color:var(--mbw-muted,#64748b)"><?= $saleJournal ? 'Voucher ' . e((string) $saleJournal['voucher_no']) . ' · ' . e(app_date((string) $saleJournal['voucher_date'])) : 'This sale is still a draft, so it has no posted journal entry.' ?></p></div><button type="button" class="button secondary" data-jw-close-journal>Close</button></div>
+            <div style="display:flex;justify-content:space-between;gap:16px;align-items:start"><div><h2 style="margin:0">Journal entry</h2><p style="margin:4px 0 16px;color:var(--mbw-muted,#64748b)"><?= $saleJournal ? 'Posted voucher ' . e((string) $saleJournal['voucher_no']) . ' · ' . e(app_date((string) $saleJournal['voucher_date'])) : 'Draft posting preview — nothing has been entered in the books yet.' ?></p></div><button type="button" class="button secondary" data-jw-close-journal>Close</button></div>
             <?php if ($saleJournal): ?>
                 <div style="overflow-x:auto"><table><thead><tr><th>Ledger</th><th>Memo</th><th class="is-numeric">Debit (<?= e($sym) ?>)</th><th class="is-numeric">Credit (<?= e($sym) ?>)</th></tr></thead><tbody>
                 <?php $journalDebit = 0.0; $journalCredit = 0.0; foreach ($saleJournalEntries as $entry): ?>
@@ -1271,6 +1278,15 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                     <tr><td><?= e(trim((string) $entry['code'] . ' — ' . (string) $entry['name'])) ?></td><td><?= e((string) ($entry['memo'] ?? '')) ?></td><td class="is-numeric"><?= $isDebit ? e($fmt($amount)) : '—' ?></td><td class="is-numeric"><?= !$isDebit ? e($fmt($amount)) : '—' ?></td></tr>
                 <?php endforeach; ?>
                 </tbody><tfoot><tr><th colspan="2">Totals</th><th class="is-numeric"><?= e($fmt($journalDebit)) ?></th><th class="is-numeric"><?= e($fmt($journalCredit)) ?></th></tr><tr><td colspan="4" style="text-align:right"><strong><?= abs($journalDebit - $journalCredit) < 0.005 ? 'Balanced' : 'Difference: ' . e($sym) . e($fmt(abs($journalDebit - $journalCredit))) ?></strong></td></tr></tfoot></table></div>
+            <?php elseif ($saleJournalPreview && !empty($saleJournalPreview['ok'])): ?>
+                <div style="overflow-x:auto"><table><thead><tr><th>Ledger</th><th>Memo</th><th class="is-numeric">Debit (<?= e($sym) ?>)</th><th class="is-numeric">Credit (<?= e($sym) ?>)</th></tr></thead><tbody>
+                <?php foreach ((array) $saleJournalPreview['legs'] as $leg): ?>
+                    <tr><td><?= e(((string) ($leg['ledger_code'] ?? '') !== '' ? (string) $leg['ledger_code'] . ' — ' : '') . (string) ($leg['ledger_name'] ?? '')) ?></td><td><?= e((string) ($leg['memo'] ?? '')) ?></td><td class="is-numeric"><?= (string) ($leg['entry_type'] ?? '') === 'debit' ? e($fmt((float) $leg['amount'])) : '—' ?></td><td class="is-numeric"><?= (string) ($leg['entry_type'] ?? '') === 'credit' ? e($fmt((float) $leg['amount'])) : '—' ?></td></tr>
+                <?php endforeach; ?>
+                </tbody><tfoot><tr><th colspan="2">Totals</th><th class="is-numeric"><?= e($fmt((float) $saleJournalPreview['debit_total'])) ?></th><th class="is-numeric"><?= e($fmt((float) $saleJournalPreview['credit_total'])) ?></th></tr><tr><td colspan="4" style="text-align:right"><strong><?= abs((float) $saleJournalPreview['debit_total'] - (float) $saleJournalPreview['credit_total']) < 0.005 ? 'Balanced — ready to post' : 'Difference: ' . e($sym) . e($fmt(abs((float) $saleJournalPreview['debit_total'] - (float) $saleJournalPreview['credit_total']))) ?></strong></td></tr></tfoot></table></div>
+                <?php if ($canPost): ?><form method="post" style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="post_sale"><input type="hidden" name="back_view" value="sales"><input type="hidden" name="doc_id" value="<?= (int) $journalSaleId ?>"><button type="submit" class="button" data-confirm="Post this draft sale using the journal entry shown above?">Confirm &amp; Post</button></form><?php endif; ?>
+            <?php elseif ($saleJournalPreview): ?>
+                <div class="notice"><strong>This draft cannot be posted:</strong> <?= e((string) ($saleJournalPreview['error'] ?? 'Unable to prepare a journal entry.')) ?></div>
             <?php endif; ?>
         </dialog>
         <?php endif; ?>
