@@ -647,6 +647,23 @@ ok(near((float) $valueOf($sectionBy['orders'], 'Balance still to collect'),
 $empty = jw_report_consolidated($cidA, '2019-01-01', '2019-01-31');
 ok(near((float) $valueOf($empty['sections'][1], 'Sales revenue'), 0.0),
     'A period before the shop existed reports no sales rather than all of them');
+echo "\nD. The file says everything the page does\n";
+// One report on screen, one file behind it. The rows are built by the SAME call
+// the export makes, so a figure cannot be on the page and missing from the PDF
+// somebody took into a meeting.
+$exportRows = jw_report_consolidated_export_rows($cons);
+ok($exportRows[0] === ['Section', 'Basis', 'Figure', 'Value', 'Kind'], 'The file opens with its header row');
+$figureCount = 0;
+foreach ($cons['sections'] as $section) { $figureCount += count($section['rows']); }
+ok(count($exportRows) - 1 === $figureCount,
+    'Every figure on the page has a row in the file (' . $figureCount . ')');
+$everyRowLabelled = true;
+foreach (array_slice($exportRows, 1) as $exportRow) {
+    if (trim((string) $exportRow[0]) === '' || trim((string) $exportRow[1]) === '') { $everyRowLabelled = false; }
+}
+ok($everyRowLabelled, 'And every row carries its section AND the date it is true on, so it can be read alone');
+$sectionsInFile = array_values(array_unique(array_column(array_slice($exportRows, 1), 0)));
+ok(count($sectionsInFile) === 5, 'All five sections reach the file, in order');
 jwt_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

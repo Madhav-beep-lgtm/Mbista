@@ -99,16 +99,7 @@ if (isset($_GET['export']) && $canExport) {
         // a stock figure "as at" a date and a receivable "as it stands" are not
         // the same kind of number, and a column of bare amounts hides that.
         $consolidated = jw_report_consolidated($companyId, $from, $to);
-        $data = [['Section', 'Basis', 'Figure', 'Value', 'Kind']];
-        foreach ($consolidated['sections'] as $section) {
-            foreach ($section['rows'] as $row) {
-                $data[] = [
-                    $section['title'], $section['note'], $row['label'],
-                    $row['value'] === null ? '' : $row['value'],
-                    (string) $row['kind'],
-                ];
-            }
-        }
+        $data = jw_report_consolidated_export_rows($consolidated);
         $summaryMeta = $meta;
         $summaryMeta['Weights'] = $consolidated['base_unit'] !== ''
             ? ('fine ' . $consolidated['base_unit']) : 'fine, base unit';
@@ -510,41 +501,51 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
             };
         };
     ?>
-    <?php // THE FIVE QUESTIONS, each with its own card and — the part the old
-          // seventeen-tile row could not say — the date it is true on. ?>
-    <section class="mbw-kpi-grid" style="margin-top:14px" aria-label="Jewellery headline figures">
-        <?php foreach ($consolidated['sections'] as $section): ?>
-            <article class="mbw-kpi">
-                <div>
-                    <span class="mbw-kpi-label"><?= e($section['title']) ?></span>
-                    <div class="mbw-kpi-value" style="font-size:1.02rem"><?= e($sym . $fmt((float) $section['headline'])) ?></div>
-                    <small style="opacity:.7"><?= e($section['note']) ?></small>
-                </div>
-                <span class="mbw-chip tone-blue"><?= icon($section['icon']) ?></span>
-            </article>
-        <?php endforeach; ?>
+    <?php // ONE REPORT, NOT FIVE BOXES. Five cards side by side made the reader
+          // do the joining: nothing lined up, the eye had to jump between
+          // columns, and it printed as five islands on a page. A single table
+          // reads top to bottom in one column, foots each section as it goes,
+          // and comes out of the PDF looking like the statement it is.
+          //
+          // Each section keeps its own heading row carrying THE DATE IT IS TRUE
+          // ON, because two bases live on this page — stock and advances rolled
+          // back to a date, receivables as they stand — and a reader who cannot
+          // see which is which will average them in their head. ?>
+    <section class="mbw-card" style="margin-top:14px">
+        <div class="mbw-card-head">
+            <h2><?= icon('analytics') ?>Consolidated Summary</h2>
+            <div class="mbw-card-tools">
+                <span style="opacity:.7;font-size:12.5px;margin-right:10px"><?= e(app_date($from) . ' to ' . app_date($to)) ?></span>
+                <?php if ($canExport): ?>
+                    <?php // The same three formats every other report offers, on the
+                          // report itself as well as up in the filter bar — this is
+                          // the page somebody prints for a partner or a bank. ?>
+                    <a class="jw-export" href="<?= e($exportUrl('summary', 'csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a>
+                    <a class="jw-export" href="<?= e($exportUrl('summary', 'xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
+                    <a class="jw-export" target="_blank" rel="noopener" href="<?= e($exportUrl('summary', 'print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="mbw-tablewrap"><table>
+            <thead><tr><th>Figure</th><th class="is-numeric">Value</th></tr></thead>
+            <tbody>
+                <?php foreach ($consolidated['sections'] as $section): ?>
+                    <tr class="jw-summary-section">
+                        <th colspan="2" scope="rowgroup" style="text-align:left;padding-top:14px">
+                            <?= icon($section['icon']) ?><?= e($section['title']) ?>
+                            <span style="opacity:.65;font-weight:400;font-size:12.5px">— <?= e($section['note']) ?></span>
+                        </th>
+                    </tr>
+                    <?php foreach ($section['rows'] as $row): ?>
+                        <tr>
+                            <td><?= $row['strong'] ? '<strong>' . e((string) $row['label']) . '</strong>' : e((string) $row['label']) ?></td>
+                            <td class="is-numeric"><?= $row['strong'] ? '<strong>' . e($cellValue($row)) . '</strong>' : e($cellValue($row)) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endforeach; ?>
+            </tbody>
+        </table></div>
     </section>
-
-    <div class="jw-summary-grid" style="display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));margin-top:14px">
-        <?php foreach ($consolidated['sections'] as $section): ?>
-            <section class="mbw-card">
-                <div class="mbw-card-head">
-                    <h2><?= icon($section['icon']) ?><?= e($section['title']) ?></h2>
-                    <span style="opacity:.7;font-size:12.5px"><?= e($section['note']) ?></span>
-                </div>
-                <div class="mbw-tablewrap"><table>
-                    <tbody>
-                        <?php foreach ($section['rows'] as $row): ?>
-                            <tr>
-                                <td><?= $row['strong'] ? '<strong>' . e((string) $row['label']) . '</strong>' : e((string) $row['label']) ?></td>
-                                <td class="is-numeric"><?= $row['strong'] ? '<strong>' . e($cellValue($row)) . '</strong>' : e($cellValue($row)) ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table></div>
-            </section>
-        <?php endforeach; ?>
-    </div>
 
 <?php elseif ($view === 'sales'): ?>
     <?php $report = jw_report_sales_detail($companyId, $from, $to); $groups = jw_report_sales_grouped($companyId, $from, $to, $groupBy); ?>

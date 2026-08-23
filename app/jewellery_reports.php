@@ -1310,6 +1310,39 @@ function jw_report_consolidated(int $companyId, string $from, string $to): array
         ],
     ];
 }
+/**
+ * The consolidated summary as export rows — the file's version of the screen.
+ *
+ * Built here rather than in the page so the CSV, the Excel and the PDF cannot
+ * drift from the table somebody printed them off. A summary whose file omits a
+ * line the page shows is the worst kind of wrong: nobody notices until the
+ * figure that was left out is the one being argued about.
+ *
+ * SECTION AND BASIS RIDE ON EVERY ROW rather than being written once as a
+ * heading. A spreadsheet can then pivot on them, and a row read on its own —
+ * pasted into an email, quoted in a meeting — still says what it is and what
+ * date it is true on. On screen the same facts are a heading, because there the
+ * eye can see the group.
+ *
+ * @return array<int, array<int, mixed>> first row is the header
+ */
+function jw_report_consolidated_export_rows(array $consolidated): array
+{
+    $rows = [['Section', 'Basis', 'Figure', 'Value', 'Kind']];
+    foreach (($consolidated['sections'] ?? []) as $section) {
+        foreach (($section['rows'] ?? []) as $row) {
+            $rows[] = [
+                (string) $section['title'],
+                (string) $section['note'],
+                (string) $row['label'],
+                $row['value'] === null ? '' : $row['value'],
+                (string) $row['kind'],
+            ];
+        }
+    }
+
+    return $rows;
+}
 /** Headline numbers for the module dashboard over a period. */
 function jw_report_summary(int $companyId, string $from, string $to): array
 {
