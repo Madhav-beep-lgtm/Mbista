@@ -841,7 +841,7 @@ jw_filter_bar_styles();
         <button type="button" class="button" id="jw-new-order-open"><?= icon('plus') ?> New Order</button>
     </div>
     <?php endif; ?>
-    <section class="mbw-card" id="jw-order-editor" data-collapsible data-draggable>
+    <section class="mbw-card" id="jw-order-editor" data-collapsible>
         <div class="mbw-card-head">
             <h2><?= $editOrder ? 'Edit Order — ' . e((string) $editOrder['order_no']) : 'New Order' ?></h2>
             <?php if ($editOrder): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">New order</a><?php endif; ?>
