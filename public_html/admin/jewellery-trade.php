@@ -1047,6 +1047,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                             // contain several pieces. Show every ordered line to
                             // the counter before it is collected.
                             $orderedLines = jewellery_order_line_rows($companyId, (int) $ord['id']);
+                            $lineSaleStates = jewellery_order_line_sale_statuses($companyId, (int) $ord['id']);
                             // The same server-side prefill used by the old page
                             // reload is embedded once here. The button below can
                             // fill the open sale in place, without navigating
@@ -1072,7 +1073,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                     <?= $isSelling ? '<span class="mbw-pill tone-green">Being sold</span>' : '' ?>
                                 </td>
                                 <td><?= e(app_date((string) $ord['order_date'])) ?></td>
-                                <td>
+                                <td class="jw-order-lines">
                                     <?php if ($orderedLines !== []): ?>
                                         <?php foreach ($orderedLines as $line): ?>
                                             <div><small><?= e((string) ($line['item_name'] ?? 'Item')) ?> — <?= $fmt((float) ($line['qty_pieces'] ?? 1), 2) ?> pc, <?= $fmt((float) ($line['gross_weight'] ?? 0), 4) ?> <?= e((string) ($line['unit_code'] ?? '')) ?> · <?= e((string) ($line['purity_code'] ?? '')) ?></small></div>
@@ -1082,9 +1083,19 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                         <small><?= e((string) $ord['purity_code']) ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td class="is-numeric"><?= $fmt((float) $ord['expected_gross_weight'], 4) ?> <?= e((string) $ord['unit_code']) ?></td>
+                                <td class="is-numeric jw-order-lines"><?php if ($orderedLines !== []): foreach ($orderedLines as $line): ?><div><small><?= $fmt((float) ($line['gross_weight'] ?? 0), 4) ?> <?= e((string) ($line['unit_code'] ?? '')) ?></small></div><?php endforeach; else: ?><?= $fmt((float) $ord['expected_gross_weight'], 4) ?> <?= e((string) $ord['unit_code']) ?><?php endif; ?></td>
                                 <td class="is-numeric"><?= $fmt((float) $ord['advance_amount']) ?></td>
+                                <?php if ($orderedLines !== []): ?>
+                                <td class="jw-order-lines">
+                                    <?php foreach ($orderedLines as $line):
+                                        $saleState = $lineSaleStates[(int) $line['id']] ?? null;
+                                        $stateText = $saleState ? ((string) $saleState['status'] === 'posted' ? 'Posted sale' : 'Draft sale') : 'Pending sale';
+                                        $stateTone = $saleState ? ((string) $saleState['status'] === 'posted' ? 'tone-green' : 'tone-amber') : 'tone-gray';
+                                    ?><div><span class="mbw-pill <?= $stateTone ?>"><?= e($stateText) ?></span></div><?php endforeach; ?>
+                                </td>
+                                <?php else: ?>
                                 <td><span class="mbw-pill <?= $isReady ? 'tone-green' : 'tone-gray' ?>"><?= $isReady ? 'Ready — collect now' : e(ucfirst((string) $ord['status'])) ?></span></td>
+                                <?php endif; ?>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>

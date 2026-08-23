@@ -3269,6 +3269,48 @@ function jewellery_order_billed_line_ids(int $companyId, int $orderId, int $excl
     return $billed;
 }
 
+/** Sales state of every order line already placed on a draft or posted bill. */
+function jewellery_order_line_sale_statuses(int $companyId, int $orderId): array
+{
+    $orderLines = jewellery_order_line_rows($companyId, $orderId);
+    if ($orderLines === []) {
+        return [];
+    }
+    $stmt = db()->prepare("SELECT sl.order_line_id, sl.item_id, sl.qty_pieces, s.status, s.sale_no
+        FROM jewellery_sale_lines sl
+        INNER JOIN jewellery_sales s ON s.id = sl.sale_id AND s.company_id = sl.company_id
+        WHERE sl.company_id = :cid AND s.status IN ('draft', 'posted')
+          AND (sl.order_line_id IN (SELECT id FROM jewellery_order_lines WHERE company_id = :cid_lines AND order_id = :oid_lines)
+               OR s.order_id = :oid_sale
+               OR EXISTS (SELECT 1 FROM jewellery_orders o
+                    WHERE o.company_id = s.company_id AND o.id = :oid_delivered AND o.delivered_sale_id = s.id))
+        ORDER BY sl.id ASC");
+    $stmt->execute(['cid' => $companyId, 'cid_lines' => $companyId, 'oid_lines' => $orderId,
+        'oid_sale' => $orderId, 'oid_delivered' => $orderId]);
+    $states = [];
+    $legacy = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $saleLine) {
+        $state = ['status' => (string) $saleLine['status'], 'sale_no' => (string) $saleLine['sale_no']];
+        $lineId = (int) ($saleLine['order_line_id'] ?? 0);
+        if ($lineId > 0) {
+            $states[$lineId] = $state;
+        } else {
+            $itemId = (int) ($saleLine['item_id'] ?? 0);
+            for ($count = max(1, (int) round((float) ($saleLine['qty_pieces'] ?? 1))); $count > 0; $count--) {
+                $legacy[$itemId][] = $state;
+            }
+        }
+    }
+    foreach ($orderLines as $line) {
+        $lineId = (int) $line['id'];
+        $itemId = (int) $line['item_id'];
+        if (!isset($states[$lineId]) && !empty($legacy[$itemId])) {
+            $states[$lineId] = array_shift($legacy[$itemId]);
+        }
+    }
+    return $states;
+}
+
 /**
  * The sale line an order becomes, priced AT THE ORDER DATE.
  *

@@ -1200,6 +1200,14 @@ body.admin-layout .jw-order-dialog #jw-order-editor {
   border: 0;
   border-radius: 0;
 }
+/* A customer order may carry several pieces; align its item, weight and sale
+   status as readable per-piece rows in the counter collection table. */
+.jw-order-lines > div {
+  min-height: 23px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--mbw-border-soft, #e8efeb);
+}
+.jw-order-lines > div:last-child { border-bottom: 0; }
 body.admin-layout .inv-bill-dialog-head {
   display: flex;
   align-items: center;
