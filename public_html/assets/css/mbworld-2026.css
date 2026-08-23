@@ -1177,6 +1177,26 @@ body.admin-layout .inv-bill-dialog {
   color: inherit;
 }
 body.admin-layout .inv-bill-dialog::backdrop { background: rgba(8, 26, 20, .45); }
+/* New jewellery orders are full working forms, so they open in a spacious
+   modal while the saved-order register remains visible underneath. */
+body.admin-layout .jw-order-dialog {
+  width: min(1680px, 97vw);
+  max-width: 97vw;
+  max-height: 94vh;
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--mbw-border);
+  border-radius: 14px;
+  background: var(--mbw-surface);
+  color: inherit;
+  overflow: auto;
+}
+body.admin-layout .jw-order-dialog::backdrop { background: rgba(8, 26, 20, .48); }
+body.admin-layout .jw-order-dialog #jw-order-editor {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
 body.admin-layout .inv-bill-dialog-head {
   display: flex;
   align-items: center;

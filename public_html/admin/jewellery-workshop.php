@@ -836,10 +836,16 @@ jw_filter_bar_styles();
         <?php };
     ?>
     <?php if ($canEdit): ?>
-    <section class="mbw-card" data-collapsible data-draggable>
+    <?php if (!$editOrder): ?>
+    <div class="jw-new-order-launch" style="margin:0 0 14px">
+        <button type="button" class="button" id="jw-new-order-open"><?= icon('plus') ?> New Order</button>
+    </div>
+    <?php endif; ?>
+    <section class="mbw-card" id="jw-order-editor" data-collapsible data-draggable>
         <div class="mbw-card-head">
             <h2><?= $editOrder ? 'Edit Order — ' . e((string) $editOrder['order_no']) : 'New Order' ?></h2>
             <?php if ($editOrder): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">New order</a><?php endif; ?>
+            <?php if (!$editOrder): ?><button type="button" class="button secondary" id="jw-new-order-close">Close</button><?php endif; ?>
         </div>
         <form method="post" data-jw-order-form>
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1026,7 +1032,7 @@ jw_filter_bar_styles();
                 </div>
             <?php endif; ?>
 
-            <div style="margin-top:12px"><button type="submit" class="button"><?= $editOrder ? 'Update Order' : 'Create Order' ?></button></div>
+            <div style="margin-top:12px"><button type="submit" class="button"><?= $editOrder ? 'Update Order' : 'Save Order' ?></button></div>
         </form>
     </section>
     <style>
@@ -1039,6 +1045,23 @@ jw_filter_bar_styles();
             color: var(--mbw-red, #e5484d); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
     </style>
     <script>
+    (function () {
+        var editor = document.getElementById('jw-order-editor');
+        var open = document.getElementById('jw-new-order-open');
+        var close = document.getElementById('jw-new-order-close');
+        if (!editor || !open || !close || !window.HTMLDialogElement) { return; }
+        var dialog = document.createElement('dialog');
+        dialog.className = 'jw-order-dialog';
+        dialog.setAttribute('aria-label', 'New jewellery order');
+        editor.parentNode.insertBefore(dialog, editor);
+        dialog.appendChild(editor);
+        open.addEventListener('click', function () { dialog.showModal(); });
+        close.addEventListener('click', function () { dialog.close(); });
+        dialog.addEventListener('click', function (event) {
+            if (event.target === dialog) { dialog.close(); }
+        });
+    })();
+
     // The save button never clears a half-finished order. What is missing is
     // NAMED, the field is marked and focused, and nothing leaves the page
     // until it is whole — the server's own checks remain behind this, and a
