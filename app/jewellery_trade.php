@@ -720,7 +720,7 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
     $sumWastage = 0.0; $sumOtherTax = 0.0; $sumDiamond = 0.0;
     // The bases the bill prints, accumulated from what each tax was actually
     // charged on rather than re-derived afterwards.
-    $sumSdTaxable = 0.0; $sumVatable = 0.0;
+    $sumSdTaxable = 0.0; $sumVatable = 0.0; $sumNonSpt = 0.0;
 
     foreach ($lines as $index => $line) {
         $itemId = (int) ($line['item_id'] ?? 0);
@@ -885,15 +885,23 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
                 };
                 $lineVatRate = $chargedTax['rate'];
                 $taxable = $chargedTax['base_amount'];
-                $lineVatable += $chargedTax['base_amount'];
+                // More than one VAT rule can be configured, but the same
+                // line base belongs in the printed VAT base only once.
+                $lineVatable = max($lineVatable, (float) $chargedTax['base_amount']);
             } else {
-                $lineSdTaxable += $chargedTax['base_amount'];
+                // SPT taxable means the value of the item portion subject to
+                // SPT — not that value multiplied by the number of configured
+                // SPT rules.  Count the line base once.
+                $lineSdTaxable = max($lineSdTaxable, (float) $chargedTax['base_amount']);
             }
         }
 
         // The wastage is INSIDE the metal amount, so the subtotal is simply
         // metal + making + the stone side — the bill's "Total Amount".
         $subtotal = jw_round_money($metalAmount + $making + $stoneSide);
+        // “Non Taxable” on this invoice means non-SPT-taxable.  A stone may
+        // be VAT-taxable yet still belong here because it has no SPT charge.
+        $lineNonSpt = jw_round_money(max(0.0, $subtotal - $lineSdTaxable));
         $computed[] = [
             'item_id' => $itemId,
             'item' => $item,
@@ -919,6 +927,7 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
             'other_diamond_carat' => $otherDiamondCarat,
             'stone_side_amount' => $stoneSide,
             'sd_taxable_amount' => jw_round_money($lineSdTaxable),
+            'non_spt_amount' => $lineNonSpt,
             'vatable_amount' => jw_round_money($lineVatable),
             'vat_base' => $vatBase,
             'vat_rate' => $lineVatRate,
@@ -950,6 +959,7 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
         $sumDiamond += jw_round_money($diamond + $otherDiamond);
         $sumSdTaxable += $lineSdTaxable;
         $sumVatable += $lineVatable;
+        $sumNonSpt += $lineNonSpt;
         $sumTaxable += $taxable;
         $sumVat += $charge['vat'];
         $sumOtherTax += $charge['other'];
@@ -1030,14 +1040,12 @@ function jw_compute_document(int $companyId, array $header, array $lines, ?array
             'other_charges' => $otherCharges,
             'discount' => $discount,
             'taxable_amount' => jw_round_money($sumTaxable),
-            // The three figures the bill prints under the totals. Anything
-            // charged by neither tax is Non Taxable, which is what makes the
-            // block add up on its face.
+            // The printed classifications are tax bases, not balancing plugs.
+            // Non Taxable deliberately means non-SPT-taxable; VAT is shown in
+            // its own base and may overlap that category.
             'sd_taxable_amount' => jw_round_money($sumSdTaxable),
             'vatable_amount' => jw_round_money($sumVatable),
-            'non_taxable_amount' => jw_round_money(
-                $subtotalAll + $otherCharges - $discount - $sumSdTaxable - $sumVatable
-            ),
+            'non_taxable_amount' => jw_round_money($sumNonSpt),
             'tax_amount' => $otherTax,
             'computed_tax_amount' => $computedOtherTax,
             'manual_tax_amount' => $manualTax,

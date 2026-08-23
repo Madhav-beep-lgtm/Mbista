@@ -173,13 +173,13 @@ ok(near((float) $row['sd_taxable_amount'], 69091.70), 'SD Taxable Amt  = metal +
 ok(near((float) $row['tax_amount'], 345.46), 'SD Tax 0.5%     = 345.46');
 ok(near((float) $row['vatable_amount'], 232.60), 'Vatable Amt     = stone side only = 232.60');
 ok(near((float) $row['vat_amount'], 30.24), 'VAT 13%         = 30.24');
-ok(near((float) $row['non_taxable_amount'], 0.00), 'Non Taxable Amt = 0.00');
+ok(near((float) $row['non_taxable_amount'], 232.60), 'Non-SPT taxable amount = stone side 232.60');
 ok(near((float) $row['total_amount'], 69700.00), 'NET TOTAL       = 69,700.00');
 
-// The three bases must account for the whole document, or the block is a lie.
-ok(near((float) $row['sd_taxable_amount'] + (float) $row['vatable_amount'] + (float) $row['non_taxable_amount'],
+// These tax classifications overlap: VAT-only stones are also non-SPT taxable.
+ok(near((float) $row['sd_taxable_amount'] + (float) $row['non_taxable_amount'],
     (float) $row['metal_amount'] + (float) $row['making_amount'] + (float) $row['stone_amount']),
-    'The three bases add up to the document value — nothing falls between them');
+    'SPT taxable and non-SPT taxable amounts account for the document value');
 
 echo "\nVAT never touches gold or making; SD never touches stones\n";
 $taxRows = db()->query("SELECT tax_code, base_amount, amount FROM jewellery_line_taxes
