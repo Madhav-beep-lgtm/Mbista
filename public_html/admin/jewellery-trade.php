@@ -1187,19 +1187,16 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2><span><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
-        <?php jw_render_filter_bar([
-            'hidden' => ['view' => 'sales'],
-            'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
-            'min_date' => $fyStart, 'max_date' => $fyEnd,
-            'reset' => url('admin/jewellery-trade.php?view=sales'),
-            'advanced_in_use' => $advancedInUse,
-            'advanced' => [
-                ['label' => 'Status', 'html' => jw_filter_select('status', $filterStatus,
-                    ['draft' => 'Draft', 'posted' => 'Posted'])],
-                ['label' => 'Customer', 'html' => jw_filter_select('party', (string) $filterParty,
-                    array_column($parties, 'name', 'id'))],
-            ],
-        ]); ?>
+        <form method="get" style="display:flex;gap:10px;align-items:end;flex-wrap:nowrap;overflow-x:auto;padding:2px 0 12px">
+            <input type="hidden" name="view" value="sales">
+            <label style="display:grid;gap:4px;flex:1 0 190px;margin:0"><span style="font-size:12.5px">Search</span><input type="search" name="q" value="<?= e($filterSearch) ?>" placeholder="Sale no., order ref. or customer"></label>
+            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">From</span><input type="date" name="from" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">To</span><input type="date" name="to" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">Sales status</span><?= jw_filter_select('status', $filterStatus, ['draft' => 'Draft sales', 'posted' => 'Posted sales'], 'All sales') ?></label>
+            <label style="display:grid;gap:4px;flex:1 0 180px;margin:0"><span style="font-size:12.5px">Customer</span><?= jw_filter_select('party', (string) $filterParty, array_column($parties, 'name', 'id'), 'All customers') ?></label>
+            <button type="submit" class="button secondary">Filter</button>
+            <a class="button secondary" href="<?= e(url('admin/jewellery-trade.php?view=sales')) ?>">Clear</a>
+        </form>
 
         <div style="overflow-x:auto"><table>
             <thead><tr><th>No.</th><th>Order ref.</th><th>Date</th><th>Customer</th><th class="is-numeric">Total</th><th class="is-numeric">Received</th><th class="is-numeric">Advance applied</th><th class="is-numeric">Exchange</th><th class="is-numeric">Pending</th><th class="is-numeric">COGS</th><th>Status</th><th>Actions</th></tr></thead>
