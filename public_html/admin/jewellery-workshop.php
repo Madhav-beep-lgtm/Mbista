@@ -514,6 +514,16 @@ if (!in_array($sortParam, $allowedSorts, true)) {
 $listFilters['sort'] = $sortParam;
 
 $orders = $view === 'orders' ? jewellery_orders_list($companyId, $listFilters) : [];
+$orderNumberOptions = [];
+if ($view === 'orders') {
+    // This is intentionally independent of the active filters: the Order No.
+    // picker must still let the clerk jump straight to any order in the company.
+    $orderNoStmt = db()->prepare('SELECT order_no FROM jewellery_orders
+        WHERE company_id = :cid AND order_no <> \'\'
+        ORDER BY order_date DESC, id DESC LIMIT 500');
+    $orderNoStmt->execute(['cid' => $companyId]);
+    $orderNumberOptions = $orderNoStmt->fetchAll(PDO::FETCH_COLUMN);
+}
 $editKarigar = $view === 'karigars' ? jewellery_karigar($companyId, (int) ($_GET['edit'] ?? 0)) : null;
 $editOrder = $view === 'orders' ? jewellery_order($companyId, (int) ($_GET['edit'] ?? 0)) : null;
 $orderAdvances = $editOrder ? jewellery_order_advances($companyId, (int) $editOrder['id'])
@@ -1231,7 +1241,7 @@ jw_filter_bar_styles();
         <form method="get" style="margin-bottom:8px;display:flex;gap:10px;flex-wrap:nowrap;align-items:end;overflow-x:auto;padding:2px 0 8px">
             <input type="hidden" name="view" value="orders">
             <?php if ($sortParam !== ''): ?><input type="hidden" name="sort" value="<?= e($sortParam) ?>"><?php endif; ?>
-            <label style="display:grid;gap:4px;flex:1.3 0 190px;margin:0"><span style="font-size:12.5px">Order no.</span><input name="q" type="search" value="<?= e($filterSearch) ?>" placeholder="Search order no..."></label>
+            <label style="display:grid;gap:4px;flex:1.3 0 190px;margin:0"><span style="font-size:12.5px">Order no.</span><select name="q" class="js-searchable" aria-label="Search or select an order number"><option value="">— all orders —</option><?php foreach ($orderNumberOptions as $orderNumber): ?><option value="<?= e((string) $orderNumber) ?>" <?= $filterSearch === (string) $orderNumber ? 'selected' : '' ?>><?= e((string) $orderNumber) ?></option><?php endforeach; ?></select></label>
             <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">From</span><input name="from" type="date" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
             <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">To</span><input name="to" type="date" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
             <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">Status</span><?= jw_filter_select('status', $filterStatus, ['draft' => 'Draft', 'confirmed' => 'Confirmed', 'assigned' => 'Assigned', 'partially_received' => 'Partially Received', 'received' => 'Received', 'invoiced' => 'Invoiced', 'delivered' => 'Delivered', 'closed' => 'Closed', 'cancelled' => 'Cancelled']) ?></label>
