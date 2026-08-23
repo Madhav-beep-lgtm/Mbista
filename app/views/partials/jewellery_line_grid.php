@@ -513,7 +513,8 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                 $fillFromTemplate = true;
                                 $inlineListUsed = true;
                             ?>
-                            <select name="<?= $prefix ?>_item_id[]" class="c-item" style="flex:1;min-width:0"<?= $fillFromTemplate ? ' data-jw-item-fill="1"' : '' ?>>
+                            <?php $blankNewAssignment = $withWorkshop && $rowItemId <= 0 && (int) ($row['stock_unit_id'] ?? 0) === 0; ?>
+                            <select name="<?= $prefix ?>_item_id[]" class="c-item" style="flex:1;min-width:0;display:<?= $blankNewAssignment ? 'none' : 'block' ?>"<?= $fillFromTemplate ? ' data-jw-item-fill="1"' : '' ?>>
                                 <?php if (!$fillFromTemplate): ?>
                                     <?= $rowItemId > 0
                                         ? str_replace('<option value="' . $rowItemId . '"', '<option selected value="' . $rowItemId . '"', $sharedItemOptions)
@@ -525,7 +526,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                             </select>
-                            <?php if ($allowItemCreate): ?>
+                            <?php if ($allowItemCreate && (!$withWorkshop || $rowItemId <= 0)): ?>
                                 <button type="button" class="jw-add-item-btn" data-row-index="<?= $i ?>" title="Create a new item">+ Add</button>
                             <?php endif; ?>
                         </div>
@@ -867,6 +868,7 @@ function jw_line_grid_scripts(array $ctx = []): void
         // A blanked row is a kaligad row again, so the item box comes back.
         var manualItem = row.querySelector(".jw-item-manual");
         if (manualItem) { manualItem.style.display = "flex"; }
+        setNewAssignmentItemState(row);
     }
     // A row is off the shelf, or it is work for a kaligad. Never both, and the
     // two halves below are exact opposites so a row can be switched back.
@@ -938,6 +940,20 @@ function jw_line_grid_scripts(array $ctx = []): void
         if (!field) { return; }
         var onScreen = field.closest('.ss-wrap') || field;
         onScreen.style.display = shown ? 'block' : 'none';
+    }
+
+    // A blank workshop line is intentionally an "add new item" action, not
+    // a second empty dropdown. Once its item exists, reveal its selected item
+    // and retire that row's Add button.
+    function setNewAssignmentItemState(row) {
+        if (!row || !row.querySelector('.jw-order-type')) { return; }
+        var type = row.querySelector('.jw-order-type');
+        if (!type || type.value === 'showroom') { return; }
+        var item = row.querySelector('select[name$="_item_id[]"]');
+        var add = row.querySelector('.jw-add-item-btn');
+        var hasItem = item && item.value && item.value !== '0';
+        setFieldShown(item, !!hasItem);
+        if (add) { add.style.display = hasItem ? 'none' : ''; }
     }
 
     function rowField(row, suffix) {
@@ -1098,6 +1114,7 @@ function jw_line_grid_scripts(array $ctx = []): void
             if (lessField) { lessField.readOnly = false; lessField.removeAttribute("title"); }
             releaseRow(row);
             if (stockPicker) { stockPicker.value = "0"; }
+            setNewAssignmentItemState(row);
         }
     });
 
@@ -1341,6 +1358,7 @@ function jw_line_grid_scripts(array $ctx = []): void
 
                     // Explicitly set the select value to display the newly created item
                     currentItemSelect.value = data.item_id;
+                    setNewAssignmentItemState(currentItemSelect.closest('tr'));
 
                     // Trigger change event to notify any listeners
                     currentItemSelect.dispatchEvent(new Event("change", { bubbles: true }));
