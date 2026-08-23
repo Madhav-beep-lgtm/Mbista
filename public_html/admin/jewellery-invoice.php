@@ -15,9 +15,10 @@ require_once __DIR__ . '/../../app/jewellery_reports.php';
  * SD Taxable Amt, Vatable Amt, Non Taxable Amt. Getting those wrong is not a
  * cosmetic problem.
  *
- * Every figure printed here is READ from the stored document. Nothing is
- * recomputed at print time, so a reprint years later shows what was actually
- * charged rather than what today's tax rules would charge.
+ * Monetary totals are read from the stored document. The printed tax BASES
+ * are derived from its stored lines, however: older drafts can contain a
+ * duplicated SPT rule, and displaying that duplicate as a negative
+ * non-taxable amount is never a valid invoice.
  *
  * Read-only. This file never writes.
  */
@@ -85,6 +86,46 @@ foreach ($taxRows as $t) {
         $sdRate = (float) ($t['rate'] ?? 0);
     }
 }
+
+// The three bases printed on a jewellery invoice describe the line items,
+// not a balancing remainder. In particular, “Non Taxable Amt” means the part
+// of an item that is NOT subject to SPT. A stone can therefore be VAT-taxable
+// and still appear here — SPT is charged only on metal plus making.
+//
+// Deriving these from the stored lines makes old drafts with repeated SPT tax
+// rows print correctly too. It does not substitute today's pricing or tax
+// rate; only the item's already-stored amounts and VAT base are used.
+$printSptBase = 0.0;
+$printNonSptBase = 0.0;
+$printVatBase = 0.0;
+$printVatAmount = 0.0;
+foreach ($lines as $line) {
+    $metal = (float) ($line['metal_amount'] ?? 0);
+    $making = (float) ($line['making_amount'] ?? 0);
+    $stoneSide = (float) ($line['stone_amount'] ?? 0)
+        + (float) ($line['diamond_amount'] ?? 0)
+        + (float) ($line['other_diamond_amount'] ?? 0);
+    $subtotal = round($metal + $making + $stoneSide, 2);
+    $sptBase = round($metal + $making, 2);
+    $printSptBase += $sptBase;
+    $printNonSptBase += max(0.0, $subtotal - $sptBase);
+    $printVatAmount += (float) ($line['vat_amount'] ?? 0);
+    $printVatBase += match ((string) ($line['vat_base'] ?? 'none')) {
+        'making_only' => $making,
+        'stone_only' => $stoneSide,
+        'full_value' => $subtotal,
+        default => 0.0,
+    };
+}
+$printSptBase = round($printSptBase, 2);
+$printNonSptBase = round($printNonSptBase, 2);
+$printVatBase = round($printVatBase, 2);
+$printVatAmount = round($printVatAmount, 2);
+// A manual SPT total is deliberate and must remain authoritative. Otherwise
+// use the one statutory rate once — never once per accidental duplicate row.
+$printSptAmount = $sale['manual_tax_amount'] !== null
+    ? (float) $sale['manual_tax_amount']
+    : round($printSptBase * $sdRate / 100, 2);
 
 $title = 'Invoice ' . (string) $sale['sale_no'];
 $esc = static fn ($v): string => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
@@ -341,15 +382,15 @@ header('Content-Type: text/html; charset=utf-8');
     <div class="right">
       <table class="totals">
         <tr><td class="lbl">&nbsp;</td><td class="amt"><b>Amount</b></td></tr>
-        <tr><td class="lbl">Non Taxable Amt</td><td class="amt"><?= $n2($sale['non_taxable_amount'] ?? 0) ?></td></tr>
+        <tr><td class="lbl">Non Taxable Amt</td><td class="amt"><?= $n2($printNonSptBase) ?></td></tr>
         <?php // SPT, written out once — the levy is the Skills PROMOTION Tax,
               // and a statutory bill must not misname the tax it charges. ?>
-        <tr><td class="lbl">SPT Taxable Amt</td><td class="amt"><?= $n2($sale['sd_taxable_amount'] ?? 0) ?></td></tr>
+        <tr><td class="lbl">SPT Taxable Amt</td><td class="amt"><?= $n2($printSptBase) ?></td></tr>
         <tr><td class="lbl">Skills Promotion Tax <?= $esc(rtrim(rtrim(number_format($sdRate, 3), '0'), '.')) ?>%</td>
-            <td class="amt"><?= $n2($sale['tax_amount'] ?? 0) ?></td></tr>
-        <tr><td class="lbl">Vatable Amt</td><td class="amt"><?= $n2($sale['vatable_amount'] ?? 0) ?></td></tr>
+            <td class="amt"><?= $n2($printSptAmount) ?></td></tr>
+        <tr><td class="lbl">Vatable Amt</td><td class="amt"><?= $n2($printVatBase) ?></td></tr>
         <tr><td class="lbl">Vat Amt <?= $esc(rtrim(rtrim(number_format($vatRate, 3), '0'), '.')) ?>%</td>
-            <td class="amt"><?= $n2($sale['vat_amount']) ?></td></tr>
+            <td class="amt"><?= $n2($printVatAmount) ?></td></tr>
         <?php if (abs((float) $sale['discount']) > 0.005): ?>
           <tr><td class="lbl">Discount</td><td class="amt">(<?= $n2($sale['discount']) ?>)</td></tr>
         <?php endif; ?>

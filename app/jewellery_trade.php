@@ -136,7 +136,7 @@ function jw_document_taxes(int $companyId, string $docType, int $docId): array
     $lineTable = $docType === 'purchase' ? 'jewellery_purchase_lines' : 'jewellery_sale_lines';
     $documentColumn = $docType === 'purchase' ? 'purchase_id' : 'sale_id';
     $stmt = db()->prepare('SELECT tax_code, tax_name, output_purpose, input_purpose, MIN(sequence) AS sequence,
-            SUM(base_amount) AS base_amount, SUM(amount) AS amount
+            MAX(t.rate) AS rate, SUM(t.base_amount) AS base_amount, SUM(t.amount) AS amount
         FROM jewellery_line_taxes t
         INNER JOIN `' . $lineTable . '` line ON line.id = t.line_id AND line.`' . $documentColumn . '` = t.doc_id
         WHERE t.company_id = :cid AND t.doc_type = :dt AND t.doc_id = :did
@@ -2217,7 +2217,21 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
         // retained for reporting/mapping only and must not alter the amount
         // being credited to the tax payable accounts.
         $lineVatTotal = jw_round_money(array_sum(array_map(static fn (array $line): float => (float) ($line['vat_amount'] ?? 0), $lines)));
-        $lineOtherTaxTotal = jw_round_money(array_sum(array_map(static fn (array $line): float => (float) ($line['tax_amount'] ?? 0), $lines)));
+        // Older drafts can carry the same SPT rule more than once. Their saved
+        // line tax total is then a duplicate of the same levy, not a genuine
+        // amount owed. SPT is always metal plus making, charged once at its
+        // saved rate; a deliberately entered manual amount still wins.
+        $sptRate = 0.0;
+        foreach ($documentTaxes as $tax) {
+            if (strtoupper(trim((string) ($tax['tax_code'] ?? ''))) !== 'VAT') {
+                $sptRate = max($sptRate, (float) ($tax['rate'] ?? 0));
+            }
+        }
+        $sptBase = jw_round_money(array_sum(array_map(static fn (array $line): float =>
+            (float) ($line['metal_amount'] ?? 0) + (float) ($line['making_amount'] ?? 0), $lines)));
+        $lineOtherTaxTotal = $sale['manual_tax_amount'] !== null
+            ? jw_round_money((float) $sale['manual_tax_amount'])
+            : jw_round_money($sptBase * $sptRate / 100);
         $postedTax = 0.0;
         $otherTaxAssigned = false;
         foreach ($documentTaxes as $tax) {
