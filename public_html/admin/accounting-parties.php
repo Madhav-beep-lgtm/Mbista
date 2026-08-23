@@ -1800,7 +1800,7 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
         $partyClientOptions = $partyClientStmt->fetchAll();
     }
     ?>
-    <section id="panel-forms" class="mbw-card reference-panel-card">
+    <section id="panel-forms" class="mbw-card reference-panel-card" data-form-popup data-popup-open="1">
         <div class="mbw-card-head"><h2><?= $editParty ? 'Edit Party — ' . e($editParty['name']) : e($newPartyLabel) ?></h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e($partyPanelClose) ?>">Close</a></div></div>
         <form method="post" class="reference-party-form">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

@@ -2925,7 +2925,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     $leases->execute(['cid' => $companyId]);
     $leases = $leases->fetchAll(PDO::FETCH_ASSOC);
     ?>
-    <section class="mbw-card" data-collapsible>
+    <section class="mbw-card" data-form-popup data-popup-label="New lease (IFRS 16)">
         <div class="mbw-card-head"><h2>New lease (IFRS 16)</h2></div>
         <?php
         $leaseDefRou = fa_resolve_mapping($companyId, 'rou_asset');
@@ -3071,7 +3071,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </form>
     </section>
     <?php endif; ?>
-    <section class="mbw-card" data-collapsible>
+    <section class="mbw-card" data-form-popup data-popup-label="Register a fixed asset">
         <div class="mbw-card-head"><h2><?= e($detailAsset['name']) ?> <span class="mbw-pill tone-gray"><?= e($detailAsset['asset_code']) ?></span><?php if ($detailAcquisitionUnposted): ?> <span class="mbw-pill tone-red">GL not posted</span><?php endif; ?></h2>
             <div class="mbw-card-tools"><a class="button secondary" href="<?= e(url('admin/fixed-assets.php')) ?>">Back to register</a></div></div>
         <div class="users-view-grid">

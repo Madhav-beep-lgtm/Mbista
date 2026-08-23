@@ -11,6 +11,7 @@
 <script src="<?= e(asset_url('assets/js/main.js')) ?>"></script>
 <script src="<?= e(asset_url('assets/js/searchable-select.js')) ?>"></script>
 <script src="<?= e(asset_url('assets/js/draggable-panel.js')) ?>"></script>
+<script src="<?= e(asset_url('assets/js/form-popup.js')) ?>"></script>
 <script src="/i18n-dict.php?v=20260719"></script>
 <script src="<?= e(asset_url('assets/js/i18n.js')) ?>"></script>
 </body>
