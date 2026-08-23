@@ -1404,6 +1404,13 @@ body.admin-layout .jw-lines-box {
   border-radius: 10px;
   padding: 10px;
 }
+/* Ledger and item option lists inside a horizontally scrolling jewellery grid
+   must sit above the rows below them while they are open. */
+body.admin-layout .jw-lines-scroll.jw-dropdown-open {
+  position: relative;
+  z-index: 30;
+  overflow: visible;
+}
 
 /* .frm-span-2 meant two different things: `grid-column: span 2` on one field
    and `grid-column: 1 / -1` — the full width of the grid — on another. One

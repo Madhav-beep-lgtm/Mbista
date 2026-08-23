@@ -2038,6 +2038,33 @@ jw_filter_bar_styles();
 // DELEGATED to the document because "+ Another way of paying" clones the last
 // row — a listener bound to the original would not follow it to the clone.
 (function () {
+    // A long ledger list may be enhanced into a searchable dropdown inside the
+    // horizontally scrolling tender grid. Lift that grid above its neighbours
+    // while a select is active so the options are never clipped behind a row.
+    function liftDropdown(control) {
+        var scroll = control && control.closest(".jw-lines-scroll");
+        if (scroll) { scroll.classList.add("jw-dropdown-open"); }
+    }
+    function lowerDropdown(control) {
+        var scroll = control && control.closest(".jw-lines-scroll");
+        if (!scroll) { return; }
+        setTimeout(function () {
+            var active = document.activeElement;
+            if (!active || !scroll.contains(active)
+                || !(active.matches("select") || active.classList.contains("ss-input"))) {
+                scroll.classList.remove("jw-dropdown-open");
+            }
+        }, 0);
+    }
+    document.addEventListener("focusin", function (event) {
+        var control = event.target.closest && event.target.closest("select, .ss-input");
+        if (control) { liftDropdown(control); }
+    });
+    document.addEventListener("focusout", function (event) {
+        var control = event.target.closest && event.target.closest("select, .ss-input");
+        if (control) { lowerDropdown(control); }
+    });
+
     // The purity list follows the chosen item, because the engine refuses a
     // purity from a different metal. No item means a money row: the purity is
     // not used, so the full list is left alone rather than emptied.
