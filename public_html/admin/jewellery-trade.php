@@ -1164,7 +1164,8 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2><span><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
+        <?php $salesExportQuery = ['view' => 'sales', 'from' => $filterFrom ?: $fyStart, 'to' => $filterTo ?: $fyEnd]; ?>
+        <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2><span><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-reports.php?' . http_build_query($salesExportQuery + ['export' => 'csv']))) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-reports.php?' . http_build_query($salesExportQuery + ['export' => 'xlsx']))) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-reports.php?' . http_build_query($salesExportQuery + ['export' => 'print']))) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
         <?php jw_render_filter_bar([
             'hidden' => ['view' => 'sales'],
             'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
