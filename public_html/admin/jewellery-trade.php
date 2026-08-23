@@ -383,6 +383,8 @@ $docs = [];
 // What the list is filtered by. Everything travels in the query string, so a
 // filtered list can be bookmarked or sent to somebody and come back the same.
 $filterSearch = trim((string) ($_GET['q'] ?? ''));
+$filterOrderNo = trim((string) ($_GET['order_no'] ?? ''));
+$filterSaleNo = trim((string) ($_GET['sale_no'] ?? ''));
 $filterFrom = (string) ($_GET['from'] ?? '');
 $filterTo = (string) ($_GET['to'] ?? '');
 $filterStatus = (string) ($_GET['status'] ?? '');
@@ -398,6 +400,8 @@ $docFilters = [
     'search' => $filterSearch,
     'status' => $filterStatus,
     'party_id' => $filterParty,
+    'order_no' => $filterOrderNo,
+    'sale_no' => $filterSaleNo,
 ];
 if ($filterFrom !== '' && $filterTo !== '') {
     $docFilters['from'] = $filterFrom;
@@ -1187,16 +1191,22 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2><span><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
+        <?php
+        $saleNumberOptions = array_values(array_unique(array_filter(array_column($docs, 'sale_no'))));
+        $orderNumberOptions = array_values(array_unique(array_filter(array_column($docs, 'order_no'))));
+        ?>
         <form method="get" style="display:flex;gap:10px;align-items:end;flex-wrap:nowrap;overflow-x:auto;padding:2px 0 12px">
             <input type="hidden" name="view" value="sales">
-            <label style="display:grid;gap:4px;flex:1 0 190px;margin:0"><span style="font-size:12.5px">Search</span><input type="search" name="q" value="<?= e($filterSearch) ?>" placeholder="Sale no., order ref. or customer"></label>
-            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">From</span><input type="date" name="from" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
-            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">To</span><input type="date" name="to" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+            <input type="hidden" name="from" id="jw-sales-from" value="<?= e($filterFrom) ?>"><input type="hidden" name="to" id="jw-sales-to" value="<?= e($filterTo) ?>">
+            <label style="display:grid;gap:4px;flex:1 0 170px;margin:0"><span style="font-size:12.5px">Order number</span><select name="order_no" class="js-searchable"><option value="">All orders</option><?php foreach ($orderNumberOptions as $number): ?><option value="<?= e($number) ?>" <?= $filterOrderNo === $number ? 'selected' : '' ?>><?= e($number) ?></option><?php endforeach; ?></select></label>
+            <label style="display:grid;gap:4px;flex:1 0 170px;margin:0"><span style="font-size:12.5px">Sales invoice number</span><select name="sale_no" class="js-searchable"><option value="">All invoices</option><?php foreach ($saleNumberOptions as $number): ?><option value="<?= e($number) ?>" <?= $filterSaleNo === $number ? 'selected' : '' ?>><?= e($number) ?></option><?php endforeach; ?></select></label>
+            <label style="display:grid;gap:4px;flex:1 0 210px;margin:0"><span style="font-size:12.5px">Date range</span><button type="button" class="field-compact" id="jw-sales-range-open" style="text-align:left;background:var(--mbw-card,#fff)!important;color:var(--mbw-ink,#12261f)!important;border:1px solid var(--mbw-border,#cfe0d7)!important"><span id="jw-sales-range-label"><?= e($filterFrom !== '' || $filterTo !== '' ? ($filterFrom ?: 'Start') . ' – ' . ($filterTo ?: 'End') : 'Select range') ?></span></button></label>
             <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">Sales status</span><?= jw_filter_select('status', $filterStatus, ['draft' => 'Draft sales', 'posted' => 'Posted sales'], 'All sales') ?></label>
             <label style="display:grid;gap:4px;flex:1 0 180px;margin:0"><span style="font-size:12.5px">Customer</span><?= jw_filter_select('party', (string) $filterParty, array_column($parties, 'name', 'id'), 'All customers') ?></label>
             <button type="submit" class="button secondary">Filter</button>
             <a class="button secondary" href="<?= e(url('admin/jewellery-trade.php?view=sales')) ?>">Clear</a>
         </form>
+        <dialog id="jw-sales-range-dialog" aria-label="Date range" style="width:min(430px,calc(100vw - 32px));border:0;border-radius:14px;padding:20px;box-shadow:0 18px 48px rgba(0,0,0,.28)"><form method="dialog"><h2 style="margin:0 0 16px">Date range</h2><div class="workspace-form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))"><label>From<input type="date" id="jw-sales-from-picker" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label><label>To<input type="date" id="jw-sales-to-picker" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label></div><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px"><button type="submit" class="button secondary">Cancel</button><button type="button" class="button" id="jw-sales-range-apply">Apply date range</button></div></form></dialog>
 
         <div style="overflow-x:auto"><table>
             <thead><tr><th>No.</th><th>Order ref.</th><th>Date</th><th>Customer</th><th class="is-numeric">Total</th><th class="is-numeric">Received</th><th class="is-numeric">Advance applied</th><th class="is-numeric">Exchange</th><th class="is-numeric">Pending</th><th class="is-numeric">COGS</th><th>Status</th><th>Actions</th></tr></thead>
@@ -1440,6 +1450,16 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 <?php endif; ?>
 
 <script>
+document.addEventListener("DOMContentLoaded", function () {
+    var open = document.getElementById("jw-sales-range-open"), dialog = document.getElementById("jw-sales-range-dialog");
+    var from = document.getElementById("jw-sales-from"), to = document.getElementById("jw-sales-to");
+    var fromPicker = document.getElementById("jw-sales-from-picker"), toPicker = document.getElementById("jw-sales-to-picker");
+    var apply = document.getElementById("jw-sales-range-apply"), label = document.getElementById("jw-sales-range-label");
+    if (!open || !dialog || !from || !to || !fromPicker || !toPicker || !apply || !label || !window.HTMLDialogElement) { return; }
+    open.addEventListener("click", function () { dialog.showModal(); });
+    apply.addEventListener("click", function () { from.value = fromPicker.value; to.value = toPicker.value; label.textContent = from.value || to.value ? (from.value || "Start") + " – " + (to.value || "End") : "Select range"; dialog.close(); });
+    dialog.addEventListener("click", function (event) { if (event.target === dialog) { dialog.close(); } });
+});
 document.addEventListener("change", function (event) {
     var action = event.target.closest(".jw-sale-action");
     if (action && action.value) { window.location.assign(action.value); }

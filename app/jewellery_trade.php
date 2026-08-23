@@ -1504,6 +1504,14 @@ function jewellery_sales_list(int $companyId, array $filters = []): array
         $sql .= ' AND s.party_id = :pid';
         $params['pid'] = (int) $filters['party_id'];
     }
+    if (($filters['order_no'] ?? '') !== '') {
+        $sql .= ' AND o.order_no = :order_no';
+        $params['order_no'] = (string) $filters['order_no'];
+    }
+    if (($filters['sale_no'] ?? '') !== '') {
+        $sql .= ' AND s.sale_no = :sale_no';
+        $params['sale_no'] = (string) $filters['sale_no'];
+    }
     if (trim((string) ($filters['search'] ?? '')) !== '') {
         $sql .= ' AND (s.sale_no LIKE :q1 OR s.ref_no LIKE :q2
             OR s.customer_name LIKE :q3 OR ap.name LIKE :q4)';
