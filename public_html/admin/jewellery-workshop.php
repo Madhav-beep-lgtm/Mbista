@@ -623,6 +623,20 @@ $jobs = $view === 'refinery' ? jewellery_refinery_jobs_list($companyId) : [];
 // ---------------------------------------------------------------------------
 // Driven by the same arrays the tables below render, so the file on disk and
 // the rows on screen can never disagree. Spreadsheets leave the building, so
+// THE SETTLEMENT RATE THE KALIGAD LIST IS VALUED AT. Typed on the page and
+// carried in the querystring, so a revaluation can be linked to, bookmarked and
+// exported exactly as it was read on screen. Blank means "no rate typed", which
+// the ladder answers with the board and then with carrying value — never zero,
+// which would quietly value every holding at nothing.
+$karigarRateInput = trim((string) ($_GET['rate'] ?? ''));
+$karigarTypedRate = $karigarRateInput !== '' ? (float) $karigarRateInput : null;
+if ($karigarTypedRate !== null && $karigarTypedRate <= 0) {
+    $karigarTypedRate = null;
+}
+$karigarRows = $view === 'karigars'
+    ? jewellery_karigar_settlement_rows($companyId, $karigars, $todayInFy, $karigarTypedRate)
+    : [];
+
 // this takes the export right, exactly as the reports page does.
 $exportFormat = jw_enum($_GET['export'] ?? null, ['csv', 'xlsx', 'print'], '');
 if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] ?? '') !== '') {
@@ -703,13 +717,26 @@ if (in_array($exportFormat, ['csv', 'xlsx', 'print'], true) && ($_GET['export'] 
     }
     if ($view === 'karigars') {
         $data = [['Code', 'Name', 'Phone', 'Engagement', 'Making basis', 'Making rate',
-            'Wastage allowed %', 'Status']];
-        foreach ($karigars as $r) {
+            'Wastage allowed %', 'Metal held (fine)', 'Work needs (fine)', 'Excess / shortfall (fine)',
+            'Fine rate', 'Rate source', 'Metal value', 'Making / wages', 'Net', 'Status']];
+        foreach ($karigarRows as $r) {
             $data[] = [$r['code'], $r['name'], (string) ($r['phone'] ?? ''), $r['engagement_type'],
                 (string) ($r['default_making_basis'] ?? ''), $r['default_making_rate'] ?? 0,
-                $r['wastage_allowed_pct'] ?? 0, $r['status']];
+                $r['wastage_allowed_pct'] ?? 0,
+                $r['held_fine'], $r['committed_fine'], $r['difference_fine'],
+                $r['fine_rate'], $r['rate_source'], $r['metal_value'], $r['wages_payable'],
+                $r['net_settlement'], $r['status']];
         }
-        export_dispatch($exportFormat, 'jewellery-kaligads-' . $stamp, $data, 'Kaligads', $exportMeta);
+        // The rate the file was valued at belongs IN the file. A statement of
+        // what a kaligad is holding, mailed without the rate behind it, is a
+        // number nobody on either side can check.
+        $rateMeta = $exportMeta;
+        $rateMeta['Valued at'] = $karigarRows === []
+            ? 'no rows'
+            : number_format((float) $karigarRows[0]['fine_rate'], 2) . ' per fine ('
+                . (string) $karigarRows[0]['rate_label'] . ')';
+        $rateMeta['As at'] = $todayInFy;
+        export_dispatch($exportFormat, 'jewellery-kaligads-' . $stamp, $data, 'Kaligads', $rateMeta);
     }
     if ($view === 'refinery') {
         $data = [['Job', 'Refiner', 'Issued', 'Out (fine)', 'Back (fine)', 'Loss (fine)', 'Surplus (fine)',
@@ -1512,34 +1539,68 @@ jw_filter_bar_styles();
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Kaligads (<?= count($karigars) ?>)</h2><span><?= $canExport ? $exportLinks() : '' ?></span></div>
+        <?php // WHAT ONE FINE UNIT IS WORTH TODAY. The metal columns are weights
+              // until somebody says what metal is going for, and the figure the
+              // shop settles at is usually agreed across the table rather than
+              // read off a board. Typed here it revalues the whole list at once;
+              // left blank the ladder falls back to the day's board rate, and
+              // then to what each holding is actually carried at. ?>
+        <form method="get" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding:2px 0 12px">
+            <input type="hidden" name="view" value="karigars">
+            <label style="display:grid;gap:4px;margin:0">
+                <span style="font-size:12.5px">Settlement rate — per fine <?= e((string) ($karigarRows[0]['base_unit']['code'] ?? '')) ?></span>
+                <input type="number" name="rate" step="0.01" min="0" value="<?= e($karigarRateInput) ?>"
+                       placeholder="<?= e($karigarRows === [] ? 'board rate' : number_format((float) $karigarRows[0]['fine_rate'], 2)) ?>" style="min-width:170px">
+            </label>
+            <button type="submit" class="button soft" style="min-height:34px">Apply</button>
+            <?php if ($karigarRateInput !== ''): ?>
+                <a class="button soft" style="min-height:34px" href="<?= e(url('admin/jewellery-workshop.php?view=karigars')) ?>">Clear</a>
+            <?php endif; ?>
+            <?php if ($karigarRows !== []): ?>
+                <span class="mbw-note tone-gray" style="margin:0 0 0 4px;align-self:center">
+                    <?= e((string) $karigarRows[0]['rate_label']) ?>.
+                    Metal value is the excess or shortfall at this rate; net adds the wages standing to his credit.
+                </span>
+            <?php endif; ?>
+        </form>
         <div class="mbw-tablewrap"><table>
-            <thead><tr><th>Code</th><th>Name</th><th>Engagement</th><th>Making</th><th class="is-numeric">Metal held (fine)</th><th class="is-numeric">Work needs</th><th class="is-numeric">Excess / shortfall</th><th class="is-numeric">Wages payable</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Code</th><th>Name</th><th>Engagement</th><th>Making</th><th class="is-numeric">Metal held (fine)</th><th class="is-numeric">Work needs</th><th class="is-numeric">Excess / shortfall</th><th class="is-numeric">Metal value</th><th class="is-numeric">Making / wages</th><th class="is-numeric">Net</th><th>Status</th><th></th></tr></thead>
             <tbody>
-                <?php if ($karigars === []): ?><tr><td colspan="11">No kaligads yet.</td></tr><?php endif; ?>
-                <?php foreach ($karigars as $row): ?>
-                    <?php
-                        $pos = jewellery_karigar_position($companyId, (int) $row['id']);
-                        // Metal goes out in weights a shop can hand over, not in the
-                        // exact sum of the pieces it will become, so held and needed
-                        // are not meant to agree. The DIFFERENCE is what is watched.
-                        $bal = jewellery_karigar_metal_balance($companyId, (int) $row['id']);
-                    ?>
+                <?php if ($karigars === []): ?><tr><td colspan="12">No kaligads yet.</td></tr><?php endif; ?>
+                <?php // Metal goes out in weights a shop can hand over, not in the exact
+                      // sum of the pieces it will become, so held and needed are not
+                      // meant to agree. The DIFFERENCE is what is watched — and it
+                      // arrives already valued, from the same call the export uses, so
+                      // the file and the screen cannot tell two different stories. ?>
+                <?php foreach ($karigarRows as $row): ?>
                     <tr>
                         <td><?= e($row['code']) ?></td>
                         <td><?= e($row['name']) ?><?= ($row['phone'] ?? '') !== '' ? '<br><small>' . e((string) $row['phone']) . '</small>' : '' ?></td>
                         <td><span class="mbw-pill <?= (string) $row['engagement_type'] === 'contractor' ? 'tone-blue' : 'tone-teal' ?>"><?= e(ucfirst((string) $row['engagement_type'])) ?></span></td>
                         <td><?= $fmt((float) $row['default_making_rate'], 2) ?> <small><?= e(str_replace('_', ' ', (string) $row['default_making_basis'])) ?></small></td>
-                        <td class="is-numeric"><?= $pos['fine_weight'] > 0 ? '<span class="mbw-pill tone-amber">' . $fmt($pos['fine_weight'], 4) . '</span>' : '—' ?></td>
-                        <td class="is-numeric"><?= $bal['committed_fine'] > 0 ? $fmt($bal['committed_fine'], 4) : '—' ?></td>
+                        <td class="is-numeric"><?= $row['held_fine'] > 0 ? '<span class="mbw-pill tone-amber">' . $fmt((float) $row['held_fine'], 4) . '</span>' : '—' ?></td>
+                        <td class="is-numeric"><?= $row['committed_fine'] > 0 ? $fmt((float) $row['committed_fine'], 4) : '—' ?></td>
                         <td class="is-numeric">
-                            <?php if (abs($bal['difference_fine']) < 0.00005): ?>—
-                            <?php elseif ($bal['difference_fine'] > 0): ?>
-                                <span class="mbw-pill tone-blue" title="Holding more than the outstanding work needs">+<?= $fmt($bal['excess_fine'], 4) ?></span>
+                            <?php if (abs((float) $row['difference_fine']) < 0.00005): ?>—
+                            <?php elseif ((float) $row['difference_fine'] > 0): ?>
+                                <span class="mbw-pill tone-blue" title="Holding more than the outstanding work needs">+<?= $fmt((float) $row['excess_fine'], 4) ?></span>
                             <?php else: ?>
-                                <span class="mbw-pill tone-red" title="Not enough metal issued for the outstanding work">−<?= $fmt($bal['shortfall_fine'], 4) ?></span>
+                                <span class="mbw-pill tone-red" title="Not enough metal issued for the outstanding work">−<?= $fmt((float) $row['shortfall_fine'], 4) ?></span>
                             <?php endif; ?>
                         </td>
-                        <td class="is-numeric"><?= $pos['wages_payable'] > 0 ? $fmt($pos['wages_payable']) : '—' ?></td>
+                        <?php // THE SAME DIFFERENCE, IN MONEY, at the rate above it. Shown
+                              // with its sign rather than as a pill, because a settlement
+                              // conversation needs to see which way it points. ?>
+                        <td class="is-numeric" title="<?= e((string) $row['rate_label']) ?> — <?= $fmt((float) $row['fine_rate'], 2) ?> per fine">
+                            <?= abs((float) $row['metal_value']) < 0.005 ? '—' : e($sym) . $fmt((float) $row['metal_value']) ?>
+                        </td>
+                        <td class="is-numeric"><?= (float) $row['wages_payable'] > 0 ? e($sym) . $fmt((float) $row['wages_payable']) : '—' ?></td>
+                        <td class="is-numeric">
+                            <?php if (abs((float) $row['net_settlement']) < 0.005): ?>—
+                            <?php else: ?>
+                                <strong><?= e($sym) ?><?= $fmt((float) $row['net_settlement']) ?></strong>
+                            <?php endif; ?>
+                        </td>
                         <td><span class="mbw-pill <?= (string) $row['status'] === 'active' ? 'tone-green' : 'tone-gray' ?>"><?= e(ucfirst((string) $row['status'])) ?></span></td>
                         <td>
                             <?php if ($canEdit): ?>

@@ -804,6 +804,167 @@ function jw_report_karigar_wages(int $companyId, string $from, string $to): arra
 // ---------------------------------------------------------------------------
 
 /** Outstanding bills grouped by party — the bill-wise seller/buyer statement. */
+/**
+ * THE METAL BEHIND A SET OF KALIGAD BILLS, batched into three queries.
+ *
+ * A kaligad's bill is money, and money is the wrong unit to argue with a
+ * goldsmith in. What he wants to know — and what the shop needs beside the
+ * figure before it pays — is the metal: how much went out for the job, how much
+ * came back, how much of the bill has been settled in gold rather than in cash,
+ * and what is still owed said as a weight and not only as rupees.
+ *
+ * Only kaligad bills have any of this. A purchase or a sale bill has no
+ * assignment behind it, so it is not asked about and comes back absent.
+ *
+ * ORDERED vs RECEIVED. The bill is raised on what CAME BACK, never on what went
+ * out — the two differ by the wastage, and by whatever metal the kaligad put in
+ * out of his own. Both are reported, so that difference is visible rather than
+ * left to be inferred from a figure that only ever shows one of them.
+ *
+ * SETTLED IN METAL vs IN CASH is APPORTIONED, because a settlement is allocated
+ * across bills while its tenders are recorded against the settlement as a
+ * whole. One payment of 100,000 — half gold, half cash — spread over two bills
+ * settles each of them half in gold. Anything else would have to pretend it
+ * knows which rupee paid which bill, and it does not.
+ *
+ * WEIGHTS ARE SUMMED IN THE BASE UNIT, one row at a time. Every document
+ * carries the unit it was written in, and adding a tola row to a gram row with
+ * SUM() reports 10 + 5 as 15 of nothing.
+ *
+ * @param  array<int, int> $billIds
+ * @return array<int, array<string, mixed>> keyed by bill id; a bill that is not
+ *         a kaligad bill is simply absent from the result
+ */
+function jw_report_karigar_bill_metal(int $companyId, array $billIds): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $billIds), static fn (int $id): bool => $id > 0)));
+    if ($companyId <= 0 || $ids === []) {
+        return [];
+    }
+    $unitMap = jw_unit_map($companyId);
+    $baseUnit = jewellery_base_unit($companyId);
+    $baseGrams = (float) ($baseUnit['grams'] ?? 0) ?: 1.0;
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+    // --- 1. the job behind each bill ---------------------------------------
+    $jobStmt = db()->prepare("SELECT b.id AS bill_id, b.bill_amount, b.settled_amount,
+            (b.bill_amount - b.settled_amount) AS outstanding,
+            r.receipt_no, r.received_fine_weight, r.avg_fine_rate, r.qty_pieces, r.unit_id AS receipt_unit_id,
+            a.issued_fine_weight, a.unit_id AS assignment_unit_id
+        FROM jewellery_bills b
+        INNER JOIN jewellery_order_receipts r ON r.id = b.source_id AND r.company_id = b.company_id
+        INNER JOIN jewellery_order_assignments a ON a.id = r.assignment_id AND a.company_id = b.company_id
+        WHERE b.company_id = ? AND b.bill_type = 'karigar'
+          AND b.source_type = 'jewellery_order_receipt' AND b.id IN ($placeholders)");
+    $jobStmt->execute(array_merge([$companyId], $ids));
+
+    $metal = [];
+    foreach ($jobStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $billId = (int) $row['bill_id'];
+        $receiptUnitId = (int) $row['receipt_unit_id'];
+        // The rate the bill was actually struck at, restated per fine BASE unit
+        // so it can divide an outstanding expressed in those same terms.
+        $receiptUnitGrams = (float) ($unitMap[$receiptUnitId]['grams'] ?? 0) ?: 1.0;
+        $billRate = jw_round_rate((float) $row['avg_fine_rate'] * ($baseGrams / $receiptUnitGrams));
+        $metal[$billId] = [
+            'receipt_no' => (string) $row['receipt_no'],
+            'ordered_fine' => jw_weight_in_base((float) $row['issued_fine_weight'], (int) $row['assignment_unit_id'], $unitMap, $baseUnit),
+            'received_fine' => jw_weight_in_base((float) $row['received_fine_weight'], $receiptUnitId, $unitMap, $baseUnit),
+            'qty_pieces' => round((float) $row['qty_pieces'], 3),
+            'bill_rate' => $billRate,
+            'settled_metal_amount' => 0.0,
+            'settled_metal_fine' => 0.0,
+            'settled_cash_amount' => 0.0,
+            'outstanding_amount' => jw_round_money((float) $row['outstanding']),
+            'outstanding_fine' => 0.0,
+            'base_unit' => $baseUnit,
+        ];
+    }
+    if ($metal === []) {
+        return [];
+    }
+
+    // --- 2. what each posted settlement was tendered in ---------------------
+    $metalBillIds = array_keys($metal);
+    $allocPlaceholders = implode(',', array_fill(0, count($metalBillIds), '?'));
+    $allocStmt = db()->prepare("SELECT al.bill_id, al.amount AS allocated, s.id AS settlement_id,
+            s.amount AS settlement_amount, s.mode AS settlement_mode,
+            s.fine_weight AS settlement_fine, s.unit_id AS settlement_unit_id
+        FROM jewellery_settlement_allocations al
+        INNER JOIN jewellery_settlements s ON s.id = al.settlement_id
+        WHERE al.company_id = ? AND s.status = 'posted' AND al.bill_id IN ($allocPlaceholders)");
+    $allocStmt->execute(array_merge([$companyId], $metalBillIds));
+    $allocations = $allocStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if ($allocations !== []) {
+        $settlementIds = array_values(array_unique(array_map(
+            static fn (array $a): int => (int) $a['settlement_id'], $allocations)));
+        $tenderPlaceholders = implode(',', array_fill(0, count($settlementIds), '?'));
+        $tenderStmt = db()->prepare("SELECT settlement_id, mode, amount, fine_weight, unit_id
+            FROM jewellery_settlement_tenders
+            WHERE company_id = ? AND settlement_id IN ($tenderPlaceholders)");
+        $tenderStmt->execute(array_merge([$companyId], $settlementIds));
+
+        $bySettlement = [];
+        foreach ($tenderStmt->fetchAll(PDO::FETCH_ASSOC) as $tender) {
+            $settlementId = (int) $tender['settlement_id'];
+            if (!isset($bySettlement[$settlementId])) {
+                $bySettlement[$settlementId] = ['total' => 0.0, 'metal_amount' => 0.0, 'metal_fine' => 0.0];
+            }
+            $amount = (float) $tender['amount'];
+            $bySettlement[$settlementId]['total'] += $amount;
+            if ((string) $tender['mode'] === 'metal') {
+                $bySettlement[$settlementId]['metal_amount'] += $amount;
+                $bySettlement[$settlementId]['metal_fine'] += jw_weight_in_base(
+                    (float) $tender['fine_weight'], (int) $tender['unit_id'], $unitMap, $baseUnit);
+            }
+        }
+
+        // --- 3. apportion each allocation over its settlement's tenders -----
+        foreach ($allocations as $allocation) {
+            $billId = (int) $allocation['bill_id'];
+            if (!isset($metal[$billId])) {
+                continue;
+            }
+            $allocated = (float) $allocation['allocated'];
+            $tenders = $bySettlement[(int) $allocation['settlement_id']] ?? null;
+
+            if ($tenders !== null && $tenders['total'] > 0.005) {
+                $share = $allocated / $tenders['total'];
+                $metalAmount = $tenders['metal_amount'] * $share;
+                $metalFine = $tenders['metal_fine'] * $share;
+            } else {
+                // A settlement written before tenders existed carries its way
+                // of paying on its own header, and that answers just as well.
+                $isMetal = (string) $allocation['settlement_mode'] === 'metal';
+                $settlementAmount = (float) $allocation['settlement_amount'];
+                $metalAmount = $isMetal ? $allocated : 0.0;
+                $metalFine = ($isMetal && $settlementAmount > 0.005)
+                    ? jw_weight_in_base((float) $allocation['settlement_fine'],
+                        (int) $allocation['settlement_unit_id'], $unitMap, $baseUnit)
+                        * ($allocated / $settlementAmount)
+                    : 0.0;
+            }
+
+            $metal[$billId]['settled_metal_amount'] += $metalAmount;
+            $metal[$billId]['settled_metal_fine'] += $metalFine;
+            $metal[$billId]['settled_cash_amount'] += max(0.0, $allocated - $metalAmount);
+        }
+    }
+
+    foreach ($metal as $billId => $row) {
+        $metal[$billId]['settled_metal_amount'] = jw_round_money($row['settled_metal_amount']);
+        $metal[$billId]['settled_metal_fine'] = jw_round_weight($row['settled_metal_fine']);
+        $metal[$billId]['settled_cash_amount'] = jw_round_money($row['settled_cash_amount']);
+        // The same outstanding the money column shows, said in metal — at the
+        // rate the bill was struck at, which is the one rate both sides have
+        // already agreed to.
+        $metal[$billId]['outstanding_fine'] = $row['bill_rate'] > 0
+            ? jw_round_weight($row['outstanding_amount'] / $row['bill_rate']) : 0.0;
+    }
+
+    return $metal;
+}
 function jw_report_bill_outstanding(int $companyId, string $billType = '', int $limit = 500, int $offset = 0): array
 {
     $bills = jewellery_bills_list($companyId, [
@@ -813,25 +974,49 @@ function jw_report_bill_outstanding(int $companyId, string $billType = '', int $
         'offset' => $offset,
     ]);
 
+    // The metal behind the kaligad bills, fetched once for the whole page
+    // rather than per row — a party with thirty open bills was thirty round
+    // trips waiting to happen.
+    $metalByBill = jw_report_karigar_bill_metal($companyId, array_map('intval', array_column($bills, 'id')));
+
     $parties = [];
     foreach ($bills as $bill) {
+        $bill['metal'] = $metalByBill[(int) $bill['id']] ?? null;
         $partyId = (int) $bill['party_id'];
         if (!isset($parties[$partyId])) {
             $parties[$partyId] = [
                 'party_id' => $partyId, 'party_name' => (string) $bill['party_name'],
                 'party_code' => (string) ($bill['party_code'] ?? ''),
                 'bills' => [], 'total_billed' => 0.0, 'total_settled' => 0.0, 'outstanding' => 0.0,
+                // Zeroed for every party, kaligad or not, so a caller can add
+                // the columns up without first asking what kind of party it is.
+                'ordered_fine' => 0.0, 'received_fine' => 0.0, 'settled_metal_amount' => 0.0,
+                'settled_metal_fine' => 0.0, 'settled_cash_amount' => 0.0, 'outstanding_fine' => 0.0,
             ];
         }
         $parties[$partyId]['bills'][] = $bill;
         $parties[$partyId]['total_billed'] += (float) $bill['bill_amount'];
         $parties[$partyId]['total_settled'] += (float) $bill['settled_amount'];
         $parties[$partyId]['outstanding'] += (float) $bill['outstanding'];
+        if ($bill['metal'] !== null) {
+            $parties[$partyId]['ordered_fine'] += (float) $bill['metal']['ordered_fine'];
+            $parties[$partyId]['received_fine'] += (float) $bill['metal']['received_fine'];
+            $parties[$partyId]['settled_metal_amount'] += (float) $bill['metal']['settled_metal_amount'];
+            $parties[$partyId]['settled_metal_fine'] += (float) $bill['metal']['settled_metal_fine'];
+            $parties[$partyId]['settled_cash_amount'] += (float) $bill['metal']['settled_cash_amount'];
+            $parties[$partyId]['outstanding_fine'] += (float) $bill['metal']['outstanding_fine'];
+        }
     }
     foreach ($parties as $partyId => $party) {
         $parties[$partyId]['total_billed'] = jw_round_money($party['total_billed']);
         $parties[$partyId]['total_settled'] = jw_round_money($party['total_settled']);
         $parties[$partyId]['outstanding'] = jw_round_money($party['outstanding']);
+        foreach (['settled_metal_amount', 'settled_cash_amount'] as $moneyKey) {
+            $parties[$partyId][$moneyKey] = jw_round_money($party[$moneyKey]);
+        }
+        foreach (['ordered_fine', 'received_fine', 'settled_metal_fine', 'outstanding_fine'] as $weightKey) {
+            $parties[$partyId][$weightKey] = jw_round_weight($party[$weightKey]);
+        }
     }
     uasort($parties, static fn (array $a, array $b): int => $b['outstanding'] <=> $a['outstanding']);
 

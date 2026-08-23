@@ -1674,6 +1674,75 @@ function jewellery_karigar_metal_balance(int $companyId, int $karigarId, string 
 }
 
 /**
+ * The kaligad directory with every row's metal position VALUED, so the list
+ * answers the question the shop actually asks it: what would settling with
+ * this man cost, or bring in, today.
+ *
+ * The weight alone never answered it. "−41.9038" is a real fact about metal
+ * and no help at all in a conversation about money, and the wages column right
+ * beside it was already money — two halves of one settlement, in two units,
+ * with nothing adding them up.
+ *
+ * THE RATE IS ONE LADDER FOR THE WHOLE LIST, and jw_statement_fine_rate() is
+ * the ladder: a rate typed on the page beats everything, the day's board quote
+ * comes next, and the row's OWN carrying value is the last resort. That last
+ * step is per row on purpose — with nothing on the board, the only honest
+ * figure for a holding is what that holding cost, and one man's average is not
+ * another's.
+ *
+ * SIGNS, once, so the columns can be read without a key:
+ *   difference   held − committed. Positive: he is holding more than the work
+ *                still outstanding needs. Negative: the shop has yet to issue
+ *                metal for work already committed to him.
+ *   metal_value  that difference at the ladder's rate, carrying its sign.
+ *   wages        what he is owed for work already received — never negative.
+ *   net          the two added, and nothing more. It is deliberately NOT
+ *                dressed up as "payable" or "receivable": a shortfall is metal
+ *                still to go out, not a debt, and calling their sum a balance
+ *                would state a fact about the books that is not true.
+ */
+function jewellery_karigar_settlement_rows(int $companyId, array $karigars, string $asOf = '', ?float $typedRate = null): array
+{
+    $asOf = $asOf !== '' ? $asOf : date('Y-m-d');
+    $rows = [];
+    foreach ($karigars as $karigar) {
+        $karigarId = (int) ($karigar['id'] ?? 0);
+        $position = jewellery_karigar_position($companyId, $karigarId, $asOf);
+        $balance = jewellery_karigar_metal_balance($companyId, $karigarId, $asOf);
+
+        // Cost fallback from THIS kaligad's own holding, which is what the
+        // metal on his bench is carried at in the books.
+        $rate = jw_statement_fine_rate(
+            $companyId,
+            ['fine_rate' => $typedRate ?? 0.0],
+            $asOf,
+            (float) $balance['held_fine'],
+            (float) $position['metal_value']
+        );
+        $fineRate = (float) $rate['fine_rate'];
+        $metalValue = jw_round_money((float) $balance['difference_fine'] * $fineRate);
+        $wages = jw_round_money((float) $position['wages_payable']);
+
+        $rows[] = $karigar + [
+            'held_fine' => (float) $balance['held_fine'],
+            'committed_fine' => (float) $balance['committed_fine'],
+            'difference_fine' => (float) $balance['difference_fine'],
+            'excess_fine' => (float) $balance['excess_fine'],
+            'shortfall_fine' => (float) $balance['shortfall_fine'],
+            'carrying_value' => jw_round_money((float) $position['metal_value']),
+            'fine_rate' => jw_round_rate($fineRate),
+            'rate_source' => (string) $rate['source'],
+            'rate_label' => (string) $rate['label'],
+            'metal_value' => $metalValue,
+            'wages_payable' => $wages,
+            'net_settlement' => jw_round_money($metalValue + $wages),
+            'base_unit' => $balance['base_unit'],
+        ];
+    }
+
+    return $rows;
+}
+/**
  * Orders whose promised date has passed and which the customer has not come in
  * for. The piece is finished and paid for in metal, sitting in the safe, and
  * nobody has collected it — money the shop cannot use and gold it is insuring

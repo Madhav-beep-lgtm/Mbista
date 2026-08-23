@@ -2030,6 +2030,89 @@ ok(near(jw_item_balance($cidA, $chain, null, 'stock')['qty_pieces'], $legacyPiec
 accounting_module_repair_database();
 ok(near((float) db()->query("SELECT qty_pieces FROM jewellery_order_receipts WHERE id=$blindReceiptId")->fetchColumn(), 1.0, 0.0005),
     'Running the repair twice does not add a second piece');
+echo "\n30. A kaligad's bill, answered in metal as well as money\n";
+// A bill is money, and money is the wrong unit to argue with a goldsmith in.
+// What went out for the job, what came back, how much of the bill has been
+// paid in gold rather than cash, and what is still owed AS A WEIGHT — those are
+// the questions asked across the table, and the bill book now answers them.
+$billIssue = jewellery_issue_to_karigar($cidA, $fyA, [
+    'karigar_id' => $kContractor, 'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola,
+    'issued_gross_weight' => 2, 'issue_date' => '2026-09-25', 'making_basis' => 'flat', 'making_rate' => 20000,
+], $userA);
+ok($billIssue['ok'], 'Two tola go out on a 20,000 job' . ($billIssue['ok'] ? '' : ' — ' . $billIssue['error']));
+$billBack = jewellery_receive_from_karigar($cidA, $fyA, [
+    'assignment_id' => (int) $billIssue['assignment_id'], 'received_item_id' => $chain,
+    'received_purity_id' => $p22, 'received_gross_weight' => 2, 'qty_pieces' => 1,
+    'receive_date' => '2026-09-26',
+], $userA);
+ok($billBack['ok'], 'The piece comes back and opens his wage bill' . ($billBack['ok'] ? '' : ' — ' . $billBack['error']));
+$wageBillId = (int) db()->query("SELECT id FROM jewellery_bills WHERE company_id=$cidA
+    AND bill_type='karigar' AND source_type='jewellery_order_receipt'
+    AND source_id=" . (int) $billBack['receipt_id'] . " LIMIT 1")->fetchColumn();
+ok($wageBillId > 0, 'The receipt opened a bill-wise wage bill');
+
+$billMetal = jw_report_karigar_bill_metal($cidA, [$wageBillId]);
+ok(isset($billMetal[$wageBillId]), 'The bill book can say what metal is behind that bill');
+$bm = $billMetal[$wageBillId] ?? [];
+// 2 tola of 22K is 1.832 fine, out and back — no wastage on this one.
+ok(near((float) ($bm['ordered_fine'] ?? 0), 1.832, 0.0011), 'It shows the metal ORDERED: 1.832 fine went out');
+ok(near((float) ($bm['received_fine'] ?? 0), 1.832, 0.0011), 'And the metal RECEIVED, which is what the bill is raised on');
+ok(near((float) ($bm['outstanding_amount'] ?? 0), 20000.0), 'The whole 20,000 wage is outstanding');
+// Tolerance is the weight's own rounding, not a round number plucked out of
+// the air: a fine weight carried to four places, at a rate near 150,000 the
+// unit, can only ever restate its value to within about fifteen rupees.
+ok((float) ($bm['bill_rate'] ?? 0) > 0
+    && near((float) $bm['outstanding_fine'] * (float) $bm['bill_rate'], (float) $bm['outstanding_amount'],
+        (float) $bm['bill_rate'] * 0.0001),
+    'The outstanding is also said in metal, at the rate the receipt was settled at');
+
+// --- paid part in cash ------------------------------------------------------
+$cashPart = jewellery_save_settlement($cidA, $fyA, [
+    'settlement_date' => '2026-09-27', 'party_id' => $ramParty, 'direction' => 'paid',
+    'mode' => 'cash', 'amount' => 8000, 'ledger_id' => $cash,
+], [['bill_id' => $wageBillId, 'amount' => 8000]], $userA);
+ok(jewellery_post_settlement($cidA, $cashPart, $userA)['ok'], '8,000 of it is paid in cash');
+$bm = jw_report_karigar_bill_metal($cidA, [$wageBillId])[$wageBillId];
+ok(near((float) $bm['settled_cash_amount'], 8000.0), 'That shows as settled in CASH');
+ok(near((float) $bm['settled_metal_amount'], 0.0), 'And not a rupee of it as metal');
+ok(near((float) $bm['outstanding_amount'], 12000.0), '12,000 still stands');
+
+// --- and part in gold -------------------------------------------------------
+$metalPart = jewellery_save_settlement($cidA, $fyA, [
+    'settlement_date' => '2026-09-28', 'party_id' => $ramParty, 'direction' => 'paid',
+    'mode' => 'metal', 'amount' => 5000,
+    'item_id' => $chain, 'purity_id' => $p22, 'unit_id' => $tola, 'gross_weight' => 0.05,
+], [['bill_id' => $wageBillId, 'amount' => 5000]], $userA);
+$metalPosted = jewellery_post_settlement($cidA, $metalPart, $userA);
+ok($metalPosted['ok'], '5,000 more is handed over in gold'
+    . ($metalPosted['ok'] ? '' : ' — ' . $metalPosted['error']));
+$bm = jw_report_karigar_bill_metal($cidA, [$wageBillId])[$wageBillId];
+ok(near((float) $bm['settled_metal_amount'], 5000.0), 'The gold shows as settled in METAL, kept apart from the cash');
+ok((float) $bm['settled_metal_fine'] > 0, 'And carries the WEIGHT of gold that changed hands, not only its value');
+ok(near((float) $bm['settled_cash_amount'], 8000.0), 'The cash already paid is untouched by it');
+ok(near((float) $bm['outstanding_amount'], 7000.0), '7,000 is left');
+
+echo "\n31. The kaligad list values his metal at the rate you are settling at\n";
+// The weight alone never answered the question the list is looked at to answer.
+$valued = jewellery_karigar_settlement_rows($cidA, jewellery_karigars_list($cidA), '2026-09-30', 152000.0);
+$ramRow = null;
+foreach ($valued as $vrow) {
+    if ((int) $vrow['id'] === $kContractor) { $ramRow = $vrow; break; }
+}
+ok($ramRow !== null, 'The contractor is in the valued list');
+ok((string) ($ramRow['rate_source'] ?? '') === 'entered' && near((float) $ramRow['fine_rate'], 152000.0),
+    'A rate typed on the page beats the board and his own cost');
+ok(near((float) $ramRow['metal_value'], (float) $ramRow['difference_fine'] * 152000.0, 1.0),
+    'His excess or shortfall is that weight AT THAT RATE, sign and all');
+ok(near((float) $ramRow['net_settlement'], (float) $ramRow['metal_value'] + (float) $ramRow['wages_payable'], 0.02),
+    'And the net is the metal plus the wages standing to his credit — nothing else folded in');
+$unvalued = jewellery_karigar_settlement_rows($cidA, jewellery_karigars_list($cidA), '2026-09-30', null);
+$ramPlain = null;
+foreach ($unvalued as $vrow) {
+    if ((int) $vrow['id'] === $kContractor) { $ramPlain = $vrow; break; }
+}
+ok($ramPlain !== null && (string) $ramPlain['rate_source'] !== 'entered',
+    'With nothing typed it falls down the ladder instead of valuing his metal at zero');
 jww_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

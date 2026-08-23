@@ -164,57 +164,129 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    // POSTING A SALE AND HANDING OVER WHAT IT CARRIES ARE ONE ACT at the
+    // counter: the customer pays and walks out with the piece. Both the single
+    // Post button and Post all drafts come through here, so a bill posted in
+    // bulk delivers its orders by exactly the same road as one posted by hand.
+    $postSaleAndDeliver = static function (int $saleId) use ($companyId, $userId): array {
+        $result = jewellery_post_sale($companyId, $saleId, $userId);
+        if (!$result['ok']) {
+            return $result + ['note' => '', 'delivered' => 0];
+        }
+        // EVERY order this bill carried. delivered_sale_id is the authoritative
+        // link and holds them all; the sale's own order_id column has room for
+        // one, so handing over on that alone left the rest of a multi-order
+        // bill sitting on the delivery board with their goods already in the
+        // customer's hand.
+        $linkedStmt = db()->prepare('SELECT id FROM jewellery_orders
+            WHERE company_id = :cid AND delivered_sale_id = :sid ORDER BY id ASC');
+        $linkedStmt->execute(['cid' => $companyId, 'sid' => $saleId]);
+        $deliverOrderIds = array_map('intval', $linkedStmt->fetchAll(PDO::FETCH_COLUMN));
+        $postedSale = jewellery_sale($companyId, $saleId);
+        $fallbackOrderId = (int) ($postedSale['order_id'] ?? 0);
+        if ($fallbackOrderId > 0 && !in_array($fallbackOrderId, $deliverOrderIds, true)) {
+            $deliverOrderIds[] = $fallbackOrderId;
+        }
+        $deliveredCount = 0;
+        $deliverProblems = [];
+        foreach ($deliverOrderIds as $deliverOrderId) {
+            $delivered = jewellery_deliver_order($companyId, $deliverOrderId, $saleId, $userId);
+            if ($delivered['ok']) {
+                $deliveredCount++;
+            } else {
+                $deliverProblems[] = $delivered['error'];
+            }
+        }
+        $note = '';
+        if ($deliveredCount > 0) {
+            $note = ' ' . ($deliveredCount === 1 ? 'Order' : $deliveredCount . ' orders') . ' marked delivered.';
+        }
+        if ($deliverProblems !== []) {
+            $note .= ' Not every order could be marked delivered: ' . implode(' ', array_unique($deliverProblems));
+        }
+
+        return $result + ['note' => $note, 'delivered' => $deliveredCount];
+    };
+
     if ($action === 'post_purchase' || $action === 'post_sale') {
         require_permission('jewellery', 'post');
         $id = (int) ($_POST['doc_id'] ?? 0);
         $result = $action === 'post_purchase'
-            ? jewellery_post_purchase($companyId, $id, $userId)
-            : jewellery_post_sale($companyId, $id, $userId);
-        $deliverNote = '';
-        if ($action === 'post_sale' && $result['ok']) {
-            // The bill is posted, so the goods can go out on it. At the
-            // counter the two are one breath: the customer pays and walks out
-            // with the piece. The order the sale was raised against —
-            // remembered on the sale itself since the save — is delivered
-            // now, and closed in the same stroke when nothing is left to
-            // collect.
-            // EVERY order this bill carried. delivered_sale_id is the
-            // authoritative link and holds them all; the sale's own order_id
-            // column has room for one, so handing over on that alone left the
-            // rest of a multi-order bill sitting on the delivery board with
-            // their goods already in the customer's hand.
-            $linkedStmt = db()->prepare('SELECT id FROM jewellery_orders
-                WHERE company_id = :cid AND delivered_sale_id = :sid ORDER BY id ASC');
-            $linkedStmt->execute(['cid' => $companyId, 'sid' => $id]);
-            $deliverOrderIds = array_map('intval', $linkedStmt->fetchAll(PDO::FETCH_COLUMN));
-            $postedSale = jewellery_sale($companyId, $id);
-            $fallbackOrderId = (int) ($postedSale['order_id'] ?? 0);
-            if ($fallbackOrderId > 0 && !in_array($fallbackOrderId, $deliverOrderIds, true)) {
-                $deliverOrderIds[] = $fallbackOrderId;
-            }
-            $deliveredCount = 0;
-            $deliverProblems = [];
-            foreach ($deliverOrderIds as $deliverOrderId) {
-                $delivered = jewellery_deliver_order($companyId, $deliverOrderId, $id, $userId);
-                if ($delivered['ok']) {
-                    $deliveredCount++;
-                } else {
-                    $deliverProblems[] = $delivered['error'];
-                }
-            }
-            if ($deliveredCount > 0) {
-                $deliverNote = ' ' . ($deliveredCount === 1 ? 'Order' : $deliveredCount . ' orders')
-                    . ' marked delivered.';
-            }
-            if ($deliverProblems !== []) {
-                $deliverNote .= ' Not every order could be marked delivered: ' . implode(' ', array_unique($deliverProblems));
-            }
-        }
+            ? jewellery_post_purchase($companyId, $id, $userId) + ['note' => '']
+            : $postSaleAndDeliver($id);
         flash($result['ok'] ? 'success' : 'error', $result['ok']
-            ? ('Posted to the ledger (voucher #' . $result['voucher_id'] . ').' . $deliverNote) : $result['error']);
+            ? ('Posted to the ledger (voucher #' . $result['voucher_id'] . ').' . $result['note']) : $result['error']);
         redirect($back);
     }
 
+    // POST EVERY DRAFT THAT IS ACTUALLY READY.
+    //
+    // One bill at a time, each on its own footing. A draft that will not post
+    // takes nothing down with it and the rest of the day's counter still goes
+    // to the ledger — which is the whole point of the button, since the drafts
+    // that fail are usually failing for a reason somebody has to go and fix.
+    //
+    // The ones that could not are named WITH THE ENGINE'S OWN REASON. "3 could
+    // not post" tells the shop nothing it can act on; "JS-00020 — Not enough
+    // stock on 2026-08-21" sends somebody to the right place.
+    //
+    // Oldest first, because bills lean on each other: a piece received in the
+    // morning and sold in the afternoon only has the stock for the second bill
+    // once the first has been through.
+    if ($action === 'post_all_sales') {
+        require_permission('jewellery', 'post');
+        // THE DRAFTS ON THE SCREEN, not every draft in the company. The button
+        // sits under a filter bar, and a shop that has narrowed the register to
+        // one customer and pressed it does not mean "post the other thirty as
+        // well". The ids come from the list that was rendered; the status is
+        // re-read here so a draft posted in another tab meanwhile is simply not
+        // found rather than posted twice.
+        $requestedIds = array_values(array_filter(array_map('intval',
+            explode(',', (string) ($_POST['draft_ids'] ?? ''))), static fn (int $id): bool => $id > 0));
+        if ($requestedIds === []) {
+            flash('info', 'There are no draft sales in this list to post.');
+            redirect($back);
+        }
+        $placeholders = implode(',', array_fill(0, count($requestedIds), '?'));
+        $draftStmt = db()->prepare("SELECT id, sale_no FROM jewellery_sales
+            WHERE company_id = ? AND status = 'draft' AND id IN ($placeholders)
+            ORDER BY sale_date ASC, id ASC");
+        $draftStmt->execute(array_merge([$companyId], $requestedIds));
+        $draftRows = $draftStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $postedCount = 0;
+        $deliveredTotal = 0;
+        $problems = [];
+        foreach ($draftRows as $draftRow) {
+            $outcome = $postSaleAndDeliver((int) $draftRow['id']);
+            if ($outcome['ok']) {
+                $postedCount++;
+                $deliveredTotal += (int) $outcome['delivered'];
+                continue;
+            }
+            $problems[] = (string) $draftRow['sale_no'] . ' — ' . (string) $outcome['error'];
+        }
+
+        if ($draftRows === []) {
+            flash('info', 'Those drafts are no longer drafts — nothing left to post.');
+            redirect($back);
+        }
+        $summary = 'Posted ' . $postedCount . ' of ' . count($draftRows) . ' draft sale'
+            . (count($draftRows) === 1 ? '' : 's') . '.';
+        if ($deliveredTotal > 0) {
+            $summary .= ' ' . $deliveredTotal . ' order' . ($deliveredTotal === 1 ? '' : 's') . ' marked delivered.';
+        }
+        if ($problems !== []) {
+            // Capped, and the cap is stated. A flash carrying forty reasons is
+            // one nobody reads; the register still shows every draft that is
+            // left, each with its own Post button and its own message.
+            $shown = array_slice($problems, 0, 10);
+            $summary .= ' ' . count($problems) . ' could not post: ' . implode('; ', $shown)
+                . (count($problems) > count($shown) ? '; and ' . (count($problems) - count($shown)) . ' more.' : '.');
+        }
+        flash($problems === [] ? 'success' : 'error', $summary);
+        redirect($back);
+    }
     if ($action === 'unpost_purchase' || $action === 'unpost_sale') {
         require_permission('jewellery', 'post');
         $id = (int) ($_POST['doc_id'] ?? 0);
@@ -649,6 +721,52 @@ if ($view === 'bills') {
     if ($settleParty > 0) {
         $partyBills = jewellery_open_bills($companyId, $settleParty);
     }
+}
+
+// THE BILL BOOK GOES TO PAPER TOO. A kaligad settlement happens across a table
+// with both sides looking at the same sheet, and until now the only way to take
+// this screen to that table was to read it out. The file carries the metal
+// columns as well as the money, because the metal is what is actually argued
+// over.
+if ($view === 'bills' && isset($_GET['export'])) {
+    require_permission('jewellery', 'export');
+    require_once __DIR__ . '/../../app/export_engine.php';
+    $format = jw_enum($_GET['export'] ?? null, ['csv', 'xlsx', 'print', 'pdf'], 'csv');
+    $unitCode = '';
+    $data = [['Party', 'Bill', 'Type', 'Date', 'Receipt', 'Metal ordered (fine)', 'Metal received (fine)',
+        'Billed', 'Settled in metal', 'Metal given (fine)', 'Settled in cash', 'Outstanding',
+        'Outstanding (fine)', 'Status']];
+    foreach ($outstanding as $party) {
+        foreach ($party['bills'] as $bill) {
+            $metal = $bill['metal'] ?? null;
+            if ($metal !== null && $unitCode === '') {
+                $unitCode = (string) ($metal['base_unit']['code'] ?? '');
+            }
+            $data[] = [
+                $party['party_name'], $bill['bill_no'], ucfirst((string) $bill['bill_type']),
+                (string) $bill['bill_date'],
+                $metal['receipt_no'] ?? '',
+                $metal === null ? '' : $metal['ordered_fine'],
+                $metal === null ? '' : $metal['received_fine'],
+                $bill['bill_amount'],
+                $metal === null ? '' : $metal['settled_metal_amount'],
+                $metal === null ? '' : $metal['settled_metal_fine'],
+                $metal === null ? '' : $metal['settled_cash_amount'],
+                $bill['outstanding'],
+                $metal === null ? '' : $metal['outstanding_fine'],
+                str_replace('_', ' ', (string) $bill['status']),
+            ];
+        }
+        $data[] = ['Total for ' . $party['party_name'], '', '', '', '',
+            $party['ordered_fine'], $party['received_fine'], $party['total_billed'],
+            $party['settled_metal_amount'], $party['settled_metal_fine'], $party['settled_cash_amount'],
+            $party['outstanding'], $party['outstanding_fine'], ''];
+    }
+    export_dispatch($format, 'jewellery-bill-outstanding-' . date('Ymd-His'), $data, 'Bill-wise Outstanding', [
+        'Company' => (string) $company['name'],
+        'Weights' => $unitCode !== '' ? ('fine ' . $unitCode) : 'fine, base unit',
+        'As at' => $todayInFy,
+    ]);
 }
 
 $pageTitle = 'Jewellery — Purchases, Sales & Bills';
@@ -1250,7 +1368,26 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2><span><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
+        <?php
+            // The drafts sitting in the list as rendered — the same set the
+            // heading counts, not just the page on screen, because that is what
+            // "all" reads as under a count of 40.
+            $draftIdsOnList = [];
+            foreach ($docs as $docRow) {
+                if ((string) ($docRow['status'] ?? '') === 'draft') {
+                    $draftIdsOnList[] = (int) $docRow['id'];
+                }
+            }
+        ?>
+        <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2><span><?php if ($canPost && $draftIdsOnList !== []): ?>
+            <form method="post" style="display:inline" data-confirm="Post <?= count($draftIdsOnList) ?> draft sale(s) to the ledger? Drafts that are not ready are skipped and listed, not posted.">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="post_all_sales">
+                <input type="hidden" name="back_view" value="sales">
+                <input type="hidden" name="draft_ids" value="<?= e(implode(',', $draftIdsOnList)) ?>">
+                <button type="submit" class="button soft" style="min-height:28px;padding:2px 10px"><?= icon('badge-check') ?>Post all <?= count($draftIdsOnList) ?> drafts</button>
+            </form>
+        <?php endif; ?><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
         <?php
         $saleNumberOptions = array_values(array_unique(array_filter(array_column($docs, 'sale_no'))));
         $orderNumberOptions = array_values(array_unique(array_filter(array_column($docs, 'order_no'))));
@@ -1399,26 +1536,59 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     </section>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Bill-wise Outstanding</h2></div>
+        <div class="mbw-card-head"><h2>Bill-wise Outstanding</h2><span><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=bills&export=csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=bills&export=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-trade.php?view=bills&export=print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Party</th><th>Bill</th><th>Type</th><th>Date</th><th class="is-numeric">Billed</th><th class="is-numeric">Settled</th><th class="is-numeric">Outstanding</th><th>Status</th></tr></thead>
+            <?php // THE METAL COLUMNS ONLY MEAN SOMETHING FOR A KALIGAD, whose bill
+                  // is raised on gold that came back off a job. A purchase or a
+                  // sale bill has no assignment behind it and shows a dash rather
+                  // than a nought, which would read as "none went out". ?>
+            <thead><tr><th>Party</th><th>Bill</th><th>Type</th><th>Date</th>
+                <th class="is-numeric">Metal ordered</th><th class="is-numeric">Metal received</th>
+                <th class="is-numeric">Billed</th>
+                <th class="is-numeric">Settled — metal</th><th class="is-numeric">Settled — cash</th>
+                <th class="is-numeric">Outstanding</th><th class="is-numeric">Outstanding (fine)</th>
+                <th>Status</th></tr></thead>
             <tbody>
-                <?php if ($outstanding === []): ?><tr><td colspan="8">Nothing outstanding — every bill is settled.</td></tr><?php endif; ?>
+                <?php if ($outstanding === []): ?><tr><td colspan="12">Nothing outstanding — every bill is settled.</td></tr><?php endif; ?>
                 <?php foreach ($outstanding as $party): ?>
                     <?php foreach ($party['bills'] as $index => $bill): ?>
+                        <?php $metal = $bill['metal'] ?? null; ?>
                         <tr>
                             <td><?php if ($index === 0): ?><strong><?= e($party['party_name']) ?></strong><?php endif; ?></td>
-                            <td><?= e($bill['bill_no']) ?></td>
+                            <td><?= e($bill['bill_no']) ?><?= $metal !== null && $metal['receipt_no'] !== '' ? '<br><small>' . e((string) $metal['receipt_no']) . '</small>' : '' ?></td>
                             <td><?= e(ucfirst((string) $bill['bill_type'])) ?></td>
                             <td><?= e(app_date((string) $bill['bill_date'])) ?></td>
+                            <?php // WHAT WENT OUT AND WHAT CAME BACK. The bill is raised on
+                                  // the second of the two; they differ by the wastage and by
+                                  // any metal the kaligad added out of his own. ?>
+                            <td class="is-numeric"><?= $metal === null ? '—' : $fmt((float) $metal['ordered_fine'], 4) ?></td>
+                            <td class="is-numeric"><?= $metal === null ? '—' : '<strong>' . $fmt((float) $metal['received_fine'], 4) . '</strong>' ?></td>
                             <td class="is-numeric"><?= $fmt((float) $bill['bill_amount']) ?></td>
-                            <td class="is-numeric"><?= $fmt((float) $bill['settled_amount']) ?></td>
+                            <td class="is-numeric">
+                                <?php if ($metal === null || $metal['settled_metal_amount'] < 0.005): ?>—
+                                <?php else: ?>
+                                    <?= $fmt((float) $metal['settled_metal_amount']) ?>
+                                    <br><small><?= $fmt((float) $metal['settled_metal_fine'], 4) ?> fine</small>
+                                <?php endif; ?>
+                            </td>
+                            <td class="is-numeric"><?= $metal === null ? $fmt((float) $bill['settled_amount']) : ($metal['settled_cash_amount'] < 0.005 ? '—' : $fmt((float) $metal['settled_cash_amount'])) ?></td>
                             <td class="is-numeric"><strong><?= $fmt((float) $bill['outstanding']) ?></strong></td>
+                            <?php // The same outstanding, said in metal, at the rate the bill
+                                  // was struck at — the one rate both sides already agreed. ?>
+                            <td class="is-numeric" title="<?= $metal === null ? '' : 'At ' . $fmt((float) $metal['bill_rate'], 2) . ' per fine — the rate this receipt was settled at' ?>">
+                                <?= $metal === null || $metal['outstanding_fine'] <= 0.00005 ? '—' : $fmt((float) $metal['outstanding_fine'], 4) ?>
+                            </td>
                             <td><span class="mbw-pill <?= (string) $bill['status'] === 'open' ? 'tone-amber' : 'tone-blue' ?>"><?= e(str_replace('_', ' ', (string) $bill['status'])) ?></span></td>
                         </tr>
                     <?php endforeach; ?>
-                    <tr><td></td><td colspan="5"><em>Total for <?= e($party['party_name']) ?></em></td>
+                    <tr><td></td><td colspan="3"><em>Total for <?= e($party['party_name']) ?></em></td>
+                        <td class="is-numeric"><?= $party['ordered_fine'] > 0 ? $fmt((float) $party['ordered_fine'], 4) : '' ?></td>
+                        <td class="is-numeric"><?= $party['received_fine'] > 0 ? '<strong>' . $fmt((float) $party['received_fine'], 4) . '</strong>' : '' ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $party['total_billed']) ?></td>
+                        <td class="is-numeric"><?= $party['settled_metal_amount'] > 0.005 ? $fmt((float) $party['settled_metal_amount']) : '' ?></td>
+                        <td class="is-numeric"><?= $party['settled_cash_amount'] > 0.005 ? $fmt((float) $party['settled_cash_amount']) : '' ?></td>
                         <td class="is-numeric"><strong><?= $fmt($party['outstanding']) ?></strong></td>
+                        <td class="is-numeric"><?= $party['outstanding_fine'] > 0.00005 ? '<strong>' . $fmt((float) $party['outstanding_fine'], 4) . '</strong>' : '' ?></td>
                         <td><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=bills&party=' . (int) $party['party_id'])) ?>">Settle →</a></td></tr>
                 <?php endforeach; ?>
             </tbody>
