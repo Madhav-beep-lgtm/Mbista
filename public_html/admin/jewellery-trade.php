@@ -568,6 +568,19 @@ if ($view === 'sales') {
     }
     $saleStockUnits = array_values($byTrace);
 
+    // Ornament codes are physical stock, not a reusable catalogue choice at
+    // the counter. Only a trace that is still available may put its item in a
+    // normal sale picker. Bullion/raw gold remains available by item because
+    // it is sold by weight rather than as one individually tagged piece.
+    $availableTraceItems = array_fill_keys(array_map(
+        static fn (array $unit): int => (int) ($unit['item_id'] ?? 0),
+        $saleStockUnits
+    ), true);
+    $items = array_values(array_filter($items, static function (array $item) use ($availableTraceItems): bool {
+        return (string) ($item['item_type'] ?? '') === 'bullion'
+            || isset($availableTraceItems[(int) $item['id']]);
+    }));
+
     // A historical order can name an item that was later archived. It is still
     // a valid item on that customer's bill, so retain it in the sale picker
     // instead of rendering an empty item field after the order is prefilled.

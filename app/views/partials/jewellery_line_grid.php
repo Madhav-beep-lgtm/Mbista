@@ -397,6 +397,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                 ?>
                 <tr>
                     <input type="hidden" name="<?= $prefix ?>_line_id[]" value="<?= (int) ($row['id'] ?? 0) ?>">
+                    <input type="hidden" name="<?= $prefix ?>_order_line_id[]" value="<?= (int) ($row['order_line_id'] ?? 0) ?>">
                     <?php if ($withWorkshop && $withStock): ?>
                         <td data-label="Order type">
                             <select name="<?= $prefix ?>_order_type[]" class="jw-order-type" style="width:100%">

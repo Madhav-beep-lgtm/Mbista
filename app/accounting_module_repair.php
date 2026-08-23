@@ -3681,6 +3681,8 @@ function accounting_module_repair_database(): array
                 'idx_jw_pline_trace', 'KEY `idx_jw_pline_trace` (`company_id`,`stock_unit_id`)'],
             ['jewellery_sale_lines', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`',
                 'idx_jw_sline_trace', 'KEY `idx_jw_sline_trace` (`company_id`,`stock_unit_id`)'],
+            ['jewellery_sale_lines', 'order_line_id', '`order_line_id` INT UNSIGNED DEFAULT NULL AFTER `company_id`',
+                'idx_jw_sline_order_line', 'KEY `idx_jw_sline_order_line` (`company_id`,`order_line_id`)'],
             ['jewellery_sale_exchanges', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`',
                 'idx_jw_sexchange_trace', 'KEY `idx_jw_sexchange_trace` (`company_id`,`stock_unit_id`)'],
             ['jewellery_stock_txns', 'stock_unit_id', '`stock_unit_id` INT UNSIGNED DEFAULT NULL AFTER `item_id`',

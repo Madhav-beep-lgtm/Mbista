@@ -3183,10 +3183,44 @@ function jewellery_open_orders_for_party(int $companyId, int $partyId): array
         INNER JOIN jewellery_metals m ON m.id = o.metal_id
         WHERE o.company_id = :cid AND o.party_id = :pid
           AND o.status IN ('confirmed', 'assigned', 'partially_received', 'received')
+          AND (
+              NOT EXISTS (SELECT 1 FROM jewellery_order_lines legacy_lines
+                  WHERE legacy_lines.company_id = o.company_id AND legacy_lines.order_id = o.id)
+              OR EXISTS (SELECT 1 FROM jewellery_order_lines remaining_lines
+                  WHERE remaining_lines.company_id = o.company_id AND remaining_lines.order_id = o.id
+                    AND NOT EXISTS (SELECT 1 FROM jewellery_sale_lines billed_lines
+                        INNER JOIN jewellery_sales billed_sales
+                            ON billed_sales.id = billed_lines.sale_id
+                           AND billed_sales.company_id = billed_lines.company_id
+                        WHERE billed_lines.company_id = o.company_id
+                          AND billed_lines.order_line_id = remaining_lines.id
+                          AND billed_sales.status <> 'cancelled'))
+          )
         ORDER BY o.status = 'received' DESC, o.order_date ASC, o.id ASC");
     $stmt->execute(['cid' => $companyId, 'pid' => $partyId]);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/** IDs of individual order lines already placed on a non-cancelled sale. */
+function jewellery_order_billed_line_ids(int $companyId, int $orderId, int $excludeSaleId = 0): array
+{
+    if ($orderId <= 0 || !column_exists('jewellery_sale_lines', 'order_line_id')) {
+        return [];
+    }
+    $sql = "SELECT sl.order_line_id FROM jewellery_sale_lines sl
+        INNER JOIN jewellery_sales s ON s.id = sl.sale_id AND s.company_id = sl.company_id
+        INNER JOIN jewellery_order_lines ol ON ol.id = sl.order_line_id AND ol.company_id = sl.company_id
+        WHERE sl.company_id = :cid AND ol.order_id = :oid
+          AND sl.order_line_id IS NOT NULL AND s.status <> 'cancelled'";
+    $params = ['cid' => $companyId, 'oid' => $orderId];
+    if ($excludeSaleId > 0) {
+        $sql .= ' AND sl.sale_id <> :sid';
+        $params['sid'] = $excludeSaleId;
+    }
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
 }
 
 /**
@@ -3252,6 +3286,15 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
     // that took an order for a ring AND a chain must get both back on the bill;
     // returning only the first would quietly drop what it agreed to sell.
     $orderLines = jewellery_order_line_rows($companyId, $orderId);
+    $billedLineIds = jewellery_order_billed_line_ids($companyId, $orderId);
+    // A partially collected order must offer only the pieces still waiting.
+    // The line ID, rather than the item code, matters: a customer can order two
+    // identical bangles and collect one today.
+    $orderLines = array_values(array_filter($orderLines,
+        static fn (array $line): bool => !isset($billedLineIds[(int) ($line['id'] ?? 0)])));
+    if ($orderLines === [] && $billedLineIds !== []) {
+        return ['ok' => false, 'error' => 'Every item on this order has already been billed.'];
+    }
     // The receipt above belongs to the workshop, so the line it re-measures has
     // to be a workshop line. An item taken off the Ready to Sale shelf was
     // weighed when it came back for the SHOWROOM, and those figures are already
@@ -3300,6 +3343,9 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
             $lineRate = $rate;
         }
         $lines[] = [
+            // An item code can appear on more than one order line. Keep the
+            // exact promise so a partial delivery cannot offer it again.
+            'order_line_id' => (int) ($orderLine['id'] ?? 0),
             'item_id' => $isReceivedLine ? $itemId : (int) $orderLine['item_id'],
             'purity_id' => $isReceivedLine ? $purityId : (int) $orderLine['purity_id'],
             'unit_id' => (int) $orderLine['unit_id'],
@@ -3327,6 +3373,7 @@ function jewellery_order_sale_prefill(int $companyId, int $orderId): array
         // An order taken before orders had lines. Fall back to what the header
         // knows, so the bill can still be raised from it.
         $lines[] = [
+            'order_line_id' => 0,
             'item_id' => $itemId,
             'purity_id' => $purityId,
             'unit_id' => (int) $order['unit_id'],

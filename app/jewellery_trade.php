@@ -569,6 +569,7 @@ function jw_posted_lines(array $post, string $prefix): array
         }
         $lines[] = [
             'item_id' => (int) $itemId,
+            'order_line_id' => (int) ($post[$prefix . '_order_line_id'][$index] ?? 0),
             'purity_id' => (int) ($post[$prefix . '_purity_id'][$index] ?? 0),
             'unit_id' => (int) ($post[$prefix . '_unit_id'][$index] ?? 0),
             'qty_pieces' => (float) ($post[$prefix . '_qty_pieces'][$index] ?? 0),
@@ -1552,6 +1553,7 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
     // figures belong to.
     $lineStockUnits = [];
     $claimedStockUnits = [];
+    $claimedOrderLines = [];
     foreach ($lines as $lineIndex => $line) {
         $stockUnitId = (int) ($line['stock_unit_id'] ?? 0);
         if ($stockUnitId > 0 && isset($claimedStockUnits[$stockUnitId])) {
@@ -1562,6 +1564,34 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
             $claimedStockUnits[$stockUnitId] = $lineIndex + 1;
         }
         $lineStockUnits[$lineIndex] = $stockUnitId ?: null;
+
+        $orderLineId = (int) ($line['order_line_id'] ?? 0);
+        if ($orderLineId > 0 && isset($claimedOrderLines[$orderLineId])) {
+            throw new RuntimeException('Sale item ' . ($lineIndex + 1) . ': that ordered item is already used on item '
+                . $claimedOrderLines[$orderLineId] . '.');
+        }
+        if ($orderLineId > 0) {
+            $claimedOrderLines[$orderLineId] = $lineIndex + 1;
+        }
+    }
+
+    // A customer-order line represents one unique promised piece. Enforce
+    // this in the engine as well as in the dropdown, so a stale tab cannot
+    // sell the same remaining item twice. The draft currently being edited is
+    // deliberately excluded from the check.
+    if ($claimedOrderLines !== []) {
+        $ids = implode(',', array_map('intval', array_keys($claimedOrderLines)));
+        $used = db()->prepare("SELECT sl.order_line_id, s.sale_no
+            FROM jewellery_sale_lines sl
+            INNER JOIN jewellery_sales s ON s.id = sl.sale_id AND s.company_id = sl.company_id
+            WHERE sl.company_id = :cid AND sl.order_line_id IN ($ids)
+              AND s.status <> 'cancelled' AND sl.sale_id <> :sid");
+        $used->execute(['cid' => $companyId, 'sid' => $saleId]);
+        foreach ($used->fetchAll(PDO::FETCH_ASSOC) as $usedLine) {
+            $lineNo = $claimedOrderLines[(int) $usedLine['order_line_id']] ?? 0;
+            throw new RuntimeException('Sale item ' . $lineNo . ': this ordered item is already on sale '
+                . (string) $usedLine['sale_no'] . '.');
+        }
     }
 
     $settings = jewellery_settings($companyId);
@@ -1858,17 +1888,19 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
             $saleId = (int) db()->lastInsertId();
         }
 
-        $lineStmt = db()->prepare('INSERT INTO jewellery_sale_lines (sale_id, company_id, item_id, purity_id, unit_id, stock_unit_id,
+        $lineStmt = db()->prepare('INSERT INTO jewellery_sale_lines (sale_id, company_id, order_line_id, item_id, purity_id, unit_id, stock_unit_id,
                 qty_pieces, gross_weight, stone_weight, net_weight, fine_weight, rate, metal_amount,
                 wastage_pct, wastage_amount, wastage_weight, total_weight, making_amount, stone_amount,
                 stone_carat, diamond_amount, diamond_carat, other_diamond_amount, other_diamond_carat,
                 vat_base, vat_rate, vat_amount, tax_amount, allocated_adjust, line_total, notes)
-            VALUES (:sid, :cid, :item, :purity, :unit, :stockunit, :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
+            VALUES (:sid, :cid, :orderline, :item, :purity, :unit, :stockunit, :pieces, :gross, :sweight, :net, :fine, :rate, :metal,
                 :wpct, :wamount, :wweight, :tweight, :making, :stone,
                 :scarat, :diamond, :dcarat, :odiamond, :odcarat, :vbase, :vrate, :vamount, :tamount, :adjust, :ltotal, :notes)');
         foreach ($computed['lines'] as $lineIndex => $row) {
             $lineStmt->execute([
-                'sid' => $saleId, 'cid' => $companyId, 'item' => $row['item_id'], 'purity' => $row['purity_id'],
+                'sid' => $saleId, 'cid' => $companyId,
+                'orderline' => (int) ($lines[$lineIndex]['order_line_id'] ?? 0) ?: null,
+                'item' => $row['item_id'], 'purity' => $row['purity_id'],
                 'unit' => $row['unit_id'], 'stockunit' => $lineStockUnits[$lineIndex] ?? null,
                 'pieces' => $row['qty_pieces'], 'gross' => $row['gross_weight'],
                 'sweight' => $row['stone_weight'], 'net' => $row['net_weight'],
