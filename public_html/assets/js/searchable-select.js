@@ -22,7 +22,8 @@
         'text-transform:uppercase;color:var(--mbw-muted,#5b6b64);background:var(--mbw-soft,#eef5f0)}' +
         '.ss-item.is-active,.ss-item:hover{background:var(--mbw-soft,#eef5f0)}' +
         '.ss-empty{padding:10px 12px;font-size:12px;color:var(--mbw-muted,#5b6b64)}' +
-        '.ss-overlay-active{position:relative!important;z-index:1000!important;overflow:visible!important}';
+        '.ss-overlay-active{position:relative!important;z-index:1000!important;overflow:visible!important}' +
+        '.ss-wrap.ss-open{z-index:1001!important}.ss-wrap.ss-open .ss-list{z-index:1002!important}';
 
     function injectStyle() {
         if (document.getElementById('ss-style')) { return; }
@@ -108,6 +109,7 @@
             list.style.display = 'none';
             input.setAttribute('aria-expanded', 'false');
             activeIndex = -1;
+            wrap.classList.remove('ss-open');
             setOverlayAncestors(input, false);
         }
         function choose(idx) {
@@ -163,6 +165,7 @@
             list.style.display = 'block';
             input.setAttribute('aria-expanded', 'true');
             activeIndex = -1;
+            wrap.classList.add('ss-open');
         }
 
         input.addEventListener('focus', function () {
