@@ -979,11 +979,11 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                 <label style="grid-column:1/-1">Narration<input type="text" name="narration" maxlength="255" value="<?= e((string) ($editDoc['narration'] ?? '')) ?>"></label>
                 <label style="grid-column:1/-1">Remarks (printed on the bill)<input type="text" name="remarks" maxlength="255" value="<?= e((string) ($editDoc['remarks'] ?? '')) ?>"></label>
             </div>
-            <?php if ($openOrders !== []): ?>
+            <?php if ($saleParty > 0 && $openOrders !== []): ?>
             <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px;margin:12px 0">
-                <legend style="padding:0 6px;font-weight:600">Orders this customer is here to collect</legend>
+                <legend style="padding:0 6px;font-weight:600">This customer's outstanding orders and delivery readiness</legend>
                 <div style="overflow-x:auto"><table>
-                    <thead><tr><th style="width:34px"></th><th>Order</th><th>Ordered</th><th>Item</th><th class="is-numeric">Weight</th><th class="is-numeric">Advance</th><th>Status</th></tr></thead>
+                    <thead><tr><th style="width:34px"></th><th>Order</th><th>Ordered</th><th>Items ordered</th><th class="is-numeric">Weight</th><th class="is-numeric">Advance</th><th>Ready to deliver</th></tr></thead>
                     <tbody>
                         <?php
                         // Only a piece that is actually BACK can be handed over.
@@ -993,6 +993,10 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         foreach ($openOrders as $ord):
                             $isSelling = in_array((int) $ord['id'], $sellingOrderIds, true);
                             $isReady = (string) $ord['status'] === 'received';
+                            // The header holds one legacy item, while an order can
+                            // contain several pieces. Show every ordered line to
+                            // the counter before it is collected.
+                            $orderedLines = jewellery_order_line_rows($companyId, (int) $ord['id']);
                             if ($isSelling) { $collectTotalAdvance += (float) $ord['advance_amount']; }
                         ?>
                             <tr<?= $isSelling ? ' style="background:var(--mbw-accent-soft,#eef7f1)"' : '' ?>>
@@ -1005,11 +1009,19 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                     <?= $isSelling ? '<span class="mbw-pill tone-green">Being sold</span>' : '' ?>
                                 </td>
                                 <td><?= e(app_date((string) $ord['order_date'])) ?></td>
-                                <td><?= e((string) ($ord['item_name'] ?? $ord['description'] ?? '—')) ?>
-                                    <small><?= e((string) $ord['purity_code']) ?></small></td>
+                                <td>
+                                    <?php if ($orderedLines !== []): ?>
+                                        <?php foreach ($orderedLines as $line): ?>
+                                            <div><small><?= e((string) ($line['item_name'] ?? 'Item')) ?> — <?= $fmt((float) ($line['qty_pieces'] ?? 1), 2) ?> pc, <?= $fmt((float) ($line['gross_weight'] ?? 0), 4) ?> <?= e((string) ($line['unit_code'] ?? '')) ?> · <?= e((string) ($line['purity_code'] ?? '')) ?></small></div>
+                                        <?php endforeach; ?>
+                                    <?php else: ?>
+                                        <?= e((string) ($ord['item_name'] ?? $ord['description'] ?? '—')) ?>
+                                        <small><?= e((string) $ord['purity_code']) ?></small>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="is-numeric"><?= $fmt((float) $ord['expected_gross_weight'], 4) ?> <?= e((string) $ord['unit_code']) ?></td>
                                 <td class="is-numeric"><?= $fmt((float) $ord['advance_amount']) ?></td>
-                                <td><span class="mbw-pill <?= $isReady ? 'tone-green' : 'tone-gray' ?>"><?= e(ucfirst((string) $ord['status'])) ?></span></td>
+                                <td><span class="mbw-pill <?= $isReady ? 'tone-green' : 'tone-gray' ?>"><?= $isReady ? 'Ready — collect now' : e(ucfirst((string) $ord['status'])) ?></span></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -1046,6 +1058,8 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                     </div>
                 <?php endif; ?>
             </fieldset>
+            <?php elseif ($saleParty > 0): ?>
+            <div class="mbw-note tone-gray" style="margin:12px 0">This customer has no outstanding jewellery orders awaiting delivery.</div>
             <?php endif; ?>
             <?php if ($openAdvances !== []): ?>
             <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px;margin:12px 0">
@@ -1377,16 +1391,23 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
 <?php endif; ?>
 
 <script>
-// Picking a customer must not navigate away from the sale currently being
-// prepared. A redirect to `for_party` re-rendered the order panel and moved the
-// summary card below the form, losing the counter user's current context. The
-// selected party is already posted with the sale; order collection remains an
-// explicit action through the order links instead.
+// Pick a customer first, then reload this same sale with the customer's open
+// orders. This gives the counter a clear delivery view before anything is
+// added to the bill.
 document.addEventListener("change", function (event) {
     var select = event.target.closest("#jw-sale-party");
     if (!select) { return; }
     var party = parseInt(select.value, 10) || 0;
-    select.closest("form").setAttribute("data-selected-party", String(party));
+    var target = new URL(window.location.href);
+    target.searchParams.set("view", "sales");
+    target.searchParams.delete("sell_order");
+    target.searchParams.delete("sell_orders[]");
+    if (party > 0) {
+        target.searchParams.set("for_party", String(party));
+    } else {
+        target.searchParams.delete("for_party");
+    }
+    window.location.assign(target.toString());
 });
 
 // The advance picker: the running total of what the user has chosen to apply,
