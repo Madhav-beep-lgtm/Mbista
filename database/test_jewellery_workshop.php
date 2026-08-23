@@ -1974,7 +1974,26 @@ ok(near((float) db()->query("SELECT qty_pieces FROM jewellery_order_receipts WHE
     'The receipt records one piece, not none');
 ok(near(jw_item_balance($cidA, $chain, null, 'stock')['qty_pieces'], $piecesBefore + 1, 0.0005),
     'And the shelf is one piece heavier');
-// The symptom the fault actually showed the shop: billing that ornament out.
+// THREE BOOKS HAVE TO AGREE that the piece is on the shelf, and the piece count
+// was only ever the third of them. The register carries its weight and value,
+// the general ledger carries that same value on the item's own stock ledger,
+// and the core inventory register carries the quantity — so the shop's stock
+// reports and its balance sheet do not tell two different stories.
+$blindTxn = db()->query("SELECT id, amount, fine_weight, qty_pieces FROM jewellery_stock_txns
+    WHERE company_id=$cidA AND source_type='jewellery_order_receipt' AND source_id=$blindReceiptId
+      AND direction='in' AND holder_type='stock' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+ok($blindTxn !== false && (float) $blindTxn['fine_weight'] > 0 && (float) $blindTxn['amount'] > 0,
+    'The register holds the piece with its fine weight AND its value');
+$blindStockLedger = jw_item_stock_ledger_id($cidA, jewellery_item($cidA, $chain));
+$blindVoucherId = (int) ($blindBack['voucher_id'] ?? 0);
+$blindDebit = (float) db()->query("SELECT COALESCE(SUM(CASE WHEN entry_type='debit' THEN amount ELSE -amount END), 0)
+    FROM voucher_entries WHERE voucher_id=$blindVoucherId AND ledger_id=$blindStockLedger")->fetchColumn();
+ok(near($blindDebit, (float) $blindTxn['amount']),
+    'The books debit the item\'s stock ledger with exactly what the register says it is worth');
+$blindCore = db()->query("SELECT qty_in, transaction_type FROM inventory_transactions
+    WHERE company_id=$cidA AND jewellery_stock_txn_id=" . (int) $blindTxn['id'] . " LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+ok($blindCore !== false && (string) $blindCore['transaction_type'] === 'produce' && near((float) $blindCore['qty_in'], 2.0, 0.0011),
+    'And core inventory shows the same two tola in, so the stock reports agree');// The symptom the fault actually showed the shop: billing that ornament out.
 $sellResult = null;
 try {
     $sellResult = jw_record_stock_txn($cidA, [
