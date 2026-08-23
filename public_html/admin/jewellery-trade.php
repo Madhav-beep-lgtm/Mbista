@@ -444,6 +444,28 @@ $docPageCount = max(1, (int) ceil(count($docs) / $docPerPage));
 $docPage = max(1, min($docPageCount, (int) ($_GET['page'] ?? 1)));
 $docPageRows = array_slice($docs, ($docPage - 1) * $docPerPage, $docPerPage);
 
+// Sales-register exports must mirror the list the counter is looking at —
+// including drafts. The detailed report intentionally includes posted line
+// items only, which made a register of 36 sales export as just two rows.
+if ($view === 'sales' && isset($_GET['export'])) {
+    require_permission('jewellery', 'export');
+    require_once __DIR__ . '/../../app/export_engine.php';
+    $format = jw_enum($_GET['export'] ?? null, ['csv', 'xlsx', 'print', 'pdf'], 'csv');
+    $data = [['Sale no.', 'Order ref.', 'Date', 'Customer', 'Total', 'Received', 'Advance applied', 'Exchange', 'Pending', 'COGS', 'Status']];
+    foreach ($docs as $row) {
+        $data[] = [
+            $row['sale_no'], $row['order_no'] ?? '', $row['sale_date'],
+            $row['party_name'] ?? $row['customer_name'] ?? 'Walk-in',
+            $row['total_amount'], $row['received_amount'], $row['advance_amount'] ?? 0,
+            $row['exchange_amount'], $row['balance_amount'], $row['cogs_amount'], $row['status'],
+        ];
+    }
+    export_dispatch($format, 'jewellery-sales-register-' . date('Ymd-His'), $data, 'Sales Register', [
+        'Company' => (string) $company['name'],
+        'Period' => ($filterFrom ?: $fyStart) . ' to ' . ($filterTo ?: $fyEnd),
+    ]);
+}
+
 // Rows a template or an import just put on the form. They REPLACE whatever the
 // grid would otherwise show, and are taken out of the session as they are read
 // so a refresh does not apply them again — a page that keeps re-filling itself
@@ -1164,8 +1186,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <?php $salesExportQuery = ['view' => 'sales', 'from' => $filterFrom ?: $fyStart, 'to' => $filterTo ?: $fyEnd]; ?>
-        <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2><span><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-reports.php?' . http_build_query($salesExportQuery + ['export' => 'csv']))) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-reports.php?' . http_build_query($salesExportQuery + ['export' => 'xlsx']))) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-reports.php?' . http_build_query($salesExportQuery + ['export' => 'print']))) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
+        <div class="mbw-card-head"><h2>Sales (<?= count($docs) ?>)</h2><span><?php if ($canExport): ?><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a><a class="mbw-view-all" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a><a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-trade.php?view=sales&export=print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a><?php endif; ?></span></div>
         <?php jw_render_filter_bar([
             'hidden' => ['view' => 'sales'],
             'search' => $filterSearch, 'from' => $filterFrom, 'to' => $filterTo,
