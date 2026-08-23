@@ -1201,14 +1201,14 @@ jw_filter_bar_styles();
         <form method="get" style="margin-bottom:8px;display:flex;gap:10px;flex-wrap:nowrap;align-items:end;overflow-x:auto;padding:2px 0 8px">
             <input type="hidden" name="view" value="orders">
             <?php if ($sortParam !== ''): ?><input type="hidden" name="sort" value="<?= e($sortParam) ?>"><?php endif; ?>
-            <label style="display:grid;gap:4px;min-width:190px;margin:0"><span style="font-size:12.5px">Search</span><input name="search" type="search" value="<?= e($filterSearch) ?>" placeholder="Search orders..."></label>
-            <label style="display:grid;gap:4px;min-width:150px;margin:0"><span style="font-size:12.5px">From</span><input name="from" type="date" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
-            <label style="display:grid;gap:4px;min-width:150px;margin:0"><span style="font-size:12.5px">To</span><input name="to" type="date" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
-            <label style="display:grid;gap:4px;min-width:150px;margin:0"><span style="font-size:12.5px">Status</span><?= jw_filter_select('status', $filterStatus, ['draft' => 'Draft', 'confirmed' => 'Confirmed', 'assigned' => 'Assigned', 'partially_received' => 'Partially Received', 'received' => 'Received', 'invoiced' => 'Invoiced', 'delivered' => 'Delivered', 'closed' => 'Closed', 'cancelled' => 'Cancelled']) ?></label>
-            <label style="display:grid;gap:4px;min-width:180px;margin:0"><span style="font-size:12.5px">Customer</span><?= jw_filter_select('party', (string) $filterParty, array_column($parties, 'name', 'id')) ?></label>
-            <label style="display:grid;gap:4px;min-width:150px;margin:0"><span style="font-size:12.5px">Kaligad</span><?= jw_filter_select('karigar', (string) $filterKarigar, array_column($karigars, 'code', 'id')) ?></label>
-            <label style="display:grid;gap:4px;min-width:170px;margin:0"><span style="font-size:12.5px">Past due, uncollected</span><?= jw_filter_select('overdue', $filterOverdue ? '1' : '', ['1' => 'Only these'], '— all —') ?></label>
-            <label style="display:grid;gap:4px;min-width:160px;margin:0">
+            <label style="display:grid;gap:4px;flex:1.3 0 190px;margin:0"><span style="font-size:12.5px">Order no.</span><input name="q" type="search" value="<?= e($filterSearch) ?>" placeholder="Search order no..."></label>
+            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">From</span><input name="from" type="date" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">To</span><input name="to" type="date" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">Status</span><?= jw_filter_select('status', $filterStatus, ['draft' => 'Draft', 'confirmed' => 'Confirmed', 'assigned' => 'Assigned', 'partially_received' => 'Partially Received', 'received' => 'Received', 'invoiced' => 'Invoiced', 'delivered' => 'Delivered', 'closed' => 'Closed', 'cancelled' => 'Cancelled']) ?></label>
+            <label style="display:grid;gap:4px;flex:1 0 180px;margin:0"><span style="font-size:12.5px">Customer</span><?= jw_filter_select('party', (string) $filterParty, array_column($parties, 'name', 'id')) ?></label>
+            <label style="display:grid;gap:4px;flex:1 0 150px;margin:0"><span style="font-size:12.5px">Kaligad</span><?= jw_filter_select('karigar', (string) $filterKarigar, array_column($karigars, 'code', 'id')) ?></label>
+            <label style="display:grid;gap:4px;flex:1 0 170px;margin:0"><span style="font-size:12.5px">Past due, uncollected</span><?= jw_filter_select('overdue', $filterOverdue ? '1' : '', ['1' => 'Only these'], '— all —') ?></label>
+            <label style="display:grid;gap:4px;flex:1 0 160px;margin:0">
                 <span style="font-size:12.5px">Order type</span>
                 <select name="source" class="field-compact" aria-label="How the order is being fulfilled">
                     <option value="">All types</option>
