@@ -3708,7 +3708,10 @@ function create_voucher_with_entries(array $voucher, array $entries): int
             $entryAmount = round((float) ($entry['amount'] ?? 0), 2);
             $balanceCheck += ($entry['entry_type'] ?? '') === 'debit' ? $entryAmount : -$entryAmount;
         }
-        if (abs(round($balanceCheck, 2)) > 0.005) {
+        // A posting preview is rolled back in full. Let it materialise an
+        // unbalanced draft's proposed legs so the operator can see exactly
+        // what is debit and credit; real posts always retain this guard.
+        if (abs(round($balanceCheck, 2)) > 0.005 && empty($GLOBALS['jw_allow_unbalanced_preview'])) {
             throw new RuntimeException('Refusing to post unbalanced voucher ' . ($voucher['voucher_no'] ?? '') . ': debits and credits differ by ' . number_format(abs($balanceCheck), 2) . '.');
         }
         if ($entries === []) {

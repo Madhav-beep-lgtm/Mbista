@@ -3476,7 +3476,9 @@ function jewellery_preview_posting(int $companyId, string $docType, int $docId):
 
     db()->beginTransaction();
     try {
+        $GLOBALS['jw_allow_unbalanced_preview'] = true;
         $result = $poster($companyId, $docId, 0);
+        unset($GLOBALS['jw_allow_unbalanced_preview']);
         if (!($result['ok'] ?? false)) {
             db()->rollBack();
 
@@ -3527,6 +3529,7 @@ function jewellery_preview_posting(int $companyId, string $docType, int $docId):
             'credit_total' => jw_round_money($creditTotal),
         ];
     } catch (Throwable $previewException) {
+        unset($GLOBALS['jw_allow_unbalanced_preview']);
         if (db()->inTransaction()) {
             db()->rollBack();
         }
