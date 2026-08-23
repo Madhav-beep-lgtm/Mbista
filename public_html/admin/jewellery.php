@@ -1342,22 +1342,38 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </section>
     <?php endif; ?>
 
+    <?php
+        $topItemOptions = static function (array $values, string $allLabel): array {
+            $options = ['' => $allLabel];
+            foreach ($values as $value) { $options[(string) $value] = (string) $value; }
+            return $options;
+        };
+        $topItemGroupOptions = $topItemOptions($itemFilterOptions['groups'], 'All groups');
+        if ($itemFilterOptions['has_ungrouped']) { $topItemGroupOptions[JW_ITEM_GROUP_NONE] = '— Ungrouped'; }
+        $topItemPurityOptions = ['' => 'All'];
+        foreach ($purities as $purityRow) {
+            $topItemPurityOptions[(string) (int) $purityRow['id']] = (string) ($purityRow['metal_code'] ?? '') . ' · ' . (string) $purityRow['code'];
+        }
+    ?>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2>Items (<?= count($items) ?>)</h2>
-            <?php // Declared here, used from inside the table head below: an input may
-                  // belong to a form it does not sit inside, and a <form> cannot wrap a
-                  // <tr>. So the filter row lives under the headings where it belongs
-                  // and still submits as one. ?>
-            <form method="get" id="jw-item-filter" style="display:flex;gap:6px;align-items:center">
-                <input type="hidden" name="view" value="items">
-                <input type="search" name="q" value="<?= e($itemFilters['search']) ?>" placeholder="Code, name or design no.">
-                <button type="submit" class="button secondary" style="min-height:32px;padding:4px 10px">Search</button>
-                <?php if ($itemFilterOn): ?>
-                    <a class="button soft" style="min-height:32px;padding:4px 10px" href="<?= e(url('admin/jewellery.php?view=items')) ?>">Clear filters</a>
-                <?php endif; ?>
-            </form>
         </div>
+        <form method="get" id="jw-item-filter-top" style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;padding:0 16px 14px">
+            <input type="hidden" name="view" value="items">
+            <label style="display:grid;gap:4px;flex:1 1 180px;margin:0"><span>Search</span><input type="search" name="q" value="<?= e($itemFilters['search']) ?>" placeholder="Code, name or design no."></label>
+            <label style="display:grid;gap:4px;flex:1 1 135px;margin:0"><span>Group</span><select name="f_group"><option value="">All groups</option><?php foreach ($topItemGroupOptions as $value => $label): ?><option value="<?= e((string) $value) ?>" <?= (string) $value === $itemFilters['group'] ? 'selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></label>
+            <label style="display:grid;gap:4px;flex:1 1 135px;margin:0"><span>Name</span><input type="search" name="f_name" value="<?= e($itemFilters['name']) ?>" placeholder="All names" list="jw-top-item-names"></label>
+            <label style="display:grid;gap:4px;flex:1 1 135px;margin:0"><span>Code</span><input type="search" name="f_code" value="<?= e($itemFilters['code']) ?>" placeholder="All codes" list="jw-top-item-codes"></label>
+            <label style="display:grid;gap:4px;flex:0 1 130px;margin:0"><span>Stock type</span><select name="f_kind"><option value="">All</option><option value="showroom" <?= $itemFilters['stock_kind'] === 'showroom' ? 'selected' : '' ?>>Showroom</option><option value="customer_ordered" <?= $itemFilters['stock_kind'] === 'customer_ordered' ? 'selected' : '' ?>>Customer Ordered</option></select></label>
+            <label style="display:grid;gap:4px;flex:0 1 110px;margin:0"><span>Type</span><select name="f_type"><option value="">All</option><?php foreach (['ornament' => 'Ornament', 'bullion' => 'Bullion', 'stone' => 'Stone', 'other' => 'Other'] as $value => $label): ?><option value="<?= $value ?>" <?= $itemFilters['item_type'] === $value ? 'selected' : '' ?>><?= $label ?></option><?php endforeach; ?></select></label>
+            <label style="display:grid;gap:4px;flex:0 1 125px;margin:0"><span>Purity</span><select name="f_purity"><?php foreach ($topItemPurityOptions as $value => $label): ?><option value="<?= e((string) $value) ?>" <?= (string) $value === (string) $itemFilters['purity_id'] ? 'selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></label>
+            <label style="display:grid;gap:4px;flex:0 1 105px;margin:0"><span>Status</span><select name="f_status"><option value="">All</option><option value="active" <?= $itemFilters['status'] === 'active' ? 'selected' : '' ?>>Active</option><option value="inactive" <?= $itemFilters['status'] === 'inactive' ? 'selected' : '' ?>>Off</option></select></label>
+            <button type="submit" class="button secondary" style="min-height:36px">Apply</button>
+            <?php if ($itemFilterOn): ?><a class="button soft" style="min-height:36px" href="<?= e(url('admin/jewellery.php?view=items')) ?>">Clear</a><?php endif; ?>
+            <datalist id="jw-top-item-names"><?php foreach ($itemFilterOptions['names'] as $value): ?><option value="<?= e((string) $value) ?>"><?php endforeach; ?></datalist>
+            <datalist id="jw-top-item-codes"><?php foreach ($itemFilterOptions['codes'] as $value): ?><option value="<?= e((string) $value) ?>"><?php endforeach; ?></datalist>
+        </form>
         <div style="overflow-x:auto"><table>
             <?php
                 // GROUPED BY ITEM GROUP, because that is how a shop thinks of
@@ -1486,7 +1502,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php // Not .no-search: a hundred item names is exactly the list worth
                       // being able to type into, and searchable-select.js turns any
                       // dropdown of twelve or more into a type-to-filter box. ?>
-                <tr class="jw-filter-row" style="background:var(--mbw-soft,#f4f8f5)">
+                <tr class="jw-filter-row" style="display:none;background:var(--mbw-soft,#f4f8f5)" aria-hidden="true">
                     <td></td>
                     <?php
                         $listOptions = static function (array $values, string $allLabel): array {
