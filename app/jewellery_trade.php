@@ -1486,7 +1486,16 @@ function jewellery_sale_exchange_rows(int $companyId, int $saleId): array
 
 function jewellery_sales_list(int $companyId, array $filters = []): array
 {
-    $sql = 'SELECT s.*, ap.name AS party_name, o.order_no AS order_no
+    $sql = 'SELECT s.*, ap.name AS party_name,
+            COALESCE((SELECT GROUP_CONCAT(DISTINCT linked_order.order_no ORDER BY linked_order.order_no SEPARATOR ", ")
+                FROM jewellery_sale_lines linked_line
+                INNER JOIN jewellery_order_lines linked_order_line
+                    ON linked_order_line.id = linked_line.order_line_id
+                   AND linked_order_line.company_id = linked_line.company_id
+                INNER JOIN jewellery_orders linked_order
+                    ON linked_order.id = linked_order_line.order_id
+                   AND linked_order.company_id = linked_line.company_id
+                WHERE linked_line.company_id = s.company_id AND linked_line.sale_id = s.id), o.order_no) AS order_no
         FROM jewellery_sales s
         LEFT JOIN accounting_parties ap ON ap.id = s.party_id
         LEFT JOIN jewellery_orders o ON o.id = s.order_id
@@ -1506,8 +1515,15 @@ function jewellery_sales_list(int $companyId, array $filters = []): array
         $params['pid'] = (int) $filters['party_id'];
     }
     if (($filters['order_no'] ?? '') !== '') {
-        $sql .= ' AND o.order_no = :order_no';
+        $sql .= ' AND (o.order_no = :order_no OR EXISTS (SELECT 1 FROM jewellery_sale_lines filter_line
+            INNER JOIN jewellery_order_lines filter_order_line
+                ON filter_order_line.id = filter_line.order_line_id AND filter_order_line.company_id = filter_line.company_id
+            INNER JOIN jewellery_orders filter_order
+                ON filter_order.id = filter_order_line.order_id AND filter_order.company_id = filter_line.company_id
+            WHERE filter_line.company_id = s.company_id AND filter_line.sale_id = s.id
+              AND filter_order.order_no = :order_no_line))';
         $params['order_no'] = (string) $filters['order_no'];
+        $params['order_no_line'] = (string) $filters['order_no'];
     }
     if (($filters['sale_no'] ?? '') !== '') {
         $sql .= ' AND s.sale_no = :sale_no';

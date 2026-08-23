@@ -1249,7 +1249,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                     <?php $isDraft = (string) $row['status'] === 'draft'; ?>
                     <tr>
                         <td><?= e($row['sale_no']) ?></td>
-                        <td><?= e((string) ($row['order_no'] ?? '—')) ?></td>
+                        <td><?= e(trim((string) ($row['order_no'] ?? '')) ?: 'N/A') ?></td>
                         <td><?= e(app_date((string) $row['sale_date'])) ?></td>
                         <td><?= e((string) ($row['party_name'] ?? $row['customer_name'] ?? 'Walk-in')) ?></td>
                         <td class="is-numeric"><strong><?= e($sym) ?><?= $fmt((float) $row['total_amount']) ?></strong></td>
