@@ -245,6 +245,7 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
     $onHand = $ctx['on_hand'] ?? [];
     $fmt = $ctx['fmt'] ?? static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
     $allowItemCreate = !array_key_exists('allow_item_create', $ctx) || !empty($ctx['allow_item_create']);
+    $salesStockOnly = !empty($ctx['autofill_stock']);
     // Orders only. Kaligads specialise — the one who makes chains does not set
     // stones — so each item on an order goes to its own craftsman and carries
     // its own promised date. A sale or a purchase has neither, so the two
@@ -369,8 +370,21 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                 static $inlineListUsed = false;
                 if ($sharedItemOptions === null) {
                     $sharedItemOptions = '<option value="0">—</option>';
+                    $selectedItemIds = array_fill_keys(array_filter(array_map(
+                        static fn (array $line): int => (int) ($line['item_id'] ?? 0),
+                        $existing
+                    )), true);
                     foreach ($items as $it) {
                         $stock = $onHand[(int) $it['id']] ?? null;
+                        $available = $stock !== null && (
+                            (float) ($stock['qty_pieces'] ?? 0) > 0.0005
+                            || (float) ($stock['fine_weight'] ?? 0) > 0.00005
+                        );
+                        // A saved draft may retain an unavailable item so it
+                        // can be corrected; new sales may choose only stock.
+                        if ($salesStockOnly && !$available && !isset($selectedItemIds[(int) $it['id']])) {
+                            continue;
+                        }
                         $left = $stock
                             ? ' · ' . $fmt((float) $stock['qty_pieces'], 0) . 'pc '
                                 . $fmt((float) $stock['fine_weight'], 3) . ' fine'

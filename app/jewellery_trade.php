@@ -1645,6 +1645,51 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
     // Every buyer is a party with a ledger — a counter customer typed by name
     // is created on the spot rather than being left anonymous, so they get a
     // statement, an outstanding balance and an order history like anyone else.
+    // A draft is still a promise to sell a real item. Waiting until Post to
+    // discover that the shelf is empty lets the same piece be entered on many
+    // drafts. Apply the same no-negative-stock rule here, grouping repeated
+    // lines for an item before comparing them with the available balance.
+    if ((int) ($settings['allow_negative_stock'] ?? 0) !== 1) {
+        $required = [];
+        foreach ($computed['lines'] as $row) {
+            $itemId = (int) ($row['item_id'] ?? 0);
+            if ($itemId <= 0) {
+                continue;
+            }
+            $unit = jewellery_unit($companyId, (int) ($row['unit_id'] ?? 0));
+            if (!$unit) {
+                throw new RuntimeException('Sale item has an unknown weight unit.');
+            }
+            if (!isset($required[$itemId])) {
+                $required[$itemId] = ['pieces' => 0.0, 'fine_g' => 0.0];
+            }
+            $required[$itemId]['pieces'] += (float) ($row['qty_pieces'] ?? 0);
+            $required[$itemId]['fine_g'] += jw_to_grams((float) ($row['fine_weight'] ?? 0), $unit);
+        }
+        foreach ($required as $itemId => $demand) {
+            $item = jewellery_item($companyId, (int) $itemId);
+            $held = jw_item_balance($companyId, (int) $itemId, $date, 'stock');
+            $fineRequired = jw_round_weight((float) $demand['fine_g'] / jw_item_unit_grams($companyId, (int) $itemId));
+            if ($fineRequired > 0.00005 && jw_round_weight((float) $held['fine_weight'] - $fineRequired) < -0.00005) {
+                throw new RuntimeException(sprintf(
+                    'Not enough stock for %s: available fine weight is %s but this sale needs %s.',
+                    (string) ($item['code'] ?? ('item #' . $itemId)),
+                    number_format((float) $held['fine_weight'], 4),
+                    number_format($fineRequired, 4)
+                ));
+            }
+            if ((float) $demand['pieces'] > 0.0005
+                && ((float) $held['qty_pieces'] - (float) $demand['pieces']) < -0.0005) {
+                throw new RuntimeException(sprintf(
+                    'Not enough stock for %s: available pieces are %s but this sale needs %s.',
+                    (string) ($item['code'] ?? ('item #' . $itemId)),
+                    number_format((float) $held['qty_pieces'], 3),
+                    number_format((float) $demand['pieces'], 3)
+                ));
+            }
+        }
+    }
+
     $partyId = jw_resolve_party($companyId, $header + ['party_name' => $header['customer_name'] ?? ''], 'customer') ?: null;
     if ($partyId === null) {
         throw new RuntimeException('Enter the customer — a name is enough, the party and its ledger are created automatically.');
