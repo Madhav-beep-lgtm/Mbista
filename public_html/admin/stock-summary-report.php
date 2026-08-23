@@ -341,9 +341,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
         <?php if (user_can_do('reports', 'export')): ?>
-            <a class="button secondary" href="?<?= e($qs) ?>&amp;export=csv"><?= icon('reports') ?>CSV</a>
-            <a class="button secondary" href="?<?= e($qs) ?>&amp;export=excel"><?= icon('reports') ?>Excel</a>
-            <a class="button secondary" target="_blank" href="?<?= e($qs) ?>&amp;export=print"><?= icon('reports') ?>Print / PDF</a>
+            <a class="button secondary" href="?<?= e($qs) ?>&amp;export=csv" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a>
+            <a class="button secondary" href="?<?= e($qs) ?>&amp;export=excel" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
+            <a class="button secondary" target="_blank" href="?<?= e($qs) ?>&amp;export=print" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a>
         <?php endif; ?>
         <details class="pr-adjust" style="margin-left:auto">
             <summary class="button secondary">Columns…</summary>

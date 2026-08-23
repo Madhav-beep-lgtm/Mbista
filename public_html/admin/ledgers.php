@@ -142,8 +142,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <a class="mbw-view-all" href="<?= e(url('admin/ledgers.php')) ?>">All ledgers</a>
             <?php else: ?>
                 <a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php')) ?>">Groups</a>
-                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank">Export PDF</a>
-                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>">Export Excel</a>
+                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a>
+                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
             <?php endif; ?>
         </div>
     </div>

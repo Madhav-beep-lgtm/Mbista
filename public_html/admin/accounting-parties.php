@@ -1965,9 +1965,9 @@ $tabHeadings = [
             <h2><?= e($tabHeadings[$tab] ?? 'Documents') ?></h2>
             <div class="mbw-card-tools">
                 <?php if (in_array($tab, $partyDirectoryTabs, true)): ?>
-                    <a class="button secondary" href="<?= e(parties_page_url(['export' => 'xlsx'])) ?>">Excel</a>
-                    <a class="button secondary" href="<?= e(parties_page_url(['export' => 'csv'])) ?>">CSV</a>
-                    <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['export' => 'print'])) ?>">PDF</a>
+                    <a class="button secondary" href="<?= e(parties_page_url(['export' => 'xlsx'])) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
+                    <a class="button secondary" href="<?= e(parties_page_url(['export' => 'csv'])) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a>
+                    <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['export' => 'print'])) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a>
                 <?php endif; ?>
                 <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=party-wise')) ?>">Aging Report</a>
             </div>
@@ -1975,7 +1975,7 @@ $tabHeadings = [
         <?php if ($tab === 'sales'): ?>
             <div class="reference-bulk-bar" id="invoice-bulk-bar" style="display:none;align-items:center;gap:10px;margin:0 0 10px;padding:8px 12px;border:1px solid var(--mbw-border,#dcebf5);border-radius:9px;background:var(--mbw-primary-soft,#e0f2fe)">
                 <strong><span id="invoice-bulk-count">0</span> selected</strong>
-                <button type="button" class="button secondary" id="invoice-bulk-export"><?= icon('download') ?>Export CSV</button>
+                <button type="button" class="button secondary" id="invoice-bulk-export" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></button>
                 <button type="button" class="button secondary" id="invoice-bulk-clear"><?= icon('close') ?>Clear</button>
             </div>
             <div style="overflow-x:auto">

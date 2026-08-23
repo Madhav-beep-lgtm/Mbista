@@ -3690,9 +3690,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="mbw-card-head"><h2>Asset Register</h2>
             <span class="frm-optional">Movement schedule for <?= e($regFrom) ?> to <?= e($regTo) ?> — opening is the position the instant before the start</span>
             <div class="mbw-card-tools">
-                <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?' . $regExportQs . '&export=xlsx')) ?>">Excel</a>
-                <a class="button secondary" target="_blank" rel="noopener" href="<?= e(url('admin/fixed-assets.php?' . $regExportQs . '&export=pdf')) ?>">PDF</a>
-                <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?' . $regExportQs . '&export=csv')) ?>">CSV</a>
+                <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?' . $regExportQs . '&export=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
+                <a class="button secondary" target="_blank" rel="noopener" href="<?= e(url('admin/fixed-assets.php?' . $regExportQs . '&export=pdf')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a>
+                <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?' . $regExportQs . '&export=csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a>
             </div>
         </div>
         <?php $regMissingCols = fa_missing_register_columns(); ?>

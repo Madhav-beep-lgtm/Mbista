@@ -42,10 +42,10 @@ $exportLinks = static function () use (&$view): string {
     $links = '';
     // PDF is the print view — it opens in its own tab with a Print / Save as
     // PDF button, the same road every jewellery document takes to paper.
-    foreach (['csv' => 'CSV', 'xlsx' => 'Excel', 'print' => 'PDF'] as $format => $label) {
+    foreach (['csv' => ['CSV', 'download'], 'xlsx' => ['Excel', 'analytics'], 'print' => ['PDF', 'documents']] as $format => [$label, $iconName]) {
         $query['export'] = $format;
         $links .= '<a class="mbw-view-all" style="margin-left:10px"' . ($format === 'print' ? ' target="_blank" rel="noopener"' : '') . ' href="'
-            . e(url('admin/jewellery-workshop.php?' . http_build_query($query))) . '">' . $label . '</a>';
+            . e(url('admin/jewellery-workshop.php?' . http_build_query($query))) . '" aria-label="Export ' . $label . '" title="Export ' . $label . '">' . icon($iconName) . '</a>';
     }
 
     return $links;

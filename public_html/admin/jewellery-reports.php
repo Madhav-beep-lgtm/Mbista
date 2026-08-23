@@ -465,9 +465,9 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
                 // well as a glyph — an icon-only button is a guess.
             ?>
             <span class="jw-report-exports">
-                <a class="jw-export" href="<?= e($exportUrl($view, 'csv')) ?>"><?= icon('documents') ?><span>CSV</span></a>
-                <a class="jw-export" href="<?= e($exportUrl($view, 'xlsx')) ?>"><?= icon('analytics') ?><span>Excel</span></a>
-                <a class="jw-export" target="_blank" rel="noopener" href="<?= e($exportUrl($view, 'print')) ?>"><?= icon('printer') ?><span>PDF / Print</span></a>
+                <a class="jw-export" href="<?= e($exportUrl($view, 'csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a>
+                <a class="jw-export" href="<?= e($exportUrl($view, 'xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
+                <a class="jw-export" target="_blank" rel="noopener" href="<?= e($exportUrl($view, 'print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a>
             </span>
         <?php endif; ?>
     </form>
@@ -946,7 +946,7 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head">
             <h2>Promised on or before <?= e(app_date($uncollected['as_of'])) ?>, not collected (<?= count($uncollected['rows']) ?>)</h2>
-            <a class="mbw-view-all" href="<?= e($exportUrl('uncollected')) ?>">Export CSV</a>
+            <a class="mbw-view-all" href="<?= e($exportUrl('uncollected')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a>
         </div>
         <div style="overflow-x:auto"><table>
             <thead><tr>

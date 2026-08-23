@@ -132,7 +132,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="rc2-export" data-rc2-export>
             <button type="button" class="rc2-export-btn"><?= icon('download') ?>Export<span class="rc2-caret"><?= icon('chevron') ?></span></button>
             <div class="rc2-export-menu" role="menu">
-                <a role="menuitem" href="<?= e(url('admin/consolidated-report.php?fiscal_year_id=' . $fiscalYearId . '&export=csv')) ?>"><?= icon('analytics') ?>Export Excel (CSV)</a>
+                <a role="menuitem" href="<?= e(url('admin/consolidated-report.php?fiscal_year_id=' . $fiscalYearId . '&export=csv')) ?>" aria-label="Export Excel (CSV)" title="Export Excel (CSV)"><?= icon('analytics') ?></a>
                 <a role="menuitem" href="#" onclick="window.print(); return false;"><?= icon('documents') ?>Print / Save as PDF</a>
             </div>
         </div>

@@ -144,11 +144,11 @@ if ($exportFormat !== '' && ($_GET['export'] ?? '') !== '') {
 $exportLinks = static function () use ($kind, $filters): string {
     $query = ['kind' => $kind] + array_filter($filters, static fn ($v): bool => (string) $v !== '' && $v !== $kind);
     $links = '';
-    foreach (['csv' => 'CSV', 'xlsx' => 'Excel', 'print' => 'PDF'] as $format => $label) {
+    foreach (['csv' => ['CSV', 'download'], 'xlsx' => ['Excel', 'analytics'], 'print' => ['PDF', 'documents']] as $format => [$label, $iconName]) {
         $query['export'] = $format;
         $links .= '<a class="mbw-view-all" style="margin-left:10px"'
             . ($format === 'print' ? ' target="_blank" rel="noopener"' : '')
-            . ' href="' . e(url('admin/jewellery-receive.php?' . http_build_query($query))) . '">' . $label . '</a>';
+            . ' href="' . e(url('admin/jewellery-receive.php?' . http_build_query($query))) . '" aria-label="Export ' . $label . '" title="Export ' . $label . '">' . icon($iconName) . '</a>';
     }
 
     return $links;

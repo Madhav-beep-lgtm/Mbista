@@ -885,7 +885,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                             <?php endif; ?>
                             <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=purchase&id=' . (int) $row['id'])) ?>">Preview</a>
                             <?php if ($canExport): ?>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-print.php?doc=purchase&id=' . (int) $row['id'] . '&format=xlsx')) ?>">Excel</a>
+                                <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-print.php?doc=purchase&id=' . (int) $row['id'] . '&format=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
                             <?php endif; ?>
                             <?php if ($isDraft && $canPost): ?>
                                 <?php // Posting goes through the confirmation card above: the
@@ -1205,7 +1205,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                             <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'])) ?>">Preview</a>
                             <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-invoice.php?id=' . (int) $row['id'])) ?>">Invoice</a>
                             <?php if ($canExport): ?>
-                                <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'] . '&format=xlsx')) ?>">Excel</a>
+                                <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-print.php?doc=sale&id=' . (int) $row['id'] . '&format=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
                             <?php endif; ?>
                             <?php if ($isDraft && $canPost): ?>
                                 <?php // Posting goes through the confirmation card above: the

@@ -1456,7 +1456,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <div class="mbw-card-head"><h2>Recipe Cost Sheet — <?= e(($openRecipe['mi_code'] ?? $openRecipe['menu_item_code']) . ' v' . $openRecipe['version']) ?>
             <span class="mbw-pill <?= $openRecipe['status'] === 'active' ? 'tone-green' : ($openRecipe['status'] === 'draft' ? 'tone-amber' : 'tone-gray') ?>"><?= e(ucfirst((string) $openRecipe['status'])) ?></span></h2>
             <div class="mbw-card-tools">
-                <button type="button" class="button secondary" onclick="window.print()">Print / PDF</button>
+                <button type="button" class="button secondary" onclick="window.print()" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></button>
                 <?php if ($canEdit): ?>
                     <?php if ((string) $openRecipe['status'] === 'draft'): ?>
                         <form method="post" style="display:inline" data-confirm="Activate this recipe from <?= e($openRecipe['effective_from']) ?>? Any overlapping active version is end-dated the day before (history preserved).">
@@ -1723,11 +1723,11 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <input type="date" name="to" value="<?= e($rangeTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>">
                     <button type="submit" class="button secondary" style="min-height:32px">Apply</button>
                 </form>
-                <button type="button" class="button secondary" onclick="window.print()">Print / PDF</button>
+                <button type="button" class="button secondary" onclick="window.print()" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></button>
                 <?php if ($canExport): ?>
-                    <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=' . $view . '&report=item&export=csv&from=' . $rangeFrom . '&to=' . $rangeTo)) ?>">Items CSV</a>
-                    <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=' . $view . '&report=category&export=csv&from=' . $rangeFrom . '&to=' . $rangeTo)) ?>">Categories CSV</a>
-                    <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=' . $view . '&report=daily&export=csv&from=' . $rangeFrom . '&to=' . $rangeTo)) ?>">Daily CSV</a>
+                    <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=' . $view . '&report=item&export=csv&from=' . $rangeFrom . '&to=' . $rangeTo)) ?>" aria-label="Export item CSV" title="Export item CSV"><?= icon('download') ?></a>
+                    <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=' . $view . '&report=category&export=csv&from=' . $rangeFrom . '&to=' . $rangeTo)) ?>" aria-label="Export category CSV" title="Export category CSV"><?= icon('download') ?></a>
+                    <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=' . $view . '&report=daily&export=csv&from=' . $rangeFrom . '&to=' . $rangeTo)) ?>" aria-label="Export daily CSV" title="Export daily CSV"><?= icon('download') ?></a>
                 <?php endif; ?>
             </div>
         </div>

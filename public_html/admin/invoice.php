@@ -1379,8 +1379,8 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                         <button type="submit" class="btn btn-secondary">✉ Email to Client</button>
                     </form>
                     <a href="<?php echo e(url('admin/reports-center.php?report=collections-register')); ?>" class="btn btn-secondary">Receipt Register</a>
-                    <a href="<?php echo e(url('admin/export-invoice.php?id=' . $invoice['id'] . '&format=pdf')); ?>" class="btn btn-secondary" target="_blank">📄 Export PDF</a>
-                    <a href="<?php echo e(url('admin/export-invoice.php?id=' . $invoice['id'] . '&format=excel')); ?>" class="btn btn-secondary">📊 Export Excel</a>
+                    <a href="<?php echo e(url('admin/export-invoice.php?id=' . $invoice['id'] . '&format=pdf')); ?>" class="btn btn-secondary" target="_blank" aria-label="Export PDF" title="Export PDF"><?php echo icon('documents'); ?></a>
+                    <a href="<?php echo e(url('admin/export-invoice.php?id=' . $invoice['id'] . '&format=excel')); ?>" class="btn btn-secondary" aria-label="Export Excel" title="Export Excel"><?php echo icon('analytics'); ?></a>
                 </div>
 
                 <?php if (!empty($invoice['payment_requests'])): ?>

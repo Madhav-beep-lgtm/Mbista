@@ -841,9 +841,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 'export' => 'csv',
                 'page' => null,
             ])) ?>"
-        >
-            Export CSV
-        </a>
+            aria-label="Export CSV"
+            title="Export CSV"
+        ><?= icon('download') ?></a>
 
         <button
             type="button"
