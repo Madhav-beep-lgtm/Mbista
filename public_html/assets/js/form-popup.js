@@ -13,6 +13,9 @@
         dialog.hidden = true;
         card.parentNode.insertBefore(dialog, card);
         dialog.appendChild(card);
+        // The stylesheet hides popup sources before this script moves them,
+        // preventing a one-frame in-page flash on direct popup URLs.
+        card.style.visibility = 'visible';
         var close = document.createElement('button');
         close.type = 'button'; close.className = 'button secondary'; close.textContent = 'Close';
         var head = card.querySelector('.mbw-card-head');

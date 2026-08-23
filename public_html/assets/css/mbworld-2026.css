@@ -1192,6 +1192,9 @@ body.admin-layout .jw-order-dialog {
   overflow: auto;
 }
 body.admin-layout .jw-order-dialog::backdrop { background: rgba(8, 26, 20, .48); }
+/* Popup editors are moved into their dialog at DOM ready. Hide the source card
+   before that happens so an edit/new sale never flashes in the page first. */
+body.admin-layout [data-form-popup] { visibility: hidden; }
 body.admin-layout .jw-order-dialog #jw-order-editor {
   margin: 0;
   border: 0;

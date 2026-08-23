@@ -3199,7 +3199,16 @@ function jewellery_open_orders_for_party(int $companyId, int $partyId): array
         ORDER BY o.status = 'received' DESC, o.order_date ASC, o.id ASC");
     $stmt->execute(['cid' => $companyId, 'pid' => $partyId]);
 
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // The SQL covers line-linked sales. Legacy draft/posted sales are matched
+    // by item as well, so a fully collected old order cannot reappear here.
+    return array_values(array_filter($orders, static function (array $order) use ($companyId): bool {
+        $lines = jewellery_order_line_rows($companyId, (int) $order['id']);
+        if ($lines === []) {
+            return true;
+        }
+        return count(jewellery_order_billed_line_ids($companyId, (int) $order['id'])) < count($lines);
+    }));
 }
 
 /** IDs of individual order lines already placed on a non-cancelled sale. */
@@ -3208,19 +3217,56 @@ function jewellery_order_billed_line_ids(int $companyId, int $orderId, int $excl
     if ($orderId <= 0 || !column_exists('jewellery_sale_lines', 'order_line_id')) {
         return [];
     }
-    $sql = "SELECT sl.order_line_id FROM jewellery_sale_lines sl
+    // New sales carry the exact order_line_id. Older sales did not, so read
+    // their direct order link as well and match each legacy item to one order
+    // line in order. Both draft and posted sales count: a piece placed on a
+    // draft bill is already reserved and must not be offered again.
+    $sql = "SELECT sl.order_line_id, sl.item_id, sl.qty_pieces
+        FROM jewellery_sale_lines sl
         INNER JOIN jewellery_sales s ON s.id = sl.sale_id AND s.company_id = sl.company_id
-        INNER JOIN jewellery_order_lines ol ON ol.id = sl.order_line_id AND ol.company_id = sl.company_id
-        WHERE sl.company_id = :cid AND ol.order_id = :oid
-          AND sl.order_line_id IS NOT NULL AND s.status <> 'cancelled'";
-    $params = ['cid' => $companyId, 'oid' => $orderId];
+        WHERE sl.company_id = :cid AND s.status IN ('draft', 'posted')
+          AND (sl.order_line_id IN (SELECT id FROM jewellery_order_lines
+                WHERE company_id = :cid_lines AND order_id = :oid_lines)
+               OR s.order_id = :oid_sale
+               OR EXISTS (SELECT 1 FROM jewellery_orders delivered_order
+                    WHERE delivered_order.company_id = s.company_id
+                      AND delivered_order.id = :oid_delivered
+                      AND delivered_order.delivered_sale_id = s.id))";
+    $params = ['cid' => $companyId, 'cid_lines' => $companyId, 'oid_lines' => $orderId,
+        'oid_sale' => $orderId, 'oid_delivered' => $orderId];
     if ($excludeSaleId > 0) {
         $sql .= ' AND sl.sale_id <> :sid';
         $params['sid'] = $excludeSaleId;
     }
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
-    return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
+    $billed = [];
+    $legacyByItem = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $saleLine) {
+        $lineId = (int) ($saleLine['order_line_id'] ?? 0);
+        if ($lineId > 0) {
+            $billed[$lineId] = true;
+            continue;
+        }
+        $itemId = (int) ($saleLine['item_id'] ?? 0);
+        if ($itemId > 0) {
+            $legacyByItem[$itemId] = ($legacyByItem[$itemId] ?? 0) + max(1, (int) round((float) ($saleLine['qty_pieces'] ?? 1)));
+        }
+    }
+    if ($legacyByItem !== []) {
+        foreach (jewellery_order_line_rows($companyId, $orderId) as $orderLine) {
+            $itemId = (int) ($orderLine['item_id'] ?? 0);
+            if (($legacyByItem[$itemId] ?? 0) <= 0) {
+                continue;
+            }
+            $lineId = (int) ($orderLine['id'] ?? 0);
+            if ($lineId > 0 && !isset($billed[$lineId])) {
+                $billed[$lineId] = true;
+                $legacyByItem[$itemId]--;
+            }
+        }
+    }
+    return $billed;
 }
 
 /**
