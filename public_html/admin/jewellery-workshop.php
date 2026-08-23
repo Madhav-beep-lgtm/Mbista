@@ -1264,7 +1264,7 @@ jw_filter_bar_styles();
         <dialog id="jw-orders-date-range-dialog" aria-label="Choose order date range" style="width:min(430px,calc(100vw - 32px));border:0;border-radius:14px;padding:20px;box-shadow:0 18px 48px rgba(0,0,0,.28)">
             <form method="dialog">
                 <h2 style="margin:0 0 16px">Date range</h2>
-                <div class="workspace-form-grid">
+                <div class="workspace-form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
                     <label>From<input type="date" id="jw-orders-date-from-picker" value="<?= e($filterFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
                     <label>To<input type="date" id="jw-orders-date-to-picker" value="<?= e($filterTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
                 </div>
