@@ -746,7 +746,7 @@ $renderGridToolbar = static function (string $docType) use ($lineTemplates): str
     return (string) ob_get_clean();
 };
 
-$renderLineRows = static function (string $prefix, array $existing, int $slots, string $legend, string $headActions = '') use ($items, $purities, $units, $baseUnit, $fmt, $onHand, $saleStockUnits, $view): void {
+$renderLineRows = static function (string $prefix, array $existing, int $slots, string $legend, string $headActions = '') use (&$items, $purities, $units, $baseUnit, $fmt, $onHand, &$saleStockUnits, $view): void {
     jw_render_line_grid($prefix, $existing, $slots, $legend, [
         'items' => $items, 'purities' => $purities, 'units' => $units,
         'base_unit' => $baseUnit, 'fmt' => $fmt, 'on_hand' => $onHand,
