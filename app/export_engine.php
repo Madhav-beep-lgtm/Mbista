@@ -144,16 +144,45 @@ function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options 
             . $sheetRelsXml
             . '<Relationship Id="' . $stylesRid . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
             . '</Relationships>',
+        // THE WORKBOOK'S OWN FORMATS. A spreadsheet of bare digits is not a
+        // report: 310649022.2 in a narrow column tells a reader nothing they can
+        // check, and the same figure as 310,649,022.20 tells them everything.
+        // Money to two places, weights to four — the places the trade actually
+        // keeps them in — counts with a thousands separator and none after the
+        // point, and every figure right-aligned so the columns line up on the
+        // decimal the way a ledger does.
+        //
+        // Style indexes are positional and the worksheet writer knows them by
+        // number, so they are only ever APPENDED to. Inserting one in the middle
+        // silently restyles every cell after it.
+        //   0 plain          1 header         2 body text
+        //   3 body money     4 body weight    5 body count
+        //   6 total text     7 total money    8 total weight   9 total count
         'xl/styles.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . '<numFmts count="3"><numFmt numFmtId="164" formatCode="#,##0.00"/>'
+            . '<numFmt numFmtId="165" formatCode="#,##0.0000"/><numFmt numFmtId="166" formatCode="#,##0"/></numFmts>'
             . '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
-            . '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
-            . '<fill><patternFill patternType="solid"><fgColor rgb="FFF5E7C7"/><bgColor indexed="64"/></patternFill></fill></fills>'
-            . '<borders count="2"><border/><border><left style="thin"><color rgb="FFD0D5DD"/></left><right style="thin"><color rgb="FFD0D5DD"/></right>'
-            . '<top style="thin"><color rgb="FFD0D5DD"/></top><bottom style="thin"><color rgb="FFD0D5DD"/></bottom></border></borders>'
+            . '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+            . '<fill><patternFill patternType="solid"><fgColor rgb="FFF5E7C7"/><bgColor indexed="64"/></patternFill></fill>'
+            . '<fill><patternFill patternType="solid"><fgColor rgb="FFEFF3F0"/><bgColor indexed="64"/></patternFill></fill></fills>'
+            . '<borders count="3"><border/><border><left style="thin"><color rgb="FFD0D5DD"/></left><right style="thin"><color rgb="FFD0D5DD"/></right>'
+            . '<top style="thin"><color rgb="FFD0D5DD"/></top><bottom style="thin"><color rgb="FFD0D5DD"/></bottom></border>'
+            . '<border><left style="thin"><color rgb="FFD0D5DD"/></left><right style="thin"><color rgb="FFD0D5DD"/></right>'
+            . '<top style="double"><color rgb="FF98A2B3"/></top><bottom style="thin"><color rgb="FFD0D5DD"/></bottom></border></borders>'
             . '<cellStyleXfs count="1"><xf/></cellStyleXfs>'
-            . '<cellXfs count="3"><xf xfId="0"/><xf xfId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
-            . '<xf xfId="0" borderId="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf></cellXfs>'
+            . '<cellXfs count="10">'
+            . '<xf xfId="0"/>'
+            . '<xf xfId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
+            . '<xf xfId="0" borderId="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
+            . '<xf xfId="0" numFmtId="164" borderId="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
+            . '<xf xfId="0" numFmtId="165" borderId="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
+            . '<xf xfId="0" numFmtId="166" borderId="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
+            . '<xf xfId="0" fontId="1" fillId="3" borderId="2" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
+            . '<xf xfId="0" fontId="1" fillId="3" numFmtId="164" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
+            . '<xf xfId="0" fontId="1" fillId="3" numFmtId="165" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
+            . '<xf xfId="0" fontId="1" fillId="3" numFmtId="166" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
+            . '</cellXfs>'
             . '</styleSheet>',
     ] + $sheetXmls;
 
@@ -183,12 +212,30 @@ function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): stri
     $rowsXml = '';
     $maxColumns = 0;
     $styledTable = !empty($options['styled_table']);
+    $columnFormats = (array) ($options['column_formats'] ?? []);
+    // -1 means "no totals row", which is not a row index anything can equal.
+    $totalRowIndex = array_key_exists('total_row', $options) ? (int) $options['total_row'] : -1;
     foreach (array_values($rows) as $rowIndex => $row) {
         $cellsXml = '';
         foreach (array_values((array) $row) as $columnIndex => $value) {
             $maxColumns = max($maxColumns, $columnIndex + 1);
             $ref = xlsx_column_letters($columnIndex) . ($rowIndex + 1);
-            $style = $styledTable ? ' s="' . ($rowIndex === 0 ? '1' : '2') . '"' : '';
+            // Header, totals band, or ordinary body — and within the last two,
+            // the column's own kind decides how the figure is written.
+            $styleId = 2;
+            if ($rowIndex === 0) {
+                $styleId = 1;
+            } else {
+                $kind = $columnFormats[$columnIndex] ?? 'text';
+                $base = $rowIndex === $totalRowIndex ? 6 : 2;
+                $styleId = match ($kind) {
+                    'money' => $base === 6 ? 7 : 3,
+                    'weight' => $base === 6 ? 8 : 4,
+                    'count' => $base === 6 ? 9 : 5,
+                    default => $base,
+                };
+            }
+            $style = $styledTable ? ' s="' . $styleId . '"' : '';
             if (is_int($value) || (is_float($value) && is_finite($value))) {
                 $cellsXml .= '<c r="' . $ref . '"' . $style . '><v>' . $value . '</v></c>';
                 continue;
@@ -692,11 +739,154 @@ function export_totals_row(array $rows, array $sumColumns = [], string $label = 
 
     return $rows;
 }
+/**
+ * What kind of figure each column holds, read off the rows themselves.
+ *
+ * The workbook needs this to choose a number format, and the rows are the only
+ * honest source: a column of money in one report is a column of carats in
+ * another, and headers are written for people rather than for parsers.
+ *
+ *   money   every value numeric, at most two decimal places anywhere
+ *   weight  every value numeric, more than two places somewhere — the trade
+ *           keeps fine weights to four, and rounding them to two in the file
+ *           loses metal that the shop is accountable for
+ *   count   every value a whole number
+ *   text    anything else, including a column with one stray word in it
+ *
+ * A column is only ever typed when EVERY cell in it agrees. One name in a
+ * column of amounts makes the whole column text, which is right: better a
+ * plain column than a formatted one hiding a value it could not parse.
+ *
+ * @param  array<int, array<int, mixed>> $rows header row first, then data
+ * @return array<int, string> column index => kind
+ */
+function export_column_formats(array $rows): array
+{
+    if (count($rows) < 2) {
+        return [];
+    }
+    $body = array_slice($rows, 1);
+    $header = array_values((array) $rows[0]);
+    $width = count($header);
+    $formats = [];
+    for ($column = 0; $column < $width; $column++) {
+        $sawValue = false;
+        $allNumeric = true;
+        $decimals = 0;
+        foreach ($body as $row) {
+            $cell = array_values((array) $row)[$column] ?? '';
+            if ($cell === null || (is_string($cell) && trim($cell) === '')) {
+                continue;
+            }
+            $text = trim((string) $cell);
+            if (preg_match('/^-?[\d,]+(\.\d+)?$/', $text) !== 1) {
+                $allNumeric = false;
+                break;
+            }
+            $sawValue = true;
+            $dot = strrpos($text, '.');
+            if ($dot !== false) {
+                $decimals = max($decimals, strlen($text) - $dot - 1);
+            }
+        }
+        if (!$sawValue || !$allNumeric) {
+            $formats[$column] = 'text';
+            continue;
+        }
+        if ($decimals > 0) {
+            $formats[$column] = $decimals <= 2 ? 'money' : 'weight';
+            continue;
+        }
+
+        // NO DECIMAL POINT ANYWHERE, which on its own says "whole numbers" and
+        // usually means a count. But a quiet month of round figures — or a shop
+        // whose amounts all happen to end in .00 — would print a column of
+        // rupees as bare integers, and a money column that sometimes shows
+        // paisa and sometimes does not is the kind of inconsistency a reader
+        // blames on the data.
+        //
+        // The heading is only consulted HERE, on a column already proved to
+        // hold nothing but numbers, so it can never drag text into a format.
+        $heading = strtolower(trim((string) ($header[$column] ?? '')));
+        $saysMoney = ['amount', 'value', 'total', 'revenue', 'profit', 'cost', 'price',
+            'billed', 'settled', 'outstanding', 'payable', 'receivable', 'advance',
+            'making', 'wages', 'wastage', 'charge', 'balance', 'vat', 'tax', 'discount'];
+        $saysWeight = ['weight', 'wt', 'fine', 'gross', 'net', 'carat', 'purity'];
+        foreach ($saysWeight as $word) {
+            if (preg_match('/\b' . preg_quote($word, '/') . '\b/', $heading) === 1) {
+                $formats[$column] = 'weight';
+                continue 2;
+            }
+        }
+        foreach ($saysMoney as $word) {
+            if (preg_match('/\b' . preg_quote($word, '/') . '\b/', $heading) === 1) {
+                $formats[$column] = 'money';
+                continue 2;
+            }
+        }
+        $formats[$column] = 'count';
+    }
+
+    return $formats;
+}
+
+/**
+ * Column widths wide enough to read, narrow enough to print.
+ *
+ * A default 18 across the board is why "Total sales and pro…" was clipped in
+ * one column while a column of dates wasted half its space. Measured from the
+ * longest cell, with a floor so a one-character column is still clickable and a
+ * ceiling so one long note cannot push the last column off the page.
+ *
+ * @param  array<int, array<int, mixed>> $rows
+ * @return array<int, float>
+ */
+function export_column_widths(array $rows, int $min = 10, int $max = 46): array
+{
+    $widths = [];
+    foreach ($rows as $row) {
+        foreach (array_values((array) $row) as $columnIndex => $value) {
+            $length = mb_strlen(trim((string) ($value ?? '')));
+            // Money gains separators when Excel formats it, so a raw 310649022.2
+            // needs the room its 310,649,022.20 will actually take.
+            $widths[$columnIndex] = max($widths[$columnIndex] ?? 0, $length + 3);
+        }
+    }
+    foreach ($widths as $columnIndex => $width) {
+        $widths[$columnIndex] = (float) max($min, min($max, $width));
+    }
+    ksort($widths);
+
+    return $widths;
+}
 function export_dispatch(string $format, string $basename, array $rows, string $title, array $meta = [], array $options = []): void
 {
+    // THE WRITER COULD ALWAYS DO THIS; nothing ever asked it to. Every workbook
+    // went out as a bare grid — no widths, no number formats, no frozen head —
+    // because export_dispatch() handed over the rows and none of the options.
+    // Set here rather than at each of the call sites so one report cannot come
+    // out looking like a different application from the next.
+    $sheetOptions = $options + [
+        'styled_table' => true,
+        'freeze_header' => true,
+        'auto_filter' => true,
+    ];
+    if (!isset($sheetOptions['column_formats'])) {
+        $sheetOptions['column_formats'] = export_column_formats($rows);
+    }
+    // A totals row footed by export_totals_row() is the last row and says
+    // "Total" in one of its first two cells. Found rather than passed, so a
+    // caller that foots its own rows still gets the band.
+    if (!array_key_exists('total_row', $sheetOptions) && count($rows) > 1) {
+        $last = array_values((array) end($rows));
+        $firstTwo = array_map(static fn ($v): string => strtolower(trim((string) $v)), array_slice($last, 0, 2));
+        $sheetOptions['total_row'] = in_array('total', $firstTwo, true) ? count($rows) - 1 : -1;
+    }
+    $sheetWidths = $options['col_widths'] ?? export_column_widths($rows);
+
     switch ($format) {
         case 'xlsx':
-            export_xlsx($basename . '.xlsx', $rows, $title);
+            export_xlsx($basename . '.xlsx', $rows, $title, $sheetWidths, $sheetOptions);
             // no break — export_xlsx exits
         case 'print':
         case 'pdf':

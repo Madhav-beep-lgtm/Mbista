@@ -1324,19 +1324,36 @@ function jw_report_consolidated(int $companyId, string $from, string $to): array
  * date it is true on. On screen the same facts are a heading, because there the
  * eye can see the group.
  *
+ * FOUR VALUE COLUMNS, NOT ONE, and each row fills exactly one of them. A single
+ * Value column held rupees, fine weights, piece counts and a percentage one
+ * under the other, and no spreadsheet format fits all four: money wants two
+ * decimal places and a thousands separator, a fine weight wants four and loses
+ * metal at two, a count wants none. One column meant every figure on the sheet
+ * was written wrong except by accident. Split, each column is typed, formats
+ * itself, and can be summed or pivoted without first being cleaned by hand.
+ *
  * @return array<int, array<int, mixed>> first row is the header
  */
 function jw_report_consolidated_export_rows(array $consolidated): array
 {
-    $rows = [['Section', 'Basis', 'Figure', 'Value', 'Kind']];
+    $rows = [['Section', 'Basis', 'Figure', 'Amount', 'Fine weight', 'Count', 'Percent', 'Note']];
     foreach (($consolidated['sections'] ?? []) as $section) {
         foreach (($section['rows'] ?? []) as $row) {
+            $kind = (string) $row['kind'];
+            $value = $row['value'];
+            // A TEXT ROW GETS ITS OWN COLUMN. The oldest unpaid bill reads
+            // "2026-07-21 (34 days)", and putting it in Amount cost that whole
+            // column its money format: one value a spreadsheet cannot parse makes
+            // every figure under it text. Kept apart, Amount stays money.
             $rows[] = [
                 (string) $section['title'],
                 (string) $section['note'],
                 (string) $row['label'],
-                $row['value'] === null ? '' : $row['value'],
-                (string) $row['kind'],
+                $kind === 'money' ? ($value ?? '') : '',
+                $kind === 'weight' ? ($value ?? '') : '',
+                $kind === 'count' ? ($value ?? '') : '',
+                $kind === 'percent' ? ($value ?? '') : '',
+                $kind === 'text' ? (string) ($value ?? '') : '',
             ];
         }
     }

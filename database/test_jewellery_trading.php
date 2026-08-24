@@ -651,8 +651,25 @@ echo "\nD. The file says everything the page does\n";
 // One report on screen, one file behind it. The rows are built by the SAME call
 // the export makes, so a figure cannot be on the page and missing from the PDF
 // somebody took into a meeting.
+require_once __DIR__ . '/../app/export_engine.php';
 $exportRows = jw_report_consolidated_export_rows($cons);
-ok($exportRows[0] === ['Section', 'Basis', 'Figure', 'Value', 'Kind'], 'The file opens with its header row');
+ok($exportRows[0] === ['Section', 'Basis', 'Figure', 'Amount', 'Fine weight', 'Count', 'Percent', 'Note'],
+    'The file opens with its header row, one typed column per kind of figure');
+// A SINGLE VALUE COLUMN COULD NOT BE FORMATTED. Rupees want two decimal
+// places, a fine weight wants four and loses metal at two, a count wants
+// none — so one column meant every figure was written wrong but by accident.
+$placed = true;
+foreach (array_slice($exportRows, 1) as $exportRow) {
+    $filled = 0;
+    foreach ([3, 4, 5, 6, 7] as $valueColumn) {
+        if (trim((string) $exportRow[$valueColumn]) !== '') { $filled++; }
+    }
+    if ($filled !== 1) { $placed = false; }
+}
+ok($placed, 'Every figure lands in exactly one of them — never two, never none');
+$formats = export_column_formats($exportRows);
+ok(($formats[3] ?? '') === 'money' && ($formats[4] ?? '') === 'weight' && ($formats[5] ?? '') === 'count',
+    'And each column then types itself: money, weight, count');
 $figureCount = 0;
 foreach ($cons['sections'] as $section) { $figureCount += count($section['rows']); }
 ok(count($exportRows) - 1 === $figureCount,
@@ -701,6 +718,58 @@ ok((string) end($weights)[1] === '2.7480', 'A four-decimal column foots to four 
 
 $empty = export_totals_row([['Item', 'Amount']]);
 ok(count($empty) === 1, 'A register with no rows gains no total row to foot');
+echo "\nF. The workbook is a report, not a grid of digits\n";
+// 310649022.2 in a narrow column tells a reader nothing they can check. The
+// same figure as 310,649,022.20, right-aligned under a frozen heading, tells
+// them everything — and the writer could always do it; nothing ever asked.
+$sheetRows = [
+    ['Bill no.', 'Date', 'Fine wt', 'Rate', 'Amount', 'Pieces'],
+    ['JRC-1', '2026-07-21', '1.8320', '152000.00', '278464.00', '2'],
+    ['JRC-2', '2026-07-22', '0.9160', '152000.00', '139232.00', '1'],
+];
+$kinds = export_column_formats($sheetRows);
+ok(($kinds[0] ?? '') === 'text' && ($kinds[1] ?? '') === 'text', 'A reference and a date stay text');
+ok(($kinds[2] ?? '') === 'weight', 'A four-place weight is a weight, not money rounded to two');
+ok(($kinds[4] ?? '') === 'money', 'An amount is money');
+ok(($kinds[5] ?? '') === 'count', 'And a piece count is a whole number');
+
+// A column of round figures is still money when its heading says so. Without
+// this a quiet month prints rupees as bare integers beside months that do not.
+$roundMoney = export_column_formats([['Item', 'Amount'], ['A', '1000'], ['B', '2000']]);
+ok(($roundMoney[1] ?? '') === 'money', 'Whole rupees are still money — the heading settles it');
+$plainCount = export_column_formats([['Item', 'Pieces'], ['A', '3'], ['B', '4']]);
+ok(($plainCount[1] ?? '') === 'count', 'While a column that is genuinely a count stays one');
+// The heading is consulted ONLY on a column already proved to hold numbers, so
+// it can never drag text into a number format.
+$textAmount = export_column_formats([['Item', 'Amount'], ['A', 'n/a'], ['B', '2000']]);
+ok(($textAmount[1] ?? '') === 'text', 'One unparseable value keeps the whole column text');
+
+$widths = export_column_widths($sheetRows);
+ok(($widths[0] ?? 0) >= 10 && ($widths[4] ?? 0) > ($widths[0] ?? 0),
+    'Columns are measured from their contents, not left at one flat default');
+
+// The file has to actually open. An invalid styles.xml does not fail loudly —
+// Excel simply calls the whole workbook corrupt and says nothing about why.
+if (class_exists('ZipArchive')) {
+    $book = xlsx_build($sheetRows, 'Register', export_column_widths($sheetRows),
+        ['styled_table' => true, 'freeze_header' => true, 'column_formats' => $kinds, 'total_row' => -1]);
+    $tmpBook = tempnam(sys_get_temp_dir(), 'xlsxt');
+    file_put_contents($tmpBook, $book);
+    $zip = new ZipArchive();
+    $opened = $zip->open($tmpBook) === true;
+    $stylesXml = $opened ? (string) $zip->getFromName('xl/styles.xml') : '';
+    $sheetXml = $opened ? (string) $zip->getFromName('xl/worksheets/sheet1.xml') : '';
+    if ($opened) { $zip->close(); }
+    @unlink($tmpBook);
+    $doc = new DOMDocument();
+    ok($opened && $stylesXml !== '' && @$doc->loadXML($stylesXml), 'The workbook styles are valid XML — Excel will open it');
+    ok(str_contains($sheetXml, 'state="frozen"'), 'The heading row is frozen');
+    ok(str_contains($sheetXml, 'customWidth="1"'), 'And the columns carry their measured widths');
+} else {
+    ok(true, 'ZipArchive absent — workbook build skipped on this machine');
+    ok(true, 'ZipArchive absent — freeze check skipped');
+    ok(true, 'ZipArchive absent — width check skipped');
+}
 jwt_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";
