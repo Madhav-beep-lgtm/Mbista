@@ -167,10 +167,19 @@ function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options 
             . '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
             . '<fill><patternFill patternType="solid"><fgColor rgb="FFF5E7C7"/><bgColor indexed="64"/></patternFill></fill>'
             . '<fill><patternFill patternType="solid"><fgColor rgb="FFEFF3F0"/><bgColor indexed="64"/></patternFill></fill></fills>'
-            . '<borders count="3"><border/><border><left style="thin"><color rgb="FFD0D5DD"/></left><right style="thin"><color rgb="FFD0D5DD"/></right>'
-            . '<top style="thin"><color rgb="FFD0D5DD"/></top><bottom style="thin"><color rgb="FFD0D5DD"/></bottom></border>'
-            . '<border><left style="thin"><color rgb="FFD0D5DD"/></left><right style="thin"><color rgb="FFD0D5DD"/></right>'
-            . '<top style="double"><color rgb="FF98A2B3"/></top><bottom style="thin"><color rgb="FFD0D5DD"/></bottom></border></borders>'
+            // EVERY CELL IS BOXED, in a line dark enough to see. The grid was
+            // drawn in FFD0D5DD, which is a hairline on a screen and nothing at
+            // all on paper — the sheet read as loose columns of figures with no
+            // visible rows, which is exactly what makes a printed register hard
+            // to follow across. Black thin is what Excel's own All Borders does,
+            // and it is what a ledger has always looked like.
+            //
+            // The totals row keeps a double rule above it. That is the one line
+            // on the sheet that has to be seen without being looked for.
+            . '<borders count="3"><border/><border><left style="thin"><color rgb="FF000000"/></left><right style="thin"><color rgb="FF000000"/></right>'
+            . '<top style="thin"><color rgb="FF000000"/></top><bottom style="thin"><color rgb="FF000000"/></bottom></border>'
+            . '<border><left style="thin"><color rgb="FF000000"/></left><right style="thin"><color rgb="FF000000"/></right>'
+            . '<top style="double"><color rgb="FF000000"/></top><bottom style="thin"><color rgb="FF000000"/></bottom></border></borders>'
             . '<cellStyleXfs count="1"><xf/></cellStyleXfs>'
             . '<cellXfs count="13">'
             . '<xf xfId="0"/>'
@@ -788,8 +797,22 @@ function export_column_formats(array $rows): array
     $body = array_slice($rows, 1);
     $header = array_values((array) $rows[0]);
     $width = count($header);
+    // AN IDENTIFIER IS NOT A QUANTITY, however much it looks like one. An order
+    // reference of 1234 formatted as a number prints "1,234", and a reader who
+    // goes looking for order 1,234 will not find it. These columns are held as
+    // text before their contents are even examined.
+    $identifier = ['no', 'no.', 'ref', 'reference', 'code', 'id', 'invoice', 'sku',
+        'barcode', 'phone', 'mobile', 'year', 'pan', 'vat no', 'account'];
+
     $formats = [];
     for ($column = 0; $column < $width; $column++) {
+        $headingText = strtolower(trim((string) ($header[$column] ?? '')));
+        foreach ($identifier as $word) {
+            if (preg_match('/\b' . preg_quote($word, '/') . '\b/', $headingText) === 1) {
+                $formats[$column] = 'text';
+                continue 2;
+            }
+        }
         $sawValue = false;
         $allNumeric = true;
         $decimals = 0;

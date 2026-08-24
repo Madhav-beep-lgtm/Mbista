@@ -827,6 +827,78 @@ if (class_exists('ZipArchive')) {
     ok(true, 'ZipArchive absent — freeze offset check skipped');
     ok(true, 'ZipArchive absent — filter offset check skipped');
 }
+echo "\nH. Every cell of the table is boxed\n";
+// The grid was drawn in a hairline grey that is faint on a screen and gone on
+// paper: the sheet read as loose columns with no visible rows, which is what
+// makes a printed register hard to follow across.
+if (class_exists('ZipArchive')) {
+    // The blank Order ref. matters — an unstyled empty cell leaves a hole in the
+    // grid exactly where the eye is trying to follow a line across.
+    $gridRows = export_totals_row([
+        ['Sale no.', 'Order ref.', 'Date', 'Customer', 'Total', 'Status'],
+        ['JS-00033', '', '2026-08-23', 'Ram Laxmi Acharya', '80000.00', 'draft'],
+        ['JS-00020', '31', '2026-08-21', 'Pushkar Pandit', '1682725.31', 'draft'],
+    ]);
+    $gridTitle = export_title_rows('Sales Register', ['Company' => 'Test Jeweller']);
+    $gridFile = array_merge($gridTitle, $gridRows);
+    $gridBook = xlsx_build($gridFile, 'Sales Register', export_column_widths($gridRows), [
+        'styled_table' => true, 'column_formats' => export_column_formats($gridRows),
+        'header_row' => count($gridTitle),
+        'total_row' => count($gridTitle) + count($gridRows) - 1,
+    ]);
+    $gridTmp = tempnam(sys_get_temp_dir(), 'xlsxb');
+    file_put_contents($gridTmp, $gridBook);
+    $gridZip = new ZipArchive();
+    $gridOpen = $gridZip->open($gridTmp) === true;
+    $gridStyles = $gridOpen ? (string) $gridZip->getFromName('xl/styles.xml') : '';
+    $gridSheet = $gridOpen ? (string) $gridZip->getFromName('xl/worksheets/sheet1.xml') : '';
+    if ($gridOpen) { $gridZip->close(); }
+    @unlink($gridTmp);
+
+    ok(str_contains($gridStyles, 'FF000000') && !str_contains($gridStyles, 'FFD0D5DD'),
+        'The grid is drawn in a line dark enough to survive a printer');
+    ok(str_contains($gridStyles, 'style="double"'), 'And the totals row keeps a double rule above it');
+
+    // Which style ids actually carry a border, read from the file itself.
+    preg_match('#<cellXfs[^>]*>(.*)</cellXfs>#s', $gridStyles, $xfBlock);
+    preg_match_all('/<xf\b[^>]*>|<xf\b[^>]*\/>/', $xfBlock[1] ?? '', $xfList);
+    $borderedStyles = [];
+    foreach ($xfList[0] as $xfIndex => $xf) {
+        if (preg_match('/borderId="[12]"/', $xf) === 1) { $borderedStyles[] = $xfIndex; }
+    }
+    $firstTableRow = count($gridTitle) + 1;
+    $lastTableRow = count($gridFile);
+    $unboxed = [];
+    for ($r = $firstTableRow; $r <= $lastTableRow; $r++) {
+        for ($c = 0; $c < 6; $c++) {
+            $ref = xlsx_column_letters($c) . $r;
+            if (preg_match('/<c r="' . $ref . '"[^>]*?s="(\d+)"/', $gridSheet, $cm) !== 1) {
+                $unboxed[] = $ref . ' (no cell)';
+            } elseif (!in_array((int) $cm[1], $borderedStyles, true)) {
+                $unboxed[] = $ref . ' (unbordered)';
+            }
+        }
+    }
+    ok($unboxed === [], 'Every cell of the table is boxed, blanks included'
+        . ($unboxed === [] ? '' : ' — ' . implode(', ', $unboxed)));
+    // The title block is NOT boxed: a heading is not a table cell.
+    ok(preg_match('/<c r="A1"[^>]*?s="10"/', $gridSheet) === 1, 'While the title above it stays unboxed');
+} else {
+    foreach (['border colour', 'double rule', 'boxed cells', 'unboxed title'] as $skipped) {
+        ok(true, 'ZipArchive absent — ' . $skipped . ' check skipped');
+    }
+}
+
+// An identifier is not a quantity, however much it looks like one.
+$idFormats = export_column_formats([
+    ['Sale no.', 'Order ref.', 'Total', 'Pieces'],
+    ['JS-00020', '1234', '1682725.31', '2'],
+    ['JS-00021', '99', '100.00', '1'],
+]);
+ok(($idFormats[1] ?? '') === 'text',
+    'An order reference stays text — formatted as a number, 1234 prints "1,234" and cannot be found');
+ok(($idFormats[2] ?? '') === 'money' && ($idFormats[3] ?? '') === 'count',
+    'While the figures beside it are still typed');
 jwt_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";
