@@ -770,6 +770,63 @@ if (class_exists('ZipArchive')) {
     ok(true, 'ZipArchive absent — freeze check skipped');
     ok(true, 'ZipArchive absent — width check skipped');
 }
+echo "\nG. A file that says what it is\n";
+// A spreadsheet opening on a bare grid cannot be filed, checked or argued from:
+// three months later nobody can say which report it was, whose books it came
+// out of, what period it covers, or whether it predates the correction being
+// looked for. The PDF has carried this since it was written; the workbook and
+// the CSV went out naked.
+$titleBlock = export_title_rows('Sales Register', [
+    'Company' => 'Akshara Jewellery Private Limited',
+    'Period' => '2026-07-17 to 2026-08-24',
+]);
+ok((string) $titleBlock[0][0] === 'Sales Register', 'The file names the report first — that is what was gone looking for');
+ok((string) $titleBlock[1][0] === 'Akshara Jewellery Private Limited',
+    'Then whose books it came out of — one accountant keeps several sets');
+ok((string) $titleBlock[2][0] === 'Period' && str_contains((string) $titleBlock[2][1], '2026-07-17'),
+    'Then the period it covers');
+$printedRow = null;
+foreach ($titleBlock as $titleRow) {
+    if ((string) ($titleRow[0] ?? '') === 'Printed') { $printedRow = $titleRow; }
+}
+ok($printedRow !== null && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', (string) $printedRow[1]) === 1,
+    'And the date it was printed — the one a stale copy is caught by');
+ok($titleBlock[count($titleBlock) - 1] === [], 'A blank row closes it, so the table below reads as a table');
+// The organisation is not printed twice under two different labels.
+$labels = [];
+foreach ($titleBlock as $titleRow) { $labels[] = (string) ($titleRow[0] ?? ''); }
+ok(!in_array('Company', $labels, true), 'A Company passed as meta becomes the heading, not a second line');
+
+// The block sits ABOVE the table, and everything that used to assume row 1
+// follows it down.
+if (class_exists('ZipArchive')) {
+    $dataRows = export_totals_row([
+        ['Sale no.', 'Date', 'Total'],
+        ['JS-1', '2026-08-23', '80000.00'],
+        ['JS-2', '2026-08-21', '20000.00'],
+    ]);
+    $fileRows = array_merge($titleBlock, $dataRows);
+    $book = xlsx_build($fileRows, 'Sales Register', export_column_widths($dataRows), [
+        'styled_table' => true, 'freeze_header' => true, 'auto_filter' => true,
+        'column_formats' => export_column_formats($dataRows),
+        'header_row' => count($titleBlock),
+        'total_row' => count($titleBlock) + count($dataRows) - 1,
+    ]);
+    $tmpBook = tempnam(sys_get_temp_dir(), 'xlsxh');
+    file_put_contents($tmpBook, $book);
+    $zip = new ZipArchive();
+    $sheetXml = $zip->open($tmpBook) === true ? (string) $zip->getFromName('xl/worksheets/sheet1.xml') : '';
+    if ($sheetXml !== '') { $zip->close(); }
+    @unlink($tmpBook);
+    $headerRowNumber = count($titleBlock) + 1;
+    ok(str_contains($sheetXml, 'ySplit="' . $headerRowNumber . '"'),
+        'The freeze follows the heading down the sheet instead of pinning the title');
+    ok(str_contains($sheetXml, '<autoFilter ref="A' . $headerRowNumber . ':'),
+        'And so does the filter — it must not try to filter the title block');
+} else {
+    ok(true, 'ZipArchive absent — freeze offset check skipped');
+    ok(true, 'ZipArchive absent — filter offset check skipped');
+}
 jwt_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

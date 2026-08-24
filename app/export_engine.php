@@ -162,7 +162,8 @@ function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options 
             . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
             . '<numFmts count="3"><numFmt numFmtId="164" formatCode="#,##0.00"/>'
             . '<numFmt numFmtId="165" formatCode="#,##0.0000"/><numFmt numFmtId="166" formatCode="#,##0"/></numFmts>'
-            . '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+            . '<fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font>'
+            . '<font><b/><sz val="14"/><name val="Calibri"/></font><font><sz val="10"/><color rgb="FF667085"/><name val="Calibri"/></font></fonts>'
             . '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
             . '<fill><patternFill patternType="solid"><fgColor rgb="FFF5E7C7"/><bgColor indexed="64"/></patternFill></fill>'
             . '<fill><patternFill patternType="solid"><fgColor rgb="FFEFF3F0"/><bgColor indexed="64"/></patternFill></fill></fills>'
@@ -171,7 +172,7 @@ function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options 
             . '<border><left style="thin"><color rgb="FFD0D5DD"/></left><right style="thin"><color rgb="FFD0D5DD"/></right>'
             . '<top style="double"><color rgb="FF98A2B3"/></top><bottom style="thin"><color rgb="FFD0D5DD"/></bottom></border></borders>'
             . '<cellStyleXfs count="1"><xf/></cellStyleXfs>'
-            . '<cellXfs count="10">'
+            . '<cellXfs count="13">'
             . '<xf xfId="0"/>'
             . '<xf xfId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
             . '<xf xfId="0" borderId="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
@@ -182,6 +183,12 @@ function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options 
             . '<xf xfId="0" fontId="1" fillId="3" numFmtId="164" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
             . '<xf xfId="0" fontId="1" fillId="3" numFmtId="165" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
             . '<xf xfId="0" fontId="1" fillId="3" numFmtId="166" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
+            // 10 the report's own name, 11 the organisation, 12 a meta line.
+            // No borders on any of them: a title is not a table cell, and boxing
+            // it makes the sheet look like the header row belongs to the data.
+            . '<xf xfId="0" fontId="2" applyFont="1"/>'
+            . '<xf xfId="0" fontId="1" applyFont="1"/>'
+            . '<xf xfId="0" fontId="3" applyFont="1"/>'
             . '</cellXfs>'
             . '</styleSheet>',
     ] + $sheetXmls;
@@ -215,6 +222,10 @@ function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): stri
     $columnFormats = (array) ($options['column_formats'] ?? []);
     // -1 means "no totals row", which is not a row index anything can equal.
     $totalRowIndex = array_key_exists('total_row', $options) ? (int) $options['total_row'] : -1;
+    // WHICH ROW IS THE TABLE'S HEADING. Zero unless a title block sits above it,
+    // and everything that used to assume row 1 — the freeze, the filter, the
+    // header styling — now asks this instead.
+    $headerRowIndex = max(0, (int) ($options['header_row'] ?? 0));
     foreach (array_values($rows) as $rowIndex => $row) {
         $cellsXml = '';
         foreach (array_values((array) $row) as $columnIndex => $value) {
@@ -223,7 +234,11 @@ function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): stri
             // Header, totals band, or ordinary body — and within the last two,
             // the column's own kind decides how the figure is written.
             $styleId = 2;
-            if ($rowIndex === 0) {
+            if ($rowIndex < $headerRowIndex) {
+                // The title block. Row 0 is the report's name, row 1 the
+                // organisation, and everything after is a label/value line.
+                $styleId = $rowIndex === 0 ? 10 : ($rowIndex === 1 ? 11 : 12);
+            } elseif ($rowIndex === $headerRowIndex) {
                 $styleId = 1;
             } else {
                 $kind = $columnFormats[$columnIndex] ?? 'text';
@@ -256,7 +271,7 @@ function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): stri
                 $cellsXml .= '<c r="' . $ref . '"' . $style . ' t="inlineStr"><is><t xml:space="preserve">' . $xml($text) . '</t></is></c>';
             }
         }
-        $rowsXml .= '<row r="' . ($rowIndex + 1) . '"' . ($styledTable && $rowIndex === 0 ? ' ht="24" customHeight="1"' : '')
+        $rowsXml .= '<row r="' . ($rowIndex + 1) . '"' . ($styledTable && $rowIndex === $headerRowIndex ? ' ht="24" customHeight="1"' : '')
             . '>' . $cellsXml . '</row>';
     }
 
@@ -274,9 +289,14 @@ function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): stri
 
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        . (!empty($options['freeze_header']) ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : '')
+        . (!empty($options['freeze_header'])
+            ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="' . ($headerRowIndex + 1)
+                . '" topLeftCell="A' . ($headerRowIndex + 2) . '" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
+            : '')
         . $colsXml . '<sheetData>' . $rowsXml . '</sheetData>'
-        . (!empty($options['auto_filter']) && $maxColumns > 0 ? '<autoFilter ref="A1:' . xlsx_column_letters($maxColumns - 1) . max(1, count($rows)) . '"/>' : '')
+        . (!empty($options['auto_filter']) && $maxColumns > 0
+            ? '<autoFilter ref="A' . ($headerRowIndex + 1) . ':' . xlsx_column_letters($maxColumns - 1) . max(1, count($rows)) . '"/>'
+            : '')
         . '</worksheet>';
 }
 
@@ -859,6 +879,57 @@ function export_column_widths(array $rows, int $min = 10, int $max = 46): array
 
     return $widths;
 }
+/**
+ * The block that says WHAT this file is, above the table.
+ *
+ * A spreadsheet that opens on a bare grid of figures cannot be filed, checked
+ * or argued from: three months later nobody can tell which report it was, whose
+ * books it came out of, what period it covers, or whether it predates the
+ * correction they are looking for. The PDF has carried this since it was
+ * written. The workbook and the CSV went out naked.
+ *
+ * Four things, in the order somebody reads them:
+ *   the REPORT, because that is what they went looking for
+ *   the ORGANISATION, because one accountant keeps several sets of books
+ *   the PERIOD and whatever else the caller passed as meta
+ *   the DATE IT WAS PRINTED, which is the one a stale copy is caught by
+ *
+ * A blank row closes it, so the table below reads as a table rather than as
+ * four more rows of data.
+ *
+ * @return array<int, array<int, string>>
+ */
+function export_title_rows(string $title, array $meta = []): array
+{
+    $companyName = '';
+    if (function_exists('current_company')) {
+        $company = current_company();
+        $companyName = trim((string) ($company['name'] ?? ''));
+    }
+
+    // Several callers already pass the organisation as meta. Taken from there
+    // when they do, so the block does not print the same name twice under two
+    // different labels.
+    foreach (['Company', 'Organisation', 'Organization'] as $metaKey) {
+        if (trim((string) ($meta[$metaKey] ?? '')) !== '') {
+            $companyName = trim((string) $meta[$metaKey]);
+            unset($meta[$metaKey]);
+            break;
+        }
+    }
+
+    $rows = [[$title]];
+    // Always present, even when there is no company in context, so the row
+    // numbering below the block never shifts between one export and the next.
+    $rows[] = [$companyName !== '' ? $companyName : '—'];
+    foreach ($meta as $label => $value) {
+        $rows[] = [(string) $label, (string) $value];
+    }
+    $rows[] = ['Printed', date('Y-m-d H:i')];
+    $rows[] = [];
+
+    return $rows;
+}
 function export_dispatch(string $format, string $basename, array $rows, string $title, array $meta = [], array $options = []): void
 {
     // THE WRITER COULD ALWAYS DO THIS; nothing ever asked it to. Every workbook
@@ -882,17 +953,30 @@ function export_dispatch(string $format, string $basename, array $rows, string $
         $firstTwo = array_map(static fn ($v): string => strtolower(trim((string) $v)), array_slice($last, 0, 2));
         $sheetOptions['total_row'] = in_array('total', $firstTwo, true) ? count($rows) - 1 : -1;
     }
+    // Widths and formats are measured from the DATA, before the title block is
+    // put on top: a report called "Jewellery — Purchases, Sales & Bills" would
+    // otherwise stretch column A to fit its own name.
     $sheetWidths = $options['col_widths'] ?? export_column_widths($rows);
+
+    // The PDF builds its own heading, so only the two file formats need this.
+    $titleRows = empty($options['no_title_block']) ? export_title_rows($title, $meta) : [];
+    if ($titleRows !== []) {
+        $sheetOptions['header_row'] = count($titleRows);
+        if (($sheetOptions['total_row'] ?? -1) >= 0) {
+            $sheetOptions['total_row'] += count($titleRows);
+        }
+    }
+    $fileRows = array_merge($titleRows, $rows);
 
     switch ($format) {
         case 'xlsx':
-            export_xlsx($basename . '.xlsx', $rows, $title, $sheetWidths, $sheetOptions);
+            export_xlsx($basename . '.xlsx', $fileRows, $title, $sheetWidths, $sheetOptions);
             // no break — export_xlsx exits
         case 'print':
         case 'pdf':
             export_print($title, $rows, $meta, $options + ['auto_print' => true]);
             // no break — export_print exits
         default:
-            export_csv($basename . '.csv', $rows);
+            export_csv($basename . '.csv', $fileRows);
     }
 }
