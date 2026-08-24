@@ -18,6 +18,9 @@ declare(strict_types=1);
  *   outward : sale, sales_delivery, purchase_return, consume,
  *             material_issue, adjustment (qty_out)
  *   damage  : write_off, damage, expiry
+ *   stock_count: the difference a physical count found, in whichever
+ *             direction the count went (qty_in inward, qty_out outward) —
+ *             see app/stock_count.php
  *   location-only (warehouse_transfer, departmental_transfer): ignored at
  *   company level (stock never leaves the entity — mirrors
  *   inv_rebuild_layers); when a warehouse filter is active they become
@@ -153,7 +156,11 @@ function sr_replay_balance(array $state): array
  * zero_movement (bool include), zero_closing (bool include),
  * dormant (bool include — an item with no opening, no movement and no
  * closing is off by default; it is a catalogue entry, not stock),
- * group_by (''|type|location|valuation|ledger|stock_kind).
+ * group_by (''|type|location|valuation|ledger|stock_kind),
+ * counts ([item_id => inventory_stock_counts row] — physically counted
+ * closing quantities to show beside the replayed one; a counted row is never
+ * hidden by the zero/dormant filters, because the whole reason it was counted
+ * is that somebody wants to see it).
  *
  * Returns ['rows' => [...], 'totals' => [...], 'generated' => meta].
  * One query for items + one for transactions — no per-item queries.
@@ -190,6 +197,12 @@ function sr_stock_summary_build(int $companyId, array $f): array
     // unless asked for, because the question this report answers is what
     // the shop HAS and what MOVED.
     $includeDormant = (bool) ($f['dormant'] ?? false);
+    // Physically counted closing quantities, already scoped to this report's
+    // date and location by the caller. Passed in rather than fetched here so
+    // the report engine keeps knowing nothing about the count store — and so
+    // sc_system_closing() can ask it for the replayed figure without the two
+    // calling each other in a circle.
+    $counts = (array) ($f['counts'] ?? []);
 
     $itemSql = "SELECT i.id, i.sku, i.name, i.item_type, i.valuation_method, i.unit, i.purchase_rate,
             i.opening_qty, i.opening_amount, i.default_warehouse_id, i.category,
@@ -329,6 +342,18 @@ function sr_stock_summary_build(int $companyId, array $f): array
 
         $closing = sr_snapshot($state, $warehouseFilterOn, $scopedQty, $avgUnitAt($state));
 
+        // What somebody physically counted on this date, in this scope. A
+        // counted row survives every "hide the quiet rows" filter below: the
+        // count IS the reason it is interesting, and hiding it would hide the
+        // difference the count exists to show.
+        $count = $counts[$itemId] ?? null;
+        $counted = $count !== null ? inv_round_qty((float) $count['counted_qty']) : null;
+        $countPosted = $count !== null && ($count['posted_at'] ?? null) !== null;
+        $countVarianceQty = $counted !== null ? inv_round_qty($counted - $closing['qty']) : 0.0;
+        $countVarianceAmount = $counted !== null
+            ? inv_round_money($countVarianceQty * sr_rate($closing['amount'], $closing['qty']))
+            : 0.0;
+
         $hasMovement = $in['qty'] > INV_EPSILON || $out['qty'] > INV_EPSILON || $damage['qty'] > INV_EPSILON;
         // Quantity AND value both, so a row carrying a balance worth money at
         // zero quantity — a rounding remnant, a write-down — is still shown.
@@ -337,23 +362,25 @@ function sr_stock_summary_build(int $companyId, array $f): array
             && abs((float) $opening['amount']) < 0.005 && abs((float) $closing['amount']) < 0.005
             && abs((float) $in['amount']) < 0.005 && abs((float) $out['amount']) < 0.005
             && abs((float) $damage['amount']) < 0.005;
-        if (!$includeDormant && $isDormant) {
-            continue;
-        }
-        if (!$includeZeroMovement && !$hasMovement) {
-            continue;
-        }
-        if (!$includeZeroClosing && abs($closing['qty']) <= INV_EPSILON) {
-            continue;
-        }
-        if ($status === 'positive' && $closing['qty'] <= INV_EPSILON) {
-            continue;
-        }
-        if ($status === 'zero' && abs($closing['qty']) > INV_EPSILON) {
-            continue;
-        }
-        if ($status === 'negative' && $closing['qty'] >= -INV_EPSILON) {
-            continue;
+        if ($count === null) {
+            if (!$includeDormant && $isDormant) {
+                continue;
+            }
+            if (!$includeZeroMovement && !$hasMovement) {
+                continue;
+            }
+            if (!$includeZeroClosing && abs($closing['qty']) <= INV_EPSILON) {
+                continue;
+            }
+            if ($status === 'positive' && $closing['qty'] <= INV_EPSILON) {
+                continue;
+            }
+            if ($status === 'zero' && abs($closing['qty']) > INV_EPSILON) {
+                continue;
+            }
+            if ($status === 'negative' && $closing['qty'] >= -INV_EPSILON) {
+                continue;
+            }
         }
 
         $displayType = sr_resolve_item_type($locationMap, $itemId, $singleWarehouse, (string) $item['item_type']);
@@ -426,12 +453,30 @@ function sr_stock_summary_build(int $companyId, array $f): array
             'closing_qty' => $closing['qty'],
             'closing_rate' => sr_rate($closing['amount'], $closing['qty']),
             'closing_amount' => inv_round_money($closing['amount']),
+            // The physical count, beside the replay rather than instead of it.
+            // Closing stays the figure the GL can be tied to; these say what
+            // the shelf held and what the difference is worth, and once the
+            // difference is posted the two are the same number.
+            'count_id' => $count !== null ? (int) $count['id'] : 0,
+            'counted_qty' => $counted,
+            'count_posted' => $countPosted,
+            'count_notes' => (string) ($count['notes'] ?? ''),
+            'count_charge_to' => (string) ($count['charge_to'] ?? 'cogs'),
+            'count_variance_qty' => $countVarianceQty,
+            'count_variance_amount' => $countVarianceAmount,
+            // Once a count is posted the live difference is zero by
+            // construction — closing IS the counted figure. What was actually
+            // charged is kept beside it, or the sheet would show a day's work
+            // as a column of noughts.
+            'count_posted_qty' => $countPosted ? (float) $count['variance_qty'] : 0.0,
+            'count_posted_value' => $countPosted ? (float) $count['variance_value'] : 0.0,
         ];
         $totals['opening_amount'] += $opening['amount'];
         $totals['in_amount'] += $in['amount'];
         $totals['out_amount'] += $out['amount'];
         $totals['damage_amount'] += $damage['amount'];
         $totals['closing_amount'] += $closing['amount'];
+        $totals['count_variance_amount'] += $countVarianceAmount;
     }
 
     foreach ($totals as $k => $v) {
@@ -455,7 +500,8 @@ function sr_stock_summary_build(int $companyId, array $f): array
 
 function sr_zero_totals(): array
 {
-    return ['opening_amount' => 0.0, 'in_amount' => 0.0, 'out_amount' => 0.0, 'damage_amount' => 0.0, 'closing_amount' => 0.0];
+    return ['opening_amount' => 0.0, 'in_amount' => 0.0, 'out_amount' => 0.0, 'damage_amount' => 0.0,
+        'closing_amount' => 0.0, 'count_variance_amount' => 0.0];
 }
 
 function sr_rate(float $amount, float $qty): float

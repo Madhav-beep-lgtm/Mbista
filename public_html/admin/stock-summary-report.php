@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/stock_report_engine.php';
+require_once __DIR__ . '/../../app/stock_count.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -20,6 +21,19 @@ $userId = (int) (current_user()['id'] ?? 0);
 $sym = site_currency_symbol();
 $fyStart = (string) $fiscalYear['start_date'];
 $fyEnd = (string) $fiscalYear['end_date'];
+
+// A count date is only ever a date INSIDE the open fiscal year — null when it
+// is anything else, so a hand-edited form cannot file a count into a year the
+// screen is not looking at. Declared before the handlers because they are the
+// first thing that needs it.
+$clampCountDate = static function (string $value) use ($fyStart, $fyEnd): ?string {
+    $value = trim($value);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) || $value < $fyStart || $value > $fyEnd) {
+        return null;
+    }
+
+    return $value;
+};
 
 // ---------------------------------------------------------------------------
 // Location-specific item type mapping (FG here, RM there).
@@ -55,6 +69,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         log_activity('inventory_item', $companyId, 'stock_gl_reconcile', $msg, $userId);
         security_event('inventory_movement_posted', 'success', 'Stock-to-GL reconciliation run.', $companyId, $userId);
         flash($rec['reconciled'] ? 'success' : 'error', $msg);
+        redirect('admin/stock-summary-report.php?' . http_build_query(array_diff_key($_GET, ['lang' => ''])));
+    }
+    if (in_array((string) ($_POST['action'] ?? ''), ['save_stock_counts', 'post_stock_counts', 'unpost_stock_count'], true)) {
+        // A count is taken on ONE date at ONE place. Both come back with the
+        // form rather than being read off the current filters, so a sheet
+        // punched under one set of filters can never be filed against another.
+        $countDate = $clampCountDate((string) ($_POST['count_date'] ?? ''));
+        $countScope = sc_scope_warehouse([(int) ($_POST['count_warehouse'] ?? 0)]);
+        if ($countDate === null || $countScope === null) {
+            flash('error', 'Pick a count date inside ' . (string) $fiscalYear['label'] . ', and one location (or all of them).');
+            redirect('admin/stock-summary-report.php?' . http_build_query(array_diff_key($_GET, ['lang' => ''])));
+        }
+        if ($countScope !== SC_COMPANY_WIDE) {
+            $ownWh = db()->prepare('SELECT COUNT(*) FROM warehouses WHERE id = :id AND company_id = :cid');
+            $ownWh->execute(['id' => $countScope, 'cid' => $companyId]);
+            if ((int) $ownWh->fetchColumn() === 0) {
+                flash('error', 'That location does not belong to this company.');
+                redirect('admin/stock-summary-report.php?' . http_build_query(array_diff_key($_GET, ['lang' => ''])));
+            }
+        }
+    }
+    if (($_POST['action'] ?? '') === 'save_stock_counts') {
+        require_permission('inventory', 'edit');
+        $saved = sc_save_many($companyId, $countDate, $countScope, (array) ($_POST['counted'] ?? []), (array) ($_POST['count_notes'] ?? []), $userId);
+        $msg = 'Counted closing stock for ' . $countDate . ' (' . sc_scope_label($companyId, $countScope) . '): '
+            . $saved['saved'] . ' punched in, ' . $saved['cleared'] . ' cleared'
+            . ($saved['unchanged'] > 0 ? ', ' . $saved['unchanged'] . ' unchanged' : '') . '.';
+        if ($saved['skipped'] !== []) {
+            $msg .= ' Not taken: ' . implode(' | ', array_slice($saved['skipped'], 0, 4))
+                . (count($saved['skipped']) > 4 ? ' +' . (count($saved['skipped']) - 4) . ' more' : '');
+        }
+        if ($saved['saved'] > 0 || $saved['cleared'] > 0) {
+            log_activity('inventory_item', $companyId, 'stock_count_saved', $msg, $userId);
+        }
+        flash($saved['skipped'] === [] ? 'success' : 'error', $msg
+            . ($saved['saved'] > 0 ? ' Nothing has reached the books yet — use "Post counted closing stock" to charge the difference.' : ''));
+        redirect('admin/stock-summary-report.php?' . http_build_query(array_diff_key($_GET, ['lang' => ''])));
+    }
+    if (($_POST['action'] ?? '') === 'post_stock_counts') {
+        require_permission('accounting', 'post');
+        $chargeTo = (string) ($_POST['charge_to'] ?? 'cogs') === 'inventory_loss' ? 'inventory_loss' : 'cogs';
+        try {
+            $posted = sc_post($companyId, (int) $fiscalYear['id'], $countDate, $countScope, $chargeTo, $userId);
+            $chargeLabel = $chargeTo === 'cogs' ? 'Cost of Goods Sold' : 'Inventory Loss';
+            $msg = 'Counted closing stock posted for ' . $countDate . ' (' . sc_scope_label($companyId, $countScope) . '): '
+                . $posted['posted'] . ' difference(s) recorded, ' . $posted['agreed'] . ' item(s) counted and already correct. '
+                . $chargeLabel . ' charged ' . $sym . number_format($posted['charged'], 2)
+                . ($posted['credited'] > 0 ? ', credited back ' . $sym . number_format($posted['credited'], 2) . ' for stock found over' : '') . '.';
+            if ($posted['skipped'] !== []) {
+                $msg .= ' Left unposted: ' . implode(' | ', array_slice($posted['skipped'], 0, 4))
+                    . (count($posted['skipped']) > 4 ? ' +' . (count($posted['skipped']) - 4) . ' more' : '') . '.';
+            }
+            $msg .= ' Closing stock on this report now equals what was counted.';
+            log_activity('inventory_item', $companyId, 'stock_count_posted', $msg, $userId);
+            security_event('inventory_movement_posted', 'success', 'Physical stock count posted (' . $countDate . ').', $companyId, $userId);
+            flash($posted['skipped'] === [] ? 'success' : 'error', $msg);
+        } catch (Throwable $e) {
+            flash('error', 'Could not post the count: ' . $e->getMessage());
+        }
+        redirect('admin/stock-summary-report.php?' . http_build_query(array_diff_key($_GET, ['lang' => ''])));
+    }
+    if (($_POST['action'] ?? '') === 'unpost_stock_count') {
+        require_permission('accounting', 'post');
+        try {
+            $undone = sc_unpost($companyId, (int) ($_POST['count_id'] ?? 0), $userId, (int) $fiscalYear['id']);
+            $msg = 'Count taken back' . ($undone['reversed']
+                ? ': its stock movement was reversed and its voucher swapped Dr/Cr on the count date. The punched quantity is still on the sheet to correct.'
+                : ' — it had agreed with the books, so it had moved nothing.');
+            log_activity('inventory_item', $companyId, 'stock_count_unposted', $msg, $userId);
+            flash('success', $msg);
+        } catch (Throwable $e) {
+            flash('error', 'Could not take that count back: ' . $e->getMessage());
+        }
         redirect('admin/stock-summary-report.php?' . http_build_query(array_diff_key($_GET, ['lang' => ''])));
     }
     if (($_POST['action'] ?? '') === 'set_location_type') {
@@ -123,9 +210,26 @@ if ($filters['ledger_id'] > 0 && $filters['group_by'] === '') {
     $filters['group_by'] = 'ledger';
 }
 
+// ---------------------------------------------------------------------------
+// The physically counted closing stock for this sheet.
+//
+// A count belongs to a DATE and a PLACE: the report's "to" date, and either
+// one selected location or the whole company. Several locations at once is not
+// a shelf anybody can walk, so the column is withheld rather than guessing
+// which one the number was meant for.
+// ---------------------------------------------------------------------------
+$countDate = $to;
+$countScope = sc_scope_warehouse($filters['warehouse_ids']);
+$countReady = sc_table_ready() && $countScope !== null;
+$countScopeLabel = $countReady ? sc_scope_label($companyId, $countScope) : '';
+$filters['counts'] = $countReady ? sc_counts($companyId, $countDate, $countScope) : [];
+
 $report = sr_stock_summary($companyId, $filters);
 $rows = $report['rows'];
 $totals = $report['totals'];
+$countSummary = $countReady ? sc_sheet_summary($companyId, $countDate, $countScope, $rows) : null;
+$canPunchCount = $countReady && user_can_do('inventory', 'edit');
+$canPostCount = $countReady && user_can_do('accounting', 'post');
 
 // Server-side pagination over the computed rows (totals stay whole-report).
 $perPageRaw = (int) ($_GET['per_page'] ?? 25);
@@ -161,12 +265,28 @@ $qs = http_build_query(array_filter([
 $export = (string) ($_GET['export'] ?? '');
 if ($export !== '') {
     require_permission('reports', 'export');
+    // A count's difference, the way the screen reports it: once posted, the
+    // LIVE difference is nought by construction (closing IS the counted
+    // figure), so what is exported is what was actually charged. A sheet that
+    // said "posted" beside a difference of 0.00 would read as a day's counting
+    // that found nothing.
+    $countDiff = static function (array $r): array {
+        if ($r['counted_qty'] === null) {
+            return [null, null];
+        }
+
+        return $r['count_posted']
+            ? [(float) $r['count_posted_qty'], (float) $r['count_posted_value']]
+            : [(float) $r['count_variance_qty'], (float) $r['count_variance_amount']];
+    };
     $header = ['S.N.', 'Item Code', 'Item Name', 'Stock Group', 'Jewellery Stock Type', 'Item Type', 'Department / Location', 'UOM',
         'Opening Qty', 'Opening Rate', 'Opening Amount',
         'Inward Qty', 'Inward Rate', 'Inward Amount',
         'Outward Qty', 'Outward Rate', 'Outward Amount',
         'Damage Qty', 'Damage Rate', 'Damage Amount',
-        'Closing Qty', 'Closing Rate', 'Closing Amount', 'GL Ledger', 'Valuation Method'];
+        'Closing Qty', 'Closing Rate', 'Closing Amount',
+        'Counted Closing Qty', 'Count Variance Qty', 'Count Variance Value', 'Count Status',
+        'GL Ledger', 'Valuation Method'];
     $data = [
         [(string) $company['name']],
         ['Stock Summary Report'],
@@ -185,12 +305,15 @@ if ($export !== '') {
             $r['out_qty'], $r['out_rate'], $r['out_amount'],
             $r['damage_qty'], $r['damage_rate'], $r['damage_amount'],
             $r['closing_qty'], $r['closing_rate'], $r['closing_amount'],
+            $r['counted_qty'] ?? '', $countDiff($r)[0] ?? '', $countDiff($r)[1] ?? '',
+            $r['counted_qty'] === null ? 'not counted' : ($r['count_posted'] ? 'posted' : 'counted, not posted'),
             $r['ledger_code'] !== '' ? $r['ledger_code'] : 'not mapped',
             strtoupper(str_replace('_', ' ', $r['valuation_method']))];
     }
     $data[] = [];
     $data[] = ['TOTALS', '', '', '', '', '', '', '', '', '', $totals['opening_amount'], '', '', $totals['in_amount'],
-        '', '', $totals['out_amount'], '', '', $totals['damage_amount'], '', '', $totals['closing_amount'], '', ''];
+        '', '', $totals['out_amount'], '', '', $totals['damage_amount'], '', '', $totals['closing_amount'],
+        '', '', $totals['count_variance_amount'], '', '', ''];
     security_event('report_exported', 'success', 'Stock summary export (' . $export . ').', $companyId, $userId);
     if ($export === 'csv' || $export === 'excel') {
         export_csv('stock-summary-' . $company['code'] . '-' . $from . '-to-' . $to . ($export === 'excel' ? '.xls.csv' : '.csv'), $data);
@@ -216,15 +339,27 @@ if ($export !== '') {
         . ' · Locations: ' . e($filters['warehouse_ids'] === [] ? 'All' : implode(', ', $filters['warehouse_ids']))
         . ' · Valuation filter: ' . e($filters['valuation'] ?: 'All')
         . ' · Generated ' . e(date('Y-m-d H:i')) . '</div>';
-    echo '<table><thead><tr><th colspan="8">Basic Item Information</th><th colspan="3" class="n">Opening</th><th colspan="3" class="n">Purchase / Inward</th><th colspan="3" class="n">Sold / Consumed / Outward</th><th colspan="3" class="n">Damage / Write-off</th><th colspan="3" class="n">Closing</th><th>Val.</th></tr><tr>';
+    echo '<table><thead><tr><th colspan="8">Basic Item Information</th><th colspan="3" class="n">Opening</th><th colspan="3" class="n">Purchase / Inward</th><th colspan="3" class="n">Sold / Consumed / Outward</th><th colspan="3" class="n">Damage / Write-off</th><th colspan="3" class="n">Closing</th><th colspan="3" class="n">Physical Count</th><th>Val.</th></tr><tr>';
     foreach (['S.N.', 'Code', 'Item', 'Stock Group', 'Jewellery Stock Type', 'Type', 'Location', 'UOM'] as $h) { echo '<th>' . $h . '</th>'; }
     for ($i = 0; $i < 5; $i++) { echo '<th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th>'; }
+    echo '<th class="n">Counted</th><th class="n">Difference</th><th class="n">Diff. Value</th>';
     echo '<th>Method</th></tr></thead><tbody>';
     foreach ($rows as $i => $r) {
         echo '<tr><td>' . ($i + 1) . '</td><td>' . e($r['sku']) . '</td><td>' . e($r['name']) . '</td><td>' . e($r['stock_group']) . '</td><td>' . e($r['jewellery_stock_kind_label']) . '</td><td>' . e($r['item_type_label']) . '</td><td>' . e($r['location']) . '</td><td>' . e($r['unit']) . '</td>';
         foreach ([['opening_qty', 'opening_rate', 'opening_amount'], ['in_qty', 'in_rate', 'in_amount'], ['out_qty', 'out_rate', 'out_amount'], ['damage_qty', 'damage_rate', 'damage_amount'], ['closing_qty', 'closing_rate', 'closing_amount']] as [$q, $ra, $am]) {
             $neg = $r[$q] < 0 ? ' neg' : '';
             echo '<td class="n' . $neg . '">' . number_format($r[$q], 3) . '</td><td class="n">' . $fmt($r[$ra]) . '</td><td class="n' . $neg . '">' . $fmt($r[$am]) . '</td>';
+        }
+        // A counted row prints what was counted and what it costs; an
+        // uncounted one prints dashes rather than a misleading zero.
+        [$diffQty, $diffValue] = $countDiff($r);
+        if ($diffQty === null) {
+            echo '<td class="n">–</td><td class="n">–</td><td class="n">–</td>';
+        } else {
+            $vneg = $diffQty < 0 ? ' neg' : '';
+            echo '<td class="n">' . number_format((float) $r['counted_qty'], 3) . '</td>'
+                . '<td class="n' . $vneg . '">' . number_format($diffQty, 3) . '</td>'
+                . '<td class="n' . $vneg . '">' . $fmt($diffValue) . '</td>';
         }
         echo '<td>' . e(strtoupper(str_replace('_', ' ', $r['valuation_method']))) . '</td></tr>';
     }
@@ -233,8 +368,10 @@ if ($export !== '') {
         . '<td colspan="2"></td><td class="n">' . $fmt($totals['in_amount']) . '</td>'
         . '<td colspan="2"></td><td class="n">' . $fmt($totals['out_amount']) . '</td>'
         . '<td colspan="2"></td><td class="n">' . $fmt($totals['damage_amount']) . '</td>'
-        . '<td colspan="2"></td><td class="n">' . $fmt($totals['closing_amount']) . '</td><td></td></tr>';
-    echo '</tbody></table><div class="meta" style="margin-top:6px">Quantity totals are deliberately not combined across units. Outward and damage amounts are inventory cost, never selling price.</div></body></html>';
+        . '<td colspan="2"></td><td class="n">' . $fmt($totals['closing_amount']) . '</td>'
+        . '<td colspan="2"></td><td class="n">' . $fmt($totals['count_variance_amount']) . '</td><td></td></tr>';
+    echo '</tbody></table><div class="meta" style="margin-top:6px">Quantity totals are deliberately not combined across units. Outward and damage amounts are inventory cost, never selling price. '
+        . 'Physical Count is the closing quantity somebody counted on ' . e($to) . '; its difference is what posting the count charges to cost of sales.</div></body></html>';
     exit;
 }
 
@@ -351,7 +488,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php foreach ([
                     'grp-open' => 'Opening Balance', 'grp-in' => 'Purchase / Inward',
                     'grp-out' => 'Sold / Consumed / Outward', 'grp-dmg' => 'Damage / Write-off',
-                    'grp-close' => 'Closing Balance', 'grp-other' => 'Valuation / Action',
+                    'grp-close' => 'Closing Balance', 'grp-count' => 'Physical Count',
+                    'grp-other' => 'Valuation / Action',
                 ] as $groupClass => $groupLabel): ?>
                     <label style="display:flex;gap:8px;align-items:center;font-weight:500">
                         <input type="checkbox" checked data-col-group="<?= e($groupClass) ?>"> <?= e($groupLabel) ?>
@@ -363,11 +501,91 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
+<section class="mbw-card" aria-label="Counted closing stock">
+    <div class="mbw-card-head">
+        <h2><?= icon('inventory') ?>Counted closing stock — punch what is actually on the shelf</h2>
+        <div class="mbw-card-tools">
+            <span class="mbw-pill tone-blue">Count date <?= e($to) ?><?= $countReady ? ' · ' . e($countScopeLabel) : '' ?></span>
+        </div>
+    </div>
+    <?php if (!sc_table_ready()): ?>
+        <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">Counted closing stock is not available on this database yet — reload the page once and the store creates itself.</p>
+    <?php elseif ($countScope === null): ?>
+        <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">
+            <?= count($filters['warehouse_ids']) ?> locations are selected. A count is taken at ONE place — pick a single location,
+            or clear the filter to count the whole company, and the <strong>Counted Qty</strong> column appears in the sheet below.
+        </p>
+    <?php else: ?>
+        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
+            Closing stock above is <em>derived</em>: opening + inward − outward − damage, from the movements that were recorded.
+            A shop that records what it buys but not what it consumes — a kitchen, a cafe — has no outward row for the milk that went into the coffee,
+            so the report says the milk is still there and the cost of it never reaches the books.
+            <strong>Punch the counted quantity into the sheet below</strong>, then post it: the difference is written as a real stock movement at inventory cost
+            (<strong>Dr Cost of Goods Sold · Cr Inventory</strong>), which both charges the actual COGS and makes the derived closing stock equal what was counted.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <span class="mbw-pill <?= $countSummary['open'] > 0 ? 'tone-amber' : 'tone-blue' ?>"><?= (int) $countSummary['open'] ?> punched, not posted</span>
+            <?php if ($countSummary['shortfall_qty'] > 0): ?>
+                <span class="mbw-pill tone-red">Short on the shelf — <?= e($sym . number_format($countSummary['shortfall_value'], 2)) ?> to charge</span>
+            <?php endif; ?>
+            <?php if ($countSummary['surplus_qty'] > 0): ?>
+                <span class="mbw-pill tone-green">Found over — <?= e($sym . number_format($countSummary['surplus_value'], 2)) ?> to credit back</span>
+            <?php endif; ?>
+            <?php if ($countSummary['posted'] > 0): ?>
+                <span class="mbw-pill tone-green"><?= (int) $countSummary['posted'] ?> posted
+                    (<?= (int) $countSummary['agreed'] ?> agreed with the books) · charged <?= e($sym . number_format($countSummary['posted_charged'], 2)) ?><?= $countSummary['posted_credited'] > 0 ? ', credited ' . e($sym . number_format($countSummary['posted_credited'], 2)) : '' ?></span>
+            <?php endif; ?>
+        </div>
+        <?php if ($canPostCount && $countSummary['open'] > 0): ?>
+        <form method="post" style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap"
+              data-confirm="Post the counted closing stock for <?= e($to) ?>? Every difference becomes a stock movement on that date with its own accounting voucher. Closing stock then equals what was counted, and the difference is charged as cost. Each count can be taken back individually afterwards.">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="post_stock_counts">
+            <input type="hidden" name="count_date" value="<?= e($to) ?>">
+            <input type="hidden" name="count_warehouse" value="<?= (int) $countScope ?>">
+            <label style="max-width:340px">Charge the shortfall to
+                <select name="charge_to">
+                    <option value="cogs">Cost of Goods Sold — it was sold or consumed (default)</option>
+                    <option value="inventory_loss">Inventory Loss — it was broken, spoiled or stolen</option>
+                </select>
+            </label>
+            <button type="submit"><?= icon('badge-check') ?>Post counted closing stock (<?= (int) $countSummary['open'] ?>)</button>
+        </form>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
+            This posts every count punched for <?= e($to) ?> at <?= e($countScopeLabel) ?>, including rows the current filters keep off the screen.
+            Stock found <em>over</em> the books always goes back the other way — inward at carrying cost, crediting the same account.
+            An item whose ledgers are not mapped is left unposted with its reason rather than having its quantity moved while its cost lands nowhere.
+        </p>
+        <?php elseif (!$canPostCount): ?>
+        <p style="margin:0;color:var(--mbw-muted);font-size:12px">Punched counts are listed in the sheet below. Posting them to the books needs the <strong>accounting · post</strong> permission.</p>
+        <?php else: ?>
+        <p style="margin:0;color:var(--mbw-muted);font-size:12px">Nothing is waiting to be posted for <?= e($to) ?>. Punch a counted quantity into the sheet below and save it, and the posting button appears here.</p>
+        <?php endif; ?>
+    <?php endif; ?>
+</section>
+
+<?php if ($countReady && $canPostCount): ?>
+    <!-- Every posted row's "Unpost" button belongs to THIS form: a form cannot
+         be nested inside the sheet's own form, and the button carries the count
+         id as its own name/value, so no script is needed to work out which. -->
+    <form method="post" id="ssrUnpostCount">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="unpost_stock_count">
+    </form>
+<?php endif; ?>
+
 <section class="mbw-card" aria-label="Stock summary table">
     <div class="mbw-card-head">
         <h2>Items (<?= count($rows) ?>)</h2>
         <div class="mbw-card-tools"><span class="mbw-pill tone-blue">Page <?= $page ?> / <?= $pageCount ?></span></div>
     </div>
+    <?php if ($canPunchCount): ?>
+    <form method="post" id="ssrCountSheet">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="save_stock_counts">
+        <input type="hidden" name="count_date" value="<?= e($to) ?>">
+        <input type="hidden" name="count_warehouse" value="<?= (int) $countScope ?>">
+    <?php endif; ?>
     <div class="ssr-scroll" style="overflow-x:auto;max-height:70vh;overflow-y:auto">
     <table class="ssr-table">
         <thead>
@@ -378,6 +596,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <th colspan="3" class="grp-out">Sold / Consumed / Outward</th>
                 <th colspan="3" class="grp-dmg">Damage / Write-off</th>
                 <th colspan="3" class="grp-close">Closing Balance</th>
+                <th colspan="3" class="grp-count">Physical Count (<?= e($to) ?>)</th>
                 <th colspan="3" class="grp-other">Other</th>
             </tr>
             <tr class="ssr-h2">
@@ -387,12 +606,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <th class="is-numeric grp-out">Qty</th><th class="is-numeric grp-out">Rate</th><th class="is-numeric grp-out">Amount</th>
                 <th class="is-numeric grp-dmg">Qty</th><th class="is-numeric grp-dmg">Rate</th><th class="is-numeric grp-dmg">Amount</th>
                 <th class="is-numeric grp-close">Qty</th><th class="is-numeric grp-close">Rate</th><th class="is-numeric grp-close">Amount</th>
+                <th class="is-numeric grp-count" title="The quantity somebody counted on the shelf as at <?= e($to) ?>">Counted Qty</th>
+                <th class="is-numeric grp-count" title="Counted minus the closing quantity the movements add up to">Difference</th>
+                <th class="is-numeric grp-count" title="What that difference costs — charged to COGS when the count is posted">Diff. Value</th>
                 <th class="grp-other">GL Ledger</th><th class="grp-other">Valuation</th><th class="grp-other">Action</th>
             </tr>
         </thead>
         <tbody>
             <?php if ($pageRows === []): ?>
-                <tr><td colspan="24" style="text-align:center;color:var(--mbw-muted);padding:24px">No items match the filters for <?= e($from) ?> → <?= e($to) ?>.</td></tr>
+                <tr><td colspan="27" style="text-align:center;color:var(--mbw-muted);padding:24px">No items match the filters for <?= e($from) ?> → <?= e($to) ?>.</td></tr>
             <?php endif; ?>
             <?php
             // Per-GL-ledger subtotals when grouped by ledger — each subtotal is
@@ -425,9 +647,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     $stockSub = $stockKindSubtotals[$prevStockKind];
             ?>
                 <tr style="background:var(--mbw-soft,#eef5f0);font-weight:700">
-                    <td colspan="21"><?= icon('inventory') ?> <?= e($stockSub['label']) ?> — <?= (int) $stockSub['count'] ?> item(s)</td>
+                    <td colspan="18"><?= icon('inventory') ?> <?= e($stockSub['label']) ?> — <?= (int) $stockSub['count'] ?> item(s)</td>
+                    <td colspan="2" class="grp-close"></td>
                     <td class="is-numeric grp-close"><?= e($sym . number_format($stockSub['closing'], 2)) ?></td>
-                    <td colspan="2" class="grp-other" style="font-weight:500;color:var(--mbw-muted)">closing stock value</td>
+                    <td colspan="3" class="grp-count"></td>
+                    <td colspan="3" class="grp-other" style="font-weight:500;color:var(--mbw-muted)">closing stock value</td>
                 </tr>
             <?php endif;
                 if ($filters['group_by'] === 'ledger' && $prevLedgerKey !== (int) $r['ledger_id']):
@@ -435,10 +659,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     $sub = $ledgerSubtotals[$prevLedgerKey];
             ?>
                 <tr style="background:var(--mbw-soft,#eef5f0);font-weight:700">
-                    <td colspan="21"><?= icon('contracts') ?> <?= e($sub['label']) ?> — <?= (int) $sub['count'] ?> item(s)
+                    <td colspan="18"><?= icon('contracts') ?> <?= e($sub['label']) ?> — <?= (int) $sub['count'] ?> item(s)
                         <?php if ((int) $r['ledger_id'] > 0): ?><a class="mbw-view-all" style="margin-left:8px" href="<?= e(url('admin/ledgers.php?ledger_id=' . (int) $r['ledger_id'])) ?>">open GL ledger →</a><?php endif; ?></td>
-                    <td class="is-numeric grp-close" colspan="1"><?= e($sym . number_format($sub['closing'], 2)) ?></td>
-                    <td colspan="2" class="grp-other" style="font-weight:500;color:var(--mbw-muted)">= trial-balance line</td>
+                    <td colspan="2" class="grp-close"></td>
+                    <td class="is-numeric grp-close"><?= e($sym . number_format($sub['closing'], 2)) ?></td>
+                    <td colspan="3" class="grp-count"></td>
+                    <td colspan="3" class="grp-other" style="font-weight:500;color:var(--mbw-muted)">= trial-balance line</td>
                 </tr>
             <?php endif; ?>
                 <tr>
@@ -455,11 +681,51 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <td class="is-numeric <?= $grp ?>"><?= $r[$qk] > 0.0005 || $r[$rk] > 0 ? e(number_format($r[$rk], 2)) : '–' ?></td>
                         <td class="is-numeric <?= $grp ?><?= $r[$ak] < 0 ? ' ssr-neg' : '' ?>"><?= e(number_format($r[$ak], 2)) ?></td>
                     <?php endforeach; ?>
+                    <?php
+                    // The counted quantity. An input while the count is still
+                    // the counter's to change; the figure itself once it has
+                    // been posted, because by then it is what the books say.
+                    $counted = $r['counted_qty'];
+                    $countIsPosted = (bool) $r['count_posted'];
+                    $varianceQty = $countIsPosted ? (float) $r['count_posted_qty'] : (float) $r['count_variance_qty'];
+                    $varianceValue = $countIsPosted ? (float) $r['count_posted_value'] : (float) $r['count_variance_amount'];
+                    $varianceClass = $varianceQty < -0.0005 ? ' ssr-neg' : ($varianceQty > 0.0005 ? ' ssr-pos' : '');
+                    ?>
+                    <td class="is-numeric grp-count">
+                        <?php if ($canPunchCount && !$countIsPosted): ?>
+                            <input class="ssr-count-input" type="number" step="0.001" min="0" inputmode="decimal"
+                                   name="counted[<?= (int) $r['item_id'] ?>]"
+                                   value="<?= $counted !== null ? e(rtrim(rtrim(number_format((float) $counted, 3, '.', ''), '0'), '.')) : '' ?>"
+                                   aria-label="Counted closing quantity for <?= e($r['sku']) ?>"
+                                   placeholder="<?= e(number_format($r['closing_qty'], 3)) ?>">
+                        <?php elseif ($counted !== null): ?>
+                            <?= e(number_format((float) $counted, 3)) ?>
+                        <?php else: ?>
+                            <span style="color:var(--mbw-muted)">&ndash;</span>
+                        <?php endif; ?>
+                    </td>
+                    <td class="is-numeric grp-count<?= $counted !== null ? $varianceClass : '' ?>">
+                        <?= $counted !== null ? e(number_format($varianceQty, 3)) : '<span style="color:var(--mbw-muted)">&ndash;</span>' ?>
+                    </td>
+                    <td class="is-numeric grp-count<?= $counted !== null ? $varianceClass : '' ?>">
+                        <?php if ($counted === null): ?><span style="color:var(--mbw-muted)">&ndash;</span>
+                        <?php else: ?><?= e(number_format($varianceValue, 2)) ?>
+                            <?php if ($countIsPosted): ?><br><small class="mbw-pill tone-green" title="Charged to <?= $r['count_charge_to'] === 'cogs' ? 'Cost of Goods Sold' : 'Inventory Loss' ?> on <?= e($to) ?>">posted</small>
+                            <?php else: ?><br><small style="color:var(--mbw-muted)">not posted</small><?php endif; ?>
+                        <?php endif; ?>
+                    </td>
                     <td class="grp-other" style="white-space:nowrap"><?= (int) $r['ledger_id'] > 0
                         ? '<a href="' . e(url('admin/ledgers.php?ledger_id=' . (int) $r['ledger_id'])) . '" title="' . e($r['ledger_name']) . '">' . e($r['ledger_code']) . '</a>'
                         : '<span class="mbw-pill tone-amber" title="Map the item\'s stock ledger so its value reaches the books">not mapped</span>' ?></td>
                     <td class="grp-other"><?= e(strtoupper(str_replace('_', ' ', $r['valuation_method']))) ?></td>
-                    <td class="grp-other"><a class="button secondary" style="min-height:28px;padding:2px 8px;white-space:nowrap" href="<?= e($ledgerUrl) ?>">View Stock Ledger</a></td>
+                    <td class="grp-other" style="white-space:nowrap">
+                        <a class="button secondary" style="min-height:28px;padding:2px 8px;white-space:nowrap" href="<?= e($ledgerUrl) ?>">View Stock Ledger</a>
+                        <?php if ($countIsPosted && $canPostCount): ?>
+                            <button class="button secondary" style="min-height:28px;padding:2px 8px;white-space:nowrap;margin-top:4px"
+                                    type="submit" form="ssrUnpostCount" name="count_id" value="<?= (int) $r['count_id'] ?>"
+                                    data-confirm="Take back the counted closing stock for <?= e($r['sku']) ?>? Its stock movement is reversed and its voucher swapped Dr/Cr on <?= e($to) ?>. The counted quantity stays on the sheet so it can be corrected and posted again.">Unpost count</button>
+                        <?php endif; ?>
+                    </td>
                 </tr>
             <?php endforeach; ?>
             <?php if ($rows !== []): ?>
@@ -470,12 +736,25 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <td colspan="2" class="grp-out"></td><td class="is-numeric grp-out"><?= e($sym . number_format($totals['out_amount'], 2)) ?></td>
                 <td colspan="2" class="grp-dmg"></td><td class="is-numeric grp-dmg"><?= e($sym . number_format($totals['damage_amount'], 2)) ?></td>
                 <td colspan="2" class="grp-close"></td><td class="is-numeric grp-close"><?= e($sym . number_format($totals['closing_amount'], 2)) ?></td>
+                <td colspan="2" class="grp-count"></td>
+                <td class="is-numeric grp-count" title="The difference still waiting to be posted. A row already posted has had its charge taken to the books, so it counts nothing here."><?= e($sym . number_format($totals['count_variance_amount'], 2)) ?></td>
                 <td colspan="3" class="grp-other"></td>
             </tr>
             <?php endif; ?>
         </tbody>
     </table>
     </div>
+    <?php if ($canPunchCount): ?>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
+            <button type="submit"><?= icon('badge-check') ?>Save counted quantities</button>
+            <small style="color:var(--mbw-muted)">
+                Saves the whole page of counts for <strong><?= e($to) ?></strong> at <strong><?= e($countScopeLabel) ?></strong>.
+                An empty box takes that item back off the sheet; <strong>0</strong> means the shelf is empty and is counted as such.
+                Saving records the count only &mdash; the books are unchanged until it is posted above.
+            </small>
+        </div>
+    </form>
+    <?php endif; ?>
     <nav class="ssr-pagination" aria-label="Stock summary pages">
         <div class="ssr-pagination-summary">
             Showing <strong><?= $showingFrom ?>â€“<?= $showingTo ?></strong> of <strong><?= $rowCount ?></strong> records
@@ -534,6 +813,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         Outward and damage amounts are inventory <strong>cost</strong> (FIFO / weighted average replay), never selling price. Damage rows (damage, expiry, write-off) are excluded from normal outward — no double counting.
         Closing = opening + inward − outward − damage, and its amount comes from the remaining valuation layers as of <?= e($to) ?>.
         Warehouse-scoped amounts value exact per-location quantities at company-level carrying cost (transfers never re-cost stock).
+        <strong>Physical Count</strong> is what somebody counted on the shelf as at <?= e($to) ?>; until it is posted it changes nothing,
+        and once it is posted the closing quantity beside it IS the counted one, with the difference charged as cost.
     </p>
 </section>
 
@@ -629,12 +910,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 .grp-out   { background: #fbf3e6; }
 .grp-dmg   { background: #fbeeed; }
 .grp-close { background: #e9f0ec; }
+.grp-count { background: #eef0fa; }
 .grp-other { background: #f5f7f5; }
-.grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-other {
+.grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-count, .grp-other {
     border-left: 1px solid #d9e0da;
 }
 @media print {
-    .grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-other {
+    .grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-count, .grp-other {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }
@@ -681,7 +963,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 .ssr-h2 .ssr-sticky-1, .ssr-h2 .ssr-sticky-2 { z-index: 6; }
 .ssr-totals td { font-weight: 700; background: var(--mbw-soft, #eef5f0); position: sticky; bottom: 0; }
 .ssr-neg { color: #c62828; font-weight: 600; }
+.ssr-pos { color: #1b6b3a; font-weight: 600; }
 .ssr-table .is-numeric { text-align: right; font-variant-numeric: tabular-nums; }
+/* The one cell on this sheet that is typed into rather than read. Sized to a
+   quantity and right-aligned like the figure it will become, so a punched
+   count sits in the same column of digits as the number it is being compared
+   to, and the placeholder shows what the books currently say. */
+.ssr-count-input {
+    width: 96px; min-height: 28px; padding: 3px 6px; text-align: right;
+    font: inherit; font-variant-numeric: tabular-nums;
+    border: 1px solid var(--mbw-line, rgba(0,0,0,.25)); border-radius: 6px;
+    background: var(--mbw-card, #fff); color: var(--mbw-ink, #12261f);
+}
+.ssr-count-input::placeholder { color: var(--mbw-muted, #93a29b); font-weight: 400; }
+.ssr-count-input:focus { outline: 2px solid var(--mbw-accent, #2f7fb8); outline-offset: 1px; }
 </style>
 <script>
 (function () {

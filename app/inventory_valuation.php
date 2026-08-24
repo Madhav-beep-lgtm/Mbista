@@ -1568,6 +1568,16 @@ function inv_movement_posting_plan(string $type, string $direction): ?array
             return $direction === 'in'
                 ? ['debit' => 'inventory_asset', 'credit' => 'inventory_gain']
                 : ['debit' => 'inventory_loss', 'credit' => 'inventory_asset'];
+        case 'stock_count':
+            // The difference between the shelf and the replay, when the shelf
+            // is right because the outflow was never recorded item by item --
+            // a kitchen's milk, a cafe's beans. That shortfall is what was
+            // SOLD, so it is cost of sales, not shrinkage; a surplus is cost
+            // of sales that never happened, so it comes back off it. Breakage
+            // and theft still belong to 'adjustment' and its loss account.
+            return $direction === 'in'
+                ? ['debit' => 'inventory_asset', 'credit' => 'cogs']
+                : ['debit' => 'cogs', 'credit' => 'inventory_asset'];
         case 'nrv_write_down':
             return ['debit' => 'write_down_expense', 'credit' => 'write_down_allowance'];
         case 'nrv_reversal':
@@ -1715,6 +1725,7 @@ function inv_transaction_purposes(string $transactionType): array
         'sale', 'sales_delivery'  => ['inventory_asset', 'cogs'],
         'sales_return'            => ['inventory_asset', 'cogs'],
         'adjustment'              => ['inventory_asset', 'inventory_gain', 'inventory_loss'],
+        'stock_count'             => ['inventory_asset', 'cogs'],
         'write_off', 'damage', 'expiry' => ['inventory_asset', 'inventory_loss'],
         'material_issue'          => ['wip', 'raw_material'],
         'material_return'         => ['raw_material', 'wip'],

@@ -857,7 +857,8 @@ function accounting_module_repair_database(): array
         db()->exec("ALTER TABLE `inventory_transactions` MODIFY COLUMN `transaction_type` ENUM(
             'opening', 'purchase', 'sale', 'sales_return', 'purchase_return', 'adjustment',
             'consume', 'produce', 'write_off', 'damage', 'expiry',
-            'warehouse_transfer', 'departmental_transfer', 'nrv_write_down', 'nrv_reversal'
+            'warehouse_transfer', 'departmental_transfer', 'nrv_write_down', 'nrv_reversal',
+            'stock_count'
         ) NOT NULL DEFAULT 'adjustment'");
     });
 
@@ -3735,6 +3736,43 @@ function accounting_module_repair_database(): array
                AND t.`holder_type` = 'stock'
                AND t.`qty_pieces` <= 0
                AND r.`qty_pieces` > 0");
+    });
+
+    $run('The closing stock somebody counted (migration 126)', static function (): void {
+        // A shop that records what it BUYS but not what it CONSUMES -- a
+        // kitchen, a cafe -- has a replayed closing stock that says the milk
+        // is all still on the shelf, and a cost of sales that never happened.
+        // The count is how the shelf gets a say: punch what is actually there,
+        // and the difference posts as the consumption it was.
+        if (!accounting_repair_table_exists('inventory_stock_counts')) {
+            db()->exec("CREATE TABLE IF NOT EXISTS `inventory_stock_counts` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `item_id` INT UNSIGNED NOT NULL,
+                `warehouse_id` INT UNSIGNED NOT NULL DEFAULT 0,
+                `count_date` DATE NOT NULL,
+                `counted_qty` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `system_qty` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `variance_qty` DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+                `variance_value` DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                `charge_to` ENUM('cogs', 'inventory_loss') NOT NULL DEFAULT 'cogs',
+                `notes` VARCHAR(255) DEFAULT NULL,
+                `txn_id` INT UNSIGNED DEFAULT NULL,
+                `voucher_id` INT UNSIGNED DEFAULT NULL,
+                `counted_by` INT UNSIGNED DEFAULT NULL,
+                `posted_by` INT UNSIGNED DEFAULT NULL,
+                `posted_at` DATETIME DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_inv_stock_count` (`company_id`, `item_id`, `warehouse_id`, `count_date`),
+                KEY `idx_inv_stock_count_date` (`company_id`, `count_date`),
+                KEY `idx_inv_stock_count_open` (`company_id`, `count_date`, `posted_at`),
+                KEY `idx_inv_stock_count_txn` (`txn_id`),
+                CONSTRAINT `fk_inv_stock_count_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_inv_stock_count_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
     });
 
     return $errors;
