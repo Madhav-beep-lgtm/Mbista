@@ -845,8 +845,15 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         case 'consolidated': {
             $companies = array_merge([['id' => $ctx['company_id'], 'name' => $ctx['company_name']]], $ctx['subsidiaries']);
             $matrix = [];
+            // This reads closing_net, which is opening PLUS the period, so it
+            // has to be told where the fiscal year starts. Without it the
+            // income and expense accounts never reset and every subsidiary
+            // reports its sales cumulatively since the company was founded —
+            // right for the balance sheet half of the matrix, and wrong by an
+            // entire company history for the other half.
+            $consolidatedFyStart = rc_ctx_fy_start($ctx);
             foreach ($companies as $entity) {
-                foreach (rc_ledger_balances((int) $entity['id'], $from, $to) as $b) {
+                foreach (rc_ledger_balances((int) $entity['id'], $from, $to, '', 0, 0, [], $consolidatedFyStart) as $b) {
                     $key = $b['code'] . '|' . $b['name'];
                     $matrix[$key][(int) $entity['id']] = (float) $b['closing_net'];
                 }

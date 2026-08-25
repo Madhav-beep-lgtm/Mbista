@@ -3663,8 +3663,11 @@ function create_voucher_with_entries(array $voucher, array $entries): int
         'fiscal_year_id' => $voucher['fiscal_year_id'],
         'voucher_no' => $voucher['voucher_no'],
         'voucher_type' => $voucher['voucher_type'],
-        'source_type' => $voucher['source_type'],
-        'source_id' => $voucher['source_id'],
+        // Optional, like every other key around them: a plain manual journal
+        // has no source document, and reading them unguarded made the shared
+        // writer emit two PHP warnings for the ordinary case.
+        'source_type' => $voucher['source_type'] ?? null,
+        'source_id' => $voucher['source_id'] ?? null,
         'narration' => $voucher['narration'] ?? null,
         'total_amount' => $voucher['total_amount'],
         'status' => $voucher['status'] ?? 'posted',
