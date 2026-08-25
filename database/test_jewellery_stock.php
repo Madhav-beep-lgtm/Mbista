@@ -616,7 +616,52 @@ ok($jwsCodes(jewellery_opening_filter($jwsSample, ['search' => 'ch-9'])) === 'CH
 ok($jwsCodes(jewellery_opening_filter($jwsSample, ['group' => 'Bangles'])) === 'BG-1,BG-2', 'The group filter narrows to one group');
 ok($jwsCodes(jewellery_opening_filter($jwsSample, ['group' => 'uncategorised'])) === 'CH-9',
     'An item under no group answers to the name the screen prints for it');
-ok($jwsCodes(jewellery_opening_filter($jwsSample, ['purity' => '22'])) === 'BG-1,RG-3,BG-2', 'Purity matches on part of the code');
+// Purity is picked from a dropdown of whole codes now, so it matches whole
+// codes. It used to match on any part of one, which was right for a box you
+// typed into and wrong the moment the value is chosen rather than typed: "22"
+// would quietly stand for 22K, and on a chart holding PT900 and PT950 a chosen
+// value could bring back a purity nobody asked for.
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['purity' => '22K'])) === 'BG-1,RG-3,BG-2',
+    'Purity matches the whole code');
+ok(jewellery_opening_filter($jwsSample, ['purity' => '22']) === [],
+    '  ...and half of one matches nothing, because a dropdown never sends half of one');
+
+echo "\n17b. Item code and item name are asked separately\n";
+// One box that searched both could answer neither cleanly.
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['code' => 'BG-1'])) === 'BG-1',
+    'The code filter finds exactly its item');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['name' => 'Bangle Two'])) === 'BG-2',
+    'The name filter finds exactly its item');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['code' => 'bg-1'])) === 'BG-1',
+    'Neither minds the case');
+ok(jewellery_opening_filter($jwsSample, ['code' => 'BG']) === [],
+    'A code is matched WHOLE — "BG" is not BG-1, or picking one bangle would return both');
+ok(jewellery_opening_filter($jwsSample, ['name' => 'Bangle']) === [],
+    '  ...and so is a name');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['code' => 'BG-1', 'name' => 'Bangle Two'])) === '',
+    'Asked for a code and a name that are not the same item, the answer is nothing');
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['code' => 'BG-2', 'group' => 'Bangles'])) === 'BG-2',
+    'And they combine with the other filters rather than replacing them');
+// The old single-box search is left working for anything still passing one.
+ok($jwsCodes(jewellery_opening_filter($jwsSample, ['search' => 'bangle'])) === 'BG-1,BG-2',
+    'The older one-box search still reads part of a word, across code and name');
+
+echo "\n17c. What the dropdowns offer\n";
+$jwsOptions = jewellery_opening_filter_options($jwsSample);
+ok($jwsOptions['codes'] === ['BG-1', 'BG-2', 'CH-9', 'RG-3'], 'Every item code, in natural order');
+ok($jwsOptions['names'] === ['Bangle One', 'Bangle Two', 'Chain Nine', 'Ring Three'], 'Every item name');
+ok($jwsOptions['groups'] === ['Bangles', 'Rings', JW_OPENING_NO_GROUP]
+    || $jwsOptions['groups'] === ['Bangles', 'Rings', 'Uncategorised'],
+    'Every group, with the ungrouped one named as the screen names it: '
+    . implode(', ', $jwsOptions['groups']));
+ok($jwsOptions['purities'] === ['22K', '24K'], 'Every purity, once each — 22K appears three times in the rows');
+// BG-10 must sit after BG-2, not between BG-1 and BG-2.
+$jwsNatural = jewellery_opening_filter_options(array_merge($jwsSample, [
+    ['item_code' => 'BG-10', 'item_name' => 'Bangle Ten', 'category' => 'Bangles', 'purity_code' => '22K'],
+]));
+ok($jwsNatural['codes'] === ['BG-1', 'BG-2', 'BG-10', 'CH-9', 'RG-3'],
+    '  ...and BG-10 sorts after BG-2, the way a person reads a code');
+ok(jewellery_opening_filter_options([])['codes'] === [], 'An empty screen offers an empty list, not a warning');
 ok($jwsCodes(jewellery_opening_filter($jwsSample, ['kind' => 'customer_ordered'])) === 'CH-9', 'Stock type is an exact match');
 ok(jewellery_opening_status($jwsSample[0]) === 'posted'
     && jewellery_opening_status($jwsSample[1]) === 'weight'

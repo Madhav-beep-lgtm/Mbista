@@ -1828,17 +1828,35 @@ function jewellery_opening_status(array $row): string
  */
 function jewellery_opening_filter(array $rows, array $filters): array
 {
-    $search = mb_strtolower(trim((string) ($filters['search'] ?? '')));
-    $group = mb_strtolower(trim((string) ($filters['group'] ?? '')));
-    $purity = mb_strtolower(trim((string) ($filters['purity'] ?? '')));
+    // CODE and NAME are asked separately, because they are separate questions.
+    // One box that searched both could not answer either of them cleanly: a
+    // code typed into it matched every name containing those characters, and a
+    // name matched codes. They are picked from dropdowns of what is actually
+    // on the screen, so each carries a WHOLE value and is matched exactly --
+    // "GOLD" must not also bring back "GOLD CHAIN", which is precisely what a
+    // substring match on a chosen value would do.
+    //
+    // `search` remains for anything that still passes one string meaning
+    // "either of those", and it stays a substring match, because a half-typed
+    // word is the only thing it was ever for.
+    $lower = static fn ($value): string => mb_strtolower(trim((string) $value));
+    $search = $lower($filters['search'] ?? '');
+    $code = $lower($filters['code'] ?? '');
+    $name = $lower($filters['name'] ?? '');
+    $group = $lower($filters['group'] ?? '');
+    $purity = $lower($filters['purity'] ?? '');
     $kind = (string) ($filters['kind'] ?? '');
     $status = (string) ($filters['status'] ?? '');
-    if ($search === '' && $group === '' && $purity === '' && $kind === '' && $status === '') {
+    if ($search === '' && $code === '' && $name === '' && $group === ''
+        && $purity === '' && $kind === '' && $status === '') {
         return array_values($rows);
     }
 
-    $has = static function (string $haystack, string $needle): bool {
-        return $needle === '' || mb_strpos(mb_strtolower($haystack), $needle) !== false;
+    $has = static function (string $haystack, string $needle) use ($lower): bool {
+        return $needle === '' || mb_strpos($lower($haystack), $needle) !== false;
+    };
+    $is = static function (string $haystack, string $needle) use ($lower): bool {
+        return $needle === '' || $lower($haystack) === $needle;
     };
 
     $kept = [];
@@ -1848,11 +1866,17 @@ function jewellery_opening_filter(array $rows, array $filters): array
             && !$has((string) ($row['item_name'] ?? ''), $search)) {
             continue;
         }
-        $rowGroup = trim((string) ($row['category'] ?? ''));
-        if (!$has($rowGroup !== '' ? $rowGroup : JW_OPENING_NO_GROUP, $group)) {
+        if (!$is((string) ($row['item_code'] ?? ''), $code)) {
             continue;
         }
-        if (!$has((string) ($row['purity_code'] ?? ''), $purity)) {
+        if (!$is((string) ($row['item_name'] ?? ''), $name)) {
+            continue;
+        }
+        $rowGroup = trim((string) ($row['category'] ?? ''));
+        if (!$is($rowGroup !== '' ? $rowGroup : JW_OPENING_NO_GROUP, $group)) {
+            continue;
+        }
+        if (!$is((string) ($row['purity_code'] ?? ''), $purity)) {
             continue;
         }
         if ($kind !== '' && (string) ($row['stock_kind'] ?? 'showroom') !== $kind) {
@@ -1865,6 +1889,50 @@ function jewellery_opening_filter(array $rows, array $filters): array
     }
 
     return $kept;
+}
+
+/**
+ * The distinct values each dropdown on the Opening Stock filter bar offers.
+ *
+ * Built from EVERY row the screen holds, not from the rows the current filter
+ * left behind — a dropdown that only offered what is already on screen could
+ * never be used to widen a search, only to narrow one that was already right.
+ *
+ * @return array{codes: array<int,string>, names: array<int,string>,
+ *               groups: array<int,string>, purities: array<int,string>}
+ */
+function jewellery_opening_filter_options(array $rows): array
+{
+    $codes = [];
+    $names = [];
+    $groups = [];
+    $purities = [];
+    foreach ($rows as $row) {
+        $code = trim((string) ($row['item_code'] ?? ''));
+        if ($code !== '') {
+            $codes[$code] = true;
+        }
+        $name = trim((string) ($row['item_name'] ?? ''));
+        if ($name !== '') {
+            $names[$name] = true;
+        }
+        $group = trim((string) ($row['category'] ?? ''));
+        $groups[$group !== '' ? $group : JW_OPENING_NO_GROUP] = true;
+        $purity = trim((string) ($row['purity_code'] ?? ''));
+        if ($purity !== '') {
+            $purities[$purity] = true;
+        }
+    }
+    // Natural order, so BG-2 sits before BG-10 rather than after it.
+    $sorted = static function (array $set): array {
+        $out = array_keys($set);
+        natcasesort($out);
+
+        return array_values($out);
+    };
+
+    return ['codes' => $sorted($codes), 'names' => $sorted($names),
+        'groups' => $sorted($groups), 'purities' => $sorted($purities)];
 }
 
 /**

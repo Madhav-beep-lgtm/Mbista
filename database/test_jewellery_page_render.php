@@ -503,7 +503,12 @@ echo "\nOpening stock asks its questions on the server\n";
 // handed a ten-megabyte document to look at fifty rows of. If the filter fields
 // ever lose their names, or the row-count chooser goes, that is the road back.
 $openingHtml = $renderedHtml['jewellery.php?view=opening'] ?? '';
-foreach (['o_q' => 'the search', 'o_group' => 'the stock group', 'o_kind' => 'the stock type',
+// The one search box became two dropdowns -- item code and item name are
+// separate questions -- but the point of this check is unchanged: every one of
+// them is a named field posted to the server, not a filter applied in the
+// browser over rows it should never have been sent.
+foreach (['o_code' => 'the item code', 'o_name' => 'the item name',
+          'o_group' => 'the stock group', 'o_kind' => 'the stock type',
           'o_purity' => 'the purity', 'o_status' => 'the posting status'] as $field => $what) {
     ok(str_contains($openingHtml, 'name="' . $field . '"'), 'Opening stock submits ' . $what . ' to the server');
 }

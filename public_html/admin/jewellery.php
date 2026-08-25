@@ -756,6 +756,12 @@ if ($view === 'opening') {
     // questions are answered here now, and only the page being looked at is
     // sent — the same way the Items screen already works.
     $openingFilters = [
+        // Code and name are asked separately and picked from dropdowns of what
+        // is actually on this screen. One box that searched both could answer
+        // neither cleanly, and a typed box asks somebody to remember a code
+        // they came here to look up.
+        'code' => trim((string) ($_GET['o_code'] ?? '')),
+        'name' => trim((string) ($_GET['o_name'] ?? '')),
         'search' => trim((string) ($_GET['o_q'] ?? '')),
         'group' => trim((string) ($_GET['o_group'] ?? '')),
         'kind' => in_array((string) ($_GET['o_kind'] ?? ''), ['showroom', 'customer_ordered'], true) ? (string) $_GET['o_kind'] : '',
@@ -771,6 +777,9 @@ if ($view === 'opening') {
         $openingFilters['status'] = '';
     }
     $openingFilterOn = implode('', $openingFilters) . $openingHolder !== '';
+    // Built BEFORE the filter runs, so a dropdown can always widen a search
+    // and not only narrow one that is already right.
+    $openingOptions = jewellery_opening_filter_options($openingAll);
     $openingRows = jewellery_opening_filter($openingAll, $openingFilters);
     if ($openingHolder !== '') {
         $openingRows = array_values(array_filter($openingRows,
@@ -789,6 +798,8 @@ if ($view === 'opening') {
     $openingPageQuery = static function (array $overrides) use ($openingFilters, $openingHolder, $openingPerPage): string {
         $query = array_filter([
             'view' => 'opening',
+            'o_code' => $openingFilters['code'],
+            'o_name' => $openingFilters['name'],
             'o_q' => $openingFilters['search'],
             'o_group' => $openingFilters['group'],
             'o_kind' => $openingFilters['kind'],
@@ -2178,13 +2189,26 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <form method="get" class="jw-opening-filter" style="display:flex;flex-wrap:wrap;gap:10px 12px;align-items:end;padding:0 0 14px">
             <input type="hidden" name="view" value="opening">
             <input type="hidden" name="o_per" value="<?= (int) $openingPerPage ?>">
-            <label style="display:grid;gap:5px;min-width:220px;flex:1 1 220px">Search
-                <input type="search" name="o_q" value="<?= e($openingFilters['search']) ?>" placeholder="Item name or code" aria-label="Search by item or code">
-            </label>
-            <label style="display:grid;gap:5px;min-width:160px;flex:1 1 160px">Stock group
-                <input type="search" name="o_group" value="<?= e($openingFilters['group']) ?>" placeholder="All groups" aria-label="Filter by stock group" list="jw-opening-groups">
-                <datalist id="jw-opening-groups"><?php foreach (jewellery_categories_list($companyId, false) as $category): ?><option value="<?= e((string) $category['name']) ?>"><?php endforeach; ?></datalist>
-            </label>
+            <?php
+            // Every one of these is a dropdown of what this screen actually
+            // holds, rather than a box to type a remembered value into. A list
+            // of twelve or more turns itself into a type-to-search box, so a
+            // shop with two thousand codes still gets a field it can type in —
+            // it just cannot type a code that is not there.
+            $openingPick = static function (string $field, string $label, array $values, string $chosen, string $allLabel): void {
+                echo '<label style="display:grid;gap:5px;min-width:170px;flex:1 1 170px">' . e($label);
+                echo '<select name="' . e($field) . '" aria-label="Filter by ' . e(mb_strtolower($label)) . '">';
+                echo '<option value="">' . e($allLabel) . '</option>';
+                foreach ($values as $value) {
+                    echo '<option value="' . e((string) $value) . '"'
+                        . ((string) $value === $chosen ? ' selected' : '') . '>' . e((string) $value) . '</option>';
+                }
+                echo '</select></label>';
+            };
+            $openingPick('o_code', 'Item code', $openingOptions['codes'], $openingFilters['code'], 'All item codes');
+            $openingPick('o_name', 'Item name', $openingOptions['names'], $openingFilters['name'], 'All item names');
+            $openingPick('o_group', 'Stock group', $openingOptions['groups'], $openingFilters['group'], 'All groups');
+            ?>
             <?php if (!$openingIsCarried): ?>
             <label style="display:grid;gap:5px;min-width:150px;flex:0 1 170px">Stock type
                 <select name="o_kind" aria-label="Filter by stock type">
@@ -2205,9 +2229,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </select>
             </label>
             <?php endif; ?>
-            <label style="display:grid;gap:5px;min-width:130px;flex:0 1 150px">Purity
-                <input type="search" name="o_purity" value="<?= e($openingFilters['purity']) ?>" placeholder="All purities" aria-label="Filter by purity">
-            </label>
+            <?php $openingPick('o_purity', 'Purity', $openingOptions['purities'], $openingFilters['purity'], 'All purities'); ?>
             <?php if (!$openingIsCarried): ?>
             <label style="display:grid;gap:5px;min-width:150px;flex:0 1 170px">Status
                 <select name="o_status" aria-label="Filter by posting status">
@@ -2217,6 +2239,15 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <option value="none" <?= $openingFilters['status'] === 'none' ? 'selected' : '' ?>>Not in stock</option>
                 </select>
             </label>
+            <?php endif; ?>
+            <?php if ($openingFilters['search'] !== ''): ?>
+                <?php // Somebody arrived here with the older one-box search in the
+                      // link. It still works, so it is shown rather than dropped
+                      // silently — a filter nobody can see is a filter nobody can
+                      // turn off. ?>
+                <label style="display:grid;gap:5px;min-width:170px;flex:1 1 170px">Search
+                    <input type="search" name="o_q" value="<?= e($openingFilters['search']) ?>" placeholder="Item name or code" aria-label="Search by item or code">
+                </label>
             <?php endif; ?>
             <div style="display:flex;gap:6px;align-items:end">
                 <button type="submit" class="button">Filter</button>
