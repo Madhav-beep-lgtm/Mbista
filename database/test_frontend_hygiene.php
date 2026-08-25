@@ -832,5 +832,48 @@ foreach ($markup as $path) {
 ok($unnamed === [], 'No button is left without a name a screen reader can read'
     . ($unnamed === [] ? '' : ' — ' . implode(', ', array_unique(array_slice($unnamed, 0, 6)))));
 
+// ---------------------------------------------------------------------------
+// A row added after the page loaded must get a WORKING dropdown.
+// ---------------------------------------------------------------------------
+// The searchable-select enhancer replaces a <select> with a wrapper holding a
+// text box and a list, and remembers that it did with data-ss-ready. Every
+// grid on this site adds rows by CLONING the row above, and cloneNode copies
+// that attribute along with the text box while copying none of the event
+// listeners that made it work. So an added row arrived looking perfect --
+// right name, whole option list, a search box -- and filtered nothing, chose
+// nothing, submitted nothing. From the counter that reads as "it will not let
+// me add more items", and it only appeared at all on companies holding twelve
+// or more of whatever the dropdown lists, which is where this enhancer
+// switches itself on.
+//
+// Asserted here rather than in a browser because there is no browser in this
+// suite; each check names the specific thing whose absence caused the fault.
+echo "\n== Dropdowns on rows added after page load ==\n";
+$enhancer = (string) @file_get_contents($root . '/public_html/assets/js/searchable-select.js');
+ok($enhancer !== '', 'The searchable-select enhancer is where it is expected to be');
+ok(str_contains($enhancer, 'MutationObserver'),
+    'It watches for selects added after it booted, instead of sweeping once and stopping');
+ok(str_contains($enhancer, 'childList: true') && str_contains($enhancer, 'subtree: true'),
+    '  ...over the whole document, because every grid adds rows somewhere different');
+ok(str_contains($enhancer, 'unwrapClone'),
+    'It strips the dead widget off a CLONED select before enhancing it');
+ok(str_contains($enhancer, 'WeakSet'),
+    '  ...telling a clone from its original by object identity, which an attribute cannot do');
+// The flag alone must never be the test for "this one is working": that is the
+// exact mistake, because cloneNode copies it.
+ok(str_contains($enhancer, 'wired.has(sel)'),
+    '  ...and never treats the copied data-ss-ready flag as proof on its own');
+
+// Every grid that clones a row is a customer of the above. Listed so a new one
+// is noticed here rather than at a counter.
+$cloners = [];
+foreach (hygiene_php_files($root . '/public_html/admin') as $path) {
+    $php = (string) file_get_contents($path);
+    if (str_contains($php, 'cloneNode(true)')) {
+        $cloners[] = basename($path);
+    }
+}
+ok($cloners !== [], 'Grids that add rows by cloning: ' . implode(', ', $cloners));
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

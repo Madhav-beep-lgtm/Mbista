@@ -58,12 +58,20 @@
         node._ssOverlayAncestors = ancestors;
     }
 
+    // Which selects this script has actually wired up, as objects rather than
+    // as a data- attribute. The difference is the whole point: cloneNode COPIES
+    // an attribute but cannot copy an event listener, so a cloned row arrives
+    // carrying data-ss-ready="1" and a dead search box. Membership of this set
+    // is the only honest answer to "is this one working".
+    var wired = new WeakSet();
+
     function enhance(sel) {
         if (sel.dataset.ssReady || sel.multiple) { return; }
         var auto = sel.options.length >= 12;
         if (!auto && !sel.classList.contains('js-searchable')) { return; }
         if (sel.closest('.no-search')) { return; }
         sel.dataset.ssReady = '1';
+        wired.add(sel);
 
         var wrap = document.createElement('span');
         wrap.className = 'ss-wrap';
@@ -203,9 +211,65 @@
         });
     }
 
+    /**
+     * Strip the dead widget off a CLONED select and hand the select back.
+     *
+     * A row added by "Add item" is a clone of the row above it, and what it
+     * clones is not a plain <select> any more -- it is this script's wrapper,
+     * with a text box and a dropdown list that no longer listen to anything.
+     * The select inside it is display:none and flagged ready, so the box on
+     * screen filters nothing, chooses nothing, and submits nothing. Every row
+     * added after page load was a dead field, which reads from the counter as
+     * "it will not let me add more items".
+     */
+    function unwrapClone(sel) {
+        var wrap = sel.parentElement;
+        delete sel.dataset.ssReady;
+        if (!wrap || !wrap.classList || !wrap.classList.contains('ss-wrap')) {
+            sel.style.display = '';
+            return;
+        }
+        // A select the PAGE hid stays hidden; the wrapper carried that fact.
+        var deliberatelyHidden = wrap.style.display === 'none';
+        wrap.parentNode.insertBefore(sel, wrap);
+        wrap.parentNode.removeChild(wrap);
+        sel.style.display = deliberatelyHidden ? 'none' : '';
+    }
+
+    /** Enhance every select in a subtree that has just been added to the page. */
+    function adopt(node) {
+        if (!node || node.nodeType !== 1) { return; }
+        var found = [];
+        if (node.matches && node.matches('select')) { found.push(node); }
+        if (node.querySelectorAll) {
+            Array.prototype.push.apply(found, node.querySelectorAll('select'));
+        }
+        found.forEach(function (sel) {
+            if (wired.has(sel)) { return; }   // one we built, being moved about
+            if (sel.dataset.ssReady) { unwrapClone(sel); }
+            enhance(sel);
+        });
+    }
+
+    function watch() {
+        if (typeof MutationObserver !== 'function' || !document.body) { return; }
+        // Grids that add rows are everywhere -- purchase bills, invoice lines,
+        // jewellery items -- and each used to have to remember to re-run this.
+        // None of them did, and the fault only showed on shops with twelve or
+        // more of whatever the dropdown lists, which is where this enhancer
+        // switches itself on. Watching the document fixes all of them at once
+        // and leaves nothing for the next grid to remember.
+        new MutationObserver(function (records) {
+            records.forEach(function (record) {
+                Array.prototype.forEach.call(record.addedNodes, adopt);
+            });
+        }).observe(document.body, { childList: true, subtree: true });
+    }
+
     function boot() {
         injectStyle();
         Array.prototype.forEach.call(document.querySelectorAll('select'), enhance);
+        watch();
     }
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', boot);
