@@ -1259,6 +1259,88 @@ body.admin-layout .inv-bill-dialog .inv-item-grid td:last-child { width: 56px; }
    grid that is mostly input boxes. */
 body.admin-layout .inv-item-row:focus-within { background: var(--mbw-primary-soft); }
 
+/* The entry a purchase bill raised, read without leaving the register.
+   Laid out as four columns -- side, ledger, amount, memo -- so the debits and
+   the credits line up down the page the way they do on a voucher, instead of
+   wrapping into prose. Closed by default: a bill's entry is what you check,
+   not what you scroll past twelve times looking for the one you want. */
+body.admin-layout .inv-entry-preview > summary {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--mbw-primary, #1b6b3a);
+}
+body.admin-layout .inv-entry-preview > summary::-webkit-details-marker { display: none; }
+body.admin-layout .inv-entry-preview[open] > summary { margin-bottom: 6px; }
+body.admin-layout .inv-entry-preview-body {
+  min-width: 300px;
+  padding: 8px 10px;
+  border: 1px solid var(--mbw-line, rgba(0, 0, 0, .12));
+  border-radius: 8px;
+  background: var(--mbw-soft, #f4f8f5);
+}
+body.admin-layout .inv-entry-line {
+  display: grid;
+  grid-template-columns: 24px minmax(120px, 1fr) auto;
+  gap: 2px 8px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 12px;
+}
+body.admin-layout .inv-entry-line.is-credit .inv-entry-ledger { padding-left: 14px; }
+body.admin-layout .inv-entry-side { font-weight: 700; color: var(--mbw-muted, #5b6b64); }
+body.admin-layout .inv-entry-amount {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+body.admin-layout .inv-entry-memo {
+  grid-column: 2 / -1;
+  font-size: 11px;
+  color: var(--mbw-muted, #5b6b64);
+}
+body.admin-layout .inv-entry-foot {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--mbw-line, rgba(0, 0, 0, .12));
+  font-weight: 700;
+}
+
+/* The standing notice above the register when bills are still split one
+   voucher per item. Amber rather than red: nothing is wrong with the books,
+   they are simply harder to read than they need to be. */
+body.admin-layout .inv-merge-notice {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--mbw-warn-line, rgba(180, 120, 20, .28));
+  background: var(--mbw-warn-soft, #fdf6e7);
+  color: var(--mbw-ink, #12261f);
+}
+body.admin-layout .inv-merge-notice > summary,
+body.admin-layout .inv-merge-notice details > summary { cursor: pointer; }
+
+/* Post it / Edit / Delete on a bill. Stacked, full width and same height, so
+   the column reads as a list of choices rather than three different shapes. */
+body.admin-layout .inv-bill-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 104px;
+}
+body.admin-layout .inv-bill-actions form { margin: 0; }
+body.admin-layout .inv-bill-actions .button,
+body.admin-layout .inv-bill-actions button {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 10px;
+  white-space: nowrap;
+  text-align: center;
+}
+
 /* The tile icon on a KPI card. It had no rule, so the glyph took whatever size
    the SVG happened to carry. */
 body.admin-layout .mbw-kpi-icon {

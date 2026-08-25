@@ -585,6 +585,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(inv_back_url());
     }
 
+    if ($action === 'delete_purchase_bill') {
+        // Removing a bill removes it: the entry, its lines, the stock it
+        // brought in, and the value that stock was carrying. A posted one is
+        // unposted on the way out rather than reversed, because what goes
+        // wrong with a purchase entry is a typo, and a reversal would leave
+        // three vouchers where the honest answer is none. Admin only, and both
+        // logs record what the voucher number used to be.
+        if ((string) ($currentUser['role'] ?? '') !== 'admin') {
+            flash('error', 'Only an administrator can delete a purchase entry.');
+            redirect(inv_back_url('#movement-purchase-entries'));
+        }
+        require_permission('inventory', 'create');
+        $removed = inv_purchase_bill_delete($companyId, (int) ($_POST['voucher_id'] ?? 0), $userId);
+        if ($removed['ok']) {
+            flash('success', 'Purchase entry ' . ($removed['voucher_no'] !== '' ? $removed['voucher_no'] : '(draft)')
+                . ' deleted — ' . $removed['items'] . ' item(s) and ' . site_currency_symbol()
+                . number_format($removed['amount'], 2) . ' taken back out of the stock and the books.');
+        } else {
+            flash('error', (string) $removed['error']);
+        }
+        redirect(inv_back_url('#movement-purchase-entries'));
+    }
+
+    if ($action === 'merge_purchase_bills') {
+        // Entries raised one voucher per item, before a bill knew how to stay
+        // in one piece. The figures are carried across rather than recomputed,
+        // so the GL is unchanged by the gathering-up.
+        require_permission('accounting', 'post');
+        $merged = 0;
+        $absorbed = 0;
+        $problems = [];
+        foreach (inv_purchase_bill_merge_plan($companyId) as $plan) {
+            $result = inv_purchase_bill_merge($companyId, (int) $plan['keep'], $plan['absorb'], $userId);
+            if ($result['ok']) {
+                $merged++;
+                $absorbed += (int) $result['absorbed'];
+            } else {
+                $problems[] = 'bill ' . $plan['ref_no'] . ': ' . (string) $result['error'];
+            }
+        }
+        if ($merged === 0 && $problems === []) {
+            flash('success', 'Every bill is already a single entry — nothing to merge.');
+        } else {
+            $msg = $merged . ' bill(s) gathered back into one entry each, absorbing ' . $absorbed . ' duplicate voucher(s).';
+            if ($problems !== []) {
+                $msg .= ' Left alone: ' . implode(' | ', array_slice($problems, 0, 4))
+                    . (count($problems) > 4 ? ' +' . (count($problems) - 4) . ' more' : '') . '.';
+            }
+            flash($problems === [] ? 'success' : 'error', $msg);
+        }
+        redirect(inv_back_url('#movement-purchase-entries'));
+    }
+
     if ($action === 'record_purchase_batch') {
         require_permission('inventory', 'create');
         // The form is bills-with-items; the engine posts flat lines. Folding
@@ -595,7 +648,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? inv_purchase_bills_to_rows($gridBills)
             : (array) ($_POST['rows'] ?? []);
         $checked = inv_purchase_batch_validate($companyId, $fiscalYearId, $gridRows);
+        // Editing a bill is entering it again over the top of the old one. The
+        // grid is checked FIRST — validation writes nothing — so a bad line
+        // sends the person back to the form with the original bill still
+        // standing, and only a grid that will certainly post gets to remove it.
+        $replaceBillId = (int) ($_POST['replace_bill_id'] ?? 0);
+        $replaced = null;
+        if ($replaceBillId > 0 && $checked['errors'] === []
+            && array_filter($checked['rows'], static fn (array $r): bool => $r['errors'] !== []) === []) {
+            if ((string) ($currentUser['role'] ?? '') !== 'admin') {
+                flash('error', 'Only an administrator can replace a purchase entry that is already recorded.');
+                redirect(inv_back_url('#movement-purchase-entries'));
+            }
+            $replaced = inv_purchase_bill_delete($companyId, $replaceBillId, $userId);
+            if (!$replaced['ok']) {
+                $_SESSION['inv_purchase_bills'] = array_values($gridBills);
+                $_SESSION['inv_purchase_grid_errors'] = [(string) $replaced['error']];
+                flash('error', 'The bill was left exactly as it was: ' . (string) $replaced['error']);
+                redirect(inv_back_url('#movement-purchase'));
+            }
+        }
         $result = inv_purchase_batch_post($companyId, $fiscalYearId, $checked, $userId);
+        if (!$result['ok'] && $replaced !== null) {
+            // Validation passed and the old bill is already gone, so this is
+            // the one case where saying so plainly matters more than anything.
+            $_SESSION['inv_purchase_bills'] = array_values($gridBills);
+            $_SESSION['inv_purchase_grid_errors'] = [(string) $result['error']];
+            flash('error', 'The old entry ' . ($replaced['voucher_no'] !== '' ? $replaced['voucher_no'] : '(draft)')
+                . ' was removed but the replacement did not post: ' . (string) $result['error']
+                . ' Everything typed is still on the form below — correct it and record it again.');
+            redirect(inv_back_url('#movement-purchase'));
+        }
         if (!$result['ok']) {
             // Everything typed is handed back, along with the per-line reasons,
             // so a long bill does not have to be keyed in twice.
@@ -622,8 +705,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $unmapped++;
             }
         }
-        flash('success', (int) $result['posted'] . ' purchase line(s) recorded'
+        flash('success', (int) $result['posted'] . ' purchase line(s) recorded as '
+            . (int) ($result['bills'] ?? 1) . ' bill entry(ies) — one entry per invoice, not one per item'
             . ((int) ($result['ingredients_added'] ?? 0) > 0 ? ', ' . (int) $result['ingredients_added'] . ' added to the kitchen ingredient list' : '')
+            . ($replaced !== null ? '. This replaces ' . ($replaced['voucher_no'] !== '' ? $replaced['voucher_no'] : 'the earlier draft') : '')
             . '. Bought-in stock is prepared as a draft entry — approve it in Purchase entries.'
             . ($unmapped > 0 ? ' ' . $unmapped . ' line(s) recorded stock only: map their ledgers on the item to post the accounting entry.' : ''));
         redirect(inv_back_url('#movement-purchase-entries'));
@@ -1817,6 +1902,63 @@ $purchaseBills = $_SESSION['inv_purchase_bills'] ?? [];
 $purchaseGridErrors = $_SESSION['inv_purchase_grid_errors'] ?? [];
 unset($_SESSION['inv_purchase_grid'], $_SESSION['inv_purchase_bills'], $_SESSION['inv_purchase_grid_errors']);
 
+// Editing a recorded bill is the same form, filled in from what was recorded.
+// Saving it replaces the old entry outright rather than leaving a correction
+// beside it, which is why the id travels with the form.
+$editBill = null;
+$editBillId = (int) ($_GET['edit_bill'] ?? 0);
+if ($editBillId > 0 && $purchaseBills === []) {
+    $editBill = inv_purchase_bill_load($companyId, $editBillId);
+    if ($editBill === null) {
+        flash('error', 'That purchase entry was not found for this company.');
+        $editBillId = 0;
+    } else {
+        // Back into the shape the form posts: one bill, its header repeated
+        // from the entry, its items from the movements underneath it.
+        $editItems = [];
+        foreach ($editBill['items'] as $editItem) {
+            $editItems[] = [
+                'item_id' => (int) $editItem['item_id'],
+                'quantity' => rtrim(rtrim(number_format((float) $editItem['qty_in'] + (float) $editItem['qty_out'], 3, '.', ''), '0'), '.'),
+                'rate' => number_format((float) $editItem['rate'], 2, '.', ''),
+                // VAT and withholding live on the ENTRY, not the movement, so
+                // they come back as the bill's own figures below rather than
+                // being invented per line.
+                'vat_applicable' => '0',
+                'notes' => (string) ($editItem['notes'] ?? ''),
+            ];
+        }
+        $editVatTotal = 0.0;
+        $editVatLedgerId = 0;
+        $editTdsLedgerId = 0;
+        foreach ($editBill['lines'] as $editLine) {
+            if (stripos((string) ($editLine['memo'] ?? ''), 'VAT on purchase') === 0) {
+                $editVatTotal += (float) $editLine['amount'];
+                $editVatLedgerId = (int) $editLine['ledger_id'];
+            } elseif (stripos((string) ($editLine['memo'] ?? ''), 'TDS withheld') === 0) {
+                $editTdsLedgerId = (int) $editLine['ledger_id'];
+            }
+        }
+        // The bill's VAT sits on its first line, where the person can see it and
+        // move it; splitting one recorded figure back across the items would be
+        // a guess at how it was arrived at.
+        if ($editVatTotal > 0 && $editItems !== []) {
+            $editItems[0]['vat_applicable'] = '1';
+            $editItems[0]['vat_amount'] = number_format($editVatTotal, 2, '.', '');
+        }
+        $purchaseBills = [[
+            'transaction_date' => (string) ($editBill['items'][0]['transaction_date'] ?? $editBill['voucher_date']),
+            'supplier_invoice_date' => '',
+            'movement' => (string) ($editBill['items'][0]['transaction_type'] ?? 'purchase'),
+            'ref_no' => (string) ($editBill['reference_no'] ?? ''),
+            'supplier_party_id' => (int) ($editBill['party_id'] ?? 0),
+            'vat_ledger_id' => $editVatLedgerId,
+            'tds_ledger_id' => $editTdsLedgerId,
+            'items' => $editItems,
+        ]];
+    }
+}
+
 $movementStmt = db()->prepare('
     SELECT t.*, i.sku, i.name AS item_name, i.unit
     FROM inventory_transactions t
@@ -2750,6 +2892,14 @@ $invMoveItemOptions = static function () use ($items): string {
         <form method="post" id="purchaseBillForm">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="record_purchase_batch">
+            <?php if ($editBill !== null): ?>
+                <input type="hidden" name="replace_bill_id" value="<?= (int) $editBillId ?>">
+                <p class="mbw-pill tone-amber" style="display:block;margin:0 0 10px;padding:10px 12px;line-height:1.5">
+                    <?= icon('tasks') ?> Editing <strong><?= e((string) ($editBill['voucher_no'] ?: 'a draft entry')) ?></strong><?= (string) ($editBill['reference_no'] ?? '') !== '' ? ' — bill ' . e((string) $editBill['reference_no']) : '' ?>.
+                    Recording it <strong>replaces</strong> that entry: the old stock movements and its accounting entry are removed and these are written in their place.
+                    <a href="<?= e(url(inv_back_url('#movement-purchase-entries'))) ?>" style="margin-left:6px">Cancel and leave it as it is</a>
+                </p>
+            <?php endif; ?>
             <div style="overflow-x:auto"><table class="mbw-grid-table" id="purchaseBills">
                 <thead><tr>
                     <th>Posting date</th>
@@ -2899,87 +3049,151 @@ $invMoveItemOptions = static function () use ($items): string {
 
 
     <?php
-    // Purchase and opening entries this company has prepared or posted, drafts
-    // first because they are the ones still waiting on somebody. The lines are
-    // shown in full so the VAT sitting outside the stock value, and the
-    // withholding taken off the supplier, can be read before any of it counts.
+    // Purchase and opening entries this company has prepared or posted, ONE
+    // ROW PER BILL, drafts first because they are the ones still waiting on
+    // somebody. A supplier's invoice for twelve items is one entry with twelve
+    // item lines, not twelve entries, so this reads against the paper.
     //
     // Read only on the page that shows them. Every task used to pay for this,
     // including the ones that never mention a purchase.
-    $purEntries = [];
-    $purLines = [];
-    if ($invShows('movement-purchase-entries')):
-    $purStmt = db()->prepare("
-        SELECT v.id, v.voucher_no, v.status, v.voucher_date, v.posting_date, v.total_amount, v.reference_no,
-               t.transaction_type, t.qty_in, t.rate, i.sku, i.name AS item_name
-        FROM vouchers v
-        INNER JOIN inventory_transactions t ON t.id = v.source_id AND t.company_id = v.company_id
-        INNER JOIN inventory_items i ON i.id = t.item_id
-        WHERE v.company_id = :cid AND v.source_type = 'inventory_movement'
-          AND t.transaction_type IN ('purchase', 'opening')
-        ORDER BY (v.status = 'draft') DESC, v.id DESC
-        LIMIT 25
-    ");
-    $purStmt->execute(['cid' => $companyId]);
-    $purEntries = $purStmt->fetchAll(PDO::FETCH_ASSOC);
-    if ($purEntries !== []) {
-        $purIds = array_map('intval', array_column($purEntries, 'id'));
-        $purPh = implode(',', array_fill(0, count($purIds), '?'));
-        $purLineStmt = db()->prepare(
-            'SELECT e.voucher_id, e.entry_type, e.amount, e.memo, l.code AS ledger_code, l.name AS ledger_name
-             FROM voucher_entries e INNER JOIN ledgers l ON l.id = e.ledger_id
-             WHERE e.voucher_id IN (' . $purPh . ') ORDER BY e.id ASC'
-        );
-        $purLineStmt->execute($purIds);
-        foreach ($purLineStmt->fetchAll(PDO::FETCH_ASSOC) as $purLine) {
-            $purLines[(int) $purLine['voucher_id']][] = $purLine;
-        }
+    $purBills = [];
+    $purMergePlan = [];
+    if ($invShows('movement-purchase-entries')) {
+        $purBills = inv_purchase_bill_list($companyId, 25);
+        // Bills that were entered one voucher per item, before a bill knew how
+        // to stay in one piece. Read-only: nothing moves until somebody asks.
+        $purMergePlan = inv_purchase_bill_merge_plan($companyId);
     }
     ?>
-    <?php endif; ?>
     <?php if ($invShows('movement-purchase-entries')): ?>
-    <details class="feature-disclosure" id="movement-purchase-entries" <?= array_filter($purEntries, static fn (array $r): bool => (string) $r['status'] === 'draft') !== [] ? 'open' : '' ?>>
-        <summary><span><strong><?= icon('tasks') ?>Purchase entries</strong><small>A draft is not in the books yet — posting puts it there and gives it its voucher number.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
-        <?php if ($purEntries === []): ?>
+    <details class="feature-disclosure" id="movement-purchase-entries" <?= array_filter($purBills, static fn (array $r): bool => (string) $r['status'] === 'draft') !== [] ? 'open' : '' ?>>
+        <summary><span><strong><?= icon('tasks') ?>Purchase entries</strong><small>One entry per supplier bill. A draft is not in the books yet — posting puts it there and gives it its voucher number.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+
+        <?php if ($purMergePlan !== []): ?>
+            <?php
+            $mergeVouchers = 0;
+            $mergeItems = 0;
+            foreach ($purMergePlan as $mergeRow) { $mergeVouchers += (int) $mergeRow['vouchers']; $mergeItems += (int) $mergeRow['items']; }
+            ?>
+            <div class="inv-merge-notice">
+                <strong><?= icon('tasks') ?> <?= count($purMergePlan) ?> bill(s) were entered one voucher per item.</strong>
+                <p style="margin:6px 0 0;font-size:12.5px;color:var(--mbw-muted)">
+                    <?= (int) $mergeVouchers ?> vouchers carry <?= (int) $mergeItems ?> items that belong to <?= count($purMergePlan) ?> invoice(s).
+                    Merging gathers each bill into a single entry: the item lines stay one per item, the supplier's credit and the VAT are stated once, and
+                    <strong>the figures are carried across rather than recalculated</strong> — the totals in the ledger do not move. The absorbed voucher numbers are written into the surviving entry's narration, so the gap they leave in the series can be read back.
+                </p>
+                <details style="margin-top:10px">
+                    <summary style="cursor:pointer;font-weight:600;font-size:12.5px">Preview what would be merged</summary>
+                    <div class="rc-table-scroll" style="margin-top:8px"><table class="rc-table">
+                        <thead><tr><th>Bill</th><th>Supplier</th><th>Date</th><th>Status</th><th class="align-right">Vouchers</th><th class="align-right">Items</th><th class="align-right">Total</th><th>Keeps</th><th>Absorbs</th></tr></thead>
+                        <tbody>
+                        <?php foreach ($purMergePlan as $mergeRow): ?>
+                            <tr>
+                                <td><strong><?= e((string) $mergeRow['ref_no']) ?></strong></td>
+                                <td><?= e((string) ($mergeRow['party_name'] ?: '—')) ?></td>
+                                <td><?= e((string) $mergeRow['date']) ?></td>
+                                <td><span class="mbw-pill <?= (string) $mergeRow['status'] === 'draft' ? 'tone-gray' : 'tone-blue' ?>"><?= e((string) $mergeRow['status']) ?></span></td>
+                                <td class="align-right"><?= (int) $mergeRow['vouchers'] ?> &rarr; 1</td>
+                                <td class="align-right"><?= (int) $mergeRow['items'] ?></td>
+                                <td class="align-right"><?= e(number_format((float) $mergeRow['total'], 2)) ?></td>
+                                <td><?= e((string) ($mergeRow['keep_no'] ?: 'the first draft')) ?></td>
+                                <td style="max-width:280px"><span style="color:var(--mbw-muted);font-size:11.5px"><?= e(implode(', ', array_filter($mergeRow['absorb_nos'])) ?: 'the other drafts') ?></span></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table></div>
+                </details>
+                <?php if (user_can_do('accounting', 'post')): ?>
+                    <form method="post" style="margin-top:10px" onsubmit="return confirm('Merge these bills into one entry each? The figures are carried across, so nothing in the ledger changes value \u2014 the duplicate vouchers are absorbed and removed.');">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
+                        <input type="hidden" name="action" value="merge_purchase_bills">
+                        <button type="submit"><?= icon('badge-check') ?>Merge <?= count($purMergePlan) ?> bill(s) into one entry each</button>
+                    </form>
+                <?php else: ?>
+                    <p style="margin:8px 0 0;font-size:12px;color:var(--mbw-muted)">Merging them needs the <strong>accounting · post</strong> permission.</p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if ($purBills === []): ?>
             <p style="color:var(--mbw-muted);padding:12px">No purchase or opening entries yet. Record one above and it appears here.</p>
         <?php else: ?>
         <div class="rc-table-scroll"><table class="rc-table">
-            <thead><tr><th>Voucher</th><th>Item</th><th>Dates</th><th>Entry</th><th class="align-right">Amount</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Voucher</th><th>Items</th><th>Dates</th><th>Entry</th><th class="align-right">Amount</th><th>Status</th><th></th></tr></thead>
             <tbody>
-                <?php foreach ($purEntries as $pe): ?>
-                    <?php $peDraft = (string) $pe['status'] === 'draft'; ?>
+                <?php foreach ($purBills as $pb): ?>
+                    <?php
+                    $peDraft = (string) $pb['status'] === 'draft';
+                    $pbId = (int) $pb['id'];
+                    ?>
                     <tr>
-                        <td><?= $peDraft ? '<span style="color:var(--mbw-muted)">not numbered yet</span>' : e((string) $pe['voucher_no']) ?>
-                            <?php if (($pe['reference_no'] ?? '') !== ''): ?><br><span style="color:var(--mbw-muted)">Bill <?= e((string) $pe['reference_no']) ?></span><?php endif; ?>
-                        </td>
-                        <td><?= e((string) $pe['sku']) ?><br><span style="color:var(--mbw-muted)"><?= e((string) $pe['item_name']) ?></span><br>
-                            <span style="color:var(--mbw-muted)"><?= e(number_format((float) $pe['qty_in'], 3)) ?> @ <?= e(number_format((float) $pe['rate'], 2)) ?> (<?= e((string) $pe['transaction_type']) ?>)</span>
-                        </td>
-                        <td><span style="color:var(--mbw-muted)">Bought</span> <?= e((string) ($pe['voucher_date'] ?? '—')) ?><br>
-                            <span style="color:var(--mbw-muted)">Posting</span> <?= e((string) ($pe['posting_date'] ?? '—')) ?>
+                        <td><?= $peDraft ? '<span style="color:var(--mbw-muted)">not numbered yet</span>' : e((string) $pb['voucher_no']) ?>
+                            <?php if (($pb['reference_no'] ?? '') !== ''): ?><br><strong>Bill <?= e((string) $pb['reference_no']) ?></strong><?php endif; ?>
+                            <?php if (($pb['party_name'] ?? '') !== ''): ?><br><span style="color:var(--mbw-muted)"><?= e((string) $pb['party_name']) ?></span><?php endif; ?>
                         </td>
                         <td>
-                            <?php foreach (($purLines[(int) $pe['id']] ?? []) as $pl): ?>
-                                <div><?= (string) $pl['entry_type'] === 'debit' ? 'Dr' : '&nbsp;&nbsp;&nbsp;Cr' ?>
-                                    <?= e((string) $pl['ledger_name']) ?>
-                                    <strong><?= e(number_format((float) $pl['amount'], 2)) ?></strong>
-                                    <?php if (($pl['memo'] ?? '') !== ''): ?><br><span style="color:var(--mbw-muted);margin-left:18px"><?= e((string) $pl['memo']) ?></span><?php endif; ?>
+                            <span class="mbw-pill tone-blue"><?= (int) $pb['item_count'] ?> item<?= (int) $pb['item_count'] === 1 ? '' : 's' ?></span>
+                            <?php foreach ($pb['items'] as $pbItem): ?>
+                                <div style="margin-top:4px"><?= e((string) $pbItem['sku']) ?>
+                                    <span style="color:var(--mbw-muted)"><?= e((string) $pbItem['item_name']) ?></span><br>
+                                    <span style="color:var(--mbw-muted)"><?= e(number_format((float) $pbItem['qty_in'] + (float) $pbItem['qty_out'], 3)) ?>
+                                        @ <?= e(number_format((float) $pbItem['rate'], 2)) ?> (<?= e((string) $pbItem['transaction_type']) ?>)</span>
                                 </div>
                             <?php endforeach; ?>
                         </td>
-                        <td class="align-right"><?= e(number_format((float) $pe['total_amount'], 2)) ?></td>
-                        <td><span class="mbw-pill <?= $peDraft ? 'tone-gray' : 'tone-blue' ?>"><?= $peDraft ? 'draft' : 'posted' ?></span></td>
+                        <td><span style="color:var(--mbw-muted)">Bought</span> <?= e((string) ($pb['voucher_date'] ?? '—')) ?><br>
+                            <span style="color:var(--mbw-muted)">Posting</span> <?= e((string) ($pb['posting_date'] ?? '—')) ?>
+                        </td>
                         <td>
-                            <?php if ($peDraft): ?>
-                                <form method="post" onsubmit="return confirm('Post this entry to the ledger? It will be given a voucher number.');">
-                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
-                                    <input type="hidden" name="action" value="post_movement_draft">
-                                    <input type="hidden" name="voucher_id" value="<?= e((int) $pe['id']) ?>">
-                                    <button type="submit">Post it</button>
-                                </form>
-                            <?php else: ?>
-                                <span style="color:var(--mbw-muted)">in the books</span>
-                            <?php endif; ?>
+                            <details class="inv-entry-preview">
+                                <summary><?= icon('documents') ?>Preview entry (<?= count($pb['lines']) ?> line<?= count($pb['lines']) === 1 ? '' : 's' ?>)</summary>
+                                <div class="inv-entry-preview-body">
+                                    <?php $prevDr = 0.0; $prevCr = 0.0; ?>
+                                    <?php foreach ($pb['lines'] as $pl): ?>
+                                        <?php if ((string) $pl['entry_type'] === 'debit') { $prevDr += (float) $pl['amount']; } else { $prevCr += (float) $pl['amount']; } ?>
+                                        <div class="inv-entry-line<?= (string) $pl['entry_type'] === 'credit' ? ' is-credit' : '' ?>">
+                                            <span class="inv-entry-side"><?= (string) $pl['entry_type'] === 'debit' ? 'Dr' : 'Cr' ?></span>
+                                            <span class="inv-entry-ledger"><?= e((string) $pl['ledger_name']) ?></span>
+                                            <span class="inv-entry-amount"><?= e(number_format((float) $pl['amount'], 2)) ?></span>
+                                            <?php if (($pl['memo'] ?? '') !== ''): ?><span class="inv-entry-memo"><?= e((string) $pl['memo']) ?></span><?php endif; ?>
+                                        </div>
+                                    <?php endforeach; ?>
+                                    <div class="inv-entry-line inv-entry-foot">
+                                        <span class="inv-entry-side"></span>
+                                        <span class="inv-entry-ledger"><?= abs($prevDr - $prevCr) < 0.005 ? 'Balanced' : 'OUT BY ' . e(number_format(abs($prevDr - $prevCr), 2)) ?></span>
+                                        <span class="inv-entry-amount"><?= e(number_format($prevDr, 2)) ?></span>
+                                        <span class="inv-entry-memo"><?= e((string) ($pb['narration'] ?? '')) ?></span>
+                                    </div>
+                                </div>
+                            </details>
+                        </td>
+                        <td class="align-right"><?= e(number_format((float) $pb['total_amount'], 2)) ?></td>
+                        <td><span class="mbw-pill <?= $peDraft ? 'tone-gray' : 'tone-blue' ?>"><?= $peDraft ? 'draft' : 'posted' ?></span>
+                            <?php if (!$peDraft): ?><br><span style="color:var(--mbw-muted);font-size:11.5px">in the books</span><?php endif; ?>
+                        </td>
+                        <td>
+                            <div class="inv-bill-actions">
+                                <?php if ($peDraft): ?>
+                                    <form method="post" onsubmit="return confirm('Post this entry to the ledger? It will be given a voucher number.');">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
+                                        <input type="hidden" name="action" value="post_movement_draft">
+                                        <input type="hidden" name="voucher_id" value="<?= $pbId ?>">
+                                        <button type="submit">Post it</button>
+                                    </form>
+                                <?php endif; ?>
+                                <?php if (user_can_do('inventory', 'create')): ?>
+                                    <a class="button secondary" href="<?= e(url(inv_back_url('edit_bill=' . $pbId) . '#movement-purchase')) ?>"
+                                       title="Open this bill in the purchase form; saving replaces it">Edit</a>
+                                <?php endif; ?>
+                                <?php if ((string) ($currentUser['role'] ?? '') === 'admin'): ?>
+                                    <form method="post" onsubmit="return confirm('Delete this whole bill? Its accounting entry, its <?= (int) $pb['item_count'] ?> stock movement(s) and the value they carried are removed, and the cost layers are rebuilt as if the bill had never been entered. This cannot be undone.');">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
+                                        <input type="hidden" name="action" value="delete_purchase_bill">
+                                        <input type="hidden" name="voucher_id" value="<?= $pbId ?>">
+                                        <button type="submit" class="secondary mbw-delete-action">Delete</button>
+                                    </form>
+                                <?php endif; ?>
+                            </div>
                         </td>
                     </tr>
                 <?php endforeach; ?>

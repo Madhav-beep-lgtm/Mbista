@@ -134,25 +134,43 @@ $txns = db()->query("SELECT * FROM inventory_transactions WHERE company_id=$cid 
 ok(count($txns) === 2, 'Two stock movements exist');
 ok(near((float) $txns[0]['qty_in'], 100.0) && near((float) $txns[0]['rate'], 20.0), 'The first carries 100 in at 20');
 ok((string) $txns[0]['ref_no'] === 'ABC-9001', 'The reference is kept, so the bill can be found when it is paid');
-ok((int) $txns[0]['voucher_id'] > 0 && (int) $txns[1]['voucher_id'] > 0, 'Each line got its own voucher');
-ok((int) $txns[0]['voucher_id'] !== (int) $txns[1]['voucher_id'], '  ...a separate one per line');
+ok((int) $txns[0]['voucher_id'] > 0 && (int) $txns[1]['voucher_id'] > 0, 'Both lines reached the books');
+// ONE invoice is ONE entry. Both lines carry bill ABC-9001 from the same
+// supplier, so the supplier is owed once, in one place, not twice in two.
+ok((int) $txns[0]['voucher_id'] === (int) $txns[1]['voucher_id'], '  ...through a single entry for the whole bill');
+ok((int) $result['bills'] === 1, 'The grid reports one bill, not one per item');
+$billVoucherId = (int) $txns[0]['voucher_id'];
+$billVoucher = db()->query("SELECT * FROM vouchers WHERE id=$billVoucherId")->fetch(PDO::FETCH_ASSOC);
+ok((string) $billVoucher['reference_no'] === 'ABC-9001', "The entry carries the supplier's bill number");
+ok((int) $billVoucher['party_id'] === $supplierId, '  ...and the supplier it is owed to');
+ok((string) $billVoucher['status'] === 'draft', 'Bought-in stock is prepared as a draft, to be read before it counts');
+ok(near((float) $billVoucher['total_amount'], 5390.00), 'The entry totals the whole bill (2,000 + 3,000 + 390 VAT)');
+ok((int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$cid AND reference_no='ABC-9001'")->fetchColumn() === 1,
+    'and there is exactly one voucher against that bill number');
 
-echo "\n== The accounting is the same as entering them one at a time ==\n";
-$allBalanced = true;
-foreach ($txns as $txn) {
-    $sums = db()->query("SELECT SUM(CASE WHEN entry_type='debit' THEN amount ELSE 0 END) dr,
-        SUM(CASE WHEN entry_type='credit' THEN amount ELSE 0 END) cr
-        FROM voucher_entries WHERE voucher_id=" . (int) $txn['voucher_id'])->fetch(PDO::FETCH_ASSOC);
-    if (!near((float) $sums['dr'], (float) $sums['cr'])) { $allBalanced = false; }
+echo "\n== The bill reads the way the invoice does ==\n";
+$sums = db()->query("SELECT SUM(CASE WHEN entry_type='debit' THEN amount ELSE 0 END) dr,
+    SUM(CASE WHEN entry_type='credit' THEN amount ELSE 0 END) cr
+    FROM voucher_entries WHERE voucher_id=$billVoucherId")->fetch(PDO::FETCH_ASSOC);
+ok(near((float) $sums['dr'], (float) $sums['cr']), 'The entry balances');
+$billLegs = db()->query("SELECT e.entry_type, e.amount, e.memo, l.name FROM voucher_entries e JOIN ledgers l ON l.id=e.ledger_id
+    WHERE e.voucher_id=$billVoucherId ORDER BY e.id")->fetchAll(PDO::FETCH_ASSOC);
+$byLeg = [];
+foreach ($billLegs as $leg) { $byLeg[$leg['entry_type'] . '|' . $leg['name']][] = (float) $leg['amount']; }
+$stockDebits = $byLeg['debit|Inventory Asset'] ?? [];
+ok(count($stockDebits) === 2, 'Stock is debited once per ITEM, so the entry still shows what was bought');
+ok(near(array_sum($stockDebits), 5000.00), '  ...2,000 of milk and 3,000 of flour, VAT kept out of both');
+$memos = implode(' | ', array_map(static fn (array $l): string => (string) $l['memo'], $billLegs));
+ok(str_contains($memos, 'MILK') && str_contains($memos, 'FLOUR'), '  ...each naming its item on the line');
+ok(str_contains($memos, '100.000 @ 20.00'), '  ...with the quantity and the rate that made the figure');
+ok(count($byLeg['debit|VAT Receivable'] ?? []) === 1 && near(array_sum($byLeg['debit|VAT Receivable'] ?? []), 390.00),
+    'VAT is debited once for the bill, to its own ledger');
+$payableLegs = [];
+foreach ($billLegs as $leg) {
+    if ((string) $leg['entry_type'] === 'credit') { $payableLegs[] = $leg; }
 }
-ok($allBalanced, 'Every voucher balances');
-$flourLegs = [];
-foreach (db()->query("SELECT e.entry_type, e.amount, l.name FROM voucher_entries e JOIN ledgers l ON l.id=e.ledger_id
-    WHERE e.voucher_id=" . (int) $txns[1]['voucher_id'])->fetchAll(PDO::FETCH_ASSOC) as $leg) {
-    $flourLegs[$leg['entry_type'] . '|' . $leg['name']] = (float) $leg['amount'];
-}
-ok(near($flourLegs['debit|Inventory Asset'] ?? 0, 3000.00), 'Stock is debited at cost, VAT kept out of it');
-ok(near($flourLegs['debit|VAT Receivable'] ?? 0, 390.00), 'VAT is debited to its own ledger');
+ok(count($payableLegs) === 1, 'The supplier is credited exactly once');
+ok(near((float) $payableLegs[0]['amount'], 5390.00), '  ...with the whole bill, VAT included');
 
 echo "\n== Cost layers were built, so valuation is real ==\n";
 $layerQty = (float) db()->query("SELECT COALESCE(SUM(qty_remaining),0) FROM inventory_cost_layers WHERE company_id=$cid AND item_id=$flour")->fetchColumn();
@@ -350,6 +368,201 @@ $postCost = questions() - $q0 - 2;
 ok($bigResult['ok'] === true, 'The whole bill posts' . ($bigResult['ok'] ? '' : ': ' . $bigResult['error']));
 ok((int) $bigResult['posted'] === 60, '  ...all 60 lines');
 echo "        (posting 60 lines took $postCost queries)\n";
+
+
+// ===========================================================================
+// A bill after it is entered
+// ===========================================================================
+echo "\n== The register reads one row per bill ==\n";
+$listed = inv_purchase_bill_list($cid, 25);
+ok($listed !== [], 'Purchase entries are listed');
+$abc = null;
+foreach ($listed as $listedBill) {
+    if ((string) $listedBill['reference_no'] === 'ABC-9001') { $abc = $listedBill; }
+}
+ok($abc !== null, 'Bill ABC-9001 is one row');
+ok((int) $abc['item_count'] === 2, '  ...carrying both its items');
+ok(count($abc['lines']) === 4, '  ...and the whole entry: 2 stock lines, VAT, and the supplier');
+ok((string) $abc['party_name'] === 'ABC Pvt. Ltd.', '  ...named with the supplier it is owed to');
+
+echo "\n== Deleting a bill takes the stock and the value with it ==\n";
+$delItem = $mkItem('DELME', 'Deletable', 'KG');
+$delChecked = inv_purchase_batch_validate($cid, $fyId, [
+    ['item_id' => $delItem, 'movement' => 'purchase', 'transaction_date' => '2026-09-10', 'quantity' => 5, 'rate' => 100,
+     'vat_mode' => 'zero', 'supplier_party_id' => $supplierId, 'ref_no' => 'DEL-1'],
+    ['item_id' => $delItem, 'movement' => 'purchase', 'transaction_date' => '2026-09-10', 'quantity' => 3, 'rate' => 100,
+     'vat_mode' => 'zero', 'supplier_party_id' => $supplierId, 'ref_no' => 'DEL-1'],
+]);
+$delPosted = inv_purchase_batch_post($cid, $fyId, $delChecked, $uid);
+ok($delPosted['ok'] === true && (int) $delPosted['bills'] === 1, 'A two-item bill is recorded as one entry');
+$delVoucherId = (int) $delPosted['lines'][0]['voucher_id'];
+ok((float) db()->query("SELECT COALESCE(SUM(qty_remaining),0) FROM inventory_cost_layers WHERE company_id=$cid AND item_id=$delItem")->fetchColumn() == 8.0,
+    '  ...laying down 8 units of cost layer');
+$removed = inv_purchase_bill_delete($cid, $delVoucherId, $uid);
+ok($removed['ok'] === true, 'The bill deletes' . ($removed['ok'] ? '' : ': ' . $removed['error']));
+ok((int) $removed['items'] === 2, '  ...reporting both items');
+ok((int) db()->query("SELECT COUNT(*) FROM vouchers WHERE id=$delVoucherId")->fetchColumn() === 0, '  ...the entry is gone');
+ok((int) db()->query("SELECT COUNT(*) FROM voucher_entries WHERE voucher_id=$delVoucherId")->fetchColumn() === 0, '  ...its lines with it');
+ok((int) db()->query("SELECT COUNT(*) FROM inventory_transactions WHERE company_id=$cid AND item_id=$delItem")->fetchColumn() === 0,
+    '  ...and both stock movements');
+ok((float) db()->query("SELECT COALESCE(SUM(qty_remaining),0) FROM inventory_cost_layers WHERE company_id=$cid AND item_id=$delItem")->fetchColumn() == 0.0,
+    '  ...leaving no value behind in the cost layers');
+ok(inv_purchase_bill_delete($cid, $delVoucherId, $uid)['ok'] === false, 'Deleting it twice is refused');
+
+echo "\n== Stock already issued cannot be un-bought ==\n";
+$issuedItem = $mkItem('ISSUED', 'Issued Out', 'KG');
+$issuedChecked = inv_purchase_batch_validate($cid, $fyId, [
+    ['item_id' => $issuedItem, 'movement' => 'purchase', 'transaction_date' => '2026-09-11', 'quantity' => 10, 'rate' => 50,
+     'vat_mode' => 'zero', 'ref_no' => 'ISS-1'],
+]);
+$issuedPosted = inv_purchase_batch_post($cid, $fyId, $issuedChecked, $uid);
+$issuedVoucherId = (int) $issuedPosted['lines'][0]['voucher_id'];
+db()->prepare('INSERT INTO inventory_transactions (company_id, fiscal_year_id, item_id, transaction_type, transaction_date, qty_in, qty_out, rate, amount)
+        VALUES (?,?,?,?,?,0,?,?,?)')
+    ->execute([$cid, $fyId, $issuedItem, 'sale', '2026-09-20', 9, 50, 450]);
+inv_apply_movement($cid, $issuedItem, 0.0, 9.0, 50.0, '2026-09-20', 'weighted_average');
+$blocked = inv_purchase_bill_delete($cid, $issuedVoucherId, $uid);
+ok($blocked['ok'] === false, 'A bill whose stock has been sold on is not deleted');
+ok(str_contains((string) $blocked['error'], 'already been issued'), '  ...and says why, naming the item');
+ok((int) db()->query("SELECT COUNT(*) FROM vouchers WHERE id=$issuedVoucherId")->fetchColumn() === 1, '  ...leaving the entry standing');
+
+echo "\n== Bills already entered one voucher per item are gathered back up ==\n";
+// Exactly the shape the old code left behind: one movement, one voucher, one
+// item, all carrying the same bill number and supplier.
+$splitItems = [$mkItem('SPL1', 'Split One', 'KG'), $mkItem('SPL2', 'Split Two', 'KG'), $mkItem('SPL3', 'Split Three', 'KG')];
+$splitVoucherIds = [];
+foreach ($splitItems as $index => $splitItemId) {
+    $qty = 2 + $index;
+    $rate = 100;
+    db()->prepare('INSERT INTO inventory_transactions (company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date, qty_in, qty_out, rate, amount)
+            VALUES (?,?,?,?,?,?,?,0,?,?)')
+        ->execute([$cid, $fyId, $splitItemId, 'purchase', 'SPLIT-77', '2026-09-15', $qty, $rate, $qty * $rate]);
+    $splitTxnId = (int) db()->lastInsertId();
+    inv_apply_movement($cid, $splitItemId, (float) $qty, 0.0, (float) $rate, '2026-09-15', 'weighted_average', $splitTxnId);
+    $splitItem = db()->query("SELECT * FROM inventory_items WHERE id=$splitItemId")->fetch(PDO::FETCH_ASSOC);
+    $splitVoucherId = inv_post_movement_voucher($cid, $fyId, $splitTxnId, 'purchase', $splitItem, 'in',
+        (float) ($qty * $rate), '2026-09-15', $uid, $supplierId,
+        ['draft' => true, 'vat' => 0.0, 'tds' => 0.0, 'posting_date' => '2026-09-15', 'reference_no' => 'SPLIT-77']);
+    db()->prepare('UPDATE inventory_transactions SET voucher_id=? WHERE id=?')->execute([$splitVoucherId, $splitTxnId]);
+    $splitVoucherIds[] = (int) $splitVoucherId;
+}
+$glBefore = (float) db()->query("SELECT COALESCE(SUM(CASE WHEN e.entry_type='debit' THEN e.amount ELSE -e.amount END),0)
+    FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
+    WHERE v.company_id=$cid AND v.reference_no='SPLIT-77'")->fetchColumn();
+$totalBefore = (float) db()->query("SELECT COALESCE(SUM(total_amount),0) FROM vouchers WHERE company_id=$cid AND reference_no='SPLIT-77'")->fetchColumn();
+ok(count($splitVoucherIds) === 3, 'Three separate vouchers carry one bill, as the old code left them');
+ok(near($totalBefore, 900.00), '  ...worth 900 between them (200 + 300 + 400)');
+
+$plan = inv_purchase_bill_merge_plan($cid);
+$splitPlan = null;
+foreach ($plan as $planRow) {
+    if ((string) $planRow['ref_no'] === 'SPLIT-77') { $splitPlan = $planRow; }
+}
+ok($splitPlan !== null, 'The merge preview finds that bill');
+ok((int) $splitPlan['vouchers'] === 3 && (int) $splitPlan['items'] === 3, '  ...as 3 vouchers holding 3 items');
+ok(near((float) $splitPlan['total'], 900.00), '  ...and says what they come to before anything moves');
+ok(count($splitPlan['absorb']) === 2, '  ...naming the two it would absorb into the first');
+ok((int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$cid AND reference_no='SPLIT-77'")->fetchColumn() === 3,
+    '  ...and the preview itself writes nothing');
+
+$mergeResult = inv_purchase_bill_merge($cid, (int) $splitPlan['keep'], $splitPlan['absorb'], $uid);
+ok($mergeResult['ok'] === true, 'The merge runs' . ($mergeResult['ok'] ? '' : ': ' . $mergeResult['error']));
+ok((int) $mergeResult['absorbed'] === 2, '  ...absorbing two vouchers');
+ok((int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id=$cid AND reference_no='SPLIT-77'")->fetchColumn() === 1,
+    'Bill SPLIT-77 is now one entry');
+$mergedVoucherId = (int) $splitPlan['keep'];
+ok((int) db()->query("SELECT COUNT(*) FROM inventory_transactions WHERE company_id=$cid AND voucher_id=$mergedVoucherId")->fetchColumn() === 3,
+    '  ...with all three stock movements pointing at it');
+$glAfter = (float) db()->query("SELECT COALESCE(SUM(CASE WHEN e.entry_type='debit' THEN e.amount ELSE -e.amount END),0)
+    FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
+    WHERE v.company_id=$cid AND v.reference_no='SPLIT-77'")->fetchColumn();
+ok(near($glAfter, $glBefore), 'The ledger carries exactly what it carried before (nothing was recalculated)');
+ok(near((float) db()->query("SELECT total_amount FROM vouchers WHERE id=$mergedVoucherId")->fetchColumn(), 900.00),
+    '  ...and the surviving entry totals the whole bill');
+$mergedLines = db()->query("SELECT e.entry_type, e.amount, e.memo, l.name FROM voucher_entries e JOIN ledgers l ON l.id=e.ledger_id
+    WHERE e.voucher_id=$mergedVoucherId ORDER BY e.id")->fetchAll(PDO::FETCH_ASSOC);
+$mergedDebits = array_filter($mergedLines, static fn (array $l): bool => (string) $l['entry_type'] === 'debit');
+$mergedCredits = array_filter($mergedLines, static fn (array $l): bool => (string) $l['entry_type'] === 'credit');
+ok(count($mergedDebits) === 3, 'The stock stays one line per item, so the entry still shows what was bought');
+ok(count($mergedCredits) === 1, 'The supplier is credited once, not three times');
+ok(near(array_sum(array_map(static fn (array $l): float => (float) $l['amount'], $mergedCredits)), 900.00),
+    '  ...for the whole bill');
+$mergedMemos = implode(' | ', array_map(static fn (array $l): string => (string) $l['memo'], $mergedLines));
+ok(str_contains($mergedMemos, 'SPL1') && str_contains($mergedMemos, 'SPL3'), '  ...each debit still naming its item');
+ok(str_contains((string) db()->query("SELECT narration FROM vouchers WHERE id=$mergedVoucherId")->fetchColumn(), 'Merged from'),
+    'The absorbed voucher numbers are written into the narration, so the gap in the series has a reason');
+ok(inv_purchase_bill_merge_plan($cid) === array_values(array_filter(inv_purchase_bill_merge_plan($cid),
+    static fn (array $g): bool => (string) $g['ref_no'] !== 'SPLIT-77')), 'And it no longer appears in the plan');
+
+echo "\n== A bill that is already one entry is left alone ==\n";
+$singlePlan = inv_purchase_bill_merge_plan($cid);
+$abcInPlan = false;
+foreach ($singlePlan as $planRow) {
+    if ((string) $planRow['ref_no'] === 'ABC-9001') { $abcInPlan = true; }
+}
+ok(!$abcInPlan, 'A bill entered as one entry is never offered for merging');
+$crossBill = inv_purchase_bill_merge($cid, $mergedVoucherId, [$issuedVoucherId], $uid);
+ok($crossBill['ok'] === false, 'Two different bills are refused');
+ok(str_contains((string) $crossBill['error'], 'not the same bill'), '  ...saying the reference, supplier, date and state must match');
+
+echo "\n== The register itself ==\n";
+// The engine tests prove the figures. This proves the PAGE, which is where the
+// three new buttons live and where a <form> inside a <form> would silently
+// stop the counted lines being sent at all.
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_SERVER['SCRIPT_NAME'] = '/admin/accounting-inventory.php';
+$_SERVER['HTTPS'] = 'on';
+$_SERVER['HTTP_HOST'] = '127.0.0.1';
+$_SESSION['user_id'] = (int) db()->query("SELECT id FROM users WHERE role = 'admin' AND status = 'active' ORDER BY id LIMIT 1")->fetchColumn();
+$_SESSION['company_id'] = $cid;
+$_SESSION['fiscal_year_id'] = $fyId;
+mark_company_pin_verified($cid);
+// The page declares functions, so it can only be included ONCE in a process.
+// It is rendered in its edit view, which draws the register AND the form
+// filled back in from a recorded bill — every piece of the new markup at once.
+$editTarget = (int) db()->query("SELECT id FROM vouchers WHERE company_id=$cid AND reference_no='ABC-9001' LIMIT 1")->fetchColumn();
+$_GET = ['view' => 'inventory', 'task' => 'purchase', 'edit_bill' => $editTarget];
+$_POST = [];
+ob_start();
+$renderError = null;
+try {
+    include dirname(__DIR__) . '/public_html/admin/accounting-inventory.php';
+} catch (Throwable $e) {
+    $renderError = get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine();
+}
+$html = (string) ob_get_clean();
+ok($renderError === null, 'The Inventory page renders' . ($renderError === null ? ' (' . strlen($html) . ' bytes)' : ' — ' . $renderError));
+$noise = [];
+foreach (['Fatal error', 'Warning:', 'Notice:', 'Deprecated:', 'Uncaught'] as $needle) {
+    $at = stripos($html, $needle);
+    if ($at !== false) { $noise[] = trim(substr($html, $at, 160)); }
+}
+ok($noise === [], 'with no PHP notice, warning or deprecation' . ($noise === [] ? '' : ' — ' . implode(' | ', $noise)));
+
+// A <form> inside a <form>: HTML has no such thing. The parser throws the
+// inner start tag away and lets the inner </form> close the OUTER one, so
+// every field after it leaves the form it was written in. The bill actions are
+// three forms in one table cell, which is exactly where this goes wrong.
+$depth = 0; $nested = false;
+preg_match_all('~<form\b|</form\s*>~i', $html, $formTags);
+foreach ($formTags[0] as $tag) {
+    if (stripos($tag, '</form') === 0) { $depth = max(0, $depth - 1); continue; }
+    if (++$depth > 1) { $nested = true; }
+}
+ok(!$nested, 'No <form> is nested inside another');
+
+ok(str_contains($html, 'value="delete_purchase_bill"'), 'A posted bill offers Delete');
+ok(str_contains($html, 'edit_bill='), '  ...and Edit');
+ok(str_contains($html, 'inv-entry-preview'), '  ...and the entry can be previewed without leaving the page');
+ok(str_contains($html, 'value="post_movement_draft"'), 'A draft still offers Post it');
+ok(substr_count($html, 'value="merge_purchase_bills"') <= 1, 'The merge button appears at most once');
+
+// Editing a bill is the same form, filled in from what was recorded.
+ok(str_contains($html, 'name="replace_bill_id" value="' . $editTarget . '"'),
+    'Editing a bill carries which entry it will replace');
+ok(str_contains($html, 'ABC-9001'), '  ...with the bill number filled back in');
+ok(substr_count($html, 'name="bills[0][items][0][item_id]"') === 1, '  ...into the item grid, one line per item bought');
+ok(str_contains($html, 'Editing'), '  ...and says plainly that recording it replaces the old entry');
 
 ipb_cleanup();
 
