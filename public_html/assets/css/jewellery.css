@@ -137,6 +137,68 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* What changes hands after the total: what is left to collect, or -- when the
+   old gold is worth more than the ring it bought -- what the shop owes back.
+   Directly under the total, because it is the next question the counter asks
+   and the one it used to have to work out on paper. */
+.jw-summary-settle {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--mbw-soft, #f4f8f5);
+    border: 1px solid var(--mbw-border, #cfe0d7);
+}
+.jw-summary-settle .jw-summary-row { font-size: .84rem; }
+/* Owed BACK reads differently from owed TO: same row, opposite direction. */
+.jw-summary-settle .is-owed span,
+.jw-summary-settle .is-owed strong { color: var(--mbw-amber-ink, #92610a); font-weight: 700; }
+
+/* The question the counter must answer before an over-covered bill can be
+   saved. It appears only when there is an excess, so a plain bill never sees
+   it, and it sits inside the document form so the answer posts with the sale. */
+[data-jw-excess-panel] {
+    display: grid;
+    gap: 8px;
+    margin: 12px 0;
+    padding: 12px;
+    border-radius: 10px;
+    background: var(--mbw-amber-soft, #fdf6e7);
+    border: 1px solid var(--mbw-amber, #d9a441);
+}
+[data-jw-excess-panel][hidden] { display: none; }
+.jw-excess-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font-size: .86rem;
+}
+.jw-excess-head span { color: var(--mbw-muted, #64748b); }
+.jw-excess-head strong {
+    font-size: 1.15rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--mbw-amber-ink, #92610a);
+}
+.jw-excess-note { margin: 0; font-size: .78rem; line-height: 1.45; color: var(--mbw-muted, #64748b); }
+.jw-excess-choice {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--mbw-card, #fff);
+    border: 1px solid var(--mbw-border, #cfe0d7);
+    cursor: pointer;
+}
+.jw-excess-choice input { margin-top: 3px; width: auto; min-height: auto; }
+.jw-excess-choice span { display: grid; gap: 2px; font-size: .82rem; }
+.jw-excess-choice small { color: var(--mbw-muted, #64748b); font-size: .74rem; line-height: 1.4; }
+.jw-excess-choice:has(input:checked) { border-color: var(--mbw-amber, #d9a441); box-shadow: 0 0 0 1px var(--mbw-amber, #d9a441); }
+[data-jw-excess-ledger][hidden] { display: none; }
+
 /* A disclosure in the rail — how the money was tendered — kept narrow enough
    that its fields stack rather than fighting for a row. */
 .jw-rail-extra { margin-top: 14px; border-top: 1px solid var(--mbw-border-soft, #eef2f6); padding-top: 12px; }

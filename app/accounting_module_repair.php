@@ -3775,5 +3775,23 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Old gold worth more than the bill (migration 127)', static function (): void {
+        // The settlement identity refused any sale where cash and old gold
+        // came to more than the total, so a customer exchanging a heavy chain
+        // for a light ring could not be billed at all -- the only ways through
+        // were to under-state the gold or to invent a line nobody sold. The
+        // excess is now a leg of its own, and the counter says whether it is
+        // held as that customer's advance or handed back as a refund.
+        if (!accounting_repair_table_exists('jewellery_sales')) {
+            return;
+        }
+        accounting_repair_add_column('jewellery_sales', 'excess_amount',
+            '`excess_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `advance_amount`');
+        accounting_repair_add_column('jewellery_sales', 'excess_mode',
+            "`excess_mode` ENUM('none', 'advance', 'refund') NOT NULL DEFAULT 'none' AFTER `excess_amount`");
+        accounting_repair_add_column('jewellery_sales', 'excess_ledger_id',
+            '`excess_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `excess_mode`');
+    });
+
     return $errors;
 }

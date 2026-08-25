@@ -110,6 +110,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'deliver_order_id' => (int) ($_POST['deliver_order_id'] ?? 0),
                 'deliver_order_ids' => array_map('intval', (array) ($_POST['deliver_order_ids'] ?? [])),
                 'advance_amount' => (float) ($_POST['advance_amount'] ?? 0),
+                // What happens to old gold worth more than the bill. Asked
+                // rather than assumed: only the person at the counter knows
+                // whether the customer walked out with the difference or left
+                // it against their next bill.
+                'excess_mode' => (string) ($_POST['excess_mode'] ?? 'none'),
+                'excess_ledger_id' => (int) ($_POST['excess_ledger_id'] ?? 0),
                 // WHICH advance entries pay this bill — the rows the user put
                 // an amount against on the picker. The engine validates each
                 // against what the entry still holds and takes their sum as
@@ -1381,6 +1387,41 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         <?php endforeach; ?>
                     </div>
                 </details>
+                <?php
+                // Old gold worth more than the ring it bought. Hidden until
+                // the rail's own arithmetic says there IS an excess, because
+                // on nearly every bill there is not -- and shown as soon as
+                // there is, because until it is answered the sale cannot be
+                // saved at all.
+                $excessMode = (string) ($editDoc['excess_mode'] ?? 'none');
+                $excessAmount = (float) ($editDoc['excess_amount'] ?? 0);
+                ?>
+                <div data-jw-excess-panel<?= $excessAmount > 0.004 ? '' : ' hidden' ?>>
+                    <div class="jw-excess-head">
+                        <span>Old gold over the bill</span>
+                        <strong data-jw-sum="excess"><?= e(number_format($excessAmount, 2)) ?></strong>
+                    </div>
+                    <p class="jw-excess-note">
+                        The metal handed over is worth more than this bill. The shop owes the difference — say which it is,
+                        or the sale cannot be saved.
+                    </p>
+                    <label class="jw-excess-choice">
+                        <input type="radio" name="excess_mode" value="advance" <?= $excessMode !== 'refund' ? 'checked' : '' ?>>
+                        <span><strong>Hold as advance</strong><small>Stays as this customer's credit and can be applied to their next bill. Needs a customer chosen.</small></span>
+                    </label>
+                    <label class="jw-excess-choice">
+                        <input type="radio" name="excess_mode" value="refund" <?= $excessMode === 'refund' ? 'checked' : '' ?>>
+                        <span><strong>Refund the excess</strong><small>Handed back over the counter now, out of the ledger below.</small></span>
+                    </label>
+                    <label data-jw-excess-ledger<?= $excessMode === 'refund' ? '' : ' hidden' ?>>Refund paid out of
+                        <select name="excess_ledger_id">
+                            <option value="0">— choose cash or bank —</option>
+                            <?php foreach ($ledgers as $l): ?>
+                                <option value="<?= (int) $l['id'] ?>" <?= (int) ($editDoc['excess_ledger_id'] ?? 0) === (int) $l['id'] ? 'selected' : '' ?>><?= e(($l['code'] ? $l['code'] . ' — ' : '') . $l['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                </div>
                 <?php $tenderPanel = (string) ob_get_clean(); ?>
                 <?php jw_summary_rail([
                     'currency' => $sym,

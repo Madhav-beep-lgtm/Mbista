@@ -10,7 +10,8 @@ declare(strict_types=1);
  * customer brings. Every document therefore balances three legs against its
  * total:
  *
- *     received_amount  +  exchange_amount  +  balance_amount  ==  total_amount
+ *     received_amount + exchange_amount + advance_amount
+ *         + balance_amount - excess_amount  ==  total_amount
  *
  * Metal-to-metal and metal-to-cash are not special cases in this model, they
  * are corners of it: a sale settled entirely in old gold is exchange == total,
@@ -1849,19 +1850,74 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
         }
     }
 
-    // The settlement identity, now with four legs. Over-paying is still
-    // refused: an excess advance is not applied here and quietly turned into a
-    // negative balance — it stays in the customer's advance account, where it
-    // is refunded in cash or in gold as its own settlement, which is the only
-    // treatment that leaves a trail of what was actually handed back.
-    $settledSoFar = jw_round_money($received + $exchangeTotal + $advanceApplied);
-    if ($settledSoFar > $total + 0.005) {
-        throw new RuntimeException('Cash received, old gold and advance applied (' . number_format($settledSoFar, 2)
-            . ') exceed the sale total (' . number_format($total, 2) . ').'
-            . ($advanceApplied > 0 ? ' Apply only what this sale comes to and refund the rest of the advance separately.' : ''));
+    // The settlement identity, now with five legs.
+    //
+    //   received + exchange + advance + balance - excess == total
+    //
+    // EXCESS is the leg this used to refuse. A customer who hands over a chain
+    // worth more than the ring they leave with is not a mistake — it is the
+    // ordinary shape of a metal-to-metal exchange, and the shop owes them the
+    // difference. Refusing it did not protect the books; it pushed the counter
+    // into under-stating the gold or inventing a line nobody sold, which is a
+    // wrong figure entered to get past a guard meant to prevent wrong figures.
+    //
+    // What the excess IS, though, only the person at the counter knows, so it
+    // is asked rather than assumed: held as that customer's advance against
+    // their next bill, or handed back over the counter now.
+    $handedOver = jw_round_money($received + $exchangeTotal);
+    $excess = jw_round_money(max(0.0, $handedOver - $total));
+
+    // An ADVANCE is not something handed over today — it is a liability the
+    // shop has been carrying since the order was taken. Applying more of it
+    // than the bill comes to is a typing slip, never an event, so that half of
+    // the old guard stays exactly as it was.
+    if ($excess > 0.005 && $advanceApplied > 0.005) {
+        throw new RuntimeException('Cash and old gold (' . number_format($handedOver, 2)
+            . ') already cover this bill of ' . number_format($total, 2)
+            . ', so no advance can be applied to it. Leave the advance where it is — it stays available for the next bill.');
+    }
+    if ($advanceApplied > 0.005 && jw_round_money($handedOver + $advanceApplied) > $total + 0.005) {
+        throw new RuntimeException('Cash received, old gold and advance applied ('
+            . number_format(jw_round_money($handedOver + $advanceApplied), 2)
+            . ') exceed the sale total (' . number_format($total, 2)
+            . '). Apply only what this sale comes to and refund the rest of the advance separately.');
     }
 
-    $balance = jw_round_money($total - $received - $exchangeTotal - $advanceApplied);
+    $excessMode = jw_enum($header['excess_mode'] ?? null, ['none', 'advance', 'refund'], 'none');
+    $excessLedgerId = (int) ($header['excess_ledger_id'] ?? 0) ?: null;
+    if ($excess > 0.005) {
+        if ($excessMode === 'none') {
+            throw new RuntimeException('The old gold and cash on this bill come to '
+                . number_format($handedOver, 2) . ', which is ' . number_format($excess, 2)
+                . ' more than the bill of ' . number_format($total, 2)
+                . '. Say what happens to the excess: hold it as this customer\'s advance, or refund it.');
+        }
+        if ($excessMode === 'advance' && $partyId <= 0) {
+            throw new RuntimeException('An excess held as an advance belongs to somebody — choose the customer, '
+                . 'or refund the ' . number_format($excess, 2) . ' instead.');
+        }
+        if ($excessMode === 'refund') {
+            if ($excessLedgerId === null) {
+                throw new RuntimeException('Choose the cash or bank ledger the ' . number_format($excess, 2)
+                    . ' refund is paid out of.');
+            }
+            $refundCheck = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE id = :id AND company_id = :cid');
+            $refundCheck->execute(['id' => $excessLedgerId, 'cid' => $companyId]);
+            if ((int) $refundCheck->fetchColumn() === 0) {
+                throw new RuntimeException('That refund ledger does not belong to this company.');
+            }
+        } else {
+            $excessLedgerId = null; // an advance goes to the customer's own ledger, not a chosen one
+        }
+    } else {
+        $excess = 0.0;
+        $excessMode = 'none';
+        $excessLedgerId = null;
+    }
+
+    // Never negative: what is over the bill is the excess leg, not a balance
+    // owing the wrong way round.
+    $balance = jw_round_money(max(0.0, $total - $received - $exchangeTotal - $advanceApplied));
 
     $settleMode = jw_enum($header['settle_mode'] ?? null, ['credit', 'cash', 'bank'], 'cash');
     $settleLedgerId = (int) ($header['settle_ledger_id'] ?? 0) ?: null;
@@ -1922,6 +1978,7 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
         'remarks' => trim((string) ($header['remarks'] ?? '')) ?: null,
         'total' => $total,
         'received' => $received, 'exchange' => $exchangeTotal, 'advance' => $advanceApplied, 'balance' => $balance,
+        'excess' => $excess, 'excessmode' => $excessMode, 'excessledger' => $excessLedgerId,
         'pcash' => $tender['paid_cash'], 'pcard' => $tender['paid_card'],
         'pcheque' => $tender['paid_cheque'], 'pqr' => $tender['paid_qr'],
         'smode' => $settleMode, 'sledger' => $settleLedgerId,
@@ -1943,6 +2000,7 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
                     manual_tax_amount = :mtax, total_amount = :total, received_amount = :received,
                     paid_cash = :pcash, paid_card = :pcard, paid_cheque = :pcheque, paid_qr = :pqr,
                     exchange_amount = :exchange, advance_amount = :advance, balance_amount = :balance,
+                    excess_amount = :excess, excess_mode = :excessmode, excess_ledger_id = :excessledger,
                     settle_mode = :smode, settle_ledger_id = :sledger
                 WHERE id = :id AND company_id = :cid')
                 ->execute($params + ['id' => $saleId]);
@@ -1955,11 +2013,12 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
                     taxable_amount, non_taxable_amount, sd_taxable_amount, vatable_amount, diamond_amount, sales_person, customer_ref,
                     vat_amount, tax_amount, manual_tax_amount, total_amount, received_amount,
                     paid_cash, paid_card, paid_cheque, paid_qr, exchange_amount,
-                    advance_amount, balance_amount, settle_mode, settle_ledger_id, created_by)
+                    advance_amount, balance_amount, excess_amount, excess_mode, excess_ledger_id,
+                    settle_mode, settle_ledger_id, created_by)
                 VALUES (:cid, :fy, :no, :date, :datebs, :party, :cname, :ref, :narration, :remarks, :metal, :wastage, :making, :stone, :other, :discount,
                     :taxable, :nontax, :sdtaxable, :vatable, :diamond, :sperson, :cref,
                     :vat, :tax, :mtax, :total, :received, :pcash, :pcard, :pcheque, :pqr,
-                    :exchange, :advance, :balance, :smode, :sledger, :by)')
+                    :exchange, :advance, :balance, :excess, :excessmode, :excessledger, :smode, :sledger, :by)')
                 ->execute($params + ['no' => $no, 'by' => $userId ?: null]);
             $saleId = (int) db()->lastInsertId();
         }
@@ -2148,7 +2207,14 @@ function jewellery_save_sale(int $companyId, int $fiscalYearId, array $header, a
  *       Cr  sales — metal / making / stone
  *       Cr  VAT output
  *       Cr  other charges recovered
+ *       Cr  customer advance / cash    excess_amount   <- old gold over the bill
  *   Dr  COGS  /  Cr stock    at the weighted-average cost in force NOW
+ *
+ * The EXCESS leg is the one that makes a metal-to-metal exchange work in both
+ * directions. Old gold worth more than the ring it bought leaves the shop
+ * owing the difference: credited to that customer's own advance ledger when it
+ * is being kept for their next bill, or to cash when it is handed back over
+ * the counter. Which of the two is the counter's answer, recorded on the sale.
  */
 function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): array
 {
@@ -2311,6 +2377,26 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
         if ((float) $sale['balance_amount'] > 0) {
             $legs[] = ['ledger_id' => jw_party_ledger($companyId, (int) $sale['party_id'], 'receivable'), 'amount' => (float) $sale['balance_amount'], 'memo' => 'Balance ' . $sale['sale_no']];
         }
+        // What the old gold was worth over and above the bill. A CREDIT, in
+        // the leg convention where positive is a debit: the shop is the one
+        // that owes now.
+        $saleExcess = jw_round_money((float) ($sale['excess_amount'] ?? 0));
+        $saleExcessMode = (string) ($sale['excess_mode'] ?? 'none');
+        if ($saleExcess > 0.004 && $saleExcessMode !== 'none') {
+            if ($saleExcessMode === 'refund') {
+                $refundLedgerId = (int) ($sale['excess_ledger_id'] ?? 0);
+                if ($refundLedgerId <= 0) {
+                    throw new RuntimeException('This bill refunds ' . number_format($saleExcess, 2)
+                        . ' of old gold but no cash or bank ledger was chosen to pay it out of.');
+                }
+                $legs[] = ['ledger_id' => $refundLedgerId, 'amount' => -$saleExcess,
+                    'memo' => 'Refund of old gold over the bill ' . $sale['sale_no']];
+            } else {
+                $legs[] = ['ledger_id' => jw_party_ledger($companyId, (int) $sale['party_id'], 'advance'),
+                    'amount' => -$saleExcess,
+                    'memo' => 'Old gold over the bill held as advance ' . $sale['sale_no']];
+            }
+        }
         foreach ($exchanges as $exchange) {
             $exItem = jewellery_item($companyId, (int) $exchange['item_id']);
             $exLedgerId = jw_item_stock_ledger_id($companyId, $exItem);
@@ -2359,6 +2445,38 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
             'status' => 'posted',
             'posted_by' => $userId ?: null,
         ], jw_build_entries($legs));
+
+        // An excess held as an advance has to be FINDABLE, or it is money the
+        // shop owes that only the sale it came off knows about. It goes in the
+        // advance register the same way any other advance does, so it appears
+        // in that customer's open advances and the next bill can apply it.
+        //
+        // It carries THIS sale's voucher rather than raising one of its own.
+        // The credit to the advance ledger is a leg of the sale entry above;
+        // a second voucher would credit it twice and leave the customer owed
+        // double what they handed over. One fact, one posting, two registers
+        // pointing at it.
+        if ($saleExcess > 0.004 && $saleExcessMode === 'advance' && table_exists('jewellery_settlements')) {
+            db()->prepare("INSERT INTO jewellery_settlements (company_id, fiscal_year_id, settlement_no, settlement_date,
+                    party_id, order_id, is_advance, direction, mode, amount, ledger_id,
+                    status, voucher_id, notes, posted_by, posted_at, created_by)
+                VALUES (:cid, :fy, :no, :date, :party, :order, 1, 'received', 'metal', :amount, :ledger,
+                    'posted', :voucher, :notes, :by, NOW(), :by2)")
+                ->execute([
+                    'cid' => $companyId,
+                    'fy' => (int) ($sale['fiscal_year_id'] ?? 0) ?: null,
+                    'no' => jw_next_no($companyId, 'jewellery_settlements', 'settlement_no', 'JST'),
+                    'date' => $saleDate,
+                    'party' => (int) $sale['party_id'],
+                    'order' => (int) ($sale['order_id'] ?? 0) ?: null,
+                    'amount' => $saleExcess,
+                    'ledger' => jw_party_ledger($companyId, (int) $sale['party_id'], 'advance'),
+                    'voucher' => $voucherId,
+                    'notes' => 'Old gold over the bill ' . $sale['sale_no'] . ' held as advance',
+                    'by' => $userId ?: null,
+                    'by2' => $userId ?: null,
+                ]);
+        }
 
         // Metal out at cost — the stock ledger must fall by cost, not by price.
         foreach ($lines as $line) {
@@ -2491,8 +2609,23 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
 function jewellery_unpost_sale(int $companyId, int $saleId, int $userId = 0): array
 {
     $sale = jewellery_sale($companyId, $saleId);
+    // An excess held as an advance was recorded in the advance register against
+    // this sale's voucher. Unposting removes the voucher, so leaving the
+    // register row would offer the next bill an advance the books no longer
+    // carry — the customer credited twice for gold handed over once.
+    $advanceRowId = 0;
+    if ($sale !== null && (int) ($sale['voucher_id'] ?? 0) > 0 && table_exists('jewellery_settlements')) {
+        $advStmt = db()->prepare("SELECT id FROM jewellery_settlements
+            WHERE company_id = :cid AND voucher_id = :vid AND is_advance = 1 AND direction = 'received' LIMIT 1");
+        $advStmt->execute(['cid' => $companyId, 'vid' => (int) $sale['voucher_id']]);
+        $advanceRowId = (int) ($advStmt->fetchColumn() ?: 0);
+    }
     $result = jw_unpost_document($companyId, 'jewellery_sales', 'jewellery_sale', $saleId, $userId);
     if ($result['ok'] && $sale !== null) {
+        if ($advanceRowId > 0) {
+            db()->prepare('DELETE FROM jewellery_settlements WHERE id = :id AND company_id = :cid')
+                ->execute(['id' => $advanceRowId, 'cid' => $companyId]);
+        }
         jewellery_trace_release_sale($companyId, $saleId, $userId);
         // The bill is out of the books, so the order it stood on goes back to
         // the workshop's answer. Delivery is undone with it: 'delivered' was

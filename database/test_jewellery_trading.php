@@ -5,7 +5,8 @@ declare(strict_types=1);
  * Jewellery Accounting — Phases 3 & 4: purchases, sales, old-gold exchange,
  * per-item VAT, COGS and bill-wise party accounting.
  *
- * Proves the settlement identity (received + exchange + balance == total),
+ * Proves the settlement identity (received + exchange + advance + balance
+ * - excess == total),
  * that every voucher balances on the mapped ledgers, that VAT follows the
  * ITEM rather than the document, that COGS is stamped at the weighted average
  * in force when posting, that metal-to-metal and metal-to-cash fall out of the
@@ -899,6 +900,130 @@ ok(($idFormats[1] ?? '') === 'text',
     'An order reference stays text — formatted as a number, 1234 prints "1,234" and cannot be found');
 ok(($idFormats[2] ?? '') === 'money' && ($idFormats[3] ?? '') === 'count',
     'While the figures beside it are still typed');
+echo "\n6b. Old gold worth MORE than the bill\n";
+// A customer walks in with a heavy chain and leaves with a light ring. The
+// metal handed over is worth more than the metal handed back, and the shop
+// owes the difference. This used to be unbillable at all.
+$excessHeader = ['sale_date' => '2026-08-12', 'party_id' => $customer, 'received_amount' => 0];
+$excessLines = [['item_id' => $chain, 'gross_weight' => 1, 'rate' => 100000]];
+$excessGold = [['item_id' => $oldGold, 'gross_weight' => 2, 'rate' => 100000]];
+try {
+    jewellery_save_sale($cidA, $fyA, $excessHeader, $excessLines, $excessGold, $userA);
+    ok(false, 'A bill over-covered by old gold is not saved without an answer');
+} catch (RuntimeException $e) {
+    ok(str_contains($e->getMessage(), 'Say what happens to the excess'),
+        'A bill over-covered by old gold is refused until somebody says what happens to the excess');
+}
+
+// (a) held as the customer's advance
+$advSaleId = jewellery_save_sale($cidA, $fyA, $excessHeader + ['excess_mode' => 'advance'], $excessLines, $excessGold, $userA);
+$advRow = jewellery_sale($cidA, $advSaleId);
+$excessExpected = 200000.0 - (float) $advRow['total_amount'];
+ok(near((float) $advRow['exchange_amount'], 200000.0), 'The old gold is valued at 200,000');
+ok(near((float) $advRow['excess_amount'], $excessExpected),
+    'The excess is the gold less the bill (' . number_format($excessExpected, 2) . ')');
+ok((string) $advRow['excess_mode'] === 'advance', '  ...recorded as held for the customer');
+ok(near((float) $advRow['balance_amount'], 0.0), 'Nothing is left owing the other way — a balance is never negative');
+// received + exchange + advance + balance - excess == total
+ok(near((float) $advRow['received_amount'] + (float) $advRow['exchange_amount'] + (float) ($advRow['advance_amount'] ?? 0)
+    + (float) $advRow['balance_amount'] - (float) $advRow['excess_amount'], (float) $advRow['total_amount']),
+    'SETTLEMENT IDENTITY still holds, with the excess as its fifth leg');
+
+$advPost = jewellery_post_sale($cidA, $advSaleId, $userA);
+ok($advPost['ok'], 'It posts' . ($advPost['ok'] ? '' : ' — ' . $advPost['error']));
+$v = voucher_shape((int) $advPost['voucher_id']);
+ok(near($v['dr'], $v['cr']), '  ...and the voucher balances with the excess on it');
+$cusAdvance = jw_party_ledger($cidA, $customer, 'advance');
+ok(near($v['ledgers'][$cusAdvance] ?? 0, -$excessExpected),
+    "The customer's own advance ledger is credited the excess");
+ok(!isset($v['ledgers'][$cash]), 'No cash moves — nothing was handed back');
+$advReg = db()->query("SELECT * FROM jewellery_settlements WHERE company_id=$cidA
+    AND voucher_id=" . (int) $advPost['voucher_id'] . " AND is_advance=1")->fetch(PDO::FETCH_ASSOC);
+ok($advReg !== false, 'The excess appears in the advance register, so the next bill can find it');
+ok(near((float) $advReg['amount'], $excessExpected), '  ...for the same amount');
+ok((int) $advReg['voucher_id'] === (int) $advPost['voucher_id'],
+    '  ...carrying THIS voucher, not a second one that would credit the customer twice');
+$openNow = jewellery_open_advances($cidA, $customer);
+$foundOpen = 0.0;
+foreach ($openNow as $openRow) {
+    if ((int) $openRow['voucher_id'] === (int) $advPost['voucher_id']) { $foundOpen = (float) $openRow['remaining']; }
+}
+ok(near($foundOpen, $excessExpected), 'It shows in the customer\'s open advances at its full value');
+
+// Unposting must take the register row with it, or the customer is credited
+// twice for gold handed over once.
+$advUnpost = jewellery_unpost_sale($cidA, $advSaleId, $userA);
+ok($advUnpost['ok'], 'The bill unposts' . ($advUnpost['ok'] ? '' : ' — ' . $advUnpost['error']));
+ok((int) db()->query("SELECT COUNT(*) FROM jewellery_settlements WHERE company_id=$cidA
+    AND voucher_id=" . (int) $advPost['voucher_id'])->fetchColumn() === 0,
+    '  ...and the advance register row goes with it');
+jewellery_post_sale($cidA, $advSaleId, $userA);
+
+// (b) handed back over the counter
+$refundSaleId = jewellery_save_sale($cidA, $fyA,
+    ['sale_date' => '2026-08-13', 'party_id' => $customer, 'received_amount' => 0,
+     'excess_mode' => 'refund', 'excess_ledger_id' => $cash],
+    [['item_id' => $chain, 'gross_weight' => 1, 'rate' => 100000]],
+    [['item_id' => $oldGold, 'gross_weight' => 2, 'rate' => 100000]], $userA);
+$refundRow = jewellery_sale($cidA, $refundSaleId);
+ok((string) $refundRow['excess_mode'] === 'refund' && (int) $refundRow['excess_ledger_id'] === $cash,
+    'The same bill can instead refund the excess out of a chosen ledger');
+$refundPost = jewellery_post_sale($cidA, $refundSaleId, $userA);
+ok($refundPost['ok'], 'It posts' . ($refundPost['ok'] ? '' : ' — ' . $refundPost['error']));
+$v = voucher_shape((int) $refundPost['voucher_id']);
+ok(near($v['dr'], $v['cr']), '  ...and balances');
+ok(near($v['ledgers'][$cash] ?? 0, -(float) $refundRow['excess_amount']),
+    'Cash is CREDITED the excess — money out of the till, not into it');
+ok((int) db()->query("SELECT COUNT(*) FROM jewellery_settlements WHERE company_id=$cidA
+    AND voucher_id=" . (int) $refundPost['voucher_id'])->fetchColumn() === 0,
+    'A refund leaves no advance behind — it was handed back, not kept');
+
+echo "\n6c. What the excess is NOT allowed to be\n";
+try {
+    jewellery_save_sale($cidA, $fyA,
+        ['sale_date' => '2026-08-14', 'party_id' => $customer, 'received_amount' => 0, 'excess_mode' => 'refund'],
+        [['item_id' => $chain, 'gross_weight' => 1, 'rate' => 100000]],
+        [['item_id' => $oldGold, 'gross_weight' => 2, 'rate' => 100000]], $userA);
+    ok(false, 'A refund with no ledger is refused');
+} catch (RuntimeException $e) {
+    ok(str_contains($e->getMessage(), 'refund is paid out of'), 'A refund with no ledger to pay it from is refused');
+}
+try {
+    jewellery_save_sale($cidA, $fyA,
+        ['sale_date' => '2026-08-14', 'party_id' => 0, 'customer_name' => '', 'received_amount' => 0, 'excess_mode' => 'advance'],
+        [['item_id' => $chain, 'gross_weight' => 1, 'rate' => 100000]],
+        [['item_id' => $oldGold, 'gross_weight' => 2, 'rate' => 100000]], $userA);
+    ok(false, 'An advance with no customer is refused');
+} catch (RuntimeException $e) {
+    ok(true, 'An advance belongs to somebody, so one with no customer is refused');
+}
+// Over-applying an ADVANCE is still a typing slip, not an event, and is still
+// refused — the old guard's other half survives untouched.
+try {
+    jewellery_save_sale($cidA, $fyA,
+        ['sale_date' => '2026-08-14', 'party_id' => $customer, 'received_amount' => 0,
+         'advance_amount' => 50000, 'excess_mode' => 'advance'],
+        [['item_id' => $chain, 'gross_weight' => 1, 'rate' => 100000]],
+        [['item_id' => $oldGold, 'gross_weight' => 2, 'rate' => 100000]], $userA);
+    ok(false, 'An advance applied to an already over-covered bill is refused');
+} catch (RuntimeException $e) {
+    // Either guard is a correct refusal: the allocation check runs first and
+    // catches an advance this customer does not actually hold, and the
+    // over-covered check catches one they do.
+    ok(stripos($e->getMessage(), 'advance') !== false,
+        'An advance cannot be applied to a bill the gold already covers — ' . $e->getMessage());
+}
+// And a bill the gold does NOT cover carries no excess at all.
+$plainId = jewellery_save_sale($cidA, $fyA,
+    ['sale_date' => '2026-08-15', 'party_id' => $customer, 'received_amount' => 0],
+    [['item_id' => $chain, 'gross_weight' => 2, 'rate' => 100000]],
+    [['item_id' => $oldGold, 'gross_weight' => 1, 'rate' => 100000]], $userA);
+$plainRow = jewellery_sale($cidA, $plainId);
+ok(near((float) $plainRow['excess_amount'], 0.0) && (string) $plainRow['excess_mode'] === 'none',
+    'An ordinary bill carries no excess and is not asked about one');
+ok((float) $plainRow['balance_amount'] > 0, '  ...it simply leaves a balance, as it always did');
+
+
 jwt_cleanup();
 echo "\n==================================================\n";
 echo "  PASS: $pass    FAIL: $fail\n";

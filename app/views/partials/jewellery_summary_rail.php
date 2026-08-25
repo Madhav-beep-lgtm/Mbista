@@ -46,6 +46,24 @@ function jw_summary_rail(array $ctx): void
                 <span>Invoice total (<?= e($sym) ?>)</span>
                 <strong data-jw-sum="total">0.00</strong>
             </div>
+            <?php if ($withOldGold): ?>
+                <?php // What is left to collect, and — when the gold is worth
+                      // more than the bill — what the shop owes instead. Both
+                      // live under the total because they are the answer to
+                      // "and now what changes hands", which is the next thing
+                      // the counter needs and the last thing it used to be
+                      // told. Each is hidden while it reads zero, so a plain
+                      // bill shows a plain total. ?>
+                <div class="jw-summary-settle" data-jw-settle hidden>
+                    <div class="jw-summary-row" data-jw-row="due" hidden>
+                        <span>Customer still to pay</span><strong data-jw-sum="due">0.00</strong>
+                    </div>
+                    <div class="jw-summary-row is-owed" data-jw-row="excess" hidden>
+                        <span data-jw-excess-label>Shop owes (old gold over the bill)</span>
+                        <strong data-jw-sum="excess-rail">0.00</strong>
+                    </div>
+                </div>
+            <?php endif; ?>
             <?php
                 // Anything that belongs with the money rather than with the
                 // items — how it was tendered, for instance. It renders INSIDE
@@ -169,6 +187,18 @@ function jw_summary_rail_script(): void
             + (other ? (parseFloat(other.value) || 0) : 0)
             - (discount ? (parseFloat(discount.value) || 0) : 0);
 
+        // What actually changes hands. Old gold and cash are both value handed
+        // over; when they come to more than the bill, the difference is owed
+        // BACK, and the sale cannot be saved until somebody says whether it is
+        // kept as the customer's advance or refunded over the counter.
+        var receivedField = form.querySelector('[name="received_amount"]');
+        var received = receivedField ? (parseFloat(receivedField.value) || 0) : 0;
+        var advanceField = form.querySelector('[name="advance_amount"]');
+        var advance = advanceField ? (parseFloat(advanceField.value) || 0) : 0;
+        var handedOver = totals.oldgold + received;
+        var excess = Math.max(0, handedOver - total);
+        var due = Math.max(0, total - handedOver - advance);
+
         var out = {
             items: String(totals.items),
             gross: weight(totals.gross),
@@ -179,12 +209,43 @@ function jw_summary_rail_script(): void
             making: money(totals.making),
             stone: money(totals.stone),
             oldgold: money(totals.oldgold),
-            total: money(total)
+            total: money(total),
+            due: money(due),
+            excess: money(excess),
+            'excess-rail': money(excess)
         };
         Object.keys(out).forEach(function (key) {
-            var cell = rail.querySelector('[data-jw-sum="' + key + '"]');
-            if (cell) { cell.textContent = out[key]; }
+            rail.querySelectorAll('[data-jw-sum="' + key + '"]').forEach(function (cell) {
+                cell.textContent = out[key];
+            });
+            // The excess figure is printed twice — in the rail and on the
+            // panel that asks what to do with it — and they are the same
+            // number, so they are written from the same place.
+            document.querySelectorAll('[data-jw-sum="' + key + '"]').forEach(function (cell) {
+                cell.textContent = out[key];
+            });
         });
+
+        var show = function (node, on) {
+            if (!node) { return; }
+            if (on) { node.removeAttribute('hidden'); } else { node.setAttribute('hidden', 'hidden'); }
+        };
+        var hasExcess = excess > 0.004;
+        show(rail.querySelector('[data-jw-row="due"]'), due > 0.004);
+        show(rail.querySelector('[data-jw-row="excess"]'), hasExcess);
+        show(rail.querySelector('[data-jw-settle]'), due > 0.004 || hasExcess);
+        show(document.querySelector('[data-jw-excess-panel]'), hasExcess);
+
+        // The label follows the choice, so the rail says what will actually
+        // happen rather than the general case.
+        var chosen = form.querySelector('[name="excess_mode"]:checked');
+        var label = document.querySelector('[data-jw-excess-label]');
+        if (label) {
+            label.textContent = chosen && chosen.value === 'refund'
+                ? 'Refund to customer (old gold over the bill)'
+                : 'Held as advance (old gold over the bill)';
+        }
+        show(document.querySelector('[data-jw-excess-ledger]'), hasExcess && chosen && chosen.value === 'refund');
     }
 
     form.addEventListener('input', recalc);
