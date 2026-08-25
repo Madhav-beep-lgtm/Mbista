@@ -640,6 +640,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'record_purchase_batch') {
         require_permission('inventory', 'create');
+        // Did the whole form arrive? PHP reads at most max_input_vars fields
+        // and throws the remainder away silently, so a bill long enough to
+        // cross that line posts with its last items missing and nothing
+        // anywhere says so. The sentinel is the last field in the form; if it
+        // is not here, neither is everything after the cut.
+        if (($_POST['grid_end'] ?? '') !== '1') {
+            $inputCap = (int) ini_get('max_input_vars');
+            $_SESSION['inv_purchase_bills'] = array_values((array) ($_POST['bills'] ?? []));
+            $_SESSION['inv_purchase_grid_errors'] = [
+                'This bill is longer than the server will accept in one submission'
+                    . ($inputCap > 0 ? ' (max_input_vars is ' . $inputCap . ', which is about ' . max(1, intdiv($inputCap - 20, 12)) . ' item lines)' : '')
+                    . '. Nothing was recorded — recording part of a bill would be worse than recording none of it.',
+                'Split it across two bills with the same bill number (they post as one entry), or raise max_input_vars in public_html/.user.ini — it is deployed with the site, so an edit made on the server by hand is overwritten by the next deploy.',
+            ];
+            flash('error', 'Nothing was recorded: the bill was too long for the server to accept in one go, and only part of it arrived. '
+                . 'Everything that did arrive is still on the form below.');
+            redirect(inv_back_url('#movement-purchase'));
+        }
         // The form is bills-with-items; the engine posts flat lines. Folding
         // out here keeps the tested engine untouched and means a bill's header
         // is copied onto its lines by code rather than re-typed by a person.
@@ -3038,6 +3056,17 @@ $invMoveItemOptions = static function () use ($items): string {
                 <button type="submit"><?= icon('badge-check') ?>Record all bills</button>
                 <button type="button" class="secondary" id="purchaseAddBill"><?= icon('plus') ?>Add bill</button>
             </div>
+            <?php // The last field in the form, and the only reason it exists.
+                  // PHP stops reading a POST at max_input_vars and DISCARDS the
+                  // rest without a word -- no error, no warning, no entry in
+                  // any log. A long bill would post with its tail simply
+                  // missing, which reads as "it will not let me add more
+                  // items". Being last, this arrives only if everything before
+                  // it did; the handler refuses the whole grid when it does
+                  // not, so a truncated bill is never half-recorded.
+                  // The submit handler re-appends it, because a bill added
+                  // after page load is cloned onto the end of the form. ?>
+            <input type="hidden" name="grid_end" id="purchaseGridEnd" value="1">
         </form>
         <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
             The reference is what ties a bill's lines together — it shows on the entry, so the bill can be found again when it is paid.
@@ -3650,6 +3679,7 @@ $invMoveItemOptions = static function () use ($items): string {
 // in two places: inside a dialog, where a line's own amount and tax are worked
 // out, and on the bill row behind it, which shows what the popup adds up to.
 (function () {
+    var purchaseForm = document.getElementById('purchaseBillForm');
     var billTable = document.getElementById('purchaseBills');
     if (!billTable) { return; }
 
@@ -3884,6 +3914,43 @@ $invMoveItemOptions = static function () use ($items): string {
     document.addEventListener('change', function (event) {
         if (event.target.closest && event.target.closest('.inv-item-grid')) { recalcAll(); }
     });
+
+    // Blank rows are not worth a submission slot.
+    //
+    // The grid always shows spares -- three bills, six item lines each -- and
+    // every one of them used to be posted whether or not anybody typed in it:
+    // roughly 240 fields spent on nothing, out of a server budget that is
+    // commonly 1,000. The engine already treats an untouched line as a spare
+    // rather than a mistake, so leaving them behind changes no outcome and
+    // roughly quadruples how long a bill can be.
+    //
+    // Disabled fields are not submitted, and the disabling happens at submit
+    // time, so nothing on screen changes and a refused grid comes back whole.
+    if (purchaseForm) {
+        purchaseForm.addEventListener('submit', function () {
+            Array.prototype.forEach.call(purchaseForm.querySelectorAll('.inv-item-grid tbody tr'), function (row) {
+                var picked = row.querySelector('.inv-grid-item');
+                var qty = row.querySelector('.inv-grid-qty');
+                var rate = row.querySelector('.inv-grid-rate');
+                var empty = (!picked || !picked.value)
+                    && (!qty || !parseFloat(qty.value))
+                    && (!rate || !parseFloat(rate.value));
+                if (!empty) { return; }
+                Array.prototype.forEach.call(row.querySelectorAll('[name]'), function (field) { field.disabled = true; });
+            });
+            // A bill with no items left is a spare too, header and all.
+            Array.prototype.forEach.call(purchaseForm.querySelectorAll('.inv-bill-row'), function (billRow) {
+                var grid = itemGridFor(billRow.getAttribute('data-bill'));
+                if (!grid) { return; }
+                var live = grid.querySelectorAll('tbody tr [name]:not([disabled])');
+                if (live.length > 0) { return; }
+                Array.prototype.forEach.call(billRow.querySelectorAll('[name]'), function (field) { field.disabled = true; });
+            });
+            // Whatever was cloned on after it, the sentinel goes last.
+            var sentinel = document.getElementById('purchaseGridEnd');
+            if (sentinel) { purchaseForm.appendChild(sentinel); }
+        });
+    }
 
     var addBill = document.getElementById('purchaseAddBill');
     if (addBill) {

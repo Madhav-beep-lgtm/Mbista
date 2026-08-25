@@ -564,6 +564,30 @@ ok(str_contains($html, 'ABC-9001'), '  ...with the bill number filled back in');
 ok(substr_count($html, 'name="bills[0][items][0][item_id]"') === 1, '  ...into the item grid, one line per item bought');
 ok(str_contains($html, 'Editing'), '  ...and says plainly that recording it replaces the old entry');
 
+echo "\n== A bill longer than the server accepts is refused, not half-recorded ==\n";
+// PHP reads at most max_input_vars fields off a POST and throws the rest away
+// without a word. A long bill therefore used to post with its last items
+// simply missing -- which is what "it will not let me add more items" looks
+// like from the outside. The sentinel is the last field in the form; if it did
+// not arrive, neither did everything after the cut.
+ok(str_contains($html, 'name="grid_end"'), 'The form ends with a sentinel field');
+ok(strrpos($html, 'name="grid_end"') > strrpos($html, 'name="bills['),
+    '  ...placed after every bill field, which is the only position that detects a cut');
+ok(str_contains($html, 'purchaseForm.appendChild(sentinel)'),
+    '  ...and re-appended on submit, so a bill added after page load stays in front of it');
+ok(str_contains($html, 'field.disabled = true'),
+    'Blank rows are dropped before submitting, so the spares cost no budget');
+
+// What the form actually spends per line, measured rather than assumed.
+$itemFieldNames = [];
+if (preg_match_all('~name="bills\[0\]\[items\]\[0\]\[([a-z_]+)\]"~', $html, $fieldMatches)) {
+    $itemFieldNames = $fieldMatches[0];
+}
+ok(count($itemFieldNames) > 0 && count($itemFieldNames) <= 12,
+    'An item line costs ' . count($itemFieldNames) . ' input vars');
+$blankRowCount = substr_count($html, 'class="inv-item-row"');
+echo '        (the form renders ' . $blankRowCount . " item rows before anybody types)\n";
+
 ipb_cleanup();
 
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass   FAIL: $fail\n" . str_repeat('=', 50) . "\n";
