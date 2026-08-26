@@ -21,7 +21,7 @@
         // sideways let the whole 1700px table burst out of its card and lie
         // across the page. Taking the list out of the flow entirely means no
         // ancestor has to be touched at all.
-        '.ss-list{position:fixed;z-index:1200;max-height:260px;overflow:auto;' +
+        '.ss-list{position:fixed;box-sizing:border-box;z-index:1200;max-height:260px;overflow:auto;' +
         'background:var(--mbw-card,#fff);color:var(--mbw-ink,#12261f);border:1px solid var(--mbw-line,rgba(0,0,0,.16));' +
         'border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.22)}' +
         '.ss-item{padding:8px 12px;cursor:pointer;font-size:13px}' +
@@ -97,24 +97,72 @@
         // Against the box, in viewport coordinates: below it when there is
         // room and above it when there is not, so a row near the foot of the
         // screen does not open a list nobody can see.
+        //
+        // POSITION:FIXED IS NOT ALWAYS FIXED TO THE VIEWPORT. Any ancestor
+        // carrying a transform, a filter, a backdrop-filter, a perspective,
+        // will-change or contain quietly becomes the containing block for
+        // everything fixed inside it, and viewport coordinates handed to a
+        // list inside one land offset by that ancestor's own position. What
+        // that looks like from the outside is a dropdown opening halfway
+        // across the page, nowhere near the field it belongs to — reported on
+        // the Reports Center as a report list sitting over the filter form.
+        //
+        // Two things stop it, and both are needed. The list is moved to
+        // <body> while it is open, which leaves no ancestor between it and
+        // the viewport that could ever do this. And the placement is then
+        // CHECKED rather than assumed: whatever the containing block turns
+        // out to be — including one added to the page next year, or by a
+        // browser extension — the difference between where the list was asked
+        // to go and where it actually went corrects it in a single step.
         function placeList() {
             var box = input.getBoundingClientRect();
-            var below = window.innerHeight - box.bottom - 8;
-            var above = box.top - 8;
-            var room = Math.max(120, Math.min(260, below > 160 || below >= above ? below : above));
-            list.style.width = box.width + 'px';
-            list.style.left = box.left + 'px';
+            var gap = 4;
+            var edge = 8;
+            var below = window.innerHeight - box.bottom - edge;
+            var above = box.top - edge;
+            var openDown = below > 160 || below >= above;
+            var room = Math.max(120, Math.min(260, openDown ? below : above));
+
+            if (list.parentNode !== document.body) { document.body.appendChild(list); }
+
+            // Wide enough to read. Sized to the field alone, a list of report
+            // names is a column of truncated words in a 190px pill; sized to
+            // its content, it says what each row is.
+            list.style.position = 'fixed';
+            list.style.bottom = 'auto';
             list.style.maxHeight = room + 'px';
-            if (below > 160 || below >= above) {
-                list.style.top = (box.bottom + 4) + 'px';
-                list.style.bottom = 'auto';
-            } else {
-                list.style.top = 'auto';
-                list.style.bottom = (window.innerHeight - box.top + 4) + 'px';
+            list.style.width = 'auto';
+            var width = Math.min(
+                Math.max(box.width, list.scrollWidth + 2),
+                window.innerWidth - (edge * 2)
+            );
+            list.style.width = width + 'px';
+
+            // Clamped, so a field near the right-hand edge does not open a
+            // list running off the screen.
+            var wantLeft = Math.max(edge, Math.min(box.left, window.innerWidth - width - edge));
+            var wantTop = openDown
+                ? box.bottom + gap
+                : Math.max(edge, box.top - gap - list.offsetHeight);
+            list.style.left = wantLeft + 'px';
+            list.style.top = wantTop + 'px';
+
+            var got = list.getBoundingClientRect();
+            var dx = wantLeft - got.left;
+            var dy = wantTop - got.top;
+            if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+                list.style.left = (wantLeft + dx) + 'px';
+                list.style.top = (wantTop + dy) + 'px';
             }
         }
         function isOpen() { return list.style.display === 'block'; }
-        function reposition() { if (isOpen()) { placeList(); } }
+        function reposition(ev) {
+            // A scroll INSIDE the list is the user reading it, and re-placing
+            // the list under them measures its own content mid-scroll. Only
+            // the world moving around the field is worth following.
+            if (ev && ev.target && ev.target !== document && list.contains(ev.target)) { return; }
+            if (isOpen()) { placeList(); }
+        }
         // The page, or the grid the box sits in, can scroll under an open
         // list. Capture, so a scroll inside the table is heard as well.
         window.addEventListener('scroll', reposition, true);
@@ -125,6 +173,10 @@
             input.setAttribute('aria-expanded', 'false');
             activeIndex = -1;
             wrap.classList.remove('ss-open');
+            // Handed back to the field it belongs to. A closed list parked in
+            // <body> outlives its own row — the item grids add and remove rows
+            // all day — and would be left behind every time one went.
+            if (list.parentNode !== wrap) { wrap.appendChild(list); }
         }
         function choose(idx) {
             var opt = visible[idx];

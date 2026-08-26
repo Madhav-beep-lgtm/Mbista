@@ -954,5 +954,39 @@ ok(!str_contains($ssJs, 'ss-overlay-active') && !str_contains($ssJs, 'overflow:v
 ok(str_contains($ssJs, 'getBoundingClientRect') && str_contains($ssJs, "addEventListener('scroll'"),
     '  ...and it is placed against its own box, and kept there when anything scrolls');
 
+// AND FIXED IS NOT ALWAYS FIXED. An ancestor carrying a transform, a filter, a
+// backdrop-filter, a perspective, will-change or contain becomes the
+// containing block for everything fixed inside it, and viewport coordinates
+// handed to a list inside one land offset by that ancestor's own corner. Seen
+// on the Reports Center as the report list opening halfway across the page,
+// over the filter form, with nothing joining it to the field it came from.
+ok(str_contains($ssJs, 'document.body.appendChild(list)'),
+    '  ...it is moved to <body> while open, where no ancestor can claim it');
+ok(str_contains($ssJs, 'wrap.appendChild(list)'),
+    '  ...and handed back on close, so nothing is left behind when its row goes');
+ok(preg_match('/var got = list\.getBoundingClientRect\(\);\s*var dx/', $ssJs) === 1,
+    '  ...with the placement CHECKED against where it actually went, not assumed');
+
+// The arithmetic above cannot be read off the source, so it is run. The
+// harness stubs a DOM whose one honest part is that a fixed element's rect
+// includes its containing block's offset — set that offset and the page has a
+// transformed ancestor.
+$placementJs = $root . '/database/test_dropdown_placement.js';
+$node = trim((string) @shell_exec((stripos(PHP_OS_FAMILY, 'Windows') === 0 ? 'where' : 'command -v') . ' node 2>&1'));
+$node = $node === '' ? '' : trim(strtok($node, "\r\n"));
+if ($node === '' || !is_file($placementJs)) {
+    ok(true, '  ...(node absent — the placement arithmetic itself was not re-run here)');
+} else {
+    $placementOut = (string) @shell_exec(escapeshellarg($node) . ' ' . escapeshellarg($placementJs) . ' 2>&1');
+    if (preg_match('/PASS: (\d+)\s+FAIL: (\d+)/', $placementOut, $m) === 1) {
+        ok((int) $m[2] === 0, '  ...and the arithmetic holds: ' . $m[1] . ' placement checks, ' . $m[2] . ' failed');
+        if ((int) $m[2] > 0) {
+            echo $placementOut;
+        }
+    } else {
+        ok(false, '  ...but the placement harness did not report — ' . substr(trim($placementOut), 0, 200));
+    }
+}
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
