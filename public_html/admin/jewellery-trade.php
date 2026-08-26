@@ -575,11 +575,15 @@ if ($view === 'sales' && isset($_GET['export'])) {
     require_permission('jewellery', 'export');
     require_once __DIR__ . '/../../app/export_engine.php';
     $format = jw_enum($_GET['export'] ?? null, ['csv', 'xlsx', 'print', 'pdf'], 'csv');
-    $data = [['Sale no.', 'Order ref.', 'Date', 'Customer', 'Total', 'Received', 'Advance applied', 'Exchange', 'Pending', 'COGS', 'Status']];
+    $data = [['Sale no.', 'Order ref.', 'Date', 'Customer', 'Billed as', 'Total', 'Received', 'Advance applied', 'Exchange', 'Pending', 'COGS', 'Status']];
     foreach ($docs as $row) {
         $data[] = [
             $row['sale_no'], $row['order_no'] ?? '', $row['sale_date'],
-            $row['party_name'] ?? $row['customer_name'] ?? 'Walk-in',
+            // The party the money is posted to, and the name the bill was made
+            // out in. Usually the same; when they are not, a register that
+            // showed only one of them cannot be reconciled against the bills.
+            trim((string) ($row['party_name'] ?? '')) ?: 'Walk-in',
+            jw_document_party_name($row),
             $row['total_amount'], $row['received_amount'], $row['advance_amount'] ?? 0,
             $row['exchange_amount'], $row['balance_amount'], $row['cogs_amount'], $row['status'],
         ];
@@ -1201,7 +1205,15 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         <?php endforeach; ?>
                     </select>
                 </label>
-                <label>Customer name<input type="text" name="customer_name" maxlength="190" value="<?= e((string) ($editDoc['customer_name'] ?? '')) ?>" placeholder="Creates the customer and their ledger"></label>
+                <?php // Two different questions, so two fields. The one above says
+                      // whose ledger the money lands in; this one says whose name
+                      // goes on the bill. They are usually the same, which is why
+                      // leaving this blank uses the customer chosen above. ?>
+                <label>Customer name <span class="jw-field-hint">(printed on the bill)</span>
+                    <input type="text" name="customer_name" maxlength="190"
+                           value="<?= e((string) ($editDoc['customer_name'] ?? '')) ?>"
+                           placeholder="Blank uses the customer above"
+                           title="The name printed on the bill. Leave it blank to bill in the name of the customer selected above. With no customer selected, what you type here creates the customer and their ledger."></label>
                 <label>Phone<input type="text" name="party_phone" maxlength="60"></label>
                 <label>Address<input type="text" name="party_address" maxlength="255"></label>
                 <label>Cash / bank received (<?= e($sym) ?>)<input type="number" name="received_amount" step="0.01" min="0" value="<?= e((string) ($editDoc['received_amount'] ?? '0')) ?>"></label>
@@ -1521,7 +1533,19 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         <td><?= e($row['sale_no']) ?></td>
                         <td><?= e(trim((string) ($row['order_no'] ?? '')) ?: 'N/A') ?></td>
                         <td><?= e(app_date((string) $row['sale_date'])) ?></td>
-                        <td><?= e((string) ($row['party_name'] ?? $row['customer_name'] ?? 'Walk-in')) ?></td>
+                        <?php
+                        // The register answers "whose ledger", so it names the
+                        // party. When the bill went out in a different name it
+                        // says so underneath -- otherwise the list and the
+                        // printed bill disagree with nothing explaining why.
+                        $rowParty = trim((string) ($row['party_name'] ?? '')) ?: 'Walk-in';
+                        $rowBilledAs = trim((string) ($row['customer_name'] ?? ''));
+                        ?>
+                        <td><?= e($rowParty) ?>
+                            <?php if ($rowBilledAs !== '' && strcasecmp($rowBilledAs, $rowParty) !== 0): ?>
+                                <br><small style="color:var(--mbw-muted)">billed as <?= e($rowBilledAs) ?></small>
+                            <?php endif; ?>
+                        </td>
                         <td class="is-numeric"><strong><?= e($sym) ?><?= $fmt((float) $row['total_amount']) ?></strong></td>
                         <td class="is-numeric"><?= $fmt((float) $row['received_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) ($row['advance_amount'] ?? 0)) ?></td>

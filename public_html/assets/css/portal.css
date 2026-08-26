@@ -3742,6 +3742,11 @@ body.admin-layout .pr-newrun input {
   min-width: 150px;
 }
 
+/* A field whose caption needs a few words of qualification -- "(printed on the
+   bill)" -- without those words being read as part of its name. Same treatment
+   the payroll bar gives its optional fields, so a form does not grow a second
+   way of saying the same thing. */
+body.admin-layout .jw-field-hint,
 body.admin-layout .pr-hint {
   font-weight: 400;
   font-size: 11px;

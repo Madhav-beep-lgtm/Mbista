@@ -61,7 +61,7 @@ if ($docType === 'sale' || $docType === 'purchase') {
     $meta = [
         'Number' => $no,
         'Date' => app_date((string) ($isSale ? $doc['sale_date'] : $doc['purchase_date'])),
-        'Party' => (string) ($doc['party_name'] ?? $doc['customer_name'] ?? ''),
+        'Party' => jw_document_party_name($doc),
         'Status' => ucfirst((string) $doc['status']),
     ];
     if ((string) ($doc['ref_no'] ?? '') !== '') {
@@ -162,7 +162,7 @@ if ($docType === 'order') {
     $meta = [
         'Number' => (string) $doc['order_no'],
         'Ordered' => app_date((string) $doc['order_date']),
-        'Customer' => (string) ($doc['party_name'] ?? $doc['customer_name'] ?? ''),
+        'Customer' => jw_document_party_name($doc),
         'Status' => ucwords(str_replace('_', ' ', (string) $doc['status'])),
     ];
     if ((string) ($doc['delivery_date'] ?? '') !== '') {

@@ -217,7 +217,10 @@ header('Content-Type: text/html; charset=utf-8');
 
   <div class="who">
     <div>
-      <div><b>Customer</b> : <?= $esc($party['name'] ?? $sale['customer_name'] ?? '') ?></div>
+      <?php // Billed in the name given at the counter when one was given, and in
+            // the party's own name otherwise. Which party the money is posted to
+            // is a separate question, answered by the Existing customer choice. ?>
+      <div><b>Customer</b> : <?= $esc(jw_document_party_name(['customer_name' => $sale['customer_name'] ?? '', 'party_name' => $party['name'] ?? ''])) ?></div>
       <div><b>Address</b> : <?= $esc($party['billing_address'] ?? '') ?></div>
       <div><b>Phone</b> : <?= $esc($party['phone'] ?? '') ?></div>
     </div>

@@ -180,6 +180,32 @@ function jw_item_ledger(int $companyId, string $purpose, ?array $item): int
 }
 
 /**
+ * The name a document is BILLED IN, which is not always the party it is posted to.
+ *
+ * A shop bills a walk-in in the name they give at the counter while the money
+ * goes to a party ledger somebody chose deliberately -- a house account, a
+ * consolidated counter ledger, the customer's own. The two answer different
+ * questions, so the form asks both: "Existing customer" is who the books owe
+ * or are owed by, and "Customer name" is who the bill is made out to.
+ *
+ * Typed name wins where one was typed. Left blank, the document carries the
+ * party's own name, which is what every bill did before this and what most
+ * still do.
+ *
+ * The ACCOUNTING is not touched by any of this: jw_resolve_party() below has
+ * always ignored a typed name once a party is chosen, and still does.
+ */
+function jw_document_party_name(array $doc): string
+{
+    $billedAs = trim((string) ($doc['customer_name'] ?? ''));
+    if ($billedAs !== '') {
+        return $billedAs;
+    }
+
+    return trim((string) ($doc['party_name'] ?? $doc['name'] ?? ''));
+}
+
+/**
  * Resolve the party a document belongs to, creating one from a typed name when
  * it does not exist yet.
  *
