@@ -937,5 +937,22 @@ foreach (['data-purity' => 'its purity', 'data-unit' => 'its unit',
 ok(str_contains($lineGrid, 'select.c-item') && str_contains($lineGrid, 'dataset.jwTouched'),
     'And choosing one fills the row, leaving alone anything already touched by hand');
 
+// A dropdown must not take the page apart to show itself.
+//
+// The list used to escape its clipping ancestors by forcing overflow:visible
+// onto every one of them while it was open. On the item grid -- 1700px of
+// table inside a card that scrolls sideways -- that let the whole table burst
+// out of its box and lie across the page, which is what somebody sees as "the
+// whole field is coming out, not just the dropdown". A list fixed to the
+// viewport is clipped by nobody, so nobody has to be altered to show it.
+echo "\n== Dropdown lists ==\n";
+$ssJs = (string) @file_get_contents($root . '/public_html/assets/js/searchable-select.js');
+ok(str_contains($ssJs, '.ss-list{position:fixed'),
+    'The list is fixed to the viewport, not absolute inside whatever scrolls');
+ok(!str_contains($ssJs, 'ss-overlay-active') && !str_contains($ssJs, 'overflow:visible!important'),
+    '  ...so no ancestor has its overflow forced open while the list is showing');
+ok(str_contains($ssJs, 'getBoundingClientRect') && str_contains($ssJs, "addEventListener('scroll'"),
+    '  ...and it is placed against its own box, and kept there when anything scrolls');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

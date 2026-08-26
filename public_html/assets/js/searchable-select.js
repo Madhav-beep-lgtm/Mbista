@@ -14,16 +14,21 @@
         '.ss-input{width:100%;min-height:38px;padding:8px 12px;border:1px solid var(--mbw-line,rgba(0,0,0,.2));border-radius:8px;' +
         'background:var(--mbw-card,#fff);color:var(--mbw-ink,#12261f);font:inherit}' +
         '.ss-input:focus{outline:2px solid var(--mbw-accent,#2f7fb8);outline-offset:1px}' +
-        '.ss-list{position:absolute;left:0;right:0;top:100%;z-index:80;max-height:260px;overflow:auto;margin-top:4px;' +
+        // Fixed to the viewport, placed against the box it belongs to. An
+        // absolutely positioned list is clipped by any scrolling ancestor, and
+        // the old answer to that was to force overflow:visible onto every one
+        // of them while the list was open -- which on a grid that scrolls
+        // sideways let the whole 1700px table burst out of its card and lie
+        // across the page. Taking the list out of the flow entirely means no
+        // ancestor has to be touched at all.
+        '.ss-list{position:fixed;z-index:1200;max-height:260px;overflow:auto;' +
         'background:var(--mbw-card,#fff);color:var(--mbw-ink,#12261f);border:1px solid var(--mbw-line,rgba(0,0,0,.16));' +
         'border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.22)}' +
         '.ss-item{padding:8px 12px;cursor:pointer;font-size:13px}' +
         '.ss-group{position:sticky;top:0;padding:6px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;' +
         'text-transform:uppercase;color:var(--mbw-muted,#5b6b64);background:var(--mbw-soft,#eef5f0)}' +
         '.ss-item.is-active,.ss-item:hover{background:var(--mbw-soft,#eef5f0)}' +
-        '.ss-empty{padding:10px 12px;font-size:12px;color:var(--mbw-muted,#5b6b64)}' +
-        '.ss-overlay-active{position:relative!important;z-index:1000!important;overflow:visible!important}' +
-        '.ss-wrap.ss-open{z-index:1001!important}.ss-wrap.ss-open .ss-list{z-index:1002!important}';
+        '.ss-empty{padding:10px 12px;font-size:12px;color:var(--mbw-muted,#5b6b64)}';
 
     function injectStyle() {
         if (document.getElementById('ss-style')) { return; }
@@ -33,30 +38,6 @@
         document.head.appendChild(s);
     }
 
-    // Dropdown lists live inside many horizontally scrolling tables. An
-    // absolutely positioned list cannot escape an ancestor with overflow set,
-    // so it used to appear behind the next row. Lift every clipping ancestor
-    // only while the list is open, then put the normal scrolling back.
-    function setOverlayAncestors(node, enabled) {
-        if (!node) { return; }
-        if (!enabled) {
-            (node._ssOverlayAncestors || []).forEach(function (ancestor) {
-                ancestor.classList.remove('ss-overlay-active');
-            });
-            node._ssOverlayAncestors = [];
-            return;
-        }
-        if (node._ssOverlayAncestors && node._ssOverlayAncestors.length) { return; }
-        var ancestors = [];
-        for (var parent = node.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
-            var style = window.getComputedStyle(parent);
-            if (style.overflow !== 'visible' || style.overflowX !== 'visible' || style.overflowY !== 'visible') {
-                parent.classList.add('ss-overlay-active');
-                ancestors.push(parent);
-            }
-        }
-        node._ssOverlayAncestors = ancestors;
-    }
 
     // Which selects this script has actually wired up, as objects rather than
     // as a data- attribute. The difference is the whole point: cloneNode COPIES
@@ -113,12 +94,37 @@
         syncFromSelect();
         sel.addEventListener('change', syncFromSelect);
 
+        // Against the box, in viewport coordinates: below it when there is
+        // room and above it when there is not, so a row near the foot of the
+        // screen does not open a list nobody can see.
+        function placeList() {
+            var box = input.getBoundingClientRect();
+            var below = window.innerHeight - box.bottom - 8;
+            var above = box.top - 8;
+            var room = Math.max(120, Math.min(260, below > 160 || below >= above ? below : above));
+            list.style.width = box.width + 'px';
+            list.style.left = box.left + 'px';
+            list.style.maxHeight = room + 'px';
+            if (below > 160 || below >= above) {
+                list.style.top = (box.bottom + 4) + 'px';
+                list.style.bottom = 'auto';
+            } else {
+                list.style.top = 'auto';
+                list.style.bottom = (window.innerHeight - box.top + 4) + 'px';
+            }
+        }
+        function isOpen() { return list.style.display === 'block'; }
+        function reposition() { if (isOpen()) { placeList(); } }
+        // The page, or the grid the box sits in, can scroll under an open
+        // list. Capture, so a scroll inside the table is heard as well.
+        window.addEventListener('scroll', reposition, true);
+        window.addEventListener('resize', reposition);
+
         function close() {
             list.style.display = 'none';
             input.setAttribute('aria-expanded', 'false');
             activeIndex = -1;
             wrap.classList.remove('ss-open');
-            setOverlayAncestors(input, false);
         }
         function choose(idx) {
             var opt = visible[idx];
@@ -174,10 +180,10 @@
             input.setAttribute('aria-expanded', 'true');
             activeIndex = -1;
             wrap.classList.add('ss-open');
+            placeList();
         }
 
         input.addEventListener('focus', function () {
-            setOverlayAncestors(input, true);
             input.select();
             render('');
         });
