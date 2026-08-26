@@ -60,20 +60,20 @@ if ($selectedLedger) {
         FROM voucher_entries ve
         INNER JOIN vouchers v ON v.id = ve.voucher_id
         WHERE ve.ledger_id = :lid AND v.company_id = :cid AND v.status = 'posted'
-          AND COALESCE(v.voucher_date, DATE(v.created_at)) < :from_date
+          AND v.voucher_date < :from_date
     ");
     $openingStmt->execute(['lid' => $selectedLedgerId, 'cid' => $companyId, 'from_date' => $fromDate]);
     $openingBalance = round((float) $openingStmt->fetchColumn(), 2);
 
     $stmtSql = "
         SELECT v.id AS voucher_id, v.voucher_no, v.voucher_type, v.reference_no, v.narration,
-               COALESCE(v.voucher_date, DATE(v.created_at)) AS entry_date,
+               v.voucher_date AS entry_date,
                ve.entry_type, ve.amount, ve.memo, p.name AS party_name
         FROM voucher_entries ve
         INNER JOIN vouchers v ON v.id = ve.voucher_id
         LEFT JOIN accounting_parties p ON p.id = v.party_id
         WHERE ve.ledger_id = :lid AND v.company_id = :cid AND v.status = 'posted'
-          AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :from_date AND :to_date
+          AND v.voucher_date BETWEEN :from_date AND :to_date
     ";
     $stmtParams = ['lid' => $selectedLedgerId, 'cid' => $companyId, 'from_date' => $fromDate, 'to_date' => $toDate];
     if ($searchQuery !== '') {
@@ -81,7 +81,7 @@ if ($selectedLedger) {
         $like = '%' . $searchQuery . '%';
         $stmtParams += ['q1' => $like, 'q2' => $like, 'q3' => $like, 'q4' => $like, 'q5' => $like];
     }
-    $stmtSql .= ' ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) ASC, v.id ASC, ve.id ASC LIMIT 1000';
+    $stmtSql .= ' ORDER BY v.voucher_date ASC, v.id ASC, ve.id ASC LIMIT 1000';
     $entriesStmt = db()->prepare($stmtSql);
     $entriesStmt->execute($stmtParams);
     $statementRows = $entriesStmt->fetchAll();

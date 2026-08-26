@@ -3793,6 +3793,31 @@ function accounting_module_repair_database(): array
             '`excess_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `excess_mode`');
     });
 
+    $run('A date filter that can use its index (migration 129)', static function (): void {
+        // Every date-ranged accounting query wrapped the date column in a
+        // COALESCE against created_at, and a column wrapped in a
+        // function cannot be looked up in an index -- so each one examined
+        // every posted voucher the company had. The indexes were always there;
+        // the COALESCE made them unusable. It was guarding rows written before
+        // voucher_date existed, so the guard moves to the data: those rows get
+        // the date they were created on, and the column is closed behind them.
+        if (!accounting_repair_table_exists('vouchers')
+            || !accounting_repair_column_exists('vouchers', 'voucher_date')) {
+            return;
+        }
+        db()->exec('UPDATE `vouchers` SET `voucher_date` = DATE(`created_at`) WHERE `voucher_date` IS NULL');
+        $nullable = (string) db()->query("SELECT IS_NULLABLE FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'vouchers' AND column_name = 'voucher_date'")
+            ->fetchColumn();
+        if (strtoupper($nullable) === 'YES') {
+            db()->exec('ALTER TABLE `vouchers` MODIFY COLUMN `voucher_date` DATE NOT NULL');
+        }
+        // Both existing indexes carry a column between company and date, so a
+        // query filtering company + date alone can only use their first part.
+        accounting_repair_add_index('vouchers', 'idx_vouchers_company_date',
+            'INDEX `idx_vouchers_company_date` (`company_id`, `voucher_date`)');
+    });
+
     $run('A scheduled report can be a real workbook (migration 128)', static function (): void {
         // The download is now a formatted .xlsx rather than a CSV under an
         // Excel label, and a schedule has to be able to email the same file:

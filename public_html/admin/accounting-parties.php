@@ -1104,14 +1104,14 @@ if (table_exists('vouchers')) {
         {$jewellerySaleJoin}
         WHERE v.company_id = :company_id AND v.status = 'posted' AND v.voucher_type = 'sales'
           AND COALESCE(v.source_type, '') <> 'task_invoice'
-          AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :from_date AND :to_date";
+          AND v.voucher_date BETWEEN :from_date AND :to_date";
     $moduleSalesParams = ['company_id' => $companyId, 'from_date' => $fromDate, 'to_date' => $toDate];
     if ($searchQuery !== '') {
         $moduleSalesSql .= ' AND (v.voucher_no LIKE :search OR ap.name LIKE :search2 OR v.reference_no LIKE :search3 OR v.narration LIKE :search4)';
         $moduleLike = '%' . $searchQuery . '%';
         $moduleSalesParams += ['search' => $moduleLike, 'search2' => $moduleLike, 'search3' => $moduleLike, 'search4' => $moduleLike];
     }
-    $moduleSalesSql .= ' ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) DESC, v.id DESC LIMIT 500';
+    $moduleSalesSql .= ' ORDER BY v.voucher_date DESC, v.id DESC LIMIT 500';
     $moduleSalesStmt = db()->prepare($moduleSalesSql);
     $moduleSalesStmt->execute($moduleSalesParams);
     foreach ($moduleSalesStmt->fetchAll(PDO::FETCH_ASSOC) as $moduleSale) {
@@ -1171,7 +1171,7 @@ if (table_exists('vouchers')) {
         FROM vouchers v
         LEFT JOIN accounting_parties ap ON ap.id = v.party_id
         WHERE v.company_id = :company_id AND v.status = "posted"
-          AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :from_date AND :to_date
+          AND v.voucher_date BETWEEN :from_date AND :to_date
     ';
     $voucherParamsBase = ['company_id' => $companyId, 'from_date' => $fromDate, 'to_date' => $toDate];
     foreach (['purchase' => 'purchaseBills', 'payment' => 'supplierPayments'] as $voucherType => $target) {
@@ -1194,7 +1194,7 @@ if (table_exists('vouchers')) {
             $like = '%' . $searchQuery . '%';
             $voucherParams += ['search' => $like, 'search2' => $like, 'search3' => $like];
         }
-        $sql .= ' ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) DESC, v.id DESC LIMIT 300';
+        $sql .= ' ORDER BY v.voucher_date DESC, v.id DESC LIMIT 300';
         $stmt = db()->prepare($sql);
         $stmt->execute($voucherParams);
         ${$target} = $stmt->fetchAll();

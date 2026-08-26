@@ -62,13 +62,13 @@ $accountStmt = db()->prepare('
            COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) AS inflow,
            COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS outflow,
            COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.reconciled_at IS NULL THEN 1 ELSE 0 END), 0) AS unreconciled,
-           MAX(COALESCE(v.voucher_date, DATE(v.created_at))) AS last_move,
+           MAX(v.voucher_date) AS last_move,
            COALESCE((
                SELECT SUM(CASE WHEN ve2.entry_type = \'debit\' THEN ve2.amount ELSE -ve2.amount END)
                FROM voucher_entries ve2
                INNER JOIN vouchers v2 ON v2.id = ve2.voucher_id
                WHERE ve2.ledger_id = l.id AND v2.company_id = l.company_id AND v2.status = \'posted\'
-                 AND COALESCE(v2.voucher_date, DATE(v2.created_at)) <= :fy_end
+                 AND v2.voucher_date <= :fy_end
            ), 0) AS balance
     FROM ledgers l
     INNER JOIN ledger_groups g ON g.id = l.group_id AND COALESCE(g.is_cash_or_bank, 0) = 1
@@ -97,13 +97,13 @@ foreach ($accounts as $account) {
 $txnStmt = db()->prepare('
     SELECT ve.id, ve.entry_type, ve.amount, ve.reconciled_at, l.name AS ledger_name,
            v.id AS voucher_id, v.voucher_no, v.voucher_type, v.narration,
-           COALESCE(v.voucher_date, DATE(v.created_at)) AS voucher_date
+           v.voucher_date AS voucher_date
     FROM voucher_entries ve
     INNER JOIN ledgers l ON l.id = ve.ledger_id
     INNER JOIN ledger_groups g ON g.id = l.group_id AND COALESCE(g.is_cash_or_bank, 0) = 1
     INNER JOIN vouchers v ON v.id = ve.voucher_id
     WHERE v.company_id = :company_id AND v.fiscal_year_id = :fiscal_year_id AND v.status = \'posted\'' . $inventoryLedgerGuard . '
-    ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) DESC, ve.id DESC
+    ORDER BY v.voucher_date DESC, ve.id DESC
     LIMIT 25
 ');
 $txnStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);

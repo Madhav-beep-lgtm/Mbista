@@ -20,14 +20,14 @@ function accounting_dashboard_aging(int $companyId, int $fiscalYearId, int $ledg
     }
 
     $stmt = db()->prepare('
-        SELECT COALESCE(v.voucher_date, DATE(v.created_at)) AS entry_date, ve.entry_type, ve.amount
+        SELECT v.voucher_date AS entry_date, ve.entry_type, ve.amount
         FROM voucher_entries ve
         INNER JOIN vouchers v ON v.id = ve.voucher_id
         WHERE v.company_id = :company_id
           AND v.fiscal_year_id = :fiscal_year_id
           AND v.status = \'posted\'
           AND ve.ledger_id = :ledger_id
-          AND COALESCE(v.voucher_date, DATE(v.created_at)) <= :as_of_date
+          AND v.voucher_date <= :as_of_date
         ORDER BY entry_date ASC, ve.id ASC
     ');
     $stmt->execute([
@@ -191,7 +191,7 @@ $ledgerStmt = db()->prepare('
            COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank,
            COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) AS debit_total,
            COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS credit_total,
-           MAX(CASE WHEN v.id IS NOT NULL THEN COALESCE(v.voucher_date, DATE(v.created_at)) END) AS last_move
+           MAX(CASE WHEN v.id IS NOT NULL THEN v.voucher_date END) AS last_move
            ' . $bankMetaSelect . '
     FROM ledgers l
     LEFT JOIN ledger_groups g ON g.id = l.group_id
@@ -312,11 +312,11 @@ $netMargin = $totalIncome > 0 ? ($netProfit / $totalIncome) * 100 : 0.0;
 
 $recentVoucherStmt = db()->prepare('
     SELECT v.id, v.voucher_no, v.voucher_type, v.narration, v.total_amount,
-           COALESCE(v.voucher_date, DATE(v.created_at)) AS voucher_date, p.name AS party_name
+           v.voucher_date AS voucher_date, p.name AS party_name
     FROM vouchers v
     LEFT JOIN accounting_parties p ON p.id = v.party_id
     WHERE v.company_id = :company_id AND v.fiscal_year_id = :fiscal_year_id AND v.status = \'posted\'
-    ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) DESC, v.id DESC
+    ORDER BY v.voucher_date DESC, v.id DESC
     LIMIT 6
 ');
 $recentVoucherStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
@@ -332,7 +332,7 @@ $receivableAgingTotal = array_sum(array_column($receivableAging, 'amount'));
 $payableAgingTotal = array_sum(array_column($payableAging, 'amount'));
 
 $monthlyStmt = db()->prepare('
-    SELECT DATE_FORMAT(COALESCE(v.voucher_date, DATE(v.created_at)), \'%Y-%m\') AS month_key,
+    SELECT DATE_FORMAT(v.voucher_date, \'%Y-%m\') AS month_key,
            SUM(CASE WHEN l.type = \'revenue\' AND ve.entry_type = \'credit\' THEN ve.amount WHEN l.type = \'revenue\' THEN -ve.amount ELSE 0 END) AS income,
            SUM(CASE WHEN l.type = \'expense\' AND ve.entry_type = \'debit\' THEN ve.amount WHEN l.type = \'expense\' THEN -ve.amount ELSE 0 END) AS expense
     FROM vouchers v
@@ -405,7 +405,7 @@ if ($hasPrevPeriod) {
             AND v.company_id = l.company_id
             AND v.fiscal_year_id = :fiscal_year_id
             AND v.status = \'posted\'
-            AND COALESCE(v.voucher_date, DATE(v.created_at)) <= :cutoff
+            AND v.voucher_date <= :cutoff
         WHERE l.company_id = :company_id
         GROUP BY l.id, l.type, g.is_cash_or_bank
     ');
@@ -597,7 +597,7 @@ if ($isGroupDashboard) {
 
         // Group monthly income vs expense over this portal's FY calendar.
         $groupMonthlyStmt = db()->query('
-            SELECT DATE_FORMAT(COALESCE(v.voucher_date, DATE(v.created_at)), \'%Y-%m\') AS month_key,
+            SELECT DATE_FORMAT(v.voucher_date, \'%Y-%m\') AS month_key,
                    SUM(CASE WHEN l.type = \'revenue\' AND ve.entry_type = \'credit\' THEN ve.amount WHEN l.type = \'revenue\' THEN -ve.amount ELSE 0 END) AS income,
                    SUM(CASE WHEN l.type = \'expense\' AND ve.entry_type = \'debit\' THEN ve.amount WHEN l.type = \'expense\' THEN -ve.amount ELSE 0 END) AS expense
             FROM vouchers v
@@ -662,14 +662,14 @@ if ($isGroupDashboard) {
         // Group recent transactions with the originating company.
         $groupRecentStmt = db()->query('
             SELECT v.id, v.voucher_no, v.voucher_type, v.narration, v.total_amount,
-                   COALESCE(v.voucher_date, DATE(v.created_at)) AS voucher_date,
+                   v.voucher_date AS voucher_date,
                    ap.name AS party_name, c.name AS company_name
             FROM vouchers v
             INNER JOIN ' . $pairsDerived . ' p ON p.cid = v.company_id AND p.fyid = v.fiscal_year_id
             INNER JOIN companies c ON c.id = v.company_id
             LEFT JOIN accounting_parties ap ON ap.id = v.party_id
             WHERE v.status = \'posted\'
-            ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) DESC, v.id DESC
+            ORDER BY v.voucher_date DESC, v.id DESC
             LIMIT 6
         ');
         $recentVouchers = $groupRecentStmt->fetchAll();
@@ -680,7 +680,7 @@ if ($isGroupDashboard) {
                    ' . ($hasBankMeta ? 'l.bank_name, l.bank_account_no,' : 'NULL AS bank_name, NULL AS bank_account_no,') . '
                    COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) AS debit_total,
                    COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS credit_total,
-                   MAX(COALESCE(v.voucher_date, DATE(v.created_at))) AS last_move
+                   MAX(v.voucher_date) AS last_move
             FROM ledgers l
             INNER JOIN ledger_groups g ON g.id = l.group_id AND COALESCE(g.is_cash_or_bank, 0) = 1
             INNER JOIN companies c ON c.id = l.company_id

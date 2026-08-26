@@ -171,7 +171,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
     // (repairable via diagnose_fiscal_years --relink) must not block a
     // label-only edit.
     if ($datesChanged) {
-        $orphanStmt = db()->prepare('SELECT COUNT(*) FROM vouchers WHERE fiscal_year_id = :fy AND (COALESCE(voucher_date, DATE(created_at)) < :start OR COALESCE(voucher_date, DATE(created_at)) > :end)');
+        $orphanStmt = db()->prepare('SELECT COUNT(*) FROM vouchers WHERE fiscal_year_id = :fy AND (voucher_date < :start OR voucher_date > :end)');
         $orphanStmt->execute(['fy' => $fyId, 'start' => $newStart, 'end' => $newEnd]);
         $orphanCount = (int) $orphanStmt->fetchColumn();
         if ($orphanCount > 0) {
@@ -248,7 +248,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
         $secondId = (int) db()->lastInsertId();
         // Vouchers follow their DATES into the correct half — dates are never
         // changed, only the fiscal-year link.
-        $relink = db()->prepare('UPDATE vouchers SET fiscal_year_id = :new_fy WHERE fiscal_year_id = :old_fy AND COALESCE(voucher_date, DATE(created_at)) > :split');
+        $relink = db()->prepare('UPDATE vouchers SET fiscal_year_id = :new_fy WHERE fiscal_year_id = :old_fy AND voucher_date > :split');
         $relink->execute(['new_fy' => $secondId, 'old_fy' => $fyId, 'split' => $splitDate]);
         $movedVouchers = (int) $relink->rowCount();
         // A cutoff beyond the first part's new end belongs to the second part.

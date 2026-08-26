@@ -89,12 +89,12 @@ if ($selectedLedgerId > 0) {
     $entriesStmt = db()->prepare('
         SELECT ve.id, ve.entry_type, ve.amount, ve.memo' . ($hasReconColumns ? ', ve.reconciled_at, ve.statement_date' : ', NULL AS reconciled_at, NULL AS statement_date') . ',
                v.voucher_no, v.voucher_type, v.narration,
-               COALESCE(v.voucher_date, DATE(v.created_at)) AS voucher_date
+               v.voucher_date AS voucher_date
         FROM voucher_entries ve
         INNER JOIN vouchers v ON v.id = ve.voucher_id
         WHERE v.company_id = :company_id AND v.fiscal_year_id = :fiscal_year_id AND v.status = \'posted\'
           AND ve.ledger_id = :ledger_id
-        ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) ASC, ve.id ASC
+        ORDER BY v.voucher_date ASC, ve.id ASC
     ');
     $entriesStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId, 'ledger_id' => $selectedLedgerId]);
     foreach ($entriesStmt->fetchAll() as $entry) {

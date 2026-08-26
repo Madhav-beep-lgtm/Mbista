@@ -272,7 +272,7 @@ function rc_cash_flow_figures(int $scopeCompanyId, string $from, string $to): ar
         INNER JOIN ledgers l ON l.id = e.ledger_id
         LEFT JOIN ledger_groups g ON g.id = l.group_id
         WHERE v.company_id = :company_id AND v.status = 'posted'
-          AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :from AND :to
+          AND v.voucher_date BETWEEN :from AND :to
         GROUP BY v.id
         HAVING cash_net <> 0
     ");
@@ -291,7 +291,7 @@ function rc_cash_flow_figures(int $scopeCompanyId, string $from, string $to): ar
         INNER JOIN vouchers v ON v.id = e.voucher_id AND v.company_id = :company_id AND v.status = 'posted'
         INNER JOIN ledgers l ON l.id = e.ledger_id
         INNER JOIN ledger_groups g ON g.id = l.group_id AND COALESCE(g.is_cash_or_bank, 0) = 1
-        WHERE COALESCE(v.voucher_date, DATE(v.created_at)) < :from
+        WHERE v.voucher_date < :from
     ");
     $openStmt->execute(['company_id' => $scopeCompanyId, 'from' => $from]);
     $flows['opening'] = (float) $openStmt->fetchColumn();
@@ -347,7 +347,7 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
                    SUM(CASE WHEN d.vdate < :fy_start2 AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS pre_fy_cr
             FROM voucher_entries e
             INNER JOIN (
-                SELECT id, COALESCE(voucher_date, DATE(created_at)) AS vdate
+                SELECT id, voucher_date AS vdate
                 FROM vouchers
                 WHERE {$voucherWhere}
             ) d ON d.id = e.voucher_id
@@ -456,13 +456,13 @@ function rc_entry_lines(int $scopeCompanyId, array $ledgerIds, string $from, str
     $sql = "
         SELECT e.ledger_id, e.entry_type, e.amount, e.memo,
                v.voucher_no, v.voucher_type, v.narration, v.reference_no,
-               COALESCE(v.voucher_date, DATE(v.created_at)) AS vdate,
+               v.voucher_date AS vdate,
                l.code AS ledger_code, l.name AS ledger_name
         FROM voucher_entries e
         INNER JOIN vouchers v ON v.id = e.voucher_id AND v.status = 'posted' AND v.company_id = ?
         INNER JOIN ledgers l ON l.id = e.ledger_id
         WHERE e.ledger_id IN ({$placeholders})
-          AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN ? AND ?
+          AND v.voucher_date BETWEEN ? AND ?
         ORDER BY vdate ASC, v.id ASC
         LIMIT 500
     ";
@@ -996,8 +996,8 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 SELECT ap.code, ap.name, ap.party_type,
                        COALESCE((SELECT SUM(ti.total_amount) FROM task_invoices ti WHERE ti.party_id = ap.id AND LOWER(COALESCE(ti.status, "")) NOT IN ("cancelled", "draft") AND COALESCE(ti.issued_on, DATE(ti.created_at)) BETWEEN :f1 AND :t1), 0) AS sales_total,
                        COALESCE((SELECT SUM(pr.payment_amount) FROM invoice_payment_requests pr INNER JOIN task_invoices ti2 ON ti2.id = pr.invoice_id WHERE ti2.party_id = ap.id AND pr.status IN ("paid", "partial") AND COALESCE(pr.payment_received_on, DATE(pr.requested_on)) BETWEEN :f2 AND :t2), 0) AS received_total,
-                       COALESCE((SELECT SUM(v.total_amount) FROM vouchers v WHERE v.party_id = ap.id AND v.voucher_type = "purchase" AND v.status = "posted" AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :f3 AND :t3), 0) AS purchase_total,
-                       COALESCE((SELECT SUM(v2.total_amount) FROM vouchers v2 WHERE v2.party_id = ap.id AND v2.voucher_type = "payment" AND v2.status = "posted" AND COALESCE(v2.voucher_date, DATE(v2.created_at)) BETWEEN :f4 AND :t4), 0) AS paid_total
+                       COALESCE((SELECT SUM(v.total_amount) FROM vouchers v WHERE v.party_id = ap.id AND v.voucher_type = "purchase" AND v.status = "posted" AND v.voucher_date BETWEEN :f3 AND :t3), 0) AS purchase_total,
+                       COALESCE((SELECT SUM(v2.total_amount) FROM vouchers v2 WHERE v2.party_id = ap.id AND v2.voucher_type = "payment" AND v2.status = "posted" AND v2.voucher_date BETWEEN :f4 AND :t4), 0) AS paid_total
                 FROM accounting_parties ap
                 WHERE ap.company_id = :company_id
                 ORDER BY ap.name ASC
@@ -1130,13 +1130,13 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
 
         case 'payments-register': {
             $stmt = db()->prepare("
-                SELECT COALESCE(v.voucher_date, DATE(v.created_at)) AS paid_on,
+                SELECT v.voucher_date AS paid_on,
                        v.voucher_no, COALESCE(ap.name, 'Direct entry') AS party_name,
                        v.reference_no, v.total_amount, v.narration
                 FROM vouchers v
                 LEFT JOIN accounting_parties ap ON ap.id = v.party_id
                 WHERE v.company_id = :company_id AND v.status = 'posted' AND v.voucher_type = 'payment'
-                  AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :from AND :to
+                  AND v.voucher_date BETWEEN :from AND :to
                 ORDER BY paid_on ASC
                 LIMIT 500
             ");
@@ -1182,11 +1182,11 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         case 'daybook': {
             $sql = "
                 SELECT v.voucher_no, v.voucher_type, v.narration, v.total_amount, v.reference_no,
-                       COALESCE(v.voucher_date, DATE(v.created_at)) AS vdate,
+                       v.voucher_date AS vdate,
                        (SELECT COUNT(*) FROM voucher_entries e WHERE e.voucher_id = v.id) AS line_count
                 FROM vouchers v
                 WHERE v.company_id = :company_id AND v.status = 'posted'
-                  AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :f AND :t
+                  AND v.voucher_date BETWEEN :f AND :t
             ";
             $params = ['company_id' => $scopeCompanyId, 'f' => $from, 't' => $to];
             if ($ctx['vtype'] !== '') {
@@ -1278,12 +1278,12 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         case 'purchase-register': {
             $stmt = db()->prepare('
                 SELECT v.voucher_no, v.reference_no, v.narration, v.total_amount,
-                       COALESCE(v.voucher_date, DATE(v.created_at)) AS vdate,
+                       v.voucher_date AS vdate,
                        COALESCE(ap.name, "Direct entry") AS party_name
                 FROM vouchers v
                 LEFT JOIN accounting_parties ap ON ap.id = v.party_id
                 WHERE v.company_id = :company_id AND v.status = "posted" AND v.voucher_type = "purchase"
-                  AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :f AND :t
+                  AND v.voucher_date BETWEEN :f AND :t
                 ORDER BY vdate ASC, v.id ASC LIMIT 500
             ');
             $stmt->execute(['company_id' => $scopeCompanyId, 'f' => $from, 't' => $to]);

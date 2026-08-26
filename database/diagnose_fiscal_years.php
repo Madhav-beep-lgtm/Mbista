@@ -73,7 +73,7 @@ foreach ($companies as $company) {
     }
 
     // 4 & 5. Voucher <-> fiscal-year consistency.
-    $voucherStmt = db()->prepare('SELECT v.id, v.voucher_no, v.fiscal_year_id, COALESCE(v.voucher_date, DATE(v.created_at)) AS vdate FROM vouchers v WHERE v.company_id = :cid');
+    $voucherStmt = db()->prepare('SELECT v.id, v.voucher_no, v.fiscal_year_id, v.voucher_date AS vdate FROM vouchers v WHERE v.company_id = :cid');
     $voucherStmt->execute(['cid' => $cid]);
     $misfiled = [];
     $orphaned = [];

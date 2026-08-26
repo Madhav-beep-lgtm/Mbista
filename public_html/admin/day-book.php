@@ -48,7 +48,7 @@ $allLedgers = $ledgerListStmt->fetchAll();
 
 $sql = "
     SELECT v.id AS voucher_id, v.voucher_no, v.voucher_type, v.status,
-           COALESCE(v.voucher_date, DATE(v.created_at)) AS entry_date,
+           v.voucher_date AS entry_date,
            v.reference_no, v.narration, p.name AS party_name,
            l.code AS ledger_code, l.name AS ledger_name,
            ve.entry_type, ve.amount, ve.memo
@@ -57,7 +57,7 @@ $sql = "
     INNER JOIN ledgers l ON l.id = ve.ledger_id
     LEFT JOIN accounting_parties p ON p.id = v.party_id
     WHERE v.company_id = :cid
-      AND COALESCE(v.voucher_date, DATE(v.created_at)) BETWEEN :from_date AND :to_date
+      AND v.voucher_date BETWEEN :from_date AND :to_date
 ";
 $params = ['cid' => $companyId, 'from_date' => $fromDate, 'to_date' => $toDate];
 if ($statusFilter !== '') {
@@ -77,7 +77,7 @@ if ($searchQuery !== '') {
     $like = '%' . $searchQuery . '%';
     $params += ['q1' => $like, 'q2' => $like, 'q3' => $like, 'q4' => $like, 'q5' => $like, 'q6' => $like];
 }
-$sql .= ' ORDER BY COALESCE(v.voucher_date, DATE(v.created_at)) DESC, v.id DESC, ve.id ASC LIMIT 1500';
+$sql .= ' ORDER BY v.voucher_date DESC, v.id DESC, ve.id ASC LIMIT 1500';
 $entriesStmt = db()->prepare($sql);
 $entriesStmt->execute($params);
 $entries = $entriesStmt->fetchAll();

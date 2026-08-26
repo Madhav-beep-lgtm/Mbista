@@ -113,7 +113,7 @@ function ob_direct_ledger_openings(int $companyId, string $fyStart): array
         FROM voucher_entries e
         INNER JOIN vouchers v ON v.id = e.voucher_id
         WHERE v.company_id = :cid AND v.source_type = 'ledger_opening' AND v.status = 'posted'
-          AND COALESCE(v.voucher_date, DATE(v.created_at)) = :fystart
+          AND v.voucher_date = :fystart
         GROUP BY e.ledger_id");
     $stmt->execute(['cid' => $companyId, 'fystart' => $fyStart]);
 
@@ -281,7 +281,7 @@ function ob_generate_batch(int $companyId, int $fiscalYearId, ?int $actorId = nu
     // Warn (do not block) when current-year transactions already exist — the user
     // may want to reconcile rather than regenerate destructively.
     $warning = null;
-    $txStmt = db()->prepare("SELECT COUNT(*) FROM vouchers WHERE company_id = :cid AND fiscal_year_id = :fy AND status = 'posted' AND source_type <> 'opening_balance_adj' AND COALESCE(voucher_date, DATE(created_at)) > :fystart");
+    $txStmt = db()->prepare("SELECT COUNT(*) FROM vouchers WHERE company_id = :cid AND fiscal_year_id = :fy AND status = 'posted' AND source_type <> 'opening_balance_adj' AND voucher_date > :fystart");
     $txStmt->execute(['cid' => $companyId, 'fy' => $fiscalYearId, 'fystart' => (string) $fy['start_date']]);
     if ((int) $txStmt->fetchColumn() > 0) {
         $warning = 'Current-year transactions already exist. Opening balances were refreshed from the previous year; posted transactions were not touched — review the differences before finalizing.';
