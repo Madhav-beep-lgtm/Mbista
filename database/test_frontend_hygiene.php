@@ -916,5 +916,26 @@ ok(substr_count($tradePhp, 'data-popup-open="<?= $justSaved') === 1
     && substr_count($tradePhp, 'data-popup-open="<?= (!$justSaved') === 1,
     '  ...and both popups honour it rather than springing open again');
 
+// ---------------------------------------------------------------------------
+// Choosing an item must fill in what that item IS.
+// ---------------------------------------------------------------------------
+// Purity and unit are properties of the item, not questions to ask again after
+// picking it. The item options carried only data-type, so a chosen row kept
+// whichever purity stood first in the list -- every line read GOLD-24K in GM
+// until somebody noticed and put it right by hand. That is a wrong bill that
+// looks exactly like a right one.
+echo "\n== A chosen item fills its own row ==\n";
+$lineGrid = (string) @file_get_contents($root . '/app/views/partials/jewellery_line_grid.php');
+ok($lineGrid !== '', 'The line grid partial is where it is expected to be');
+foreach (['data-purity' => 'its purity', 'data-unit' => 'its unit',
+          'data-wastage' => 'its wastage', 'data-making' => 'its making charge'] as $attr => $what) {
+    // Twice over: the shared option list AND the single option a saved row
+    // draws for itself before that list arrives.
+    ok(substr_count($lineGrid, $attr . '=') >= 2,
+        'An item option carries ' . $what . ' (' . $attr . ')');
+}
+ok(str_contains($lineGrid, 'select.c-item') && str_contains($lineGrid, 'dataset.jwTouched'),
+    'And choosing one fills the row, leaving alone anything already touched by hand');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

@@ -390,8 +390,22 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                 . $fmt((float) $stock['fine_weight'], 3) . ' fine'
                             : '';
                         $label = $it['code'] . ' — ' . $it['name'] . $left;
-                        $sharedItemOptions .= '<option value="' . (int) $it['id'] . '" data-type="'
-                            . e((string) ($it['item_type'] ?? '')) . '" title="' . e($label) . '">'
+                        // What the item IS, carried on its own option. Purity
+                        // and unit are properties of the item, not questions
+                        // to ask again after choosing it -- without these the
+                        // row kept whichever purity happened to be first in
+                        // the list, so every line read GOLD·24K / GM until
+                        // somebody noticed and corrected it by hand.
+                        $sharedItemOptions .= '<option value="' . (int) $it['id'] . '"'
+                            . ' data-type="' . e((string) ($it['item_type'] ?? '')) . '"'
+                            . ' data-metal="' . (int) ($it['metal_id'] ?? 0) . '"'
+                            . ' data-purity="' . (int) ($it['purity_id'] ?? 0) . '"'
+                            . ' data-unit="' . (int) ($it['unit_id'] ?? 0) . '"'
+                            . ' data-wastage="' . e((string) (float) ($it['wastage_pct'] ?? 0)) . '"'
+                            . ' data-making="' . e((string) (float) ($it['making_charge_rate'] ?? 0)) . '"'
+                            . ' data-making-basis="' . e((string) ($it['making_charge_basis'] ?? '')) . '"'
+                            . ' data-size="' . e((string) ($it['design_no'] ?? '')) . '"'
+                            . ' title="' . e($label) . '">'
                             . e($label) . '</option>';
                     }
                 }
@@ -537,7 +551,16 @@ function jw_render_line_grid(string $prefix, array $existing, int $slots, string
                                 <?php else: ?>
                                     <option value="0">—</option>
                                     <?php foreach ($items as $it): if ((int) $it['id'] !== $rowItemId) { continue; } ?>
-                                        <option value="<?= (int) $it['id'] ?>" data-type="<?= e((string) ($it['item_type'] ?? '')) ?>" selected><?= e($it['code'] . ' — ' . $it['name']) ?></option>
+                                        <option value="<?= (int) $it['id'] ?>"
+                                            data-type="<?= e((string) ($it['item_type'] ?? '')) ?>"
+                                            data-metal="<?= (int) ($it['metal_id'] ?? 0) ?>"
+                                            data-purity="<?= (int) ($it['purity_id'] ?? 0) ?>"
+                                            data-unit="<?= (int) ($it['unit_id'] ?? 0) ?>"
+                                            data-wastage="<?= e((string) (float) ($it['wastage_pct'] ?? 0)) ?>"
+                                            data-making="<?= e((string) (float) ($it['making_charge_rate'] ?? 0)) ?>"
+                                            data-making-basis="<?= e((string) ($it['making_charge_basis'] ?? '')) ?>"
+                                            data-size="<?= e((string) ($it['design_no'] ?? '')) ?>"
+                                            selected><?= e($it['code'] . ' — ' . $it['name']) ?></option>
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                             </select>
@@ -1097,6 +1120,22 @@ function jw_line_grid_scripts(array $ctx = []): void
         }
     }
 
+    // Anything a person edits by hand is marked as theirs, so an item chosen
+    // afterwards fills the blanks around it without overwriting it.
+    document.addEventListener("input", function (event) {
+        var field = event.target;
+        if (!field || !field.name || !field.closest || !field.closest("table.jw-lines")) { return; }
+        if (field.classList && field.classList.contains("c-item")) { return; }
+        field.dataset.jwTouched = "1";
+    });
+    document.addEventListener("change", function (event) {
+        var typedSelect = event.target;
+        if (typedSelect && typedSelect.name && typedSelect.closest && typedSelect.closest("table.jw-lines")
+            && /_(purity|unit)_id\[\]$/.test(typedSelect.name)) {
+            typedSelect.dataset.jwTouched = "1";
+        }
+    });
+
     document.addEventListener("change", function (event) {
         var orderTypeSelect = event.target.closest(".jw-order-type");
         if (!orderTypeSelect) { return; }
@@ -1133,7 +1172,50 @@ function jw_line_grid_scripts(array $ctx = []): void
         }
     });
 
+    // Choosing an ITEM fills in what that item is.
+    //
+    // Purity and unit are not questions -- they are properties of the thing
+    // just chosen, and the row had no way of knowing them, so it kept whatever
+    // stood first in each list. Every line therefore read GOLD·24K / GM until
+    // a person noticed and put it right, which is a correction nobody should
+    // be asked to make and which is silent when they miss it.
+    //
+    // Only fields the person has NOT touched are written. A rate typed for
+    // this bill, a wastage agreed with this customer, a making charge argued
+    // over -- none of those may be undone by picking the item they belong to.
     document.addEventListener("change", function (event) {
+        var itemPick = event.target.closest("select.c-item");
+        if (itemPick) {
+            var itemRow = itemPick.closest("tr");
+            var chosen = itemPick.options[itemPick.selectedIndex];
+            if (!itemRow || !chosen || parseInt(itemPick.value, 10) <= 0) { return; }
+            var fact = function (key) { return chosen.getAttribute("data-" + key) || ""; };
+
+            // A select is untouched while it still sits where it was rendered;
+            // once somebody has chosen on it, it is theirs.
+            [["_purity_id[]", "purity"], ["_unit_id[]", "unit"]].forEach(function (pair) {
+                var field = rowField(itemRow, pair[0]);
+                var value = fact(pair[1]);
+                if (!field || value === "" || value === "0" || field.dataset.jwTouched) { return; }
+                if (!field.querySelector('option[value="' + value + '"]')) { return; }
+                field.value = value;
+                // searchable-select.js hides the real select behind its own
+                // box, so the box has to be told the value moved under it.
+                field.dispatchEvent(new Event("change", { bubbles: false }));
+            });
+
+            [["_wastage_pct[]", "wastage"], ["_making_amount[]", "making"], ["_size[]", "size"]]
+                .forEach(function (pair) {
+                    var field = rowField(itemRow, pair[0]);
+                    var value = fact(pair[1]);
+                    if (!field || value === "" || value === "0" || field.dataset.jwTouched) { return; }
+                    if ((field.value || "").trim() !== "" && parseFloat(field.value || "0") !== 0) { return; }
+                    field.value = value;
+                });
+            itemRow.dispatchEvent(new Event("input", { bubbles: true }));  // wake the summary rail
+            return;
+        }
+
         var picker = event.target.closest(".jw-stock-pick");
         if (!picker) { return; }
         var row = picker.closest("tr");
