@@ -1201,8 +1201,16 @@ body.admin-layout .jw-order-dialog::backdrop { background: rgba(8, 26, 20, .48);
    then a screen-height blank while the browser finished the rest of the
    document -- which reads as a page that loads in two goes and stalls halfway.
    Taking it out of the flow means the page arrives its real size and the
-   button appears in it, instead of a gap that later fills. */
-body.admin-layout [data-form-popup] { display: none; }
+   button appears in it, instead of a gap that later fills.
+
+   The rule STOPS APPLYING once the script has taken the card over, which is
+   what data-form-popup-ready says. It has to be the selector that lets go
+   rather than an inline style that fights it: the card is a grid, and an
+   inline `display` put back to override this would have to guess which
+   display it was, and guess wrong. Written the other way -- unscoped here and
+   overridden there -- the dialog opened with nothing in it, because clearing
+   an inline style does not beat a stylesheet. */
+body.admin-layout [data-form-popup]:not([data-form-popup-ready]) { display: none; }
 body.admin-layout .jw-order-dialog #jw-order-editor {
   margin: 0;
   border: 0;

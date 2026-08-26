@@ -889,10 +889,17 @@ echo "\n== Forms that open in a popup ==\n";
 $popupJs = (string) @file_get_contents($root . '/public_html/assets/js/form-popup.js');
 $adminCss = (string) @file_get_contents($root . '/public_html/assets/css/mbworld-2026.css');
 ok($popupJs !== '' && $adminCss !== '', 'The popup script and the admin stylesheet are both present');
-ok(str_contains($adminCss, '[data-form-popup] { display: none; }'),
+ok(str_contains($adminCss, '[data-form-popup]:not([data-form-popup-ready]) { display: none; }'),
     'A popup source is taken OUT of the flow, not just made invisible in place');
 ok(!preg_match('~\[data-form-popup\]\s*\{\s*visibility:\s*hidden~', $adminCss),
     '  ...so it never reserves a screen-height blank while the page finishes arriving');
+// The rule must LET GO once the script owns the card. Hiding it unscoped and
+// hoping an inline style wins is how the dialog came to open with nothing in
+// it: clearing an inline style does not beat a stylesheet, and the card is a
+// grid, so an inline display put back to fight it would have to guess which.
+ok(!preg_match('~\[data-form-popup\]\s*\{\s*display:\s*none~', $adminCss),
+    '  ...and the rule stops applying once the script has taken the card over, '
+    . 'rather than being fought with an inline style');
 ok(str_contains($popupJs, "!window.HTMLDialogElement") && str_contains($popupJs, "card.style.display = ''"),
     'A browser without <dialog> gets the form left in the page, never hidden for good');
 ok(str_contains($popupJs, "document.readyState === 'loading'"),
