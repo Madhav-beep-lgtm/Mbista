@@ -473,9 +473,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <a class="mbw-view-all" href="<?= e(url('admin/stock-summary-report.php?' . $qs)) ?>" title="Refresh with the same filters">&#8635; Refresh</a>
         </div>
     </div>
-    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px"><?= icon('layers') ?>
-        Derived 100% from <a href="<?= e(url('admin/accounting-inventory.php')) ?>">Inventory &amp; Manufacturing</a> records —
-        every item, stock movement, and manufacturing order recorded there appears here instantly; this report keeps no data of its own.</p>
     <form method="get" class="workspace-form-grid">
         <input type="hidden" name="applied" value="1">
         <label>From (inside <?= e((string) $fiscalYear['label']) ?>)<input type="date" name="from" value="<?= e($from) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
@@ -590,13 +587,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             or clear the filter to count the whole company, and the <strong>Counted Qty</strong> column appears in the sheet below.
         </p>
     <?php else: ?>
-        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
-            Closing stock above is <em>derived</em>: opening + inward − outward − damage, from the movements that were recorded.
-            A shop that records what it buys but not what it consumes — a kitchen, a cafe — has no outward row for the milk that went into the coffee,
-            so the report says the milk is still there and the cost of it never reaches the books.
-            <strong>Punch the counted quantity into the sheet below</strong>, then post it: the difference is written as a real stock movement at inventory cost
-            (<strong>Dr Cost of Goods Sold · Cr Inventory</strong>), which both charges the actual COGS and makes the derived closing stock equal what was counted.
-        </p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
             <span class="mbw-pill <?= $countSummary['open'] > 0 ? 'tone-amber' : 'tone-blue' ?>"><?= (int) $countSummary['open'] ?> punched, not posted</span>
             <?php if ($countSummary['shortfall_qty'] > 0): ?>

@@ -59,6 +59,15 @@
 
         var wrap = document.createElement('span');
         wrap.className = 'ss-wrap';
+        // Preserve sizing chosen by the form. The native select may carry an
+        // inline min-width (purchase suppliers and VAT/TDS ledgers use 160px),
+        // but once it is hidden the table sizes itself from this wrapper
+        // instead. Without copying those constraints, companies with 12+
+        // options get a narrow searchable field while smaller local datasets
+        // keep the correctly sized native select.
+        if (sel.style.width) { wrap.style.width = sel.style.width; }
+        if (sel.style.minWidth) { wrap.style.minWidth = sel.style.minWidth; }
+        if (sel.style.maxWidth) { wrap.style.maxWidth = sel.style.maxWidth; }
         // A select the page has deliberately hidden must not reappear as a
         // visible search box. The wrapper inherits the select's own display
         // state, because from here on the wrapper IS the field as far as the

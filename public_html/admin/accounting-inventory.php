@@ -2055,36 +2055,6 @@ foreach ($items as $stockItem) {
 }
 $showWarehouseStockCard = $allWarehouses !== [] || $anyWarehouseTaggedTxn;
 $lowStockCount = count(array_filter($items, static fn (array $item): bool => (float) $item['reorder_level'] > 0 && (float) $item['on_hand'] <= (float) $item['reorder_level']));
-$inventoryProcessSteps = $inventoryProfile['show_manufacturing']
-    ? [
-        ['Create Item', 'Master data'],
-        ['Set Type, Unit & Category', 'Classification'],
-        ['Save Item Master', 'Available for transactions'],
-        ['Record Stock Movement', 'Receipt / issue / transfer'],
-        ['Update Stock Summary', 'Qty on hand'],
-        ['Update Valuation', 'Cost and value'],
-        ['Update Reports', 'Analytics'],
-    ]
-    : [
-        ['Create Item', 'Master data'],
-        ['Set Type, Unit & Category', 'Classification'],
-        ['Save Item Master', 'Available for transactions'],
-        ['Record Stock Movement', 'Receipt / issue / transfer'],
-        ['Update Stock Summary', 'Qty on hand'],
-        ['Update Valuation', 'Cost and value'],
-    ];
-$inventoryTypeCards = $inventoryProfile['show_manufacturing']
-    ? [
-        ['Stock Item', 'Physical items bought, sold, and inventoried.'],
-        ['Service Item', 'Non-physical service lines used in billing.'],
-        ['Raw Material', 'Inputs consumed in manufacturing or production.'],
-        ['Finished Goods', 'Completed products ready for sale to customers.'],
-    ]
-    : [
-        ['Stock Item', 'Physical items bought, sold, and inventoried.'],
-        ['Service Item', 'Non-physical service lines used in billing.'],
-        ['Consumable', 'Low-value operational items tracked for stock control.'],
-];
 $invView = (string) ($_GET['view'] ?? 'inventory');
 
 // 'mapping' is gone on purpose: ledgers are chosen per item on the item form
@@ -2202,7 +2172,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php if (($inventoryProfile['show_manufacturing'] ?? false)): ?>
         <a class="mbw-tab <?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('services') ?> Manufacturing</a>
     <?php endif; ?>
-    <a class="mbw-tab" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?> Fixed Assets</a>
 </nav>
 
 <section class="mbw-kpi-grid" aria-label="Inventory overview">
@@ -2411,20 +2380,6 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 <?php endif; ?>
 
 <?php if ($invView === 'inventory'): ?>
-<details class="mbw-card" data-collapsible aria-label="Help and workflow">
-    <summary class="mbw-card-head" style="cursor:pointer"><h2>Help &amp; Workflow</h2></summary>
-    <div class="inventory-process-grid" style="margin-bottom:14px">
-        <?php foreach ($inventoryProcessSteps as $index => $process): ?>
-            <article><b><?= e((string) ($index + 1)) ?></b><span><?= icon($index === 0 ? 'services' : ($index === count($inventoryProcessSteps) - 1 ? 'reports' : 'documents')) ?></span><strong><?= e($process[0]) ?></strong><small><?= e($process[1]) ?></small></article>
-        <?php endforeach; ?>
-    </div>
-    <div class="inventory-type-grid">
-        <?php foreach ($inventoryTypeCards as [$typeLabel, $typeDescription]): ?>
-            <article><strong><?= e($typeLabel) ?></strong><span><?= e($typeDescription) ?></span></article>
-        <?php endforeach; ?>
-    </div>
-</details>
-
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
 <?php endif; ?>
@@ -2434,7 +2389,6 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     <div class="mbw-card-head inventory-workbench-head">
     <div>
         <h2><?= $invView === 'manufacturing' ? 'Manufacturing Workspace' : 'Inventory Workspace' ?></h2>
-        <p>Choose a task. Each one is its own page, so only that form is built.</p>
     </div>
 </div>
 
@@ -2901,12 +2855,6 @@ $invMoveItemOptions = static function () use ($items): string {
                 </ul>
             </div>
         <?php endif; ?>
-        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
-            One row per supplier's bill. Click <strong>Items</strong> to enter what is on it — each item carries its own quantity, rate,
-            VAT treatment and withholding, because one invoice can hold an exempt line and a standard one.
-            Every item becomes its own stock movement and its own accounting entry, and they all succeed or all fail together,
-            so a bill can never be half in.
-        </p>
         <form method="post" id="purchaseBillForm">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="record_purchase_batch">
@@ -3002,7 +2950,7 @@ $invMoveItemOptions = static function () use ($items): string {
                                 <th>Item</th>
                                 <th>UoM</th>
                                 <th class="is-numeric">Quantity</th>
-                                <th class="is-numeric"><span class="inv-grid-head-stack"><span>Rate</span><small>Excl. VAT · after discount</small></span></th>
+                                <th class="is-numeric">Rate</th>
                                 <th class="is-numeric">Amount</th>
                                 <th><span class="inv-grid-head-stack"><span>VAT</span><label class="inv-grid-check-all"><input type="checkbox" class="inv-item-vatall" checked><span>All</span></label></span></th>
                                 <th class="is-numeric">VAT</th>
@@ -3056,7 +3004,6 @@ $invMoveItemOptions = static function () use ($items): string {
                         </table></div>
                         <div class="inv-bill-dialog-actions">
                             <button type="button" class="button secondary inv-item-add" data-bill="<?= $billIndex ?>"><?= icon('plus') ?>Add item</button>
-                            <span class="inv-bill-dialog-hint">Amounts update automatically as you enter quantity and rate.</span>
                             <button type="button" class="button inv-bill-close"><?= icon('badge-check') ?>Done</button>
                         </div>
                     </div>
@@ -3079,11 +3026,6 @@ $invMoveItemOptions = static function () use ($items): string {
                   // after page load is cloned onto the end of the form. ?>
             <input type="hidden" name="grid_end" id="purchaseGridEnd" value="1">
         </form>
-        <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-            The reference is what ties a bill's lines together — it shows on the entry, so the bill can be found again when it is paid.
-            Bought-in stock is prepared as a draft entry so it can be read before it counts; approve it in <strong>Purchase entries</strong> below.
-            VAT and any tax withheld are shown next to the stock value they are deliberately kept out of.
-        </p>
     </details>
     <?php endif; ?>
 
@@ -3107,7 +3049,7 @@ $invMoveItemOptions = static function () use ($items): string {
     ?>
     <?php if ($invShows('movement-purchase-entries')): ?>
     <details class="feature-disclosure" id="movement-purchase-entries" <?= array_filter($purBills, static fn (array $r): bool => (string) $r['status'] === 'draft') !== [] ? 'open' : '' ?>>
-        <summary><span><strong><?= icon('tasks') ?>Purchase entries</strong><small>One entry per supplier bill. A draft is not in the books yet — posting puts it there and gives it its voucher number.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+        <summary><span><strong><?= icon('tasks') ?>Purchase entries</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
 
         <?php if ($purMergePlan !== []): ?>
             <?php
