@@ -227,6 +227,31 @@ $filters['counts'] = $countReady ? sc_counts($companyId, $countDate, $countScope
 $report = sr_stock_summary($companyId, $filters);
 $rows = $report['rows'];
 $totals = $report['totals'];
+
+// A JEWELLER READS THIS REPORT IN GRAMS. Pieces answer nothing: the metal
+// register, the karigar's issue slip and the opening stock sheet are all
+// written in weight by purity, and a summary that cannot be laid beside them
+// is a summary of the wrong thing. So when the stock on this page carries
+// weight profiles, the weight block appears; on a restaurant's or a trader's
+// stock it stays away, because there it would be a column of noughts.
+//
+// Asked of the DATA, not of whether the module is switched on: a company that
+// has enabled jewellery but not yet given its items a metal and a purity has
+// nothing to weigh, and empty columns help nobody.
+$jwColumns = [
+    ['Metal', 'jw_metal', 'text'],
+    ['Purity', 'jw_purity', 'text'],
+    ['Op. Net Wt', 'opening_net', 'weight'],
+    ['In Net Wt', 'in_net', 'weight'],
+    ['Out Net Wt', 'out_net', 'weight'],
+    ['Cl. Gross Wt', 'closing_gross', 'weight'],
+    ['Cl. Net Wt', 'closing_net', 'weight'],
+    ['Cl. Fine Wt', 'closing_fine', 'weight'],
+];
+$showJw = (int) ($totals['weighed_rows'] ?? 0) > 0;
+$jwCount = $showJw ? count($jwColumns) : 0;
+$baseWeightUnit = 'g';
+$jwWeight = static fn (?float $w): string => $w === null ? '–' : number_format($w, 4);
 $countSummary = $countReady ? sc_sheet_summary($companyId, $countDate, $countScope, $rows) : null;
 $canPunchCount = $countReady && user_can_do('inventory', 'edit');
 $canPostCount = $countReady && user_can_do('accounting', 'post');
@@ -287,6 +312,15 @@ if ($export !== '') {
         'Closing Qty', 'Closing Rate', 'Closing Amount',
         'Counted Closing Qty', 'Count Variance Qty', 'Count Variance Value', 'Count Status',
         'GL Ledger', 'Valuation Method'];
+    // The weight block, on a jeweller's stock only. See $jwColumns on the
+    // screen for why: pieces answer nothing when the register is kept in grams.
+    $exportJw = (int) ($totals['weighed_rows'] ?? 0) > 0;
+    if ($exportJw) {
+        $header = array_merge($header, ['Metal', 'Purity', 'Fineness',
+            'Gross Wt / pc', 'Net Wt / pc', 'Stone Wt / pc', 'Making Rate', 'Stone Value',
+            'Opening Net Wt', 'Inward Net Wt', 'Outward Net Wt', 'Damage Net Wt',
+            'Closing Gross Wt', 'Closing Net Wt', 'Closing Fine Wt', 'Hallmark', 'Design No.']);
+    }
     $data = [
         [(string) $company['name']],
         ['Stock Summary Report'],
@@ -309,11 +343,28 @@ if ($export !== '') {
             $r['counted_qty'] === null ? 'not counted' : ($r['count_posted'] ? 'posted' : 'counted, not posted'),
             $r['ledger_code'] !== '' ? $r['ledger_code'] : 'not mapped',
             strtoupper(str_replace('_', ' ', $r['valuation_method']))];
+        if ($exportJw) {
+            $line = array_pop($data);
+            foreach (['jw_metal', 'jw_purity', 'jw_fineness', 'jw_gross_each', 'jw_net_each', 'jw_stone_each',
+                'jw_making_rate', 'jw_stone_value', 'opening_net', 'in_net', 'out_net', 'damage_net',
+                'closing_gross', 'closing_net', 'closing_fine', 'jw_hallmark', 'jw_design_no'] as $jwKey) {
+                // An item with no profile writes nothing rather than a nought,
+                // so a mixed catalogue never reports a ring as weighing zero.
+                $line[] = $r[$jwKey] ?? '';
+            }
+            $data[] = $line;
+        }
     }
     $data[] = [];
-    $data[] = ['TOTALS', '', '', '', '', '', '', '', '', '', $totals['opening_amount'], '', '', $totals['in_amount'],
+    $totalsLine = ['TOTALS', '', '', '', '', '', '', '', '', '', $totals['opening_amount'], '', '', $totals['in_amount'],
         '', '', $totals['out_amount'], '', '', $totals['damage_amount'], '', '', $totals['closing_amount'],
         '', '', $totals['count_variance_amount'], '', '', ''];
+    if ($exportJw) {
+        $totalsLine = array_merge($totalsLine, ['', '', '', '', '', '', '', '',
+            $totals['opening_net'], $totals['in_net'], $totals['out_net'], $totals['damage_net'],
+            $totals['closing_gross'], $totals['closing_net'], $totals['closing_fine'], '', '']);
+    }
+    $data[] = $totalsLine;
     security_event('report_exported', 'success', 'Stock summary export (' . $export . ').', $companyId, $userId);
     if ($export === 'csv' || $export === 'excel') {
         export_csv('stock-summary-' . $company['code'] . '-' . $from . '-to-' . $to . ($export === 'excel' ? '.xls.csv' : '.csv'), $data);
@@ -339,11 +390,18 @@ if ($export !== '') {
         . ' · Locations: ' . e($filters['warehouse_ids'] === [] ? 'All' : implode(', ', $filters['warehouse_ids']))
         . ' · Valuation filter: ' . e($filters['valuation'] ?: 'All')
         . ' · Generated ' . e(date('Y-m-d H:i')) . '</div>';
-    echo '<table><thead><tr><th colspan="8">Basic Item Information</th><th colspan="3" class="n">Opening</th><th colspan="3" class="n">Purchase / Inward</th><th colspan="3" class="n">Sold / Consumed / Outward</th><th colspan="3" class="n">Damage / Write-off</th><th colspan="3" class="n">Closing</th><th colspan="3" class="n">Physical Count</th><th>Val.</th></tr><tr>';
+    echo '<table><thead><tr><th colspan="8">Basic Item Information</th><th colspan="3" class="n">Opening</th><th colspan="3" class="n">Purchase / Inward</th><th colspan="3" class="n">Sold / Consumed / Outward</th><th colspan="3" class="n">Damage / Write-off</th><th colspan="3" class="n">Closing</th><th colspan="3" class="n">Physical Count</th><th>Val.</th>'
+        . ($exportJw ? '<th colspan="7" class="n">Jewellery — weight</th>' : '') . '</tr><tr>';
     foreach (['S.N.', 'Code', 'Item', 'Stock Group', 'Jewellery Stock Type', 'Type', 'Location', 'UOM'] as $h) { echo '<th>' . $h . '</th>'; }
     for ($i = 0; $i < 5; $i++) { echo '<th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th>'; }
     echo '<th class="n">Counted</th><th class="n">Difference</th><th class="n">Diff. Value</th>';
-    echo '<th>Method</th></tr></thead><tbody>';
+    echo '<th>Method</th>';
+    if ($exportJw) {
+        foreach (['Metal', 'Purity', 'Op. Net Wt', 'In Net Wt', 'Out Net Wt', 'Cl. Net Wt', 'Cl. Fine Wt'] as $h) {
+            echo '<th class="n">' . e($h) . '</th>';
+        }
+    }
+    echo '</tr></thead><tbody>';
     foreach ($rows as $i => $r) {
         echo '<tr><td>' . ($i + 1) . '</td><td>' . e($r['sku']) . '</td><td>' . e($r['name']) . '</td><td>' . e($r['stock_group']) . '</td><td>' . e($r['jewellery_stock_kind_label']) . '</td><td>' . e($r['item_type_label']) . '</td><td>' . e($r['location']) . '</td><td>' . e($r['unit']) . '</td>';
         foreach ([['opening_qty', 'opening_rate', 'opening_amount'], ['in_qty', 'in_rate', 'in_amount'], ['out_qty', 'out_rate', 'out_amount'], ['damage_qty', 'damage_rate', 'damage_amount'], ['closing_qty', 'closing_rate', 'closing_amount']] as [$q, $ra, $am]) {
@@ -361,7 +419,14 @@ if ($export !== '') {
                 . '<td class="n' . $vneg . '">' . number_format($diffQty, 3) . '</td>'
                 . '<td class="n' . $vneg . '">' . $fmt($diffValue) . '</td>';
         }
-        echo '<td>' . e(strtoupper(str_replace('_', ' ', $r['valuation_method']))) . '</td></tr>';
+        echo '<td>' . e(strtoupper(str_replace('_', ' ', $r['valuation_method']))) . '</td>';
+        if ($exportJw) {
+            echo '<td>' . e((string) $r['jw_metal'] ?: '–') . '</td><td>' . e((string) $r['jw_purity'] ?: '–') . '</td>';
+            foreach (['opening_net', 'in_net', 'out_net', 'closing_net', 'closing_fine'] as $jwKey) {
+                echo '<td class="n">' . ($r[$jwKey] === null ? '–' : number_format((float) $r[$jwKey], 4)) . '</td>';
+            }
+        }
+        echo '</tr>';
     }
     echo '<tr class="tot"><td colspan="8">Totals (amounts)</td>'
         . '<td colspan="2"></td><td class="n">' . $fmt($totals['opening_amount']) . '</td>'
@@ -369,7 +434,16 @@ if ($export !== '') {
         . '<td colspan="2"></td><td class="n">' . $fmt($totals['out_amount']) . '</td>'
         . '<td colspan="2"></td><td class="n">' . $fmt($totals['damage_amount']) . '</td>'
         . '<td colspan="2"></td><td class="n">' . $fmt($totals['closing_amount']) . '</td>'
-        . '<td colspan="2"></td><td class="n">' . $fmt($totals['count_variance_amount']) . '</td><td></td></tr>';
+        . '<td colspan="2"></td><td class="n">' . $fmt($totals['count_variance_amount']) . '</td><td></td>'
+        . ($exportJw
+            ? '<td></td><td></td>'
+                . '<td class="n">' . number_format($totals['opening_net'], 4) . '</td>'
+                . '<td class="n">' . number_format($totals['in_net'], 4) . '</td>'
+                . '<td class="n">' . number_format($totals['out_net'], 4) . '</td>'
+                . '<td class="n">' . number_format($totals['closing_net'], 4) . '</td>'
+                . '<td class="n">' . number_format($totals['closing_fine'], 4) . '</td>'
+            : '')
+        . '</tr>';
     echo '</tbody></table><div class="meta" style="margin-top:6px">Quantity totals are deliberately not combined across units. Outward and damage amounts are inventory cost, never selling price. '
         . 'Physical Count is the closing quantity somebody counted on ' . e($to) . '; its difference is what posting the count charges to cost of sales.</div></body></html>';
     exit;
@@ -598,6 +672,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <th colspan="3" class="grp-close">Closing Balance</th>
                 <th colspan="3" class="grp-count">Physical Count (<?= e($to) ?>)</th>
                 <th colspan="3" class="grp-other">Other</th>
+                <?php if ($showJw): ?><th colspan="<?= $jwCount ?>" class="grp-jw">Jewellery — weight (<?= e($baseWeightUnit) ?>)</th><?php endif; ?>
             </tr>
             <tr class="ssr-h2">
                 <th>S.N.</th><th class="ssr-sticky-1">Item Code</th><th class="ssr-sticky-2">Item Name</th><th>Type</th><th>Location</th><th>UOM</th>
@@ -610,11 +685,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <th class="is-numeric grp-count" title="Counted minus the closing quantity the movements add up to">Difference</th>
                 <th class="is-numeric grp-count" title="What that difference costs — charged to COGS when the count is posted">Diff. Value</th>
                 <th class="grp-other">GL Ledger</th><th class="grp-other">Valuation</th><th class="grp-other">Action</th>
+                <?php if ($showJw): foreach ($jwColumns as [$jwLabel, , $jwKind]): ?>
+                    <th class="grp-jw<?= $jwKind === 'weight' ? ' is-numeric' : '' ?>"><?= e($jwLabel) ?></th>
+                <?php endforeach; endif; ?>
             </tr>
         </thead>
         <tbody>
             <?php if ($pageRows === []): ?>
-                <tr><td colspan="27" style="text-align:center;color:var(--mbw-muted);padding:24px">No items match the filters for <?= e($from) ?> → <?= e($to) ?>.</td></tr>
+                <tr><td colspan="<?= 27 + $jwCount ?>" style="text-align:center;color:var(--mbw-muted);padding:24px">No items match the filters for <?= e($from) ?> → <?= e($to) ?>.</td></tr>
             <?php endif; ?>
             <?php
             // Per-GL-ledger subtotals when grouped by ledger — each subtotal is
@@ -652,6 +730,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td class="is-numeric grp-close"><?= e($sym . number_format($stockSub['closing'], 2)) ?></td>
                     <td colspan="3" class="grp-count"></td>
                     <td colspan="3" class="grp-other" style="font-weight:500;color:var(--mbw-muted)">closing stock value</td>
+                    <?php if ($showJw): ?><td colspan="<?= $jwCount ?>" class="grp-jw"></td><?php endif; ?>
                 </tr>
             <?php endif;
                 if ($filters['group_by'] === 'ledger' && $prevLedgerKey !== (int) $r['ledger_id']):
@@ -665,6 +744,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td class="is-numeric grp-close"><?= e($sym . number_format($sub['closing'], 2)) ?></td>
                     <td colspan="3" class="grp-count"></td>
                     <td colspan="3" class="grp-other" style="font-weight:500;color:var(--mbw-muted)">= trial-balance line</td>
+                    <?php if ($showJw): ?><td colspan="<?= $jwCount ?>" class="grp-jw"></td><?php endif; ?>
                 </tr>
             <?php endif; ?>
                 <tr>
@@ -726,6 +806,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     data-confirm="Take back the counted closing stock for <?= e($r['sku']) ?>? Its stock movement is reversed and its voucher swapped Dr/Cr on <?= e($to) ?>. The counted quantity stays on the sheet so it can be corrected and posted again.">Unpost count</button>
                         <?php endif; ?>
                     </td>
+                    <?php if ($showJw): foreach ($jwColumns as [, $jwKey, $jwKind]): ?>
+                        <td class="grp-jw<?= $jwKind === 'weight' ? ' is-numeric' : '' ?>"><?php
+                            echo $jwKind === 'weight'
+                                ? e($jwWeight($r[$jwKey] === null ? null : (float) $r[$jwKey]))
+                                : e((string) $r[$jwKey] !== '' ? (string) $r[$jwKey] : '–');
+                        ?></td>
+                    <?php endforeach; endif; ?>
                 </tr>
             <?php endforeach; ?>
             <?php if ($rows !== []): ?>
@@ -739,6 +826,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <td colspan="2" class="grp-count"></td>
                 <td class="is-numeric grp-count" title="The difference still waiting to be posted. A row already posted has had its charge taken to the books, so it counts nothing here."><?= e($sym . number_format($totals['count_variance_amount'], 2)) ?></td>
                 <td colspan="3" class="grp-other"></td>
+                <?php if ($showJw): foreach ($jwColumns as [, $jwKey, $jwKind]): ?>
+                    <td class="grp-jw<?= $jwKind === 'weight' ? ' is-numeric' : '' ?>"><?= $jwKind === 'weight'
+                        ? e($jwWeight((float) ($totals[$jwKey] ?? 0))) : '' ?></td>
+                <?php endforeach; endif; ?>
             </tr>
             <?php endif; ?>
         </tbody>
@@ -912,6 +1003,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 .grp-close { background: #e9f0ec; }
 .grp-count { background: #eef0fa; }
 .grp-other { background: #f5f7f5; }
+.grp-jw { background: #fdf6e8; }
 .grp-open, .grp-in, .grp-out, .grp-dmg, .grp-close, .grp-count, .grp-other {
     border-left: 1px solid #d9e0da;
 }

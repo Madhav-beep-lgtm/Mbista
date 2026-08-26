@@ -204,11 +204,27 @@ function sr_stock_summary_build(int $companyId, array $f): array
     // calling each other in a circle.
     $counts = (array) ($f['counts'] ?? []);
 
+    // A JEWELLER'S STOCK IS WEIGHT, NOT PIECES. Two rings are two pieces and
+    // tell nobody anything; 27.54g of 22K gold is the figure the metal
+    // register, the karigar's issue slip and the opening stock sheet are all
+    // written in, and a summary that cannot be reconciled against them is a
+    // summary of the wrong thing. The profile beside each item already carries
+    // the metal, the purity and the per-piece weights — the same columns the
+    // opening-stock template asks for — so the report reads them rather than
+    // making the reader look each item up.
     $itemSql = "SELECT i.id, i.sku, i.name, i.item_type, i.valuation_method, i.unit, i.purchase_rate,
             i.opening_qty, i.opening_amount, i.default_warehouse_id, i.category,
-            jp.stock_kind AS jewellery_stock_kind
+            jp.stock_kind AS jewellery_stock_kind,
+            jp.jewellery_type, jp.track_mode,
+            jp.gross_weight AS jw_gross_each, jp.stone_weight AS jw_stone_each,
+            jp.net_weight AS jw_net_each, jp.wastage_pct AS jw_wastage_pct,
+            jp.making_charge_basis AS jw_making_basis, jp.making_charge_rate AS jw_making_rate,
+            jp.stone_value AS jw_stone_value, jp.hallmark AS jw_hallmark, jp.design_no AS jw_design_no,
+            jm.name AS jw_metal, jpu.name AS jw_purity, jpu.fineness AS jw_fineness
         FROM inventory_items i
         LEFT JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id AND jp.company_id = i.company_id
+        LEFT JOIN jewellery_metals jm ON jm.id = jp.metal_id
+        LEFT JOIN jewellery_purities jpu ON jpu.id = jp.purity_id
         WHERE i.company_id = :cid AND i.item_type <> 'service'";
     $params = ['cid' => $companyId];
     if ($search !== '') {
@@ -419,10 +435,54 @@ function sr_stock_summary_build(int $companyId, array $f): array
             $warehouseLabel = 'All locations';
         }
 
+        // Weight per stage is the per-piece profile weight times the pieces
+        // that moved. It is the only honest derivation available: the movement
+        // rows carry quantity, and for a jeweller a quantity is a count of
+        // pieces whose weight is written on the item, not on the movement.
+        // An item with no profile yields nothing rather than a nought, so a
+        // mixed catalogue does not report a diamond ring as weighing zero.
+        $hasProfile = ($item['jw_metal'] ?? null) !== null;
+        $grossEach = (float) ($item['jw_gross_each'] ?? 0);
+        $netEach = (float) ($item['jw_net_each'] ?? 0);
+        $stoneEach = (float) ($item['jw_stone_each'] ?? 0);
+        $weigh = static fn (float $qty, float $each): ?float => $hasProfile ? sr_weight($qty * $each) : null;
+
         $rows[] = [
             'item_id' => $itemId,
             'sku' => (string) $item['sku'],
             'name' => (string) $item['name'],
+            // --- Jewellery profile, null on an item that has none ------------
+            'jw' => $hasProfile,
+            'jw_metal' => (string) ($item['jw_metal'] ?? ''),
+            'jw_purity' => (string) ($item['jw_purity'] ?? ''),
+            'jw_fineness' => $hasProfile ? (float) ($item['jw_fineness'] ?? 0) : null,
+            'jw_type' => (string) ($item['jewellery_type'] ?? ''),
+            'jw_track_mode' => (string) ($item['track_mode'] ?? ''),
+            'jw_gross_each' => $hasProfile ? sr_weight($grossEach) : null,
+            'jw_net_each' => $hasProfile ? sr_weight($netEach) : null,
+            'jw_stone_each' => $hasProfile ? sr_weight($stoneEach) : null,
+            'jw_making_basis' => (string) ($item['jw_making_basis'] ?? ''),
+            'jw_making_rate' => $hasProfile ? (float) ($item['jw_making_rate'] ?? 0) : null,
+            'jw_stone_value' => $hasProfile ? (float) ($item['jw_stone_value'] ?? 0) : null,
+            'jw_hallmark' => (string) ($item['jw_hallmark'] ?? ''),
+            'jw_design_no' => (string) ($item['jw_design_no'] ?? ''),
+            'opening_gross' => $weigh((float) $opening['qty'], $grossEach),
+            'opening_net' => $weigh((float) $opening['qty'], $netEach),
+            'in_gross' => $weigh((float) $in['qty'], $grossEach),
+            'in_net' => $weigh((float) $in['qty'], $netEach),
+            'out_gross' => $weigh((float) $out['qty'], $grossEach),
+            'out_net' => $weigh((float) $out['qty'], $netEach),
+            'damage_gross' => $weigh((float) $damage['qty'], $grossEach),
+            'damage_net' => $weigh((float) $damage['qty'], $netEach),
+            'closing_gross' => $weigh((float) $closing['qty'], $grossEach),
+            'closing_net' => $weigh((float) $closing['qty'], $netEach),
+            'closing_stone' => $weigh((float) $closing['qty'], $stoneEach),
+            // Fine metal: what the closing weight is worth once purity is
+            // taken out of it. Two lots of 22K and 18K do not add up as
+            // grams, and this is the column they add up in.
+            'closing_fine' => $hasProfile && (float) ($item['jw_fineness'] ?? 0) > 0
+                ? sr_weight((float) $closing['qty'] * $netEach * ((float) $item['jw_fineness'] / 1000))
+                : null,
             'item_type' => $displayType,
             'item_type_label' => sr_item_type_labels()[$displayType] ?? ucfirst($displayType),
             'stock_group' => (string) ($item['category'] ?? ''),
@@ -477,10 +537,24 @@ function sr_stock_summary_build(int $companyId, array $f): array
         $totals['damage_amount'] += $damage['amount'];
         $totals['closing_amount'] += $closing['amount'];
         $totals['count_variance_amount'] += $countVarianceAmount;
+        if ($hasProfile) {
+            $totals['weighed_rows']++;
+            $totals['opening_net'] += (float) $weigh((float) $opening['qty'], $netEach);
+            $totals['in_net'] += (float) $weigh((float) $in['qty'], $netEach);
+            $totals['out_net'] += (float) $weigh((float) $out['qty'], $netEach);
+            $totals['damage_net'] += (float) $weigh((float) $damage['qty'], $netEach);
+            $totals['closing_net'] += (float) $weigh((float) $closing['qty'], $netEach);
+            $totals['closing_gross'] += (float) $weigh((float) $closing['qty'], $grossEach);
+            $totals['closing_fine'] += (float) (end($rows)['closing_fine'] ?? 0);
+        }
     }
 
+    $weightKeys = ['opening_net', 'in_net', 'out_net', 'damage_net', 'closing_net', 'closing_gross', 'closing_fine'];
     foreach ($totals as $k => $v) {
-        $totals[$k] = inv_round_money($v);
+        if ($k === 'weighed_rows') {
+            continue;
+        }
+        $totals[$k] = in_array($k, $weightKeys, true) ? sr_weight((float) $v) : inv_round_money((float) $v);
     }
 
     $groupBy = (string) ($f['group_by'] ?? '');
@@ -501,12 +575,31 @@ function sr_stock_summary_build(int $companyId, array $f): array
 function sr_zero_totals(): array
 {
     return ['opening_amount' => 0.0, 'in_amount' => 0.0, 'out_amount' => 0.0, 'damage_amount' => 0.0,
-        'closing_amount' => 0.0, 'count_variance_amount' => 0.0];
+        'closing_amount' => 0.0, 'count_variance_amount' => 0.0,
+        // A jeweller foots the weight column, not only the money one.
+        'opening_net' => 0.0, 'in_net' => 0.0, 'out_net' => 0.0, 'damage_net' => 0.0,
+        'closing_net' => 0.0, 'closing_gross' => 0.0, 'closing_fine' => 0.0,
+        // How many of the rows above actually carried a weight profile. Zero
+        // means this is not a jeweller's stock and the weight columns are not
+        // worth showing at all.
+        'weighed_rows' => 0];
 }
 
 function sr_rate(float $amount, float $qty): float
 {
     return $qty > INV_EPSILON ? round($amount / $qty, 2) : 0.0;
+}
+
+/**
+ * A weight, to the four places the trade keeps them in.
+ *
+ * Four, not two: a 0.2650g stone rounded to 0.27 is off by enough to matter
+ * once a hundred of them are added up, and the opening-stock sheet this report
+ * is reconciled against carries four.
+ */
+function sr_weight(float $grams): float
+{
+    return round($grams, 4);
 }
 
 function sr_snapshot(array $state, bool $warehouseFilterOn, float $scopedQty, float $avgUnit): array

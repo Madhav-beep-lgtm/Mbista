@@ -2990,19 +2990,26 @@ $invMoveItemOptions = static function () use ($items): string {
                         <button type="button" class="button inv-bill-close"><?= icon('badge-check') ?> Done</button>
                     </div>
                     <div class="inv-bill-dialog-body">
-                        <div class="inv-item-grid-scroll"><table class="mbw-grid-table inv-item-grid" data-bill="<?= $billIndex ?>">
+                        <div class="inv-item-grid-scroll"><table class="mbw-grid-table inv-item-grid<?= $marksIngredients ? ' has-ingredient' : '' ?>" data-bill="<?= $billIndex ?>">
+                            <colgroup>
+                                <col class="inv-col-item"><col class="inv-col-uom"><col class="inv-col-qty"><col class="inv-col-rate">
+                                <col class="inv-col-amount"><col class="inv-col-vat-control"><col class="inv-col-vat-amount">
+                                <col class="inv-col-tds-control"><col class="inv-col-tds-rate">
+                                <?php if ($marksIngredients): ?><col class="inv-col-ingredient"><?php endif; ?>
+                                <col class="inv-col-notes"><col class="inv-col-action">
+                            </colgroup>
                             <thead><tr>
                                 <th>Item</th>
                                 <th>UoM</th>
                                 <th class="is-numeric">Quantity</th>
-                                <th class="is-numeric">Rate<br><small>excl. VAT, after discount</small></th>
+                                <th class="is-numeric"><span class="inv-grid-head-stack"><span>Rate</span><small>Excl. VAT · after discount</small></span></th>
                                 <th class="is-numeric">Amount</th>
-                                <th style="text-align:center">VAT<br><label style="font-weight:400;font-size:11px;color:var(--mbw-muted)"><input type="checkbox" class="inv-item-vatall" checked> all</label></th>
+                                <th><span class="inv-grid-head-stack"><span>VAT</span><label class="inv-grid-check-all"><input type="checkbox" class="inv-item-vatall" checked><span>All</span></label></span></th>
                                 <th class="is-numeric">VAT</th>
-                                <th style="text-align:center">TDS<br><label style="font-weight:400;font-size:11px;color:var(--mbw-muted)"><input type="checkbox" class="inv-item-tdsall"> all</label></th>
+                                <th><span class="inv-grid-head-stack"><span>TDS</span><label class="inv-grid-check-all"><input type="checkbox" class="inv-item-tdsall"><span>All</span></label></span></th>
                                 <th class="is-numeric">TDS %</th>
-                                <?php if ($marksIngredients): ?><th style="text-align:center">Ingredient</th><?php endif; ?>
-                                <th>Notes</th>
+                                <?php if ($marksIngredients): ?><th class="inv-grid-ingredient">Ingredient</th><?php endif; ?>
+                                <th class="inv-grid-notes">Notes</th>
                                 <th></th>
                             </tr></thead>
                             <tbody>
@@ -3032,9 +3039,9 @@ $invMoveItemOptions = static function () use ($items): string {
                                     </td>
                                     <td class="is-numeric"><input type="number" step="0.01" min="0" max="100" name="<?= e($lineName) ?>[tds_rate]" class="inv-grid-tdsrate" value="<?= e((string) ($line['tds_rate'] ?? '')) ?>" style="width:80px;text-align:right"></td>
                                     <?php if ($marksIngredients): ?>
-                                        <td style="text-align:center"><input type="checkbox" name="<?= e($lineName) ?>[mark_ingredient]" value="1" <?= !empty($line['mark_ingredient']) ? 'checked' : '' ?> title="Also make this item available to recipes"></td>
+                                        <td class="inv-grid-ingredient" style="text-align:center"><input type="checkbox" name="<?= e($lineName) ?>[mark_ingredient]" value="1" <?= !empty($line['mark_ingredient']) ? 'checked' : '' ?> title="Also make this item available to recipes"></td>
                                     <?php endif; ?>
-                                    <td><input type="text" name="<?= e($lineName) ?>[notes]" maxlength="255" value="<?= e((string) ($line['notes'] ?? '')) ?>" style="width:120px"></td>
+                                    <td class="inv-grid-notes"><input type="text" name="<?= e($lineName) ?>[notes]" maxlength="255" value="<?= e((string) ($line['notes'] ?? '')) ?>" style="width:120px"></td>
                                     <td><button type="button" class="button secondary jw-line-remove mbw-delete-action inv-item-clear" title="Delete this item from the bill" aria-label="Delete this item from the bill"><?= icon('trash') ?></button></td>
                                 </tr>
                             <?php endfor; ?>
