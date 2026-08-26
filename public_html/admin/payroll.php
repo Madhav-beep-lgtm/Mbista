@@ -585,13 +585,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php if ($run): ?>
 <section class="mbw-kpi-grid pr-kpis" aria-label="Payroll totals">
-    <?php foreach ([
+    <?php
+    $money = static fn (float $amount): string => rtrim($sym) . ' ' . number_format($amount, 2);
+    foreach ([
+        // The symbol is spaced off the amount. It reads better, and it is the
+        // one place a long figure can break if a card is ever narrow enough to
+        // need to -- "NPR2,345,678.90" is a single unbreakable token.
         ['Employees', (string) $kpi['employees'], 'users', 'tone-blue'],
-        ['Gross Earnings', $sym . number_format($kpi['gross'], 2), 'wallet', 'tone-green'],
-        ['Employer Contribution', $sym . number_format($kpi['employer'], 2), 'bank', 'tone-blue'],
-        ['Deductions', $sym . number_format($kpi['deductions'], 2), 'tag', 'tone-amber'],
-        ['Income Tax (TDS)', $sym . number_format($kpi['tax'], 2), 'compliance', 'tone-amber'],
-        ['Net Payable', $sym . number_format($kpi['net'], 2), 'card', 'tone-green'],
+        ['Gross Earnings', $money($kpi['gross']), 'wallet', 'tone-green'],
+        ['Employer Contribution', $money($kpi['employer']), 'bank', 'tone-blue'],
+        ['Deductions', $money($kpi['deductions']), 'tag', 'tone-amber'],
+        ['Income Tax (TDS)', $money($kpi['tax']), 'compliance', 'tone-amber'],
+        ['Net Payable', $money($kpi['net']), 'card', 'tone-green'],
     ] as [$kpiLabel, $kpiValue, $kpiIcon, $kpiTone]): ?>
         <article class="mbw-kpi">
             <div>

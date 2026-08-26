@@ -768,15 +768,23 @@ body.admin-layout .mbw-kpi > div:first-child {
   flex: 1 1 auto;
 }
 
+/* A FIGURE IS NEVER ELLIPSISED. "NPR2..." could be two thousand or two crore,
+   and a payroll total nobody can read is worse than one that takes a second
+   line: the whole reason the card is on the page is the number on it.
+   The size steps down with the viewport so most values still fit on one line,
+   and what does not fit wraps at the space after the currency rather than
+   being cut off. Breaking is allowed only between words -- a thousands
+   separator is not a place to break a number. */
 body.admin-layout .mbw-kpi-value {
   margin: 4px 0 6px;
   color: var(--mbw-heading);
-  font-size: 19px;
+  font-size: clamp(15px, 1.25vw, 19px);
   font-weight: 700;
   letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: keep-all;
 }
 
 body.admin-layout .mbw-kpi-delta {
@@ -3687,11 +3695,20 @@ body.admin-layout .pr-newrun {
   align-items: flex-end;
 }
 
+/* THE CONTROLS LINE UP, WHATEVER THE CAPTIONS DO. "Pay date" is one line and
+   "Voucher date (optional)" is two, so laying these out on their natural
+   heights put the date boxes at three different levels across one row. The
+   caption box is given room for two lines either way and its contents sit at
+   the bottom of it, so every control in the bar shares a baseline -- and goes
+   on sharing it when a caption is translated into something longer. */
 body.admin-layout .pr-runpick label,
 body.admin-layout .pr-newrun label {
   display: grid;
   gap: 4px;
+  min-height: 74px;
+  align-content: end;
   font-size: 12px;
+  line-height: 1.25;
   color: var(--mbw-muted);
   font-weight: 600;
 }
@@ -3764,16 +3781,18 @@ body.admin-layout .pr-flow-step.is-current {
   background: var(--mbw-primary-soft);
 }
 
+/* Six cards, five of them carrying money. Pinned at six across they were each
+   narrower than the figure inside them from about 1500px down, which is how a
+   payroll total came to read "NPR2...". Asking for a MINIMUM width instead of
+   a fixed count gives six across on a wide screen and drops to five, four,
+   three as the window narrows -- always with room for the amount, and without
+   a breakpoint to keep in step with the font size. */
 body.admin-layout .pr-kpis {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-}
-
-@media (max-width: 1200px) {
-  body.admin-layout .pr-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  grid-template-columns: repeat(auto-fit, minmax(238px, 1fr));
 }
 
 @media (max-width: 700px) {
-  body.admin-layout .pr-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.admin-layout .pr-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 }
 
 body.admin-layout .pr-workspace {
