@@ -84,7 +84,14 @@ function makeDom(options) {
         (this.handlers[ev.type] || []).forEach(function (fn) { fn(ev); });
     };
     El.prototype.fire = function (type, ev) { this.dispatchEvent(Object.assign({ type: type }, ev || {})); };
-    El.prototype.closest = function () { return null; };
+    El.prototype.closest = function (sel) {
+        var node = this;
+        while (node) {
+            if (sel === 'dialog' && node.tagName === 'DIALOG') { return node; }
+            node = node.parentNode;
+        }
+        return null;
+    };
     El.prototype.select = function () {};        // the text box's own selectAll
     El.prototype.scrollIntoView = function () {};
     El.prototype.matches = function (sel) { return sel === this.tagName.toLowerCase(); };
@@ -124,6 +131,13 @@ function makeDom(options) {
         var inBody = this.parentNode === body;
         var ox = inBody ? 0 : cbOffset.x;
         var oy = inBody ? 0 : cbOffset.y;
+        if (dialog && this.parentNode === dialog) {
+            // A dialog is a containing block for fixed children, exactly like
+            // a transformed ancestor. Hosting the list there is only safe
+            // because the placement is measured and corrected afterwards.
+            ox = cbOffset.x;
+            oy = cbOffset.y;
+        }
         var left = parseFloat(this.style.left || '0') + ox;
         var top = parseFloat(this.style.top || '0') + oy;
         var w = this.style.width === 'auto' || !this.style.width ? this.scrollWidth : parseFloat(this.style.width);
@@ -151,8 +165,19 @@ function makeDom(options) {
 
     var body = new El('body');
     var head = new El('head');
+    var dialog = null;
     var host = new El('label');          // the field's own box
-    body.appendChild(host);
+    if (options.inDialog) {
+        // A modal dialog paints in the browser's top layer, above everything
+        // in <body> whatever its z-index. Anything hosted in <body> while a
+        // dialog is open is therefore invisible, which is the whole reason
+        // the list has to move into the dialog instead.
+        dialog = new El('dialog');
+        body.appendChild(dialog);
+        dialog.appendChild(host);
+    } else {
+        body.appendChild(host);
+    }
 
     var sel = new El('select');
     sel.multiple = false;
@@ -188,7 +213,7 @@ function makeDom(options) {
     };
 
     return {
-        document: document, window: windowObj, body: body, host: host, select: sel,
+        document: document, window: windowObj, body: body, host: host, select: sel, dialog: dialog,
         listeners: listeners,
         setInput: function (el) { input = el; },
         getInput: function () { return input; }
@@ -266,6 +291,25 @@ var clamped = run({ viewport: viewport, fieldRect: edge, containingBlockOffset: 
 var c = clamped.list.getBoundingClientRect();
 ok(c.right <= viewport.width - 8 + 0.51, 'Its right edge stays inside the viewport (' + c.right + ')');
 ok(c.left >= 8, 'And its left edge does too (' + c.left + ')');
+
+console.log('\nF. A field inside a modal dialog still searches');
+// This is where it went wrong once already. Moving the open list to <body> is
+// what stops an ordinary page clipping or displacing it -- but a dialog paints
+// in the top layer, so a list in <body> is BEHIND it however high its z-index.
+// The answer at the time was to switch the search box off inside dialogs
+// entirely, which is how the purchase bill's item picker became a plain select
+// with no way to search a few hundred items.
+var dlg = run({ viewport: viewport, fieldRect: pill, containingBlockOffset: { x: 267, y: 82 },
+    itemWidth: 240, inDialog: true });
+ok(dlg.wrap !== null, 'A long select inside a dialog is still upgraded to a searchable field');
+ok(dlg.list.parentNode === dlg.dom.dialog,
+    '  ...and its list is hosted in the DIALOG, which shares the top layer with it');
+ok(dlg.list.parentNode !== dlg.dom.body,
+    '  ...not in <body>, where the dialog would paint straight over it');
+var d = dlg.list.getBoundingClientRect();
+ok(near(d.left, pill.left), "It still opens at the field's left edge (" + d.left + ' vs ' + pill.left + ')');
+ok(near(d.top, pill.top + pill.height + 4),
+    '  ...and directly under it, the dialog being a containing block notwithstanding');
 
 console.log('\nE. A closed list is handed back to its field');
 // A list parked in <body> outlives the row it belongs to, and the item grids

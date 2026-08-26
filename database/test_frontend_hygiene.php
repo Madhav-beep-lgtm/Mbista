@@ -960,8 +960,13 @@ ok(str_contains($ssJs, 'getBoundingClientRect') && str_contains($ssJs, "addEvent
 // handed to a list inside one land offset by that ancestor's own corner. Seen
 // on the Reports Center as the report list opening halfway across the page,
 // over the filter form, with nothing joining it to the field it came from.
-ok(str_contains($ssJs, 'document.body.appendChild(list)'),
-    '  ...it is moved to <body> while open, where no ancestor can claim it');
+ok(str_contains($ssJs, "sel.closest('dialog') || document.body") && str_contains($ssJs, 'host.appendChild(list)'),
+    '  ...it is hosted where it can be SEEN while open: <body> normally, and the dialog when it is in one');
+// A dialog paints in the top layer, above everything in <body> whatever its
+// z-index. Switching the search box off inside dialogs was the first answer to
+// that, and it cost the purchase bill its item search.
+ok(!str_contains($ssJs, "if (sel.closest('dialog')) { return; }"),
+    '  ...rather than switched off inside dialogs, which is what lost the item search');
 ok(str_contains($ssJs, 'wrap.appendChild(list)'),
     '  ...and handed back on close, so nothing is left behind when its row goes');
 ok(preg_match('/var got = list\.getBoundingClientRect\(\);\s*var dx/', $ssJs) === 1,

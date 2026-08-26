@@ -3510,7 +3510,22 @@ $invMoveItemOptions = static function () use ($items): string {
                 <?php $movementIn = (float) $movement['qty_in'] > 0; ?>
                 <tr>
                     <td><?= e($movement['transaction_date']) ?></td><td><?= e($movement['sku'] . ' - ' . $movement['item_name']) ?></td>
-                    <td><span class="mbw-pill <?= $movementIn ? 'tone-blue' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', ucfirst($movement['transaction_type']))) ?><?= $movement['transaction_type'] === 'adjustment' ? ($movementIn ? ' +' : ' −') : '' ?></span></td>
+                    <td><span class="mbw-pill <?= $movementIn ? 'tone-blue' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', ucfirst($movement['transaction_type']))) ?><?= $movement['transaction_type'] === 'adjustment' ? ($movementIn ? ' +' : ' −') : '' ?></span>
+                        <?php
+                        // A MOVEMENT WITH NO VOUCHER NEVER REACHED THE LEDGER.
+                        // Until now the only sign of it was the shape of the
+                        // button at the end of the row -- a bin where other
+                        // companies have "Reverse" -- which reads as two
+                        // screens behaving differently rather than as one
+                        // company missing its ledger mapping. It says so now.
+                        $movementUnposted = (int) ($movement['voucher_id'] ?? 0) <= 0
+                            && empty($movement['jewellery_stock_txn_id'])
+                            && !in_array((string) $movement['transaction_type'], ['consume', 'produce'], true);
+                        ?>
+                        <?php if ($movementUnposted): ?>
+                            <span class="mbw-pill tone-amber" title="Stock was recorded but no accounting entry was raised — the ledgers for this item are not mapped, so there is nothing to reverse. Map them in Ledger mapping, then post the gap from Stock Summary → Reconcile Stock ↔ General Ledger.">stock only</span>
+                        <?php endif; ?>
+                    </td>
                     <td class="is-numeric"><?= e(number_format((float) $movement['qty_in'], 3)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['qty_out'], 3)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['rate'], 2)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['amount'], 2)) ?></td><td><?= e($movement['ref_no'] ?? '-') ?></td>
                     <?php if (($currentUser['role'] ?? '') === 'admin'): ?>
                         <td style="white-space:nowrap">

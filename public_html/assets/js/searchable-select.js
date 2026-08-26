@@ -48,9 +48,6 @@
 
     function enhance(sel) {
         if (sel.dataset.ssReady || sel.multiple) { return; }
-        // Dialogs are in the browser's top layer. A searchable list moved to
-        // <body> cannot appear above it, so use the native picker there.
-        if (sel.closest('dialog')) { return; }
         var auto = sel.options.length >= 12;
         if (!auto && !sel.classList.contains('js-searchable')) { return; }
         if (sel.closest('.no-search')) { return; }
@@ -135,7 +132,19 @@
             var openDown = below > 160 || below >= above;
             var room = Math.max(120, Math.min(260, openDown ? below : above));
 
-            if (list.parentNode !== document.body) { document.body.appendChild(list); }
+            // WHERE THE LIST HAS TO LIVE WHILE IT IS OPEN. <body> is right for
+            // an ordinary field: no ancestor is left between the list and the
+            // viewport that could clip it or claim it as a containing block.
+            //
+            // It is wrong inside a modal <dialog>. A dialog is painted in the
+            // browser's TOP LAYER, above the whole document, so a list parked
+            // in <body> is behind it however high its z-index goes — which is
+            // what turned the purchase bill's item picker back into a plain
+            // select with no search. A child of the dialog is in the top layer
+            // with it. The dialog then becomes the containing block, and the
+            // correction below is what makes that harmless.
+            var host = sel.closest('dialog') || document.body;
+            if (list.parentNode !== host) { host.appendChild(list); }
 
             // Wide enough to read. Sized to the field alone, a list of report
             // names is a column of truncated words in a 190px pill; sized to
