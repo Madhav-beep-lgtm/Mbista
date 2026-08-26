@@ -875,5 +875,39 @@ foreach (hygiene_php_files($root . '/public_html/admin') as $path) {
 }
 ok($cloners !== [], 'Grids that add rows by cloning: ' . implode(', ', $cloners));
 
+// ---------------------------------------------------------------------------
+// A form that lives in a popup must not leave a hole in the page waiting for it.
+// ---------------------------------------------------------------------------
+// The counter billing form is moved into a <dialog> by form-popup.js, and the
+// stylesheet hides it until that happens. It used to hide it with
+// `visibility: hidden`, which KEEPS THE BOX: a screen-tall form left a
+// screen-tall blank under the card heading while the rest of the document
+// arrived, which reads as a page that loads in two goes and stalls halfway.
+// And if <dialog> was not available the card was never un-hidden at all, so
+// the form was simply gone.
+echo "\n== Forms that open in a popup ==\n";
+$popupJs = (string) @file_get_contents($root . '/public_html/assets/js/form-popup.js');
+$adminCss = (string) @file_get_contents($root . '/public_html/assets/css/mbworld-2026.css');
+ok($popupJs !== '' && $adminCss !== '', 'The popup script and the admin stylesheet are both present');
+ok(str_contains($adminCss, '[data-form-popup] { display: none; }'),
+    'A popup source is taken OUT of the flow, not just made invisible in place');
+ok(!preg_match('~\[data-form-popup\]\s*\{\s*visibility:\s*hidden~', $adminCss),
+    '  ...so it never reserves a screen-height blank while the page finishes arriving');
+ok(str_contains($popupJs, "!window.HTMLDialogElement") && str_contains($popupJs, "card.style.display = ''"),
+    'A browser without <dialog> gets the form left in the page, never hidden for good');
+ok(str_contains($popupJs, "document.readyState === 'loading'"),
+    'And the script does not wait for DOMContentLoaded when the page is already parsed');
+
+// Saving a draft is somebody FINISHING with the form. The document stays
+// loaded so nothing is lost, but the popup stays shut.
+$tradePhp = (string) @file_get_contents($root . '/public_html/admin/jewellery-trade.php');
+ok(substr_count($tradePhp, "'&edit=' . \$id . '&saved=1'") === 2,
+    'Both save handlers come back marked as just-saved');
+ok(str_contains($tradePhp, '$justSaved = ($_GET[\'saved\'] ?? \'\') === \'1\';'),
+    '  ...read in one place');
+ok(substr_count($tradePhp, 'data-popup-open="<?= $justSaved') === 1
+    && substr_count($tradePhp, 'data-popup-open="<?= (!$justSaved') === 1,
+    '  ...and both popups honour it rather than springing open again');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

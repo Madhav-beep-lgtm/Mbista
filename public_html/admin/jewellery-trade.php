@@ -37,6 +37,11 @@ $canEdit = user_can_do('jewellery', 'edit');
 $canExport = user_can_do('jewellery', 'export');
 $canPost = user_can_do('jewellery', 'post');
 
+// Just come back from saving a draft. The document stays loaded so nothing is
+// lost, but the popup stays SHUT -- somebody who has just saved is done with
+// the form, and having it spring open again is the screen arguing with them.
+$justSaved = ($_GET['saved'] ?? '') === '1';
+
 $allowedViews = ['purchases', 'sales', 'bills'];
 $view = jw_enum($_GET['view'] ?? null, $allowedViews, 'purchases');
 
@@ -76,7 +81,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'settle_ledger_id' => (int) ($_POST['settle_ledger_id'] ?? 0),
             ], jw_posted_lines($_POST, 'l'), $userId);
             flash('success', 'Purchase saved as a draft.');
-            redirect($back . '&edit=' . $id);
+            // &saved=1 keeps the document loaded -- nothing typed is lost and
+            // the Edit link still works -- while telling the page NOT to throw
+            // the popup open again. Saving a draft is a person finishing with
+            // the form, not asking for it back.
+            redirect($back . '&edit=' . $id . '&saved=1');
         } catch (Throwable $e) {
             flash('error', $e->getMessage());
         }
@@ -163,7 +172,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? ' Posting the bill will mark ' . ($deliverCount === 1 ? 'the order' : $deliverCount . ' orders') . ' delivered.'
                 : '';
             flash('success', 'Sale saved as a draft.' . $deliverNote);
-            redirect($back . '&edit=' . $id);
+            // &saved=1 keeps the document loaded -- nothing typed is lost and
+            // the Edit link still works -- while telling the page NOT to throw
+            // the popup open again. Saving a draft is a person finishing with
+            // the form, not asking for it back.
+            redirect($back . '&edit=' . $id . '&saved=1');
         } catch (Throwable $e) {
             flash('error', $e->getMessage());
         }
@@ -959,7 +972,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         <?php else: ?>
         <?php // The FORM is the two-column grid, so the rail is a real sibling
               // of the working area rather than something floated beside it. ?>
-        <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="New Purchase" data-popup-open="<?= $editDoc ? '1' : '0' ?>">
+        <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="<?= $editDoc ? e('Continue editing ' . (string) ($editDoc['purchase_no'] ?? 'this purchase')) : 'New Purchase' ?>" data-popup-open="<?= $justSaved ? '0' : ($editDoc ? '1' : '0') ?>">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_purchase">
             <input type="hidden" name="back_view" value="purchases">
@@ -1166,7 +1179,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                  form collapsed below the sales register. -->
             <input type="hidden" name="popup" value="sale">
         </form>
-        <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="New Sale" data-popup-open="<?= ($editDoc || ($_GET['popup'] ?? '') === 'sale') ? '1' : '0' ?>">
+        <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="<?= $editDoc ? e('Continue editing ' . (string) ($editDoc['sale_no'] ?? 'this sale')) : 'New Sale' ?>" data-popup-open="<?= (!$justSaved && ($editDoc || ($_GET['popup'] ?? '') === 'sale')) ? '1' : '0' ?>">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_sale">
             <input type="hidden" name="back_view" value="sales">

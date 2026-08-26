@@ -1192,9 +1192,17 @@ body.admin-layout .jw-order-dialog {
   overflow: auto;
 }
 body.admin-layout .jw-order-dialog::backdrop { background: rgba(8, 26, 20, .48); }
-/* Popup editors are moved into their dialog at DOM ready. Hide the source card
-   before that happens so an edit/new sale never flashes in the page first. */
-body.admin-layout [data-form-popup] { visibility: hidden; }
+/* Popup editors are moved into their dialog as soon as the script reaches
+   them. Hide the source card before that happens so an edit/new sale never
+   flashes in the page first.
+
+   display, not visibility. `visibility: hidden` keeps the box: a counter
+   billing form is most of a screen tall, so the page rendered its heading and
+   then a screen-height blank while the browser finished the rest of the
+   document -- which reads as a page that loads in two goes and stalls halfway.
+   Taking it out of the flow means the page arrives its real size and the
+   button appears in it, instead of a gap that later fills. */
+body.admin-layout [data-form-popup] { display: none; }
 body.admin-layout .jw-order-dialog #jw-order-editor {
   margin: 0;
   border: 0;
