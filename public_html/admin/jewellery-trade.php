@@ -1154,7 +1154,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
     </section>
 
 <?php elseif ($view === 'sales'): ?>
-    <?php jw_page_head('Jewellery Sales (Counter Billing)',
+    <?php jw_page_head('Jewellery Sales',
         'Raise the bill, take old gold in exchange, and settle what is left.', 'receipt-voucher'); ?>
     <?php if ($canEdit): ?>
         <?php if ($editDoc && (string) $editDoc['status'] !== 'draft'): ?>
