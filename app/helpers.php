@@ -1423,11 +1423,16 @@ function company_by_id(int $companyId): ?array
         return null;
     }
 
-    $stmt = db()->prepare('SELECT * FROM companies WHERE id = :id LIMIT 1');
-    $stmt->execute(['id' => $companyId]);
-    $row = $stmt->fetch();
+    // Read once per request. Any write empties the cache automatically -- see
+    // DbRequestCache in app/database.php -- so this cannot serve a company
+    // that has since been renamed or deactivated in the same request.
+    return DbRequestCache::get('company:' . $companyId, static function () use ($companyId): ?array {
+        $stmt = db()->prepare('SELECT * FROM companies WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $companyId]);
+        $row = $stmt->fetch();
 
-    return $row ?: null;
+        return $row ?: null;
+    });
 }
 
 function company_by_code(string $code): ?array
@@ -1485,11 +1490,14 @@ function fiscal_year_by_id(int $fiscalYearId): ?array
         return null;
     }
 
-    $stmt = db()->prepare('SELECT * FROM fiscal_years WHERE id = :id LIMIT 1');
-    $stmt->execute(['id' => $fiscalYearId]);
-    $row = $stmt->fetch();
+    // The voucher register asked this twenty-three times for one year.
+    return DbRequestCache::get('fiscal_year:' . $fiscalYearId, static function () use ($fiscalYearId): ?array {
+        $stmt = db()->prepare('SELECT * FROM fiscal_years WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $fiscalYearId]);
+        $row = $stmt->fetch();
 
-    return $row ?: null;
+        return $row ?: null;
+    });
 }
 
 function set_context(int $companyId, int $fiscalYearId): void
@@ -2122,6 +2130,24 @@ function current_user(): ?array
         return null;
     }
 
+    // ONCE PER REQUEST, which is what the guard below has always promised.
+    // Nineteen calls on one page meant nineteen reads of the same row and
+    // nineteen repeats of a lifecycle check whose answer cannot change
+    // between them -- "on EVERY request" is satisfied by running it once,
+    // not nineteen times.
+    //
+    // The key carries the session's user id, so logging in or out mid-request
+    // misses and re-reads rather than answering as whoever was here before.
+    // A user row that CHANGES mid-request -- suspended, sessions revoked --
+    // is a write, and a write empties this cache, so the check runs again.
+    return DbRequestCache::get('current_user:' . (int) $_SESSION['user_id'], static function (): ?array {
+        return current_user_uncached();
+    });
+}
+
+/** The read and the lifecycle guard themselves. See current_user(). */
+function current_user_uncached(): ?array
+{
     $passwordChangeSelect = column_exists('users', 'must_change_password') ? ', must_change_password' : '';
     $accessLevelSelect = column_exists('users', 'access_level') ? ', access_level' : '';
     $sessionsValidSelect = column_exists('users', 'sessions_valid_from') ? ', sessions_valid_from' : '';
@@ -5789,10 +5815,17 @@ function period_locked_through(int $companyId, int $fiscalYearId): ?string
     if ($companyId <= 0 || $fiscalYearId <= 0 || !table_exists('fiscal_period_locks')) {
         return null;
     }
-    $stmt = db()->prepare('SELECT locked_through FROM fiscal_period_locks WHERE company_id = :company_id AND fiscal_year_id = :fiscal_year_id LIMIT 1');
-    $stmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
-    $value = $stmt->fetchColumn();
-    return $value !== false && $value !== null ? (string) $value : null;
+    // Asked once per row on any screen that shows whether a date can still be
+    // posted to, which on the voucher register was twenty-one times for one
+    // answer. Locking a period writes, and the write empties this.
+    return DbRequestCache::get('period_lock:' . $companyId . ':' . $fiscalYearId,
+        static function () use ($companyId, $fiscalYearId): ?string {
+            $stmt = db()->prepare('SELECT locked_through FROM fiscal_period_locks WHERE company_id = :company_id AND fiscal_year_id = :fiscal_year_id LIMIT 1');
+            $stmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
+            $value = $stmt->fetchColumn();
+
+            return $value !== false && $value !== null ? (string) $value : null;
+        });
 }
 
 function is_period_locked(int $companyId, int $fiscalYearId, string $date): bool
