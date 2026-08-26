@@ -3695,6 +3695,13 @@ $invMoveItemOptions = static function () use ($items): string {
         return billTable.querySelector('.inv-bill-row[data-bill="' + billIndex + '"]');
     }
 
+    // Keep a blank line available even when the user removes every currently
+    // shown item before choosing to add another.
+    Array.prototype.forEach.call(document.querySelectorAll('.inv-item-grid'), function (grid) {
+        var first = grid.tBodies[0] && grid.tBodies[0].rows[0];
+        if (first) { grid._invItemTemplate = first.cloneNode(true); }
+    });
+
     // One item line: its amount, its VAT, and what it withholds.
     function recalcItem(row) {
         var itemSelect = row.querySelector('.inv-grid-item');
@@ -3839,8 +3846,15 @@ $invMoveItemOptions = static function () use ($items): string {
             if (!grid) { return; }
             var body = grid.tBodies[0];
             var last = body.rows[body.rows.length - 1];
-            var copy = last.cloneNode(true);
-            var nextItem = body.rows.length;
+            if (!grid._invItemTemplate && last) { grid._invItemTemplate = last.cloneNode(true); }
+            var source = last || grid._invItemTemplate;
+            if (!source) { return; }
+            var copy = source.cloneNode(true);
+            var nextItem = 0;
+            Array.prototype.forEach.call(body.querySelectorAll('.inv-item-row [name*="[items]"]'), function (field) {
+                var match = field.name.match(/\[items\]\[(\d+)\]/);
+                if (match) { nextItem = Math.max(nextItem, parseInt(match[1], 10) + 1); }
+            });
             Array.prototype.forEach.call(copy.querySelectorAll('[name]'), function (field) {
                 field.name = field.name.replace(/\[items\]\[\d+\]/, '[items][' + nextItem + ']');
                 if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
@@ -3855,13 +3869,11 @@ $invMoveItemOptions = static function () use ($items): string {
         var clearItem = event.target.closest ? event.target.closest('.inv-item-clear') : null;
         if (clearItem) {
             var itemRow = clearItem.closest('tr');
-            Array.prototype.forEach.call(itemRow.querySelectorAll('input, select'), function (field) {
-                if (field.type === 'checkbox') { field.checked = field.classList.contains('inv-grid-vaton'); }
-                else if (field.type === 'hidden') { /* the tick's "no" answer — leave it */ }
-                else if (field.tagName === 'SELECT') { field.selectedIndex = 0; }
-                else if (!field.readOnly) { field.value = ''; }
-                delete field.dataset.touched;
-            });
+            if (itemRow) {
+                itemRow.remove();
+                recalcAll();
+                return;
+            }
             recalcAll();
             return;
         }

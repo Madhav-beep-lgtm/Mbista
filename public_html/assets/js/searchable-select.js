@@ -48,6 +48,9 @@
 
     function enhance(sel) {
         if (sel.dataset.ssReady || sel.multiple) { return; }
+        // Dialogs are in the browser's top layer. A searchable list moved to
+        // <body> cannot appear above it, so use the native picker there.
+        if (sel.closest('dialog')) { return; }
         var auto = sel.options.length >= 12;
         if (!auto && !sel.classList.contains('js-searchable')) { return; }
         if (sel.closest('.no-search')) { return; }
