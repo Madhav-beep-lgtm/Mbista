@@ -2983,8 +2983,11 @@ $invMoveItemOptions = static function () use ($items): string {
                 <?php $billItems = (array) ($purchaseBills[$billIndex]['items'] ?? []); ?>
                 <dialog class="inv-bill-dialog" id="invBillDialog<?= $billIndex ?>">
                     <div class="inv-bill-dialog-head">
-                        <strong>Items on bill <span class="inv-dialog-ref"></span></strong>
-                        <button type="button" class="button secondary inv-bill-close">Done</button>
+                        <div class="inv-bill-dialog-title">
+                            <span class="inv-bill-dialog-icon" aria-hidden="true"><?= icon('box') ?></span>
+                            <span><strong>Bill items <span class="inv-dialog-ref"></span></strong><small>Add the products and tax treatment shown on the supplier's invoice.</small></span>
+                        </div>
+                        <button type="button" class="button inv-bill-close"><?= icon('badge-check') ?> Done</button>
                     </div>
                     <div class="inv-bill-dialog-body">
                         <div class="inv-item-grid-scroll"><table class="mbw-grid-table inv-item-grid" data-bill="<?= $billIndex ?>">
@@ -3044,9 +3047,10 @@ $invMoveItemOptions = static function () use ($items): string {
                                 <th colspan="<?= $marksIngredients ? 5 : 4 ?>"></th>
                             </tr></tfoot>
                         </table></div>
-                        <div style="margin-top:12px;display:flex;gap:8px">
+                        <div class="inv-bill-dialog-actions">
                             <button type="button" class="button secondary inv-item-add" data-bill="<?= $billIndex ?>"><?= icon('plus') ?>Add item</button>
-                            <button type="button" class="button secondary inv-bill-close" style="margin-left:auto"><?= icon('badge-check') ?>Done</button>
+                            <span class="inv-bill-dialog-hint">Amounts update automatically as you enter quantity and rate.</span>
+                            <button type="button" class="button inv-bill-close"><?= icon('badge-check') ?>Done</button>
                         </div>
                     </div>
                 </dialog>

@@ -1167,16 +1167,22 @@ body.admin-layout .mbw-grid-table :is(input, select) { max-width: 100%; }
    backdrop is dimmed — a modal that does not dim reads as part of the page
    behind it. */
 body.admin-layout .inv-bill-dialog {
-  width: min(1760px, 98vw);
-  max-width: 98vw;
-  max-height: 92vh;
+  width: min(1680px, calc(100vw - 40px));
+  max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 40px);
+  margin: auto;
   padding: 0;
-  border: 1px solid var(--mbw-border);
-  border-radius: var(--mbw-radius);
+  border: 1px solid rgba(28, 111, 84, .22);
+  border-radius: 20px;
   background: var(--mbw-surface);
   color: inherit;
+  overflow: hidden;
+  box-shadow: 0 28px 80px rgba(4, 35, 25, .28), 0 2px 10px rgba(4, 35, 25, .12);
 }
-body.admin-layout .inv-bill-dialog::backdrop { background: rgba(8, 26, 20, .45); }
+body.admin-layout .inv-bill-dialog::backdrop {
+  background: rgba(4, 28, 21, .62);
+  backdrop-filter: blur(3px);
+}
 /* New jewellery orders are full working forms, so they open in a spacious
    modal while the saved-order register remains visible underneath. */
 body.admin-layout .jw-order-dialog {
@@ -1228,31 +1234,117 @@ body.admin-layout .inv-bill-dialog-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 16px 18px;
-  border-bottom: 1px solid var(--mbw-border);
+  gap: 20px;
+  padding: 18px 22px;
+  border-bottom: 1px solid rgba(28, 111, 84, .16);
+  background: linear-gradient(135deg, #f8fcfa 0%, #eef8f3 100%);
+}
+body.admin-layout .inv-bill-dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+}
+body.admin-layout .inv-bill-dialog-title > span:last-child { display: grid; gap: 3px; }
+body.admin-layout .inv-bill-dialog-title strong {
+  color: var(--mbw-ink, #12362b);
+  font-size: 18px;
+  line-height: 1.25;
+}
+body.admin-layout .inv-bill-dialog-title small {
+  color: var(--mbw-muted, #60776f);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+body.admin-layout .inv-bill-dialog-icon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--mbw-primary, #08775b);
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(8, 119, 91, .2);
+}
+body.admin-layout .inv-bill-dialog-icon svg { width: 20px; height: 20px; }
+body.admin-layout .inv-bill-dialog-head > .inv-bill-close {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding-inline: 16px;
 }
 body.admin-layout .inv-bill-dialog-body {
-  padding: 14px 18px;
-  max-height: calc(92vh - 82px);
-  overflow: auto;
+  padding: 16px 20px 18px;
+  max-height: calc(100vh - 120px);
+  overflow: hidden;
+  background: #f7faf8;
 }
 /* Purchase bills have many fields per item. Keep the dialog wide, retain
    generous usable field widths, and always expose a horizontal scrollbar when
    a smaller screen cannot fit the whole line. */
 body.admin-layout .inv-item-grid-scroll {
   width: 100%;
-  overflow-x: scroll;
-  overflow-y: visible;
-  padding-bottom: 8px;
+  max-height: calc(100vh - 235px);
+  overflow: auto;
+  border: 1px solid var(--mbw-border, #cfe0d7);
+  border-radius: 13px;
+  background: var(--mbw-card, #fff);
+  box-shadow: 0 3px 14px rgba(9, 54, 41, .06);
+  scrollbar-color: #75b59f #edf4f0;
 }
 body.admin-layout .inv-bill-dialog .inv-item-grid {
   width: max-content;
-  min-width: 1640px;
+  min-width: 1510px;
   table-layout: fixed;
+  margin: 0;
+  border: 0;
+  background: #fff;
 }
-body.admin-layout .inv-bill-dialog .inv-item-grid th:first-child,
-body.admin-layout .inv-bill-dialog .inv-item-grid td:first-child { width: 320px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  height: 58px;
+  padding: 10px 9px;
+  border-bottom: 1px solid #bad6ca;
+  background: #eaf5f0;
+  color: #173b30;
+  font-size: 11px;
+  letter-spacing: .045em;
+}
+body.admin-layout .inv-bill-dialog .inv-item-grid tbody td {
+  height: 64px;
+  padding: 8px 9px;
+  background: #fff;
+  transition: background-color .14s ease;
+}
+body.admin-layout .inv-bill-dialog .inv-item-grid tbody tr:nth-child(even) td { background: #f8fbf9; }
+body.admin-layout .inv-bill-dialog .inv-item-grid tbody tr:hover td,
+body.admin-layout .inv-bill-dialog .inv-item-grid tbody tr:focus-within td { background: #eef8f3; }
+body.admin-layout .inv-bill-dialog .inv-item-grid :is(input:not([type="checkbox"]), select) {
+  min-height: 40px;
+  border-color: #c5dcd2;
+  border-radius: 9px;
+  background-color: #fff;
+}
+body.admin-layout .inv-bill-dialog .inv-item-grid :is(input:not([type="checkbox"]), select):focus {
+  border-color: var(--mbw-primary, #08775b);
+  box-shadow: 0 0 0 3px rgba(8, 119, 91, .12);
+  outline: 0;
+}
+body.admin-layout .inv-bill-dialog .inv-item-grid tfoot th {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  height: 46px;
+  border-top: 1px solid #bad6ca;
+  border-bottom: 0;
+  background: #e3f2ec;
+  color: #123d30;
+  box-shadow: 0 -5px 12px rgba(12, 63, 47, .06);
+}
+body.admin-layout .inv-bill-dialog .inv-item-grid thead th:first-child,
+body.admin-layout .inv-bill-dialog .inv-item-grid tbody td:first-child { width: 300px; }
 body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(2),
 body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(2) { width: 88px; }
 body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(3),
@@ -1269,11 +1361,47 @@ body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(8),
 body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(8) { width: 90px; }
 body.admin-layout .inv-bill-dialog .inv-item-grid th:nth-child(9),
 body.admin-layout .inv-bill-dialog .inv-item-grid td:nth-child(9) { width: 105px; }
-body.admin-layout .inv-bill-dialog .inv-item-grid th:last-child,
-body.admin-layout .inv-bill-dialog .inv-item-grid td:last-child { width: 56px; }
+body.admin-layout .inv-bill-dialog .inv-item-grid tbody td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  width: 58px;
+  text-align: center;
+  box-shadow: -8px 0 12px rgba(12, 63, 47, .05);
+}
+body.admin-layout .inv-bill-dialog .inv-item-grid thead th:last-child {
+  right: 0;
+  z-index: 5;
+  width: 58px;
+}
+body.admin-layout .inv-bill-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 14px;
+}
+body.admin-layout .inv-bill-dialog-actions .inv-bill-close { margin-left: auto; }
+body.admin-layout .inv-bill-dialog-hint {
+  color: var(--mbw-muted, #60776f);
+  font-size: 12px;
+}
 /* A line being edited, marked so the row under the cursor is obvious in a
    grid that is mostly input boxes. */
 body.admin-layout .inv-item-row:focus-within { background: var(--mbw-primary-soft); }
+
+@media (max-width: 720px) {
+  body.admin-layout .inv-bill-dialog {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    border-radius: 15px;
+  }
+  body.admin-layout .inv-bill-dialog-head { padding: 14px; }
+  body.admin-layout .inv-bill-dialog-title small,
+  body.admin-layout .inv-bill-dialog-hint { display: none; }
+  body.admin-layout .inv-bill-dialog-body { padding: 10px; }
+  body.admin-layout .inv-item-grid-scroll { max-height: calc(100vh - 185px); }
+}
 
 /* The entry a purchase bill raised, read without leaving the register.
    Laid out as four columns -- side, ledger, amount, memo -- so the debits and
