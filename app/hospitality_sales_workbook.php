@@ -1500,10 +1500,34 @@ function hospitality_sales_report(int $companyId, string $from, string $to, stri
         ['total', 'Sales with VAT', true],
     ];
 
+    // THE VOUCHER EVERY ROW WAS POSTED IN. An upload raises one voucher per
+    // sale date, and every item line of that date, every party leg and the VAT
+    // leg are entries inside it -- the linkage was already carried on
+    // hospitality_sales_upload_lines.voucher_id and never shown. Without it a
+    // reader looking at a wrong figure on this screen has no way to reach the
+    // entry it produced, and no way to say "take that day back out".
+    //
+    // A grouped report spans dates, so it carries the SET of vouchers behind
+    // the group rather than one: deleting a category's sales means taking back
+    // every day that category was sold on, and the row has to be honest about
+    // how many that is.
+    $voucherColumn = ['voucher_ids', 'Voucher', false];
+    $voucherIds = "GROUP_CONCAT(DISTINCT l.voucher_id ORDER BY l.voucher_id SEPARATOR ',') AS voucher_ids";
+    // A year of daily vouchers runs past the 1024-byte default and would be
+    // silently truncated -- which on a delete list means quietly leaving some
+    // of the selection posted.
+    try {
+        db()->exec('SET SESSION group_concat_max_len = 1000000');
+    } catch (Throwable $exception) {
+        // A host that forbids it keeps the default; the count below still
+        // reports honestly on what was actually returned.
+    }
+
     switch ($key) {
         case 'item':
             $columns = array_merge([['label', 'Item', false], ['category', 'Category', false], ['qty', 'Qty', true]], $moneyColumns);
-            $sql = "SELECT l.item_name AS label, MIN(l.category) AS category, SUM(l.qty) AS qty, $itemSums
+            $columns[] = $voucherColumn;
+            $sql = "SELECT l.item_name AS label, MIN(l.category) AS category, SUM(l.qty) AS qty, $itemSums, $voucherIds
                 FROM hospitality_sales_upload_lines l
                 WHERE l.company_id = :cid AND l.sale_date BETWEEN :from AND :to
                 GROUP BY l.item_name ORDER BY total DESC, label ASC";
@@ -1511,7 +1535,8 @@ function hospitality_sales_report(int $companyId, string $from, string $to, stri
 
         case 'date':
             $columns = array_merge([['label', 'Date', false], ['line_count', 'Lines', true], ['qty', 'Qty', true]], $moneyColumns);
-            $sql = "SELECT l.sale_date AS label, COUNT(*) AS line_count, SUM(l.qty) AS qty, $itemSums
+            $columns[] = $voucherColumn;
+            $sql = "SELECT l.sale_date AS label, COUNT(*) AS line_count, SUM(l.qty) AS qty, $itemSums, $voucherIds
                 FROM hospitality_sales_upload_lines l
                 WHERE l.company_id = :cid AND l.sale_date BETWEEN :from AND :to
                 GROUP BY l.sale_date ORDER BY label ASC";
@@ -1519,7 +1544,8 @@ function hospitality_sales_report(int $companyId, string $from, string $to, stri
 
         case 'category':
             $columns = array_merge([['label', 'Category', false], ['line_count', 'Lines', true], ['qty', 'Qty', true]], $moneyColumns);
-            $sql = "SELECT l.category AS label, COUNT(*) AS line_count, SUM(l.qty) AS qty, $itemSums
+            $columns[] = $voucherColumn;
+            $sql = "SELECT l.category AS label, COUNT(*) AS line_count, SUM(l.qty) AS qty, $itemSums, $voucherIds
                 FROM hospitality_sales_upload_lines l
                 WHERE l.company_id = :cid AND l.sale_date BETWEEN :from AND :to
                 GROUP BY l.category ORDER BY total DESC, label ASC";
@@ -1530,10 +1556,12 @@ function hospitality_sales_report(int $companyId, string $from, string $to, stri
                 return ['columns' => [], 'rows' => [], 'totals' => [], 'total_rows' => 0, 'note' => 'Party-wise sales need the invoice sheet, which older uploads did not carry.'];
             }
             $columns = array_merge([['label', 'Party ledger', false], ['payment_type', 'Payment type', false], ['invoices', 'Invoices', true]], $moneyColumns);
+            $columns[] = $voucherColumn;
             $sql = "SELECT COALESCE(led.name, CONCAT('(unmatched code ', i.ledger_code, ')')) AS label,
                     MIN(i.payment_type) AS payment_type, COUNT(*) AS invoices,
                     SUM(i.gross_amount) AS gross, SUM(i.discount) AS discount, SUM(i.taxable_amount) AS taxable,
-                    SUM(i.vat_amount) AS vat, SUM(i.total_amount) AS total
+                    SUM(i.vat_amount) AS vat, SUM(i.total_amount) AS total,
+                    GROUP_CONCAT(DISTINCT i.voucher_id ORDER BY i.voucher_id SEPARATOR ',') AS voucher_ids
                 FROM hospitality_sales_invoice_lines i
                 LEFT JOIN ledgers led ON led.id = i.ledger_id AND led.company_id = i.company_id
                 WHERE i.company_id = :cid AND i.sale_date BETWEEN :from AND :to
@@ -1545,10 +1573,11 @@ function hospitality_sales_report(int $companyId, string $from, string $to, stri
                 return ['columns' => [], 'rows' => [], 'totals' => [], 'total_rows' => 0, 'note' => 'Invoice-wise sales need the invoice sheet, which older uploads did not carry.'];
             }
             $columns = array_merge([['label', 'Invoice No', false], ['sale_date', 'Date', false], ['payment_type', 'Payment type', false], ['party', 'Party ledger', false]], $moneyColumns);
+            $columns[] = $voucherColumn;
             $sql = "SELECT i.invoice_no AS label, i.sale_date, i.payment_type,
                     COALESCE(led.name, i.ledger_code) AS party,
                     i.gross_amount AS gross, i.discount AS discount, i.taxable_amount AS taxable,
-                    i.vat_amount AS vat, i.total_amount AS total
+                    i.vat_amount AS vat, i.total_amount AS total, i.voucher_id AS voucher_ids
                 FROM hospitality_sales_invoice_lines i
                 LEFT JOIN ledgers led ON led.id = i.ledger_id AND led.company_id = i.company_id
                 WHERE i.company_id = :cid AND i.sale_date BETWEEN :from AND :to
@@ -1561,10 +1590,12 @@ function hospitality_sales_report(int $companyId, string $from, string $to, stri
                 ['sale_date', 'Date', false], ['category', 'Category', false], ['label', 'Item', false], ['qty', 'Qty', true],
                 ['gross', 'Total Sales Amount', true], ['discount', 'Discount', true],
                 ['taxable', 'Taxable Sales', true], ['vat', 'VAT', true], ['total', 'Sales with VAT', true],
+                $voucherColumn,
             ];
             $sql = "SELECT l.sale_date, l.category, l.item_name AS label, l.qty,
                     l.gross_amount AS gross, l.discount, l.taxable_amount AS taxable,
-                    l.vat_amount AS vat, (l.taxable_amount + l.vat_amount) AS total
+                    l.vat_amount AS vat, (l.taxable_amount + l.vat_amount) AS total,
+                    l.voucher_id AS voucher_ids
                 FROM hospitality_sales_upload_lines l
                 WHERE l.company_id = :cid AND l.sale_date BETWEEN :from AND :to
                 ORDER BY l.sale_date ASC, l.id ASC";
@@ -1574,6 +1605,50 @@ function hospitality_sales_report(int $companyId, string $from, string $to, stri
     $stmt = db()->prepare($sql);
     $stmt->execute($bind);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // The ids come back as a raw list; what a person needs to see is the
+    // voucher NUMBER, and what the delete form needs is the ids. Both are
+    // carried, resolved in one query rather than one per row.
+    $voucherNumbers = [];
+    $allVoucherIds = [];
+    foreach ($rows as $row) {
+        foreach (explode(',', (string) ($row['voucher_ids'] ?? '')) as $rawId) {
+            $id = (int) trim($rawId);
+            if ($id > 0) {
+                $allVoucherIds[$id] = true;
+            }
+        }
+    }
+    if ($allVoucherIds !== []) {
+        $ph = implode(',', array_fill(0, count($allVoucherIds), '?'));
+        $numStmt = db()->prepare("SELECT id, voucher_no, status FROM vouchers
+            WHERE company_id = ? AND id IN ($ph)");
+        $numStmt->execute(array_merge([$companyId], array_keys($allVoucherIds)));
+        foreach ($numStmt->fetchAll(PDO::FETCH_ASSOC) as $voucher) {
+            $voucherNumbers[(int) $voucher['id']] = [
+                'no' => (string) $voucher['voucher_no'],
+                'status' => (string) $voucher['status'],
+            ];
+        }
+    }
+    foreach ($rows as $index => $row) {
+        $ids = [];
+        foreach (explode(',', (string) ($row['voucher_ids'] ?? '')) as $rawId) {
+            $id = (int) trim($rawId);
+            // A row whose voucher has been deleted elsewhere keeps its id out
+            // of the list rather than offering to delete it again.
+            if ($id > 0 && isset($voucherNumbers[$id])) {
+                $ids[] = $id;
+            }
+        }
+        $rows[$index]['voucher_id_list'] = $ids;
+        $rows[$index]['voucher_ids'] = match (true) {
+            $ids === [] => 'not posted',
+            count($ids) === 1 => $voucherNumbers[$ids[0]]['no'],
+            default => count($ids) . ' vouchers',
+        };
+        $rows[$index]['voucher_status'] = count($ids) === 1 ? $voucherNumbers[$ids[0]]['status'] : '';
+    }
 
     // Totals are added here rather than asked for again: the rows are already
     // in hand, and a second grouped query to re-add them would be a round trip

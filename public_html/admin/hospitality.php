@@ -579,6 +579,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($back);
     }
 
+    if ($action === 'delete_sales_vouchers') {
+        // Removing a posting is an accounting act, not a housekeeping one, so
+        // it needs the permission that posts as well as the one that runs this
+        // module.
+        require_permission('hospitality', 'post');
+        require_permission('accounting', 'post');
+        // A tick can carry several vouchers when the report is grouped, so the
+        // values arrive comma-separated and are flattened here.
+        $selectedVouchers = [];
+        foreach ((array) ($_POST['voucher_ids'] ?? []) as $selection) {
+            foreach (explode(',', (string) $selection) as $rawVoucherId) {
+                $selectedVoucherId = (int) trim($rawVoucherId);
+                if ($selectedVoucherId > 0) {
+                    $selectedVouchers[$selectedVoucherId] = true;
+                }
+            }
+        }
+        $backToReport = 'admin/hospitality.php?view=sales-upload&report=' . urlencode((string) ($_POST['report'] ?? 'sheet'))
+            . '&rfrom=' . urlencode((string) ($_POST['rfrom'] ?? '')) . '&rto=' . urlencode((string) ($_POST['rto'] ?? ''));
+        if ($selectedVouchers === []) {
+            flash('error', 'Nothing was selected, so nothing was deleted.');
+            redirect($backToReport);
+        }
+        try {
+            $deleteResult = hospitality_sales_delete_vouchers($companyId, array_keys($selectedVouchers), $userId);
+        } catch (Throwable $deleteException) {
+            flash('error', 'Nothing was deleted: ' . $deleteException->getMessage());
+            redirect($backToReport);
+        }
+        log_activity('hospitality_sales_upload', $companyId, 'deleted',
+            $deleteResult['deleted'] . ' daily sales voucher(s) deleted with '
+                . $deleteResult['lines'] . ' item line(s) and ' . $deleteResult['invoices'] . ' invoice line(s).', $userId);
+        // Whatever was refused is named. A silent partial delete is how
+        // somebody comes back a week later to find half a period still posted.
+        $skippedNote = '';
+        if ($deleteResult['skipped'] !== []) {
+            $skippedReasons = [];
+            foreach ($deleteResult['skipped'] as $skippedId => $skippedWhy) {
+                $skippedReasons[] = '#' . $skippedId . ' — ' . $skippedWhy;
+            }
+            $skippedNote = ' ' . count($deleteResult['skipped']) . ' left alone: ' . implode('; ', $skippedReasons);
+        }
+        if ($deleteResult['deleted'] === 0) {
+            flash('error', 'Nothing was deleted.' . $skippedNote);
+        } else {
+            flash('success', $deleteResult['deleted'] . ' daily voucher(s) deleted — '
+                . $deleteResult['lines'] . ' item line(s) and ' . $deleteResult['invoices'] . ' invoice line(s) went with them'
+                . ($deleteResult['uploads'] > 0 ? ', and ' . $deleteResult['uploads'] . ' upload batch(es) are now empty and removed' : '')
+                . '.' . $skippedNote);
+        }
+        redirect($backToReport);
+    }
+
     if ($action === 'generate_costing') {
         require_permission('hospitality', 'create');
         $date = $clampDate(trim((string) ($_POST['costing_date'] ?? '')));
@@ -2027,8 +2080,31 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <?php if (isset($report['note'])): ?>
             <div class="notice"><?= e((string) $report['note']) ?></div>
         <?php endif; ?>
+        <?php
+        // WHAT A TICK SELECTS IS THE VOUCHER, not the row. An upload posts one
+        // voucher per sale date carrying every item line of that day, both
+        // party legs and the VAT leg; taking a single item row out of it would
+        // leave an entry whose debits no longer match its credits. So a row
+        // hands over the voucher(s) behind it, and each goes whole.
+        $canDeleteSales = user_can_do('hospitality', 'post') && user_can_do('accounting', 'post');
+        $anySelectable = false;
+        foreach ($report['rows'] as $checkRow) {
+            if (($checkRow['voucher_id_list'] ?? []) !== []) { $anySelectable = true; break; }
+        }
+        $showSelect = $canDeleteSales && $anySelectable;
+        ?>
+        <form method="post" id="salesReportDelete" onsubmit="return hsConfirmDelete(this);">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="action" value="delete_sales_vouchers">
+        <input type="hidden" name="report" value="<?= e($reportKey) ?>">
+        <input type="hidden" name="rfrom" value="<?= e($reportFrom) ?>">
+        <input type="hidden" name="rto" value="<?= e($reportTo) ?>">
         <div style="overflow-x:auto"><table>
             <thead><tr>
+                <?php if ($showSelect): ?>
+                    <th style="width:34px"><input type="checkbox" id="hsSelectAll" title="Select every row in this report"
+                        aria-label="Select all rows"></th>
+                <?php endif; ?>
                 <?php foreach ($report['columns'] as [$columnKey, $columnLabel, $columnNumeric]): ?>
                     <?php
                     // Every heading sorts, and clicking the active one reverses it.
@@ -2045,14 +2121,40 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </tr></thead>
             <tbody>
                 <?php if ($report['rows'] === []): ?>
-                    <tr><td colspan="<?= max(1, count($report['columns'])) ?>">Nothing uploaded for <?= e($reportFrom) ?> to <?= e($reportTo) ?>.</td></tr>
+                    <tr><td colspan="<?= max(1, count($report['columns'])) + ($showSelect ? 1 : 0) ?>">Nothing uploaded for <?= e($reportFrom) ?> to <?= e($reportTo) ?>.</td></tr>
                 <?php endif; ?>
                 <?php foreach ($report['rows'] as $reportRow): ?>
+                    <?php $rowVouchers = (array) ($reportRow['voucher_id_list'] ?? []); ?>
                     <tr>
+                        <?php if ($showSelect): ?>
+                            <td><?php if ($rowVouchers !== []): ?>
+                                <input type="checkbox" class="hs-row-select" name="voucher_ids[]"
+                                       value="<?= e(implode(',', $rowVouchers)) ?>"
+                                       aria-label="Select <?= e((string) ($reportRow['label'] ?? '')) ?>">
+                            <?php endif; ?></td>
+                        <?php endif; ?>
                         <?php foreach ($report['columns'] as [$columnKey, $columnLabel, $columnNumeric]): ?>
                             <td<?= $columnNumeric ? ' class="is-numeric"' : '' ?>><?php
                                 $cellValue = $reportRow[$columnKey] ?? '';
-                                if (!$columnNumeric) {
+                                if ($columnKey === 'voucher_ids') {
+                                    // The number, linked to the entry it raised,
+                                    // so a wrong figure here reaches its voucher
+                                    // in one click instead of a hunt.
+                                    if ($rowVouchers === []) {
+                                        echo '<span class="mbw-pill tone-gray">not posted</span>';
+                                    } elseif (count($rowVouchers) === 1) {
+                                        // To the register, not to the voucher
+                                        // editor: these vouchers are owned by
+                                        // this screen and the editor refuses
+                                        // them, so sending somebody there
+                                        // would only earn them a refusal.
+                                        echo '<a href="' . e(url('admin/accounting.php?q=' . urlencode((string) $cellValue)))
+                                            . '" title="Find this entry in the Voucher Register">' . e((string) $cellValue) . '</a>';
+                                    } else {
+                                        echo '<span title="' . e(implode(', ', array_map('strval', $rowVouchers)))
+                                            . '">' . e((string) $cellValue) . '</span>';
+                                    }
+                                } elseif (!$columnNumeric) {
                                     echo e((string) $cellValue);
                                 } elseif ($columnKey === 'qty') {
                                     echo e(rtrim(rtrim(number_format((float) $cellValue, 3, '.', ','), '0'), '.'));
@@ -2068,6 +2170,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </tbody>
             <?php if ($report['rows'] !== []): ?>
             <tfoot><tr>
+                <?php if ($showSelect): ?><th></th><?php endif; ?>
                 <?php foreach ($report['columns'] as $columnIndex => [$columnKey, $columnLabel, $columnNumeric]): ?>
                     <?php if ($columnIndex === 0): ?>
                         <th>Total (<?= (int) $report['total_rows'] ?> row<?= $report['total_rows'] === 1 ? '' : 's' ?>)</th>
@@ -2084,6 +2187,75 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </tr></tfoot>
             <?php endif; ?>
         </table></div>
+        <?php if ($showSelect): ?>
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
+                <button type="submit" class="button secondary"><?= icon('trash') ?>Delete selected</button>
+                <span id="hsSelectedCount" style="color:var(--mbw-muted);font-size:12.5px">Nothing selected.</span>
+            </div>
+            <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12.5px">
+                Deleting removes the whole daily voucher — its sales, party and VAT entries — and the uploaded
+                lines behind it, so this screen and the ledger stay in step. To correct a figure, delete the day
+                and upload it again.
+            </p>
+        <?php elseif ($canDeleteSales ?? false): ?>
+            <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12.5px">Nothing here carries a posted voucher yet.</p>
+        <?php endif; ?>
+        </form>
+        <?php if ($showSelect): ?>
+        <script>
+        (function () {
+            var form = document.getElementById('salesReportDelete');
+            if (!form) { return; }
+            var all = document.getElementById('hsSelectAll');
+            var boxes = function () { return form.querySelectorAll('.hs-row-select'); };
+            var count = document.getElementById('hsSelectedCount');
+            // A tick can stand for several vouchers when the report is grouped,
+            // so the running total counts VOUCHERS, not ticks — otherwise
+            // "3 selected" would delete thirty days.
+            function tally() {
+                var rows = 0;
+                var vouchers = 0;
+                Array.prototype.forEach.call(boxes(), function (box) {
+                    if (!box.checked) { return; }
+                    rows++;
+                    vouchers += box.value.split(',').filter(Boolean).length;
+                });
+                if (all) {
+                    all.checked = rows > 0 && rows === boxes().length;
+                    all.indeterminate = rows > 0 && rows < boxes().length;
+                }
+                count.textContent = rows === 0
+                    ? 'Nothing selected.'
+                    : rows + ' row(s) selected — ' + vouchers + ' daily voucher(s) will be deleted.';
+            }
+            if (all) {
+                all.addEventListener('change', function () {
+                    Array.prototype.forEach.call(boxes(), function (box) { box.checked = all.checked; });
+                    tally();
+                });
+            }
+            form.addEventListener('change', function (ev) {
+                if (ev.target && ev.target.classList.contains('hs-row-select')) { tally(); }
+            });
+            tally();
+        })();
+        function hsConfirmDelete(form) {
+            var picked = form.querySelectorAll('.hs-row-select:checked');
+            if (picked.length === 0) {
+                alert('Tick the rows you want removed first.');
+                return false;
+            }
+            var vouchers = 0;
+            Array.prototype.forEach.call(picked, function (box) {
+                vouchers += box.value.split(',').filter(Boolean).length;
+            });
+            return confirm('Delete ' + vouchers + ' daily sales voucher(s) and every uploaded line behind them?
+
+'
+                + 'The sales, party and VAT entries go with them. This cannot be undone — re-upload the sheet to put them back.');
+        }
+        </script>
+        <?php endif; ?>
         <?php if ($reportPages > 1): ?>
             <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12.5px">
                 Page <?= $reportPage ?> of <?= $reportPages ?>

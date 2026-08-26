@@ -3932,6 +3932,10 @@ function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []
         'party_opening' => 'the Parties module (the party opening balance would silently vanish from the books)',
         'task_advance' => 'the Advances workflow (deleting it would strand the client advance and leave any applied amount pointing at nothing)',
         'advance_applied' => 'the Advances workflow (the invoice would keep showing an advance payment with no backing voucher)',
+        // A day's uploaded sales: every item line and invoice line of that date
+        // carries this voucher's id, and deleting it from the register would
+        // leave the Sales Reports listing sales the ledger no longer has.
+        'hospitality_sales_upload' => 'the Hospitality sales upload (its uploaded item and invoice lines back this posting — delete the day from Sales Upload & Costing instead, which takes the lines with it)',
         'inventory_opening' => 'the Inventory module (the item\'s master opening stock backs it — change the opening on the item instead)',
         'inventory_opening_adj' => 'the Inventory opening (adjust the item\'s opening on the Opening Balances page instead)',
         'manufacturing_order_start' => 'the Manufacturing module (it carries the order\'s materials into WIP — complete or cancel the order instead)',

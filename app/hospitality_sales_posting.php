@@ -684,3 +684,166 @@ function hospitality_sales_template_xlsx(): string
 
     return xlsx_build(hospitality_sales_template_rows(), 'Daily Sales');
 }
+
+/**
+ * Take a day of uploaded sales back out of the books, sheet and all.
+ *
+ * THE UNIT IS THE VOUCHER, and that is not a limitation — it is what was
+ * posted. An upload raises one voucher per sale date carrying every item line
+ * of that day, every party leg and the VAT leg. Deleting one item row out of
+ * it would leave a voucher whose debits no longer equal its credits, which is
+ * not a correction; it is a broken entry. So a selection of report rows
+ * resolves to the vouchers behind them, and each one goes whole.
+ *
+ * The upload lines go WITH the voucher. Leaving them behind would keep this
+ * screen reporting sales the ledger no longer has — the same subledger/GL
+ * drift the voucher mutation guard exists to prevent everywhere else.
+ *
+ * @param int[] $voucherIds
+ * @return array{deleted:int, lines:int, invoices:int, uploads:int, skipped:array<int,string>}
+ */
+function hospitality_sales_delete_vouchers(int $companyId, array $voucherIds, int $userId): array
+{
+    $result = ['deleted' => 0, 'lines' => 0, 'invoices' => 0, 'uploads' => 0, 'skipped' => []];
+    $ids = [];
+    foreach ($voucherIds as $rawId) {
+        $id = (int) $rawId;
+        if ($id > 0) {
+            $ids[$id] = true;
+        }
+    }
+    if ($ids === []) {
+        return $result;
+    }
+    $ids = array_keys($ids);
+
+    $pdo = db();
+    $ownStmt = $pdo->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :cid LIMIT 1');
+    $touchedUploads = [];
+
+    $pdo->beginTransaction();
+    try {
+        foreach ($ids as $voucherId) {
+            $ownStmt->execute(['id' => $voucherId, 'cid' => $companyId]);
+            $voucher = $ownStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$voucher) {
+                // Already gone, or another tenant's. Either way it is not this
+                // company's to delete, and saying so beats a silent no-op.
+                $result['skipped'][$voucherId] = 'not found in this company';
+                continue;
+            }
+            // Only ever vouchers this screen posted. A hand-written sales
+            // voucher that happens to be selected is not an upload's to remove.
+            if ((string) $voucher['source_type'] !== 'hospitality_sales_upload') {
+                $result['skipped'][$voucherId] = 'not a sales-upload voucher';
+                continue;
+            }
+            // A locked or closed fiscal year still says no, and so does every
+            // other reason the guard knows about. The upload's own source type
+            // is allowed through, because this IS the module that owns it.
+            $blocked = voucher_mutation_blocker($voucher, ['hospitality_sales_upload']);
+            if ($blocked !== null) {
+                $result['skipped'][$voucherId] = $blocked;
+                continue;
+            }
+
+            foreach (['hospitality_sales_upload_lines' => 'lines',
+                      'hospitality_sales_invoice_lines' => 'invoices'] as $table => $countKey) {
+                if (!table_exists($table)) {
+                    continue;
+                }
+                $uploadStmt = $pdo->prepare("SELECT DISTINCT upload_id FROM `$table` WHERE company_id = :cid AND voucher_id = :vid");
+                $uploadStmt->execute(['cid' => $companyId, 'vid' => $voucherId]);
+                foreach ($uploadStmt->fetchAll(PDO::FETCH_COLUMN) as $uploadId) {
+                    $touchedUploads[(int) $uploadId] = true;
+                }
+                $del = $pdo->prepare("DELETE FROM `$table` WHERE company_id = :cid AND voucher_id = :vid");
+                $del->execute(['cid' => $companyId, 'vid' => $voucherId]);
+                $result[$countKey] += $del->rowCount();
+            }
+
+            $pdo->prepare('DELETE FROM voucher_entries WHERE voucher_id = :vid')->execute(['vid' => $voucherId]);
+            $pdo->prepare('DELETE FROM vouchers WHERE id = :vid AND company_id = :cid')
+                ->execute(['vid' => $voucherId, 'cid' => $companyId]);
+            $result['deleted']++;
+
+            security_event('hospitality_sales_voucher_deleted', 'success',
+                'Sales upload voucher ' . (string) $voucher['voucher_no'] . ' (' . (string) $voucher['voucher_date']
+                    . ') deleted with its uploaded lines.',
+                $companyId, $userId);
+        }
+
+        // The batch header counts what is left of it. A batch with nothing left
+        // is removed outright rather than kept as a row claiming lines it no
+        // longer has.
+        foreach (array_keys($touchedUploads) as $uploadId) {
+            $result['uploads'] += hospitality_sales_upload_resync($companyId, (int) $uploadId) ? 1 : 0;
+        }
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $exception;
+    }
+
+    return $result;
+}
+
+/**
+ * Re-add one upload batch from the lines it still has.
+ *
+ * Returns true when the batch was removed entirely, which is what happens once
+ * every day it carried has been deleted.
+ */
+function hospitality_sales_upload_resync(int $companyId, int $uploadId): bool
+{
+    if (!table_exists('hospitality_sales_uploads')) {
+        return false;
+    }
+    $lines = db()->prepare('SELECT COUNT(*) AS rows_left, COALESCE(SUM(gross_amount), 0) AS gross,
+            COALESCE(SUM(discount), 0) AS discount, COALESCE(SUM(vat_amount), 0) AS vat,
+            COALESCE(SUM(taxable_amount), 0) AS taxable, MIN(sale_date) AS d_from, MAX(sale_date) AS d_to
+        FROM hospitality_sales_upload_lines WHERE company_id = :cid AND upload_id = :up');
+    $lines->execute(['cid' => $companyId, 'up' => $uploadId]);
+    $agg = $lines->fetch(PDO::FETCH_ASSOC) ?: ['rows_left' => 0];
+
+    $invoiceCount = 0;
+    $receivable = 0.0;
+    if (table_exists('hospitality_sales_invoice_lines')) {
+        $inv = db()->prepare('SELECT COUNT(*) AS n, COALESCE(SUM(total_amount), 0) AS total
+            FROM hospitality_sales_invoice_lines WHERE company_id = :cid AND upload_id = :up');
+        $inv->execute(['cid' => $companyId, 'up' => $uploadId]);
+        $invRow = $inv->fetch(PDO::FETCH_ASSOC) ?: [];
+        $invoiceCount = (int) ($invRow['n'] ?? 0);
+        $receivable = (float) ($invRow['total'] ?? 0);
+    }
+
+    if ((int) $agg['rows_left'] === 0 && $invoiceCount === 0) {
+        db()->prepare('DELETE FROM hospitality_sales_uploads WHERE id = :id AND company_id = :cid')
+            ->execute(['id' => $uploadId, 'cid' => $companyId]);
+
+        return true;
+    }
+
+    $vc = db()->prepare('SELECT COUNT(DISTINCT voucher_id) FROM hospitality_sales_upload_lines
+        WHERE company_id = :cid AND upload_id = :up AND voucher_id IS NOT NULL');
+    $vc->execute(['cid' => $companyId, 'up' => $uploadId]);
+    $voucherCount = (int) $vc->fetchColumn();
+
+    db()->prepare('UPDATE hospitality_sales_uploads
+        SET row_count = :rc, invoice_count = :ic, voucher_count = :vc, gross_amount = :g,
+            discount_amount = :d, vat_amount = :v, taxable_amount = :t, receivable_amount = :r,
+            date_from = COALESCE(:df, date_from), date_to = COALESCE(:dt, date_to)
+        WHERE id = :id AND company_id = :cid')
+        ->execute([
+            'rc' => (int) $agg['rows_left'], 'ic' => $invoiceCount, 'vc' => $voucherCount,
+            'g' => (float) ($agg['gross'] ?? 0), 'd' => (float) ($agg['discount'] ?? 0),
+            'v' => (float) ($agg['vat'] ?? 0), 't' => (float) ($agg['taxable'] ?? 0),
+            'r' => $receivable,
+            'df' => $agg['d_from'] ?? null, 'dt' => $agg['d_to'] ?? null,
+            'id' => $uploadId, 'cid' => $companyId,
+        ]);
+
+    return false;
+}
