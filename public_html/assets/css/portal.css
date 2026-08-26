@@ -2955,6 +2955,28 @@ body.admin-layout .workspace-form-grid .workspace-span-2 {
   grid-column: span 2;
 }
 
+/* A TICKBOX IS A FIELD TOO, and it was not being laid out as one. The rule
+   above makes every label in this grid a grid itself -- caption on one row,
+   control on the next -- which outranks .checkbox-line's own display:flex and
+   stacked the box above its words instead of putting them on a line. And with
+   no caption to sit under, it floated at the top of its cell while every input
+   beside it sat lower, under its own caption.
+   Laid out as a row, and pushed to the end of the cell so it lands on the same
+   line as the controls it sits among. */
+body.admin-layout .workspace-form-grid label.checkbox-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: end;
+  min-height: var(--control-height, 38px);
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .workspace-form-grid label.checkbox-line input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
 body.admin-layout .workspace-form-grid button[type="submit"] {
   grid-column: 1 / -1;
   justify-self: start;

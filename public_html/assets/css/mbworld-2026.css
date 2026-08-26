@@ -1415,6 +1415,15 @@ body.admin-layout .inv-bill-dialog .inv-item-grid .inv-grid-uom,
 body.admin-layout .inv-bill-dialog .inv-item-grid .inv-grid-amount {
   padding-inline: 4px !important;
 }
+/* The last two columns of the grid, whose widths were the only ones still
+   written inline on the cell. Here with the rest of them, so a column is
+   adjusted in one place rather than two. */
+body.admin-layout .inv-item-grid .inv-grid-ingredient {
+  text-align: center;
+}
+body.admin-layout .inv-item-grid .inv-grid-notes input {
+  width: 120px;
+}
 body.admin-layout .inv-bill-dialog .inv-item-grid tbody td:last-child {
   position: sticky;
   right: 0;

@@ -2559,15 +2559,14 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             ?>
             <label>Type<select name="item_type"><?php foreach ($formItemTypes as $type): ?><option value="<?= e($type) ?>" <?= ($editItem['item_type'] ?? 'stock') === $type ? 'selected' : '' ?>><?= e(str_replace('_', ' ', ucfirst($type))) ?></option><?php endforeach; ?></select></label>
             <?php if (column_exists('inventory_items', 'is_ingredient') && function_exists('hospitality_enabled_for_company') && hospitality_enabled_for_company($companyId)): ?>
-                <label class="checkbox-line" style="align-self:end">
-                    <input type="checkbox" name="is_ingredient" value="1" <?= (int) ($editItem['is_ingredient'] ?? 0) === 1 ? 'checked' : '' ?>>
+                <?php // What it does is on the tickbox itself. Three lines of prose
+                      // across the middle of a field grid broke the run of inputs in
+                      // half and pushed everything after it onto a new row. ?>
+                <label class="checkbox-line">
+                    <input type="checkbox" name="is_ingredient" value="1" <?= (int) ($editItem['is_ingredient'] ?? 0) === 1 ? 'checked' : '' ?>
+                           title="Puts this item in the kitchen&#39;s ingredient list so recipes can quote it. Name, code, category, purchase unit and cost keep coming from here; the ingredient screen only adds the unit a recipe measures it in and the wastage and yield of preparing it.">
                     Use as a recipe ingredient
                 </label>
-                <p class="workspace-span-2" style="margin:-4px 0 0;color:var(--mbw-muted);font-size:12px">
-                    Ticking this puts the item in the kitchen's ingredient list, where recipes can quote it. Its name, code, category,
-                    purchase unit and cost keep coming from here — the ingredient screen only holds what this form has no opinion about:
-                    the unit a recipe measures it in, and the wastage and yield of preparing it.
-                </p>
             <?php endif; ?>
             <label>Valuation method
                 <select name="valuation_method">
@@ -2998,9 +2997,9 @@ $invMoveItemOptions = static function () use ($items): string {
                                     </td>
                                     <td class="is-numeric"><input type="number" step="0.01" min="0" max="100" name="<?= e($lineName) ?>[tds_rate]" class="inv-grid-tdsrate" value="<?= e((string) ($line['tds_rate'] ?? '')) ?>" style="width:80px;text-align:right"></td>
                                     <?php if ($marksIngredients): ?>
-                                        <td class="inv-grid-ingredient" style="text-align:center"><input type="checkbox" name="<?= e($lineName) ?>[mark_ingredient]" value="1" <?= !empty($line['mark_ingredient']) ? 'checked' : '' ?> title="Also make this item available to recipes"></td>
+                                        <td class="inv-grid-ingredient"><input type="checkbox" name="<?= e($lineName) ?>[mark_ingredient]" value="1" <?= !empty($line['mark_ingredient']) ? 'checked' : '' ?> title="Also make this item available to recipes"></td>
                                     <?php endif; ?>
-                                    <td class="inv-grid-notes"><input type="text" name="<?= e($lineName) ?>[notes]" maxlength="255" value="<?= e((string) ($line['notes'] ?? '')) ?>" style="width:120px"></td>
+                                    <td class="inv-grid-notes"><input type="text" name="<?= e($lineName) ?>[notes]" maxlength="255" value="<?= e((string) ($line['notes'] ?? '')) ?>"></td>
                                     <td><button type="button" class="button secondary jw-line-remove mbw-delete-action inv-item-clear" title="Delete this item from the bill" aria-label="Delete this item from the bill"><?= icon('trash') ?></button></td>
                                 </tr>
                             <?php endfor; ?>
