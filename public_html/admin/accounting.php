@@ -364,6 +364,13 @@ if ($company && table_exists('ledgers')) {
     $voucherStmt->execute($voucherParams);
     $vouchers = $voucherStmt->fetchAll();
 
+    // Every row asks voucher_mutation_blocker() whether Edit and Delete may be
+    // offered, and that used to cost five counts PER ROW -- a hundred and
+    // thirty round trips for a page of twenty-six. Asked for the whole list at
+    // once it is five, and the blocker reads the answers where this leaves
+    // them. Forgetting this line makes the page slower, never wrong.
+    voucher_prime_mutation_checks(array_map(static fn (array $row): int => (int) $row['id'], $vouchers));
+
     $voucherTypeStmt = db()->prepare('SELECT DISTINCT voucher_type FROM vouchers WHERE company_id = :cid ORDER BY voucher_type ASC');
     $voucherTypeStmt->execute(['cid' => (int) $company['id']]);
     $voucherTypeOptions = $voucherTypeStmt->fetchAll(PDO::FETCH_COLUMN);

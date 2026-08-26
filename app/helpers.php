@@ -1426,7 +1426,7 @@ function company_by_id(int $companyId): ?array
     // Read once per request. Any write empties the cache automatically -- see
     // DbRequestCache in app/database.php -- so this cannot serve a company
     // that has since been renamed or deactivated in the same request.
-    return DbRequestCache::get('company:' . $companyId, static function () use ($companyId): ?array {
+    return DbRequestCache::get('companies', 'company:' . $companyId, static function () use ($companyId): ?array {
         $stmt = db()->prepare('SELECT * FROM companies WHERE id = :id LIMIT 1');
         $stmt->execute(['id' => $companyId]);
         $row = $stmt->fetch();
@@ -1491,7 +1491,7 @@ function fiscal_year_by_id(int $fiscalYearId): ?array
     }
 
     // The voucher register asked this twenty-three times for one year.
-    return DbRequestCache::get('fiscal_year:' . $fiscalYearId, static function () use ($fiscalYearId): ?array {
+    return DbRequestCache::get('fiscal_years', 'fiscal_year:' . $fiscalYearId, static function () use ($fiscalYearId): ?array {
         $stmt = db()->prepare('SELECT * FROM fiscal_years WHERE id = :id LIMIT 1');
         $stmt->execute(['id' => $fiscalYearId]);
         $row = $stmt->fetch();
@@ -2140,7 +2140,7 @@ function current_user(): ?array
     // misses and re-reads rather than answering as whoever was here before.
     // A user row that CHANGES mid-request -- suspended, sessions revoked --
     // is a write, and a write empties this cache, so the check runs again.
-    return DbRequestCache::get('current_user:' . (int) $_SESSION['user_id'], static function (): ?array {
+    return DbRequestCache::get('users', 'current_user:' . (int) $_SESSION['user_id'], static function (): ?array {
         return current_user_uncached();
     });
 }
@@ -3892,6 +3892,121 @@ function post_ledger_opening_balance(int $companyId, int $ledgerId, float $amoun
     return null;
 }
 
+
+/** The five tables voucher_mutation_blocker() has to ask about, in order. */
+function voucher_mutation_ref_tables(): array
+{
+    return [
+        'asset_depreciation_schedule' => 'a depreciation schedule row',
+        'lease_schedule_lines' => 'a lease schedule period',
+        'asset_impairments' => 'an impairment event',
+        'asset_revaluation_lines' => 'a revaluation batch line',
+    ];
+}
+
+/**
+ * How many of a voucher's entries a bank reconciliation has already claimed.
+ *
+ * Read once per voucher per request. Reconciling writes, and a write empties
+ * the request cache, so this cannot report a voucher as free to edit after
+ * something in the same request has reconciled it.
+ */
+function voucher_reconciled_entry_count(int $voucherId): int
+{
+    if ($voucherId <= 0 || !column_exists('voucher_entries', 'reconciled_at')) {
+        return 0;
+    }
+
+    return (int) DbRequestCache::get('voucher_entries', 'voucher_reconciled:' . $voucherId, static function () use ($voucherId): int {
+        $stmt = db()->prepare('SELECT COUNT(*) FROM voucher_entries WHERE voucher_id = :id AND reconciled_at IS NOT NULL');
+        $stmt->execute(['id' => $voucherId]);
+
+        return (int) $stmt->fetchColumn();
+    });
+}
+
+/** How many rows of one fixed-asset register table point at this voucher. */
+function voucher_reference_count(string $refTable, int $voucherId): int
+{
+    if ($voucherId <= 0 || !array_key_exists($refTable, voucher_mutation_ref_tables()) || !table_exists($refTable)) {
+        return 0;
+    }
+
+    return (int) DbRequestCache::get($refTable, 'voucher_ref:' . $refTable . ':' . $voucherId,
+        static function () use ($refTable, $voucherId): int {
+            // $refTable is checked against the fixed list above before it can
+            // reach this string, so it can never carry anything of a caller's.
+            $stmt = db()->prepare('SELECT COUNT(*) FROM ' . $refTable . ' WHERE voucher_id = :id');
+            $stmt->execute(['id' => $voucherId]);
+
+            return (int) $stmt->fetchColumn();
+        });
+}
+
+/**
+ * Answer those questions for a WHOLE PAGE of vouchers at once.
+ *
+ * The voucher register asks voucher_mutation_blocker() for every row it draws,
+ * to decide whether Edit and Delete are offered. Each call asked whether the
+ * voucher had a reconciled entry and whether any of four fixed-asset tables
+ * pointed at it -- five counts, per row, one voucher at a time. Twenty-six
+ * rows on screen meant a hundred and thirty round trips to answer a question
+ * the same five queries could answer for all of them.
+ *
+ * This asks them for the lot and leaves the answers where the per-voucher
+ * accessors above look, so the blocker needs no argument it did not have and
+ * a caller that forgets to prime is slower rather than wrong.
+ *
+ * @param int[] $voucherIds
+ */
+function voucher_prime_mutation_checks(array $voucherIds): void
+{
+    $ids = [];
+    foreach ($voucherIds as $rawId) {
+        $id = (int) $rawId;
+        if ($id > 0) {
+            $ids[$id] = true;
+        }
+    }
+    if ($ids === []) {
+        return;
+    }
+    $ids = array_keys($ids);
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+    if (column_exists('voucher_entries', 'reconciled_at')) {
+        $found = [];
+        $stmt = db()->prepare("SELECT voucher_id, COUNT(*) AS n FROM voucher_entries
+            WHERE voucher_id IN ($placeholders) AND reconciled_at IS NOT NULL GROUP BY voucher_id");
+        $stmt->execute($ids);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $found[(int) $row['voucher_id']] = (int) $row['n'];
+        }
+        // A voucher with no reconciled entry returns no row, and caching only
+        // what came back would leave every clean voucher to be asked about
+        // individually -- which is most of them, and the whole cost.
+        foreach ($ids as $id) {
+            DbRequestCache::get('voucher_entries', 'voucher_reconciled:' . $id, static fn (): int => $found[$id] ?? 0);
+        }
+    }
+
+    foreach (array_keys(voucher_mutation_ref_tables()) as $refTable) {
+        if (!table_exists($refTable)) {
+            continue;
+        }
+        $found = [];
+        $stmt = db()->prepare("SELECT voucher_id, COUNT(*) AS n FROM " . $refTable . "
+            WHERE voucher_id IN ($placeholders) GROUP BY voucher_id");
+        $stmt->execute($ids);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $found[(int) $row['voucher_id']] = (int) $row['n'];
+        }
+        foreach ($ids as $id) {
+            DbRequestCache::get($refTable, 'voucher_ref:' . $refTable . ':' . $id, static fn (): int => $found[$id] ?? 0);
+        }
+    }
+}
+
 /**
  * Why a voucher cannot be edited or deleted, or null when it can.
  * The two hard blockers: a bank-reconciled entry (removing it would desync
@@ -3903,12 +4018,11 @@ function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []
     if ($voucherId <= 0) {
         return 'Voucher not found.';
     }
-    if (column_exists('voucher_entries', 'reconciled_at')) {
-        $reconciledStmt = db()->prepare('SELECT COUNT(*) FROM voucher_entries WHERE voucher_id = :id AND reconciled_at IS NOT NULL');
-        $reconciledStmt->execute(['id' => $voucherId]);
-        if ((int) $reconciledStmt->fetchColumn() > 0) {
-            return 'This voucher has bank-reconciled entries. Undo the reconciliation before editing or deleting it.';
-        }
+    // Both this and the register checks below read through the request cache,
+    // so a page that primed them for its whole list (see
+    // voucher_prime_mutation_checks) costs five queries rather than five per row.
+    if (voucher_reconciled_entry_count($voucherId) > 0) {
+        return 'This voucher has bank-reconciled entries. Undo the reconciliation before editing or deleting it.';
     }
     $companyId = (int) ($voucher['company_id'] ?? 0);
     $fiscalYearId = (int) ($voucher['fiscal_year_id'] ?? 0);
@@ -3986,18 +4100,8 @@ function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []
     if (isset($moduleSourceTypes[$voucherSourceType]) && !in_array($voucherSourceType, $allowModuleSources, true)) {
         return 'This voucher was posted by ' . $moduleSourceTypes[$voucherSourceType] . ' — deleting or cancelling it here would desync that register from the books.';
     }
-    foreach ([
-        'asset_depreciation_schedule' => 'a depreciation schedule row',
-        'lease_schedule_lines' => 'a lease schedule period',
-        'asset_impairments' => 'an impairment event',
-        'asset_revaluation_lines' => 'a revaluation batch line',
-    ] as $refTable => $refLabel) {
-        if (!table_exists($refTable)) {
-            continue;
-        }
-        $refStmt = db()->prepare('SELECT COUNT(*) FROM ' . $refTable . ' WHERE voucher_id = :id');
-        $refStmt->execute(['id' => $voucherId]);
-        if ((int) $refStmt->fetchColumn() > 0) {
+    foreach (voucher_mutation_ref_tables() as $refTable => $refLabel) {
+        if (voucher_reference_count($refTable, $voucherId) > 0) {
             return 'This voucher backs ' . $refLabel . ' in the fixed-asset register. Correct it from the asset or lease page — removing it here would leave the register claiming a posting the ledger no longer has.';
         }
     }
@@ -5818,7 +5922,7 @@ function period_locked_through(int $companyId, int $fiscalYearId): ?string
     // Asked once per row on any screen that shows whether a date can still be
     // posted to, which on the voucher register was twenty-one times for one
     // answer. Locking a period writes, and the write empties this.
-    return DbRequestCache::get('period_lock:' . $companyId . ':' . $fiscalYearId,
+    return DbRequestCache::get('fiscal_period_locks', 'period_lock:' . $companyId . ':' . $fiscalYearId,
         static function () use ($companyId, $fiscalYearId): ?string {
             $stmt = db()->prepare('SELECT locked_through FROM fiscal_period_locks WHERE company_id = :company_id AND fiscal_year_id = :fiscal_year_id LIMIT 1');
             $stmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
