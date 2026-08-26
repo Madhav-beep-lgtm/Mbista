@@ -459,7 +459,39 @@ $pageSubtitle = 'Item-wise stock movement and valuation — opening, inward, out
 $pageHero = ['icon' => 'inventory'];
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
+
+// A POSTING PURPOSE POINTED AT THE WRONG KIND OF ACCOUNT does not announce
+// itself. The vouchers balance and the ledgers are valid; the only visible
+// symptom is a balance sheet with no inventory on it and a profit and loss
+// already carrying the cost of stock nobody has sold. This is the screen
+// where somebody notices the stock figure looks wrong, so it is the screen
+// that should say why. Reported, never corrected: re-posting a voucher is a
+// decision about a period that may well be closed.
+require_once __DIR__ . '/../../app/inventory_mapping.php';
+$mappingGaps = inventory_mapping_nature_gaps($companyId);
 ?>
+<?php if ($mappingGaps !== []): ?>
+<div class="notice error" role="alert" style="margin-bottom:12px">
+    <strong>Stock is posting to the wrong kind of account.</strong>
+    <p style="margin:6px 0">Until this is re-pointed, purchases charge straight to the profit and loss
+       and the balance sheet carries no inventory. Nothing below has been changed — fix the mapping in
+       <a href="<?= e(url('admin/accounting-inventory.php?view=mapping')) ?>">Inventory &rarr; Ledger mapping</a>,
+       then decide separately what to do about what is already posted.</p>
+    <ul style="margin:6px 0 0 18px">
+        <?php foreach ($mappingGaps as $gap): ?>
+            <li>
+                <strong><?= e($gap['label']) ?></strong> should be <?= e(inv_nature_article($gap['expected'])) ?>
+                account, but points at <strong><?= e($gap['ledger_name']) ?></strong><?= $gap['ledger_code'] !== '' ? ' (' . e($gap['ledger_code']) . ')' : '' ?>,
+                which is <?= e(inv_nature_article($gap['actual'])) ?> account.
+                <?php if (abs($gap['posted']) > 0.004): ?>
+                    <?= e($sym . number_format(abs($gap['posted']), 2)) ?> has already been posted there.
+                <?php endif; ?>
+                <?php if ($gap['item_sku'] !== ''): ?><br><small>Items: <?= e($gap['item_sku']) ?></small><?php endif; ?>
+            </li>
+        <?php endforeach; ?>
+    </ul>
+</div>
+<?php endif; ?>
 <section class="mbw-card" aria-label="Stock summary filters">
     <div class="mbw-card-head">
         <h2><?= icon('inventory') ?>Stock Summary Report</h2>

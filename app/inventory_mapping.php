@@ -84,6 +84,41 @@ function inventory_mapping_plan(): array
     ];
 }
 
+/**
+ * What kind of account a ledger is — asset, liability, equity, revenue or
+ * expense — read from its own type, or from its group's master when the
+ * ledger does not carry one. '' when the ledger cannot be found, which is
+ * treated as "do not judge" rather than as a mismatch.
+ */
+function inv_ledger_nature(int $companyId, int $ledgerId): string
+{
+    static $cache = [];
+    $key = $companyId . ':' . $ledgerId;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    $stmt = db()->prepare('SELECT l.type, g.master_key
+        FROM ledgers l LEFT JOIN ledger_groups g ON g.id = l.group_id
+        WHERE l.id = :id AND l.company_id = :cid LIMIT 1');
+    $stmt->execute(['id' => $ledgerId, 'cid' => $companyId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return $cache[$key] = '';
+    }
+    $type = (string) ($row['type'] ?? '');
+    if (in_array($type, ['asset', 'liability', 'equity', 'revenue', 'expense'], true)) {
+        return $cache[$key] = $type;
+    }
+
+    return $cache[$key] = (string) (ledger_master_nature((string) ($row['master_key'] ?? '')) ?? '');
+}
+
+/** "an asset" / "a liability" — so the refusal reads like a sentence. */
+function inv_nature_article(string $nature): string
+{
+    return (in_array($nature, ['asset', 'equity', 'expense'], true) ? 'an ' : 'a ') . $nature;
+}
+
 /** Every company-default mapping, keyed by purpose, with the ledger's name and code. */
 function inventory_mapping_rows(int $companyId): array
 {
@@ -124,6 +159,25 @@ function inventory_mapping_save(int $companyId, string $purpose, int $ledgerId, 
     $check->execute(['id' => $ledgerId, 'cid' => $companyId]);
     if ((int) $check->fetchColumn() === 0) {
         throw new RuntimeException('That ledger does not belong to this company.');
+    }
+
+    // AND IT MUST BE THE RIGHT KIND OF LEDGER. Every purpose above declares
+    // what it expects, and until now that expectation was printed on the
+    // screen as a grey pill and never once checked. Point Inventory Asset at
+    // an expense ledger — "Kitchen Purchase", say — and nothing complains:
+    // every purchase from then on debits an expense instead of stock, the
+    // balance sheet carries no inventory at all, and the whole purchase lands
+    // in the profit and loss on the day it is bought. Nothing in the books
+    // says why. A stock account is an asset; that is not a preference.
+    $expected = (string) (inventory_mapping_purposes()[$purpose]['expect'] ?? '');
+    $actual = inv_ledger_nature($companyId, $ledgerId);
+    if ($expected !== '' && $actual !== '' && $actual !== $expected) {
+        $label = (string) (inventory_mapping_purposes()[$purpose]['label'] ?? $purpose);
+        throw new RuntimeException($label . ' has to be ' . inv_nature_article($expected)
+            . ' ledger, and that one is ' . inv_nature_article($actual) . ' ledger.'
+            . ($expected === 'asset'
+                ? ' Posting stock to an expense account would charge every purchase straight to the profit and loss and leave the balance sheet with no inventory on it.'
+                : ''));
     }
 
     $existing = db()->prepare("SELECT id FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = 'global'
@@ -226,4 +280,112 @@ function inventory_mapping_gaps(int $companyId): array
     }
 
     return $gaps;
+}
+
+/**
+ * Mappings that point a posting purpose at the wrong KIND of account.
+ *
+ * Nothing checked this until now, so books already carrying the mistake will
+ * not announce it — the ledgers balance, the vouchers are valid, and the only
+ * visible symptom is a balance sheet with no inventory on it and a profit and
+ * loss carrying stock nobody has sold. This lists them, with what has already
+ * been posted to each, and changes nothing: correcting a posted voucher is a
+ * decision about a period that may well be closed, and it is not this
+ * function's to take.
+ *
+ * @return array<int, array{scope:string, purpose:string, label:string, expected:string,
+ *     actual:string, ledger_id:int, ledger_code:string, ledger_name:string,
+ *     item_sku:string, posted:float}>
+ */
+function inventory_mapping_nature_gaps(int $companyId): array
+{
+    if (!table_exists('ledgers') || !table_exists('ledger_groups')) {
+        return [];
+    }
+    $purposes = inventory_mapping_purposes();
+    $gaps = [];
+
+    $add = static function (string $scope, string $purpose, int $ledgerId, string $itemSku)
+        use ($companyId, $purposes, &$gaps): void {
+        $expected = (string) ($purposes[$purpose]['expect'] ?? '');
+        if ($expected === '' || $ledgerId <= 0) {
+            return;
+        }
+        $actual = inv_ledger_nature($companyId, $ledgerId);
+        if ($actual === '' || $actual === $expected) {
+            return;
+        }
+        $stmt = db()->prepare('SELECT code, name FROM ledgers WHERE id = :id AND company_id = :cid');
+        $stmt->execute(['id' => $ledgerId, 'cid' => $companyId]);
+        $ledger = $stmt->fetch() ?: ['code' => '', 'name' => '#' . $ledgerId];
+        $gaps[] = [
+            'scope' => $scope,
+            'purpose' => $purpose,
+            'label' => (string) ($purposes[$purpose]['label'] ?? $purpose),
+            'expected' => $expected,
+            'actual' => $actual,
+            'ledger_id' => $ledgerId,
+            'ledger_code' => (string) $ledger['code'],
+            'ledger_name' => (string) $ledger['name'],
+            'item_sku' => $itemSku,
+            'posted' => inv_ledger_posted_total($companyId, $ledgerId),
+        ];
+    };
+
+    if (table_exists('inventory_ledger_mappings')) {
+        $stmt = db()->prepare("SELECT m.scope, m.purpose, m.ledger_id, COALESCE(i.sku, '') AS sku
+            FROM inventory_ledger_mappings m
+            LEFT JOIN inventory_items i ON i.id = m.item_id AND i.company_id = m.company_id
+            WHERE m.company_id = :cid");
+        $stmt->execute(['cid' => $companyId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $add((string) $row['scope'], (string) $row['purpose'], (int) $row['ledger_id'], (string) $row['sku']);
+        }
+    }
+
+    // The legacy per-item column, which the resolver falls back to and which
+    // no screen has ever policed.
+    if (table_exists('inventory_items')) {
+        $stmt = db()->prepare("SELECT id, sku, ledger_id FROM inventory_items
+            WHERE company_id = :cid AND ledger_id IS NOT NULL AND item_type <> 'service'");
+        $stmt->execute(['cid' => $companyId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $add('item (linked ledger)', 'inventory_asset', (int) $row['ledger_id'], (string) $row['sku']);
+        }
+    }
+
+    // One ledger reached by twenty items is one problem, not twenty lines.
+    $unique = [];
+    foreach ($gaps as $gap) {
+        $key = $gap['scope'] . '|' . $gap['purpose'] . '|' . $gap['ledger_id'];
+        if (isset($unique[$key])) {
+            $unique[$key]['item_sku'] = $unique[$key]['item_sku'] === '' ? $gap['item_sku']
+                : $unique[$key]['item_sku'] . ', ' . $gap['item_sku'];
+            continue;
+        }
+        $unique[$key] = $gap;
+    }
+    foreach ($unique as &$gap) {
+        if (substr_count($gap['item_sku'], ',') > 4) {
+            $names = explode(', ', $gap['item_sku']);
+            $gap['item_sku'] = implode(', ', array_slice($names, 0, 4)) . ' and ' . (count($names) - 4) . ' more';
+        }
+    }
+
+    return array_values($unique);
+}
+
+/** What has already been posted to one ledger, net, across all time. */
+function inv_ledger_posted_total(int $companyId, int $ledgerId): float
+{
+    if (!table_exists('voucher_entries') || !table_exists('vouchers')) {
+        return 0.0;
+    }
+    $stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN e.entry_type = 'debit' THEN e.amount ELSE -e.amount END), 0)
+        FROM voucher_entries e
+        INNER JOIN vouchers v ON v.id = e.voucher_id
+        WHERE v.company_id = :cid AND v.status = 'posted' AND e.ledger_id = :lid");
+    $stmt->execute(['cid' => $companyId, 'lid' => $ledgerId]);
+
+    return round((float) $stmt->fetchColumn(), 2);
 }

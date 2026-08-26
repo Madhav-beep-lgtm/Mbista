@@ -40,6 +40,10 @@ require_once __DIR__ . '/inventory_valuation.php';
 const SR_INWARD_TYPES = ['opening', 'purchase', 'purchase_receipt', 'sales_return', 'production_receipt', 'produce', 'material_return', 'scrap_receipt'];
 const SR_OUTWARD_TYPES = ['sale', 'sales_delivery', 'purchase_return', 'consume', 'material_issue'];
 const SR_DAMAGE_TYPES = ['write_off', 'damage', 'expiry'];
+// Inward that is actually a PURCHASE. The trading account shows purchases
+// on a line of their own, and a production receipt or a sales return coming
+// back into stock is inward without being one.
+const SR_PURCHASE_TYPES = ['purchase', 'purchase_receipt'];
 const SR_LOCATION_TYPES = ['warehouse_transfer', 'departmental_transfer'];
 
 /** Report/UI labels for the item types the app stores. */
@@ -285,6 +289,7 @@ function sr_stock_summary_build(int $companyId, array $f): array
         $in = ['qty' => 0.0, 'amount' => 0.0];
         $out = ['qty' => 0.0, 'amount' => 0.0];
         $damage = ['qty' => 0.0, 'amount' => 0.0];
+        $purchased = 0.0;
         $openingTaken = false;
         $avgUnitAt = static function (array $state): float {
             $b = sr_replay_balance($state);
@@ -333,6 +338,9 @@ function sr_stock_summary_build(int $companyId, array $f): array
                     if ($inPeriod) {
                         $in['qty'] += $qtyIn;
                         $in['amount'] += $qtyIn * $rate;
+                        if (in_array($type, SR_PURCHASE_TYPES, true)) {
+                            $purchased += $qtyIn * $rate;
+                        }
                     }
                 }
             } elseif ($qtyOut > INV_EPSILON) {
@@ -510,6 +518,7 @@ function sr_stock_summary_build(int $companyId, array $f): array
             'damage_qty' => inv_round_qty($damage['qty']),
             'damage_rate' => sr_rate($damage['amount'], $damage['qty']),
             'damage_amount' => inv_round_money($damage['amount']),
+            'purchase_amount' => inv_round_money($purchased),
             'closing_qty' => $closing['qty'],
             'closing_rate' => sr_rate($closing['amount'], $closing['qty']),
             'closing_amount' => inv_round_money($closing['amount']),
@@ -535,6 +544,7 @@ function sr_stock_summary_build(int $companyId, array $f): array
         $totals['in_amount'] += $in['amount'];
         $totals['out_amount'] += $out['amount'];
         $totals['damage_amount'] += $damage['amount'];
+        $totals['purchase_amount'] += $purchased;
         $totals['closing_amount'] += $closing['amount'];
         $totals['count_variance_amount'] += $countVarianceAmount;
         if ($hasProfile) {
@@ -574,7 +584,7 @@ function sr_stock_summary_build(int $companyId, array $f): array
 
 function sr_zero_totals(): array
 {
-    return ['opening_amount' => 0.0, 'in_amount' => 0.0, 'out_amount' => 0.0, 'damage_amount' => 0.0,
+    return ['opening_amount' => 0.0, 'in_amount' => 0.0, 'purchase_amount' => 0.0, 'out_amount' => 0.0, 'damage_amount' => 0.0,
         'closing_amount' => 0.0, 'count_variance_amount' => 0.0,
         // A jeweller foots the weight column, not only the money one.
         'opening_net' => 0.0, 'in_net' => 0.0, 'out_net' => 0.0, 'damage_net' => 0.0,

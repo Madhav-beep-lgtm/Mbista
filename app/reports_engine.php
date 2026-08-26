@@ -193,6 +193,68 @@ function rc_pl_figures(int $scopeCompanyId, string $from, string $to): array
 }
 
 /**
+ * The trading account, out of the stock records rather than the ledgers.
+ *
+ * "Cost of Goods Sold: 357,288.84" is a figure nobody can check. What a
+ * reader wants, and what every trading account has shown since long before
+ * any of this was software, is how it was arrived at: what was on the shelf
+ * at the start, what was bought, what is left. Perpetual books post the
+ * answer straight to a COGS ledger on each sale and never show the working,
+ * which is why the same purchase read as an expense on one screen and as
+ * stock on another.
+ *
+ * These figures are the WORKING, not a second set of books. The postings are
+ * untouched; the stock module already holds opening, purchases, damage and
+ * closing per item, and this reads its totals. Where the working and the COGS
+ * ledger disagree — and they will, whenever stock moved for a reason that is
+ * not a sale — the statement says so rather than quietly presenting one as
+ * the other.
+ *
+ * @return array{available: bool, opening: float, purchases: float, other_in: float,
+ *     damage: float, closing: float, consumed: float}
+ */
+function rc_trading_figures(int $scopeCompanyId, string $from, string $to): array
+{
+    $none = ['available' => false, 'opening' => 0.0, 'purchases' => 0.0, 'other_in' => 0.0,
+        'damage' => 0.0, 'closing' => 0.0, 'consumed' => 0.0];
+    if (!table_exists('inventory_items')) {
+        return $none;
+    }
+    require_once __DIR__ . '/stock_report_engine.php';
+    try {
+        $summary = sr_stock_summary($scopeCompanyId, [
+            'from' => $from, 'to' => $to, 'dormant' => true,
+            'zero_movement' => true, 'zero_closing' => true,
+        ]);
+    } catch (Throwable $exception) {
+        return $none;
+    }
+    $t = (array) ($summary['totals'] ?? []);
+    $opening = (float) ($t['opening_amount'] ?? 0);
+    $purchases = (float) ($t['purchase_amount'] ?? 0);
+    $otherIn = (float) ($t['in_amount'] ?? 0) - $purchases;
+    $damage = (float) ($t['damage_amount'] ?? 0);
+    $closing = (float) ($t['closing_amount'] ?? 0);
+
+    // A company that keeps no stock has no trading account, and inventing one
+    // out of noughts would report a real cost of sales as zero.
+    $touched = abs($opening) > 0.004 || abs($purchases) > 0.004 || abs($otherIn) > 0.004
+        || abs($damage) > 0.004 || abs($closing) > 0.004;
+
+    return [
+        'available' => $touched,
+        'opening' => $opening,
+        'purchases' => $purchases,
+        'other_in' => $otherIn,
+        'damage' => $damage,
+        'closing' => $closing,
+        // What left the shelf, at cost. Damage is taken out because it is
+        // written off to its own account and is not a cost of anything sold.
+        'consumed' => $opening + $purchases + $otherIn - $damage - $closing,
+    ];
+}
+
+/**
  * Cash movements classified by activity (indirect approximation): each
  * posted voucher touching cash/bank is assigned to the activity of its
  * dominant counterpart ledger group.
@@ -615,7 +677,44 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 $rows[] = $line('Gross Sales', $cur['gross_sales'], $prev['gross_sales']);
                 $rows[] = $line('Less: Sales Returns', $cur['sales_returns'], $prev['sales_returns'], '', true, true);
                 $rows[] = $line('Net Sales', $cur['net_sales'], $prev['net_sales'], 'bold', false);
-                $rows[] = $line('Cost of Goods Sold', $cur['cogs'], $prev['cogs']);
+
+                // THE WORKING BEHIND THE COST, where the stock records can
+                // show it. One line reading "Cost of Goods Sold" is a figure
+                // nobody can check; opening, purchases and closing are the
+                // three a reader can tie to the stock summary and the
+                // supplier bills. A company keeping no stock keeps the single
+                // line, because a trading account made of noughts would
+                // report a real cost of sales as nothing at all.
+                $trade = rc_trading_figures($scopeCompanyId, $from, $to);
+                $tradePrev = $trade['available']
+                    ? rc_trading_figures($scopeCompanyId, $prevFrom, $prevTo)
+                    : $trade;
+                if ($trade['available']) {
+                    $rows[] = $line('Opening Stock', $trade['opening'], $tradePrev['opening']);
+                    $rows[] = $line('Add: Purchases', $trade['purchases'], $tradePrev['purchases']);
+                    if (abs($trade['other_in']) > 0.004 || abs($tradePrev['other_in']) > 0.004) {
+                        $rows[] = $line('Add: Other stock inward (production, returns)', $trade['other_in'], $tradePrev['other_in']);
+                    }
+                    if (abs($trade['damage']) > 0.004 || abs($tradePrev['damage']) > 0.004) {
+                        $rows[] = $line('Less: Damage, loss and write-off', $trade['damage'], $tradePrev['damage'], '', true, true);
+                    }
+                    $rows[] = $line('Less: Closing Stock', $trade['closing'], $tradePrev['closing'], '', true, true);
+                    $rows[] = $line('Cost of stock consumed', $trade['consumed'], $tradePrev['consumed'], 'bold', false);
+
+                    // Stock moves for reasons that are not sales, and the COGS
+                    // ledger only ever hears about the sales. Saying which is
+                    // which beats presenting either one as the other.
+                    $drift = $cur['cogs'] - $trade['consumed'];
+                    $driftPrev = $prev['cogs'] - $tradePrev['consumed'];
+                    if (abs($drift) > 0.004 || abs($driftPrev) > 0.004) {
+                        // Either way round it is worth seeing. Positive is
+                        // direct cost that never was stock — freight inward,
+                        // direct wages. Negative is stock that moved without
+                        // the ledger being told, which is a gap, not a cost.
+                        $rows[] = $line('Difference from the Cost of Goods Sold ledger', $drift, $driftPrev);
+                    }
+                }
+                $rows[] = $line('Cost of Goods Sold', $cur['cogs'], $prev['cogs'], 'bold', !$trade['available']);
                 $rows[] = $line('Gross Profit', $cur['gross_profit'], $prev['gross_profit'], 'bold', false);
                 if (abs($cur['other_income']) > 0.004 || abs($prev['other_income']) > 0.004) {
                     $rows[] = $line('Other Operating Income', $cur['other_income'], $prev['other_income']);

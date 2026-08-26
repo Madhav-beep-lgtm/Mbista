@@ -106,6 +106,17 @@ function inventory_set_item_ledger(int $companyId, int $itemId, string $purpose,
         if ((int) $own->fetchColumn() === 0) {
             return; // never map a foreign company's ledger
         }
+        // The purpose says what kind of account it needs, and an item-scoped
+        // mapping is held to it exactly as the company-wide one is. Stock
+        // pointed at an expense ledger charges every purchase to the profit
+        // and loss and leaves the balance sheet with no inventory on it.
+        $expected = (string) (inventory_mapping_purposes()[$purpose]['expect'] ?? '');
+        $actual = inv_ledger_nature($companyId, $ledgerId);
+        if ($expected !== '' && $actual !== '' && $actual !== $expected) {
+            throw new RuntimeException((string) (inventory_mapping_purposes()[$purpose]['label'] ?? $purpose)
+                . ' has to be ' . inv_nature_article($expected) . ' ledger, and that one is '
+                . inv_nature_article($actual) . ' ledger.');
+        }
     }
     db()->prepare("DELETE FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = 'item' AND item_id = :iid AND purpose = :p AND category IS NULL")
         ->execute(['cid' => $companyId, 'iid' => $itemId, 'p' => $purpose]);

@@ -609,7 +609,23 @@ function inv_item_stock_ledger_id(int $companyId, array $item): int
             return (int) $resolved['id'];
         }
     }
-    return (int) ($item['ledger_id'] ?? 0);
+
+    // THE LEGACY COLUMN IS NOT A LICENCE TO POST STOCK TO AN EXPENSE. It is
+    // here so items that predate the mapping table keep posting where they
+    // always did, and for that it has to be an asset — a stock account is.
+    // Pointed at "Kitchen Purchase" instead, every purchase debits an expense,
+    // the balance sheet shows no inventory, and the cost of goods nobody has
+    // sold yet is already in the profit and loss. Returning 0 makes the caller
+    // record the movement stock-only and SAY the ledger is missing, which is a
+    // gap somebody can see and fix; posting to the wrong account is not.
+    $legacy = (int) ($item['ledger_id'] ?? 0);
+    if ($legacy <= 0) {
+        return 0;
+    }
+    require_once __DIR__ . '/inventory_mapping.php';
+    $nature = inv_ledger_nature($companyId, $legacy);
+
+    return ($nature === '' || $nature === 'asset') ? $legacy : 0;
 }
 
 /**
