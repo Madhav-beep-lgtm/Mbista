@@ -23,11 +23,17 @@ require_once __DIR__ . '/jewellery_workshop.php';
 /** Line-level sales detail — the "Sales Detailed" report. */
 function jw_report_sales_detail(int $companyId, string $from, string $to, array $filters = []): array
 {
-    $sql = "SELECT s.sale_no, s.sale_date, s.party_id, s.customer_name, s.status,
+    // Every component of the bill total, at the level it was computed. The
+    // three that were never selected -- wastage, the Skills Promotion Tax and
+    // the allocated charge -- are the difference between a report that adds up
+    // to the bill and one that quietly does not.
+    $sql = "SELECT s.sale_no, s.sale_date, s.party_id, s.customer_name, s.ref_no, s.status,
+                COALESCE(NULLIF(TRIM(s.customer_name), ''), ap.name, 'Walk-in') AS bill_name,
                 COALESCE(ap.name, s.customer_name, 'Walk-in') AS party_label,
                 l.id AS line_id, l.qty_pieces, l.gross_weight, l.fine_weight, l.rate,
-                l.metal_amount, l.making_amount, l.stone_amount, l.diamond_amount, l.other_diamond_amount,
-                l.vat_base, l.vat_rate, l.vat_amount,
+                l.metal_amount, l.wastage_amount, l.making_amount,
+                l.stone_amount, l.diamond_amount, l.other_diamond_amount,
+                l.vat_base, l.vat_rate, l.vat_amount, l.tax_amount,
                 l.allocated_adjust, l.line_total, l.cogs_amount,
                 i.sku AS item_code, i.name AS item_name, i.category, jp.jewellery_type AS item_type,
                 m.name AS metal_name, p.code AS purity_code, u.code AS unit_code
@@ -100,6 +106,223 @@ function jw_report_sales_detail(int $companyId, string $from, string $to, array 
 }
 
 /** Sales rolled up by item, category, metal, party or day. */
+/**
+ * The ways a shop asks to see its sales.
+ *
+ * "Bill" is the register a counter recognises, one row per invoice. The rest
+ * cut the same sales a different way, and every one of them foots to the same
+ * total, because they are all built from the same lines.
+ */
+function jw_sales_group_options(): array
+{
+    return [
+        'invoice' => 'Bill-wise (one row per invoice)',
+        'day' => 'Day-wise',
+        'category' => 'Category-wise',
+        'purity' => 'Purity-wise',
+        'item' => 'Item-wise',
+        'metal' => 'Metal-wise',
+        'party' => 'Customer-wise',
+    ];
+}
+
+/**
+ * WHAT THE TOTAL ON A BILL IS MADE OF.
+ *
+ * The register showed one figure called Total and no way to see inside it,
+ * which is a figure nobody can check against the bill in their hand. It is:
+ *
+ *     metal + wastage + making + stone and diamond
+ *       + other charges - discount            (allocated across the lines)
+ *       + Skills Promotion Tax
+ *       + VAT
+ *     = TOTAL
+ *
+ * Every one of those is stored per LINE, which is why one grouping can serve
+ * all of them: group by day, by category, by purity, by item, by metal, by
+ * customer or by bill, and the columns are the same and still add up to the
+ * same money. Weight and purity are not components of the total -- they are
+ * what the metal was measured in -- so they stay beside it as context rather
+ * than inside the bifurcation.
+ *
+ * Other charges and discount arrive here already netted into one allocated
+ * figure per line. They are a bill-level amount, and the only honest way to
+ * attribute a bill-level discount to one item on it is the share the sale
+ * itself allocated -- so that is the column, named for what it holds.
+ *
+ * @return array{columns: array<int, array{0:string,1:string,2:bool}>,
+ *               rows: array<int, array<string, mixed>>, totals: array<string, float>}
+ */
+function jw_report_sales_bifurcated(int $companyId, string $from, string $to, string $groupBy = 'invoice', array $filters = []): array
+{
+    if (!array_key_exists($groupBy, jw_sales_group_options())) {
+        $groupBy = 'invoice';
+    }
+    $detail = jw_report_sales_detail($companyId, $from, $to, $filters);
+
+    // What identifies a row, and what else that row should carry with it. A
+    // bill row shows who it was billed to and against which reference; a
+    // category row has no such thing and does not pretend to.
+    $keyFor = static function (array $row) use ($groupBy): string {
+        return match ($groupBy) {
+            'day' => (string) $row['sale_date'],
+            'category' => trim((string) ($row['category'] ?? '')) !== '' ? (string) $row['category'] : 'Uncategorised',
+            'purity' => trim((string) ($row['purity_code'] ?? '')) !== '' ? (string) $row['purity_code'] : 'Unstated',
+            'item' => (string) $row['item_code'] . ' — ' . (string) $row['item_name'],
+            'metal' => (string) $row['metal_name'],
+            'party' => (string) $row['party_label'],
+            default => (string) $row['sale_no'],
+        };
+    };
+
+    $money = ['metal_amount', 'wastage_amount', 'making_amount', 'stone_side', 'allocated_adjust',
+        'tax_amount', 'vat_amount', 'line_total', 'cogs_amount', 'gross_profit'];
+    $groups = [];
+    foreach ($detail['rows'] as $row) {
+        $key = $keyFor($row);
+        if (!isset($groups[$key])) {
+            $groups[$key] = [
+                'group' => $key,
+                // Carried for a bill row and left empty elsewhere, so the
+                // screen can show them without a second query or a guess.
+                'sale_date' => (string) $row['sale_date'],
+                'bill_name' => (string) ($row['bill_name'] ?? ''),
+                'ref_no' => (string) ($row['ref_no'] ?? ''),
+                'status' => (string) ($row['status'] ?? ''),
+                'lines' => 0,
+                'pieces' => 0.0,
+                'gross_weight' => 0.0,
+                'fine_weight' => 0.0,
+            ];
+            foreach ($money as $field) {
+                $groups[$key][$field] = 0.0;
+            }
+        }
+        $groups[$key]['lines']++;
+        $groups[$key]['pieces'] += (float) $row['qty_pieces'];
+        $groups[$key]['gross_weight'] += (float) $row['gross_weight'];
+        $groups[$key]['fine_weight'] += (float) $row['fine_weight'];
+        foreach ($money as $field) {
+            $groups[$key][$field] += (float) ($row[$field] ?? 0);
+        }
+    }
+
+    $totals = ['lines' => 0, 'pieces' => 0.0, 'gross_weight' => 0.0, 'fine_weight' => 0.0];
+    foreach ($money as $field) {
+        $totals[$field] = 0.0;
+    }
+    foreach ($groups as $key => $group) {
+        foreach (['gross_weight', 'fine_weight'] as $field) {
+            $groups[$key][$field] = jw_round_weight($group[$field]);
+        }
+        foreach ($money as $field) {
+            $groups[$key][$field] = jw_round_money($group[$field]);
+        }
+        // Margin is measured against the revenue side only: VAT and the Skills
+        // Promotion Tax are collected for the government, never earned.
+        $revenue = $groups[$key]['metal_amount'] + $groups[$key]['wastage_amount']
+            + $groups[$key]['making_amount'] + $groups[$key]['stone_side'] + $groups[$key]['allocated_adjust'];
+        $groups[$key]['revenue'] = jw_round_money($revenue);
+        $groups[$key]['gp_pct'] = $revenue > 0
+            ? round($groups[$key]['gross_profit'] / $revenue * 100, 2)
+            : null;
+
+        $totals['lines'] += $groups[$key]['lines'];
+        $totals['pieces'] += $groups[$key]['pieces'];
+        $totals['gross_weight'] += $groups[$key]['gross_weight'];
+        $totals['fine_weight'] += $groups[$key]['fine_weight'];
+        foreach ($money as $field) {
+            $totals[$field] += $groups[$key][$field];
+        }
+    }
+    foreach (['gross_weight', 'fine_weight'] as $field) {
+        $totals[$field] = jw_round_weight($totals[$field]);
+    }
+    foreach ($money as $field) {
+        $totals[$field] = jw_round_money($totals[$field]);
+    }
+    $totals['revenue'] = jw_round_money($totals['metal_amount'] + $totals['wastage_amount']
+        + $totals['making_amount'] + $totals['stone_side'] + $totals['allocated_adjust']);
+    $totals['gp_pct'] = $totals['revenue'] > 0
+        ? round($totals['gross_profit'] / $totals['revenue'] * 100, 2)
+        : null;
+
+    // A bill register reads in date order, the way it was written. Every other
+    // cut is a ranking, and the biggest line is the one being looked for.
+    if ($groupBy === 'invoice' || $groupBy === 'day') {
+        uasort($groups, static fn (array $a, array $b): int => [$a['sale_date'], $a['group']] <=> [$b['sale_date'], $b['group']]);
+    } else {
+        uasort($groups, static fn (array $a, array $b): int => $b['line_total'] <=> $a['line_total']);
+    }
+
+    // The label the first column carries, and whether the bill-only columns
+    // are worth drawing at all.
+    $groupLabel = match ($groupBy) {
+        'day' => 'Date',
+        'category' => 'Category',
+        'purity' => 'Purity',
+        'item' => 'Item',
+        'metal' => 'Metal',
+        'party' => 'Customer',
+        default => 'Bill no.',
+    };
+
+    return [
+        'group_by' => $groupBy,
+        'group_label' => $groupLabel,
+        'per_bill' => $groupBy === 'invoice',
+        'rows' => array_values($groups),
+        'totals' => $totals,
+    ];
+}
+
+/**
+ * The same report flattened for a spreadsheet, headings and totals included.
+ *
+ * Built from the same rows the screen draws, so the file and the page cannot
+ * disagree about what was sold.
+ */
+function jw_report_sales_bifurcated_rows(array $report, string $currency = ''): array
+{
+    $head = [$report['group_label']];
+    if ($report['per_bill']) {
+        $head = array_merge($head, ['Date', 'Customer (billed as)', 'Invoice ref.', 'Status']);
+    }
+    $head = array_merge($head, ['Lines', 'Pieces', 'Gross wt', 'Fine wt',
+        'Metal', 'Wastage', 'Making', 'Stone / diamond', 'Charges less discount',
+        'Skills Promotion Tax', 'VAT', 'TOTAL', 'COGS', 'Gross profit', 'GP %']);
+    $out = [$head];
+
+    foreach ($report['rows'] as $row) {
+        $line = [$row['group']];
+        if ($report['per_bill']) {
+            $line = array_merge($line, [$row['sale_date'], $row['bill_name'], $row['ref_no'], $row['status']]);
+        }
+        $out[] = array_merge($line, [
+            $row['lines'], $row['pieces'], $row['gross_weight'], $row['fine_weight'],
+            $row['metal_amount'], $row['wastage_amount'], $row['making_amount'], $row['stone_side'],
+            $row['allocated_adjust'], $row['tax_amount'], $row['vat_amount'], $row['line_total'],
+            $row['cogs_amount'], $row['gross_profit'],
+            $row['gp_pct'] === null ? '' : $row['gp_pct'],
+        ]);
+    }
+
+    $totals = $report['totals'];
+    $totalLine = ['TOTAL'];
+    if ($report['per_bill']) {
+        $totalLine = array_merge($totalLine, ['', '', '', '']);
+    }
+    $out[] = array_merge($totalLine, [
+        $totals['lines'], $totals['pieces'], $totals['gross_weight'], $totals['fine_weight'],
+        $totals['metal_amount'], $totals['wastage_amount'], $totals['making_amount'], $totals['stone_side'],
+        $totals['allocated_adjust'], $totals['tax_amount'], $totals['vat_amount'], $totals['line_total'],
+        $totals['cogs_amount'], $totals['gross_profit'],
+        $totals['gp_pct'] === null ? '' : $totals['gp_pct'],
+    ]);
+
+    return $out;
+}
+
 function jw_report_sales_grouped(int $companyId, string $from, string $to, string $groupBy = 'item'): array
 {
     $detail = jw_report_sales_detail($companyId, $from, $to);

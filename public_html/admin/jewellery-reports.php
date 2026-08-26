@@ -41,7 +41,9 @@ $to = $clampDate((string) ($_GET['to'] ?? min($fyEnd, date('Y-m-d'))));
 if ($from > $to) {
     [$from, $to] = [$to, $from];
 }
-$groupBy = jw_enum($_GET['group'] ?? null, ['item', 'category', 'metal', 'party', 'day'], 'item');
+// Bill-wise by default: the register a counter recognises is one row per
+// invoice, and the other cuts are what somebody goes looking for afterwards.
+$groupBy = jw_enum($_GET['group'] ?? null, array_keys(jw_sales_group_options()), 'invoice');
 $karigarId = (int) ($_GET['karigar'] ?? 0);
 $karigars = jewellery_karigars_list($companyId);
 // The rate the statement values metal at. Blank falls back to the rate board on
@@ -110,20 +112,18 @@ if (isset($_GET['export']) && $canExport) {
         export_dispatch($format, 'jewellery-summary-' . $stamp, $data, 'Consolidated Summary', $summaryMeta);
     }
     if ($view === 'sales') {
-        $data = [['Date', 'Sale no', 'Party', 'Item', 'Purity', 'Pieces', 'Gross wt', 'Fine wt', 'Rate',
-            'Metal', 'Making', 'Stone / diamond', 'VAT base', 'VAT', 'Revenue', 'COGS', 'Gross profit', 'GP %']];
-        foreach (jw_report_sales_detail($companyId, $from, $to)['rows'] as $r) {
-            $data[] = [$r['sale_date'], $r['sale_no'], $r['party_label'], $r['item_code'], $r['purity_code'],
-                $r['qty_pieces'], $r['gross_weight'], $r['fine_weight'], $r['rate'], $r['metal_amount'],
-                $r['making_amount'], $r['stone_side'], $r['vat_base'], $r['vat_amount'], $r['revenue'],
-                $r['cogs_amount'], $r['gross_profit'], $r['gp_pct']];
-        }
-        // Footed before it goes out: a register without its total is a list,
-        // and the reader adds it up by hand and disagrees with the person
-        // beside them. export_totals_row() leaves rates, dates and document
-        // numbers alone — see its own note for why that list errs wide.
-        $data = export_totals_row($data);
-        export_dispatch($format, 'jewellery-sales-' . $stamp, $data, 'Sales Detailed', $meta);
+        // The file carries whichever cut is on screen, bifurcated the same way
+        // and already footed by the engine -- so the two cannot disagree about
+        // what was sold, and nobody has to add a column up by hand.
+        $bifExport = jw_report_sales_bifurcated($companyId, $from, $to, $groupBy);
+        $data = jw_report_sales_bifurcated_rows($bifExport);
+        export_dispatch(
+            $format,
+            'jewellery-sales-' . $groupBy . '-' . $stamp,
+            $data,
+            mb_substr(jw_sales_group_options()[$groupBy], 0, 31),
+            $meta + ['Grouped by' => jw_sales_group_options()[$groupBy]]
+        );
     }
     if ($view === 'purchases') {
         $data = [['Date', 'Purchase no', 'Party', 'Source', 'Item', 'Purity', 'Pieces', 'Gross wt', 'Fine wt',
@@ -483,7 +483,7 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
 <?php if ($view === 'sales'): ?>
             <label>Group by
                 <select name="group">
-                    <?php foreach (['item' => 'Item', 'category' => 'Category', 'metal' => 'Metal', 'party' => 'Party', 'day' => 'Day'] as $k => $v): ?>
+                    <?php foreach (jw_sales_group_options() as $k => $v): ?>
                         <option value="<?= e($k) ?>" <?= $groupBy === $k ? 'selected' : '' ?>><?= e($v) ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -612,26 +612,98 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
     </section>
 
 <?php elseif ($view === 'sales'): ?>
-    <?php $report = jw_report_sales_detail($companyId, $from, $to); $groups = jw_report_sales_grouped($companyId, $from, $to, $groupBy); ?>
+    <?php
+    $report = jw_report_sales_detail($companyId, $from, $to);
+    $bif = jw_report_sales_bifurcated($companyId, $from, $to, $groupBy);
+    $bifTotals = $bif['totals'];
+    // The money columns, in the order the total is built up. Kept in one list
+    // so the heading, the rows and the foot cannot drift apart.
+    $bifMoney = [
+        ['metal_amount', 'Metal'],
+        ['wastage_amount', 'Wastage'],
+        ['making_amount', 'Making'],
+        ['stone_side', 'Stone / diamond'],
+        ['allocated_adjust', 'Charges − Disc.'],
+        ['tax_amount', 'SPT'],
+        ['vat_amount', 'VAT'],
+    ];
+    ?>
     <section class="mbw-card" data-collapsible style="margin-top:14px">
-        <div class="mbw-card-head"><h2>Sales by <?= e(ucfirst($groupBy)) ?> (<?= count($groups) ?>)</h2></div>
+        <div class="mbw-card-head">
+            <h2><?= e(jw_sales_group_options()[$groupBy]) ?> (<?= count($bif['rows']) ?>)</h2>
+        </div>
+        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
+            What the bill total is made of, and it adds across:
+            <strong>Metal + Wastage + Making + Stone/diamond + (Other charges − Discount) + SPT + VAT = TOTAL</strong>.
+            Weight and purity sit beside it as context — they are what the metal was measured in, not parts of the money.
+            Other charges and discount are entered per bill, so an item or category row carries the share that bill
+            allocated to it. Gross profit is measured against the revenue side only: SPT and VAT are collected for
+            the government, never earned.
+        </p>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th><?= e(ucfirst($groupBy)) ?></th><th class="is-numeric">Pieces</th><th class="is-numeric">Fine wt</th><th class="is-numeric">Revenue</th><th class="is-numeric">VAT</th><th class="is-numeric">COGS</th><th class="is-numeric">Gross profit</th><th class="is-numeric">GP %</th></tr></thead>
+            <thead>
+                <tr>
+                    <th><?= e($bif['group_label']) ?></th>
+                    <?php if ($bif['per_bill']): ?>
+                        <th>Date</th><th>Customer (billed as)</th><th>Invoice ref.</th><th>Status</th>
+                    <?php endif; ?>
+                    <th class="is-numeric">Pieces</th>
+                    <th class="is-numeric">Gross wt</th>
+                    <th class="is-numeric">Fine wt</th>
+                    <?php foreach ($bifMoney as [$key, $label]): ?>
+                        <th class="is-numeric"><?= e($label) ?></th>
+                    <?php endforeach; ?>
+                    <th class="is-numeric">TOTAL</th>
+                    <th class="is-numeric">COGS</th>
+                    <th class="is-numeric">Gross profit</th>
+                    <th class="is-numeric">GP %</th>
+                </tr>
+            </thead>
             <tbody>
-                <?php if ($groups === []): ?><tr><td colspan="8">No posted sales in this period.</td></tr><?php endif; ?>
-                <?php foreach ($groups as $g): ?>
+                <?php $bifCols = 8 + count($bifMoney) + ($bif['per_bill'] ? 4 : 0); ?>
+                <?php if ($bif['rows'] === []): ?>
+                    <tr><td colspan="<?= $bifCols ?>">No posted sales in this period.</td></tr>
+                <?php endif; ?>
+                <?php foreach ($bif['rows'] as $g): ?>
                     <tr>
-                        <td><?= e($g['group']) ?></td>
-                        <td class="is-numeric"><?= $fmt($g['pieces'], 3) ?></td>
-                        <td class="is-numeric"><?= $fmt($g['fine_weight'], 4) ?></td>
-                        <td class="is-numeric"><?= $fmt($g['revenue']) ?></td>
-                        <td class="is-numeric"><?= $fmt($g['vat_amount']) ?></td>
-                        <td class="is-numeric"><?= $fmt($g['cogs_amount']) ?></td>
-                        <td class="is-numeric"><?= $fmt($g['gross_profit']) ?></td>
-                        <td class="is-numeric"><?= $g['gp_pct'] === null ? '—' : $fmt($g['gp_pct']) . '%' ?></td>
+                        <td><?= e((string) $g['group']) ?></td>
+                        <?php if ($bif['per_bill']): ?>
+                            <td><?= e(app_date((string) $g['sale_date'])) ?></td>
+                            <td><?= e((string) $g['bill_name']) ?></td>
+                            <td><?= (string) $g['ref_no'] !== '' ? e((string) $g['ref_no']) : '—' ?></td>
+                            <td><span class="mbw-pill tone-green"><?= e(ucfirst((string) $g['status'])) ?></span></td>
+                        <?php endif; ?>
+                        <td class="is-numeric"><?= $fmt((float) $g['pieces'], 3) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $g['gross_weight'], 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $g['fine_weight'], 4) ?></td>
+                        <?php foreach ($bifMoney as [$key, $label]): ?>
+                            <td class="is-numeric"><?= $fmt((float) $g[$key]) ?></td>
+                        <?php endforeach; ?>
+                        <td class="is-numeric"><strong><?= $fmt((float) $g['line_total']) ?></strong></td>
+                        <td class="is-numeric"><?= $fmt((float) $g['cogs_amount']) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) $g['gross_profit']) ?></td>
+                        <td class="is-numeric"><?= $g['gp_pct'] === null ? '—' : $fmt((float) $g['gp_pct']) . '%' ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
+            <?php if ($bif['rows'] !== []): ?>
+            <tfoot>
+                <tr>
+                    <th>TOTAL</th>
+                    <?php if ($bif['per_bill']): ?><th></th><th></th><th></th><th></th><?php endif; ?>
+                    <th class="is-numeric"><?= $fmt((float) $bifTotals['pieces'], 3) ?></th>
+                    <th class="is-numeric"><?= $fmt((float) $bifTotals['gross_weight'], 4) ?></th>
+                    <th class="is-numeric"><?= $fmt((float) $bifTotals['fine_weight'], 4) ?></th>
+                    <?php foreach ($bifMoney as [$key, $label]): ?>
+                        <th class="is-numeric"><?= $fmt((float) $bifTotals[$key]) ?></th>
+                    <?php endforeach; ?>
+                    <th class="is-numeric"><?= $fmt((float) $bifTotals['line_total']) ?></th>
+                    <th class="is-numeric"><?= $fmt((float) $bifTotals['cogs_amount']) ?></th>
+                    <th class="is-numeric"><?= $fmt((float) $bifTotals['gross_profit']) ?></th>
+                    <th class="is-numeric"><?= $bifTotals['gp_pct'] === null ? '—' : $fmt((float) $bifTotals['gp_pct']) . '%' ?></th>
+                </tr>
+            </tfoot>
+            <?php endif; ?>
         </table></div>
     </section>
 
