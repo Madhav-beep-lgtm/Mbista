@@ -36,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
             flash('error', 'Enter a valid recipient email address.');
-        } elseif (!in_array($frequency, ['daily', 'weekly', 'monthly'], true) || !in_array($format, ['csv', 'html', 'both'], true)) {
+        } elseif (!in_array($frequency, ['daily', 'weekly', 'monthly'], true) || !in_array($format, ['csv', 'html', 'both', 'xlsx'], true)) {
             flash('error', 'Choose a valid frequency and format.');
         } else {
             $nextRun = match ($frequency) {
@@ -145,7 +145,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </label>
             <label>Format
                 <select name="export_format">
-                    <option value="both" selected>CSV + HTML</option>
+                    <option value="xlsx" selected>Excel (.xlsx) + HTML</option>
+                    <option value="both">CSV + HTML</option>
                     <option value="csv">CSV only</option>
                     <option value="html">HTML only</option>
                 </select>

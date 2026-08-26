@@ -3793,5 +3793,22 @@ function accounting_module_repair_database(): array
             '`excess_ledger_id` INT UNSIGNED DEFAULT NULL AFTER `excess_mode`');
     });
 
+    $run('A scheduled report can be a real workbook (migration 128)', static function (): void {
+        // The download is now a formatted .xlsx rather than a CSV under an
+        // Excel label, and a schedule has to be able to email the same file:
+        // an emailed copy that looks different from the downloaded one is the
+        // sort of difference somebody eventually has to explain to a client.
+        if (!accounting_repair_table_exists('report_schedules')) {
+            return;
+        }
+        $type = (string) db()->query("SELECT COLUMN_TYPE FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'report_schedules' AND column_name = 'export_format'")
+            ->fetchColumn();
+        if ($type !== '' && !str_contains($type, "'xlsx'")) {
+            db()->exec("ALTER TABLE `report_schedules`
+                MODIFY COLUMN `export_format` ENUM('csv', 'html', 'both', 'xlsx') NOT NULL DEFAULT 'xlsx'");
+        }
+    });
+
     return $errors;
 }

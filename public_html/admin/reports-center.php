@@ -330,7 +330,7 @@ $reportMeta = [
     'currency_code' => trim($currencySymbol, ' .') !== '' ? rtrim(trim($currencySymbol), '. ') : 'NPR',
     'generated_by' => (string) ($currentUser['name'] ?? 'System'),
     'pdf_url' => rc_url(['view' => 'print']),
-    'excel_url' => rc_url(['export' => 'csv']),
+    'excel_url' => rc_url(['export' => 'xlsx']),
 ];
 // The section number ("5." on the Ledger Report) belongs to a BOUND SET of
 // financial statements, where the reader flips between numbered sections. A
@@ -338,6 +338,30 @@ $reportMeta = [
 // only made people ask what the other four were. The bar keeps the report's
 // name, which a printed page does need; the number stays off it.
 $reportNumberedTitle = (string) ($report['title'] ?? $reportLabel);
+
+// ---------------------------------------------------------------------------
+// Excel export.
+// ---------------------------------------------------------------------------
+// "Export Excel" used to hand over the CSV above, which opens in Excel and is
+// not a spreadsheet in any sense that matters: no heading, no borders, columns
+// too narrow to read, and every figure stored as text so the one thing an
+// accountant opens a report to do — select a column and read its total — does
+// nothing. The workbook below is the same report the print view renders, with
+// the same letterhead, the same emphasis on the same rows, and real numbers
+// underneath. The CSV stays for anything that needs to be re-imported.
+if (isset($_GET['export']) && $_GET['export'] === 'xlsx') {
+    require_permission('reports', 'export');
+    require_once __DIR__ . '/../../app/export_engine.php';
+    $workbook = rc_workbook($report, $reportMeta + ['notes' => $reportNotes]);
+    security_event('report_exported', 'success', 'Report exported: ' . $reportLabel . ' (Excel).', $companyId, $userId);
+    export_xlsx(
+        $reportId . '-' . $fromDate . '-to-' . $toDate . '.xlsx',
+        $workbook['rows'],
+        $workbook['sheet'],
+        $workbook['widths'],
+        $workbook['options']
+    );
+}
 
 if (isset($_GET['view']) && $_GET['view'] === 'print') {
     // The print view carries the full report — it must not bypass the export
@@ -592,8 +616,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="rc2-export" data-rc2-export>
             <button type="button" class="rc2-export-btn"><?= icon('download') ?>Export<span class="rc2-caret"><?= icon('chevron') ?></span></button>
             <div class="rc2-export-menu" role="menu">
-                <a role="menuitem" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a>
-                <a role="menuitem" href="<?= e(rc_url(['export' => 'csv'])) ?>" aria-label="Export Excel (CSV)" title="Export Excel (CSV)"><?= icon('analytics') ?></a>
+                <?php // Named in words. Three unlabelled icons in a row left people
+                      // guessing which one was the spreadsheet, and the one they
+                      // guessed was the CSV. ?>
+                <a role="menuitem" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>" title="Opens a print view your browser saves as PDF"><?= icon('documents') ?>Export PDF</a>
+                <a role="menuitem" href="<?= e(rc_url(['export' => 'xlsx'])) ?>" title="Formatted workbook with headings, borders and real figures"><?= icon('analytics') ?>Export Excel (.xlsx)</a>
+                <a role="menuitem" href="<?= e(rc_url(['export' => 'csv'])) ?>" title="Plain comma-separated data, for re-importing elsewhere"><?= icon('download') ?>Export CSV</a>
                 <a role="menuitem" target="_blank" href="<?= e(rc_url(['view' => 'print'])) ?>"><?= icon('receipt-voucher') ?>Print Report</a>
                 <a role="menuitem" href="<?= e(url('admin/report-schedules.php?report_key=' . urlencode($reportId))) ?>"><?= icon('calendar') ?>Schedule Reports</a>
                 <a role="menuitem" href="<?= e(rc_url($compareEnabled ? ['compare' => null, 'cfrom' => null, 'cto' => null] : ['compare' => '1'])) ?>"><?= icon('reconcile') ?>Compare Period: <?= $compareEnabled ? 'On' : 'Off' ?></a>

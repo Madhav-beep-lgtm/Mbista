@@ -114,10 +114,25 @@ function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options 
     $sheetsXml = '';
     $sheetRelsXml = '';
     $contentTypesXml = '';
+    // THE HEADING HAS TO REPRINT ON PAGE TWO. A statement that runs to four
+    // pages is read on all four, and pages two to four of a bare grid of
+    // figures cannot be read at all — nobody can say which column is Opening
+    // Dr. and which is Closing Cr. Print_Titles is how a workbook says "these
+    // rows are the heading", and Excel repeats them at the top of every page.
+    $repeatRows = max(0, (int) ($options['print']['repeat_rows'] ?? 0));
+    $definedNamesXml = '';
     foreach ($sheetEntries as $entry) {
         $sheetsXml .= '<sheet name="' . $xml($entry['name']) . '" sheetId="' . $entry['id'] . '" r:id="rId' . $entry['id'] . '"/>';
         $sheetRelsXml .= '<Relationship Id="rId' . $entry['id'] . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' . $entry['id'] . '.xml"/>';
         $contentTypesXml .= '<Override PartName="/xl/worksheets/sheet' . $entry['id'] . '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+        if ($repeatRows > 0) {
+            // A sheet name is quoted in a formula, and an apostrophe inside it
+            // is doubled — "Ram's Books" otherwise closes the quote early and
+            // Excel calls the whole workbook corrupt.
+            $quoted = "'" . str_replace("'", "''", $entry['name']) . "'";
+            $definedNamesXml .= '<definedName name="_xlnm.Print_Titles" localSheetId="' . ($entry['id'] - 1) . '">'
+                . $xml($quoted) . '!$1:$' . $repeatRows . '</definedName>';
+        }
     }
     // The styles relationship id follows the sheets, so it cannot collide with
     // a worksheet the way a hard-coded rId2 would once there are two of them.
@@ -138,68 +153,15 @@ function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options 
             . '</Relationships>',
         'xl/workbook.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            . '<sheets>' . $sheetsXml . '</sheets></workbook>',
+            . '<sheets>' . $sheetsXml . '</sheets>'
+            . ($definedNamesXml !== '' ? '<definedNames>' . $definedNamesXml . '</definedNames>' : '')
+            . '</workbook>',
         'xl/_rels/workbook.xml.rels' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             . $sheetRelsXml
             . '<Relationship Id="' . $stylesRid . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
             . '</Relationships>',
-        // THE WORKBOOK'S OWN FORMATS. A spreadsheet of bare digits is not a
-        // report: 310649022.2 in a narrow column tells a reader nothing they can
-        // check, and the same figure as 310,649,022.20 tells them everything.
-        // Money to two places, weights to four — the places the trade actually
-        // keeps them in — counts with a thousands separator and none after the
-        // point, and every figure right-aligned so the columns line up on the
-        // decimal the way a ledger does.
-        //
-        // Style indexes are positional and the worksheet writer knows them by
-        // number, so they are only ever APPENDED to. Inserting one in the middle
-        // silently restyles every cell after it.
-        //   0 plain          1 header         2 body text
-        //   3 body money     4 body weight    5 body count
-        //   6 total text     7 total money    8 total weight   9 total count
-        'xl/styles.xml' => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . '<numFmts count="3"><numFmt numFmtId="164" formatCode="#,##0.00"/>'
-            . '<numFmt numFmtId="165" formatCode="#,##0.0000"/><numFmt numFmtId="166" formatCode="#,##0"/></numFmts>'
-            . '<fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font>'
-            . '<font><b/><sz val="14"/><name val="Calibri"/></font><font><sz val="10"/><color rgb="FF667085"/><name val="Calibri"/></font></fonts>'
-            . '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
-            . '<fill><patternFill patternType="solid"><fgColor rgb="FFF5E7C7"/><bgColor indexed="64"/></patternFill></fill>'
-            . '<fill><patternFill patternType="solid"><fgColor rgb="FFEFF3F0"/><bgColor indexed="64"/></patternFill></fill></fills>'
-            // EVERY CELL IS BOXED, in a line dark enough to see. The grid was
-            // drawn in FFD0D5DD, which is a hairline on a screen and nothing at
-            // all on paper — the sheet read as loose columns of figures with no
-            // visible rows, which is exactly what makes a printed register hard
-            // to follow across. Black thin is what Excel's own All Borders does,
-            // and it is what a ledger has always looked like.
-            //
-            // The totals row keeps a double rule above it. That is the one line
-            // on the sheet that has to be seen without being looked for.
-            . '<borders count="3"><border/><border><left style="thin"><color rgb="FF000000"/></left><right style="thin"><color rgb="FF000000"/></right>'
-            . '<top style="thin"><color rgb="FF000000"/></top><bottom style="thin"><color rgb="FF000000"/></bottom></border>'
-            . '<border><left style="thin"><color rgb="FF000000"/></left><right style="thin"><color rgb="FF000000"/></right>'
-            . '<top style="double"><color rgb="FF000000"/></top><bottom style="thin"><color rgb="FF000000"/></bottom></border></borders>'
-            . '<cellStyleXfs count="1"><xf/></cellStyleXfs>'
-            . '<cellXfs count="13">'
-            . '<xf xfId="0"/>'
-            . '<xf xfId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
-            . '<xf xfId="0" borderId="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
-            . '<xf xfId="0" numFmtId="164" borderId="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
-            . '<xf xfId="0" numFmtId="165" borderId="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
-            . '<xf xfId="0" numFmtId="166" borderId="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
-            . '<xf xfId="0" fontId="1" fillId="3" borderId="2" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
-            . '<xf xfId="0" fontId="1" fillId="3" numFmtId="164" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
-            . '<xf xfId="0" fontId="1" fillId="3" numFmtId="165" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
-            . '<xf xfId="0" fontId="1" fillId="3" numFmtId="166" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>'
-            // 10 the report's own name, 11 the organisation, 12 a meta line.
-            // No borders on any of them: a title is not a table cell, and boxing
-            // it makes the sheet look like the header row belongs to the data.
-            . '<xf xfId="0" fontId="2" applyFont="1"/>'
-            . '<xf xfId="0" fontId="1" applyFont="1"/>'
-            . '<xf xfId="0" fontId="3" applyFont="1"/>'
-            . '</cellXfs>'
-            . '</styleSheet>',
+        'xl/styles.xml' => xlsx_styles_xml(),
     ] + $sheetXmls;
 
     $tmp = tempnam(sys_get_temp_dir(), 'xlsx');
@@ -221,6 +183,203 @@ function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options 
     return $bytes;
 }
 
+/**
+ * THE WORKBOOK'S OWN FORMATS. A spreadsheet of bare digits is not a report:
+ * 310649022.2 in a narrow column tells a reader nothing they can check, and
+ * the same figure as 310,649,022.20 tells them everything. Money to two
+ * places, weights to four — the places the trade actually keeps them in —
+ * counts with a thousands separator and none after the point, and every
+ * figure right-aligned so the columns line up on the decimal the way a
+ * ledger does.
+ *
+ * Style indexes are positional and the worksheet writer knows them by number,
+ * so they are only ever APPENDED to. Inserting one in the middle silently
+ * restyles every cell after it.
+ *
+ * The flat block, 0-12, is what a register export uses:
+ *   0 plain          1 header         2 body text
+ *   3 body money     4 body weight    5 body count
+ *   6 total text     7 total money    8 total weight   9 total count
+ *   10 report name   11 organisation  12 meta line
+ *
+ * The statement block, 13 and up, is what a financial statement uses, where a
+ * row is not just "body" or "total": a master group heading, a group subtotal
+ * and a ledger line all sit in the same table and have to be told apart at a
+ * glance. Its indexes are laid out by xlsx_statement_style() rather than
+ * written down here, so the two never drift apart.
+ */
+function xlsx_styles_xml(): string
+{
+    $attr = static fn (string $value): string => htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+    $numFmts = [
+        164 => '#,##0.00',
+        165 => '#,##0.0000',
+        166 => '#,##0',
+        // The statement formats print a zero as the dash the statement itself
+        // shows and a negative in the brackets an accountant reads as one,
+        // while the cell underneath stays a number Excel can still add up.
+        167 => '#,##0.00;(#,##0.00);"–"',
+        168 => '#,##0.0000;(#,##0.0000);"–"',
+        169 => '#,##0;(#,##0);"–"',
+    ];
+    $numFmtsXml = '';
+    foreach ($numFmts as $id => $code) {
+        $numFmtsXml .= '<numFmt numFmtId="' . $id . '" formatCode="' . $attr($code) . '"/>';
+    }
+
+    // 0 body, 1 bold, 2 bold 14, 3 grey caption, 4 column heading,
+    // 5 statement emphasis, 6 organisation, 7 statement body.
+    $fonts = [
+        '<font><sz val="11"/><name val="Calibri"/></font>',
+        '<font><b/><sz val="11"/><name val="Calibri"/></font>',
+        '<font><b/><sz val="14"/><name val="Calibri"/></font>',
+        '<font><sz val="10"/><color rgb="FF667085"/><name val="Calibri"/></font>',
+        '<font><b/><sz val="10.5"/><color rgb="FF16325D"/><name val="Calibri"/></font>',
+        '<font><b/><sz val="11"/><color rgb="FF16325D"/><name val="Calibri"/></font>',
+        '<font><b/><sz val="13"/><color rgb="FF16325D"/><name val="Calibri"/></font>',
+        '<font><sz val="11"/><color rgb="FF1F2937"/><name val="Calibri"/></font>',
+    ];
+
+    // 4, 5 and 6 are the three tints the printed statement already uses, so a
+    // report opened in Excel and the same report on paper are recognisably the
+    // same document.
+    $fills = [
+        '<fill><patternFill patternType="none"/></fill>',
+        '<fill><patternFill patternType="gray125"/></fill>',
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFF5E7C7"/><bgColor indexed="64"/></patternFill></fill>',
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFEFF3F0"/><bgColor indexed="64"/></patternFill></fill>',
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFF1F5FB"/><bgColor indexed="64"/></patternFill></fill>',
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFF6F8FC"/><bgColor indexed="64"/></patternFill></fill>',
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFEEF3FA"/><bgColor indexed="64"/></patternFill></fill>',
+    ];
+
+    // EVERY CELL IS BOXED, in a line dark enough to see. The grid was drawn in
+    // FFD0D5DD, which is a hairline on a screen and nothing at all on paper —
+    // the sheet read as loose columns of figures with no visible rows, which is
+    // exactly what makes a printed register hard to follow across. Black thin
+    // is what Excel's own All Borders does, and it is what a ledger has always
+    // looked like.
+    //
+    // The totals row keeps a double rule above it. That is the one line on the
+    // sheet that has to be seen without being looked for. The heading keeps a
+    // medium rule under it, which is the other.
+    $box = '<left style="thin"><color rgb="FF000000"/></left><right style="thin"><color rgb="FF000000"/></right>';
+    $borders = [
+        '<border/>',
+        '<border>' . $box . '<top style="thin"><color rgb="FF000000"/></top><bottom style="thin"><color rgb="FF000000"/></bottom></border>',
+        '<border>' . $box . '<top style="double"><color rgb="FF000000"/></top><bottom style="thin"><color rgb="FF000000"/></bottom></border>',
+        '<border>' . $box . '<top style="thin"><color rgb="FF000000"/></top><bottom style="medium"><color rgb="FF000000"/></bottom></border>',
+    ];
+
+    $xfs = [
+        '<xf xfId="0"/>',
+        '<xf xfId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>',
+        '<xf xfId="0" borderId="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>',
+        '<xf xfId="0" numFmtId="164" borderId="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>',
+        '<xf xfId="0" numFmtId="165" borderId="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>',
+        '<xf xfId="0" numFmtId="166" borderId="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>',
+        '<xf xfId="0" fontId="1" fillId="3" borderId="2" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>',
+        '<xf xfId="0" fontId="1" fillId="3" numFmtId="164" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>',
+        '<xf xfId="0" fontId="1" fillId="3" numFmtId="165" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>',
+        '<xf xfId="0" fontId="1" fillId="3" numFmtId="166" borderId="2" applyFont="1" applyFill="1" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="right"/></xf>',
+        // 10 the report's own name, 11 the organisation, 12 a meta line. No
+        // borders on any of them: a title is not a table cell, and boxing it
+        // makes the sheet look like the header row belongs to the data.
+        '<xf xfId="0" fontId="2" applyFont="1"/>',
+        '<xf xfId="0" fontId="1" applyFont="1"/>',
+        '<xf xfId="0" fontId="3" applyFont="1"/>',
+    ];
+
+    // 13-16: the letterhead, centred across the width of the table because a
+    // statement's heading belongs over the whole statement and not over column A.
+    $centred = '<alignment horizontal="center" vertical="center"/>';
+    $xfs[] = '<xf xfId="0" fontId="6" applyFont="1" applyAlignment="1">' . $centred . '</xf>';
+    $xfs[] = '<xf xfId="0" fontId="2" applyFont="1" applyAlignment="1">' . $centred . '</xf>';
+    $xfs[] = '<xf xfId="0" fontId="5" applyFont="1" applyAlignment="1">' . $centred . '</xf>';
+    $xfs[] = '<xf xfId="0" fontId="3" applyFont="1" applyAlignment="1">' . $centred . '</xf>';
+
+    // 17-19: the column heading, which wraps rather than truncating — "Opening
+    // Balance Dr." has to be readable without widening the column to fit it.
+    foreach (['left', 'right', 'center'] as $align) {
+        $xfs[] = '<xf xfId="0" fontId="4" fillId="4" borderId="3" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">'
+            . '<alignment horizontal="' . $align . '" vertical="center" wrapText="1"/></xf>';
+    }
+
+    // 20 and up: four bands of nine. See xlsx_statement_style() for the order —
+    // it is the only thing that should ever compute one of these indexes.
+    foreach (XLSX_STATEMENT_BANDS as $band) {
+        $common = ' fontId="' . $band[0] . '" applyFont="1"'
+            . ($band[1] > 0 ? ' fillId="' . $band[1] . '" applyFill="1"' : '')
+            . ' borderId="' . $band[2] . '" applyBorder="1" applyAlignment="1"';
+        for ($indent = 0; $indent <= 3; $indent++) {
+            $xfs[] = '<xf xfId="0"' . $common . '><alignment horizontal="left" vertical="center"'
+                . ($indent > 0 ? ' indent="' . $indent . '"' : '') . '/></xf>';
+        }
+        $xfs[] = '<xf xfId="0"' . $common . '><alignment horizontal="right" vertical="center"/></xf>';
+        $xfs[] = '<xf xfId="0"' . $common . '>' . $centred . '</xf>';
+        foreach ([167, 168, 169] as $numFmtId) {
+            $xfs[] = '<xf xfId="0" numFmtId="' . $numFmtId . '" applyNumberFormat="1"' . $common
+                . '><alignment horizontal="right" vertical="center"/></xf>';
+        }
+    }
+
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        . '<numFmts count="' . count($numFmts) . '">' . $numFmtsXml . '</numFmts>'
+        . '<fonts count="' . count($fonts) . '">' . implode('', $fonts) . '</fonts>'
+        . '<fills count="' . count($fills) . '">' . implode('', $fills) . '</fills>'
+        . '<borders count="' . count($borders) . '">' . implode('', $borders) . '</borders>'
+        . '<cellStyleXfs count="1"><xf/></cellStyleXfs>'
+        . '<cellXfs count="' . count($xfs) . '">' . implode('', $xfs) . '</cellXfs>'
+        . '</styleSheet>';
+}
+
+/** [fontId, fillId, borderId] for body, bold, section and total rows. */
+const XLSX_STATEMENT_BANDS = [
+    'body' => [7, 0, 1],
+    'bold' => [5, 0, 1],
+    'section' => [5, 5, 1],
+    'total' => [5, 6, 2],
+];
+
+/** Where the statement block starts, and how wide one band of it is. */
+const XLSX_STATEMENT_FIRST = 20;
+const XLSX_STATEMENT_BAND_SIZE = 9;
+
+/**
+ * The style index for one cell of a statement.
+ *
+ * $kind is what the ROW is — 'company', 'title', 'entity' and 'meta' for the
+ * letterhead, 'header' for the column heading, and 'body', 'bold', 'section'
+ * or 'total' for a line of the table. $format is what the COLUMN holds, and
+ * $indent is how far down the chart of accounts the line sits, which is the
+ * only thing that tells a reader a ledger belongs to the group above it.
+ */
+function xlsx_statement_style(string $kind, string $format = 'text', string $align = 'left', int $indent = 0): int
+{
+    switch ($kind) {
+        case 'company': return 13;
+        case 'title': return 14;
+        case 'entity': return 15;
+        case 'meta': return 16;
+        case 'header': return $align === 'right' ? 18 : ($align === 'center' ? 19 : 17);
+    }
+
+    $band = array_search($kind, array_keys(XLSX_STATEMENT_BANDS), true);
+    if ($band === false) {
+        $band = 0;
+    }
+    $offset = match ($format) {
+        'money' => 6,
+        'weight' => 7,
+        'count' => 8,
+        default => $align === 'right' ? 4 : ($align === 'center' ? 5 : max(0, min(3, $indent))),
+    };
+
+    return XLSX_STATEMENT_FIRST + ((int) $band * XLSX_STATEMENT_BAND_SIZE) + $offset;
+}
+
 /** One worksheet's XML from its rows. */
 function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): string
 {
@@ -235,6 +394,18 @@ function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): stri
     // and everything that used to assume row 1 — the freeze, the filter, the
     // header styling — now asks this instead.
     $headerRowIndex = max(0, (int) ($options['header_row'] ?? 0));
+
+    // A STATEMENT SAYS WHAT EACH ROW IS. A register can work out a row's style
+    // from its position — first row heading, last row total, everything else
+    // body — but a trial balance cannot: a master heading, a group subtotal and
+    // a ledger line are interleaved all the way down and only the caller knows
+    // which is which. When row_kinds is given it decides, and the positional
+    // rules above are left alone for every caller that does not pass it.
+    $rowKinds = (array) ($options['row_kinds'] ?? []);
+    $statement = $rowKinds !== [];
+    $columnAligns = (array) ($options['column_aligns'] ?? []);
+    $rowAligns = (array) ($options['row_aligns'] ?? []);
+    $rowIndents = (array) ($options['row_indents'] ?? []);
     foreach (array_values($rows) as $rowIndex => $row) {
         $cellsXml = '';
         foreach (array_values((array) $row) as $columnIndex => $value) {
@@ -243,7 +414,26 @@ function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): stri
             // Header, totals band, or ordinary body — and within the last two,
             // the column's own kind decides how the figure is written.
             $styleId = 2;
-            if ($rowIndex < $headerRowIndex) {
+            $forceText = false;
+            if ($statement) {
+                $rowKind = (string) ($rowKinds[$rowIndex] ?? 'body');
+                if ($rowKind === 'blank') {
+                    // Nothing at all, not even an empty boxed cell: the gap
+                    // between the letterhead and the table is what makes the
+                    // table read as a table.
+                    continue;
+                }
+                $align = (string) ($rowAligns[$rowIndex][$columnIndex] ?? $columnAligns[$columnIndex] ?? 'left');
+                $format = (string) ($columnFormats[$columnIndex] ?? 'text');
+                $indent = isset($rowIndents[$rowIndex]) && (int) ($rowIndents[$rowIndex][0] ?? -1) === $columnIndex
+                    ? (int) ($rowIndents[$rowIndex][1] ?? 0)
+                    : 0;
+                $styleId = xlsx_statement_style($rowKind, $format, $align, $indent);
+                // A LEDGER CODE IS NOT A QUANTITY. Written as a number, 0101
+                // opens as 101 and the account can no longer be found by the
+                // code printed beside it on every other copy of the report.
+                $forceText = $format === 'text';
+            } elseif ($rowIndex < $headerRowIndex) {
                 // The title block. Row 0 is the report's name, row 1 the
                 // organisation, and everything after is a label/value line.
                 $styleId = $rowIndex === 0 ? 10 : ($rowIndex === 1 ? 11 : 12);
@@ -274,13 +464,15 @@ function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): stri
             // A numeric string is written as a number so Excel can total it;
             // anything else is an inline string, which also neutralises the
             // formula-injection that a leading = would otherwise cause.
-            if (preg_match('/^-?\d+(\.\d+)?$/', $text) === 1) {
+            if (!$forceText && preg_match('/^-?\d+(\.\d+)?$/', $text) === 1) {
                 $cellsXml .= '<c r="' . $ref . '"' . $style . '><v>' . $text . '</v></c>';
             } else {
                 $cellsXml .= '<c r="' . $ref . '"' . $style . ' t="inlineStr"><is><t xml:space="preserve">' . $xml($text) . '</t></is></c>';
             }
         }
-        $rowsXml .= '<row r="' . ($rowIndex + 1) . '"' . ($styledTable && $rowIndex === $headerRowIndex ? ' ht="24" customHeight="1"' : '')
+        $tallRow = $styledTable
+            && ($statement ? (string) ($rowKinds[$rowIndex] ?? '') === 'header' : $rowIndex === $headerRowIndex);
+        $rowsXml .= '<row r="' . ($rowIndex + 1) . '"' . ($tallRow ? ' ht="24" customHeight="1"' : '')
             . '>' . $cellsXml . '</row>';
     }
 
@@ -296,16 +488,46 @@ function xlsx_worksheet_xml(array $rows, array $colWidths, array $options): stri
         $colsXml = '<cols><col min="1" max="' . $maxColumns . '" width="18" customWidth="1"/></cols>';
     }
 
+    // The letterhead is one heading spread over the width of the table, not a
+    // word in column A and seven empty cells beside it.
+    $mergesXml = '';
+    $merges = array_values(array_filter((array) ($options['merges'] ?? [])));
+    foreach ($merges as $ref) {
+        $mergesXml .= '<mergeCell ref="' . $xml((string) $ref) . '"/>';
+    }
+
+    // A REPORT IS PRINTED. Left to itself Excel breaks a wide statement down
+    // the middle and prints the last three columns on their own sheets of
+    // paper, which is how a balance sheet ends up unreadable in a folder.
+    // Fitting to one page WIDE and as many pages long as it takes is what a
+    // person does by hand every time before they press print.
+    $print = (array) ($options['print'] ?? []);
+    $pageXml = '';
+    $sheetPrXml = '';
+    if ($print !== []) {
+        $sheetPrXml = '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>';
+        $pageXml = '<printOptions horizontalCentered="1"/>'
+            . '<pageMargins left="0.35" right="0.35" top="0.5" bottom="0.5" header="0.25" footer="0.25"/>'
+            . '<pageSetup paperSize="9" orientation="' . (!empty($print['landscape']) ? 'landscape' : 'portrait')
+            . '" fitToWidth="1" fitToHeight="0"/>'
+            // Page 3 of 7 in the footer, because a dropped page in a printed
+            // set is otherwise found only by someone re-adding the totals.
+            . '<headerFooter><oddFooter>&amp;LPage &amp;P of &amp;N&amp;RPrinted &amp;D</oddFooter></headerFooter>';
+    }
+
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        . $sheetPrXml
         . (!empty($options['freeze_header'])
-            ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="' . ($headerRowIndex + 1)
+            ? '<sheetViews><sheetView showGridLines="' . ($statement ? '0' : '1') . '" workbookViewId="0"><pane ySplit="' . ($headerRowIndex + 1)
                 . '" topLeftCell="A' . ($headerRowIndex + 2) . '" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
-            : '')
+            : ($statement ? '<sheetViews><sheetView showGridLines="0" workbookViewId="0"/></sheetViews>' : ''))
         . $colsXml . '<sheetData>' . $rowsXml . '</sheetData>'
         . (!empty($options['auto_filter']) && $maxColumns > 0
             ? '<autoFilter ref="A' . ($headerRowIndex + 1) . ':' . xlsx_column_letters($maxColumns - 1) . max(1, count($rows)) . '"/>'
             : '')
+        . ($mergesXml !== '' ? '<mergeCells count="' . count($merges) . '">' . $mergesXml . '</mergeCells>' : '')
+        . $pageXml
         . '</worksheet>';
 }
 

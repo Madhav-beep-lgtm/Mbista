@@ -109,7 +109,33 @@ foreach ($due as $schedule) {
         if ($format === 'csv' || $format === 'both') {
             $attachments[] = ['name' => $reportKey . '-' . $from . '-to-' . $to . '.csv', 'mime' => 'text/csv', 'content' => $csv];
         }
-        $inner = ($format === 'csv') ? '<p>The scheduled report is attached as CSV.</p>' . $html : $html;
+        // The emailed copy is the same report as the downloaded one, so it gets
+        // the same workbook — letterhead, boxed table, bold headings and real
+        // numbers — rather than a CSV somebody has to reformat before they can
+        // forward it on.
+        if ($format === 'xlsx') {
+            require_once __DIR__ . '/../app/export_engine.php';
+            $book = rc_workbook($report, [
+                'report_label' => $reportLabel,
+                'company_name' => $companyName,
+                'from' => $from,
+                'to' => $to,
+                'fiscal_label' => (string) (fiscal_year_for_date($scopeCompanyId, $to)['label'] ?? ''),
+                'branch' => 'Head Office',
+                'currency_code' => rtrim(trim(site_currency_symbol()), '. ') ?: 'NPR',
+                'generated_by' => 'Scheduled delivery',
+            ]);
+            $attachments[] = [
+                'name' => $reportKey . '-' . $from . '-to-' . $to . '.xlsx',
+                'mime' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'content' => xlsx_build($book['rows'], $book['sheet'], $book['widths'], $book['options']),
+            ];
+        }
+        $inner = match ($format) {
+            'csv' => '<p>The scheduled report is attached as CSV.</p>' . $html,
+            'xlsx' => '<p>The scheduled report is attached as an Excel workbook.</p>' . $html,
+            default => $html,
+        };
         $body = function_exists('branded_email_html') ? branded_email_html($reportLabel, $inner) : $inner;
 
         $subject = $reportLabel . ' · ' . $companyName . ' · ' . date('d M Y', strtotime($from)) . ' - ' . date('d M Y', strtotime($to));

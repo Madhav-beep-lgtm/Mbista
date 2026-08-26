@@ -2665,3 +2665,340 @@ function rc_render_report_foot(array $meta): void
     </div>
     <?php
 }
+
+// ---------------------------------------------------------------------------
+// The same statement as a workbook.
+// ---------------------------------------------------------------------------
+/**
+ * Every report on this screen, as a formatted .xlsx instead of a bare grid.
+ *
+ * What went out before was CSV under an Excel label: no letterhead, no boxes,
+ * no bold heading, no column widths, and — the part that actually cost people
+ * time — figures written as the text "1,234.00", which Excel will not add up.
+ * An accountant who wants a subtotal of eleven rows has to retype them.
+ *
+ * The rules are the ones a statement has always followed on paper:
+ *   the LETTERHEAD says whose books, which statement, what period, before
+ *     anything else, because a filed spreadsheet that cannot say what it is
+ *     is not evidence of anything;
+ *   the COLUMN HEADING is bold on a tint with a rule under it, and it repeats
+ *     at the top of every printed page;
+ *   a LEDGER LINE is plain, and indented to sit under the group it belongs to;
+ *   a GROUP or MASTER line is bold, so the eye can find the structure;
+ *   the TOTAL carries a double rule above it, the one line on the sheet that
+ *     has to be seen without being looked for;
+ *   and every FIGURE is a number underneath, formatted the way the report
+ *     prints it, so the column can be summed, sorted and charted.
+ *
+ * @param array $report the shape rc_generate() returns
+ * @param array $meta   the same meta the print view is given, plus optional
+ *                      'notes' rows to reprint below the table
+ * @return array{rows: array, widths: array, options: array, sheet: string}
+ */
+function rc_workbook(array $report, array $meta): array
+{
+    require_once __DIR__ . '/export_engine.php';
+
+    $columns = array_values((array) ($report['columns'] ?? []));
+    $columnCount = max(1, count($columns));
+    $lastLetter = xlsx_column_letters($columnCount - 1);
+
+    $aligns = [];
+    foreach ($columns as $index => $column) {
+        $declared = (string) ($column[1] ?? 'left');
+        $aligns[$index] = in_array($declared, ['right', 'center'], true) ? $declared : 'left';
+    }
+    for ($index = count($columns); $index < $columnCount; $index++) {
+        $aligns[$index] = 'left';
+    }
+
+    $formats = rc_column_formats($report, $aligns);
+
+    $rows = [];
+    $kinds = [];
+    $indents = [];
+    $rowAligns = [];
+    $merges = [];
+    $widthSource = [];
+
+    $push = static function (array $cells, string $kind) use (&$rows, &$kinds, $columnCount): int {
+        $cells = array_slice(array_pad(array_values($cells), $columnCount, ''), 0, $columnCount);
+        $rows[] = $cells;
+        $index = count($rows) - 1;
+        $kinds[$index] = $kind;
+
+        return $index;
+    };
+    // A heading belongs over the whole statement, not over column A.
+    $spread = static function (int $rowIndex) use (&$merges, $lastLetter, $columnCount): void {
+        if ($columnCount > 1) {
+            $merges[] = 'A' . ($rowIndex + 1) . ':' . $lastLetter . ($rowIndex + 1);
+        }
+    };
+
+    // --- Letterhead --------------------------------------------------------
+    $companyName = function_exists('statement_company_name')
+        ? statement_company_name((string) ($meta['company_name'] ?? ''))
+        : (string) ($meta['company_name'] ?? '');
+    if ($companyName !== '') {
+        $spread($push([mb_strtoupper($companyName)], 'company'));
+    }
+    $title = (string) ($report['title'] ?? $meta['report_label'] ?? 'Report');
+    $spread($push([$title], 'title'));
+    if ((string) ($report['entity_line'] ?? '') !== '') {
+        $spread($push([(string) $report['entity_line']], 'entity'));
+    }
+
+    $asAt = (bool) ($report['as_at'] ?? false);
+    $periodLine = $asAt
+        ? 'As at ' . app_date((string) ($meta['to'] ?? ''))
+        : app_date_range((string) ($meta['from'] ?? ''), (string) ($meta['to'] ?? ''));
+    if ((string) ($meta['fiscal_label'] ?? '') !== '') {
+        $periodLine = $meta['fiscal_label'] . '  |  ' . $periodLine;
+    }
+    $spread($push([$periodLine], 'meta'));
+
+    $scope = [];
+    if ((string) ($report['org_label'] ?? '') !== '') {
+        $scope[] = 'Organization Type : ' . $report['org_label'];
+    }
+    $scope[] = 'Branch : ' . (string) ($meta['branch'] ?? 'Head Office');
+    $scope[] = 'Currency : ' . (string) ($meta['currency_code'] ?? 'NPR');
+    $spread($push([implode('   -   ', $scope)], 'meta'));
+    $push([], 'blank');
+
+    // --- Column heading ----------------------------------------------------
+    $headerLabels = [];
+    foreach ($columns as $index => $column) {
+        $headerLabels[$index] = trim(((string) ($column[2] ?? '') !== '' ? $column[2] . ' ' : '') . (string) ($column[0] ?? ''));
+    }
+    $widthSource[] = $headerLabels;
+
+    if (rc_has_group_columns($report)) {
+        // Two tiers: a spanned group band over the columns it covers, and the
+        // ungrouped columns merged down through both so "Code" is not printed
+        // twice or, worse, left floating over an empty cell.
+        $top = array_fill(0, $columnCount, '');
+        $bottom = array_fill(0, $columnCount, '');
+        $topAligns = [];
+        $topRow = count($rows);
+        $bottomRow = $topRow + 1;
+        $index = 0;
+        while ($index < $columnCount) {
+            $group = (string) ($columns[$index][2] ?? '');
+            $letter = xlsx_column_letters($index);
+            if ($group === '') {
+                $top[$index] = (string) ($columns[$index][0] ?? '');
+                $merges[] = $letter . ($topRow + 1) . ':' . $letter . ($bottomRow + 1);
+                $index++;
+                continue;
+            }
+            $span = 1;
+            while ($index + $span < $columnCount && (string) ($columns[$index + $span][2] ?? '') === $group) {
+                $span++;
+            }
+            $top[$index] = $group;
+            $topAligns[$index] = 'center';
+            for ($offset = 0; $offset < $span; $offset++) {
+                $bottom[$index + $offset] = (string) ($columns[$index + $offset][0] ?? '');
+            }
+            if ($span > 1) {
+                $merges[] = $letter . ($topRow + 1) . ':' . xlsx_column_letters($index + $span - 1) . ($topRow + 1);
+            }
+            $index += $span;
+        }
+        $push($top, 'header');
+        $rowAligns[$topRow] = $topAligns;
+        $push($bottom, 'header');
+    } else {
+        $push(array_map(static fn (array $column): string => (string) ($column[0] ?? ''), $columns), 'header');
+    }
+    $headerRowIndex = count($rows) - 1;
+
+    // --- The table itself --------------------------------------------------
+    $hierarchical = false;
+    foreach ((array) ($report['rows'] ?? []) as $reportRow) {
+        $cells = rc_row_cells((array) $reportRow);
+        $style = rc_row_style((array) $reportRow);
+        $rowMeta = rc_row_meta((array) $reportRow);
+        $widthSource[] = array_values((array) $cells);
+
+        $kind = match ($style) {
+            'total' => 'total',
+            'section' => 'section',
+            '' => 'body',
+            default => 'bold',
+        };
+        $index = $push(rc_workbook_cells((array) $cells, $formats), $kind);
+        // Anything but a run of plain lines is structure — a subtotal in the
+        // middle of a profit and loss counts just as much as an indent does.
+        if ($kind !== 'body') {
+            $hierarchical = true;
+        }
+        if (isset($rowMeta['level'])) {
+            $hierarchical = true;
+            $indents[$index] = [(int) ($rowMeta['label_cell'] ?? 0), max(0, min(3, (int) $rowMeta['level']))];
+        }
+    }
+    if ((array) ($report['rows'] ?? []) === []) {
+        $push(['No data for the selected filters.'], 'body');
+    }
+
+    if (($report['totals'] ?? null) !== null) {
+        $widthSource[] = array_values((array) $report['totals']);
+        $push(rc_workbook_cells((array) $report['totals'], $formats), 'total');
+    }
+
+    // --- Notes and provenance ---------------------------------------------
+    $notes = (array) ($meta['notes'] ?? []);
+    if ($notes !== []) {
+        $push([], 'blank');
+        $spread($push(['Notes to Accounts'], 'entity'));
+        foreach ($notes as $note) {
+            $spread($push([trim((string) ($note['note_no'] ?? '')) . '. ' . (string) ($note['body'] ?? '')], 'meta'));
+        }
+    }
+    $push([], 'blank');
+    $spread($push([
+        'Generated On: ' . date('d M Y, h:i A')
+        . '    Generated By: ' . (string) ($meta['generated_by'] ?? 'System'),
+    ], 'meta'));
+
+    // Measured from the DATA, before the letterhead goes on top: a report
+    // called "Statement of Profit or Loss for the Period" would otherwise
+    // stretch column A to fit its own name.
+    $widths = export_column_widths($widthSource, 11, 46);
+    // The label column carries the indent as well as the text.
+    if ($indents !== []) {
+        $first = reset($indents);
+        $labelColumn = (int) $first[0];
+        if (isset($widths[$labelColumn])) {
+            $widths[$labelColumn] = min(52.0, $widths[$labelColumn] + 6);
+        }
+    }
+
+    return [
+        'rows' => $rows,
+        'widths' => $widths,
+        'sheet' => mb_substr($title, 0, 31),
+        'options' => [
+            'styled_table' => true,
+            'freeze_header' => true,
+            // Filter arrows on a statement are a trap: hiding one ledger line
+            // leaves its group subtotal and the grand total standing, and the
+            // sheet then shows a column that does not add up to its own foot.
+            // A flat register has no such structure, so it keeps them.
+            'auto_filter' => !$hierarchical,
+            'header_row' => $headerRowIndex,
+            'row_kinds' => $kinds,
+            'row_indents' => $indents,
+            'row_aligns' => $rowAligns,
+            'column_formats' => $formats,
+            'column_aligns' => $aligns,
+            'merges' => $merges,
+            'print' => [
+                'landscape' => $columnCount >= 6,
+                'repeat_rows' => $headerRowIndex + 1,
+            ],
+        ],
+    ];
+}
+
+/**
+ * What each column of a report actually holds.
+ *
+ * Only a right-aligned column is a candidate — the report already decided that
+ * when it declared its columns — and one unparseable value in it (a "12.34%",
+ * an "n/a") keeps the whole column text, because half a column of numbers and
+ * half of text is worse to work with than either. The decimal places decide
+ * the rest: none is a count, one or two is money, more is a weight, which is
+ * how the trade keeps them.
+ */
+function rc_column_formats(array $report, array $aligns): array
+{
+    $bodies = (array) ($report['rows'] ?? []);
+    if (($report['totals'] ?? null) !== null) {
+        $bodies[] = ['cells' => (array) $report['totals']];
+    }
+
+    $formats = [];
+    foreach ($aligns as $column => $align) {
+        if ($align !== 'right') {
+            $formats[$column] = 'text';
+            continue;
+        }
+        $sawNumber = false;
+        $allNumeric = true;
+        $decimals = 0;
+        foreach ($bodies as $row) {
+            $raw = trim((string) (rc_row_cells((array) $row)[$column] ?? ''));
+            if ($raw === '' || $raw === "\xe2\x80\x93" || $raw === '-') {
+                continue;
+            }
+            if (rc_workbook_number($raw) === null) {
+                $allNumeric = false;
+                break;
+            }
+            $sawNumber = true;
+            $point = strrpos($raw, '.');
+            if ($point !== false) {
+                $decimals = max($decimals, strlen(rtrim(substr($raw, $point + 1), ')')));
+            }
+        }
+        if (!$allNumeric || !$sawNumber) {
+            $formats[$column] = 'text';
+            continue;
+        }
+        $formats[$column] = $decimals === 0 ? 'count' : ($decimals <= 2 ? 'money' : 'weight');
+    }
+
+    return $formats;
+}
+
+/**
+ * A formatted figure back as the number it was.
+ *
+ * "1,234.00" is text to Excel and cannot be summed; 1234.0 with a number
+ * format on the cell looks identical and can. Brackets are read as the
+ * negative an accountant means by them.
+ */
+function rc_workbook_number(string $text): ?float
+{
+    $text = trim($text);
+    $negative = false;
+    if (preg_match('/^\((.*)\)$/', $text, $match) === 1) {
+        $negative = true;
+        $text = trim($match[1]);
+    }
+    if ($text === '' || preg_match('/^-?[\d,]+(\.\d+)?$/', $text) !== 1) {
+        return null;
+    }
+    $value = (float) str_replace(',', '', $text);
+
+    return $negative ? -$value : $value;
+}
+
+/** One report row with its figures converted back to numbers. */
+function rc_workbook_cells(array $cells, array $formats): array
+{
+    $out = [];
+    foreach (array_values($cells) as $column => $cell) {
+        $format = (string) ($formats[$column] ?? 'text');
+        if ($format === 'text') {
+            $out[$column] = (string) $cell;
+            continue;
+        }
+        $text = trim((string) $cell);
+        // A dash is how the statement prints a zero, and the number format the
+        // cell carries prints a zero the same way — so it is left empty rather
+        // than written as a 0 that adds nothing but noise to the column.
+        if ($text === '' || $text === "\xe2\x80\x93" || $text === '-') {
+            $out[$column] = '';
+            continue;
+        }
+        $number = rc_workbook_number($text);
+        $out[$column] = $number ?? $text;
+    }
+
+    return $out;
+}
