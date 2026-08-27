@@ -48,7 +48,8 @@ echo "Books are currently kept on the ", strtoupper($method), " system.\n";
 if ($method !== 'periodic') {
     echo "\n  NOTE: the periodic system is not switched on yet, so new postings will still\n";
     echo "  go the perpetual way. Converting history without switching leaves the two\n";
-    echo "  halves of a year disagreeing. Set it under Settings, then convert.\n";
+    echo "  halves of a year disagreeing. Switch it first, under Accounting > Inventory >\n";
+    echo "  Valuation > Inventory accounting system, then convert.\n";
 }
 echo "\n";
 

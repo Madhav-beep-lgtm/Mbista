@@ -905,5 +905,25 @@ ok(str_contains($tradePage, '>Gross wt<') && str_contains($tradePage, '>Fine wt<
     'The register heads its weight columns for what they are');
 ok(str_contains($tradePage, '>Metal value<'),
     '  ...and "Metal" now says Metal value, because that is what the figure is');
+
+echo "\n15. The switch is on a screen, not only in a database row\n";
+// Every piece of this was built and tested and then could not be turned on:
+// inventory_accounting existed only as a row somebody would have to write by
+// hand. Worse, the converter told people to "set it under Settings", pointing
+// at a page that had no such control.
+$invPage = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/accounting-inventory.php');
+ok(str_contains($invPage, "value=\"save_inventory_method\""),
+    'The Inventory page can save the accounting system');
+ok(str_contains($invPage, 'value="periodic"') && str_contains($invPage, 'value="perpetual"'),
+    '  ...offering both, so it can be switched back as easily as forward');
+ok(str_contains($invPage, "require_permission('accounting', 'post')"),
+    '  ...behind the posting right, because this decides what every purchase debits');
+ok(str_contains($invPage, 'inv_resolve_mapping($companyId, $methodPurpose)'),
+    'And it checks the accounts periodic needs are mapped BEFORE the switch, not after the first refusal');
+
+// The converter used to send people to a page that had no such setting.
+$converter = (string) file_get_contents(dirname(__DIR__) . '/deploy/convert-to-periodic.php');
+ok(str_contains($converter, 'Inventory'),
+    'The converter points at the screen that actually carries the switch');
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

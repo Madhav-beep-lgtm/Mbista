@@ -245,6 +245,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
 
+    if ($action === 'save_inventory_method') {
+        // Which of the two systems the books are kept on. Deliberately behind
+        // the same right as posting a voucher: this decides what every future
+        // purchase debits, which is a bookkeeping decision and not a display
+        // preference.
+        require_permission('accounting', 'post');
+        require_once __DIR__ . '/../../app/inventory_valuation.php';
+        $wanted = (string) ($_POST['inventory_accounting'] ?? '') === 'periodic' ? 'periodic' : 'perpetual';
+        $current = inv_accounting_method();
+        if ($wanted !== $current) {
+            db()->prepare('REPLACE INTO settings (setting_key, setting_value) VALUES (:k, :v)')
+                ->execute(['k' => 'inventory_accounting', 'v' => $wanted]);
+            setting('inventory_accounting', '', true);
+            log_activity('inventory', $companyId, 'updated',
+                'Inventory accounting switched from ' . $current . ' to ' . $wanted . '.', $userId);
+            flash('success', $wanted === 'periodic'
+                ? 'Now on the PERIODIC system. New purchases will debit Purchases, and sales will post no cost'
+                    . ' entry. Books already posted the other way are unchanged until they are converted —'
+                    . ' run deploy/convert-to-periodic.php, earliest year first.'
+                : 'Back on the PERPETUAL system. New purchases will debit Inventory and each sale will post'
+                    . ' its own cost of sales.');
+        }
+        redirect('admin/accounting-inventory.php?view=valuation#inventory-method');
+    }
+
     if ($action === 'purge_sample_inventory') {
         // Remove the seeded SMP-* demo inventory (items, movements, layers,
         // their vouchers, sample manufacturing orders) in one consistent
@@ -2293,6 +2318,69 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
         ], $overrides))) . '#valuation-nrv';
     };
     ?>
+    <?php
+    require_once __DIR__ . '/../../app/inventory_valuation.php';
+    $invMethod = inv_accounting_method();
+    $methodMapped = [];
+    foreach (['purchases' => 'Purchases', 'inventory_change' => 'Change in Inventory',
+        'inventory_asset' => 'Inventory Asset'] as $methodPurpose => $methodLabel) {
+        if (!inv_resolve_mapping($companyId, $methodPurpose)) {
+            $methodMapped[] = $methodLabel;
+        }
+    }
+    ?>
+    <section class="mbw-card" id="inventory-method" data-collapsible aria-label="Inventory accounting system">
+        <div class="mbw-card-head">
+            <h2>Inventory accounting system</h2>
+            <div class="mbw-card-tools"><span class="mbw-pill <?= $invMethod === 'periodic' ? 'tone-amber' : 'tone-green' ?>"><?= $invMethod === 'periodic' ? 'Periodic' : 'Perpetual' ?></span></div>
+        </div>
+        <p style="margin:0 0 14px;color:var(--mbw-muted);font-size:13px">
+            Both are accepted practice — IAS 2 governs how inventory is <em>measured</em>, not which system records
+            it. The difference shows on the face of the trial balance.
+        </p>
+        <form method="post" class="workspace-form-grid" style="grid-template-columns:1fr;gap:14px">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_inventory_method">
+            <label style="display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid var(--mbw-border);border-radius:10px;cursor:pointer">
+                <input type="radio" name="inventory_accounting" value="perpetual" <?= $invMethod === 'perpetual' ? 'checked' : '' ?> style="margin-top:4px">
+                <span>
+                    <strong>Perpetual</strong><br>
+                    <small style="color:var(--mbw-muted)">
+                        A purchase debits Inventory; every sale posts its own cost of sales. The ledger always knows
+                        what stock is worth, and the trial balance carries Inventory and Cost of Goods Sold.
+                    </small>
+                </span>
+            </label>
+            <label style="display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid var(--mbw-border);border-radius:10px;cursor:pointer">
+                <input type="radio" name="inventory_accounting" value="periodic" <?= $invMethod === 'periodic' ? 'checked' : '' ?> style="margin-top:4px">
+                <span>
+                    <strong>Periodic — Opening + Purchases − Closing</strong><br>
+                    <small style="color:var(--mbw-muted)">
+                        A purchase debits <strong>Purchases</strong>; a sale posts no cost entry at all. The trial
+                        balance carries opening stock and purchases and carries <strong>neither closing stock nor
+                        cost of sales</strong>, because neither is a ledger balance. Cost of sales is worked out
+                        when the profit and loss is drawn, and closing stock reaches the balance sheet through the
+                        one year-end journal.
+                    </small>
+                </span>
+            </label>
+            <?php if ($methodMapped !== []): ?>
+                <div class="notice">
+                    <strong>Map these before switching:</strong> <?= e(implode(', ', $methodMapped)) ?>.
+                    The periodic system posts to them, and a purchase that cannot find its account will refuse to
+                    post rather than guess.
+                </div>
+            <?php endif; ?>
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+                <small style="color:var(--mbw-muted)">
+                    Switching changes what happens NEXT. Books already posted the other way are untouched until
+                    they are converted, earliest year first.
+                </small>
+                <button type="submit" class="button" data-confirm="Change how every future purchase and sale posts to the ledger?">Save system</button>
+            </div>
+        </form>
+    </section>
+
     <section class="mbw-card" id="valuation-nrv" data-collapsible aria-label="Valuation and NRV">
         <div class="mbw-card-head">
             <h2>Valuation &amp; NRV (IAS 2)</h2>
