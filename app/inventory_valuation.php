@@ -790,7 +790,12 @@ function inv_post_closing_stock_voucher(int $companyId, int $fiscalYearId, ?int 
         INNER JOIN vouchers v ON v.id = ve.voucher_id
         WHERE v.company_id = :cid AND ve.ledger_id = :lid
           AND v.voucher_date <= :end AND v.status = 'posted'
-          AND NOT (v.source_type = 'inventory_closing' AND v.source_id = :fy)");
+          -- COALESCE, not a bare comparison. NULL = 'x' is NULL, NULL AND y is
+          -- NULL, and NOT NULL is still NULL -- which is not true, so every
+          -- voucher with no source_type would be thrown out of the carried
+          -- figure. Most journals somebody typed by hand have none, and the
+          -- closing entry would then be measured against almost nothing.
+          AND NOT (COALESCE(v.source_type, '') = 'inventory_closing' AND v.source_id = :fy)");
     $carriedStmt->execute(['cid' => $companyId, 'lid' => $stockLedgerId, 'end' => $periodEnd, 'fy' => $fiscalYearId]);
     $opening = inv_round_money((float) $carriedStmt->fetchColumn());
     $change = inv_round_money($closing - $opening);

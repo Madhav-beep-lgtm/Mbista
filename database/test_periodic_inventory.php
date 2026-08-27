@@ -611,5 +611,170 @@ require_once dirname(__DIR__) . '/app/hospitality_management_report.php';
 $costNote = (new ReflectionFunction('hospitality_pack_category'))->getDocComment() ?: '';
 ok(function_exists('hospitality_pack_costed_note'),
     'And its costing stays an estimate the reports label, not a posting');
+
+echo "\n11. Converting books that are already posted, and taking it back off\n";
+// The last piece, and the one that touches real client books. Perpetual books
+// are built, restated, read back, then reversed and read back again. The
+// reversal matters as much as the conversion: it is what makes the thing safe
+// to attempt at all.
+require_once dirname(__DIR__) . '/app/periodic_conversion.php';
+
+$cvSuffix = 'PDCV' . substr((string) time(), -5);
+db()->prepare('INSERT INTO companies (name, code, is_active) VALUES (:n, :c, 1)')
+    ->execute(['n' => 'Conversion Co ' . $cvSuffix, 'c' => $cvSuffix]);
+$cvCo = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_default, status)
+    VALUES (:c, '2026-27', '2026-04-01', '2027-03-31', 1, 'open')")->execute(['c' => $cvCo]);
+$cvFy = (int) db()->lastInsertId();
+
+$cvGroups = [];
+$cvLedger = static function (string $name, string $masterKey, string $type) use ($cvCo, &$cvGroups): int {
+    if (!isset($cvGroups[$masterKey])) {
+        db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key) VALUES (:c, :code, :n, :m)')
+            ->execute(['c' => $cvCo, 'code' => coa_next_group_code($cvCo, $masterKey),
+                'n' => ucwords(str_replace('_', ' ', $masterKey)), 'm' => $masterKey]);
+        $cvGroups[$masterKey] = (int) db()->lastInsertId();
+    }
+    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status)
+        VALUES (:c, :g, :code, :n, :t, 'active')")
+        ->execute(['c' => $cvCo, 'g' => $cvGroups[$masterKey],
+            'code' => coa_next_ledger_code($cvCo, $cvGroups[$masterKey]), 'n' => $name, 't' => $type]);
+
+    return (int) db()->lastInsertId();
+};
+
+$cvStock  = $cvLedger('Inventory', 'current_asset', 'asset');
+$cvPurch  = $cvLedger('Purchases', 'purchases', 'expense');
+$cvChange = $cvLedger('Change in inventory', 'purchases', 'revenue');
+$cvCogs   = $cvLedger('Cost of goods sold', 'direct_expense', 'expense');
+$cvCred   = $cvLedger('Sundry creditors', 'current_liability', 'liability');
+$cvEquity = $cvLedger('Opening balance equity', 'equity', 'equity');
+$cvDebtor = $cvLedger('Sundry debtors', 'current_asset', 'asset');
+$cvSales  = $cvLedger('Sales', 'direct_income', 'revenue');
+
+foreach (['inventory_asset' => $cvStock, 'purchases' => $cvPurch, 'inventory_change' => $cvChange,
+    'cogs' => $cvCogs, 'purchase_clearing' => $cvCred, 'opening_equity' => $cvEquity] as $purpose => $ledgerId) {
+    db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, purpose, ledger_id)
+        VALUES (:c, 'global', :p, :l)")->execute(['c' => $cvCo, 'p' => $purpose, 'l' => $ledgerId]);
+}
+inv_mapping_forget();
+
+// An item, and the stock movements that tell the subledger what was a purchase.
+// Opening stock lives on the ITEM, not as a movement. sr_stock_summary seeds
+// its cost layers from opening_qty/opening_amount before replaying anything,
+// and takes its opening snapshot at the first transaction on or after the
+// period start -- so an "opening" transaction dated on day one reads as a
+// purchase made that morning, which is not what it means.
+db()->prepare("INSERT INTO inventory_items (company_id, sku, name, item_type, unit, status,
+        opening_qty, opening_amount)
+    VALUES (:c, 'WIDGET', 'Widget', 'stock', 'pcs', 'active', 20, 200000)")->execute(['c' => $cvCo]);
+$cvItem = (int) db()->lastInsertId();
+$stockTxn = static function (string $type, string $date, float $in, float $out, float $amount)
+    use ($cvCo, $cvFy, $cvItem): void {
+    db()->prepare("INSERT INTO inventory_transactions
+        (company_id, fiscal_year_id, item_id, transaction_type, transaction_date, qty_in, qty_out, rate, amount)
+        VALUES (:c, :f, :i, :t, :d, :qi, :qo, :r, :a)")
+        ->execute(['c' => $cvCo, 'f' => $cvFy, 'i' => $cvItem, 't' => $type, 'd' => $date,
+            'qi' => $in, 'qo' => $out, 'r' => $in > 0 ? $amount / $in : ($out > 0 ? $amount / $out : 0),
+            'a' => $amount]);
+};
+$stockTxn('purchase', '2026-06-10', 90, 0, 900000.0);
+$stockTxn('sale', '2026-12-20', 0, 51, 510000.0);
+
+$cvPost = static function (string $date, string $no, int $dr, int $cr, float $amount) use ($cvCo, $cvFy): int {
+    return (int) create_voucher_with_entries([
+        'company_id' => $cvCo, 'fiscal_year_id' => $cvFy, 'voucher_no' => $no,
+        'voucher_type' => 'journal', 'voucher_date' => $date, 'total_amount' => $amount,
+        'narration' => $no, 'status' => 'posted',
+    ], [
+        ['ledger_id' => $dr, 'entry_type' => 'debit', 'amount' => $amount],
+        ['ledger_id' => $cr, 'entry_type' => 'credit', 'amount' => $amount],
+    ]);
+};
+
+// The books AS THEY WERE KEPT: perpetual. Purchase into stock, cost out of it.
+$cvPost('2026-04-01', 'CV-OPEN', $cvStock, $cvEquity, 200000.0);
+$cvPost('2026-06-10', 'CV-PUR', $cvStock, $cvCred, 900000.0);
+$cvPost('2026-12-20', 'CV-SALE', $cvDebtor, $cvSales, 1200000.0);
+$cvPost('2026-12-20', 'CV-COGS', $cvCogs, $cvStock, 510000.0);
+
+$cvBalance = static function (int $ledgerId) use ($cvCo): float {
+    $stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0)
+        FROM voucher_entries ve INNER JOIN vouchers v ON v.id = ve.voucher_id
+        WHERE v.company_id = :c AND ve.ledger_id = :l AND v.status='posted'");
+    $stmt->execute(['c' => $cvCo, 'l' => $ledgerId]);
+
+    return round((float) $stmt->fetchColumn(), 2);
+};
+
+ok(abs($cvBalance($cvStock) - 590000.0) < 0.01,
+    'Perpetual as kept: stock is 200,000 + 900,000 - 510,000 = 590,000');
+ok(abs($cvBalance($cvCogs) - 510000.0) < 0.01, '  ...and cost of sales is a ledger holding 510,000');
+ok(abs($cvBalance($cvPurch)) < 0.01, '  ...and there is no Purchases balance at all');
+
+with_method('periodic', static function () use ($cvCo, $cvFy, $cvStock, $cvPurch, $cvCogs, $cvChange, $cvBalance): void {
+    // A dry run first, which is what the tool does by default.
+    $plan = periodic_conversion_plan($cvCo, $cvFy);
+    ok($plan['ok'], 'The conversion plans cleanly' . ($plan['ok'] ? '' : ' — ' . $plan['note']));
+    ok(abs($plan['purchases'] - 900000.0) < 0.01,
+        '  ...finding 900,000 of purchases, from the stock records that know what a purchase is');
+    ok(abs($plan['cogs'] - 510000.0) < 0.01, '  ...and 510,000 of posted cost of sales');
+    ok(abs($plan['inventory_after'] - 200000.0) < 0.01,
+        '  ...and works out that stock would land back on its opening 200,000');
+    ok(abs($cvBalance($cvPurch)) < 0.01, 'And planning posted nothing — it is a dry run');
+
+    $done = periodic_conversion_apply($cvCo, $cvFy, null);
+    ok($done['ok'], 'Applying it works' . ($done['ok'] ? '' : ' — ' . $done['note']));
+    ok((int) $done['voucher_id'] > 0, '  ...as ONE journal, leaving every original voucher untouched');
+
+    // The three rules, on books that were perpetual ten seconds ago.
+    ok(abs($cvBalance($cvPurch) - 900000.0) < 0.01,
+        'Purchases now holds the 900,000 that was buried in stock');
+    ok(abs($cvBalance($cvCogs)) < 0.01,
+        'Cost of sales is nought — it is derived now, so it cannot sit in a trial balance');
+    // The restatement puts stock back on its opening 200,000, and the
+    // closing-stock journal that runs with it immediately carries it to the
+    // counted 590,000. Both happen inside apply(), so what is read here is the
+    // end state: a balance sheet showing what is actually on the shelf.
+    ok(abs($cvBalance($cvStock) - 590000.0) < 0.01,
+        'And stock now shows the counted closing figure of 590,000, got '
+            . number_format($cvBalance($cvStock), 2));
+
+    // The closing-stock journal ran with it, so the balance sheet is right.
+    ok((int) ($done['closing_voucher_id'] ?? 0) > 0 || abs((float) ($done['closing_stock'] ?? 0)) > 0.005,
+        'The closing-stock journal ran too, so the balance sheet is not left showing last year');
+
+    $figures = rc_pl_figures($cvCo, '2026-04-01', '2027-03-31');
+    ok(abs($figures['cogs'] - 510000.0) < 0.01,
+        'The profit and loss still says cost of sales is 510,000, got ' . number_format($figures['cogs'], 2));
+    ok(abs($figures['gross_profit'] - 690000.0) < 0.01,
+        '  ...and gross profit is unchanged at 690,000 — the SAME trading, said a different way');
+});
+
+echo "\n12. And it goes back\n";
+// Reversibility is the property that makes converting real books defensible.
+with_method('periodic', static function () use ($cvCo, $cvFy, $cvStock, $cvPurch, $cvCogs, $cvBalance): void {
+    $undone = periodic_conversion_undo($cvCo, $cvFy);
+    ok($undone['ok'] && $undone['removed'] > 0,
+        'The conversion reverses, removing ' . $undone['removed'] . ' journal(s)');
+    ok(abs($cvBalance($cvStock) - 590000.0) < 0.01, 'Stock is back at 590,000');
+    ok(abs($cvBalance($cvCogs) - 510000.0) < 0.01, 'Cost of sales is a ledger again, at 510,000');
+    ok(abs($cvBalance($cvPurch)) < 0.01, 'And Purchases is empty again');
+    ok((int) db()->query("SELECT COUNT(*) FROM vouchers WHERE company_id = {$cvCo}
+        AND voucher_no IN ('CV-OPEN','CV-PUR','CV-SALE','CV-COGS')")->fetchColumn() === 4,
+        'Every original voucher survived both the conversion and the reversal untouched');
+});
+
+foreach (['voucher_entries' => 'voucher_id IN (SELECT id FROM vouchers WHERE company_id = :c)',
+    'vouchers' => 'company_id = :c', 'inventory_transactions' => 'company_id = :c',
+    'inventory_items' => 'company_id = :c', 'inventory_ledger_mappings' => 'company_id = :c',
+    'ledgers' => 'company_id = :c', 'ledger_groups' => 'company_id = :c',
+    'fiscal_years' => 'company_id = :c', 'companies' => 'id = :c'] as $table => $where) {
+    try {
+        db()->prepare("DELETE FROM `{$table}` WHERE {$where}")->execute(['c' => $cvCo]);
+    } catch (Throwable $ignored) {
+    }
+}
+inv_mapping_forget();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
