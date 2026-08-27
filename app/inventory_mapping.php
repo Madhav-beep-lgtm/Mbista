@@ -34,6 +34,13 @@ function inventory_mapping_purposes(): array
         'wip'                  => ['label' => 'Work in Progress', 'expect' => 'asset'],
         'finished_goods'       => ['label' => 'Finished Goods Inventory', 'expect' => 'asset'],
         'cogs'                 => ['label' => 'Cost of Goods Sold', 'expect' => 'expense'],
+        // The periodic pair. `purchases` is what a purchase debits when the
+        // books are kept the trading-account way; `inventory_change` is the
+        // other side of the one year-end journal that brings closing stock on
+        // to the balance sheet.
+        'purchases'            => ['label' => 'Purchases (trading account)', 'expect' => 'expense'],
+        'purchase_returns'     => ['label' => 'Purchase Returns', 'expect' => 'revenue'],
+        'inventory_change'     => ['label' => 'Change in Inventory (closing stock)', 'expect' => 'revenue'],
         'purchase_clearing'    => ['label' => 'Purchase / GRNI Clearing', 'expect' => 'liability'],
         'sales_revenue'        => ['label' => 'Sales Revenue', 'expect' => 'revenue'],
         'inventory_gain'       => ['label' => 'Inventory Gain / Adjustment', 'expect' => 'revenue'],
@@ -73,6 +80,9 @@ function inventory_mapping_plan(): array
         'inventory_gain'       => ['Indirect Income', 'indirect_income'],
         'write_down_reversal'  => ['Indirect Income', 'indirect_income'],
         'cogs'                 => ['Direct Expenses', 'direct_expense'],
+        'purchases'            => ['Purchase Accounts', 'purchases'],
+        'purchase_returns'     => ['Purchase Accounts', 'purchases'],
+        'inventory_change'     => ['Purchase Accounts', 'purchases'],
         'inventory_loss'       => ['Indirect Expenses', 'indirect_expense'],
         'write_down_expense'   => ['Indirect Expenses', 'indirect_expense'],
         'overhead_absorbed'    => ['Direct Expenses', 'direct_expense'],

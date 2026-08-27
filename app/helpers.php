@@ -87,11 +87,24 @@ const LEDGER_MASTERS = [
     'current_asset' => ['label' => 'Current Assets', 'nature' => 'asset', 'sort_order' => 5],
     'direct_income' => ['label' => 'Direct Income', 'nature' => 'revenue', 'sort_order' => 6],
     'indirect_income' => ['label' => 'Indirect Income', 'nature' => 'revenue', 'sort_order' => 7],
-    'direct_expense' => ['label' => 'Direct Expenses', 'nature' => 'expense', 'sort_order' => 8],
+    // A purchase is not an expense and it is not inventory. It is a trading
+    // account debit which, with opening stock and less closing stock, gives the
+    // cost of what was sold. Its NATURE is expense so every report that asks
+    // "is this an expense?" keeps working unchanged; what it gains is a head of
+    // its own, so purchases are no longer filed among wages and rent.
+    'purchases' => [
+        'label' => 'Purchases',
+        'nature' => 'expense',
+        'sort_order' => 8,
+        'suggested_groups' => [
+            'Purchase Accounts',
+        ],
+    ],
+    'direct_expense' => ['label' => 'Direct Expenses', 'nature' => 'expense', 'sort_order' => 9],
     'indirect_expense' => [
         'label' => 'Indirect Expenses',
         'nature' => 'expense',
-        'sort_order' => 9,
+        'sort_order' => 10,
         'suggested_groups' => [
             'Administrative Expenses',
             'Operating/Employee Benefit Expenses',
@@ -7379,6 +7392,8 @@ function provision_client_books(int $clientProfileId): int
         ['EMP_BENEFIT_EXP', 'Employee Benefit Expenses', 'indirect_expense', 0], ['SALES_MKT_EXP', 'Sales and Marketing Expenses', 'indirect_expense', 0],
         ['OTHER_NONOP_EXP', 'Other Non-operating Expenses', 'indirect_expense', 0], ['DIRECT_EXP_GRP', 'Direct Expenses', 'direct_expense', 0],
         ['TAX_EXP_GRP', 'Tax Expenses', 'indirect_expense', 0],
+        ['PURCHASE_GRP', 'Purchase Accounts', 'purchases', 0],
+        ['STOCK_GRP', 'Stock in Hand', 'current_asset', 0],
     ];
     $groupInsert = db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, :name, :mk, :cb, 1)');
     $groupIds = [];
@@ -7392,6 +7407,13 @@ function provision_client_books(int $clientProfileId): int
         ['CASH', 'Cash and bank', 'asset', 'BANK'], ['AR', 'Accounts receivable', 'asset', 'RECEIVABLE'],
         ['AP', 'Accounts payable', 'liability', 'PAYABLE'], ['CAPITAL', 'Owner capital', 'equity', 'SHARE_CAPITAL_GRP'],
         ['SALES', 'Sales / service revenue', 'revenue', 'DIRECT_INCOME_GRP'], ['EXPENSES', 'General expenses', 'expense', 'ADMIN_EXP'],
+        // The trading account, in three ledgers. Purchases collects what was
+        // bought; Purchase Returns takes back what went out again; Stock in
+        // Hand carries the opening figure through the year untouched and is
+        // revalued to the closing figure once, at the year end.
+        ['PURCHASES', 'Purchases', 'expense', 'PURCHASE_GRP'],
+        ['PURCH_RET', 'Purchase returns', 'revenue', 'PURCHASE_GRP'],
+        ['STOCK_HAND', 'Stock in hand', 'asset', 'STOCK_GRP'],
     ];
     $ledgerInsert = db()->prepare('INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:cid, :gid, :code, :name, :type, 1, \'active\')');
     $ledgerIds = [];

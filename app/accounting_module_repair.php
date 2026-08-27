@@ -3886,5 +3886,29 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Purchases is a head of its own in the chart of accounts (migration 132)', static function (): void {
+        // A purchase is not an expense and it is not inventory. Filed under
+        // Direct Expenses it reads as money spent and gone; filed under
+        // Inventory it never passes through the profit and loss at all. The
+        // head is added here; nothing is reclassified into it, because moving a
+        // company's existing ledgers is a deliberate act and not a repair.
+        if (!accounting_repair_table_exists('ledger_groups')) {
+            return;
+        }
+        $type = (string) db()->query("SELECT COLUMN_TYPE FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'ledger_groups' AND column_name = 'master_key'")
+            ->fetchColumn();
+        if ($type === '' || str_contains($type, "'purchases'")) {
+            return;
+        }
+        db()->exec("ALTER TABLE `ledger_groups`
+            MODIFY COLUMN `master_key` ENUM(
+                'equity', 'non_current_liability', 'current_liability',
+                'non_current_asset', 'current_asset',
+                'direct_income', 'indirect_income',
+                'purchases', 'direct_expense', 'indirect_expense'
+            ) NOT NULL");
+    });
+
     return $errors;
 }

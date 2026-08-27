@@ -1545,6 +1545,34 @@ function inv_void_allowance_rows_for_txn(int $companyId, int $txnId, ?int $fisca
 }
 
 /**
+ * Which of the two recognised inventory systems the books are kept on.
+ *
+ *   perpetual  every movement hits the general ledger as it happens. Inventory
+ *              is an asset that rises on purchase and falls on sale, and cost
+ *              of sales is posted sale by sale, so the ledger always knows what
+ *              stock is worth.
+ *
+ *   periodic   purchases go to a Purchases account in the trading account and
+ *              stock is left alone until the year end, when it is counted and
+ *              one closing-stock journal is passed. Cost of sales is not a
+ *              ledger at all: it is Opening + Purchases - Closing, worked out
+ *              when the statements are drawn.
+ *
+ * Both are accepted practice -- IAS 2 governs how inventory is MEASURED, not
+ * which system records it -- and the difference shows on the face of the trial
+ * balance. Under periodic a trial balance carries opening stock and purchases,
+ * and carries neither closing stock nor cost of sales, because neither is a
+ * ledger balance. That is the test of whether this is working.
+ *
+ * Global rather than per company: a group whose books are kept two different
+ * ways cannot be consolidated without restating one of them first.
+ */
+function inv_accounting_method(): string
+{
+    return setting('inventory_accounting', 'perpetual') === 'periodic' ? 'periodic' : 'perpetual';
+}
+
+/**
  * The Dr/Cr posting plan for a stock movement (section E posting matrix).
  * Direction is system-derived; $direction 'in'|'out' only matters for
  * adjustments (which can go either way). Returns
@@ -1554,6 +1582,10 @@ function inv_void_allowance_rows_for_txn(int $companyId, int $txnId, ?int $fisca
  */
 function inv_movement_posting_plan(string $type, string $direction): ?array
 {
+    if (inv_accounting_method() === 'periodic') {
+        return inv_periodic_posting_plan($type);
+    }
+
     switch ($type) {
         case 'opening':
             return ['debit' => 'inventory_asset', 'credit' => 'opening_equity'];
@@ -1725,6 +1757,52 @@ function inv_post_movement_voucher(int $companyId, ?int $fiscalYearId, int $txnI
 }
 
 /**
+ * The periodic posting matrix: what a movement does to the general ledger when
+ * the books are kept the trading-account way.
+ *
+ * The striking thing is how little there is. Only a purchase, and a purchase
+ * going back, touch the ledger. Every other movement -- a sale, an issue to
+ * production, a breakage, a transfer -- moves QUANTITY and leaves the ledger
+ * alone, because under this system the ledger carries no running stock figure
+ * to move. All of it is caught in one stroke at the year end, when stock is
+ * counted and revalued and the difference lands in Change in Inventory.
+ *
+ * A sale posting no cost entry looks alarming the first time. It is correct:
+ * cost of sales does not exist as a ledger here. It is Opening + Purchases -
+ * Closing, worked out when the profit and loss is drawn -- which is exactly
+ * why a periodic trial balance shows no cost of sales line. There is nothing
+ * to show.
+ *
+ * Losses are not posted separately either. A breakage makes the closing count
+ * smaller, which makes cost of sales bigger, which is where the loss lands.
+ * Reporting it as its own line is the stock reports' job; giving it a ledger
+ * entry as well would take it out of the trading account twice.
+ */
+function inv_periodic_posting_plan(string $type): ?array
+{
+    return match ($type) {
+        // Opening stock IS a balance sheet asset at the start of the year --
+        // last year's closing, brought forward. It is the one stock figure the
+        // ledger carries, and it sits still until the year end.
+        'opening' => ['debit' => 'inventory_asset', 'credit' => 'opening_equity'],
+        'purchase', 'purchase_receipt' => ['debit' => 'purchases', 'credit' => 'purchase_clearing'],
+        'purchase_return' => ['debit' => 'purchase_clearing', 'credit' => 'purchase_returns'],
+        default => null,
+    };
+}
+
+/** The purposes a movement needs mapped, under whichever system is in force. */
+function inv_periodic_transaction_purposes(string $type): array
+{
+    return match ($type) {
+        'opening' => ['inventory_asset', 'opening_equity'],
+        'purchase', 'purchase_receipt' => ['purchases', 'purchase_clearing'],
+        'purchase_return' => ['purchase_clearing', 'purchase_returns'],
+        default => [],
+    };
+}
+
+/**
  * The purposes each transaction type needs mapped before it can post.
  * Direction is derived by the engine; this table also documents the posting
  * matrix (Dr/Cr) used by the posting layer. Kept in exact sync with
@@ -1734,6 +1812,10 @@ function inv_post_movement_voucher(int $companyId, ?int $fiscalYearId, int $txnI
  */
 function inv_transaction_purposes(string $transactionType): array
 {
+    if (inv_accounting_method() === 'periodic') {
+        return inv_periodic_transaction_purposes($transactionType);
+    }
+
     return match ($transactionType) {
         'opening'                 => ['inventory_asset', 'opening_equity'],
         'purchase', 'purchase_receipt' => ['inventory_asset', 'purchase_clearing'],
