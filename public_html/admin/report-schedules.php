@@ -156,11 +156,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </select>
             </label>
             <label>Format
+                <?php // The report table is in the BODY of every scheduled email
+                      // whatever is chosen here, so this picks the file that
+                      // arrives attached -- the only thing that actually differs. ?>
                 <select name="export_format">
-                    <option value="xlsx" selected>Excel (.xlsx) + HTML</option>
-                    <option value="both">CSV + HTML</option>
-                    <option value="csv">CSV only</option>
-                    <option value="html">HTML only</option>
+                    <option value="xlsx" selected>Excel (.xlsx)</option>
+                    <option value="pdf">PDF</option>
+                    <option value="csv">CSV</option>
                 </select>
             </label>
         </div>

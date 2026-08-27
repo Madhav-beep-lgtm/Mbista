@@ -3835,5 +3835,29 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('A schedule can be delivered as PDF, and HTML stops pretending to be a format (migration 130)', static function (): void {
+        // Three of the four old choices described HTML, and none of them were
+        // choices: the runner puts the report table in the BODY of every
+        // scheduled email whatever the format says. What actually differed was
+        // the file attached, so that is what the list now offers -- with PDF
+        // added, because a client sent a management pack usually wants to read
+        // it rather than open it in a spreadsheet.
+        if (!accounting_repair_table_exists('report_schedules')) {
+            return;
+        }
+        $type = (string) db()->query("SELECT COLUMN_TYPE FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'report_schedules' AND column_name = 'export_format'")
+            ->fetchColumn();
+        if ($type === '' || str_contains($type, "'pdf'")) {
+            return;
+        }
+        // Move the rows BEFORE narrowing the column, or MySQL quietly turns a
+        // value the new enum does not list into an empty string.
+        db()->exec("UPDATE `report_schedules` SET `export_format` = 'csv' WHERE `export_format` = 'both'");
+        db()->exec("UPDATE `report_schedules` SET `export_format` = 'xlsx' WHERE `export_format` = 'html'");
+        db()->exec("ALTER TABLE `report_schedules`
+            MODIFY COLUMN `export_format` ENUM('xlsx', 'csv', 'pdf') NOT NULL DEFAULT 'xlsx'");
+    });
+
     return $errors;
 }

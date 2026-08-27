@@ -7552,3 +7552,43 @@ body.admin-layout .hosp-pack-mark label {
   font-weight: 600;
   color: var(--mbw-heading);
 }
+
+/* The management pack's View dialog. A section opens where the reader is
+   looking instead of appearing somewhere further down the page. */
+.hosp-pack-dialog {
+    width: min(1180px, 94vw);
+    max-height: 88vh;
+    padding: 0;
+    border: 1px solid var(--mbw-border);
+    border-radius: 14px;
+    background: var(--mbw-card);
+    color: var(--mbw-text);
+    overflow: hidden;
+}
+.hosp-pack-dialog::backdrop { background: rgba(10, 20, 35, .55); }
+.hosp-pack-dialog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--mbw-border);
+    background: var(--mbw-soft, transparent);
+}
+.hosp-pack-dialog-head h3 { margin: 0; font-size: 1rem; }
+.hosp-pack-dialog-tools { display: flex; gap: 8px; align-items: center; }
+.hosp-pack-dialog-body {
+    padding: 14px 18px 20px;
+    /* The head stays put and the table scrolls under it, so a long section
+       does not push its own export buttons off the screen. */
+    max-height: calc(88vh - 64px);
+    overflow: auto;
+}
+.hosp-pack-dialog-body table { width: 100%; }
+.hosp-pack-note { margin: 0 0 10px; color: var(--mbw-muted); font-size: 12px; }
+@media (max-width: 640px) {
+    .hosp-pack-dialog { width: 96vw; }
+    .hosp-pack-dialog-head { padding: 12px; }
+    .hosp-pack-dialog-body { padding: 12px; }
+}

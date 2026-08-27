@@ -115,6 +115,41 @@ function rc_row_style(array $row): string
     return (string) ($row['style'] ?? '');
 }
 
+/**
+ * A Reports Center report as a PDF section.
+ *
+ * The report already carries its cells as the strings it means to display, so
+ * this is a translation of shape rather than of content: the PDF prints what
+ * the screen prints. A statement's indent levels come through as leading
+ * spaces, which is how the PDF writer is told how deep a line sits.
+ */
+function rc_pdf_section(array $report, string $title, string $note = ''): array
+{
+    $columns = [];
+    foreach (array_values((array) ($report['columns'] ?? [])) as $index => $column) {
+        $declared = (string) ($column[1] ?? 'left');
+        $columns[] = ['c' . $index, (string) ($column[0] ?? ''), $declared === 'right' ? 'right' : 'left'];
+    }
+
+    $rows = [];
+    foreach ((array) ($report['rows'] ?? []) as $row) {
+        $cells = rc_row_cells($row);
+        $meta = rc_row_meta($row);
+        $level = isset($meta['level']) ? max(0, (int) $meta['level']) : 0;
+        $labelCell = isset($meta['level']) ? (int) ($meta['label_cell'] ?? 0) : -1;
+        $out = ['emphasis' => rc_row_style($row) === 'total' ? 'total' : ''];
+        foreach (array_values($cells) as $index => $cell) {
+            $text = is_array($cell) ? (string) ($cell['text'] ?? '') : (string) $cell;
+            $out['c' . $index] = $index === $labelCell && $level > 0
+                ? str_repeat('   ', $level) . $text
+                : $text;
+        }
+        $rows[] = $out;
+    }
+
+    return ['title' => $title, 'note' => $note, 'columns' => $columns, 'rows' => $rows, 'totals' => []];
+}
+
 /** Immediately preceding period of the same length. */
 function rc_previous_period(string $from, string $to): array
 {

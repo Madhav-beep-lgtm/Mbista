@@ -59,9 +59,16 @@ foreach ($due as $schedule) {
             $packFilters = json_decode((string) ($schedule['filters'] ?? '{}'), true) ?: [];
             $packSections = (array) ($packFilters['sections'] ?? []);
             $pack = hospitality_pack_build($companyId, $from, $to, $packSections);
-            $packBytes = hospitality_pack_xlsx($pack, [
-                'company_name' => $companyName, 'from' => $from, 'to' => $to,
-            ]);
+            $packFormat = (string) $schedule['export_format'];
+            $packMeta = ['company_name' => $companyName, 'from' => $from, 'to' => $to,
+                'generated' => 'Scheduled delivery - ' . app_name()];
+            // CSV cannot hold eleven differently shaped sections in one file, so
+            // a pack scheduled as CSV is sent as the workbook. Saying so beats
+            // attaching something that is not the report.
+            $packAsPdf = $packFormat === 'pdf';
+            $packBytes = $packAsPdf
+                ? hospitality_pack_pdf($pack, $packMeta)
+                : hospitality_pack_xlsx($pack, $packMeta);
             $packTitles = [];
             foreach ($pack as $packSection) {
                 $packTitles[] = '<li>' . e((string) $packSection['title']) . '</li>';
@@ -69,6 +76,9 @@ foreach ($due as $schedule) {
             $packInner = '<p>The management pack for ' . e($companyName) . ', ' . e($from) . ' to ' . e($to)
                 . ', is attached as one workbook with a sheet for each section:</p><ul>'
                 . implode('', $packTitles) . '</ul>'
+                . ($packFormat === 'csv'
+                    ? '<p>Sent as a workbook: eleven sections of different shapes do not fit in one CSV.</p>'
+                    : '')
                 . '<p style="color:#64748b;font-size:12px;">Recipe costing is an estimate from configured recipes'
                 . ' and reference ingredient prices. It is not posted cost of goods sold — the posted figures are'
                 . ' on the Profit &amp; Loss sheet.</p>';
@@ -79,8 +89,10 @@ foreach ($due as $schedule) {
                 'Management pack · ' . $companyName . ' · ' . date('d M Y', strtotime($from)) . ' - ' . date('d M Y', strtotime($to)),
                 $packBody,
                 [[
-                    'name' => 'management-pack-' . $from . '-to-' . $to . '.xlsx',
-                    'mime' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'name' => 'management-pack-' . $from . '-to-' . $to . ($packAsPdf ? '.pdf' : '.xlsx'),
+                    'mime' => $packAsPdf
+                        ? 'application/pdf'
+                        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                     'content' => $packBytes,
                 ]]);
             if (!empty($packResult['ok']) && ($packResult['transport'] ?? '') === 'log') {
@@ -160,7 +172,7 @@ foreach ($due as $schedule) {
 
         $format = (string) $schedule['export_format'];
         $attachments = [];
-        if ($format === 'csv' || $format === 'both') {
+        if ($format === 'csv') {
             $attachments[] = ['name' => $reportKey . '-' . $from . '-to-' . $to . '.csv', 'mime' => 'text/csv', 'content' => $csv];
         }
         // The emailed copy is the same report as the downloaded one, so it gets
@@ -185,9 +197,24 @@ foreach ($due as $schedule) {
                 'content' => xlsx_build($book['rows'], $book['sheet'], $book['widths'], $book['options']),
             ];
         }
+        // The same report, as a PDF: one section, the report's own columns, and
+        // the letterhead the workbook carries.
+        if ($format === 'pdf') {
+            require_once __DIR__ . '/../app/pdf_engine.php';
+            $attachments[] = [
+                'name' => $reportKey . '-' . $from . '-to-' . $to . '.pdf',
+                'mime' => 'application/pdf',
+                'content' => pdf_document([rc_pdf_section($report, $reportLabel)], [
+                    'company_name' => $companyName,
+                    'period' => date('d M Y', strtotime($from)) . ' to ' . date('d M Y', strtotime($to)),
+                    'generated' => 'Scheduled delivery - ' . app_name(),
+                ]),
+            ];
+        }
         $inner = match ($format) {
             'csv' => '<p>The scheduled report is attached as CSV.</p>' . $html,
             'xlsx' => '<p>The scheduled report is attached as an Excel workbook.</p>' . $html,
+            'pdf' => '<p>The scheduled report is attached as a PDF.</p>' . $html,
             default => $html,
         };
         $body = function_exists('branded_email_html') ? branded_email_html($reportLabel, $inner) : $inner;

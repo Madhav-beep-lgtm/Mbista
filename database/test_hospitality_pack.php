@@ -242,10 +242,24 @@ $page = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/hospit
 ok(str_contains($page, 'hospitality_pack_render_table'), 'The reports tab draws sections inline');
 ok(str_contains($page, "name=\"show[]\"") || str_contains($page, "'show' =>"),
     '  ...opened by their own View link, without exporting first');
-$printPath = dirname(__DIR__) . '/public_html/admin/hospitality-pack-print.php';
-ok(is_file($printPath), 'And the print view is its own page');
-$print = (string) file_get_contents($printPath);
-ok(str_contains($print, 'hospitality_pack_render_table'), '  ...drawing the same sections through the same renderer');
-ok(str_contains($print, "require_permission('hospitality'"), '  ...behind the same permission as the tab it came from');
+// View opens the section in a dialog rather than rendering it further down the
+// page: what the reader asked to see appears where they are looking. The link
+// still carries the working no-JS address, so the feature does not depend on
+// the fetch succeeding.
+ok(str_contains($page, 'hospPackDialog') && str_contains($page, 'showModal'),
+    'And View opens it in a dialog rather than scrolling the page');
+ok(str_contains($page, 'hosp-pack-view') && str_contains($page, "'show' =>"),
+    '  ...over a link that still works with JavaScript off');
+ok(str_contains($page, "=== 'pack_html'"),
+    '  ...fed by a fragment route, so the dialog and the page draw the same section');
+
+// There used to be a separate print page for PDF, which relied on the reader
+// running the browser print dialog. A real PDF replaced it, so the page should
+// be gone rather than left behind unreferenced.
+ok(!is_file(dirname(__DIR__) . '/public_html/admin/hospitality-pack-print.php'),
+    'The old print-view page is gone, replaced by a real PDF');
+ok(!str_contains($page, 'pack_print'), '  ...and nothing still links to it');
+ok(str_contains($page, 'pack_pdf') && function_exists('hospitality_pack_pdf'),
+    '  ...with PDF now produced as a file rather than asked of the browser');
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

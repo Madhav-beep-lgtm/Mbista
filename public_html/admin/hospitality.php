@@ -1096,8 +1096,34 @@ if ($view === 'sales-upload' && $salesReportExport !== '' && isset($_GET['report
     );
 }
 
-// The management pack: several readings of one period, in one workbook.
-if (($_GET['export'] ?? '') === 'pack') {
+// One section on its own, as a fragment, for the reader that opens it in a
+// dialog. Same builder and same renderer as the page -- a popup showing
+// something the page would not show is a second report nobody maintains.
+if (($_GET['export'] ?? '') === 'pack_html') {
+    require_once __DIR__ . '/../../app/hospitality_management_report.php';
+    $fragFrom = $clampDate(trim((string) ($_GET['from'] ?? $rangeFrom)));
+    $fragTo = $clampDate(trim((string) ($_GET['to'] ?? $rangeTo)));
+    $fragWanted = array_values(array_filter(array_map('strval', (array) ($_GET['section'] ?? []))));
+    header('Content-Type: text/html; charset=utf-8');
+    header('Cache-Control: no-store');
+    if ($fragWanted === []) {
+        echo '<p>No section asked for.</p>';
+        exit;
+    }
+    foreach (hospitality_pack_build($companyId, $fragFrom, $fragTo, $fragWanted) as $fragSection) {
+        if ((string) $fragSection['note'] !== '') {
+            echo '<p class="hosp-pack-note">' . e((string) $fragSection['note']) . '</p>';
+        }
+        hospitality_pack_render_table($fragSection, $fmt);
+    }
+    exit;
+}
+
+// The management pack: several readings of one period, in one file. Excel and
+// PDF are the same sections through the same formatter -- see
+// hospitality_pack_cell_text() -- so the two containers cannot disagree about
+// what a figure says.
+if (in_array($_GET['export'] ?? '', ['pack', 'pack_pdf'], true)) {
     require_permission('hospitality', 'export');
     require_once __DIR__ . '/../../app/hospitality_management_report.php';
     require_once __DIR__ . '/../../app/export_engine.php';
@@ -1107,15 +1133,22 @@ if (($_GET['export'] ?? '') === 'pack') {
     // means the whole pack rather than an empty file.
     $packWanted = array_values(array_filter(array_map('strval', (array) ($_GET['section'] ?? []))));
     $pack = hospitality_pack_build($companyId, $packFrom, $packTo, $packWanted);
-    $packBytes = hospitality_pack_xlsx($pack, [
+    $asPdf = ($_GET['export'] ?? '') === 'pack_pdf';
+    $packMeta = [
         'company_name' => (string) ($company['name'] ?? ''),
         'from' => $packFrom,
         'to' => $packTo,
-    ]);
+        'generated' => 'Generated ' . date('d M Y H:i') . ' by ' . (string) ($currentUser['name'] ?? '')
+            . ' - ' . app_name(),
+    ];
+    $packBytes = $asPdf ? hospitality_pack_pdf($pack, $packMeta) : hospitality_pack_xlsx($pack, $packMeta);
     log_activity('hospitality_report', $companyId, 'exported',
-        'Management pack exported (' . count($pack) . ' section(s), ' . $packFrom . ' to ' . $packTo . ').', $userId);
-    $packName = 'management-pack-' . $packFrom . '-to-' . $packTo . '.xlsx';
-    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        'Management pack exported as ' . ($asPdf ? 'PDF' : 'Excel') . ' (' . count($pack)
+            . ' section(s), ' . $packFrom . ' to ' . $packTo . ').', $userId);
+    $packName = 'management-pack-' . $packFrom . '-to-' . $packTo . ($asPdf ? '.pdf' : '.xlsx');
+    header('Content-Type: ' . ($asPdf
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
     header('Content-Disposition: attachment; filename="' . $packName . '"');
     header('Content-Length: ' . strlen($packBytes));
     header('Cache-Control: no-cache, no-store, must-revalidate');
@@ -1803,12 +1836,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <input type="date" name="to" value="<?= e($rangeTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>">
                     <button type="submit" class="button secondary" style="min-height:32px">Apply</button>
                 </form>
-                <button type="button" class="button secondary" onclick="window.print()" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></button>
-                <?php if ($canExport): ?>
-                    <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=' . $view . '&report=item&export=csv&from=' . $rangeFrom . '&to=' . $rangeTo)) ?>" aria-label="Export item CSV" title="Export item CSV"><?= icon('download') ?></a>
-                    <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=' . $view . '&report=category&export=csv&from=' . $rangeFrom . '&to=' . $rangeTo)) ?>" aria-label="Export category CSV" title="Export category CSV"><?= icon('download') ?></a>
-                    <a class="button secondary" href="<?= e(url('admin/hospitality.php?view=' . $view . '&report=daily&export=csv&from=' . $rangeFrom . '&to=' . $rangeTo)) ?>" aria-label="Export daily CSV" title="Export daily CSV"><?= icon('download') ?></a>
-                <?php endif; ?>
+                <?php // Exporting lives in the Management pack below, where each report
+                      // is named and can be marked. Three identical download arrows
+                      // told nobody which was which. ?>
             </div>
         </div>
         <p style="margin:0;color:var(--mbw-muted);font-size:12px">Generated <?= e(date('Y-m-d H:i')) ?> by <?= e((string) ($currentUser['name'] ?? '')) ?> · <?= e($company['name']) ?> · Estimated management report based on configured recipes and reference ingredient costs. No accounting or inventory entry has been posted.</p>
@@ -1839,9 +1869,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php if ($canExport): ?>
                     <button type="submit" form="hospPackForm" name="export" value="pack" class="button secondary"
                             title="Every marked section, one workbook, one sheet each"><?= icon('analytics') ?>Excel</button>
-                    <button type="submit" form="hospPackForm" formaction="<?= e(url('admin/hospitality-pack-print.php')) ?>"
-                            formtarget="_blank" class="button secondary"
-                            title="Every marked section as a print view your browser saves as PDF"><?= icon('documents') ?>PDF</button>
+                    <button type="submit" form="hospPackForm" name="export" value="pack_pdf" class="button secondary"
+                            title="Every marked section, one PDF"><?= icon('documents') ?>PDF</button>
                 <?php endif; ?>
                 <a class="mbw-view-all" href="<?= e(url('admin/report-schedules.php?report_key=hospitality-pack')) ?>"><?= icon('calendar') ?>Schedule</a>
             </div>
@@ -1867,7 +1896,13 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             <small><?= e($packWhat) ?></small>
                         </div>
                         <div class="hosp-pack-actions">
-                            <a class="button secondary" href="<?= e($packLink($isShown
+                            <?php // The href is the working no-JS path: it renders the section
+                                  // into the page below. With JS the click is caught and the
+                                  // same fragment is shown in a dialog instead, so nothing
+                                  // moves under the reader. ?>
+                            <a class="button secondary hosp-pack-view" data-section="<?= e($packKey) ?>"
+                               data-title="<?= e($packLabel) ?>"
+                               href="<?= e($packLink($isShown
                                 ? ['show' => array_values(array_diff($packViewing, [$packKey]))]
                                 : ['show' => array_merge($packViewing, [$packKey])])) ?>#pack-<?= e($packKey) ?>">
                                 <?= $isShown ? 'Hide' : 'View' ?>
@@ -1875,15 +1910,25 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                             <?php if ($canExport): ?>
                                 <a class="button secondary" href="<?= e($packLink(['export' => 'pack', 'section' => [$packKey]])) ?>"
                                    title="This section only, as Excel"><?= icon('analytics') ?></a>
-                                <a class="button secondary" target="_blank" rel="noopener"
-                                   href="<?= e(url('admin/hospitality-pack-print.php?' . http_build_query(['from' => $rangeFrom, 'to' => $rangeTo, 'section' => [$packKey]]))) ?>"
-                                   title="This section only, as a print view"><?= icon('documents') ?></a>
+                                <a class="button secondary" href="<?= e($packLink(['export' => 'pack_pdf', 'section' => [$packKey]])) ?>"
+                                   title="This section only, as PDF"><?= icon('documents') ?></a>
                             <?php endif; ?>
                         </div>
                     </div>
                 <?php endforeach; ?>
             </div>
         </form>
+        <dialog id="hospPackDialog" class="hosp-pack-dialog">
+            <div class="hosp-pack-dialog-head">
+                <h3 id="hospPackDialogTitle">Section</h3>
+                <div class="hosp-pack-dialog-tools">
+                    <a id="hospPackDialogXlsx" class="button secondary" href="#" title="This section as Excel"><?= icon('analytics') ?>Excel</a>
+                    <a id="hospPackDialogPdf" class="button secondary" href="#" title="This section as PDF"><?= icon('documents') ?>PDF</a>
+                    <button type="button" class="button secondary" data-close-pack-dialog>Close</button>
+                </div>
+            </div>
+            <div id="hospPackDialogBody" class="hosp-pack-dialog-body"><p>Loading...</p></div>
+        </dialog>
         <script>
         (function () {
             var form = document.getElementById('hospPackForm');
@@ -1908,6 +1953,56 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             }
             form.addEventListener('change', tally);
             tally();
+
+            // --- View opens the section where the reader is looking ---------
+            var dialog = document.getElementById('hospPackDialog');
+            if (!dialog || typeof dialog.showModal !== 'function') { return; }
+            var title = document.getElementById('hospPackDialogTitle');
+            var body = document.getElementById('hospPackDialogBody');
+            var xlsx = document.getElementById('hospPackDialogXlsx');
+            var pdf = document.getElementById('hospPackDialogPdf');
+            var base = <?= json_encode(url('admin/hospitality.php'), JSON_UNESCAPED_SLASHES) ?>;
+            var period = <?= json_encode(['from' => $rangeFrom, 'to' => $rangeTo], JSON_UNESCAPED_SLASHES) ?>;
+
+            function link(kind, section) {
+                return base + '?view=<?= e($view) ?>&from=' + encodeURIComponent(period.from)
+                    + '&to=' + encodeURIComponent(period.to)
+                    + '&export=' + kind + '&section%5B%5D=' + encodeURIComponent(section);
+            }
+
+            Array.prototype.forEach.call(document.querySelectorAll('.hosp-pack-view'), function (el) {
+                el.addEventListener('click', function (event) {
+                    // A modified click is the reader asking for a new tab. Leave it.
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) { return; }
+                    event.preventDefault();
+                    var section = el.getAttribute('data-section');
+                    title.textContent = el.getAttribute('data-title') || 'Section';
+                    body.innerHTML = '<p>Loading...</p>';
+                    xlsx.href = link('pack', section);
+                    pdf.href = link('pack_pdf', section);
+                    dialog.showModal();
+                    fetch(link('pack_html', section), { credentials: 'same-origin' })
+                        .then(function (response) {
+                            if (!response.ok) { throw new Error('HTTP ' + response.status); }
+                            return response.text();
+                        })
+                        .then(function (html) { body.innerHTML = html; })
+                        .catch(function () {
+                            // Say what went wrong and leave the working link, rather
+                            // than a spinner that never stops.
+                            body.innerHTML = '<p>This section could not be loaded. '
+                                + '<a href="' + el.getAttribute('href') + '">Open it on the page instead</a>.</p>';
+                        });
+                });
+            });
+
+            Array.prototype.forEach.call(dialog.querySelectorAll('[data-close-pack-dialog]'), function (el) {
+                el.addEventListener('click', function () { dialog.close(); });
+            });
+            // Clicking the backdrop closes it, the way every other dialog here does.
+            dialog.addEventListener('click', function (event) {
+                if (event.target === dialog) { dialog.close(); }
+            });
         })();
         </script>
     </section>
@@ -1920,7 +2015,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <div class="mbw-card-tools">
                     <?php if ($canExport): ?>
                         <a class="mbw-view-all" href="<?= e($packLink(['export' => 'pack', 'section' => [$shownKey]])) ?>">Excel</a>
-                        <a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/hospitality-pack-print.php?' . http_build_query(['from' => $rangeFrom, 'to' => $rangeTo, 'section' => [$shownKey]]))) ?>">PDF</a>
+                        <a class="mbw-view-all" href="<?= e($packLink(['export' => 'pack_pdf', 'section' => [$shownKey]])) ?>">PDF</a>
                     <?php endif; ?>
                     <a class="mbw-view-all" href="<?= e($packLink(['show' => array_values(array_diff($packViewing, [$shownKey]))])) ?>">Hide</a>
                 </div>

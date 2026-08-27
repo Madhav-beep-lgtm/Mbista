@@ -36,6 +36,7 @@ function hospitality_pack_sections(): array
         'pl' => ['Profit & Loss (common size)', 'Sales as 100%, with every other line measured against it.'],
         'pl_category' => ['P&L by category', 'Gross profit per category, then the common costs once, ledger by ledger.'],
         'category' => ['Category performance', 'What each category sold, cost to serve, and earned.'],
+        'daily' => ['Sales day by day', 'Every trading day in the period, with its takings and margin.'],
         'items_top' => ['Best and worst sellers', 'The dishes carrying the period, and the ones being carried.'],
         'items_gp' => ['Menu items by GP ratio', 'Ranked by margin rather than by turnover.'],
         'payments' => ['How the money came in', 'Receipts by payment method.'],
@@ -83,6 +84,7 @@ function hospitality_pack_build(int $companyId, string $from, string $to, array 
             'pl_category' => hospitality_pack_pl_category($companyId, $from, $to),
             'employee' => hospitality_pack_employee($companyId, $from, $to),
             'category' => hospitality_pack_category($companyId, $from, $to),
+            'daily' => hospitality_pack_daily($companyId, $from, $to),
             'items_top' => hospitality_pack_items_top($companyId, $from, $to),
             'items_gp' => hospitality_pack_items_gp($companyId, $from, $to),
             'payments' => hospitality_pack_payments($companyId, $from, $to),
@@ -381,6 +383,68 @@ function hospitality_pack_category(int $companyId, string $from, string $to): ar
 // ---------------------------------------------------------------------------
 // 3. Best and worst sellers
 // ---------------------------------------------------------------------------
+/**
+ * Every trading day in the period, in order.
+ *
+ * A monthly total hides the shape of a month. Which days carry the week, which
+ * ones are dead, and whether a quiet Tuesday is normal or new are all questions
+ * only the day rows answer.
+ */
+function hospitality_pack_daily(int $companyId, string $from, string $to): array
+{
+    $rows = hospitality_pack_sales_by($companyId, $from, $to, 'day');
+    $salesTotal = 0.0;
+    foreach ($rows as $row) {
+        $salesTotal += (float) $row['net_sales'];
+    }
+
+    $columns = [
+        ['group', 'Date', 'left'],
+        ['lines', 'Lines', 'right'],
+        ['qty', 'Qty', 'right'],
+        ['gross_sales', 'Gross sales', 'right'],
+        ['discount', 'Discount', 'right'],
+        ['net_sales', 'Net sales', 'right'],
+        ['share', '% of sales', 'right'],
+        ['vat', 'VAT', 'right'],
+        ['est_cost', 'Est. cost', 'right'],
+        ['est_gp', 'Est. gross profit', 'right'],
+        ['gp_pct', 'GP %', 'right'],
+    ];
+    $out = [];
+    $totals = ['lines' => 0, 'qty' => 0.0, 'gross_sales' => 0.0, 'discount' => 0.0,
+        'net_sales' => 0.0, 'vat' => 0.0, 'est_cost' => 0.0, 'est_gp' => 0.0];
+    $anyCost = false;
+    foreach ($rows as $row) {
+        $row['share'] = hospitality_pack_share((float) $row['net_sales'], $salesTotal);
+        $row['emphasis'] = '';
+        $out[] = $row;
+        $totals['lines'] += (int) $row['lines'];
+        foreach (['qty', 'gross_sales', 'discount', 'net_sales', 'vat'] as $field) {
+            $totals[$field] += (float) $row[$field];
+        }
+        if ($row['est_cost'] !== null) {
+            $anyCost = true;
+            $totals['est_cost'] += (float) $row['est_cost'];
+            $totals['est_gp'] += (float) $row['est_gp'];
+        }
+    }
+    $totals['share'] = $salesTotal != 0.0 ? 100.0 : null;
+    if ($anyCost) {
+        $totals['gp_pct'] = hospitality_pack_share($totals['est_gp'], $totals['net_sales']);
+    } else {
+        // An empty cost column must not foot to nought, which reads as free.
+        $totals['est_cost'] = null;
+        $totals['est_gp'] = null;
+        $totals['gp_pct'] = null;
+    }
+
+    return hospitality_pack_section('Sales day by day', $columns, $out, $totals,
+        'One row per day that traded, from the uploaded sheet. A day with no sales has no row rather than a'
+        . ' row of noughts -- the shop being shut and the shop taking nothing are different facts.'
+        . hospitality_pack_costed_note($rows));
+}
+
 /**
  * The dishes carrying the period, and the ones being carried.
  *
@@ -738,6 +802,11 @@ function hospitality_pack_comparison(int $companyId, string $from, string $to): 
         $prevFrom = date('Y-m-d', strtotime($prevTo . ' -' . ($spanDays - 1) . ' days'));
     }
 
+    // Required here rather than left to the caller: this file was reachable
+    // from the scheduler and from a CLI script that had not loaded it, and the
+    // only symptom was a fatal at the last section of the pack.
+    require_once __DIR__ . '/hospitality_engine.php';
+
     $now = hospitality_summary($companyId, $from, $to);
     $was = hospitality_summary($companyId, $prevFrom, $prevTo);
 
@@ -1027,20 +1096,9 @@ function hospitality_pack_render_table(array $section, ?callable $fmt = null): v
                     <?php foreach ($columns as [$key, $label, $align]): ?>
                         <?php $value = $row[$key] ?? null; ?>
                         <td<?= $isNumeric($align) ? ' class="is-numeric"' : '' ?>><?php
-                            // A null is UNKNOWN and prints as a dash. A nought is
-                            // a real zero and prints as one -- the difference is
-                            // the whole point on an uncosted line.
-                            if ($value === null || $value === '') {
-                                echo '—';
-                            } elseif (is_string($value)) {
-                                echo e($value);
-                            } elseif (preg_match('/pct|share/i', (string) $key) === 1) {
-                                echo e($fmt($value)) . '%';
-                            } elseif (preg_match('/qty|people|lines|invoices|movements|headcount/i', (string) $key) === 1) {
-                                echo e($fmt($value, 3));
-                            } else {
-                                echo e($fmt($value));
-                            }
+                            // One formatter for the screen, the workbook and
+                            // the PDF -- see hospitality_pack_cell_text().
+                            echo e(hospitality_pack_cell_text($value, (string) $key, $fmt));
                         ?></td>
                     <?php endforeach; ?>
                 </tr>
@@ -1054,17 +1112,7 @@ function hospitality_pack_render_table(array $section, ?callable $fmt = null): v
                 <?php else: ?>
                     <?php $value = $section['totals'][$key] ?? null; ?>
                     <th<?= $isNumeric($align) ? ' class="is-numeric"' : '' ?>><?php
-                        if ($value === null || $value === '') {
-                            echo '—';
-                        } elseif (is_string($value)) {
-                            echo e($value);
-                        } elseif (preg_match('/pct|share/i', (string) $key) === 1) {
-                            echo e($fmt($value)) . '%';
-                        } elseif (preg_match('/qty|people|lines|invoices|movements|headcount/i', (string) $key) === 1) {
-                            echo e($fmt($value, 3));
-                        } else {
-                            echo e($fmt($value));
-                        }
+                        echo e(hospitality_pack_cell_text($value, (string) $key, $fmt));
                     ?></th>
                 <?php endif; ?>
             <?php endforeach; ?>
@@ -1226,6 +1274,66 @@ function hospitality_pack_workbook(array $pack, array $meta): array
         'widths' => $widths,
         'options' => ['sheets' => $perSheet],
     ];
+}
+
+/**
+ * How one value in a section prints, wherever it is printed.
+ *
+ * The screen, the workbook and the PDF all call this, so a figure cannot say
+ * one thing in the browser and another in the file the client is emailed. The
+ * rule that matters most: null is UNKNOWN and prints as a dash, nought is a
+ * real zero and prints as one. On an uncosted line that difference is the
+ * whole point.
+ */
+function hospitality_pack_cell_text($value, string $key, ?callable $fmt = null): string
+{
+    $fmt = $fmt ?? static fn ($number, int $dp = 2): string => number_format((float) $number, $dp);
+    if ($value === null || $value === '') {
+        return "\xe2\x80\x94";
+    }
+    if (is_string($value)) {
+        return $value;
+    }
+    if (preg_match('/pct|share/i', $key) === 1) {
+        return $fmt($value) . '%';
+    }
+    if (preg_match('/qty|people|lines|invoices|movements|headcount/i', $key) === 1) {
+        return $fmt($value, 3);
+    }
+
+    return $fmt($value);
+}
+
+/**
+ * The pack as a PDF: one section after another, each starting on a fresh page.
+ *
+ * Same sections, same formatter and same colour board as the workbook, so the
+ * two files are the same report in two containers rather than two reports.
+ */
+function hospitality_pack_pdf(array $pack, array $meta): string
+{
+    require_once __DIR__ . '/pdf_engine.php';
+
+    $company = trim((string) ($meta['company_name'] ?? ''));
+    if (function_exists('statement_company_name')) {
+        $company = statement_company_name($company);
+    }
+    $period = (string) ($meta['from'] ?? '') . ' to ' . (string) ($meta['to'] ?? '');
+    if (function_exists('app_date_range')) {
+        $period = app_date_range((string) ($meta['from'] ?? ''), (string) ($meta['to'] ?? ''));
+    }
+    $generated = trim((string) ($meta['generated'] ?? ''));
+    if ($generated === '') {
+        $generated = 'Generated ' . date('d M Y H:i')
+            . (function_exists('app_name') ? ' - ' . app_name() : '');
+    }
+
+    return pdf_document(array_values($pack), [
+        'company_name' => $company,
+        'period' => $period,
+        'generated' => $generated,
+        'cell' => static fn ($value, string $key): string => hospitality_pack_cell_text($value, $key),
+    ]);
 }
 
 /** The pack as .xlsx bytes, ready to download or attach to an email. */
