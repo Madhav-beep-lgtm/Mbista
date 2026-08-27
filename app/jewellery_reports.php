@@ -416,6 +416,14 @@ function jw_report_sales_grouped(int $companyId, string $from, string $to, strin
  * No double count: an advance moves metal once, when it is taken. Applying it
  * to a later bill moves MONEY between that customer's advance and receivable
  * ledgers, and touches no weight at all.
+ *
+ * Every branch joins to its item, metal, purity and unit with LEFT JOINs
+ * ON PURPOSE. Those four tables supply nothing but labels, and an INNER JOIN
+ * would make a missing label delete the row -- so a piece of old gold whose item
+ * had never been given a jewellery profile would vanish out of the register with
+ * no error anywhere, which is precisely the complaint this report exists to
+ * answer. A row with an unknown purity is worth showing with the purity blank.
+ * A row that is not there is worth nothing.
  */
 function jw_report_purchase_detail(int $companyId, string $from, string $to, array $filters = []): array
 {
@@ -435,15 +443,19 @@ function jw_report_purchase_detail(int $companyId, string $from, string $to, arr
                     l.metal_amount, l.making_amount, l.stone_amount, l.diamond_amount, l.other_diamond_amount,
                     l.vat_base, l.vat_rate, l.vat_amount,
                     l.allocated_adjust, l.line_total, l.stock_amount,
-                    i.sku AS item_code, i.name AS item_name, i.category, jp.jewellery_type AS item_type,
-                    m.name AS metal_name, p.code AS purity_code, u.code AS unit_code
+                    COALESCE(i.sku, CONCAT('item #', l.item_id)) AS item_code,
+                    COALESCE(i.name, 'Unknown item') AS item_name,
+                    i.category, jp.jewellery_type AS item_type,
+                    COALESCE(m.name, '') AS metal_name,
+                    COALESCE(p.code, '') AS purity_code,
+                    COALESCE(u.code, '') AS unit_code
                 FROM jewellery_purchase_lines l
                 INNER JOIN jewellery_purchases pu ON pu.id = l.purchase_id
-                INNER JOIN inventory_items i ON i.id = l.item_id
-                INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
-                INNER JOIN jewellery_metals m ON m.id = jp.metal_id
-                INNER JOIN jewellery_purities p ON p.id = l.purity_id
-                INNER JOIN jewellery_units u ON u.id = l.unit_id
+                LEFT JOIN inventory_items i ON i.id = l.item_id
+                LEFT JOIN jewellery_item_profiles jp ON jp.inventory_item_id = l.item_id
+                LEFT JOIN jewellery_metals m ON m.id = jp.metal_id
+                LEFT JOIN jewellery_purities p ON p.id = l.purity_id
+                LEFT JOIN jewellery_units u ON u.id = l.unit_id
                 LEFT JOIN accounting_parties ap ON ap.id = pu.party_id
                 WHERE pu.company_id = :cid AND pu.purchase_date BETWEEN :from AND :to
                   AND pu.status = :status";
@@ -479,15 +491,19 @@ function jw_report_purchase_detail(int $companyId, string $from, string $to, arr
         $sql = "SELECT s.sale_no AS purchase_no, s.sale_date AS purchase_date, s.party_id, s.status,
                     COALESCE(ap.name, 'Walk-in') AS party_label,
                     e.id AS line_id, e.qty_pieces, e.gross_weight, e.fine_weight, e.rate, e.amount,
-                    i.sku AS item_code, i.name AS item_name, i.category, jp.jewellery_type AS item_type,
-                    m.name AS metal_name, p.code AS purity_code, u.code AS unit_code
+                    COALESCE(i.sku, CONCAT('item #', e.item_id)) AS item_code,
+                    COALESCE(i.name, 'Unknown item') AS item_name,
+                    i.category, jp.jewellery_type AS item_type,
+                    COALESCE(m.name, '') AS metal_name,
+                    COALESCE(p.code, '') AS purity_code,
+                    COALESCE(u.code, '') AS unit_code
                 FROM jewellery_sale_exchanges e
                 INNER JOIN jewellery_sales s ON s.id = e.sale_id
-                INNER JOIN inventory_items i ON i.id = e.item_id
-                INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
-                INNER JOIN jewellery_metals m ON m.id = jp.metal_id
-                INNER JOIN jewellery_purities p ON p.id = e.purity_id
-                INNER JOIN jewellery_units u ON u.id = e.unit_id
+                LEFT JOIN inventory_items i ON i.id = e.item_id
+                LEFT JOIN jewellery_item_profiles jp ON jp.inventory_item_id = e.item_id
+                LEFT JOIN jewellery_metals m ON m.id = jp.metal_id
+                LEFT JOIN jewellery_purities p ON p.id = e.purity_id
+                LEFT JOIN jewellery_units u ON u.id = e.unit_id
                 LEFT JOIN accounting_parties ap ON ap.id = s.party_id
                 WHERE e.company_id = :cid AND s.sale_date BETWEEN :from AND :to
                   AND s.status = :status";
@@ -515,8 +531,12 @@ function jw_report_purchase_detail(int $companyId, string $from, string $to, arr
         // split payment twice, so each side excludes the other.
         $common = "st.settlement_no AS purchase_no, st.settlement_date AS purchase_date, st.party_id, st.status,
                     st.is_advance, COALESCE(ap.name, 'Walk-in') AS party_label,
-                    i.sku AS item_code, i.name AS item_name, i.category, jp.jewellery_type AS item_type,
-                    m.name AS metal_name, p.code AS purity_code, u.code AS unit_code";
+                    COALESCE(i.sku, 'Old gold') AS item_code,
+                    COALESCE(i.name, 'Old gold') AS item_name,
+                    i.category, jp.jewellery_type AS item_type,
+                    COALESCE(m.name, '') AS metal_name,
+                    COALESCE(p.code, '') AS purity_code,
+                    COALESCE(u.code, '') AS unit_code";
         $where = "st.company_id = :cid AND st.settlement_date BETWEEN :from AND :to
                   AND st.status = :status AND st.direction = 'received'";
         $params = ['cid' => $companyId, 'from' => $from, 'to' => $to, 'status' => $status];
@@ -534,11 +554,11 @@ function jw_report_purchase_detail(int $companyId, string $from, string $to, arr
                     CASE WHEN t.fine_weight > 0 THEN t.amount / t.fine_weight ELSE 0 END AS rate
                 FROM jewellery_settlement_tenders t
                 INNER JOIN jewellery_settlements st ON st.id = t.settlement_id
-                INNER JOIN inventory_items i ON i.id = t.item_id
-                INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
-                INNER JOIN jewellery_metals m ON m.id = jp.metal_id
-                INNER JOIN jewellery_purities p ON p.id = t.purity_id
-                INNER JOIN jewellery_units u ON u.id = t.unit_id
+                LEFT JOIN inventory_items i ON i.id = t.item_id
+                LEFT JOIN jewellery_item_profiles jp ON jp.inventory_item_id = t.item_id
+                LEFT JOIN jewellery_metals m ON m.id = jp.metal_id
+                LEFT JOIN jewellery_purities p ON p.id = t.purity_id
+                LEFT JOIN jewellery_units u ON u.id = t.unit_id
                 LEFT JOIN accounting_parties ap ON ap.id = st.party_id
                 WHERE {$where} AND t.mode = 'metal'{$metalWhere}";
         $stmt = db()->prepare($tenderSql);
@@ -552,11 +572,11 @@ function jw_report_purchase_detail(int $companyId, string $from, string $to, arr
                     st.gross_weight, st.fine_weight, st.amount,
                     CASE WHEN st.fine_weight > 0 THEN st.amount / st.fine_weight ELSE 0 END AS rate
                 FROM jewellery_settlements st
-                INNER JOIN inventory_items i ON i.id = st.item_id
-                INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
-                INNER JOIN jewellery_metals m ON m.id = jp.metal_id
-                INNER JOIN jewellery_purities p ON p.id = st.purity_id
-                INNER JOIN jewellery_units u ON u.id = st.unit_id
+                LEFT JOIN inventory_items i ON i.id = st.item_id
+                LEFT JOIN jewellery_item_profiles jp ON jp.inventory_item_id = st.item_id
+                LEFT JOIN jewellery_metals m ON m.id = jp.metal_id
+                LEFT JOIN jewellery_purities p ON p.id = st.purity_id
+                LEFT JOIN jewellery_units u ON u.id = st.unit_id
                 LEFT JOIN accounting_parties ap ON ap.id = st.party_id
                 WHERE {$where} AND st.mode = 'metal'{$metalWhere}
                   AND NOT EXISTS (SELECT 1 FROM jewellery_settlement_tenders t2

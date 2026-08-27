@@ -439,6 +439,41 @@ foreach ($purchaseReport['rows'] as $purchaseRow) {
 ok($labels === [$flagged > 0 ? 'Old gold advance' : 'Old gold in settlement'],
     '  ...and is labelled ' . implode(', ', $labels) . ', which is what it was');
 
+// A MISSING LABEL MUST NOT DELETE THE ROW. The old-gold legs reach their item,
+// metal, purity and unit through four lookup tables that supply nothing but
+// names. Joined with INNER JOIN -- as they first were -- a piece of old gold
+// whose item had never been given a jewellery profile disappeared out of the
+// register with no error anywhere, which is exactly the fault this report was
+// built to answer. A row with a blank purity is worth showing. A row that is
+// not there is worth nothing.
+$strippedItem = (int) db()->query("SELECT item_id FROM jewellery_sale_exchanges
+    WHERE company_id = {$cidA} LIMIT 1")->fetchColumn();
+$keptProfile = db()->query("SELECT * FROM jewellery_item_profiles
+    WHERE inventory_item_id = {$strippedItem}")->fetch(PDO::FETCH_ASSOC);
+ok($keptProfile !== false, 'The exchange item has a jewellery profile to take away');
+db()->exec("DELETE FROM jewellery_item_profiles WHERE inventory_item_id = {$strippedItem}");
+$stripped = jw_report_purchase_detail($cidA, '2026-07-16', '2027-07-15');
+ok(count($stripped['rows']) === count($purchaseReport['rows']),
+    'An old-gold item with NO jewellery profile still appears, got '
+        . count($stripped['rows']) . ' of ' . count($purchaseReport['rows']) . ' rows');
+$strippedExchange = null;
+foreach ($stripped['rows'] as $strippedRow) {
+    if ((string) $strippedRow['origin'] === 'sale_exchange') {
+        $strippedExchange = $strippedRow;
+    }
+}
+ok($strippedExchange !== null && near((float) $strippedExchange['stock_amount'], 320000.0),
+    '  ...still carrying its full 320,000, with the label it cannot find left blank');
+// Put it back before anything else reads it.
+$profileColumns = implode(', ', array_map(static fn (string $c): string => "`{$c}`", array_keys($keptProfile)));
+$profileValues = implode(', ', array_map(
+    static fn ($v): string => $v === null ? 'NULL' : db()->quote((string) $v),
+    array_values($keptProfile)
+));
+db()->exec("INSERT INTO jewellery_item_profiles ({$profileColumns}) VALUES ({$profileValues})");
+ok(count(jw_report_purchase_detail($cidA, '2026-07-16', '2027-07-15')['rows']) === count($purchaseReport['rows']),
+    '  ...and the register is unchanged once the profile is restored');
+
 // Filtering by source still separates the two, since old gold is bought FROM
 // a customer and never from a supplier.
 $supplierOnly = jw_report_purchase_detail($cidA, '2026-07-16', '2027-07-15', ['source' => 'supplier']);
