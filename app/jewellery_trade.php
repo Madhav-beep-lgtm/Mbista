@@ -28,6 +28,11 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/jewellery_stock.php';
+// inv_accounting_method() decides whether a purchase debits stock or Purchases,
+// and whether a sale posts its own cost. Required here rather than left to the
+// caller: this file is reached from pages, from CLI scripts and from the
+// scheduler, and the answer must be the same for all of them.
+require_once __DIR__ . '/inventory_valuation.php';
 // Posting refreshes the AML candidates for the date it lands on, so the rules
 // that read those postings have to be loaded alongside them.
 require_once __DIR__ . '/jewellery_aml.php';
@@ -1344,9 +1349,10 @@ function jewellery_post_purchase(int $companyId, int $purchaseId, int $userId = 
         $legs = [];
         foreach ($lines as $line) {
             $item = jewellery_item($companyId, (int) $line['item_id']);
-            $stockLedgerId = jw_item_stock_ledger_id($companyId, $item);
+            $stockLedgerId = jw_metal_in_ledger_id($companyId, $item);
             if ($stockLedgerId <= 0) {
-                throw new RuntimeException('No stock ledger is mapped for item ' . $item['code']
+                throw new RuntimeException('No ' . (inv_accounting_method() === 'periodic' ? 'Purchases' : 'stock')
+                    . ' ledger is mapped for item ' . $item['code']
                     . '. Set it under Jewellery → Settings → Posting Ledgers.');
             }
             $legs[] = ['ledger_id' => $stockLedgerId, 'amount' => (float) $line['stock_amount'], 'memo' => 'Purchase ' . $purchase['purchase_no']];
@@ -2425,14 +2431,17 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
         }
         foreach ($exchanges as $exchange) {
             $exItem = jewellery_item($companyId, (int) $exchange['item_id']);
-            $exLedgerId = jw_item_stock_ledger_id($companyId, $exItem);
+            $exLedgerId = jw_metal_in_ledger_id($companyId, $exItem);
             if ($exLedgerId <= 0) {
-                throw new RuntimeException('No stock ledger is mapped for exchange item ' . $exItem['code'] . '.');
+                throw new RuntimeException('No ' . (inv_accounting_method() === 'periodic' ? 'Purchases' : 'stock')
+                    . ' ledger is mapped for exchange item ' . $exItem['code'] . '.');
             }
             $legs[] = ['ledger_id' => $exLedgerId, 'amount' => (float) $exchange['amount'], 'memo' => 'Old gold in exchange ' . $sale['sale_no']];
         }
 
         // Cost of sales, priced at the weighted average in force right now.
+        // Whether it reaches the ledger depends on how the books are kept.
+        $periodic = inv_accounting_method() === 'periodic';
         $cogsTotal = 0.0;
         $lineCogs = [];
         foreach ($lines as $line) {
@@ -2443,7 +2452,13 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
             $cost = jw_round_money((float) $line['fine_weight'] * $balance['avg_fine_rate']);
             $lineCogs[(int) $line['id']] = $cost;
             $cogsTotal += $cost;
-            if ($cost > 0) {
+            // The COST is worked out either way and kept on the line, because
+            // the margin reports read it from there and not from the ledger.
+            // What changes is whether it is POSTED. Under the periodic system
+            // it is not: cost of sales is Opening + Purchases - Closing, worked
+            // out when the statements are drawn, and a per-sale entry would put
+            // the same cost into the trading account twice.
+            if ($cost > 0 && !$periodic) {
                 $stockLedgerId = jw_item_stock_ledger_id($companyId, $item);
                 if ($stockLedgerId <= 0) {
                     throw new RuntimeException('No stock ledger is mapped for item ' . $item['code'] . '.');
@@ -2452,7 +2467,7 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
             }
         }
         $cogsTotal = jw_round_money($cogsTotal);
-        if ($cogsTotal > 0) {
+        if ($cogsTotal > 0 && !$periodic) {
             $legs[] = ['ledger_id' => jw_require_ledger($companyId, 'cogs'), 'amount' => $cogsTotal, 'memo' => 'COGS ' . $sale['sale_no']];
         }
 
@@ -3487,9 +3502,10 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
                 $tenderLedgerId = (int) ($tenderRow['ledger_id'] ?? 0);
                 if ($tenderMode === 'metal') {
                     $item = jewellery_item($companyId, (int) $tenderRow['item_id']);
-                    $tenderLedgerId = jw_item_stock_ledger_id($companyId, $item);
+                    $tenderLedgerId = jw_metal_in_ledger_id($companyId, $item);
                     if ($tenderLedgerId <= 0) {
-                        throw new RuntimeException('No stock ledger is mapped for item ' . $item['code'] . '.');
+                        throw new RuntimeException('No ' . (inv_accounting_method() === 'periodic' ? 'Purchases' : 'stock')
+                            . ' ledger is mapped for item ' . $item['code'] . '.');
                     }
                 } elseif ($tenderMode === 'adjustment') {
                     $tenderLedgerId = $tenderLedgerId ?: jw_require_ledger($companyId, 'rounding');
@@ -3516,9 +3532,10 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
             $counterLedgerId = 0;
             if ($mode === 'metal') {
                 $item = jewellery_item($companyId, (int) $settlement['item_id']);
-                $counterLedgerId = jw_item_stock_ledger_id($companyId, $item);
+                $counterLedgerId = jw_metal_in_ledger_id($companyId, $item);
                 if ($counterLedgerId <= 0) {
-                    throw new RuntimeException('No stock ledger is mapped for item ' . $item['code'] . '.');
+                    throw new RuntimeException('No ' . (inv_accounting_method() === 'periodic' ? 'Purchases' : 'stock')
+                        . ' ledger is mapped for item ' . $item['code'] . '.');
                 }
             } elseif ($mode === 'adjustment') {
                 $counterLedgerId = jw_require_ledger($companyId, 'rounding');

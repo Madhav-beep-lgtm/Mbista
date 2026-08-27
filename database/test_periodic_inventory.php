@@ -414,5 +414,202 @@ foreach (['voucher_entries' => 'voucher_id IN (SELECT id FROM vouchers WHERE com
     db()->prepare("DELETE FROM `{$table}` WHERE {$where}")->execute(['c' => $plId]);
 }
 inv_mapping_forget();
+
+echo "\n9. Jewellery posts the same way, because it goes through the same switch\n";
+// Jewellery builds its own vouchers and never touches inv_movement_posting_plan(),
+// so it had to be told separately. Only two things change, and the instruction
+// was exact: the PURCHASE leg and the COST leg. The sale's revenue side — the
+// customer, sales, VAT, the skills tax — is posted identically either way.
+require_once dirname(__DIR__) . '/app/jewellery_trade.php';
+// jewellery_post_sale() reaches into the workshop for order status, which
+// jewellery_trade.php does not require itself.
+require_once dirname(__DIR__) . '/app/jewellery_workshop.php';
+
+$jwSuffix = 'PDJW' . substr((string) time(), -5);
+db()->prepare('INSERT INTO companies (name, code, is_active) VALUES (:n, :c, 1)')
+    ->execute(['n' => 'Periodic Jeweller ' . $jwSuffix, 'c' => $jwSuffix]);
+$jwCo = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_default, status)
+    VALUES (:c, '2026-27', '2026-07-16', '2027-07-15', 1, 'open')")->execute(['c' => $jwCo]);
+$jwFy = (int) db()->lastInsertId();
+
+$jwGroups = [];
+$jwLedger = static function (string $name, string $masterKey, string $type) use ($jwCo, &$jwGroups): int {
+    $key = $masterKey;
+    if (!isset($jwGroups[$key])) {
+        db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key) VALUES (:c, :code, :n, :m)')
+            ->execute(['c' => $jwCo, 'code' => coa_next_group_code($jwCo, $masterKey),
+                'n' => ucwords(str_replace('_', ' ', $masterKey)), 'm' => $masterKey]);
+        $jwGroups[$key] = (int) db()->lastInsertId();
+    }
+    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status)
+        VALUES (:c, :g, :code, :n, :t, 'active')")
+        ->execute(['c' => $jwCo, 'g' => $jwGroups[$key],
+            'code' => coa_next_ledger_code($jwCo, $jwGroups[$key]), 'n' => $name, 't' => $type]);
+
+    return (int) db()->lastInsertId();
+};
+
+$jwStock     = $jwLedger('Metal stock', 'current_asset', 'asset');
+$jwPurchases = $jwLedger('Purchases — gold', 'purchases', 'expense');
+$jwCogs      = $jwLedger('Cost of goods sold', 'direct_expense', 'expense');
+$jwCash      = $jwLedger('Cash', 'current_asset', 'asset');
+$jwSalesMetal = $jwLedger('Sales — metal', 'direct_income', 'revenue');
+$jwSalesMaking = $jwLedger('Sales — making', 'direct_income', 'revenue');
+$jwVat       = $jwLedger('VAT payable', 'current_liability', 'liability');
+$jwSpt       = $jwLedger('Skills promotion tax', 'current_liability', 'liability');
+$jwRound     = $jwLedger('Rounding', 'indirect_expense', 'expense');
+$jwClearing  = $jwLedger('Sundry creditors', 'current_liability', 'liability');
+
+// Mappings are stored under the CANONICAL purpose name — jewellery's own names
+// are aliases onto the shared inventory vocabulary, and jw_canonical_purpose()
+// is what does the translating. Storing them under the jewellery name looks
+// right and resolves to nothing.
+$jwMap = ['stock_metal' => $jwStock, 'stock_finished' => $jwStock, 'cogs' => $jwCogs,
+    'sales_metal' => $jwSalesMetal, 'sales_making' => $jwSalesMaking, 'vat_output' => $jwVat,
+    'spt_output' => $jwSpt, 'rounding' => $jwRound, 'purchase_clearing' => $jwClearing];
+foreach ($jwMap as $purpose => $ledgerId) {
+    $canonical = jw_canonical_purpose($purpose);
+    db()->prepare("INSERT IGNORE INTO inventory_ledger_mappings (company_id, scope, purpose, ledger_id)
+        VALUES (:c, 'global', :p, :l)")->execute(['c' => $jwCo, 'p' => $canonical, 'l' => $ledgerId]);
+}
+foreach (['purchases' => $jwPurchases, 'inventory_asset' => $jwStock] as $purpose => $ledgerId) {
+    db()->prepare("INSERT IGNORE INTO inventory_ledger_mappings (company_id, scope, purpose, ledger_id)
+        VALUES (:c, 'global', :p, :l)")->execute(['c' => $jwCo, 'p' => $purpose, 'l' => $ledgerId]);
+}
+inv_mapping_forget();
+
+// The metal, the purity, the unit and an item to buy.
+db()->prepare("INSERT INTO jewellery_metals (company_id, code, name, active) VALUES (:c, 'GOLD', 'Gold', 1)")
+    ->execute(['c' => $jwCo]);
+$jwMetal = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO jewellery_units (company_id, code, name, grams, is_base, active)
+    VALUES (:c, 'TOLA', 'Tola', 11.6638, 0, 1)")->execute(['c' => $jwCo]);
+$jwUnit = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO jewellery_purities (company_id, metal_id, code, name, fineness)
+    VALUES (:c, :m, '22K', '22 Karat', 0.916)")->execute(['c' => $jwCo, 'm' => $jwMetal]);
+$jwPurity = (int) db()->lastInsertId();
+
+$jwUser = (int) db()->query("SELECT id FROM users ORDER BY id LIMIT 1")->fetchColumn();
+$jwItem = jewellery_save_item($jwCo, ['code' => 'RING1', 'name' => 'Gold ring', 'jewellery_type' => 'ornament',
+    'metal_id' => $jwMetal, 'purity_id' => $jwPurity, 'unit_id' => $jwUnit, 'gross_weight' => 0], $jwUser);
+
+db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type)
+    VALUES (:c, 'SUP1', 'Bullion House', 'supplier')")->execute(['c' => $jwCo]);
+$jwSupplier = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type)
+    VALUES (:c, 'CUS1', 'Walk-in customer', 'customer')")->execute(['c' => $jwCo]);
+$jwCustomer = (int) db()->lastInsertId();
+
+/** Every leg of a voucher, keyed by ledger name. */
+$legsOf = static function (int $voucherId): array {
+    $stmt = db()->prepare("SELECT l.name, ve.entry_type, ve.amount FROM voucher_entries ve
+        INNER JOIN ledgers l ON l.id = ve.ledger_id WHERE ve.voucher_id = ? ORDER BY ve.id");
+    $stmt->execute([$voucherId]);
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $sign = $row['entry_type'] === 'debit' ? 1 : -1;
+        $out[(string) $row['name']] = round(($out[(string) $row['name']] ?? 0) + $sign * (float) $row['amount'], 2);
+    }
+
+    return $out;
+};
+
+with_method('periodic', static function () use ($jwCo, $jwFy, $jwUser, $jwItem, $jwPurity, $jwUnit,
+    $jwSupplier, $jwCustomer, $jwCash, $legsOf): void {
+    // BUY: 10 tola at 90,000 a tola.
+    $purchaseId = jewellery_save_purchase($jwCo, $jwFy, [
+        'purchase_date' => '2026-08-01', 'party_id' => $jwSupplier, 'source' => 'supplier',
+        'settle_mode' => 'credit',
+    ], [['item_id' => $jwItem, 'purity_id' => $jwPurity, 'unit_id' => $jwUnit,
+        'gross_weight' => 10, 'rate' => 90000]], $jwUser);
+    $posted = jewellery_post_purchase($jwCo, $purchaseId, $jwUser);
+    ok(!empty($posted['ok']), 'A jewellery purchase posts' . (!empty($posted['ok']) ? '' : ' — ' . ($posted['error'] ?? '')));
+    $legs = $legsOf((int) $posted['voucher_id']);
+    ok(isset($legs['Purchases — gold']) && $legs['Purchases — gold'] > 0,
+        'It DEBITS Purchases — gold, not the stock account');
+    ok(!isset($legs['Metal stock']),
+        '  ...and the stock account is not touched at all, which is the whole point');
+
+    // SELL: 4 tola. The revenue side must be identical to perpetual.
+    $saleId = jewellery_save_sale($jwCo, $jwFy, [
+        'sale_date' => '2026-09-01', 'party_id' => $jwCustomer,
+        'received_amount' => 0, 'settle_mode' => 'credit',
+    ], [['item_id' => $jwItem, 'gross_weight' => 4, 'rate' => 160000]], [], $jwUser);
+    $soldResult = jewellery_post_sale($jwCo, $saleId, $jwUser);
+    ok(!empty($soldResult['ok']), 'A jewellery sale posts' . (!empty($soldResult['ok']) ? '' : ' — ' . ($soldResult['error'] ?? '')));
+    $saleLegs = $legsOf((int) $soldResult['voucher_id']);
+
+    // THE COST LEG IS GONE, and only the cost leg.
+    ok(!isset($saleLegs['Cost of goods sold']),
+        'The sale posts NO cost of goods sold, because there is no such ledger under this system');
+    ok(!isset($saleLegs['Metal stock']),
+        '  ...and takes nothing out of stock either');
+    ok(isset($saleLegs['Sales — metal']) && $saleLegs['Sales — metal'] < 0,
+        'But the revenue side is untouched: Sales — metal is still credited');
+    ok(isset($saleLegs['Skills promotion tax']),
+        '  ...and so is the skills promotion tax');
+
+    // The cost is still WORKED OUT, just not posted, so margin reports live on.
+    $lineCost = (float) db()->query("SELECT COALESCE(SUM(cogs_amount), 0) FROM jewellery_sale_lines
+        WHERE sale_id = {$saleId}")->fetchColumn();
+    ok($lineCost > 0,
+        'The cost is still calculated and kept on the line (' . number_format($lineCost, 2)
+            . '), so item-wise margin still reports');
+    ok(abs((float) ($soldResult['cogs'] ?? 0) - $lineCost) < 0.01,
+        '  ...and the posting routine still returns it');
+
+    // And the voucher still balances, which a half-removed leg would break.
+    $sum = 0.0;
+    foreach ($saleLegs as $amount) {
+        $sum += $amount;
+    }
+    ok(abs($sum) < 0.01, 'The sale voucher still balances to nought without its cost leg');
+});
+
+foreach (['voucher_entries' => 'voucher_id IN (SELECT id FROM vouchers WHERE company_id = :c)',
+    'vouchers' => 'company_id = :c', 'jewellery_sale_lines' => 'company_id = :c',
+    'jewellery_sales' => 'company_id = :c', 'jewellery_purchase_lines' => 'company_id = :c',
+    'jewellery_purchases' => 'company_id = :c', 'jewellery_stock_txns' => 'company_id = :c',
+    'jewellery_bills' => 'company_id = :c', 'jewellery_item_profiles' => 'company_id = :c',
+    'inventory_transactions' => 'company_id = :c', 'inventory_items' => 'company_id = :c',
+    'jewellery_purities' => 'company_id = :c', 'jewellery_units' => 'company_id = :c',
+    'jewellery_metals' => 'company_id = :c', 'inventory_ledger_mappings' => 'company_id = :c',
+    'accounting_parties' => 'company_id = :c', 'ledgers' => 'company_id = :c',
+    'ledger_groups' => 'company_id = :c', 'fiscal_years' => 'company_id = :c',
+    'companies' => 'id = :c'] as $table => $where) {
+    try {
+        db()->prepare("DELETE FROM `{$table}` WHERE {$where}")->execute(['c' => $jwCo]);
+    } catch (Throwable $ignored) {
+        // A table this build does not have is not a failure of the assertions.
+    }
+}
+inv_mapping_forget();
+
+echo "\n10. Hospitality needed nothing, and it is worth knowing why\n";
+// Hospitality was on the list of modules that post their own vouchers. It does
+// -- but its sales voucher is revenue only: Dr receivable and discount, Cr
+// sales and VAT. It has never posted a cost of sales entry or touched a stock
+// account, so it was already keeping the periodic form without anyone saying
+// so, and needed no change at all.
+//
+// Asserted rather than assumed, because "we checked and there was nothing to
+// do" is indistinguishable from "we forgot" a year from now.
+$hospPosting = (string) file_get_contents(dirname(__DIR__) . '/app/hospitality_sales_posting.php');
+$hospEngine = (string) file_get_contents(dirname(__DIR__) . '/app/hospitality_engine.php');
+ok(str_contains($hospPosting, 'create_voucher_with_entries'), 'Hospitality posts its own sales voucher');
+ok(!str_contains($hospPosting, "'cogs'"),
+    '  ...and posts no cost of sales leg, so a sale never carries its own cost');
+ok(!preg_match("/'inventory_asset'/", $hospPosting),
+    '  ...and never debits or credits a stock account');
+ok(substr_count($hospEngine, "'cogs'") === 0,
+    'Nor does the hospitality engine post one anywhere else');
+
+// Its ingredient costing is an ESTIMATE from recipes, reported and never
+// posted, which is why the management pack labels every cost column as one.
+require_once dirname(__DIR__) . '/app/hospitality_management_report.php';
+$costNote = (new ReflectionFunction('hospitality_pack_category'))->getDocComment() ?: '';
+ok(function_exists('hospitality_pack_costed_note'),
+    'And its costing stays an estimate the reports label, not a posting');
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

@@ -731,6 +731,37 @@ function jw_item_stock_ledger_id(int $companyId, array $item): int
 // The stock movement choke point
 // ---------------------------------------------------------------------------
 
+/**
+ * Where metal COMING IN is debited.
+ *
+ * Under the perpetual system that is the item's stock account: the shop buys
+ * gold, the asset goes up. Under the periodic system it is Purchases, because
+ * there the ledger carries no running stock figure to add to -- the metal is
+ * counted at the year end instead, and the one closing-stock journal puts it on
+ * the balance sheet.
+ *
+ * Every door metal arrives by goes through here, and they are all purchases:
+ * a supplier bill, old gold handed over against a sale, old gold taken in
+ * settlement or left as an advance. Metal paid back out uses the same account
+ * with the sign reversed, which under periodic reads as a purchase undone --
+ * there being no stock account to take it out of.
+ *
+ * Returns 0 when nothing is mapped, so the caller refuses to post and names
+ * what is missing rather than guessing.
+ */
+function jw_metal_in_ledger_id(int $companyId, array $item): int
+{
+    require_once __DIR__ . '/inventory_valuation.php';
+    if (inv_accounting_method() !== 'periodic') {
+        return jw_item_stock_ledger_id($companyId, $item);
+    }
+    require_once __DIR__ . '/inventory_mapping.php';
+    $row = inv_resolve_mapping($companyId, 'purchases', (int) ($item['id'] ?? 0) ?: null,
+        ($item['category'] ?? '') !== '' ? (string) $item['category'] : null);
+
+    return $row ? (int) $row['id'] : 0;
+}
+
 /** Movement types that leave own stock, for the negative-stock guard. */
 function jw_stock_txn_types(): array
 {
