@@ -1814,59 +1814,123 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <p style="margin:0;color:var(--mbw-muted);font-size:12px">Generated <?= e(date('Y-m-d H:i')) ?> by <?= e((string) ($currentUser['name'] ?? '')) ?> · <?= e($company['name']) ?> · Estimated management report based on configured recipes and reference ingredient costs. No accounting or inventory entry has been posted.</p>
     </section>
 
-    <?php require_once __DIR__ . '/../../app/hospitality_management_report.php'; ?>
+    <?php
+    require_once __DIR__ . '/../../app/hospitality_management_report.php';
+    // Which sections the reader has asked to SEE. Viewing is separate from
+    // ticking for export: somebody reads one section on screen and still wants
+    // the whole pack in the file.
+    $packViewing = array_values(array_filter(array_map('strval', (array) ($_GET['show'] ?? []))));
+    $packViewing = $packViewing === [] ? [] : hospitality_pack_normalise($packViewing);
+    $packShown = $packViewing === [] ? [] : hospitality_pack_build($companyId, $rangeFrom, $rangeTo, $packViewing);
+    $packLink = static function (array $extra) use ($view, $rangeFrom, $rangeTo): string {
+        return url('admin/hospitality.php?' . http_build_query(
+            ['view' => $view, 'from' => $rangeFrom, 'to' => $rangeTo] + $extra
+        ));
+    };
+    ?>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head">
             <h2><?= icon('reports') ?>Management pack</h2>
-            <div class="mbw-card-tools">
-                <a class="mbw-view-all" href="<?= e(url('admin/report-schedules.php?report_key=hospitality-pack')) ?>"><?= icon('calendar') ?>Schedule this pack</a>
+            <div class="mbw-card-tools hosp-pack-tools">
+                <span class="hosp-pack-mark">
+                    <label><input type="checkbox" id="hospPackAll" form="hospPackForm" checked> Mark all</label>
+                    <span id="hospPackCount">10 marked</span>
+                </span>
+                <?php if ($canExport): ?>
+                    <button type="submit" form="hospPackForm" name="export" value="pack" class="button secondary"
+                            title="Every marked section, one workbook, one sheet each"><?= icon('analytics') ?>Excel</button>
+                    <button type="submit" form="hospPackForm" formaction="<?= e(url('admin/hospitality-pack-print.php')) ?>"
+                            formtarget="_blank" class="button secondary"
+                            title="Every marked section as a print view your browser saves as PDF"><?= icon('documents') ?>PDF</button>
+                <?php endif; ?>
+                <a class="mbw-view-all" href="<?= e(url('admin/report-schedules.php?report_key=hospitality-pack')) ?>"><?= icon('calendar') ?>Schedule</a>
             </div>
         </div>
         <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
-            Tick what the meeting needs. Everything ticked comes out as <strong>one workbook, one sheet per
-            section</strong> — a pack is read as a pack, and separate downloads are separate chances to be
-            looking at a different date range from the person beside you. Nothing ticked exports the lot.
+            <?= e($rangeFrom) ?> → <?= e($rangeTo) ?>. Mark what the meeting needs; everything marked comes out as
+            <strong>one workbook, one sheet per section</strong>. <strong>View</strong> opens a section here in full
+            detail without leaving the page.
         </p>
-        <form method="get">
+        <form method="get" id="hospPackForm">
             <input type="hidden" name="view" value="<?= e($view) ?>">
-            <input type="hidden" name="export" value="pack">
             <input type="hidden" name="from" value="<?= e($rangeFrom) ?>">
             <input type="hidden" name="to" value="<?= e($rangeTo) ?>">
-            <div class="hosp-pack-grid">
+            <div class="hosp-pack-list">
                 <?php foreach (hospitality_pack_sections() as $packKey => [$packLabel, $packWhat]): ?>
-                    <label class="hosp-pack-pick">
-                        <input type="checkbox" name="section[]" value="<?= e($packKey) ?>" checked>
-                        <span>
+                    <?php $isShown = in_array($packKey, $packViewing, true); ?>
+                    <div class="hosp-pack-row<?= $isShown ? ' is-open' : '' ?>">
+                        <label class="hosp-pack-mark-one">
+                            <input type="checkbox" name="section[]" value="<?= e($packKey) ?>" checked>
+                        </label>
+                        <div class="hosp-pack-name">
                             <strong><?= e($packLabel) ?></strong>
                             <small><?= e($packWhat) ?></small>
-                        </span>
-                    </label>
+                        </div>
+                        <div class="hosp-pack-actions">
+                            <a class="button secondary" href="<?= e($packLink($isShown
+                                ? ['show' => array_values(array_diff($packViewing, [$packKey]))]
+                                : ['show' => array_merge($packViewing, [$packKey])])) ?>#pack-<?= e($packKey) ?>">
+                                <?= $isShown ? 'Hide' : 'View' ?>
+                            </a>
+                            <?php if ($canExport): ?>
+                                <a class="button secondary" href="<?= e($packLink(['export' => 'pack', 'section' => [$packKey]])) ?>"
+                                   title="This section only, as Excel"><?= icon('analytics') ?></a>
+                                <a class="button secondary" target="_blank" rel="noopener"
+                                   href="<?= e(url('admin/hospitality-pack-print.php?' . http_build_query(['from' => $rangeFrom, 'to' => $rangeTo, 'section' => [$packKey]]))) ?>"
+                                   title="This section only, as a print view"><?= icon('documents') ?></a>
+                            <?php endif; ?>
+                        </div>
+                    </div>
                 <?php endforeach; ?>
-            </div>
-            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
-                <?php if ($canExport): ?>
-                    <button type="submit"><?= icon('analytics') ?>Export selected as one Excel workbook</button>
-                <?php else: ?>
-                    <span style="color:var(--mbw-muted);font-size:12.5px">Exporting needs the <strong>hospitality · export</strong> permission.</span>
-                <?php endif; ?>
-                <button type="button" class="button secondary" data-pack-all>Select all</button>
-                <button type="button" class="button secondary" data-pack-none>Select none</button>
             </div>
         </form>
         <script>
         (function () {
-            var form = document.currentScript.closest('section').querySelector('form');
+            var form = document.getElementById('hospPackForm');
             if (!form) { return; }
-            function setAll(on) {
-                Array.prototype.forEach.call(form.querySelectorAll('input[name="section[]"]'), function (b) { b.checked = on; });
+            var all = document.getElementById('hospPackAll');
+            var count = document.getElementById('hospPackCount');
+            function boxes() { return form.querySelectorAll('input[name="section[]"]'); }
+            function tally() {
+                var marked = 0;
+                Array.prototype.forEach.call(boxes(), function (b) { if (b.checked) { marked++; } });
+                if (count) { count.textContent = marked + ' marked'; }
+                if (all) {
+                    all.checked = marked === boxes().length;
+                    all.indeterminate = marked > 0 && marked < boxes().length;
+                }
             }
-            var all = form.querySelector('[data-pack-all]');
-            var none = form.querySelector('[data-pack-none]');
-            if (all) { all.addEventListener('click', function () { setAll(true); }); }
-            if (none) { none.addEventListener('click', function () { setAll(false); }); }
+            if (all) {
+                all.addEventListener('change', function () {
+                    Array.prototype.forEach.call(boxes(), function (b) { b.checked = all.checked; });
+                    tally();
+                });
+            }
+            form.addEventListener('change', tally);
+            tally();
         })();
         </script>
     </section>
+
+    <?php // Sections opened for reading, in full, one card each. ?>
+    <?php foreach ($packShown as $shownKey => $shownSection): ?>
+        <section class="mbw-card" data-collapsible id="pack-<?= e($shownKey) ?>">
+            <div class="mbw-card-head">
+                <h2><?= icon('reports') ?><?= e((string) $shownSection['title']) ?></h2>
+                <div class="mbw-card-tools">
+                    <?php if ($canExport): ?>
+                        <a class="mbw-view-all" href="<?= e($packLink(['export' => 'pack', 'section' => [$shownKey]])) ?>">Excel</a>
+                        <a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e(url('admin/hospitality-pack-print.php?' . http_build_query(['from' => $rangeFrom, 'to' => $rangeTo, 'section' => [$shownKey]]))) ?>">PDF</a>
+                    <?php endif; ?>
+                    <a class="mbw-view-all" href="<?= e($packLink(['show' => array_values(array_diff($packViewing, [$shownKey]))])) ?>">Hide</a>
+                </div>
+            </div>
+            <?php if ((string) $shownSection['note'] !== ''): ?>
+                <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12px"><?= e((string) $shownSection['note']) ?></p>
+            <?php endif; ?>
+            <?php hospitality_pack_render_table($shownSection, $fmt); ?>
+        </section>
+    <?php endforeach; ?>
 
     <section class="mbw-kpi-grid" aria-label="Consolidated summary">
         <?php foreach ([

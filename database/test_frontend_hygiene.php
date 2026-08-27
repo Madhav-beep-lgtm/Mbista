@@ -107,6 +107,7 @@ $printPages = [
     'stock-ledger.php',           // printable ledger
     'accounting-parties.php',     // the party statement print sheet
     'agreement-builder.php',      // WYSIWYG editor canvas
+    'hospitality-pack-print.php', // the management pack, printed
 ];
 $offenders = [];
 foreach (array_merge(hygiene_php_files($root . '/public_html/admin'), hygiene_php_files($root . '/app/views')) as $path) {

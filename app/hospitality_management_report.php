@@ -34,10 +34,12 @@ function hospitality_pack_sections(): array
 {
     return [
         'pl' => ['Profit & Loss (common size)', 'Sales as 100%, with every other line measured against it.'],
+        'pl_category' => ['P&L by category', 'Gross profit per category, then the common costs once, ledger by ledger.'],
         'category' => ['Category performance', 'What each category sold, cost to serve, and earned.'],
         'items_top' => ['Best and worst sellers', 'The dishes carrying the period, and the ones being carried.'],
         'items_gp' => ['Menu items by GP ratio', 'Ranked by margin rather than by turnover.'],
         'payments' => ['How the money came in', 'Receipts by payment method.'],
+        'employee' => ['Employee cost breakdown', 'What the wage bill is made of, component by component.'],
         'purchases' => ['Purchase analysis', 'Most and least bought, with what they cost and at what rate.'],
         'service_charge' => ['Service charge', 'Collected, and what went to staff.'],
         'comparison' => ['Period comparison', 'This period against the one before it, and day by day.'],
@@ -78,6 +80,8 @@ function hospitality_pack_build(int $companyId, string $from, string $to, array 
     foreach ($sections as $key) {
         $built = match ($key) {
             'pl' => hospitality_pack_pl($companyId, $from, $to),
+            'pl_category' => hospitality_pack_pl_category($companyId, $from, $to),
+            'employee' => hospitality_pack_employee($companyId, $from, $to),
             'category' => hospitality_pack_category($companyId, $from, $to),
             'items_top' => hospitality_pack_items_top($companyId, $from, $to),
             'items_gp' => hospitality_pack_items_gp($companyId, $from, $to),
@@ -99,6 +103,142 @@ function hospitality_pack_build(int $companyId, string $from, string $to, array 
 function hospitality_pack_share(float $amount, float $sales): ?float
 {
     return abs($sales) > 0.004 ? round($amount / $sales * 100, 2) : null;
+}
+
+
+// ---------------------------------------------------------------------------
+// Where the sales figures come from
+// ---------------------------------------------------------------------------
+/**
+ * SALES COME FROM THE UPLOADED SHEET. COST IS AN OVERLAY ON TOP OF IT.
+ *
+ * This pack first read everything through hospitality_grouped(), which reads
+ * hospitality_costing_lines -- rows that exist only once somebody has RUN
+ * costing and only for lines a recipe could be found for. A shop that uploads
+ * its daily sales but has not built its recipes yet therefore saw a management
+ * pack of noughts: the Sales Report showed Bakery and Beverage takings on the
+ * same screen, and the pack beside it said nothing was recorded.
+ *
+ * That is the wrong way round. The uploaded sheet IS the sales record -- it is
+ * what posts to the ledger -- so every sales figure here is read from it and is
+ * available the moment a sheet is uploaded. Recipe cost and gross profit are a
+ * SEPARATE question, answered by the costing runs where they exist, joined on
+ * afterwards and left null where they do not.
+ *
+ * A section can then say "these are your sales, and the cost of them is not
+ * known yet", which is true and useful, instead of "nothing was recorded",
+ * which is neither.
+ *
+ * @param string $groupBy 'category', 'item' or 'day'
+ * @return array<int, array<string, mixed>>
+ */
+function hospitality_pack_sales_by(int $companyId, string $from, string $to, string $groupBy): array
+{
+    if (!table_exists('hospitality_sales_upload_lines')) {
+        return [];
+    }
+    [$salesKey, $costKey] = match ($groupBy) {
+        'item' => ['l.item_name', 'c.menu_item_name'],
+        'day' => ['l.sale_date', 'c.sale_date'],
+        default => ["COALESCE(NULLIF(TRIM(l.category), ''), 'Uncategorised')", "COALESCE(NULLIF(TRIM(c.category), ''), 'Uncategorised')"],
+    };
+
+    $sales = db()->prepare("SELECT {$salesKey} AS grp,
+            COUNT(*) AS line_count,
+            SUM(l.qty) AS qty,
+            SUM(l.gross_amount) AS gross_sales,
+            SUM(l.discount) AS discount,
+            SUM(l.vat_amount) AS vat,
+            SUM(l.taxable_amount) AS net_sales
+        FROM hospitality_sales_upload_lines l
+        WHERE l.company_id = :cid AND l.sale_date BETWEEN :f AND :t
+        GROUP BY {$salesKey}");
+    $sales->execute(['cid' => $companyId, 'f' => $from, 't' => $to]);
+
+    $rows = [];
+    foreach ($sales->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $key = (string) $row['grp'];
+        $rows[$key] = [
+            'group' => $key,
+            'lines' => (int) $row['line_count'],
+            'qty' => (float) $row['qty'],
+            'gross_sales' => round((float) $row['gross_sales'], 2),
+            'discount' => round((float) $row['discount'], 2),
+            'vat' => round((float) $row['vat'], 2),
+            'net_sales' => round((float) $row['net_sales'], 2),
+            // Null, not nought: an uncosted line has an UNKNOWN cost, and a
+            // zero would report it as free and a 100% margin.
+            'est_cost' => null,
+            'est_gp' => null,
+            'gp_pct' => null,
+            'costed_net_sales' => 0.0,
+        ];
+    }
+    if ($rows === [] || !table_exists('hospitality_costing_lines')) {
+        return array_values($rows);
+    }
+
+    // The cost overlay, where costing has actually been run.
+    $costs = db()->prepare("SELECT {$costKey} AS grp,
+            SUM(c.total_cost) AS est_cost, SUM(c.gross_profit) AS est_gp, SUM(c.net_sales) AS costed_net_sales
+        FROM hospitality_costing_lines c
+        WHERE c.company_id = :cid AND c.sale_date BETWEEN :f AND :t AND c.status = 'costed'
+        GROUP BY {$costKey}");
+    $costs->execute(['cid' => $companyId, 'f' => $from, 't' => $to]);
+    foreach ($costs->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $key = (string) $row['grp'];
+        if (!isset($rows[$key])) {
+            continue;
+        }
+        $costedSales = round((float) $row['costed_net_sales'], 2);
+        $rows[$key]['est_cost'] = round((float) $row['est_cost'], 2);
+        $rows[$key]['est_gp'] = round((float) $row['est_gp'], 2);
+        $rows[$key]['costed_net_sales'] = $costedSales;
+        // The margin is measured against the sales that were actually costed,
+        // not against all of them -- otherwise a category half of whose lines
+        // have recipes reports half the margin it really earns.
+        $rows[$key]['gp_pct'] = abs($costedSales) > 0.004
+            ? round((float) $row['est_gp'] / $costedSales * 100, 2)
+            : null;
+    }
+
+    $out = array_values($rows);
+    usort($out, static fn (array $a, array $b): int => $groupBy === 'day'
+        ? strcmp((string) $a['group'], (string) $b['group'])
+        : ((float) $b['net_sales'] <=> (float) $a['net_sales']));
+
+    return $out;
+}
+
+/**
+ * How much of a period's sales carry a recipe cost.
+ *
+ * Printed on every section that shows an estimated cost, because "GP 47%" on a
+ * period where a tenth of the lines were costed is not a gross profit, it is a
+ * tenth of one.
+ */
+function hospitality_pack_costed_note(array $rows): string
+{
+    $sales = 0.0;
+    $costed = 0.0;
+    foreach ($rows as $row) {
+        $sales += (float) ($row['net_sales'] ?? 0);
+        $costed += (float) ($row['costed_net_sales'] ?? 0);
+    }
+    if ($sales <= 0.004) {
+        return '';
+    }
+    $share = round($costed / $sales * 100, 1);
+    if ($share >= 99.5) {
+        return ' Every line in this period carries a recipe cost.';
+    }
+    if ($costed <= 0.004) {
+        return ' NO LINE in this period has been costed yet — the sales are real, the cost and margin columns'
+            . ' are empty because no recipe has been matched to them. Run costing on the Sales Upload tab.';
+    }
+
+    return ' Only ' . $share . '% of these sales carry a recipe cost, so the cost and margin columns describe'
+        . ' that share and not the whole period.';
 }
 
 // ---------------------------------------------------------------------------
@@ -176,9 +316,16 @@ function hospitality_pack_pl(int $companyId, string $from, string $to): array
 // ---------------------------------------------------------------------------
 // 2. Category performance
 // ---------------------------------------------------------------------------
+/**
+ * What each category sold, what it cost to serve, and what it earned.
+ *
+ * Sales from the uploaded sheet, cost from the costing runs where they exist.
+ * A category with sales and no recipe shows its takings and an empty cost --
+ * which is the truth -- rather than dropping off the report entirely.
+ */
 function hospitality_pack_category(int $companyId, string $from, string $to): array
 {
-    $rows = hospitality_grouped($companyId, $from, $to, 'category');
+    $rows = hospitality_pack_sales_by($companyId, $from, $to, 'category');
     $salesTotal = 0.0;
     foreach ($rows as $row) {
         $salesTotal += (float) $row['net_sales'];
@@ -186,41 +333,49 @@ function hospitality_pack_category(int $companyId, string $from, string $to): ar
 
     $columns = [
         ['group', 'Category', 'left'],
-        ['net_qty', 'Qty', 'right'],
+        ['lines', 'Lines', 'right'],
+        ['qty', 'Qty', 'right'],
         ['gross_sales', 'Gross sales', 'right'],
         ['discount', 'Discount', 'right'],
         ['net_sales', 'Net sales', 'right'],
         ['share', '% of sales', 'right'],
+        ['vat', 'VAT', 'right'],
         ['est_cost', 'Est. recipe cost', 'right'],
         ['est_gp', 'Est. gross profit', 'right'],
         ['gp_pct', 'GP %', 'right'],
     ];
     $out = [];
-    $totals = ['net_qty' => 0.0, 'gross_sales' => 0.0, 'discount' => 0.0, 'net_sales' => 0.0,
-        'est_cost' => 0.0, 'est_gp' => 0.0];
+    $totals = ['lines' => 0, 'qty' => 0.0, 'gross_sales' => 0.0, 'discount' => 0.0,
+        'net_sales' => 0.0, 'vat' => 0.0, 'est_cost' => 0.0, 'est_gp' => 0.0];
+    $anyCost = false;
     foreach ($rows as $row) {
-        $out[] = [
-            'group' => (string) $row['group'],
-            'net_qty' => (float) $row['net_qty'],
-            'gross_sales' => (float) $row['gross_sales'],
-            'discount' => (float) $row['discount'],
-            'net_sales' => (float) $row['net_sales'],
-            'share' => hospitality_pack_share((float) $row['net_sales'], $salesTotal),
-            'est_cost' => (float) $row['est_cost'],
-            'est_gp' => (float) $row['est_gp'],
-            'gp_pct' => $row['gp_pct'],
-            'emphasis' => '',
-        ];
-        foreach (array_keys($totals) as $field) {
+        $row['share'] = hospitality_pack_share((float) $row['net_sales'], $salesTotal);
+        $row['emphasis'] = '';
+        $out[] = $row;
+        $totals['lines'] += (int) $row['lines'];
+        foreach (['qty', 'gross_sales', 'discount', 'net_sales', 'vat'] as $field) {
             $totals[$field] += (float) $row[$field];
+        }
+        if ($row['est_cost'] !== null) {
+            $anyCost = true;
+            $totals['est_cost'] += (float) $row['est_cost'];
+            $totals['est_gp'] += (float) $row['est_gp'];
         }
     }
     $totals['share'] = $salesTotal != 0.0 ? 100.0 : null;
-    $totals['gp_pct'] = hospitality_pack_share($totals['est_gp'], $totals['net_sales']);
+    if (!$anyCost) {
+        // An empty cost column must not foot to nought, which reads as free.
+        $totals['est_cost'] = null;
+        $totals['est_gp'] = null;
+        $totals['gp_pct'] = null;
+    } else {
+        $totals['gp_pct'] = hospitality_pack_share($totals['est_gp'], $totals['net_sales']);
+    }
 
     return hospitality_pack_section('Category performance', $columns, $out, $totals,
-        'Cost and gross profit are ESTIMATES from configured recipes and reference ingredient prices.'
-        . ' They are not posted cost of goods sold; the ledger figure is on the profit and loss sheet.');
+        'Sales are the uploaded daily sheet -- the same figures the Sales Report shows and the ledger was'
+        . ' posted from. Cost and gross profit are ESTIMATES from configured recipes and reference ingredient'
+        . ' prices, not posted cost of goods sold.' . hospitality_pack_costed_note($rows));
 }
 
 // ---------------------------------------------------------------------------
@@ -232,14 +387,22 @@ function hospitality_pack_category(int $companyId, string $from, string $to): ar
  * By VALUE and by QUANTITY, because they answer different questions and a shop
  * that only ranks by value never notices the cheap thing everyone orders.
  */
+/**
+ * The dishes carrying the period, and the ones being carried.
+ *
+ * By VALUE and by QUANTITY, because they answer different questions and a shop
+ * that only ranks by value never notices the cheap thing everyone orders.
+ */
 function hospitality_pack_items_top(int $companyId, string $from, string $to, int $limit = 10): array
 {
-    $items = hospitality_grouped($companyId, $from, $to, 'menu_item');
+    $items = hospitality_pack_sales_by($companyId, $from, $to, 'item');
     $columns = [
         ['rank', 'Rank', 'left'],
         ['basis', 'Ranked by', 'left'],
-        ['group', 'Menu item', 'left'],
-        ['net_qty', 'Qty sold', 'right'],
+        ['group', 'Item', 'left'],
+        ['qty', 'Qty sold', 'right'],
+        ['gross_sales', 'Gross sales', 'right'],
+        ['discount', 'Discount', 'right'],
         ['net_sales', 'Net sales', 'right'],
         ['est_cost', 'Est. cost', 'right'],
         ['est_gp', 'Est. gross profit', 'right'],
@@ -251,17 +414,10 @@ function hospitality_pack_items_top(int $companyId, string $from, string $to, in
         $rank = 0;
         foreach (array_slice($sorted, 0, $limit) as $row) {
             $rank++;
-            $out[] = [
-                'rank' => $band . ' ' . $rank,
-                'basis' => $basis,
-                'group' => (string) $row['group'],
-                'net_qty' => (float) $row['net_qty'],
-                'net_sales' => (float) $row['net_sales'],
-                'est_cost' => (float) $row['est_cost'],
-                'est_gp' => (float) $row['est_gp'],
-                'gp_pct' => $row['gp_pct'],
-                'emphasis' => '',
-            ];
+            $row['rank'] = $band . ' ' . $rank;
+            $row['basis'] = $basis;
+            $row['emphasis'] = '';
+            $out[] = $row;
         }
 
         return $out;
@@ -270,60 +426,81 @@ function hospitality_pack_items_top(int $companyId, string $from, string $to, in
     $byValue = $items;
     usort($byValue, static fn (array $a, array $b): int => (float) $b['net_sales'] <=> (float) $a['net_sales']);
     $byQty = $items;
-    usort($byQty, static fn (array $a, array $b): int => (float) $b['net_qty'] <=> (float) $a['net_qty']);
+    usort($byQty, static fn (array $a, array $b): int => (float) $b['qty'] <=> (float) $a['qty']);
 
-    $rows = [];
-    $rows = array_merge($rows, $take($byValue, 'Sales value', 'Best'));
-    $rows = array_merge($rows, $take(array_reverse($byValue), 'Sales value', 'Worst'));
-    $rows = array_merge($rows, $take($byQty, 'Quantity', 'Best'));
-    $rows = array_merge($rows, $take(array_reverse($byQty), 'Quantity', 'Worst'));
+    $rows = array_merge(
+        $take($byValue, 'Sales value', 'Best'),
+        $take(array_reverse($byValue), 'Sales value', 'Worst'),
+        $take($byQty, 'Quantity', 'Best'),
+        $take(array_reverse($byQty), 'Quantity', 'Worst')
+    );
 
     return hospitality_pack_section('Best and worst sellers', $columns, $rows, [],
         'Ranked both ways on purpose: by value, and by how many went out of the door. A cheap item everybody'
         . ' orders and an expensive one nobody does look identical on a value ranking alone.'
-        . ' Cost and gross profit are recipe estimates.');
+        . ' Sales are the uploaded sheet; cost and gross profit are recipe ESTIMATES.'
+        . hospitality_pack_costed_note($items));
 }
 
 // ---------------------------------------------------------------------------
 // 4. Menu items by GP ratio
 // ---------------------------------------------------------------------------
+/**
+ * Menu items ranked by margin rather than by turnover.
+ *
+ * An item with no costed sales has no ratio -- not a ratio of nought -- so it
+ * is listed at the foot under its own heading rather than ranked as though it
+ * earned nothing.
+ */
 function hospitality_pack_items_gp(int $companyId, string $from, string $to): array
 {
-    $items = hospitality_grouped($companyId, $from, $to, 'menu_item');
-    // An item with no costed sales has no ratio -- not a ratio of nought.
-    $rated = array_values(array_filter($items, static fn (array $r): bool => $r['gp_pct'] !== null));
+    $items = hospitality_pack_sales_by($companyId, $from, $to, 'item');
+    $totalGp = 0.0;
+    foreach ($items as $row) {
+        $totalGp += (float) ($row['est_gp'] ?? 0);
+    }
+
+    $rated = [];
+    $unrated = [];
+    foreach ($items as $row) {
+        if ($row['gp_pct'] === null) {
+            $unrated[] = $row;
+        } else {
+            $rated[] = $row;
+        }
+    }
     usort($rated, static fn (array $a, array $b): int => (float) $b['gp_pct'] <=> (float) $a['gp_pct']);
 
     $columns = [
-        ['group', 'Menu item', 'left'],
-        ['net_qty', 'Qty sold', 'right'],
+        ['group', 'Item', 'left'],
+        ['qty', 'Qty sold', 'right'],
         ['net_sales', 'Net sales', 'right'],
         ['est_cost', 'Est. cost', 'right'],
         ['est_gp', 'Est. gross profit', 'right'],
         ['gp_pct', 'GP %', 'right'],
-        ['gp_contribution_pct', '% of total GP', 'right'],
+        ['gp_share', '% of total GP', 'right'],
     ];
     $rows = [];
     foreach ($rated as $row) {
-        $rows[] = [
-            'group' => (string) $row['group'],
-            'net_qty' => (float) $row['net_qty'],
-            'net_sales' => (float) $row['net_sales'],
-            'est_cost' => (float) $row['est_cost'],
-            'est_gp' => (float) $row['est_gp'],
-            'gp_pct' => $row['gp_pct'],
-            'gp_contribution_pct' => $row['gp_contribution_pct'] ?? null,
-            'emphasis' => '',
-        ];
+        $row['gp_share'] = hospitality_pack_share((float) ($row['est_gp'] ?? 0), $totalGp);
+        $row['emphasis'] = '';
+        $rows[] = $row;
     }
-    $uncosted = count($items) - count($rated);
+    if ($unrated !== []) {
+        $rows[] = ['group' => 'NOT COSTED — sold, but no recipe matched', 'emphasis' => 'total'];
+        foreach ($unrated as $row) {
+            $row['gp_share'] = null;
+            $row['emphasis'] = '';
+            $rows[] = $row;
+        }
+    }
 
     return hospitality_pack_section('Menu items by GP ratio', $columns, $rows, [],
-        'Cost and margin here are ESTIMATES from configured recipes and reference ingredient prices, not posted'
-        . ' cost of goods sold. Highest margin first. An item whose sales were never costed has no ratio and is left out rather than'
-        . ' shown as nought' . ($uncosted > 0 ? ' — ' . $uncosted . ' item(s) here' : '')
-        . '. A high ratio on two covers a month is worth less than a lower one on two hundred, which is what'
-        . ' the "% of total GP" column is for.');
+        'Cost and margin here are ESTIMATES from configured recipes and reference ingredient prices, not'
+        . ' posted cost of goods sold. Highest margin first. An item whose sales were never costed has no'
+        . ' ratio and is listed separately at the foot rather than ranked as though it earned nothing.'
+        . ' A high ratio on two covers a month is worth less than a lower one on two hundred, which is what'
+        . ' the "% of total GP" column is for.' . hospitality_pack_costed_note($items));
 }
 
 // ---------------------------------------------------------------------------
@@ -603,13 +780,15 @@ function hospitality_pack_comparison(int $companyId, string $from, string $to): 
     ];
 
     // Day by day underneath, which is where a bad Tuesday shows up.
-    $daily = hospitality_grouped($companyId, $from, $to, 'period_day');
+    $daily = hospitality_pack_sales_by($companyId, $from, $to, 'day');
     foreach ($daily as $day) {
         $rows[] = [
             'label' => 'Day — ' . (string) $day['group'],
             'now' => round((float) $day['net_sales'], 2),
             'was' => null,
-            'change' => round((float) $day['est_gp'], 2),
+            // Null rather than nought where the day was never costed: an empty
+            // cell reads as unknown, a zero reads as a day that earned nothing.
+            'change' => $day['est_gp'],
             'change_pct' => $day['gp_pct'],
             'emphasis' => 'day',
         ];
@@ -620,6 +799,279 @@ function hospitality_pack_comparison(int $companyId, string $from, string $to): 
         . ' (' . $prevFrom . ' to ' . $prevTo . ').'
         . ' Day rows underneath carry that day\'s net sales, its estimated gross profit in the Change column'
         . ' and its GP % beside it — a month that looks steady in total rarely is day by day.');
+}
+
+
+// ---------------------------------------------------------------------------
+// Category-wise profit and loss
+// ---------------------------------------------------------------------------
+/**
+ * DOWN TO GROSS PROFIT PER CATEGORY, THEN THE COMMON COSTS ONCE.
+ *
+ * A restaurant earns its margin per category and spends most of its money
+ * across all of them at the same time. Rent, wages, electricity and the
+ * accountant's fee do not belong to Bakery or to Beverage, and apportioning
+ * them on a made-up basis produces a "category profit" that is really an
+ * argument about the apportionment.
+ *
+ * So the statement stops where the honest attribution stops: every category
+ * carries its own sales, its own direct cost and its own gross profit, and the
+ * common costs are listed once underneath, LEDGER BY LEDGER, and taken off the
+ * total. What a category is responsible for and what the business is
+ * responsible for stay visibly apart.
+ */
+function hospitality_pack_pl_category(int $companyId, string $from, string $to): array
+{
+    require_once __DIR__ . '/reports_engine.php';
+
+    $categories = hospitality_pack_sales_by($companyId, $from, $to, 'category');
+    $columns = [
+        ['label', 'Particulars', 'left'],
+        ['qty', 'Qty', 'right'],
+        ['net_sales', 'Net sales', 'right'],
+        ['share', '% of sales', 'right'],
+        ['est_cost', 'Direct cost (est.)', 'right'],
+        ['est_gp', 'Gross profit', 'right'],
+        ['gp_pct', 'GP %', 'right'],
+    ];
+
+    $salesTotal = 0.0;
+    $costTotal = 0.0;
+    $gpTotal = 0.0;
+    $anyCost = false;
+    foreach ($categories as $row) {
+        $salesTotal += (float) $row['net_sales'];
+        if ($row['est_cost'] !== null) {
+            $anyCost = true;
+            $costTotal += (float) $row['est_cost'];
+            $gpTotal += (float) $row['est_gp'];
+        }
+    }
+
+    $rows = [];
+    $rows[] = ['label' => 'SALES BY CATEGORY', 'emphasis' => 'total'];
+    foreach ($categories as $row) {
+        $rows[] = [
+            'label' => '   ' . (string) $row['group'],
+            'qty' => (float) $row['qty'],
+            'net_sales' => (float) $row['net_sales'],
+            'share' => hospitality_pack_share((float) $row['net_sales'], $salesTotal),
+            'est_cost' => $row['est_cost'],
+            'est_gp' => $row['est_gp'],
+            'gp_pct' => $row['gp_pct'],
+            'emphasis' => '',
+        ];
+    }
+    $rows[] = [
+        'label' => 'GROSS PROFIT (all categories)',
+        'net_sales' => round($salesTotal, 2),
+        'share' => $salesTotal != 0.0 ? 100.0 : null,
+        'est_cost' => $anyCost ? round($costTotal, 2) : null,
+        'est_gp' => $anyCost ? round($gpTotal, 2) : null,
+        'gp_pct' => $anyCost ? hospitality_pack_share($gpTotal, $salesTotal) : null,
+        'emphasis' => 'total',
+    ];
+
+    // --- the common costs, ledger by ledger -------------------------------
+    // Read from the LEDGER rather than estimated, because these are what was
+    // actually spent. Everything that is not a direct cost of sales is here.
+    $balances = rc_ledger_balances($companyId, $from, $to);
+    $common = [];
+    $commonTotal = 0.0;
+    foreach ($balances as $balance) {
+        if (rc_ledger_nature($balance) !== 'expense') {
+            continue;
+        }
+        $master = (string) ($balance['master_key'] ?? '');
+        if ($master === 'direct_expense') {
+            // Direct costs belong to the categories above, not down here.
+            continue;
+        }
+        $movement = (float) $balance['tx_dr'] - (float) $balance['tx_cr'];
+        if (abs($movement) < 0.005) {
+            continue;
+        }
+        $common[] = [
+            'label' => '   ' . (string) $balance['name'],
+            'group' => (string) ($balance['group_name'] ?? ''),
+            'net_sales' => round($movement, 2),
+            'share' => hospitality_pack_share($movement, $salesTotal),
+            'emphasis' => '',
+        ];
+        $commonTotal += $movement;
+    }
+    usort($common, static fn (array $a, array $b): int => (float) $b['net_sales'] <=> (float) $a['net_sales']);
+
+    $rows[] = ['label' => 'COMMON COSTS — not attributable to a category', 'emphasis' => 'total'];
+    if ($common === []) {
+        $rows[] = ['label' => '   None posted in this period', 'emphasis' => ''];
+    }
+    $rows = array_merge($rows, $common);
+    $rows[] = [
+        'label' => 'TOTAL COMMON COSTS',
+        'net_sales' => round($commonTotal, 2),
+        'share' => hospitality_pack_share($commonTotal, $salesTotal),
+        'emphasis' => 'total',
+    ];
+    $rows[] = [
+        'label' => 'NET RESULT (gross profit less common costs)',
+        'net_sales' => $anyCost ? round($gpTotal - $commonTotal, 2) : null,
+        'share' => $anyCost ? hospitality_pack_share($gpTotal - $commonTotal, $salesTotal) : null,
+        'emphasis' => 'total',
+    ];
+
+    return hospitality_pack_section('P&L by category', $columns, $rows, [],
+        'Each category carries its own sales, direct cost and gross profit; the common costs below belong to'
+        . ' the business rather than to any one category and are listed ledger by ledger, taken off once.'
+        . ' Rent, wages and the rest are NOT apportioned across categories — an apportioned category profit'
+        . ' is mostly an argument about the apportionment. Sales and common costs are actual; the direct cost'
+        . ' is a recipe ESTIMATE.' . hospitality_pack_costed_note($categories));
+}
+
+// ---------------------------------------------------------------------------
+// Employee cost, by what the employee actually receives
+// ---------------------------------------------------------------------------
+/**
+ * One "Employee cost" line on a profit and loss says nothing a manager can act
+ * on. Basic pay, allowances, overtime, the employer's retirement contribution
+ * and the service charge share are different decisions with different levers,
+ * and a wage cost that moved is only useful once you know which of them moved.
+ *
+ * Read from the payroll runs, which carry every component by name and amount.
+ */
+function hospitality_pack_employee(int $companyId, string $from, string $to): array
+{
+    $columns = [
+        ['component', 'Component', 'left'],
+        ['category', 'Kind', 'left'],
+        ['behaviour', 'Posting', 'left'],
+        ['people', 'Employees', 'right'],
+        ['amount', 'Amount', 'right'],
+        ['share', '% of employee cost', 'right'],
+    ];
+    $note = 'What the wage bill is actually made of, taken from the payroll runs whose pay date falls in this'
+        . ' period. An employer contribution is a cost to the business but not pay in the employee\'s hand,'
+        . ' which is why the posting column is here.';
+    if (!table_exists('payroll_run_components') || !table_exists('payroll_runs')) {
+        return hospitality_pack_section('Employee cost breakdown', $columns, [], [],
+            'Payroll has not been run for this company, so there is nothing to break down.');
+    }
+
+    $stmt = db()->prepare("SELECT c.component_code, c.component_name, c.category, c.posting_behaviour,
+            COUNT(DISTINCT c.payroll_employee_id) AS people, SUM(c.amount) AS amount
+        FROM payroll_run_components c
+        INNER JOIN payroll_runs r ON r.id = c.run_id
+        WHERE r.company_id = :cid AND r.pay_date BETWEEN :f AND :t AND c.amount <> 0
+        GROUP BY c.component_code, c.component_name, c.category, c.posting_behaviour
+        ORDER BY amount DESC");
+    try {
+        $stmt->execute(['cid' => $companyId, 'f' => $from, 't' => $to]);
+        $found = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $exception) {
+        return hospitality_pack_section('Employee cost breakdown', $columns, [], [],
+            $note . ' (This period could not be read: ' . $exception->getMessage() . ')');
+    }
+
+    $costTotal = 0.0;
+    foreach ($found as $row) {
+        $costTotal += (float) $row['amount'];
+    }
+    $rows = [];
+    $totals = ['people' => 0, 'amount' => 0.0];
+    foreach ($found as $row) {
+        $rows[] = [
+            'component' => (string) $row['component_name'] . ' (' . (string) $row['component_code'] . ')',
+            'category' => ucwords(str_replace('_', ' ', (string) $row['category'])),
+            'behaviour' => ucwords(str_replace('_', ' ', (string) $row['posting_behaviour'])),
+            'people' => (int) $row['people'],
+            'amount' => round((float) $row['amount'], 2),
+            'share' => hospitality_pack_share((float) $row['amount'], $costTotal),
+            'emphasis' => '',
+        ];
+        $totals['people'] = max($totals['people'], (int) $row['people']);
+        $totals['amount'] += (float) $row['amount'];
+    }
+    $totals['amount'] = round($totals['amount'], 2);
+    $totals['share'] = $costTotal != 0.0 ? 100.0 : null;
+
+    return hospitality_pack_section('Employee cost breakdown', $columns, $rows, $totals,
+        $note . ' The employee count on the total row is the largest headcount on any one component, not a sum'
+        . ' — the same person appears on several.');
+}
+
+/**
+ * One section drawn as a table, for the screen and for the print view.
+ *
+ * The same rows the workbook carries, so what is read on screen and what is
+ * filed afterwards cannot disagree.
+ */
+function hospitality_pack_render_table(array $section, ?callable $fmt = null): void
+{
+    $fmt = $fmt ?? static fn ($value, int $dp = 2): string => number_format((float) $value, $dp);
+    $columns = (array) $section['columns'];
+    $isNumeric = static fn (string $align): bool => $align === 'right';
+    ?>
+    <div style="overflow-x:auto"><table>
+        <thead><tr>
+            <?php foreach ($columns as [$key, $label, $align]): ?>
+                <th<?= $isNumeric($align) ? ' class="is-numeric"' : '' ?>><?= e($label) ?></th>
+            <?php endforeach; ?>
+        </tr></thead>
+        <tbody>
+            <?php if ((array) $section['rows'] === []): ?>
+                <tr><td colspan="<?= max(1, count($columns)) ?>">Nothing recorded for this period.</td></tr>
+            <?php endif; ?>
+            <?php foreach ((array) $section['rows'] as $row): ?>
+                <?php $emphasis = (string) ($row['emphasis'] ?? ''); ?>
+                <tr<?= $emphasis === 'total' ? ' style="font-weight:700;background:var(--mbw-soft,#eef5f0)"' : '' ?>>
+                    <?php foreach ($columns as [$key, $label, $align]): ?>
+                        <?php $value = $row[$key] ?? null; ?>
+                        <td<?= $isNumeric($align) ? ' class="is-numeric"' : '' ?>><?php
+                            // A null is UNKNOWN and prints as a dash. A nought is
+                            // a real zero and prints as one -- the difference is
+                            // the whole point on an uncosted line.
+                            if ($value === null || $value === '') {
+                                echo '—';
+                            } elseif (is_string($value)) {
+                                echo e($value);
+                            } elseif (preg_match('/pct|share/i', (string) $key) === 1) {
+                                echo e($fmt($value)) . '%';
+                            } elseif (preg_match('/qty|people|lines|invoices|movements|headcount/i', (string) $key) === 1) {
+                                echo e($fmt($value, 3));
+                            } else {
+                                echo e($fmt($value));
+                            }
+                        ?></td>
+                    <?php endforeach; ?>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+        <?php if ((array) $section['totals'] !== []): ?>
+        <tfoot><tr>
+            <?php foreach ($columns as $index => [$key, $label, $align]): ?>
+                <?php if ($index === 0): ?>
+                    <th>TOTAL</th>
+                <?php else: ?>
+                    <?php $value = $section['totals'][$key] ?? null; ?>
+                    <th<?= $isNumeric($align) ? ' class="is-numeric"' : '' ?>><?php
+                        if ($value === null || $value === '') {
+                            echo '—';
+                        } elseif (is_string($value)) {
+                            echo e($value);
+                        } elseif (preg_match('/pct|share/i', (string) $key) === 1) {
+                            echo e($fmt($value)) . '%';
+                        } elseif (preg_match('/qty|people|lines|invoices|movements|headcount/i', (string) $key) === 1) {
+                            echo e($fmt($value, 3));
+                        } else {
+                            echo e($fmt($value));
+                        }
+                    ?></th>
+                <?php endif; ?>
+            <?php endforeach; ?>
+        </tr></tfoot>
+        <?php endif; ?>
+    </table></div>
+    <?php
 }
 
 // ---------------------------------------------------------------------------

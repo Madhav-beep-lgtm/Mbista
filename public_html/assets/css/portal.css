@@ -7465,46 +7465,90 @@ body.admin-layout.sidebar-collapsed .admin-sidebar-toggle .ui-icon {
   body.admin-layout .admin-shell::before { content: none; }
 }
 
-/* The management pack picker: a grid of what the meeting might need, each with
-   a line saying what it answers. The description matters as much as the label
-   — "Menu items by GP ratio" and "Best and worst sellers" both sound like the
-   same report until you read what each one is for. */
-body.admin-layout .hosp-pack-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 10px;
+/* The management pack, listed VERTICALLY. A grid of tiles reads as a menu of
+   alternatives; a list reads as a pack with an order to it, which is what this
+   is — and it leaves room on each row for the two things a reader wants next
+   to a report's name: see it, or take it away. */
+body.admin-layout .hosp-pack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-body.admin-layout .hosp-pack-pick {
+body.admin-layout .hosp-pack-row {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 11px 13px;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
   border: 1px solid var(--mbw-border);
   border-radius: var(--mbw-radius);
   background: var(--mbw-card);
-  cursor: pointer;
 }
 
-body.admin-layout .hosp-pack-pick:hover {
+body.admin-layout .hosp-pack-row.is-open {
+  border-color: var(--mbw-primary);
+  background: var(--mbw-soft, #eef5f0);
+}
+
+body.admin-layout .hosp-pack-row:hover {
   border-color: var(--mbw-primary);
 }
 
-body.admin-layout .hosp-pack-pick input[type="checkbox"] {
-  margin-top: 2px;
+body.admin-layout .hosp-pack-mark-one {
+  display: flex;
   flex: 0 0 auto;
 }
 
-body.admin-layout .hosp-pack-pick strong {
+body.admin-layout .hosp-pack-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+body.admin-layout .hosp-pack-name strong {
   display: block;
   font-size: 13px;
   color: var(--mbw-heading);
 }
 
-body.admin-layout .hosp-pack-pick small {
+body.admin-layout .hosp-pack-name small {
   display: block;
-  margin-top: 2px;
+  margin-top: 1px;
   font-size: 11.5px;
   line-height: 1.35;
   color: var(--mbw-muted);
+}
+
+body.admin-layout .hosp-pack-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+body.admin-layout .hosp-pack-actions .button {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+body.admin-layout .hosp-pack-tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+body.admin-layout .hosp-pack-mark {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--mbw-muted);
+}
+
+body.admin-layout .hosp-pack-mark label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-weight: 600;
+  color: var(--mbw-heading);
 }
