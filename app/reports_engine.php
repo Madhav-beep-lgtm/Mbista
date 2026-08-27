@@ -595,18 +595,40 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 (float) $b['tx_dr'], (float) $b['tx_cr'],
                 (float) $b['cl_side_dr'], (float) $b['cl_side_cr'],
             ];
+            // Every head the chart knows, PLUS whatever belongs to none.
+            //
+            // A trial balance that quietly leaves an account out is the most
+            // dangerous report in the system: it balances by omission, or -- as
+            // happened here -- fails to balance for a reason nothing on the page
+            // explains. A group whose master_key is empty or unrecognised used
+            // to be skipped by this loop entirely, taking its ledgers with it,
+            // and seven accounts holding millions simply were not printed.
+            //
+            // Anything unplaceable is now gathered at the foot under its own
+            // heading, so the figure is on the page, the total is honest, and
+            // the accounts needing a head are named rather than hunted for.
             $masterOrder = array_keys(LEDGER_MASTERS);
+            $strayMasters = [];
+            foreach ($balances as $balanceRow) {
+                $rowMaster = (string) ($balanceRow['master_key'] ?? '');
+                if (!in_array($rowMaster, $masterOrder, true) && !in_array($rowMaster, $strayMasters, true)) {
+                    $strayMasters[] = $rowMaster;
+                }
+            }
             $rows = [];
             $grand = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
             $mi = 0;
-            foreach ($masterOrder as $masterKey) {
-                $section = rc_group_balances($balances, [$masterKey], $tbValue);
+            foreach (array_merge($masterOrder, $strayMasters === [] ? [] : ['__unclassified__']) as $masterKey) {
+                $unclassified = $masterKey === '__unclassified__';
+                $section = rc_group_balances($balances, $unclassified ? $strayMasters : [$masterKey], $tbValue);
                 if ($section['groups'] === []) {
                     continue;
                 }
                 $mi++;
                 $node = 'm' . $mi;
-                $masterLabel = (string) (LEDGER_MASTERS[$masterKey]['label'] ?? ucwords(str_replace('_', ' ', $masterKey)));
+                $masterLabel = $unclassified
+                    ? 'Unclassified — these groups belong to no head and are excluded from the P&L'
+                    : (string) (LEDGER_MASTERS[$masterKey]['label'] ?? ucwords(str_replace('_', ' ', $masterKey)));
                 $sum = $section['sum'] + [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
                 $rows[] = rc_row(array_merge(['', $mi . '. ' . strtoupper($masterLabel)], array_map('rc_fmt', $sum)), 'bold', ['level' => 0, 'node' => $node, 'label_cell' => 1]);
                 $gi = 0;

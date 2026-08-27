@@ -776,5 +776,88 @@ foreach (['voucher_entries' => 'voucher_id IN (SELECT id FROM vouchers WHERE com
     }
 }
 inv_mapping_forget();
+
+echo "\n13. A trial balance may not quietly leave an account out\n";
+// THE FAULT THIS SECTION EXISTS FOR. The trial balance walked the heads it knew
+// -- Current Assets, Direct Income and the rest -- and printed the groups filed
+// under each. A group whose master_key was empty or unrecognised belonged to no
+// head, so the loop never reached it, and its ledgers were not printed at all.
+//
+// On a real set of books that meant seven accounts holding millions were absent
+// from the report, and the total did not balance by exactly the amount that had
+// gone missing. Nothing on the page said why. That is the worst way for a trial
+// balance to be wrong: it is the report people use to decide whether everything
+// else can be trusted.
+$tbSuffix = 'PDTB' . substr((string) time(), -5);
+db()->prepare('INSERT INTO companies (name, code, is_active) VALUES (:n, :c, 1)')
+    ->execute(['n' => 'Unclassified Co ' . $tbSuffix, 'c' => $tbSuffix]);
+$tbCo = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_default, status)
+    VALUES (:c, '2026-27', '2026-04-01', '2027-03-31', 1, 'open')")->execute(['c' => $tbCo]);
+$tbFy = (int) db()->lastInsertId();
+
+/** A group with whatever master_key is asked for, valid or not. */
+$tbGroup = static function (string $code, string $name, string $master) use ($tbCo): int {
+    db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key) VALUES (:c,:code,:n,:m)')
+        ->execute(['c' => $tbCo, 'code' => $code, 'n' => $name, 'm' => $master]);
+
+    return (int) db()->lastInsertId();
+};
+$tbLedger = static function (int $groupId, string $code, string $name, string $type) use ($tbCo): int {
+    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status)
+        VALUES (:c,:g,:code,:n,:t,'active')")
+        ->execute(['c' => $tbCo, 'g' => $groupId, 'code' => $code, 'n' => $name, 't' => $type]);
+
+    return (int) db()->lastInsertId();
+};
+
+$goodGroup = $tbGroup('TBG1', 'Trade Receivables', 'current_asset');
+$debtorL = $tbLedger($goodGroup, 'TBD', 'Sundry debtors', 'asset');
+// MySQL outside strict mode stores an out-of-range enum as '', which is exactly
+// how the broken books came to be: nothing refused the value.
+db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key) VALUES (:c,:code,:n,:m)')
+    ->execute(['c' => $tbCo, 'code' => 'TBG2', 'n' => 'Homeless Group', 'm' => '']);
+$strayGroup = (int) db()->lastInsertId();
+$salesL = $tbLedger($strayGroup, 'TBS', 'Sales', 'revenue');
+ok((string) db()->query("SELECT master_key FROM ledger_groups WHERE id = {$strayGroup}")->fetchColumn() === '',
+    'A group can end up with no head at all, which is how this happens');
+
+create_voucher_with_entries([
+    'company_id' => $tbCo, 'fiscal_year_id' => $tbFy, 'voucher_no' => 'TB-1',
+    'voucher_type' => 'journal', 'voucher_date' => '2026-09-01', 'total_amount' => 500000.0,
+    'narration' => 'Sale', 'status' => 'posted',
+], [['ledger_id' => $debtorL, 'entry_type' => 'debit', 'amount' => 500000.0],
+    ['ledger_id' => $salesL, 'entry_type' => 'credit', 'amount' => 500000.0]]);
+
+$tbReport = rc_generate('trial-balance', $tbCo, '2026-04-01', '2027-03-31',
+    ['company_id' => $tbCo, 'company_name' => 'X', 'subsidiaries' => [], 'currency' => 'Rs']);
+
+$printed = '';
+foreach ($tbReport['rows'] as $reportRow) {
+    foreach (rc_row_cells($reportRow) as $cell) {
+        $printed .= (is_array($cell) ? ($cell['text'] ?? '') : (string) $cell) . ' ';
+    }
+}
+ok(str_contains($printed, 'Sundry debtors'), 'The properly filed account is printed');
+ok(str_contains($printed, 'Sales'),
+    'AND SO IS THE HOMELESS ONE — it used to be dropped without a word');
+ok(stripos($printed, 'Unclassified') !== false,
+    '  ...under a heading that says what is wrong with it, so it can be fixed');
+
+// The point of all of it: the totals have to agree.
+$totals = (array) ($tbReport['totals'] ?? []);
+$asFloat = static fn ($v): float => (float) str_replace([',', '–', ' '], ['', '0', ''], (string) $v);
+$periodDr = $asFloat($totals[4] ?? 0);
+$periodCr = $asFloat($totals[5] ?? 0);
+ok(abs($periodDr - $periodCr) < 0.01,
+    'And the trial balance BALANCES: Dr ' . number_format($periodDr, 2)
+        . ' against Cr ' . number_format($periodCr, 2));
+ok(abs($periodDr - 500000.0) < 0.01, '  ...at the 500,000 that was actually posted');
+
+foreach (['voucher_entries' => 'voucher_id IN (SELECT id FROM vouchers WHERE company_id = :c)',
+    'vouchers' => 'company_id = :c', 'ledgers' => 'company_id = :c', 'ledger_groups' => 'company_id = :c',
+    'fiscal_years' => 'company_id = :c', 'companies' => 'id = :c'] as $table => $where) {
+    db()->prepare("DELETE FROM `{$table}` WHERE {$where}")->execute(['c' => $tbCo]);
+}
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

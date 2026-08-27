@@ -104,30 +104,31 @@ $mkLedger = static function (int $companyId, string $code, string $name, string 
     db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code,type) VALUES (:cid,:g,:n,:c,:t)')
         ->execute(['cid' => $companyId, 'g' => $gid, 'n' => $name, 'c' => $code,
             't' => $master === 'equity' ? 'equity' : ($master === 'liabilities' || $master === 'current_liability' ? 'liability'
-                : ($master === 'income' ? 'revenue' : ($master === 'expenses' ? 'expense' : 'asset')))]);
+                : (str_ends_with($master, '_income') ? 'revenue'
+                    : (str_ends_with($master, '_expense') ? 'expense' : 'asset')))]);
 
     return (int) db()->lastInsertId();
 };
 $L = [];
 foreach ([
-    ['stock_metal', 'ASTKM', 'Metal Stock', 'assets'],
-    ['stock_finished', 'ASTKF', 'Finished Stock', 'assets'],
-    ['sales_metal', 'ASALM', 'Sales Metal', 'income'],
-    ['sales_making', 'ASALK', 'Sales Making', 'income'],
-    ['sales_stone', 'ASALS', 'Sales Stone', 'income'],
-    ['cogs', 'ACOGS', 'COGS', 'expenses'],
-    ['vat_input', 'AVATI', 'VAT Input', 'assets'],
+    ['stock_metal', 'ASTKM', 'Metal Stock', 'current_asset'],
+    ['stock_finished', 'ASTKF', 'Finished Stock', 'current_asset'],
+    ['sales_metal', 'ASALM', 'Sales Metal', 'direct_income'],
+    ['sales_making', 'ASALK', 'Sales Making', 'direct_income'],
+    ['sales_stone', 'ASALS', 'Sales Stone', 'direct_income'],
+    ['cogs', 'ACOGS', 'COGS', 'direct_expense'],
+    ['vat_input', 'AVATI', 'VAT Input', 'current_asset'],
     ['vat_output', 'AVATO', 'VAT Output', 'current_liability'],
-    ['spt_input', 'ASPTI', 'SPT Input', 'assets'],
+    ['spt_input', 'ASPTI', 'SPT Input', 'current_asset'],
     ['spt_output', 'ASPTO', 'SPT Output', 'current_liability'],
     ['customer_advance', 'AADVC', 'Customer Advances', 'current_liability'],
     ['opening_equity', 'AOPEQ', 'Opening Equity', 'equity'],
-    ['rounding', 'AROUN', 'Rounding', 'expenses'],
+    ['rounding', 'AROUN', 'Rounding', 'direct_expense'],
 ] as [$purpose, $code, $name, $master]) {
     $L[$purpose] = $mkLedger($cid, $code, $name, $master);
     jewellery_save_mapping($cid, $purpose, $L[$purpose], $uid);
 }
-$cash = $mkLedger($cid, 'ACASH', 'Cash', 'assets');
+$cash = $mkLedger($cid, 'ACASH', 'Cash', 'current_asset');
 
 $chain = jewellery_save_item($cid, ['code' => 'ACH-1', 'name' => 'Order Chain', 'item_type' => 'ornament',
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'vat_applicable' => 0], $uid);
@@ -368,7 +369,7 @@ echo "\n9. One advance paid three ways at once — cash, Fonepay and old gold\n"
 // The counter reality: a customer putting down 50,000 hands over 20,000 in
 // cash, taps 15,000 on Fonepay and puts an old ring on the scale for the
 // rest. ONE payment, one settlement number, one receipt — with a breakdown.
-$qrLedger = $mkLedger($cid, 'AQRTL', 'Fonepay Collection', 'assets');
+$qrLedger = $mkLedger($cid, 'AQRTL', 'Fonepay Collection', 'current_asset');
 jewellery_save_mapping($cid, 'tender_qr', $qrLedger, $uid);
 
 $order3 = jewellery_save_order($cid, $fy, [
